@@ -362,6 +362,100 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_collectionVariables_set" } });
 
     // ========================================
+    // has / unset / clear / toObject - identical on all three scopes, so
+    // emitted from one table rather than nine more hand-written entries that
+    // would then have to be kept in step with each other.
+    // ========================================
+    struct VariableScopeCompletion {
+        const char* accessor; // pm.<accessor>
+        const char* noun;     // what its variables are called in prose
+        const char* example;  // a variable name that reads naturally for it
+    };
+    constexpr VariableScopeCompletion variable_scopes[] = {
+        { "environment", "environment variable", "auth_token" },
+        { "globals", "global variable", "api_key" },
+        { "collectionVariables", "collection variable", "base_url" },
+    };
+
+    for (const auto& scope : variable_scopes) {
+        const std::string accessor = std::string ("pm.") + scope.accessor;
+        const std::string sort = std::string ("1_pm_") + scope.accessor + "_";
+        const std::string noun = scope.noun;
+
+        completions.push_back ({ { "label", accessor + ".has" },
+        { "kind", KIND_FUNCTION }, { "insertText", accessor + ".has(\"${1:variable}\")" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", accessor + ".has(name: string): boolean" },
+        { "documentation",
+        "True when the " + noun + " exists and is enabled - the same rows " +
+        accessor + ".get() can read.\n\nExample:\nif (" + accessor + ".has('" +
+        scope.example + "')) { /* ... */ }" },
+        { "sortText", sort + "has" } });
+
+        completions.push_back ({ { "label", accessor + ".unset" },
+        { "kind", KIND_FUNCTION }, { "insertText", accessor + ".unset(\"${1:variable}\")" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", accessor + ".unset(name: string): void" },
+        { "documentation",
+        "Remove the " + noun +
+        " entirely. Not the same as setting it to \"\", which leaves an "
+        "enabled empty variable behind for {{template}} resolution to "
+        "find.\n\nExample:\n" +
+        accessor + ".unset('" + scope.example + "');" },
+        { "sortText", sort + "unset" } });
+
+        completions.push_back ({ { "label", accessor + ".clear" },
+        { "kind", KIND_FUNCTION }, { "insertText", accessor + ".clear()" },
+        { "detail", accessor + ".clear(): void" },
+        { "documentation", "Remove every " + noun + ", disabled ones included. Only this scope is affected." },
+        { "sortText", sort + "clear" } });
+
+        completions.push_back ({ { "label", accessor + ".toObject" },
+        { "kind", KIND_FUNCTION }, { "insertText", accessor + ".toObject()" },
+        { "detail", accessor + ".toObject(): Record<string, any>" },
+        { "documentation",
+        "A plain object of every enabled " + noun + ", each value cast by its declared type.\n\nExample:\nconsole.log(" +
+        accessor + ".toObject());" },
+        { "sortText", sort + "toObject" } });
+    }
+
+    // ========================================
+    // pm.variables - merged read across the scopes
+    // ========================================
+    completions.push_back ({ { "label", "pm.variables" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.variables" }, { "detail", "Merged variables object (read-only)" },
+    { "documentation",
+    "Read a variable without naming its scope. Resolves environment, then "
+    "collection, then global - the same order {{name}} uses. Writes must name "
+    "a scope: pm.variables.set() throws." },
+    { "sortText", "0_pm_variables" } });
+
+    completions.push_back ({ { "label", "pm.variables.get" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.get(\"${1:variable}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.variables.get(name: string): any | undefined" },
+    { "documentation",
+    "Get a variable from the highest-precedence scope that has it enabled: "
+    "environment, then collection, then global.\n\nExample:\nconst baseUrl = "
+    "pm.variables.get('base_url');" },
+    { "sortText", "1_pm_variables_get" } });
+
+    completions.push_back ({ { "label", "pm.variables.has" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.has(\"${1:variable}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.variables.has(name: string): boolean" },
+    { "documentation", "True when any scope has the variable enabled." },
+    { "sortText", "1_pm_variables_has" } });
+
+    completions.push_back ({ { "label", "pm.variables.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.toObject()" },
+    { "detail", "pm.variables.toObject(): Record<string, any>" },
+    { "documentation",
+    "Every enabled variable from all three scopes, merged in precedence "
+    "order - each name resolves to what pm.variables.get() would answer." },
+    { "sortText", "1_pm_variables_toObject" } });
+
+    // ========================================
     // console - Console output
     // ========================================
     completions.push_back ({ { "label", "console.log" }, { "kind", KIND_FUNCTION },

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -1663,19 +1664,76 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     return std::nullopt;
 }
 
-JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// ============================================================================
+// Variable scopes: pm.environment / pm.globals / pm.collectionVariables
+// ============================================================================
+
+// Which of the run's three variable maps a binding reads and writes. The value
+// is the `magic` argument QuickJS hands back, so one implementation serves all
+// three scopes. They were three hand-written copies of get/set; six methods
+// each would have tripled that, and a copy is exactly what stops a fix landing
+// everywhere it belongs.
+enum VariableScope : int {
+    SCOPE_ENVIRONMENT,
+    SCOPE_GLOBALS,
+    SCOPE_COLLECTION_VARIABLES
+};
+
+struct VariableScopeBinding {
+    const char* property; // the name this scope answers to on `pm`
+    VariableScope scope;
+};
+
+constexpr VariableScopeBinding variable_scope_bindings[] = {
+    { "environment", SCOPE_ENVIRONMENT },
+    { "globals", SCOPE_GLOBALS },
+    { "collectionVariables", SCOPE_COLLECTION_VARIABLES },
+};
+
+// Postman resolves an unqualified name local -> data -> environment ->
+// collection -> global. Vayu has neither a local nor a data scope, so the chain
+// starts at the environment - the same order `{{name}}` resolution already uses
+// app-side (docs/app/variable-resolution.md), which is what keeps a script's
+// reading of a name identical to the URL's.
+constexpr VariableScope variables_precedence[] = { SCOPE_ENVIRONMENT,
+    SCOPE_COLLECTION_VARIABLES, SCOPE_GLOBALS };
+
+// The map behind a scope, or nullptr when the run carries no such scope (a
+// design run with no active environment, say). Every binding below reads that
+// as an empty scope rather than an error: a script cannot see which scopes a
+// run was given, so throwing would fail it for a reason its author has no way
+// to inspect.
+Environment* scope_variables (JSContext* ctx, int magic) {
+    auto* data = get_context_data (ctx);
+    if (!data) {
+        return nullptr;
+    }
+    switch (magic) {
+    case SCOPE_ENVIRONMENT: return data->environment;
+    case SCOPE_GLOBALS: return data->globals;
+    case SCOPE_COLLECTION_VARIABLES: return data->collectionVariables;
+    default: return nullptr;
+    }
+}
+
+// A disabled variable is a row the user unticked in the variables editor, so
+// `get`, `has` and `toObject` all look straight past it - reading it would
+// resurrect a value that was switched off. `unset` and `clear` still remove it:
+// those are asked to delete a key, not to read one.
+JSValue
+js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
     if (argc < 1) {
         return JS_UNDEFINED;
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->environment) {
+    Environment* variables = scope_variables (ctx, magic);
+    if (!variables) {
         return JS_UNDEFINED;
     }
 
-    std::string key = js_to_string (ctx, argv[0]);
-    auto it         = data->environment->find (key);
-    if (it != data->environment->end () && it->second.enabled) {
+    auto it = variables->find (js_to_string (ctx, argv[0]));
+    if (it != variables->end () && it->second.enabled) {
         return cast_variable_to_jsvalue (ctx, it->second);
     }
 
@@ -1683,10 +1741,9 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
 }
 
 // Update a variable's value while preserving an existing key's secret, enabled
-// and type fields; a brand-new key gets the current defaults. Shared by the
-// environment/globals/collectionVariables pm.*.set() bindings so a script that
-// re-sets an existing (e.g. secret) variable does not silently strip its flag
-// or reset its type.
+// and type fields; a brand-new key gets the current defaults. Shared by every
+// scope's set() so a script that re-sets an existing (e.g. secret) variable
+// does not silently strip its flag or reset its type.
 //
 // A brand-new key is also stamped with its creation time, the app's ordering
 // key for the variables editor (issue #135). This is the one place the engine
@@ -1706,129 +1763,226 @@ void set_variable_preserving (Environment& map, const std::string& key, std::str
     }
 }
 
-JSValue js_pm_environment_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+JSValue
+js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
     if (argc < 2) {
         return JS_UNDEFINED;
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->environment) {
+    Environment* variables = scope_variables (ctx, magic);
+    if (!variables) {
         return JS_UNDEFINED;
     }
 
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    set_variable_preserving (*data->environment, key, std::move (value));
+    set_variable_preserving (*variables, key, std::move (value));
 
     return JS_UNDEFINED;
 }
 
-void setup_pm_environment (JSContext* ctx, JSValue pm) {
-    JSValue env = JS_NewObject (ctx);
+JSValue
+js_pm_scope_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_NewBool (ctx, 0);
+    }
 
-    JS_SetPropertyStr (
-    ctx, env, "get", JS_NewCFunction (ctx, js_pm_environment_get, "get", 1));
-    JS_SetPropertyStr (
-    ctx, env, "set", JS_NewCFunction (ctx, js_pm_environment_set, "set", 2));
+    Environment* variables = scope_variables (ctx, magic);
+    if (!variables) {
+        return JS_NewBool (ctx, 0);
+    }
 
-    JS_SetPropertyStr (ctx, pm, "environment", env);
+    auto it = variables->find (js_to_string (ctx, argv[0]));
+    return JS_NewBool (ctx, it != variables->end () && it->second.enabled ? 1 : 0);
 }
 
-JSValue js_pm_globals_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// The method with no workaround: setting a variable to "" leaves an enabled
+// empty variable behind, which is not the same thing to `{{template}}`
+// resolution as the variable being gone. The removal reaches disk through
+// persist_script_variables, which rewrites a scope whenever the map it ends
+// with differs from the one on disk.
+JSValue
+js_pm_scope_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
     if (argc < 1) {
         return JS_UNDEFINED;
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->globals) {
+    Environment* variables = scope_variables (ctx, magic);
+    if (!variables) {
         return JS_UNDEFINED;
     }
 
-    std::string key = js_to_string (ctx, argv[0]);
-    auto it         = data->globals->find (key);
-    if (it != data->globals->end () && it->second.enabled) {
-        return cast_variable_to_jsvalue (ctx, it->second);
+    variables->erase (js_to_string (ctx, argv[0]));
+
+    return JS_UNDEFINED;
+}
+
+JSValue
+js_pm_scope_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+
+    if (Environment* variables = scope_variables (ctx, magic)) {
+        variables->clear ();
     }
 
     return JS_UNDEFINED;
 }
 
-JSValue js_pm_globals_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 2) {
-        return JS_UNDEFINED;
+JSValue
+js_pm_scope_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+
+    JSValue snapshot = JS_NewObject (ctx);
+    if (JS_IsException (snapshot)) {
+        return snapshot;
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->globals) {
-        return JS_UNDEFINED;
+    if (Environment* variables = scope_variables (ctx, magic)) {
+        for (const auto& [key, variable] : *variables) {
+            if (variable.enabled) {
+                JS_SetPropertyStr (ctx, snapshot, key.c_str (),
+                cast_variable_to_jsvalue (ctx, variable));
+            }
+        }
     }
 
-    std::string key   = js_to_string (ctx, argv[0]);
-    std::string value = js_to_string (ctx, argv[1]);
-
-    set_variable_preserving (*data->globals, key, std::move (value));
-
-    return JS_UNDEFINED;
+    return snapshot;
 }
 
-void setup_pm_globals (JSContext* ctx, JSValue pm) {
-    JSValue globals = JS_NewObject (ctx);
+void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBinding& binding) {
+    JSValue scope   = JS_NewObject (ctx);
+    const int magic = binding.scope;
 
-    JS_SetPropertyStr (
-    ctx, globals, "get", JS_NewCFunction (ctx, js_pm_globals_get, "get", 1));
-    JS_SetPropertyStr (
-    ctx, globals, "set", JS_NewCFunction (ctx, js_pm_globals_set, "set", 2));
+    JS_SetPropertyStr (ctx, scope, "get",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_get, "get", 1, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "set",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 2, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "has",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_has, "has", 1, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "unset",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_unset, "unset", 1, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "clear",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_clear, "clear", 0, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "toObject",
+    JS_NewCFunctionMagic (
+    ctx, js_pm_scope_to_object, "toObject", 0, JS_CFUNC_generic_magic, magic));
 
-    JS_SetPropertyStr (ctx, pm, "globals", globals);
+    JS_SetPropertyStr (ctx, pm, binding.property, scope);
 }
 
-JSValue js_pm_collectionVariables_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// ============================================================================
+// pm.variables - the merged, read-only accessor
+// ============================================================================
+
+JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
     if (argc < 1) {
         return JS_UNDEFINED;
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->collectionVariables) {
-        return JS_UNDEFINED;
-    }
-
-    std::string key = js_to_string (ctx, argv[0]);
-    auto it         = data->collectionVariables->find (key);
-    if (it != data->collectionVariables->end () && it->second.enabled) {
-        return cast_variable_to_jsvalue (ctx, it->second);
+    const std::string key = js_to_string (ctx, argv[0]);
+    for (const VariableScope scope : variables_precedence) {
+        Environment* variables = scope_variables (ctx, scope);
+        if (!variables) {
+            continue;
+        }
+        auto it = variables->find (key);
+        if (it != variables->end () && it->second.enabled) {
+            return cast_variable_to_jsvalue (ctx, it->second);
+        }
     }
 
     return JS_UNDEFINED;
 }
 
-JSValue js_pm_collectionVariables_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 2) {
-        return JS_UNDEFINED;
+JSValue js_pm_variables_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_NewBool (ctx, 0);
     }
 
-    auto* data = get_context_data (ctx);
-    if (!data->collectionVariables) {
-        return JS_UNDEFINED;
+    const std::string key = js_to_string (ctx, argv[0]);
+    for (const VariableScope scope : variables_precedence) {
+        Environment* variables = scope_variables (ctx, scope);
+        if (!variables) {
+            continue;
+        }
+        auto it = variables->find (key);
+        if (it != variables->end () && it->second.enabled) {
+            return JS_NewBool (ctx, 1);
+        }
     }
 
-    std::string key   = js_to_string (ctx, argv[0]);
-    std::string value = js_to_string (ctx, argv[1]);
-
-    set_variable_preserving (*data->collectionVariables, key, std::move (value));
-
-    return JS_UNDEFINED;
+    return JS_NewBool (ctx, 0);
 }
 
-void setup_pm_collectionVariables (JSContext* ctx, JSValue pm) {
-    JSValue collectionVariables = JS_NewObject (ctx);
+JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
 
-    JS_SetPropertyStr (ctx, collectionVariables, "get",
-    JS_NewCFunction (ctx, js_pm_collectionVariables_get, "get", 1));
-    JS_SetPropertyStr (ctx, collectionVariables, "set",
-    JS_NewCFunction (ctx, js_pm_collectionVariables_set, "set", 2));
+    JSValue snapshot = JS_NewObject (ctx);
+    if (JS_IsException (snapshot)) {
+        return snapshot;
+    }
 
-    JS_SetPropertyStr (ctx, pm, "collectionVariables", collectionVariables);
+    // Weakest scope first, so a stronger one overwrites it and the snapshot
+    // agrees with what get() would have answered for every key in it.
+    for (auto it = std::rbegin (variables_precedence);
+         it != std::rend (variables_precedence); ++it) {
+        Environment* variables = scope_variables (ctx, *it);
+        if (!variables) {
+            continue;
+        }
+        for (const auto& [key, variable] : *variables) {
+            if (variable.enabled) {
+                JS_SetPropertyStr (ctx, snapshot, key.c_str (),
+                cast_variable_to_jsvalue (ctx, variable));
+            }
+        }
+    }
+
+    return snapshot;
+}
+
+// Postman's pm.variables.set writes to the *local* scope: alive for one
+// request, never stored. Vayu has no such scope, and neither substitute is
+// honest - writing to the environment persists a value the author expects to
+// vanish, and dropping the call loses a write they believe happened. So it
+// throws, naming the three scopes that do exist. Documented in
+// docs/engine/scripting.md; changing this changes a documented contract.
+JSValue js_pm_variables_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_ThrowTypeError (ctx,
+    "pm.variables.set is not supported: Vayu has no local variable scope. "
+    "Use pm.environment.set(), pm.collectionVariables.set() or "
+    "pm.globals.set() "
+    "to choose where the value is stored.");
+}
+
+void setup_pm_variables (JSContext* ctx, JSValue pm) {
+    JSValue variables = JS_NewObject (ctx);
+
+    JS_SetPropertyStr (
+    ctx, variables, "get", JS_NewCFunction (ctx, js_pm_variables_get, "get", 1));
+    JS_SetPropertyStr (
+    ctx, variables, "has", JS_NewCFunction (ctx, js_pm_variables_has, "has", 1));
+    JS_SetPropertyStr (ctx, variables, "toObject",
+    JS_NewCFunction (ctx, js_pm_variables_to_object, "toObject", 0));
+    JS_SetPropertyStr (
+    ctx, variables, "set", JS_NewCFunction (ctx, js_pm_variables_set, "set", 2));
+
+    JS_SetPropertyStr (ctx, pm, "variables", variables);
 }
 
 void setup_pm_object (JSContext* ctx) {
@@ -1856,14 +2010,13 @@ void setup_pm_object (JSContext* ctx) {
     // pm.request
     setup_pm_request (ctx, pm);
 
-    // pm.environment
-    setup_pm_environment (ctx, pm);
+    // pm.environment, pm.globals, pm.collectionVariables
+    for (const auto& binding : variable_scope_bindings) {
+        setup_pm_variable_scope (ctx, pm, binding);
+    }
 
-    // pm.globals
-    setup_pm_globals (ctx, pm);
-
-    // pm.collectionVariables
-    setup_pm_collectionVariables (ctx, pm);
+    // pm.variables
+    setup_pm_variables (ctx, pm);
 
     JS_SetPropertyStr (ctx, global, "pm", pm);
     JS_FreeValue (ctx, global);
