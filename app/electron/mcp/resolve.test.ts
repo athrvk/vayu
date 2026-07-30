@@ -110,6 +110,35 @@ describe("auth composition", () => {
 		});
 	});
 
+	test("inherit stops at a collection explicitly set to noauth", () => {
+		// Mirrors `resolveAuthSource` in the renderer: `none` means "nothing set
+		// here" and is stepped over, `noauth` means "send nothing" and terminates.
+		// Without the terminator, a request under a folder the user marked No Auth
+		// still sent the root's bearer token (issue #195, finding 2).
+		const chain: CollectionLike[] = [
+			{ id: "root", auth: { mode: "bearer", token: "{{token}}" } },
+			{ id: "public", auth: { mode: "noauth" } },
+			{ id: "leaf", auth: { mode: "none" } },
+		];
+		expect(composeAuth({ mode: "inherit" }, chain, resolver)).toBeUndefined();
+	});
+
+	test("a collection below a noauth one can still define its own auth", () => {
+		const chain: CollectionLike[] = [
+			{ id: "root", auth: { mode: "bearer", token: "root-tok" } },
+			{ id: "public", auth: { mode: "noauth" } },
+			{ id: "leaf", auth: { mode: "bearer", token: "{{token}}" } },
+		];
+		expect(composeAuth({ mode: "inherit" }, chain, resolver)).toEqual({
+			mode: "bearer",
+			token: "T",
+		});
+	});
+
+	test("a request's own noauth sends nothing, like none", () => {
+		expect(composeAuth({ mode: "noauth" }, [], resolver)).toBeUndefined();
+	});
+
 	test("a missing auth field defaults to inherit", () => {
 		const chain: CollectionLike[] = [
 			{ id: "root", auth: { mode: "bearer", token: "{{token}}" } },

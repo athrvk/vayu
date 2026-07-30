@@ -46,7 +46,11 @@ Stores folder/group hierarchy for requests.
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
 `{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |
 `{"mode":"oauth2","config":{…}}` (see [`requests.auth`](#requests) and [`oauth_tokens`](#oauth_tokens)).
-Collections are always auth sources - they never store `{"mode":"inherit"}`.
+Collections are always auth sources - they never store `{"mode":"inherit"}`. They may store
+`{"mode":"noauth"}`, the app-side terminator meaning "descendants inherit no credentials"
+(distinct from `none`, which means nothing is set at that level); like `inherit`, the clients
+resolve it before sending, so it never reaches the engine's `parse_auth` - which would treat it
+as no auth anyway.
 
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
 deletes all their requests before deleting the collections deepest-first, wrapped in a single

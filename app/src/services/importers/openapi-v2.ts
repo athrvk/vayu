@@ -212,7 +212,7 @@ function buildSwaggerOp(
 		name: op.summary ?? op.operationId ?? `${method.toUpperCase()} ${path}`,
 		description: op.description ?? "",
 		method: method.toUpperCase() as HttpMethod,
-		url: `{{baseUrl}}${normalizeVars(path)}`,
+		url: `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}`,
 		params,
 		headers,
 		body,

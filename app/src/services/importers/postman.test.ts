@@ -79,6 +79,263 @@ describe("PostmanV21Parser", () => {
 		]);
 	});
 
+	/**
+	 * One fixture-shaped collection per finding in issue #195. Each is built inline
+	 * rather than added to the shared fixture, so a case that regresses names the
+	 * defect it came from instead of shifting counts in the fixture-wide tests.
+	 */
+	function collectionOf(items: unknown[], extra: Record<string, unknown> = {}) {
+		return {
+			info: {
+				name: "CB",
+				schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+			},
+			item: items,
+			...extra,
+		};
+	}
+	const parse = (obj: unknown) => p.parse(obj, JSON.stringify(obj), opts);
+
+	it("imports awsv4 auth as the aws mode with its config, and counts it", () => {
+		// The wire type is `awsv4`; matching on `"aws"` sent every real SigV4 export
+		// to the `default` branch, which discarded the keys AND suppressed the
+		// warning counter, so the preview reported a clean import.
+		const result = parse(
+			collectionOf([
+				{
+					name: "Signed",
+					request: {
+						method: "GET",
+						url: "https://api.example.com/x",
+						auth: {
+							type: "awsv4",
+							awsv4: [
+								{ key: "accessKey", value: "AKIA" },
+								{ key: "secretKey", value: "s3cret" },
+								{ key: "region", value: "us-east-1" },
+								{ key: "service", value: "execute-api" },
+							],
+						},
+					},
+				},
+			])
+		);
+
+		expect(result.collections[0].requests[0].auth).toEqual({
+			mode: "aws",
+			config: {
+				accessKey: "AKIA",
+				secretKey: "s3cret",
+				region: "us-east-1",
+				service: "execute-api",
+			},
+		});
+		expect(result.meta.nonExecutableAuth).toBe(1);
+	});
+
+	it("keeps an explicit folder noauth terminal, and an absent one transparent", () => {
+		// Postman's No Auth on a folder stops inheritance; a folder that simply has
+		// no auth field does not. Both used to become `{mode:"none"}`, which the
+		// resolution walk steps over - so the folder's requests silently regained
+		// the root's bearer token.
+		const root = parse(
+			collectionOf(
+				[
+					{
+						name: "Public endpoints",
+						auth: { type: "noauth" },
+						item: [
+							{
+								name: "Health",
+								request: { method: "GET", url: "https://x/health" },
+							},
+						],
+					},
+					{ name: "Private", item: [] },
+				],
+				{ auth: { type: "bearer", bearer: [{ key: "token", value: "T" }] } }
+			)
+		).collections[0];
+
+		expect(root.children[0].auth).toEqual({ mode: "noauth" });
+		expect(root.children[1].auth).toEqual({ mode: "none" });
+	});
+
+	it("parses GraphQL variables into an object, keeping unparseable text", () => {
+		const [ok, bad, empty] = parse(
+			collectionOf(
+				[
+					{ query: "{ me }", variables: '{"limit": 10}' },
+					{ query: "{ me }", variables: "{limit: 10" },
+					{ query: "{ me }", variables: "  " },
+				].map((graphql, i) => ({
+					name: `gql${i}`,
+					request: {
+						method: "POST",
+						url: "https://x/graphql",
+						body: { mode: "graphql", graphql },
+					},
+				}))
+			)
+		).collections[0].requests;
+
+		expect(JSON.parse((ok.body as { content: string }).content)).toEqual({
+			query: "{ me }",
+			variables: { limit: 10 },
+		});
+		expect(JSON.parse((bad.body as { content: string }).content)).toEqual({
+			query: "{ me }",
+			variables: "{limit: 10",
+		});
+		expect(JSON.parse((empty.body as { content: string }).content)).toEqual({
+			query: "{ me }",
+		});
+	});
+
+	it("reads item-level protocolProfileBehavior into the redirect settings", () => {
+		// Postman writes this block exactly where the user overrode redirect
+		// handling. The engine's default is follow=true, so dropping a `false` here
+		// follows the 3xx the request exists to inspect.
+		const [overridden, plain] = parse(
+			collectionOf([
+				{
+					name: "Login",
+					protocolProfileBehavior: { followRedirects: false, maxRedirects: 3 },
+					request: { method: "POST", url: "https://x/login" },
+				},
+				{ name: "Plain", request: { method: "GET", url: "https://x/y" } },
+			])
+		).collections[0].requests;
+
+		expect(overridden.followRedirects).toBe(false);
+		expect(overridden.maxRedirects).toBe(3);
+		// Absent, not defaulted: the engine seeds its own defaults for a request
+		// whose source said nothing.
+		expect(plain.followRedirects).toBeUndefined();
+		expect(plain.maxRedirects).toBeUndefined();
+	});
+
+	it("ignores a protocolProfileBehavior whose values are the wrong type", () => {
+		const req = parse(
+			collectionOf([
+				{
+					name: "Odd",
+					protocolProfileBehavior: { followRedirects: "false", maxRedirects: "3" },
+					request: { method: "GET", url: "https://x/y" },
+				},
+			])
+		).collections[0].requests[0];
+
+		// A coerced "false" would read as the user's setting while being its opposite.
+		expect(req.followRedirects).toBeUndefined();
+		expect(req.maxRedirects).toBeUndefined();
+	});
+
+	it("survives a malformed percent-sequence in a string URL query", () => {
+		const req = parse(
+			collectionOf([
+				{
+					name: "Discount",
+					request: { method: "GET", url: "https://x/search?discount=50%&q=a%zzb" },
+				},
+			])
+		).collections[0].requests[0];
+
+		// One bad character used to throw URIError out of parseImport and fail the
+		// whole file with no pointer to the offending request.
+		expect(req.params).toEqual([
+			{ key: "discount", value: "50%", enabled: true },
+			{ key: "q", value: "a%zzb", enabled: true },
+		]);
+	});
+
+	it("falls back to raw's query when an object URL has no query[]", () => {
+		const req = parse(
+			collectionOf([
+				{
+					name: "Raw only",
+					request: {
+						method: "GET",
+						url: { raw: "https://x/y?page=2&apiKey=abc" },
+					},
+				},
+			])
+		).collections[0].requests[0];
+
+		expect(req.url).toBe("https://x/y");
+		expect(req.params).toEqual([
+			{ key: "page", value: "2", enabled: true },
+			{ key: "apiKey", value: "abc", enabled: true },
+		]);
+	});
+
+	it("still prefers query[] over raw when both are present", () => {
+		// `query[]` carries disabled state and descriptions that `raw` cannot.
+		const req = parse(
+			collectionOf([
+				{
+					name: "Both",
+					request: {
+						method: "GET",
+						url: {
+							raw: "https://x/y?page=99",
+							query: [{ key: "page", value: "2", disabled: true }],
+						},
+					},
+				},
+			])
+		).collections[0].requests[0];
+
+		expect(req.params).toEqual([{ key: "page", value: "2", enabled: false }]);
+	});
+
+	it("leaves a literal single-brace value alone", () => {
+		// `{beta}` is a valid literal path segment in Postman, where only `{{x}}` is
+		// template syntax. Rewriting it invented a variable that resolves to nothing.
+		const req = parse(
+			collectionOf([
+				{
+					name: "Literal",
+					request: {
+						method: "GET",
+						url: "https://x/tags/{beta}?fields=friends{name}",
+						header: [{ key: "X-Shape", value: "{id}" }],
+					},
+				},
+			])
+		).collections[0].requests[0];
+
+		expect(req.url).toBe("https://x/tags/{beta}");
+		expect(req.params).toEqual([{ key: "fields", value: "friends{name}", enabled: true }]);
+		expect(req.headers[0].value).toBe("{id}");
+	});
+
+	it("skips a non-object item or event instead of throwing", () => {
+		const result = parse(
+			collectionOf([
+				null,
+				"nonsense",
+				{
+					name: "Real",
+					event: [null, { listen: "test", script: { exec: ["ok"] } }],
+					request: { method: "GET", url: "https://x/y" },
+				},
+				{
+					name: "Folder",
+					item: [null, { name: "Deep", request: { method: "GET", url: "https://x/z" } }],
+				},
+			])
+		);
+
+		const root = result.collections[0];
+		expect(root.requests.map((r) => r.name)).toEqual(["Real"]);
+		expect(root.requests[0].postRequestScript).toBe("ok");
+		expect(root.children[0].requests.map((r) => r.name)).toEqual(["Deep"]);
+		// Visible in the preview rather than merely non-fatal: two at the root, one
+		// inside the folder.
+		expect(result.meta.skipped).toEqual([{ kind: "malformed_item", count: 3 }]);
+	});
+
 	it("reports meta counts", () => {
 		const m = p.parse(parsed, raw, opts).meta;
 		expect(m.requestCount).toBe(2);

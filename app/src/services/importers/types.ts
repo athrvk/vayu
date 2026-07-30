@@ -13,10 +13,13 @@ export interface ImportOptions {
 }
 
 /**
- * Something the parse had to drop: a resource Vayu can't represent (ws, grpc, a
- * file/binary body), an operation whose HTTP method it has no `HttpMethod` for
- * (`unsupported_method` - OpenAPI 3's `trace`), or a shape the parser stepped over
- * to keep the rest of the file importable (`malformed_spec`).
+ * Something the parser could not import. Mostly a resource or body Vayu can't
+ * represent (file/binary, ws, grpc). Three are not about representability:
+ * `unsupported_method` is an operation whose HTTP method has no `HttpMethod`
+ * (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec` are shapes the
+ * source file got wrong - a Postman `item[]` entry that is not an object (see
+ * `pmFolder`), an OpenAPI path item or `parameters` list that is not what the
+ * spec allows - which are stepped over rather than allowed to abort the file.
  */
 export interface SkippedItem {
 	kind:
@@ -25,6 +28,7 @@ export interface SkippedItem {
 		| "api_spec"
 		| "unit_test"
 		| "file_body"
+		| "malformed_item"
 		| "unsupported_method"
 		| "malformed_spec";
 	count: number;
@@ -58,6 +62,15 @@ export interface RequestDraft {
 	auth: RequestAuth; // "inherit" allowed; resolved at execution
 	preRequestScript: string;
 	postRequestScript: string;
+	/**
+	 * Per-request redirect settings, when the source states them (Postman's
+	 * item-level `protocolProfileBehavior`). Absent means "engine default" -
+	 * `followRedirects: true`, `maxRedirects: 10` - which is why they are optional
+	 * rather than defaulted here: a parser that says nothing must not look like a
+	 * parser that said `true`.
+	 */
+	followRedirects?: boolean;
+	maxRedirects?: number;
 }
 
 export interface CollectionDraft {

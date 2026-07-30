@@ -103,8 +103,13 @@ export function mapPostmanAuth(auth: any): RequestAuth {
 			};
 		case "oauth2":
 			return mapPostmanOAuth2(d);
+		// AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum);
+		// Vayu's internal mode is `aws`, which Insomnia's `iam` also maps to. The
+		// two names diverge, so the mode is written out instead of reusing `type` -
+		// matching on `"aws"` here is what silently dropped every real SigV4 export.
+		case "awsv4":
+			return { mode: "aws", config: d };
 		case "digest":
-		case "aws":
 		case "ntlm":
 			return { mode: type, config: d } as RequestAuth;
 		case "inherit":
