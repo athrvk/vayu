@@ -21,7 +21,7 @@ detect(parsed) {
 }
 ```
 
-The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser - see [OpenAPI v2](./openapi-v2.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
+The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). The 3.1 claim is honoured on the schema side too: `sampleSchema` reads the JSON-Schema keywords 3.1 adopted - type arrays (`type: ["string", "null"]`), `const`, and the plural `examples` (see [`sampleSchema`](#sampleschema-schema--stub-value)) - and a `{"$ref": ...}` path item, which 3.1 made common, is resolved rather than dropped. Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser - see [OpenAPI v2](./openapi-v2.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
 
 ## Tree structure
 
@@ -32,7 +32,7 @@ The spec maps to a single root collection, with operations grouped into child co
   - `children`: one child collection per distinct first-tag, in first-encounter order.
 - **Tag child collections** ← created lazily by `makeTagCollection(spec, tag)` the first time a tag is seen, keyed in a `Map<string, CollectionDraft>`. Description comes from the matching entry in the top-level `tags[]` array (if any).
 
-Iteration order: `parse` loops over `spec.paths` entries, and for each path item over the fixed `HTTP_METHODS` list (`get, post, put, patch, delete, head, options`). For each present operation it calls `buildOperation(...)`, then routes by tag:
+Iteration order: `parse` loops over `spec.paths` entries, resolves each path item through `resolvePathItem` (`openapi-shared.ts`) so a `{"$ref": "#/components/pathItems/X"}` item is read from its target instead of contributing nothing, and then loops over the fixed `HTTP_METHODS` list (`get, post, put, patch, delete, head, options`). A path item that is not an object - or whose `$ref` does not resolve to one - is counted as a `malformed_spec` [`SkippedItem`](./README.md#draft-model-the-parser-output-contract) and skipped, so the drop is named in the preview rather than silent. The ref is followed **one hop only**, like the parameter and `requestBody` refs. For each present operation `parse` calls `buildOperation(...)`, then routes by tag:
 
 ```ts
 const tag = op.tags?.[0];   // ONLY the first tag is used
@@ -41,6 +41,8 @@ else     rootRequests.push(req);
 ```
 
 **Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder). An operation with no `tags` (or `tags: []`) becomes a root request.
+
+**`trace` operations:** OpenAPI 3's Path Item Object also defines `trace`, which is **not** in `HTTP_METHODS` because `HttpMethod` (`types/domain.ts`) has no `"TRACE"` - Vayu cannot execute one. A `trace` operation is therefore not built, is **not** counted in `requestCount`, and is counted as an `unsupported_method` `SkippedItem` so the preview says so. `UNSUPPORTED_METHODS` in `openapi-v3.ts` is the list; `trace` is its only member, since a path item defines exactly the eight methods.
 
 Key internal functions: `buildOperation` (per-operation `RequestDraft`), `makeTagCollection` (per-tag `CollectionDraft`), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and a closed-over `resolveRef` for `$ref` resolution.
 
@@ -92,6 +94,8 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 
 **Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
 
+Both lists go through `SkipTally.params` (`openapi-shared.ts`) first. `parameters` is an array per the spec, but a missing `-` in hand-written YAML makes it a mapping, and spreading that used to throw `is not iterable` and abort the **whole file**. A present-but-non-array `parameters` is now treated as empty and counted as a `malformed_spec` `SkippedItem` (once per offending list); an absent `parameters` is normal and counted as nothing. Every other path in the file still imports.
+
 ## URL & path parameters
 
 - The request `url` is always `` `{{baseUrl}}${normalizeVars(path)}` ``. `{{baseUrl}}` is a Vayu collection variable resolved from `servers[0].url` at import time (defined on the root collection). If the spec has no `servers`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
@@ -105,11 +109,13 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 |----------------------|--------------------|-------------------------|
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
 | `text/plain` | `{ mode: "text", content: "" }` | empty string (the schema is not sampled for text bodies) |
-| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per `schema.properties` key |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded; key per `schema.properties` |
+| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field name from `schemaFieldNames(schema)` |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded |
 | no `content`, or none of the above | `{ mode: "none" }` | |
 
 JSON is preferred: `findJsonMedia` is checked first and takes precedence over text/form variants. The `x-www-form-urlencoded` / `multipart/form-data` branch only reads property **names** - property schemas, `required`, and nested structure are not sampled into form fields.
+
+**Form field names resolve `$ref` and `allOf`, exactly as far as a JSON body does.** `schemaFieldNames(schema, resolveRef)` (`schema-sampler.ts`) samples the schema and returns the stub's own keys, rather than reading `schema.properties` directly. That key does not exist on a schema written as `{"$ref": "#/components/schemas/TokenRequest"}` or as an `allOf` - the shape generators emit - which used to yield the right body mode with an **empty** field list and no warning anywhere. Consequences of going through the sampler: composition follows the **first** branch only (the same rule JSON bodies get, not an `allOf` merge), and a schema that samples to a non-object (a scalar, an array, or an `example` that is not an object) contributes no field names.
 
 ### `sampleSchema` (schema → stub value)
 
@@ -117,8 +123,12 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
 - **Depth cap.** `MAX_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
 - **`$ref` resolution + cycle guard.** A node with a string `$ref` is resolved via `resolveRef` and walked (depth +1). A `Set` of already-visited `$ref` strings is threaded down each branch; re-encountering a `$ref` already on the current path returns `{}` (breaks reference cycles). Resolution failures (`throw` or `null` result) also yield `{}`.
-- **`example` preference.** If the schema node has an `example` field, that value is returned verbatim (checked **after** `$ref`, before composition and `type`). This lets authors pin exact sample values.
+- **Pinned-value precedence:** `const` → `example` → `examples[0]`, all checked **after** `$ref` and before composition and `type`.
+  - **`const`** (JSON Schema, so OpenAPI 3.1) is returned verbatim and **outranks `example`**: it says the value MUST be exactly this, where `example` is only an annotation. `const: null` samples as `null`.
+  - **`example`** is returned verbatim - this is how authors pin exact sample values.
+  - **`examples`** is 3.1's plural replacement for `example`; its **first** entry is used when there is no singular `example`. An empty `examples: []` is ignored.
 - **`allOf` / `oneOf` / `anyOf` - first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members; it just samples the first.
+- **Type arrays (3.1).** 3.1 writes a nullable field as `type: ["string", "null"]` where 3.0 wrote `nullable: true`. The walker samples the **first non-`"null"`** member, so such a field gets the typed stub the user edits rather than the `{}` an unmatched type used to produce. A type whose only member is `"null"` (and the scalar `type: "null"`) samples as `null`.
 - **Type defaults:**
 
   | `schema.type` | Sample value |
@@ -126,10 +136,13 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
   | `string` | `enum[0]` if a non-empty `enum` is present, else `""` |
   | `integer` / `number` | `0` |
   | `boolean` | `false` |
+  | `null` | `null` |
   | `array` | `[ sample(items) ]` if `items` is present, else `[]` (one element) |
   | `object` (or no/unknown `type`) | walks each entry of `properties`, producing `{ key: sample }`; `{}` if no `properties` |
 
   The `object`/default branch is the same fallback used for untyped schemas - a node with `properties` but no `type` is still expanded.
+
+`schemaFieldNames(schema, resolveRef)` is the form-body wrapper over this: it samples the schema and returns `Object.keys()` of the result (`[]` for a non-object sample). See [Request body generation](#request-body-generation).
 
 > Older notes claimed sampling was "one level only" and "`oneOf` → `{}`". That is **not** what the code does: sampling recurses to depth 6, resolves and cycle-guards `$ref`s, honors `example`, and follows the first branch of `oneOf`/`anyOf`/`allOf`.
 
@@ -167,8 +180,18 @@ Dropped / not represented:
 - **Cookie parameters** and **path parameters as params**: not emitted (path params live in the URL only).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Multi-tag grouping:** only the first tag groups an operation.
+- **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
+- **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
+- **Form-field property schemas:** only field **names** are imported; `required`, types, and nested structure are not.
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built, `folderCount` = number of tag collections, `environmentCount = 0`, `skipped = []` (this parser never emits `SkippedItem`s), `nonExecutableAuth = 0` (oauth2 is now executable).
+`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), and `skipped` from the `SkipTally`:
+
+| `SkippedItem.kind` | Counted when |
+|--------------------|--------------|
+| `unsupported_method` | a path item carries a `trace` operation |
+| `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
+
+An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 
 ## Shared helpers used
 
@@ -176,6 +199,8 @@ Dropped / not represented:
 |--------|--------|--------------------|
 | [`normalizeVars`](./README.md#normalizevars) | `var-normalize.ts` | convert OpenAPI `{param}` path templates → Vayu `{{param}}` in request URLs |
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from a request `schema` (bounded, ref-resolving) |
+| `schemaFieldNames` | `schema-sampler.ts` | field names for an urlencoded / multipart body, resolved through the sampler |
+| `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
 
 This parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 

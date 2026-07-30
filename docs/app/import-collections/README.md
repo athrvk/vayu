@@ -139,8 +139,14 @@ execution time), `preRequestScript`, `postRequestScript`.
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
 `environmentCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`.
 
-**`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body", count }`.
+**`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
+"unsupported_method" | "malformed_spec", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
+The last two are what the OpenAPI parsers emit: `unsupported_method` for an operation whose
+HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), `malformed_spec` for a shape the
+parser stepped over to keep the rest of the file importable (an unresolvable `$ref`'d path
+item, a non-array `parameters`). Counted via `SkipTally` in `openapi-shared.ts`, which both
+OpenAPI parsers share - they are structural clones, and a second copy would drift.
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
@@ -241,11 +247,18 @@ used to build request-body stubs. It is **bounded and resilient**, not a naive o
 - Recurses up to `MAX_DEPTH = 6`.
 - Resolves `$ref` via the injected `resolveRef`, with a per-path `Set` **cycle guard**
   (a re-seen ref → `{}`); a failed/`null` resolution → `{}`.
-- Returns a schema's `example` verbatim when present.
+- Returns a pinned value verbatim, `const` → `example` → `examples[0]`. `const` wins because
+  JSON Schema makes it the only permitted value; `examples` is OpenAPI 3.1's plural form.
 - For `allOf` / `oneOf` / `anyOf`, walks the **first** branch (precedence `allOf → oneOf → anyOf`).
+- Samples a 3.1 type array (`type: ["string", "null"]`) from its first non-`"null"` member.
 - Type defaults: `string` → `""` (or `enum[0]`), `integer`/`number` → `0`, `boolean` →
-  `false`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands `properties`
-  recursively (else `{}`).
+  `false`, `null` → `null`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands
+  `properties` recursively (else `{}`).
+
+`schemaFieldNames(schema, resolveRef)` in the same module returns the sampled stub's own keys
+(`[]` when it samples to a non-object). It is how the v3 parser reads urlencoded / multipart
+field names, so a form schema behind `$ref` or `allOf` resolves as far as a JSON body does
+instead of reading a `properties` key that isn't there.
 
 (`schema-sampler.ts`)
 

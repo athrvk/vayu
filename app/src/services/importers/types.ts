@@ -12,9 +12,21 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
-/** A request body skipped because Vayu can't represent it (file/binary, ws, grpc, etc.). */
+/**
+ * Something the parse had to drop: a resource Vayu can't represent (ws, grpc, a
+ * file/binary body), an operation whose HTTP method it has no `HttpMethod` for
+ * (`unsupported_method` - OpenAPI 3's `trace`), or a shape the parser stepped over
+ * to keep the rest of the file importable (`malformed_spec`).
+ */
 export interface SkippedItem {
-	kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body";
+	kind:
+		| "websocket"
+		| "grpc"
+		| "api_spec"
+		| "unit_test"
+		| "file_body"
+		| "unsupported_method"
+		| "malformed_spec";
 	count: number;
 }
 

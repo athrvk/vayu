@@ -16,8 +16,19 @@ import type {
 import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
+import { resolvePathItem, SkipTally } from "./openapi-shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+
+/** A `consumes` entry stripped of its parameters, e.g. `"multipart/form-data; boundary=x"`. */
+const mediaType = (c: unknown): string =>
+	String(c ?? "")
+		.split(";")[0]
+		.trim()
+		.toLowerCase();
+const isUrlEncodedType = (c: unknown): boolean =>
+	mediaType(c) === "application/x-www-form-urlencoded";
+const isMultipartType = (c: unknown): boolean => mediaType(c) === "multipart/form-data";
 
 export function swaggerSchemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
 	if (!scheme || !scheme.type) return { mode: "none" };
@@ -64,15 +75,21 @@ export class OpenApiV2Parser implements ImportParser {
 
 		const tagCollections = new Map<string, CollectionDraft>();
 		const rootRequests: RequestDraft[] = [];
+		const tally = new SkipTally();
 		let requestCount = 0;
 
-		for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
-			const pathParams = (pathItem as any)?.parameters ?? [];
+		for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
+			const pathItem = resolvePathItem(rawPathItem, resolveRef);
+			if (!pathItem) {
+				tally.add("malformed_spec");
+				continue;
+			}
+			const pathParams = tally.params(pathItem.parameters);
 			for (const method of HTTP_METHODS) {
-				const op = (pathItem as any)?.[method];
+				const op = (pathItem as any)[method];
 				if (!op) continue;
 				requestCount += 1;
-				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams);
+				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally);
 				const tag = op.tags?.[0];
 				if (tag) {
 					if (!tagCollections.has(tag)) {
@@ -116,7 +133,7 @@ export class OpenApiV2Parser implements ImportParser {
 				folderCount: tagCollections.size,
 				environmentCount: 0,
 				globalCount: 0,
-				skipped: [],
+				skipped: tally.items(),
 				nonExecutableAuth: 0,
 			},
 		};
@@ -129,7 +146,8 @@ function buildSwaggerOp(
 	op: any,
 	spec: any,
 	resolveRef: (r: string) => unknown,
-	pathParams: any[] = []
+	pathParams: unknown[],
+	tally: SkipTally
 ): RequestDraft {
 	const params: KeyValueEntry[] = [];
 	const headers: KeyValueEntry[] = [];
@@ -143,10 +161,18 @@ function buildSwaggerOp(
 			(c) =>
 				c === "application/json" || c.startsWith("application/json;") || c.endsWith("+json")
 		);
+	// Swagger 2.0 ties `formData` encoding to `consumes` - urlencoded and multipart are
+	// distinct wire encodings, and Vayu models them as distinct body modes. Multipart wins
+	// when both are listed (only it can carry a `type: file` field), and a `consumes` that
+	// names neither keeps the historical multipart default.
+	const formMode: "form-data" | "x-www-form-urlencoded" =
+		consumes.some(isUrlEncodedType) && !consumes.some(isMultipartType)
+			? "x-www-form-urlencoded"
+			: "form-data";
 
 	// Resolve $ref params and dedupe by name+in (operation overrides path-item).
 	const byKey = new Map<string, any>();
-	for (const param of [...pathParams, ...(op.parameters ?? [])]) {
+	for (const param of [...pathParams, ...tally.params(op.parameters)] as any[]) {
 		const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
 		if (!resolved || !resolved.in || !resolved.name) continue;
 		byKey.set(`${resolved.in}:${resolved.name}`, resolved);
@@ -180,7 +206,7 @@ function buildSwaggerOp(
 				break;
 		}
 	}
-	if (formFields.length > 0) body = { mode: "form-data", fields: formFields };
+	if (formFields.length > 0) body = { mode: formMode, fields: formFields };
 
 	return {
 		name: op.summary ?? op.operationId ?? `${method.toUpperCase()} ${path}`,
