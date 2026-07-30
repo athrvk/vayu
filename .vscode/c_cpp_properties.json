@@ -60,7 +60,7 @@
                 "${workspaceFolder}/engine/include",
                 "${workspaceFolder}/engine/src",
                 "${workspaceFolder}/engine/vendor/**",
-                "${workspaceFolder}/engine/vcpkg_installed/x64-windows/include"
+                "${workspaceFolder}/engine/vcpkg_installed/x64-windows-static/include"
             ],
             "defines": [
                 "_DEBUG",

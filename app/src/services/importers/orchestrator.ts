@@ -144,9 +144,12 @@ function flatten(
 			auth: r.auth,
 			preRequestScript: r.preRequestScript,
 			postRequestScript: r.postRequestScript,
-			// Absent is meaningful here: it means "engine default". Only forward a
-			// value the parser actually read out of the file.
-			...(r.followRedirects === undefined ? {} : { followRedirects: r.followRedirects }),
+			// Spread rather than assigned so the payload object holds the key only
+			// when the source stated it. `JSON.stringify` would drop an `undefined`
+			// property anyway, but the payload is also compared structurally in
+			// tests, and "absent" is the state the engine's field appliers read.
+			...(r.followRedirects !== undefined ? { followRedirects: r.followRedirects } : {}),
+			...(r.maxRedirects !== undefined ? { maxRedirects: r.maxRedirects } : {}),
 			order: i,
 		});
 	}

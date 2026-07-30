@@ -1,14 +1,21 @@
 /**
  * @file tests/resource_write_route_test.cpp
- * @brief Tests for the create/update verb split and the one null-vs-absent
- *        rule across collections, requests and environments (issue #95).
+ * @brief Tests for the create/update verb split, engine-owned ids, and the one
+ *        null-vs-absent rule across collections, requests and environments
+ *        (issues #95, #97).
  *
- * Three things are pinned here, for each of the three resources:
+ * Four things are pinned here, for each of the three resources:
  *
- *  - **POST creates and only creates.** An id that already exists is a 409
- *    naming the PUT path, not a silent update. Before the split, POSTing a
- *    stale or typo'd id merged two records into one - the same upsert that
- *    turned an id collision into data loss.
+ *  - **POST creates and only creates.** Before the split, POSTing a stale or
+ *    typo'd id merged two records into one - the same upsert that turned an id
+ *    collision into data loss.
+ *
+ *  - **The engine owns every id** (#97). A create carrying a body `id` is a
+ *    400, so the id in the payload can no longer select a record at all -
+ *    which is why the collision cases above now assert a 400 rather than the
+ *    409 that only a `generate_id` collision could still produce. An update's
+ *    identity is the path, so a body `id` disagreeing with it is a 400 rather
+ *    than a write to whichever of the two the handler happened to prefer.
  *
  *  - **PUT updates and only updates.** A missing id is a 404, not a silent
  *    create.
@@ -82,6 +89,15 @@ using vayu::http::routes::update_collection_response;
 using vayu::http::routes::update_environment_response;
 using vayu::http::routes::update_request_response;
 
+/**
+ * The exact create-time rejection from routes.hpp. Spelled out here rather than
+ * substring-matched: it is the message that tells a client where ids come from
+ * and which endpoint to use for a bulk tree, so a reword should show up as a
+ * failing test and be made deliberately.
+ */
+constexpr const char* ENGINE_OWNS_ID =
+"id is assigned by the engine; omit it (bulk import: POST /import/apply)";
+
 class ResourceWriteRouteTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_resource_write_route.db";
@@ -144,29 +160,84 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateGeneratesIdWhenAbsent) {
     << "engine-generated ids carry the resource prefix";
 }
 
-TEST_F (ResourceWriteRouteTest, CollectionCreateHonoursClientId) {
-    // Still accepted this phase - the import orchestrator pre-assigns ids to
-    // wire the tree together before persisting (#96 removes the need).
+TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsClientId) {
     auto [status, body] = create_collection_response (
     *db_, json{ { "id", "col_fixed" }, { "name", "New" } });
-    ASSERT_EQ (status, 200);
-    EXPECT_EQ (body["id"], "col_fixed");
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_FALSE (db_->get_collection ("col_fixed").has_value ())
+    << "a rejected create must not persist anything";
+
+    // Nothing was created under a generated id either - the whole write is off.
+    EXPECT_TRUE (db_->get_collections ().empty ());
 }
 
-TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsConflict) {
+TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsNullClientId) {
+    // Presence is the trigger: the null-vs-absent rule does not reach `id`,
+    // because a caller sending null still believes the field is honoured.
+    auto [status, body] =
+    create_collection_response (*db_, json{ { "id", nullptr }, { "name", "New" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsRejected) {
+    // The upsert this replaced merged two records into one when the ids
+    // collided. There is no route left to that: a body id never reaches the
+    // existence check, so the stored record cannot be touched by a create.
     const std::string id = make_collection ("Original");
 
     auto [status, body] =
     create_collection_response (*db_, json{ { "id", id }, { "name", "Impostor" } });
-    EXPECT_EQ (status, 409);
-    EXPECT_NE (body["error"].get<std::string> ().find ("PUT /collections/:id"),
-    std::string::npos)
-    << "the 409 must point the caller at the update verb";
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
 
-    // The stored record is untouched - this is the data loss the upsert caused.
     auto stored = db_->get_collection (id);
     ASSERT_TRUE (stored.has_value ());
     EXPECT_EQ (stored->name, "Original");
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsMismatchedBodyId) {
+    const std::string id = make_collection ("Original");
+
+    auto [status, body] = update_collection_response (
+    *db_, id, json{ { "id", "col_somewhere_else" }, { "name", "Renamed" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_EQ (db_->get_collection (id)->name, "Original")
+    << "a body id naming another record must not write through the path id";
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionUpdateAcceptsMatchingBodyId) {
+    // Redundant but not contradictory: the path and the body agree on which
+    // record is being written, so there is nothing to guess.
+    const std::string id = make_collection ("Original");
+
+    auto [status, body] = update_collection_response (
+    *db_, id, json{ { "id", id }, { "name", "Renamed" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["name"], "Renamed");
+    EXPECT_EQ (db_->get_collection (id)->name, "Renamed");
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsNullBodyId) {
+    const std::string id = make_collection ("Original");
+
+    auto [status, body] = update_collection_response (
+    *db_, id, json{ { "id", nullptr }, { "name", "Renamed" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_EQ (db_->get_collection (id)->name, "Original");
+}
+
+TEST_F (ResourceWriteRouteTest, UpdateRejectsBodyIdBeforeLookingTheRecordUp) {
+    // The answer to a malformed body must not depend on whether the target
+    // exists, or a client debugging a 404 chases the wrong problem.
+    auto [status, body] = update_collection_response (
+    *db_, "col_does_not_exist", json{ { "id", "col_other" }, { "name", "X" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateRequiresName) {
@@ -300,16 +371,28 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateKeepsCycleGuard) {
 // Requests
 // ---------------------------------------------------------------------------
 
-TEST_F (ResourceWriteRouteTest, RequestCreateOnExistingIdIsConflict) {
+TEST_F (ResourceWriteRouteTest, RequestCreateRejectsClientId) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
 
     auto [status, body] = create_request_response (*db_,
     json{ { "id", id }, { "collectionId", collection }, { "name", "Impostor" },
     { "method", "POST" }, { "url", "https://evil.example" } });
-    EXPECT_EQ (status, 409);
-    EXPECT_NE (body["error"].get<std::string> ().find ("PUT /requests/:id"),
-    std::string::npos);
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (db_->get_request (id)->name, "R");
+    EXPECT_EQ (db_->get_requests_in_collection (collection).size (), 1U)
+    << "a rejected create must not persist a second row under a generated id";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateRejectsMismatchedBodyId) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+
+    auto [status, body] = update_request_response (
+    *db_, id, json{ { "id", "req_somewhere_else" }, { "name", "Renamed" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
     EXPECT_EQ (db_->get_request (id)->name, "R");
 }
 
@@ -624,7 +707,7 @@ TEST_F (ResourceWriteRouteTest, RequestAllHttpVersionsAreAcceptedAndRoundTrip) {
 // Environments
 // ---------------------------------------------------------------------------
 
-TEST_F (ResourceWriteRouteTest, EnvironmentCreateOnExistingIdIsConflict) {
+TEST_F (ResourceWriteRouteTest, EnvironmentCreateRejectsClientId) {
     auto [created_status, created] =
     create_environment_response (*db_, json{ { "name", "Original" } });
     ASSERT_EQ (created_status, 200);
@@ -632,9 +715,23 @@ TEST_F (ResourceWriteRouteTest, EnvironmentCreateOnExistingIdIsConflict) {
 
     auto [status, body] =
     create_environment_response (*db_, json{ { "id", id }, { "name", "Impostor" } });
-    EXPECT_EQ (status, 409);
-    EXPECT_NE (body["error"].get<std::string> ().find ("PUT /environments/:id"),
-    std::string::npos);
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (db_->get_environment (id)->name, "Original");
+    EXPECT_EQ (db_->get_environments ().size (), 1U)
+    << "a rejected create must not persist a second row under a generated id";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentUpdateRejectsMismatchedBodyId) {
+    auto [created_status, created] =
+    create_environment_response (*db_, json{ { "name", "Original" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [status, body] = update_environment_response (
+    *db_, id, json{ { "id", "env_somewhere_else" }, { "name", "Renamed" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
     EXPECT_EQ (db_->get_environment (id)->name, "Original");
 }
 

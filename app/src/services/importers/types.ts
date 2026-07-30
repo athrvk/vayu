@@ -12,9 +12,25 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
-/** A request body skipped because Vayu can't represent it (file/binary, ws, grpc, etc.). */
+/**
+ * Something the parser could not import. Mostly a resource or body Vayu can't
+ * represent (file/binary, ws, grpc). Three are not about representability:
+ * `unsupported_method` is an operation whose HTTP method has no `HttpMethod`
+ * (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec` are shapes the
+ * source file got wrong - a Postman `item[]` entry that is not an object (see
+ * `pmFolder`), an OpenAPI path item or `parameters` list that is not what the
+ * spec allows - which are stepped over rather than allowed to abort the file.
+ */
 export interface SkippedItem {
-	kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body";
+	kind:
+		| "websocket"
+		| "grpc"
+		| "api_spec"
+		| "unit_test"
+		| "file_body"
+		| "malformed_item"
+		| "unsupported_method"
+		| "malformed_spec";
 	count: number;
 }
 
@@ -47,12 +63,15 @@ export interface RequestDraft {
 	preRequestScript: string;
 	postRequestScript: string;
 	/**
-	 * Follow 3xx `Location` responses. Absent means "leave the engine's default",
-	 * which is `true` - so a parser sets this only when the source file states it.
-	 * Sending an omitted `false` as `true` would follow a redirect the user turned
-	 * off; sending an absent value as `false` would stop one they never touched.
+	 * Per-request redirect settings, when the source states them (Postman's
+	 * item-level `protocolProfileBehavior`; Insomnia's `settingFollowRedirects`,
+	 * which has no limit to go with it). Absent means "engine default" -
+	 * `followRedirects: true`, `maxRedirects: 10` - which is why they are optional
+	 * rather than defaulted here: a parser that says nothing must not look like a
+	 * parser that said `true`.
 	 */
 	followRedirects?: boolean;
+	maxRedirects?: number;
 }
 
 export interface CollectionDraft {

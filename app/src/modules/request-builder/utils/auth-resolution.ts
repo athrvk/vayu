@@ -19,32 +19,54 @@
 
 import type { Collection, RequestAuth } from "@/types";
 
+/** Where a descendant's `inherit` lands - see {@link resolveAuthSource}. */
+export interface AuthSource {
+	/** The ancestor whose auth is inherited, or null when nothing is. */
+	source: Collection | null;
+	/**
+	 * The ancestor that stopped the walk by being explicitly `noauth`, when one
+	 * did. Non-null implies `source` is null: the chain deliberately sends no
+	 * credentials, which is a different answer from "nobody configured any" and
+	 * is worded differently in the UI.
+	 */
+	blockedBy: Collection | null;
+}
+
 /**
- * Walk the ancestor chain leaf-first and return the first non-none auth.
- * Collections are always concrete auth sources (never inherit), so the first
- * non-none one found is the effective inherited auth for the request.
+ * Walk the ancestor chain leaf-first for the auth a descendant `inherit`
+ * resolves to. Collections are always concrete auth sources (never inherit), so
+ * the first one that configures auth wins - except that an explicit `noauth`
+ * terminates the walk instead of being stepped over (see `RequestAuth`).
  *
  * Lives here rather than in the builder's `index.tsx`, where it started, because
- * the History run view resolves auth the same way when it replays a run.
- * `CLAUDE.md` forbids a third copy of the resolution rules, and a second one was
- * already one too many.
+ * the History run view resolves auth the same way when it replays a run, and the
+ * two chain views (`InheritanceChain`, `AuthInheritBanner`) have to agree with
+ * what actually gets sent. `CLAUDE.md` forbids a third copy of the resolution
+ * rules, and a second one was already one too many.
  */
-export function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> | undefined {
+export function resolveAuthSource(ancestors: Collection[]): AuthSource {
 	for (let i = ancestors.length - 1; i >= 0; i--) {
-		const auth = ancestors[i].auth;
-		if (auth.mode !== "none") {
-			// Spread the discriminated union into a plain record for the engine
-			return { ...auth } as Record<string, unknown>;
-		}
+		const collection = ancestors[i];
+		if (collection.auth.mode === "noauth") return { source: null, blockedBy: collection };
+		if (collection.auth.mode !== "none") return { source: collection, blockedBy: null };
 	}
-	return undefined;
+	return { source: null, blockedBy: null };
+}
+
+/** The inherited auth as the flat record the engine expects, or undefined for none. */
+export function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> | undefined {
+	const { source } = resolveAuthSource(ancestors);
+	// Spread the discriminated union into a plain record for the engine
+	return source ? ({ ...source.auth } as Record<string, unknown>) : undefined;
 }
 
 /** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
 export function authToRecord(
 	auth: Exclude<RequestAuth, { mode: "inherit" }>
 ): Record<string, unknown> | undefined {
-	if (auth.mode === "none") return undefined;
+	// `noauth` only differs from `none` when *walked* - on the request itself both
+	// mean send nothing, and neither is a mode the engine resolves.
+	if (auth.mode === "none" || auth.mode === "noauth") return undefined;
 	return { ...auth } as Record<string, unknown>;
 }
 

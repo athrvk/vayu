@@ -104,6 +104,107 @@ describe("OpenApiV2Parser", () => {
 		]);
 	});
 
+	const formSpec = (consumes?: string[]) => ({
+		swagger: "2.0",
+		info: { title: "Form API" },
+		paths: {
+			"/login": {
+				post: {
+					summary: "Log in",
+					...(consumes ? { consumes } : {}),
+					parameters: [
+						{ name: "username", in: "formData", type: "string" },
+						{ name: "password", in: "formData", type: "string" },
+					],
+				},
+			},
+		},
+	});
+
+	const formBody = (consumes?: string[]) => {
+		const spec = formSpec(consumes);
+		return p
+			.parse(spec, JSON.stringify(spec), opts)
+			.collections[0].requests.find((r) => r.name === "Log in")!.body;
+	};
+
+	it("maps formData to urlencoded or multipart per consumes", () => {
+		expect(formBody(["application/x-www-form-urlencoded"]).mode).toBe("x-www-form-urlencoded");
+		expect(formBody(["application/x-www-form-urlencoded; charset=utf-8"]).mode).toBe(
+			"x-www-form-urlencoded"
+		);
+		expect(formBody(["multipart/form-data"]).mode).toBe("form-data");
+		// Multipart wins when both are offered - it is the only one that can carry a file.
+		expect(formBody(["application/x-www-form-urlencoded", "multipart/form-data"]).mode).toBe(
+			"form-data"
+		);
+		// An absent or unrelated consumes keeps the historical multipart default.
+		expect(formBody().mode).toBe("form-data");
+		expect(formBody(["application/json"]).mode).toBe("form-data");
+	});
+
+	it("keeps the formData field rows whichever encoding is chosen", () => {
+		const body = formBody(["application/x-www-form-urlencoded"]);
+		expect(body).toEqual({
+			mode: "x-www-form-urlencoded",
+			fields: [
+				{ key: "username", value: "", enabled: true },
+				{ key: "password", value: "", enabled: true },
+			],
+		});
+	});
+
+	it("falls back to the spec-level consumes for the form encoding", () => {
+		const spec = { ...formSpec(), consumes: ["application/x-www-form-urlencoded"] };
+		const body = p
+			.parse(spec, JSON.stringify(spec), opts)
+			.collections[0].requests.find((r) => r.name === "Log in")!.body;
+		expect(body.mode).toBe("x-www-form-urlencoded");
+	});
+
+	it("resolves a $ref'd path item instead of dropping every operation under it", () => {
+		const spec = {
+			swagger: "2.0",
+			info: { title: "Ref Path API" },
+			paths: {
+				"/users/{id}": { $ref: "#/x-pathItems/UserOps" },
+				"/health": { get: { summary: "Health" } },
+			},
+			"x-pathItems": { UserOps: { get: { summary: "Get user" } } },
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.collections[0].requests.map((r) => r.name)).toEqual(["Get user", "Health"]);
+		expect(result.meta.requestCount).toBe(2);
+		expect(result.meta.skipped).toEqual([]);
+	});
+
+	it("steps over a non-array parameters block instead of aborting the file", () => {
+		const spec = {
+			swagger: "2.0",
+			info: { title: "Malformed API" },
+			paths: {
+				"/items": {
+					parameters: { name: "shared", in: "query" },
+					get: { summary: "List items" },
+				},
+				"/other": { get: { summary: "Other", parameters: [{ name: "ok", in: "query" }] } },
+			},
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.meta.requestCount).toBe(2);
+		expect(result.collections[0].requests.find((r) => r.name === "List items")!.params).toEqual(
+			[]
+		);
+		expect(result.collections[0].requests.find((r) => r.name === "Other")!.params).toEqual([
+			{ key: "ok", value: "", enabled: true },
+		]);
+		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
+	});
+
+	it("records nothing skipped for a spec it can represent whole", () => {
+		expect(p.parse(parsed, raw, opts).meta.skipped).toEqual([]);
+	});
+
 	it("treats charset json consume as json body", () => {
 		const spec = {
 			swagger: "2.0",
