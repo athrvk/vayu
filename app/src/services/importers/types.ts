@@ -12,9 +12,14 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
-/** A request body skipped because Vayu can't represent it (file/binary, ws, grpc, etc.). */
+/**
+ * Something the parser could not import. Mostly a body Vayu can't represent
+ * (file/binary, ws, grpc); `malformed_item` is the odd one out - an `item[]`
+ * entry that is not an object at all, which is skipped rather than allowed to
+ * abort the file (see `pmFolder`).
+ */
 export interface SkippedItem {
-	kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body";
+	kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" | "malformed_item";
 	count: number;
 }
 
@@ -46,6 +51,15 @@ export interface RequestDraft {
 	auth: RequestAuth; // "inherit" allowed; resolved at execution
 	preRequestScript: string;
 	postRequestScript: string;
+	/**
+	 * Per-request redirect settings, when the source states them (Postman's
+	 * item-level `protocolProfileBehavior`). Absent means "engine default" -
+	 * `followRedirects: true`, `maxRedirects: 10` - which is why they are optional
+	 * rather than defaulted here: a parser that says nothing must not look like a
+	 * parser that said `true`.
+	 */
+	followRedirects?: boolean;
+	maxRedirects?: number;
 }
 
 export interface CollectionDraft {

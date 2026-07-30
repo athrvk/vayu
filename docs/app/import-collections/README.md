@@ -157,10 +157,13 @@ Supporting value types:
 - `VariableValue`: `{ value: string, enabled: boolean, secret? }` - all values are strings.
 - `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql", content}` |
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
-- `RequestAuth`: `{mode:"none"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
+- `RequestAuth`: `{mode:"none"}` | `{mode:"noauth"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
   `{mode:"basic", username, password}` | `{mode:"apikey", key, value, in}` |
   `{mode:"oauth2", config: OAuth2Config}` (executable) |
   `{mode:"digest"|"aws"|"ntlm", config}` (stored, not executed).
+  On a collection, `none` means "nothing set here" (a descendant's `inherit` keeps
+  climbing) and `noauth` means "send nothing" (the walk stops there) - see
+  [Postman auth mapping](./postman.md#auth-mapping).
 
 ---
 
@@ -212,8 +215,10 @@ and **preserves duplicates and disabled rows**. (`shared.ts`)
 Reads the per-type detail via `authDetail`, which handles both v2.1's array shape
 (`[{key, value}]`) and v2.0's object shape. Maps `bearer`/`basic`/`apikey` to concrete auth,
 maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `mapPostmanOAuth2` (below),
-stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), `noauth` → `none`, and
-missing/`inherit` → `inherit`. (`shared.ts`)
+stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), maps the real AWS wire type
+`awsv4` → the internal `{mode:"aws", config}`, `noauth` → `none`, and missing/`inherit` →
+`inherit`. A collection/folder `noauth` is handled by `collectionAuth` in `postman.ts` instead,
+which maps it to the terminal `{mode:"noauth"}`. (`shared.ts`)
 
 ### OAuth 2.0 mapping (`oauth2-import.ts`)
 Turns each source format's OAuth 2.0 block into Vayu's typed `OAuth2Config`, so imported
@@ -238,11 +243,14 @@ with no explicit language it sniffs via `JSON.parse` (success → `json`, else `
 `event.script.exec[]` with `\n` (or returns a string `exec` as-is). (`shared.ts`)
 
 ### normalizeVars
-`normalizeVars(input)` - normalizes foreign template syntax to Vayu `{{var}}`:
-`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped) and OpenAPI single-brace
-`{x}` → `{{x}}` (without touching an existing `{{…}}` pair). Nunjucks tags `{% … %}` and
-filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent and renders
-them as literal text. (`var-normalize.ts`)
+`normalizeVars(input, opts?)` - normalizes foreign template syntax to Vayu `{{var}}`:
+`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped). With
+`{ pathTemplates: true }` it additionally rewrites single-brace `{x}` → `{{x}}` (without
+touching an existing `{{…}}` pair); **only the OpenAPI/Swagger parsers pass it**, because in
+Postman and Insomnia a single brace is literal text (`/tags/{beta}`, `fields=friends{name}`)
+and rewriting it invents a variable reference that resolves to nothing. Nunjucks tags
+`{% … %}` and filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent
+and renders them as literal text. (`var-normalize.ts`)
 
 ### sampleSchema
 `sampleSchema(schema, resolveRef)` - generates a sample value for an OpenAPI/Swagger schema,

@@ -9,7 +9,8 @@
  * AuthTab - collection auth source.
  *
  * Collections never use `inherit` - they ARE the source, so this tab offers the
- * editable modes and nothing else. The fields are the shared `AuthFields`, the
+ * editable modes plus `noauth`, the one that says "and nothing is inherited past
+ * here" (see `RequestAuth`). The fields are the shared `AuthFields`, the
  * same component the request builder's Auth tab renders. The bottom shows the
  * inheritance chain so the user can see which ancestor a child request would
  * resolve to.
@@ -26,10 +27,10 @@ import {
 import { AuthFields, Callout } from "@/components/shared";
 import {
 	AUTH_MODE_LABELS,
-	EDITABLE_AUTH_MODES,
-	isEditableAuthMode,
+	COLLECTION_AUTH_MODES,
+	isCollectionAuthMode,
 	uneditableAuthLabel,
-	type EditableAuthMode,
+	type CollectionAuthMode,
 } from "@/constants/auth-modes";
 import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
@@ -53,8 +54,9 @@ type CollectionAuth = Collection["auth"];
  * for them, so offering them would let you configure something that silently
  * does nothing.
  */
-const AUTH_MODE_HINTS: Record<EditableAuthMode, string> = {
-	none: "Requests use no authentication unless they set their own.",
+const AUTH_MODE_HINTS: Record<CollectionAuthMode, string> = {
+	none: 'Nothing set here: requests using "Inherit from collection" keep looking up the chain.',
+	noauth: 'Requests using "Inherit from collection" send no credentials - an ancestor collection\'s auth stops here.',
 	bearer: 'Token is inherited by requests that use "Inherit from collection".',
 	basic: 'Credentials are inherited by requests that use "Inherit from collection".',
 	apikey: 'API key is inherited by requests that use "Inherit from collection".',
@@ -68,14 +70,16 @@ const AUTH_MODE_HINTS: Record<EditableAuthMode, string> = {
 // this tab state "No authentication for this collection. Requests using
 // 'Inherit from collection' will send no auth." about a collection that does
 // have auth - contradicting the inheritance chain three lines below it.
-function asEditable(auth: CollectionAuth): EditableAuthMode | null {
-	return isEditableAuthMode(auth.mode) ? auth.mode : null;
+function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
+	return isCollectionAuthMode(auth.mode) ? auth.mode : null;
 }
 
-function defaultsFor(mode: EditableAuthMode): CollectionAuth {
+function defaultsFor(mode: CollectionAuthMode): CollectionAuth {
 	switch (mode) {
 		case "none":
 			return { mode: "none" };
+		case "noauth":
+			return { mode: "noauth" };
 		case "bearer":
 			return { mode: "bearer", token: "" };
 		case "basic":
@@ -117,7 +121,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 		updateCollection.mutate({ id: collection.id, auth });
 	};
 
-	const handleModeChange = (next: EditableAuthMode) => {
+	const handleModeChange = (next: CollectionAuthMode) => {
 		setAuth(defaultsFor(next));
 	};
 
@@ -152,7 +156,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 					 */}
 					<Select
 						value={mode ?? ""}
-						onValueChange={(v) => handleModeChange(v as EditableAuthMode)}
+						onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}
 					>
 						<SelectTrigger className="h-9 text-sm">
 							<SelectValue
@@ -162,7 +166,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 							/>
 						</SelectTrigger>
 						<SelectContent>
-							{EDITABLE_AUTH_MODES.map((m) => (
+							{COLLECTION_AUTH_MODES.map((m) => (
 								<SelectItem key={m} value={m}>
 									{AUTH_MODE_LABELS[m]}
 								</SelectItem>
@@ -183,18 +187,29 @@ export default function AuthTab({ collection }: AuthTabProps) {
 				value={auth}
 				onChange={setAuth}
 				noAuthDescription={
-					<>
-						No authentication for this collection.
-						<div className="text-[11px] text-muted-foreground mt-1">
-							Requests using "Inherit from collection" will send no auth.
-						</div>
-					</>
+					mode === "noauth" ? (
+						<>
+							No authentication, and no inheriting past this collection.
+							<div className="text-[11px] text-muted-foreground mt-1">
+								Requests using "Inherit from collection" send no auth even if a
+								parent collection defines some.
+							</div>
+						</>
+					) : (
+						<>
+							No authentication set on this collection.
+							<div className="text-[11px] text-muted-foreground mt-1">
+								Requests using "Inherit from collection" inherit from a parent
+								collection instead, if one defines auth.
+							</div>
+						</>
+					)
 				}
 			/>
 
 			<SaveFailed mutation={updateCollection} what="auth" className="mt-6" />
 
-			{mode !== null && mode !== "none" && (
+			{mode !== null && mode !== "none" && mode !== "noauth" && (
 				<div className="flex gap-2 mt-6">
 					<Button
 						onClick={handleSave}
@@ -213,7 +228,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 				</div>
 			)}
 
-			{mode === "none" && isDirty && (
+			{(mode === "none" || mode === "noauth") && isDirty && (
 				<div className="flex gap-2 mt-6">
 					<Button
 						onClick={handleSave}

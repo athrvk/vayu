@@ -20,7 +20,9 @@ import { describe, it, expect } from "vitest";
 import type { AuthMode } from "@/types";
 import {
 	AUTH_MODE_LABELS,
+	COLLECTION_AUTH_MODES,
 	EDITABLE_AUTH_MODES,
+	isCollectionAuthMode,
 	isEditableAuthMode,
 	isUneditableAuthMode,
 	uneditableAuthLabel,
@@ -33,6 +35,7 @@ import {
  */
 const ALL_MODES: AuthMode[] = [
 	"none",
+	"noauth",
 	"inherit",
 	"bearer",
 	"basic",
@@ -63,6 +66,33 @@ describe("auth mode registry", () => {
 			expect(isEditableAuthMode(mode)).toBe(false);
 			expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain(mode);
 		}
+	});
+
+	it("keeps noauth out of the shared list and in the collection one", () => {
+		// A request's own `none` already means send nothing, so a second spelling
+		// there would be two options doing one job. On a collection the two differ:
+		// `noauth` stops descendants inheriting (issue #195, finding 2).
+		expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain("noauth");
+		expect([...COLLECTION_AUTH_MODES]).toEqual([
+			"none",
+			"noauth",
+			"bearer",
+			"basic",
+			"apikey",
+			"oauth2",
+		]);
+		expect(isCollectionAuthMode("noauth")).toBe(true);
+		expect(isEditableAuthMode("noauth")).toBe(false);
+		// Distinguishable in a picker: the labels must not be the same string.
+		expect(AUTH_MODE_LABELS.noauth).not.toBe(AUTH_MODE_LABELS.none);
+	});
+
+	it("keeps every collection mode nameable and never offers an unresolvable one", () => {
+		for (const mode of COLLECTION_AUTH_MODES) {
+			expect(AUTH_MODE_LABELS[mode], mode).toBeTruthy();
+			expect(isUneditableAuthMode(mode)).toBe(false);
+		}
+		expect(COLLECTION_AUTH_MODES as readonly string[]).not.toContain("inherit");
 	});
 
 	it("keeps inherit out of the shared list - it is request-only", () => {

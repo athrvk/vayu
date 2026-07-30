@@ -53,8 +53,28 @@ describe("mapPostmanAuth", () => {
 			})
 		).toEqual({ mode: "apikey", key: "X", value: "V", in: "query" });
 	});
-	it("noauth → none", () => {
+	it("noauth → none (a request-level noauth just sends nothing)", () => {
+		// The collection/folder side is where noauth has to stay distinct - see
+		// `collectionAuth` in postman.ts, which reads the wire type itself.
 		expect(mapPostmanAuth({ type: "noauth" })).toEqual({ mode: "none" });
+	});
+	it("awsv4 (the real wire type) → the internal aws mode with its config", () => {
+		expect(
+			mapPostmanAuth({
+				type: "awsv4",
+				awsv4: [
+					{ key: "accessKey", value: "AKIA" },
+					{ key: "sessionToken", value: "tok" },
+				],
+			})
+		).toEqual({ mode: "aws", config: { accessKey: "AKIA", sessionToken: "tok" } });
+	});
+	it("does not answer to a bare 'aws' type - that spelling never occurs", () => {
+		// Insomnia's IAM auth maps to the aws mode in `insomnia-v4.ts` without going
+		// through this function, so the old `case "aws"` was dead code.
+		expect(mapPostmanAuth({ type: "aws", aws: { accessKey: "AKIA" } })).toEqual({
+			mode: "none",
+		});
 	});
 	it("oauth2 with a flow maps to a typed config", () => {
 		const r = mapPostmanAuth({
