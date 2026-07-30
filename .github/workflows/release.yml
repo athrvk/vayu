@@ -79,18 +79,26 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      # sccache is skipped on Windows: sccache-action fails its install step on
-      # the Windows Server 2025 + Visual Studio 2026 image GitHub is rolling out
-      # across windows-latest in June 2026. Builds on Windows are slower without
-      # sccache but reliable. Diagnosed against v0.0.10 and never retested since,
-      # because the skip means no Windows run exercises it - see the longer note
-      # in pr-tests.yml.
+      # Windows used to skip both of these: sccache-action@v0.0.10 could not
+      # install on the Windows Server 2025 + Visual Studio 2026 image GitHub
+      # rolled across windows-latest in June 2026, failing its post-step with
+      # "Unable to locate executable file: undefined".
+      #
+      # v0.0.11 fixed it, and this is not being taken on faith - the same two
+      # steps ran green on windows-latest in pr-tests.yml, which builds the
+      # identical `windows-prod` preset on the identical image. That run
+      # installed sccache v0.17.0, put 152 compile requests through it with no
+      # compilation failures and no unsupported-compiler calls, and completed
+      # its post-step. This job is the same work behind a tag, so the evidence
+      # carries; it is only listed here because nothing but a release exercises
+      # this file, so a regression would surface at the worst moment.
+      #
+      # If a release ever fails in these steps, put `if: runner.os != 'Windows'`
+      # back on both. The build is slower without sccache but reliable.
       - name: Setup sccache
-        if: runner.os != 'Windows'
         uses: mozilla-actions/sccache-action@v0.0.11
 
-      - name: Configure sccache compiler launcher (non-Windows)
-        if: runner.os != 'Windows'
+      - name: Configure sccache compiler launcher
         shell: bash
         run: |
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
