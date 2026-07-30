@@ -1,0 +1,130 @@
+name: Publish to winget (manual)
+
+# Manual counterpart to the `publish-winget` job in release.yml.
+#
+# That job fires automatically when a release tag is pushed, which covers the
+# normal case. This one exists for everything else:
+#
+#   - a release that predates the automation (v0.11.0 was tagged ~15h before
+#     the auto job merged, so it was never submitted and winget stayed on
+#     0.10.0 with nothing failing to show for it)
+#   - re-submitting after a winget-pkgs pull request was closed or rejected
+#   - publishing an older tag deliberately
+#
+# It submits an *existing* GitHub release to winget-pkgs and builds nothing, so
+# it takes seconds rather than running the two-hour three-platform matrix that
+# release.yml's own workflow_dispatch path would.
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Free text rather than a dropdown on purpose: workflow_dispatch `choice`
+      # options must be a static list literal in this file, with no expression
+      # or API lookup available, so a dropdown would have to be hand-edited on
+      # every release and would silently go stale the moment someone forgot.
+      # Leaving this empty picks the latest release, which is the common case;
+      # an unrecognised tag is rejected below with the available ones listed.
+      tag:
+        description: 'Release tag to publish, e.g. v0.11.0. Leave empty for the latest release.'
+        required: false
+        type: string
+
+# Serialise with itself so two runs cannot race to open competing pull requests
+# against winget-pkgs for the same package.
+concurrency:
+  group: winget-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Submit manifest to winget-pkgs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # A manual run must fail loudly when it cannot work. The automatic job in
+      # release.yml deliberately skips when the secret is absent, so that
+      # landing it before setup could never fail a release tag - but here the
+      # operator explicitly asked for a submission, and a green tick that
+      # published nothing would be worse than an error.
+      - name: Require WINGET_TOKEN
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error::WINGET_TOKEN is not set. Create a *classic* PAT with the" \
+                 "public_repo scope (fine-grained PATs are not supported by" \
+                 "winget-releaser) and add it as a repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # Resolve and validate before submitting, so a typo produces a clear
+      # message here instead of a confusing failure inside the action - or,
+      # worse, a manifest pointing at an asset that does not exist.
+      - name: Resolve release and version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+            echo "No tag given, using the latest release: $tag"
+          fi
+
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # No dropdown is possible for the input, so make the failure do that
+            # job instead: name the tags that would have worked.
+            available=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 15 \
+                        --json tagName -q '.[].tagName' | paste -sd ', ' -)
+            echo "::error::No GitHub release found for tag '$tag'. Available: $available"
+            exit 1
+          fi
+
+          # The manifest records a download URL and a hash of that exact asset,
+          # so a release without the Windows installer must not be submitted.
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+               --json assets -q '.assets[].name' | grep -qx 'Vayu-x64.exe'; then
+            echo "::error::Release '$tag' has no Vayu-x64.exe asset to publish."
+            exit 1
+          fi
+
+          # PackageVersion carries no leading 'v'. The action strips it only
+          # from the tag it defaults to, never from a value passed in - and on
+          # workflow_dispatch the ref is a branch, so letting it default here
+          # would try to publish a version literally called "master". Strip it
+          # ourselves and pass it explicitly; that is exact either way.
+          version="${tag#v}"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Submitting athrvk.Vayu $version from tag $tag"
+
+      - name: Submit manifest to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: athrvk.Vayu
+          version: ${{ steps.resolve.outputs.version }}
+          release-tag: ${{ steps.resolve.outputs.tag }}
+          installers-regex: 'Vayu-x64\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### Submitted to winget-pkgs"
+            echo
+            echo "- Package: \`athrvk.Vayu\`"
+            echo "- Version: \`${{ steps.resolve.outputs.version }}\`"
+            echo "- Tag: \`${{ steps.resolve.outputs.tag }}\`"
+            echo
+            echo "Track the pull request at <https://github.com/microsoft/winget-pkgs/pulls>."
+          } >> "$GITHUB_STEP_SUMMARY"

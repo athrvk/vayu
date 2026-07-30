@@ -22,9 +22,10 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
-| Environment         | `pm.environment.get(name)`, `pm.environment.set(name, value)`                    |
-| Globals             | `pm.globals.get(name)`, `pm.globals.set(name, value)`                            |
-| Collection vars     | `pm.collectionVariables.get(name)`, `pm.collectionVariables.set(name, value)`    |
+| Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
+| Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
+| Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
+| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()` - read-only, see below     |
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
@@ -37,7 +38,19 @@ Variable writes persist to the scope they target (environment / collection / glo
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
 on a variable that already exists updates only its value - the existing `secret` flag,
 `enabled` flag and `type` are preserved. A `set` on a new name creates it with the defaults
-(not secret, enabled, `type: "string"`).
+(not secret, enabled, `type: "string"`). `unset(name)` removes it outright, which is not
+the same as setting it to `""`: an emptied variable is still an enabled row that
+`{{name}}` resolves to.
+
+`get`, `has` and `toObject` read only **enabled** variables, so a row unticked in the
+variables editor is invisible to a script; `unset` and `clear` remove it regardless.
+
+`pm.variables` resolves a name across the scopes - environment, then collection, then
+global - the same order `{{name}}` uses. It is read-only: **`pm.variables.set()` throws**,
+because Postman writes it to a per-request *local* scope that Vayu does not have, and both
+alternatives (persisting to the environment, or dropping the write) would misrepresent
+what happened. The error names the three scoped setters. See
+[scripting.md](../engine/scripting.md#variables-pmvariables).
 
 ### Assertion chains (`pm.expect` / `pm.response.to`)
 
@@ -83,8 +96,13 @@ report PASS against a broken API.
 These Postman APIs are **not** implemented - scripts that rely on them will fail:
 
 - `pm.sendRequest(...)` - sending auxiliary requests from a script
-- `pm.variables.*` - the merged/resolved variable accessor (use the scoped
-  `pm.environment` / `pm.collectionVariables` / `pm.globals` instead)
+- `pm.variables.set(...)` - throws; Vayu has no local scope to write to, so name
+  one of the three scoped setters instead. The read half (`get`/`has`/`toObject`)
+  is supported - see above
+- `replaceIn(...)` on any scope - `{{name}}` interpolation of an arbitrary string.
+  The engine does no `{{var}}` interpolation at all (it is resolved app-side
+  before the payload arrives), so there is nothing to expose
+- `pm.environment.name` - the active environment's name
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`, and `pm.response.cookies`
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.

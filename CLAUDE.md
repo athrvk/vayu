@@ -432,6 +432,24 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
 
+**Windows also publishes to winget, automatically.** The `publish-winget` job in
+`release.yml` submits `Vayu-x64.exe` to `microsoft/winget-pkgs` after the
+release is built, so `winget install athrvk.Vayu` follows each tag with no
+manual step. It runs only on a tag push and only if the whole build matrix
+succeeded, and it skips silently when the `WINGET_TOKEN` secret is absent - so
+a release can never fail because of it.
+
+For anything the tag-triggered path does not cover - a release that predates
+the automation, a re-submission after a winget-pkgs pull request was closed,
+publishing an older tag - run the **Publish to winget (manual)** workflow
+(`.github/workflows/winget-publish.yml`) from the Actions tab. It takes an
+optional tag (defaulting to the latest release), validates that the release and
+its `Vayu-x64.exe` asset exist, and submits only that - it builds nothing.
+Unlike the automatic job it **fails** rather than skips when `WINGET_TOKEN` is
+missing, because a manual run that published nothing while reporting success
+would be worse than an error. `WINGET_TOKEN` must be a **classic** PAT with
+`public_repo` scope; fine-grained PATs are not supported by the action.
+
 ### Release changelog
 
 Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/releases) page (there is no `CHANGELOG.md` in the repo). Write them in [Keep a Changelog](https://keepachangelog.com) style so entries stay consistent across versions:

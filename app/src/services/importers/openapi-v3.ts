@@ -13,11 +13,19 @@ import type {
 	ImportResult,
 	RequestDraft,
 } from "./types";
-import { sampleSchema } from "./schema-sampler";
+import { sampleSchema, schemaFieldNames } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
+import { resolvePathItem, SkipTally } from "./openapi-shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+
+/**
+ * Path Item Object methods Vayu has no `HttpMethod` for. `trace` is the whole list:
+ * OpenAPI 3's path item defines exactly the eight methods, and adding `"TRACE"` to
+ * `HttpMethod` is an execution-model change, not an import fix.
+ */
+const UNSUPPORTED_METHODS = ["trace"] as const;
 
 /** Map an OpenAPI 3 securityScheme to a concrete collection-level auth (empty secrets). */
 export function schemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
@@ -63,15 +71,25 @@ export class OpenApiV3Parser implements ImportParser {
 
 		const tagCollections = new Map<string, CollectionDraft>();
 		const rootRequests: RequestDraft[] = [];
+		const tally = new SkipTally();
 		let requestCount = 0;
 
-		for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
-			const pathParams = (pathItem as any)?.parameters ?? [];
+		for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
+			const pathItem = resolvePathItem(rawPathItem, resolveRef);
+			if (!pathItem) {
+				tally.add("malformed_spec");
+				continue;
+			}
+			const pathParams = tally.params(pathItem.parameters);
+			for (const unsupported of UNSUPPORTED_METHODS) {
+				if (pathItem[unsupported] && typeof pathItem[unsupported] === "object")
+					tally.add("unsupported_method");
+			}
 			for (const method of HTTP_METHODS) {
-				const op = (pathItem as any)?.[method];
+				const op = (pathItem as any)[method];
 				if (!op) continue;
 				requestCount += 1;
-				const req = buildOperation(method, path, op, resolveRef, pathParams);
+				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
 				const tag = op.tags?.[0];
 				if (tag) {
 					if (!tagCollections.has(tag))
@@ -104,7 +122,7 @@ export class OpenApiV3Parser implements ImportParser {
 				folderCount: tagCollections.size,
 				environmentCount: 0,
 				globalCount: 0,
-				skipped: [],
+				skipped: tally.items(),
 				nonExecutableAuth: 0,
 			},
 		};
@@ -138,12 +156,13 @@ function buildOperation(
 	path: string,
 	op: any,
 	resolveRef: (r: string) => unknown,
-	pathParams: any[] = []
+	pathParams: unknown[],
+	tally: SkipTally
 ): RequestDraft {
 	const params: KeyValueEntry[] = [];
 	const headers: KeyValueEntry[] = [];
 	const byKey = new Map<string, any>();
-	for (const param of [...pathParams, ...(op.parameters ?? [])]) {
+	for (const param of [...pathParams, ...tally.params(op.parameters)] as any[]) {
 		const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
 		if (!resolved || !resolved.in || !resolved.name) continue;
 		byKey.set(`${resolved.in}:${resolved.name}`, resolved); // later (operation) wins
@@ -166,7 +185,7 @@ function buildOperation(
 		name: op.summary ?? op.operationId ?? `${method.toUpperCase()} ${path}`,
 		description: op.description ?? "",
 		method: method.toUpperCase() as HttpMethod,
-		url: `{{baseUrl}}${normalizeVars(path)}`,
+		url: `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}`,
 		params,
 		headers,
 		body: buildBody(op.requestBody, resolveRef),
@@ -198,8 +217,11 @@ function buildBody(requestBody: any, resolveRef: (r: string) => unknown): Reques
 	if (content["text/plain"]) return { mode: "text", content: "" };
 	for (const ct of ["application/x-www-form-urlencoded", "multipart/form-data"] as const) {
 		if (content[ct]) {
-			const props = content[ct].schema?.properties ?? {};
-			const fields = Object.keys(props).map((k) => ({ key: k, value: "", enabled: true }));
+			const fields = schemaFieldNames(content[ct].schema, resolveRef).map((k) => ({
+				key: k,
+				value: "",
+				enabled: true,
+			}));
 			return {
 				mode: ct === "multipart/form-data" ? "form-data" : "x-www-form-urlencoded",
 				fields,

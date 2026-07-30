@@ -87,6 +87,164 @@ describe("OpenApiV3Parser", () => {
 		expect(req.params).toContainEqual({ key: "shared", value: "", enabled: true });
 	});
 
+	it("records nothing skipped for a spec it can represent whole", () => {
+		expect(p.parse(parsed, raw, opts).meta.skipped).toEqual([]);
+	});
+
+	it("resolves a $ref'd path item instead of dropping every operation under it", () => {
+		const spec = {
+			openapi: "3.1.0",
+			components: {
+				pathItems: {
+					UserOps: {
+						parameters: [{ name: "expand", in: "query", schema: { type: "string" } }],
+						get: { summary: "Get user" },
+						delete: { summary: "Delete user" },
+					},
+				},
+			},
+			paths: { "/users/{id}": { $ref: "#/components/pathItems/UserOps" } },
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		const names = result.collections[0].requests.map((r) => r.name);
+		expect(names).toEqual(["Get user", "Delete user"]);
+		expect(result.meta.requestCount).toBe(2);
+		// The referenced item's shared parameters come along with it.
+		const get = result.collections[0].requests[0];
+		expect(get.params).toEqual([{ key: "expand", value: "", enabled: true }]);
+		expect(get.url).toBe("{{baseUrl}}/users/{{id}}");
+		expect(result.meta.skipped).toEqual([]);
+	});
+
+	it("records a path item whose $ref does not resolve, rather than dropping it silently", () => {
+		const spec = {
+			openapi: "3.1.0",
+			paths: {
+				"/gone": { $ref: "#/components/pathItems/Missing" },
+				"/here": { get: { summary: "Here" } },
+			},
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.meta.requestCount).toBe(1);
+		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
+	});
+
+	it("resolves a $ref'd form-body schema to its fields", () => {
+		const spec = {
+			openapi: "3.0.0",
+			components: {
+				schemas: {
+					TokenRequest: {
+						type: "object",
+						properties: {
+							grant_type: { type: "string" },
+							username: { type: "string" },
+							password: { type: "string" },
+						},
+					},
+				},
+			},
+			paths: {
+				"/token": {
+					post: {
+						summary: "Get token",
+						requestBody: {
+							content: {
+								"application/x-www-form-urlencoded": {
+									schema: { $ref: "#/components/schemas/TokenRequest" },
+								},
+							},
+						},
+					},
+				},
+			},
+		};
+		const req = p
+			.parse(spec, JSON.stringify(spec), opts)
+			.collections[0].requests.find((r) => r.name === "Get token")!;
+		expect(req.body).toEqual({
+			mode: "x-www-form-urlencoded",
+			fields: [
+				{ key: "grant_type", value: "", enabled: true },
+				{ key: "username", value: "", enabled: true },
+				{ key: "password", value: "", enabled: true },
+			],
+		});
+	});
+
+	it("resolves an allOf multipart form-body schema to its fields", () => {
+		const spec = {
+			openapi: "3.0.0",
+			components: {
+				schemas: { Upload: { type: "object", properties: { file: { type: "string" } } } },
+			},
+			paths: {
+				"/upload": {
+					post: {
+						summary: "Upload",
+						requestBody: {
+							content: {
+								"multipart/form-data": {
+									schema: { allOf: [{ $ref: "#/components/schemas/Upload" }] },
+								},
+							},
+						},
+					},
+				},
+			},
+		};
+		const req = p
+			.parse(spec, JSON.stringify(spec), opts)
+			.collections[0].requests.find((r) => r.name === "Upload")!;
+		expect(req.body).toEqual({
+			mode: "form-data",
+			fields: [{ key: "file", value: "", enabled: true }],
+		});
+	});
+
+	it("records a TRACE operation as an unsupported method instead of omitting it", () => {
+		const spec = {
+			openapi: "3.0.0",
+			paths: {
+				"/debug": {
+					trace: { summary: "Trace it" },
+					get: { summary: "Get it" },
+				},
+			},
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.meta.requestCount).toBe(1); // TRACE cannot be built; the count stays honest
+		expect(result.collections[0].requests.map((r) => r.name)).toEqual(["Get it"]);
+		expect(result.meta.skipped).toEqual([{ kind: "unsupported_method", count: 1 }]);
+	});
+
+	it("steps over a non-array parameters block instead of aborting the file", () => {
+		const spec = {
+			openapi: "3.0.0",
+			paths: {
+				// The classic hand-edited-YAML mistake: a missing `-` makes this a mapping.
+				"/items": {
+					parameters: { name: "shared", in: "query" },
+					get: { summary: "List items", parameters: { name: "q", in: "query" } },
+				},
+				"/other": {
+					get: {
+						summary: "Other",
+						parameters: [{ name: "ok", in: "query" }],
+					},
+				},
+			},
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.meta.requestCount).toBe(2);
+		const list = result.collections[0].requests.find((r) => r.name === "List items")!;
+		expect(list.params).toEqual([]);
+		// Every other path still imports, params and all.
+		const other = result.collections[0].requests.find((r) => r.name === "Other")!;
+		expect(other.params).toEqual([{ key: "ok", value: "", enabled: true }]);
+		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 2 }]);
+	});
+
 	it("resolves requestBody.$ref to a referenced request body", () => {
 		const spec = {
 			openapi: "3.0.0",

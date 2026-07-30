@@ -9,8 +9,9 @@
  * AuthInheritBanner
  *
  * Shown in the request AuthPanel when the request's auth mode is "inherit". Walks the
- * ancestor chain of the request's collection, finds the nearest collection
- * with auth.mode !== "none", and renders:
+ * ancestor chain of the request's collection via the shared `resolveAuthSource`
+ * (so the banner cannot disagree with what execution sends - including an
+ * ancestor set to No Auth, which blocks inheriting) and renders:
  *   - a summary line: effective auth type + resolved source name
  *   - the ancestor chain root → leaf with a SOURCE tag on the resolved row
  *   - `{{variable}}` references in the accent color
@@ -25,6 +26,7 @@ import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import { resolveAuthSource } from "../../../utils/auth-resolution";
 import ChainCard from "./ChainCard";
 
 interface AuthInheritBannerProps {
@@ -79,16 +81,27 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 		);
 	}
 
-	// Nearest non-none ancestor wins (leaf-closest precedence per data-model PRD).
-	const source = [...ancestors].reverse().find((c) => c.auth.mode !== "none") ?? null;
+	// Nearest ancestor that defines auth wins (leaf-closest precedence per
+	// data-model PRD), unless one explicitly set to No Auth blocks inheriting.
+	const { source, blockedBy } = resolveAuthSource(ancestors);
 
 	if (!source) {
 		return (
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
 				<Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
-					No ancestor collection defines auth - this request will send{" "}
-					<span className="text-foreground font-medium">no authentication</span>.
+					{blockedBy ? (
+						<>
+							<span className="font-mono font-medium">{blockedBy.name}</span> is set
+							to No Auth, so nothing is inherited past it - this request will send{" "}
+							<span className="text-foreground font-medium">no authentication</span>.
+						</>
+					) : (
+						<>
+							No ancestor collection defines auth - this request will send{" "}
+							<span className="text-foreground font-medium">no authentication</span>.
+						</>
+					)}
 				</p>
 			</div>
 		);

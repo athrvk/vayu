@@ -249,10 +249,40 @@ created with the defaults and stamped with its creation time, so it appears at
 the bottom of that scope in the variables editor rather than above the rows
 that were already there. A scope no script wrote is not persisted at all.
 
+### The six methods every scope has
+
+| Method | Returns | Notes |
+|---|---|---|
+| `get(name)` | the value, cast by its declared type, or `undefined` | a disabled variable reads as `undefined` |
+| `set(name, value)` | `undefined` | keeps `secret` / `enabled` / `type` / creation time |
+| `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
+| `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
+| `clear()` | `undefined` | empties **this** scope only, disabled rows included |
+| `toObject()` | plain object | every enabled variable, values cast by type; a snapshot, not a live view |
+
+```javascript
+if (pm.environment.has('auth_token')) {
+	pm.environment.unset('auth_token');
+}
+
+console.log(pm.environment.toObject());
+```
+
+`unset()` is not the same as `set(name, '')`. An emptied variable is still an
+enabled row, so `{{auth_token}}` resolves to the empty string; an unset one is
+gone, and the template resolves as it does for a name nobody defined. The
+removal reaches disk the same way any other write does - the scope is rewritten
+after the run because the map the script left differs from the stored one.
+
+A scope the run was not given (a design run with no active environment, say)
+behaves as an empty one: `get` is `undefined`, `has` is `false`, `toObject` is
+`{}`, and writes go nowhere. A script cannot see which scopes a run carries, so
+this is deliberately not an error.
+
 ## Collection and Global Variables
 
 The other two scopes are reached the same way as the environment, each through
-its own accessor:
+its own accessor, and answer the same six methods:
 
 ```javascript
 const value = pm.collectionVariables.get('baseUrl');
@@ -265,20 +295,46 @@ pm.globals.set('run_id', '42');
 Each `set()` persists to the scope it names, with the same
 keep-the-flags behaviour described for `pm.environment` above.
 
-### `pm.variables` is not supported
+`pm.collectionVariables` is the request's **immediate parent collection**, not
+the whole collection chain. `{{name}}` resolution merges every ancestor
+root-first before the payload reaches the engine, so a variable defined on a
+parent collection resolves in a URL and is *not* readable from a script. Define
+it on the request's own collection, or in the environment, if a script needs it.
 
-Postman's merged accessor - `pm.variables.get(name)`, which searches every scope
-in precedence order - **does not exist in the runtime**. `pm.variables` is
-`undefined`, so `pm.variables.get('baseUrl')` throws
-`TypeError: cannot read property 'get' of undefined`. Use the three scoped
-accessors above.
+## Variables (`pm.variables`)
 
-Scope precedence (environment, then collection, then global) is applied when
-`{{baseUrl}}` is resolved before the request is sent - see
-[Variable Resolution](../app/variable-resolution.md) - not by anything a script
-can call. Implementing `pm.variables` on top of that order is tracked in
-[#184](https://github.com/athrvk/vayu/issues/184); when it lands, this section is
-what it replaces.
+`pm.variables` reads a name without naming its scope, resolving
+**environment, then collection, then global** and stopping at the first scope
+that has it enabled. That is the same order `{{baseUrl}}` is resolved in before
+the request is sent (see
+[Variable Resolution](../app/variable-resolution.md)), so a script and a URL in
+the same request cannot read one name two different ways.
+
+```javascript
+const baseUrl = pm.variables.get('baseUrl'); // wherever it is defined
+if (pm.variables.has('debug')) { /* ... */ }
+console.log(pm.variables.toObject()); // all three scopes, merged
+```
+
+It has `get`, `has` and `toObject` - and no `unset` or `clear`, because it owns
+no scope to remove a name from.
+
+**`pm.variables.set()` throws.** In Postman it writes to a *local* scope that
+lives for one request and is never stored; Vayu has no such scope. Writing to
+the environment instead would persist a value the script author expects to
+vanish, and quietly dropping the call would lose a write they believe happened,
+so it fails loudly and names the three scopes that do exist:
+
+```
+TypeError: pm.variables.set is not supported: Vayu has no local variable scope.
+Use pm.environment.set(), pm.collectionVariables.set() or pm.globals.set() to
+choose where the value is stored.
+```
+
+`replaceIn()` - Postman's `{{name}}` interpolation of an arbitrary string - is
+still absent from every scope. The engine deliberately does no `{{var}}`
+interpolation at all (it is resolved app-side before the payload arrives), so
+there is nothing for it to call.
 
 ## Console Output
 

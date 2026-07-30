@@ -87,7 +87,10 @@ export default function AuthFields({
 	TextInput = PlainTextInput,
 	resolveString,
 }: AuthFieldsProps) {
-	if (value.mode === "none") {
+	// `noauth` is the collection-only terminal form of "none" (it stops the
+	// inheritance walk instead of being stepped over). Neither has fields; the
+	// host's `noAuthDescription` is what tells the two apart.
+	if (value.mode === "none" || value.mode === "noauth") {
 		return (
 			<div className="p-6 text-center bg-card border border-border rounded-md">
 				<Lock className="w-5 h-5 mx-auto mb-2 text-subtle-foreground" />

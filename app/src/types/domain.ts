@@ -22,6 +22,7 @@ export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-w
 
 export type AuthMode =
 	| "none"
+	| "noauth"
 	| "inherit"
 	| "bearer"
 	| "basic"
@@ -101,8 +102,25 @@ export interface OAuth2Config {
 	credentialsId?: string; // default "default"
 }
 
+/**
+ * `none` vs `noauth` - the distinction the inheritance walk turns on.
+ *
+ * On a collection, `none` means "nothing configured here": the walk steps past
+ * it and a descendant `inherit` keeps climbing. `noauth` means "configured to
+ * send nothing", which *terminates* the walk - descendants inherit no
+ * credentials. Postman draws the same line (a folder set to No Auth blocks
+ * inheritance; a folder left on Inherit does not), and collapsing the two is how
+ * an imported No Auth folder used to leak its parent's bearer token (issue
+ * #195). `resolveAuthSource` in `modules/request-builder/utils/auth-resolution.ts`
+ * is the one place that reads the difference, mirrored for MCP in
+ * `electron/mcp/resolve.ts`.
+ *
+ * On a *request* the two coincide - a request's own auth is never walked, so
+ * `none` already means send nothing - which is why only the collection editor
+ * offers `noauth`.
+ */
 export type RequestAuth =
-	| { mode: "none" | "inherit" }
+	| { mode: "none" | "noauth" | "inherit" }
 	| { mode: "bearer"; token: string }
 	| { mode: "basic"; username: string; password: string }
 	| { mode: "apikey"; key: string; value: string; in: "header" | "query" }
@@ -611,10 +629,10 @@ export interface RunReport {
 			 * using it as a value.
 			 */
 			httpVersion?: string;
-		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
-		followRedirects?: boolean;
-		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
-		maxRedirects?: number;
+			/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+			followRedirects?: boolean;
+			/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+			maxRedirects?: number;
 		};
 	};
 	summary: {

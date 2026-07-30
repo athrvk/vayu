@@ -38,7 +38,7 @@ import { useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import { resolveAuthForSend } from "./utils/auth-resolution";
+import { resolveAuthForSend, resolveAuthSource } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
@@ -108,12 +108,9 @@ export default function RequestBuilder() {
 		if (req.auth.mode === "oauth2") {
 			auth = req.auth;
 		} else if (req.auth.mode === "inherit") {
-			for (let i = collectionAncestors.length - 1; i >= 0; i--) {
-				if (collectionAncestors[i].auth.mode !== "none") {
-					auth = collectionAncestors[i].auth;
-					break;
-				}
-			}
+			// Shared walk, so an ancestor set to No Auth stops the search here too -
+			// otherwise the guard would fetch a token the request never sends.
+			auth = resolveAuthSource(collectionAncestors).source?.auth;
 		}
 		if (!auth || auth.mode !== "oauth2") return null;
 		return resolveObject(auth.config) as OAuth2Config;

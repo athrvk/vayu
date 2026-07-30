@@ -86,6 +86,27 @@ describe("InheritanceChain", () => {
 		expect(screen.queryByText(/X-Acme-Very-Long-Header-Name/)).not.toBeInTheDocument();
 	});
 
+	it("marks no source, and says why, when an ancestor blocks inheriting", () => {
+		// A folder explicitly set to No Auth terminates the walk. The panel has to
+		// agree with what execution sends, or it claims a SOURCE the request never
+		// uses - the bug an imported Postman No Auth folder produced (issue #195).
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", { mode: "bearer", token: "t" }),
+			collection("mid", "Public endpoints", { mode: "noauth" }),
+			collection("leaf", "Health", { mode: "none" })
+		);
+
+		render(<InheritanceChain collectionId="leaf" />);
+
+		expect(screen.queryByText("SOURCE")).not.toBeInTheDocument();
+		expect(
+			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
+		).toBeInTheDocument();
+		// The blocking row names itself distinctly from a plain unset one.
+		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+	});
+
 	it("still marks the nearest non-none ancestor as the source", () => {
 		chain.length = 0;
 		chain.push(

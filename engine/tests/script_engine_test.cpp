@@ -1442,34 +1442,238 @@ TEST_F (ScriptEngineTest, NoCryptoBase64OrUrlParserIsExposed) {
 // Same reason as the two above: a name that is written down but not installed
 // throws in the user's face, and nothing else notices. `scripting.md` taught
 // `pm.variables` and the Tests panel's quick reference taught
-// `pm.response.headers.get()`; neither has ever existed. These pin the runtime
-// so the docs can be trusted, and so implementing either one flips a test red
-// and forces the doc to be rewritten with it.
+// `pm.response.headers.get()`; neither had ever existed. `pm.variables` has
+// since been built (#184), so the tests below now pin it as *present* and its
+// documented precedence; `pm.response.headers.get()` is still absent and stays
+// pinned that way, so implementing it flips a test red and forces the doc to be
+// rewritten with it.
 
-TEST_F (ScriptEngineTest, PmVariablesIsAbsentAndTheScopedAccessorsAreNot) {
+// Every scope answers the same six names, and the merged accessor exists (#184).
+// This is the list both script docs promise, checked against the runtime rather
+// than against itself - a method dropped from setup_pm_variable_scope shows up
+// here as a name, not as a mysteriously undefined call somewhere downstream.
+TEST_F (ScriptEngineTest, EveryVariableScopeExposesTheSameSurfaceAndPmVariablesExists) {
     auto result = engine.execute_prerequest (R"JS(
-        pm.environment.set('mergedAccessor', typeof pm.variables);
         var missing = [];
         var scopes = ['environment', 'globals', 'collectionVariables'];
+        var methods = ['get', 'set', 'has', 'unset', 'clear', 'toObject'];
         for (var i = 0; i < scopes.length; i++) {
             var scope = pm[scopes[i]];
-            if (!scope || typeof scope.get !== 'function'
-                || typeof scope.set !== 'function') {
-                missing.push(scopes[i]);
+            if (!scope) { missing.push(scopes[i]); continue; }
+            for (var j = 0; j < methods.length; j++) {
+                if (typeof scope[methods[j]] !== 'function') {
+                    missing.push(scopes[i] + '.' + methods[j]);
+                }
             }
         }
-        pm.environment.set('missingScopes', missing.join(','));
+        // The merged accessor reads across scopes; it deliberately has no
+        // unset/clear, since it owns no scope to remove a name from.
+        var merged = ['get', 'has', 'toObject', 'set'];
+        for (var k = 0; k < merged.length; k++) {
+            if (!pm.variables || typeof pm.variables[merged[k]] !== 'function') {
+                missing.push('variables.' + merged[k]);
+            }
+        }
+        pm.environment.set('missing', missing.join(','));
     )JS",
     request, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
-    EXPECT_EQ (env["missingScopes"].value, "")
-    << "a scoped accessor the docs point at instead of pm.variables is gone";
-    // Implementing the merged accessor is #184. When it lands, this expectation
-    // is the one that says "now rewrite the 'not supported' section in
-    // scripting.md and the unsupported list in pm-api-compatibility.md".
-    EXPECT_EQ (env["mergedAccessor"].value, "undefined")
-    << "pm.variables now exists; both docs say it does not";
+    EXPECT_EQ (env["missing"].value, "")
+    << "a variable-scope method both script docs teach is not installed";
+}
+
+TEST_F (ScriptEngineTest, HasIsTrueOnlyForAVariableGetCanRead) {
+    env["disabled"] = Variable{ "value", false, false };
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('present', String(pm.environment.has('base_url')));
+        pm.environment.set('absent', String(pm.environment.has('nope')));
+        // A row the user unticked reads as absent, the same way get() skips it.
+        pm.environment.set('disabledIsHidden', String(pm.environment.has('disabled')));
+        pm.environment.set('noArgument', String(pm.environment.has()));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["present"].value, "true");
+    EXPECT_EQ (env["absent"].value, "false");
+    EXPECT_EQ (env["disabledIsHidden"].value, "false");
+    EXPECT_EQ (env["noArgument"].value, "false");
+}
+
+// The method with no workaround before #184: setting a variable to "" leaves an
+// enabled empty variable behind, which {{template}} resolution still finds.
+TEST_F (ScriptEngineTest, UnsetRemovesTheVariableRatherThanEmptyingIt) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.unset('api_key');
+        pm.environment.set('readBack', String(pm.environment.get('api_key')));
+        pm.environment.unset('never_existed');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.count ("api_key"), 0U) << "the key is still in the map";
+    EXPECT_EQ (env["readBack"].value, "undefined");
+}
+
+// A disabled variable is invisible to get/has but is still a key, so unset and
+// clear remove it - they were asked to delete a name, not to read one.
+TEST_F (ScriptEngineTest, UnsetAndClearRemoveDisabledVariablesToo) {
+    env["disabled"] = Variable{ "value", false, false };
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.unset('disabled');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.count ("disabled"), 0U);
+}
+
+TEST_F (ScriptEngineTest, ClearEmptiesOnlyItsOwnScope) {
+    Environment globals;
+    globals["g"] = Variable{ "kept", false, true };
+    Environment collVars;
+    collVars["c"] = Variable{ "kept", false, true };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"JS(
+        pm.environment.clear();
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (env.empty ());
+    EXPECT_EQ (globals.size (), 1U)
+    << "clear() reached a scope it was not called on";
+    EXPECT_EQ (collVars.size (), 1U);
+}
+
+TEST_F (ScriptEngineTest, ToObjectSnapshotsEnabledVariablesWithTheirDeclaredTypes) {
+    env["count"]    = Variable{ "42", false, true, "number" };
+    env["disabled"] = Variable{ "value", false, false };
+
+    auto result = engine.execute_prerequest (R"JS(
+        var snapshot = pm.environment.toObject();
+        pm.environment.set('baseUrl', snapshot['base_url']);
+        // Cast by declared type, exactly as get() would answer it.
+        pm.environment.set('countType', typeof snapshot['count']);
+        pm.environment.set('hasDisabled', String('disabled' in snapshot));
+        // A snapshot, not a view: writing to it must not reach the scope.
+        snapshot['base_url'] = 'mutated';
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["baseUrl"].value, "https://api.example.com");
+    EXPECT_EQ (env["countType"].value, "number");
+    EXPECT_EQ (env["hasDisabled"].value, "false");
+    EXPECT_EQ (env["base_url"].value, "https://api.example.com")
+    << "toObject() handed out a live view of the scope";
+}
+
+// The precedence pm.variables resolves in - environment, then collection, then
+// global - is the order {{name}} already uses app-side, so a script and a URL
+// in the same request cannot read one name two ways.
+TEST_F (ScriptEngineTest, PmVariablesResolvesEnvironmentThenCollectionThenGlobal) {
+    Environment globals;
+    globals["everywhere"]  = Variable{ "from-globals", false, true };
+    globals["only_global"] = Variable{ "global-only", false, true };
+    Environment collVars;
+    collVars["everywhere"] = Variable{ "from-collection", false, true };
+    collVars["in_two"]     = Variable{ "from-collection", false, true };
+    Environment environment;
+    environment["everywhere"] = Variable{ "from-environment", false, true };
+    environment["disabled"]   = Variable{ "hidden", false, false };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &environment;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('winner', String(pm.variables.get('everywhere')));
+        pm.globals.set('lowestOnly', String(pm.variables.get('only_global')));
+        pm.globals.set('middle', String(pm.variables.get('in_two')));
+        pm.globals.set('nowhere', String(pm.variables.get('missing')));
+        pm.globals.set('hasLowest', String(pm.variables.has('only_global')));
+        pm.globals.set('hasNowhere', String(pm.variables.has('missing')));
+        // A disabled variable is not a hit, so resolution keeps looking.
+        pm.globals.set('hasDisabled', String(pm.variables.has('disabled')));
+        var merged = pm.variables.toObject();
+        pm.globals.set('mergedWinner', String(merged['everywhere']));
+        pm.globals.set('mergedKeeps', String(merged['only_global']));
+        pm.globals.set('mergedHasDisabled', String('disabled' in merged));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["winner"].value, "from-environment");
+    EXPECT_EQ (globals["middle"].value, "from-collection");
+    EXPECT_EQ (globals["lowestOnly"].value, "global-only");
+    EXPECT_EQ (globals["nowhere"].value, "undefined");
+    EXPECT_EQ (globals["hasLowest"].value, "true");
+    EXPECT_EQ (globals["hasNowhere"].value, "false");
+    EXPECT_EQ (globals["hasDisabled"].value, "false");
+    // The merged snapshot agrees with get() name for name, or it is a second
+    // answer to the same question.
+    EXPECT_EQ (globals["mergedWinner"].value, "from-environment");
+    EXPECT_EQ (globals["mergedKeeps"].value, "global-only");
+    EXPECT_EQ (globals["mergedHasDisabled"].value, "false");
+}
+
+// Postman's pm.variables.set writes to a local scope that lives for one request.
+// Vayu has none, and both substitutes lie: writing to the environment persists
+// a value the author expects to vanish, dropping it loses a write they believe
+// happened. So it throws, and the message names the three scopes that exist.
+TEST_F (ScriptEngineTest, PmVariablesSetThrowsRatherThanGuessingAScope) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.variables.set('token', 'value');
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.variables.set is not supported"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_NE (result.error_message.find ("pm.environment.set()"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (env.count ("token"), 0U)
+    << "the throwing write still landed somewhere";
+}
+
+// A run can be given fewer than three scopes - a design run with no active
+// environment, for instance. Every method has to read that as an empty scope: a
+// script cannot see which scopes it was handed, so a throw here would fail it
+// for a reason its author cannot inspect.
+TEST_F (ScriptEngineTest, AScopeTheRunDoesNotCarryBehavesAsEmptyRatherThanThrowing) {
+    ScriptContext ctx;
+    ctx.request     = &request;
+    ctx.environment = &env; // globals and collectionVariables stay null
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('ignored', 'value');
+        pm.globals.unset('ignored');
+        pm.globals.clear();
+        pm.environment.set('absentGet', String(pm.globals.get('anything')));
+        pm.environment.set('absentHas', String(pm.globals.has('anything')));
+        pm.environment.set('absentKeys', Object.keys(pm.globals.toObject()).join(','));
+        pm.environment.set('mergedStillReads', String(pm.variables.get('base_url')));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["absentGet"].value, "undefined");
+    EXPECT_EQ (env["absentHas"].value, "false");
+    EXPECT_EQ (env["absentKeys"].value, "");
+    EXPECT_EQ (env["mergedStillReads"].value, "https://api.example.com");
 }
 
 // ============================================================================

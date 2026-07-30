@@ -81,16 +81,20 @@ Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
 | `op.summary` → `op.operationId` → `"{METHOD} {path}"` | `name` | precedence in that order; final fallback uses upper-cased method + raw path, e.g. `"GET /users/{id}"` |
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
-| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path)}` `` - always prefixed with `{{baseUrl}}`, even if no `host` was defined (see [URL](#url--path-parameters)) |
+| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no `host` was defined (see [URL](#url--path-parameters)) |
 | parameter `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present |
 | parameter `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameter `in: "body"` | `body` | sampled via `sampleSchema`; JSON vs text decided by `consumes` (see [Parameters & body](#parameters--body)) |
-| parameter `in: "formData"` | `body` | collected into `form-data` fields (see below) |
+| parameter `in: "formData"` | `body` | collected into form fields; the encoding (`x-www-form-urlencoded` vs `form-data`) comes from `consumes` (see [`consumes` → body mode](#consumes--body-mode)) |
 | parameter `in: "path"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars` |
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 
 **Parameter resolution & merge.** `buildSwaggerOp` concatenates path-item-level `parameters` (passed in as `pathParams`) with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map` (`byKey`), so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
+
+Both lists go through `SkipTally.params` (`openapi-shared.ts`) first, shared with the v3 parser: a `parameters` value that is present but **not an array** (the missing-`-` YAML mistake) used to throw `is not iterable` and abort the whole file. It is now treated as empty and counted as a `malformed_spec` [`SkippedItem`](./README.md#draft-model-the-parser-output-contract); an absent `parameters` is normal and counted as nothing.
+
+**Path items.** Each `spec.paths` entry goes through `resolvePathItem` (`openapi-shared.ts`) before its methods are read, so a path item written as `{"$ref": "..."}` contributes its target's operations instead of vanishing (Swagger 2.0 allows a path-item ref; the resolver is generic, so any in-document pointer works). One hop only. A path item that is not an object, or whose `$ref` does not resolve to one, is counted as `malformed_spec` and skipped.
 
 ## Base URL construction
 
@@ -119,8 +123,8 @@ When set, the value is stored as `variables.baseUrl = { value: baseUrl, enabled:
 
 ## URL & path parameters
 
-- The request `url` is always `` `{{baseUrl}}${normalizeVars(path)}` ``. `{{baseUrl}}` is the Vayu collection variable described above (defined on the root collection). If the spec has no `host`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
-- Swagger path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). It rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters (`in: "path"`) are **not** also emitted as `params` entries - they live only in the URL.
+- The request `url` is always `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` ``. `{{baseUrl}}` is the Vayu collection variable described above (defined on the root collection). If the spec has no `host`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
+- Swagger path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). With `pathTemplates` (which only the OpenAPI/Swagger parsers pass) it rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters (`in: "path"`) are **not** also emitted as `params` entries - they live only in the URL.
 
 ## Parameters & body
 
@@ -134,11 +138,11 @@ Swagger 2.0 has **no `requestBody` object** (unlike v3). Request bodies are expr
 | `formData` | collect into `formFields` | `{ key: name, value: "", enabled: true }` per field |
 | (anything else) | ignored | no `default` case action |
 
-After the loop, **form data wins**: if any `formData` fields were collected, `body` is unconditionally replaced with `{ mode: "form-data", fields: formFields }` - overriding any body set by an `in: "body"` parameter. (A spec mixing both would be unusual, but the code resolves it in favor of form-data.)
+After the loop, **form data wins**: if any `formData` fields were collected, `body` is unconditionally replaced with `{ mode: formMode, fields: formFields }` - overriding any body set by an `in: "body"` parameter. (A spec mixing both would be unusual, but the code resolves it in favor of the form.) `formMode` comes from `consumes`, below.
 
 ### `consumes` → body mode
 
-The JSON-vs-text decision for an `in: "body"` parameter is driven by `consumes`:
+`consumes` drives two decisions: JSON-vs-text for an `in: "body"` parameter, and urlencoded-vs-multipart for `formData` fields.
 
 ```ts
 const consumes = op.consumes ?? spec.consumes ?? [];
@@ -157,6 +161,19 @@ const isJsonConsume =
 
 Note the text branch still serializes the sampled schema to JSON text (it does not blank the body - this differs from v3's `text/plain` handling, which emits an empty string).
 
+#### `consumes` → form encoding
+
+Swagger 2.0 ties `formData` encoding to `consumes`, and `application/x-www-form-urlencoded` and `multipart/form-data` are distinct wire encodings that Vayu models as distinct body modes. Importing every `formData` operation as multipart (which is what this parser did unconditionally) sent a classic urlencoded login/token endpoint out as multipart, and the server rejected it with a 400/415 that nothing in the import explained. The rule now:
+
+| `consumes` (operation, else spec-level) | Form body mode |
+|---|---|
+| lists `application/x-www-form-urlencoded` and **not** `multipart/form-data` | `x-www-form-urlencoded` |
+| lists `multipart/form-data` | `form-data` |
+| lists **both** | `form-data` - only multipart can carry a `type: file` field |
+| absent, or names neither | `form-data` (the historical default is preserved) |
+
+Entries are compared on the media type alone, so a `charset`/`boundary` parameter (`application/x-www-form-urlencoded; charset=utf-8`) still matches. `type: file` fields themselves are not imported as files - a `formData` parameter always becomes an empty-value text row.
+
 ## `$ref` & schema sampling
 
 `resolveRef` resolves any JSON-pointer ref against the whole spec - Swagger model refs are `#/definitions/...`, but the resolver is generic. It strips the leading `#/`, splits on `/`, un-escapes `~1`→`/` and `~0`→`~`, and walks the spec object segment by segment.
@@ -165,8 +182,9 @@ Body schemas are turned into stub values by `sampleSchema(schema, resolveRef)` (
 
 - **Depth cap.** `MAX_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
 - **`$ref` resolution + cycle guard.** A node with a string `$ref` (e.g. `#/definitions/User`) is resolved via `resolveRef` and walked (depth +1). A `Set` of already-visited `$ref` strings is threaded down each branch; re-encountering a `$ref` already on the current path returns `{}` (breaks reference cycles). Resolution failures (`throw` or `null` result) also yield `{}`.
-- **`example` preference.** If the schema node has an `example` field, that value is returned verbatim (checked **after** `$ref`, before composition and `type`). This lets authors pin exact sample values.
+- **Pinned-value precedence:** `const` → `example` → `examples[0]` (checked **after** `$ref`, before composition and `type`). `const` outranks `example` because JSON Schema makes it the only permitted value; `examples` is the plural form 3.1 introduced. Swagger 2.0 schemas only ever carry `example`, so in practice this parser reads that one - the other two come along because the sampler is shared.
 - **`allOf` / `oneOf` / `anyOf` - first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members.
+- **Type arrays.** A `type` written as an array (a JSON-Schema / OpenAPI 3.1 shape, not legal Swagger 2.0) samples its first non-`"null"` member; an only-`"null"` type samples as `null`.
 - **Type defaults:**
 
   | `schema.type` | Sample value |
@@ -174,10 +192,11 @@ Body schemas are turned into stub values by `sampleSchema(schema, resolveRef)` (
   | `string` | `enum[0]` if a non-empty `enum` is present, else `""` |
   | `integer` / `number` | `0` |
   | `boolean` | `false` |
+  | `null` | `null` |
   | `array` | `[ sample(items) ]` if `items` is present, else `[]` (one element) |
   | `object` (or no/unknown `type`) | walks each entry of `properties`, producing `{ key: sample }`; `{}` if no `properties` |
 
-`sampleSchema` is shared verbatim with the v3 parser - same depth cap, cycle guard, and branch handling.
+`sampleSchema` is shared verbatim with the v3 parser - same depth cap, cycle guard, and branch handling. Its `schemaFieldNames` companion is v3-only: Swagger 2.0 form fields come from `formData` parameters, not from a schema.
 
 ## `collectionFormat` for array query params
 
@@ -229,9 +248,10 @@ Dropped / not represented:
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Path parameters as params:** not emitted (path params live in the URL only).
 - **Multi-tag grouping:** only the first tag groups an operation.
-- **`SkippedItem`s:** never emitted - `meta.skipped` is always `[]`.
+- **`type: file` form fields:** imported as ordinary empty-value rows, not as file parts.
+- **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `skipped = []`, `nonExecutableAuth = 0` (oauth2 is now executable).
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), and `skipped` from the shared `SkipTally` - `malformed_spec` is the only kind this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 
@@ -244,13 +264,14 @@ See [OpenAPI v3](./openapi-v3.md) for the v3 reference. Key contrasts:
 | Request body | `in: "body"` / `in: "formData"` parameters | dedicated `op.requestBody` with `content` map |
 | Body content-type decision | `consumes` (op → spec → JSON default) | media-type keys of `requestBody.content` |
 | Text/non-JSON body | sampled schema serialized as JSON text | `text/plain` → empty string |
-| Form bodies | `in: "formData"` params → `form-data` (overrides body param) | `multipart/form-data` / `x-www-form-urlencoded` from `content` |
+| Form bodies | `in: "formData"` params → urlencoded or multipart per `consumes` (overrides body param) | `multipart/form-data` / `x-www-form-urlencoded` from `content`, field names resolved through the sampler |
+| Unsupported methods | none - Swagger 2.0 defines no `trace` | `trace` counted as `unsupported_method` |
 | `$ref` namespace | `#/definitions/...` | `#/components/schemas/...` (resolver is generic in both) |
 | Auth schemes | `securityDefinitions` (`basic`, `apiKey`, `oauth2`) | `components.securitySchemes` (`http`/bearer/basic, `apiKey`, `oauth2`) |
 | Auth helper | `swaggerSchemeToAuth` | `schemeToAuth` |
 | Collection build | inline in `parse` | helper `makeTagCollection` |
 
-Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeVars` path conversion, `sampleSchema`, request `auth: inherit`, `ImportOptions` ignored, `meta.skipped` always empty.
+Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeVars` path conversion, `sampleSchema`, request `auth: inherit`, `ImportOptions` ignored, and the `openapi-shared.ts` helpers (`resolvePathItem`, `SkipTally`) - so a `$ref`'d path item, a malformed `parameters` list, and `meta.skipped` behave identically in both.
 
 ## Shared helpers used
 
@@ -258,6 +279,7 @@ Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeV
 |--------|--------|--------------------|
 | [`normalizeVars`](./README.md#normalizevars) | `var-normalize.ts` | convert Swagger `{param}` path templates → Vayu `{{param}}` in request URLs |
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from an `in: "body"` parameter `schema` (bounded, ref-resolving) |
+| `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
 
 This parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 
