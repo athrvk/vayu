@@ -18,6 +18,12 @@ name: Publish to winget (manual)
 on:
   workflow_dispatch:
     inputs:
+      # Free text rather than a dropdown on purpose: workflow_dispatch `choice`
+      # options must be a static list literal in this file, with no expression
+      # or API lookup available, so a dropdown would have to be hand-edited on
+      # every release and would silently go stale the moment someone forgot.
+      # Leaving this empty picks the latest release, which is the common case;
+      # an unrecognised tag is rejected below with the available ones listed.
       tag:
         description: 'Release tag to publish, e.g. v0.11.0. Leave empty for the latest release.'
         required: false
@@ -75,7 +81,11 @@ jobs:
           fi
 
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::No GitHub release found for tag '$tag'."
+            # No dropdown is possible for the input, so make the failure do that
+            # job instead: name the tags that would have worked.
+            available=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 15 \
+                        --json tagName -q '.[].tagName' | paste -sd ', ' -)
+            echo "::error::No GitHub release found for tag '$tag'. Available: $available"
             exit 1
           fi
 
