@@ -105,9 +105,14 @@ jobs:
           GOOGLE_ANALYTICS_KEY: ${{ vars.GOOGLE_ANALYTICS_KEY }}
         run: mkdocs build --strict -f .github/mkdocs.yml
 
+      # v4 stopped including dotfiles in the artifact and v5 added an
+      # `include-hidden-files` input to opt back in. `mkdocs build` emits none
+      # into site/ (no .nojekyll either - the Pages artifact path never runs
+      # Jekyll), so the default is right and the input stays unset. Check again
+      # if a hook starts writing one. See the pinning note in the deploy job.
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -124,16 +129,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # This trio is version-coupled through the Pages artifact format, so the
-      # pairing is taken verbatim from GitHub's own starter workflow
-      # (actions/starter-workflows, pages/static.yml) rather than each action
-      # being bumped to its newest major independently. `upload-pages-artifact`
-      # has a v5 and `configure-pages` a v6, but GitHub still ships v3 and v5
-      # alongside `deploy-pages@v5`. Nothing on a pull request exercises this
-      # job (it is skipped), so a bad pin here would only surface as a failed
-      # deploy on master.
+      # This trio is version-coupled through the Pages artifact format, and
+      # these pins are deliberately *ahead* of GitHub's own starter workflow
+      # (actions/starter-workflows, pages/static.yml), which as of Jul 2026
+      # still ships upload-pages-artifact@v3 + configure-pages@v5 alongside
+      # deploy-pages@v5. Nothing documents v5/v6 as a supported pairing with
+      # deploy-pages@v5 - there is no deploy-pages v6 to pair with - so the
+      # combination is untested rather than blessed. It is here anyway, to find
+      # a break now instead of discovering it under a release.
+      #
+      # Read that as the standing warning it is: nothing on a pull request
+      # exercises this job (it is skipped), so the first signal either way is
+      # this workflow's own run on master. If it fails, revert this trio to
+      # v3/v5/v5 - the previously published site stays up until a deploy
+      # succeeds, so the cost of being wrong is a stale site, not a broken one.
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Deploy to GitHub Pages
         id: deployment
