@@ -265,4 +265,42 @@ TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyG
     EXPECT_EQ (stored_collection_variables (), APP_BLOB);
 }
 
+// `pm.environment.unset()` (#184) is the first thing that can make a scope
+// *smaller*, and a removal is the write most easily lost: every other one shows
+// up as a changed value, while this one shows up only as a key that is no
+// longer there. The scope is rewritten because the two maps differ, and the
+// serializer writes the map it is given rather than merging into what is on
+// disk - so an absent key stays absent.
+TEST_F (PersistScriptVariablesTest, AnUnsetVariableIsRemovedFromTheStoredBlob) {
+    auto env       = parse_variables (stored_environment_variables ());
+    auto globals   = parse_variables (stored_globals_variables ());
+    auto coll_vars = parse_variables (stored_collection_variables ());
+
+    ASSERT_EQ (env.count ("token"), 1U);
+    env.erase ("token"); // what pm.environment.unset("token") leaves behind
+    env["kept"] = vayu::Variable{ "still here", false, true };
+
+    persist_script_variables (*db_, run_, env, globals, coll_vars);
+
+    auto stored = json::parse (stored_environment_variables ());
+    EXPECT_FALSE (stored.contains ("token")) << stored.dump ();
+    EXPECT_EQ (stored["kept"]["value"], "still here");
+}
+
+// `clear()` empties one scope and no other. An empty blob is `{}`, not a
+// scope left untouched because "nothing to write" was mistaken for "no change".
+TEST_F (PersistScriptVariablesTest, AClearedScopeIsStoredAsEmptyAndTheOthersAreUntouched) {
+    auto env       = parse_variables (stored_environment_variables ());
+    auto globals   = parse_variables (stored_globals_variables ());
+    auto coll_vars = parse_variables (stored_collection_variables ());
+
+    env.clear (); // what pm.environment.clear() leaves behind
+
+    persist_script_variables (*db_, run_, env, globals, coll_vars);
+
+    EXPECT_EQ (stored_environment_variables (), "{}");
+    EXPECT_EQ (stored_globals_variables (), APP_BLOB);
+    EXPECT_EQ (stored_collection_variables (), APP_BLOB);
+}
+
 } // namespace

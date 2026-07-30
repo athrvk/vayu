@@ -169,6 +169,25 @@ scripts are dropped); the **engine** joins the surviving parts with a blank
 line and runs the result. See `docs/engine/architecture.md` → *Request
 composition boundary* for the wire shape.
 
+### Reading a variable from a script
+
+A script does not see `{{name}}` - those are already resolved by the time the
+payload reaches the engine. It reads a scope by name (`pm.environment.get`,
+`pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
+`pm.variables.get`, which walks **environment → collection → global** and stops
+at the first scope that has the name enabled - this page's priority order, read
+from the top down.
+
+One difference to know about: the script side has a single collection scope, and
+the engine fills it from the request's **immediate parent collection only**
+(`execution.cpp`, where `collectionVariables` is loaded). The chain merge
+described above is done app-side for `{{name}}`, so a variable defined on an
+ancestor collection is visible to `{{name}}` and *not* to
+`pm.collectionVariables.get` / `pm.variables.get`. Read such a value from the
+environment or globals, or define it on the request's own collection. See
+[pm API compatibility](./pm-api-compatibility.md) and
+[scripting.md](../engine/scripting.md#variables-pmvariables).
+
 ---
 
 ## Scope labels

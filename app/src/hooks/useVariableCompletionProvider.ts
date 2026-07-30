@@ -18,9 +18,9 @@
  * **Registered for the body languages only.** `json`, `plaintext` and `graphql`
  * are what `CodeEditor` mounts for a request body. Deliberately *not*
  * `javascript`: the script editors are the one place `{{name}}` is not the
- * syntax - a script reaches variables through `pm.environment.get()` and its
- * sibling scope accessors (there is no `pm.variables`), and
- * offering brace completion there would teach the wrong thing.
+ * syntax - a script reaches variables through `pm.environment.get()`, its
+ * sibling scope accessors, or the merged `pm.variables.get()`, and offering
+ * brace completion there would teach the wrong thing.
  *
  * Called once, in App - a completion provider is global per language, so one
  * registration covers every editor instance. The same shape as
