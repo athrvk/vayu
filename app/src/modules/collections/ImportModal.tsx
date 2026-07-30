@@ -138,7 +138,11 @@ export function ImportModal() {
 			});
 			handleClose();
 		} catch (e) {
-			// Import failed (orchestrator rolled back) - surface it instead of silently re-enabling.
+			// There is no rollback since #145: the engine write is atomic, so a validation
+			// failure persisted nothing - but a failure *after* it (the id-map check, the
+			// globals write) leaves the tree committed. Surface the error and leave the
+			// modal in its error phase; the mutation invalidates on every outcome, so
+			// whatever did land is already visible behind this dialog.
 			setError((e as Error).message || "Import failed");
 			setPhase("error");
 		}
