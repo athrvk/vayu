@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <set>
 #include <string>
 
 #include "vayu/runtime/script_engine.hpp"
@@ -222,6 +223,69 @@ TEST (ScriptCompletions, EveryOfferedExpectMatcherExistsInTheRuntime) {
 
     EXPECT_GE (offered, 20)
     << "the pm.expect assertion chains are missing from the completion list";
+}
+
+// The other direction, and the one that goes stale silently: a matcher the
+// runtime gained but nobody added to the list is invisible in the editor. The
+// runtime is asked what it binds rather than the expectation being written out
+// here, so a matcher added later cannot be missed by forgetting to update a
+// list in a test.
+//
+// A name counts as offered when it appears as a segment of some chain, since a
+// chainer like `have` is only ever reachable inside a longer label.
+TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
+    const auto completions = get_script_completions ();
+
+    std::set<std::string> segments;
+    for (const auto& item : completions) {
+        const std::string match = match_text (item);
+        if (match.empty () || match[0] != '.') {
+            continue;
+        }
+        size_t start = 1;
+        while (start <= match.size ()) {
+            const size_t dot = match.find ('.', start);
+            const std::string segment = match.substr (start,
+            dot == std::string::npos ? std::string::npos : dot - start);
+            if (!segment.empty ()) {
+                segments.insert (segment);
+            }
+            if (dot == std::string::npos) {
+                break;
+            }
+            start = dot + 1;
+        }
+    }
+    ASSERT_FALSE (segments.empty ()) << "no assertion chains found to compare against";
+
+    std::string offered_literal;
+    for (const auto& segment : segments) {
+        offered_literal += (offered_literal.empty () ? "" : ", ");
+        offered_literal += "\"" + segment + "\"";
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    const std::string script = "var offered = [" + offered_literal +
+    "];\n"
+    "pm.test(\"t\", function() {\n"
+    "  var bound = Object.getOwnPropertyNames(pm.expect(1));\n"
+    "  var missing = bound.filter(function (name) { return offered.indexOf(name) === -1; });\n"
+    "  if (missing.length) { throw new Error(missing.join(', ')); }\n"
+    "});";
+
+    auto result = engine.execute_test (script, request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
+    EXPECT_TRUE (result.tests[0].passed)
+    << "pm.expect binds names the completion list never offers: "
+    << result.tests[0].error_message;
 }
 
 } // namespace

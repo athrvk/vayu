@@ -141,8 +141,18 @@ export const DEV_SERVER_URL = "http://localhost:5173";
 
 // Project links
 export const REPO = "athrvk/vayu";
-export const DOCS_URL = `https://github.com/${REPO}#readme`;
-export const SCRIPTING_DOCS_URL = `https://github.com/${REPO}/blob/master/docs/engine/scripting.md`;
+/**
+ * The published docs site, not the repository.
+ *
+ * `docs/` ships to MkDocs Material on every push to the default branch, so the
+ * site is the rendered, navigable, searchable copy of the same files - a raw
+ * `blob/master/...` markdown page drops the sidebar, the search box and every
+ * relative cross-link. `use_directory_urls` is on, so a page's URL is its path
+ * without the `.md`.
+ */
+export const SITE_URL = "https://athrvk.github.io/vayu/";
+export const DOCS_URL = SITE_URL;
+export const SCRIPTING_DOCS_URL = `${SITE_URL}engine/scripting/`;
 export const ISSUES_URL = `https://github.com/${REPO}/issues`;
 
 // Auto-updater

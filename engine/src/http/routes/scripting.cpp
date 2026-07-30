@@ -557,6 +557,12 @@ nlohmann::json get_script_completions () {
     "candidates.\n\nExample:\npm.expect(pm.response.code).to.be.oneOf([200, 201]);" },
     { "sortText", "2_to_be_oneOf" }, { "filterText", ".to.be.oneOf" } });
 
+    completions.push_back ({ { "label", "to.eqls" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.eqls(${1:expected})" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.eqls(expected: any)" },
+    { "documentation", "Assert deep equality (alias for .to.eql)." },
+    { "sortText", "2_to_eqls" }, { "filterText", ".to.eqls" } });
+
     completions.push_back ({ { "label", "to.have.keys" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.have.keys(\"${1:key}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
@@ -565,6 +571,21 @@ nlohmann::json get_script_completions () {
     "Assert the object has exactly these keys - not a subset. Accepts names or "
     "one array.\n\nExample:\npm.expect(json).to.have.keys(\"id\", \"name\");" },
     { "sortText", "2_to_have_keys" }, { "filterText", ".to.have.keys" } });
+
+    completions.push_back ({ { "label", "to.have.all.keys" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.all.keys(\"${1:key}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.all.keys(...keys: string[])" },
+    { "documentation",
+    "Assert the object has exactly these keys. `all` is chai's default and "
+    "changes nothing; `any` is not supported." },
+    { "sortText", "2_to_have_all_keys" }, { "filterText", ".to.have.all.keys" } });
+
+    completions.push_back ({ { "label", "to.have.key" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.key(\"${1:key}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.key(key: string)" },
+    { "documentation", "Assert the object has exactly this key (alias for .to.have.keys)." },
+    { "sortText", "2_to_have_key" }, { "filterText", ".to.have.key" } });
 
     completions.push_back ({ { "label", "to.have.members" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.have.members([${1:values}])" },
@@ -601,6 +622,11 @@ nlohmann::json get_script_completions () {
     "Assert the function throws, optionally matching the message.\n\nExample:\n"
     "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();" },
     { "sortText", "2_to_throw" }, { "filterText", ".to.throw" } });
+
+    completions.push_back ({ { "label", "to.throws" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.throws()" }, { "detail", ".to.throws(message?: string | RegExp)" },
+    { "documentation", "Assert the function throws (alias for .to.throw)." },
+    { "sortText", "2_to_throws" }, { "filterText", ".to.throws" } });
 
     completions.push_back ({ { "label", "to.be.instanceOf" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.be.instanceOf(${1:Array})" },

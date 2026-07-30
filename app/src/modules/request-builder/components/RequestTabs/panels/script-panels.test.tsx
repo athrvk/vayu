@@ -248,6 +248,47 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 		}
 	});
 
+	/*
+	 * The quick reference is a handful of lines and the notes are a handful of
+	 * rules; everything else about the `pm` API lives in the scripting guide,
+	 * which a script author had no way to reach from the panel they write
+	 * scripts in. It has to be the keyed channel: the renderer cannot open an
+	 * arbitrary URL, and an anchor would open an Electron window instead of the
+	 * browser.
+	 */
+	describe("the scripting docs link", () => {
+		function docsLink(container: HTMLElement): HTMLButtonElement | undefined {
+			return Array.from(container.querySelectorAll("button")).find((b) =>
+				/scripting docs/i.test(b.textContent ?? "")
+			);
+		}
+
+		it("offers the guide and opens it through the keyed link channel", () => {
+			const openAppLink = vi.fn();
+			vi.stubGlobal("electronAPI", {
+				openAppLink,
+			} as unknown as Window["electronAPI"]);
+
+			const { container } = render(<Panel />);
+			const link = docsLink(container);
+			expect(link, "both script panels should link the scripting guide").toBeTruthy();
+
+			fireEvent.click(link!);
+			expect(openAppLink).toHaveBeenCalledWith("scripting");
+
+			vi.unstubAllGlobals();
+		});
+
+		it("does not throw when the preload bridge is absent", () => {
+			vi.stubGlobal("electronAPI", undefined);
+
+			const { container } = render(<Panel />);
+			expect(() => fireEvent.click(docsLink(container)!)).not.toThrow();
+
+			vi.unstubAllGlobals();
+		});
+	});
+
 	describe("the sunken slabs", () => {
 		it("declares the surface its rule reads from", () => {
 			const { container } = render(<Panel />);
