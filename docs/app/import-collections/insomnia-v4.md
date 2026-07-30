@@ -93,7 +93,7 @@ Built by `buildRequest`.
 All variable-bearing strings are run through `normalizeVars` (`var-normalize.ts`). It converts foreign template syntax to Vayu's `{{var}}` form:
 
 - `{{ x }}` and `{{ _.x }}` (identifier only, whitespace tolerant) → `{{x}}`. The leading `_.` namespace Insomnia uses is stripped.
-- OpenAPI single-brace `{x}` → `{{x}}`, but only when not already part of a `{{...}}` pair (it checks the adjacent characters). This rule is shared with the OpenAPI parsers and rarely fires on Insomnia input.
+- Single-brace `{x}` is **left alone** here. The rewrite exists for OpenAPI path templates and is opt-in per format (`normalizeVars(input, { pathTemplates: true })`); Insomnia templates with `{{x}}` only, so `{x}` is literal text.
 - **Left verbatim:** Nunjucks tags `{% ... %}` and filtered expressions `{{ x | filter }}`. The simple-var regex requires an identifier-only body (`[\w.$-]+`), so a `|` filter never matches and is passed through unchanged. Vayu has no equivalent, so these remain as literal text.
 
 Applied to: request `url`; every `params` and `headers` value (inside `mapKeyValues`); JSON/text/graphql body `content` and urlencoded/form-data field values; every auth token/username/password/key/value string; and every environment value (inside `toEnvVars`).

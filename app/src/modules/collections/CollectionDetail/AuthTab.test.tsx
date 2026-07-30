@@ -107,13 +107,11 @@ describe("AuthTab with an auth mode it cannot edit", () => {
 		renderTab(uneditable);
 
 		expect(
-			screen.queryByText(/No authentication for this collection/i)
+			screen.queryByText(/No authentication set on this collection/i)
 		).not.toBeInTheDocument();
 		// The hint under the type picker is driven by the same narrowing, so it
 		// is the second half of the same claim.
-		expect(
-			screen.queryByText(/Requests use no authentication unless they set their own/i)
-		).not.toBeInTheDocument();
+		expect(screen.queryByText(/keep looking up the chain/i)).not.toBeInTheDocument();
 	});
 
 	it("names the mode that is actually stored, and says what changing it costs", () => {
@@ -133,10 +131,37 @@ describe("AuthTab with an editable auth mode", () => {
 		expect(screen.queryByText(/not editable here/i)).not.toBeInTheDocument();
 	});
 
+	it("tells the two no-credential modes apart", () => {
+		// `none` and `noauth` both render the empty state, and both are offered in
+		// this picker, so the copy is the only thing that says which one the user is
+		// looking at - and they mean different things for descendants (issue #195).
+		renderTab(makeCollection({ mode: "noauth" }));
+
+		expect(
+			screen.getByText(/No authentication, and no inheriting past this collection/i)
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(/send no auth even if a parent collection defines some/i)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/not editable here/i)).not.toBeInTheDocument();
+		// It is a real mode here, not the digest/aws/ntlm placeholder path.
+		expect(screen.getByText(/an ancestor collection's auth stops here/i)).toBeInTheDocument();
+	});
+
+	it("saves a switch to the blocking mode", () => {
+		renderTab(makeCollection({ mode: "bearer", token: "abc" }));
+
+		fireEvent.click(screen.getByRole("combobox"));
+		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+		expect(mutation.mutate).toHaveBeenCalledWith({ id: "c1", auth: { mode: "noauth" } });
+	});
+
 	it("says no auth when there genuinely is none", () => {
 		renderTab(makeCollection({ mode: "none" }));
 
-		expect(screen.getByText(/No authentication for this collection/i)).toBeInTheDocument();
+		expect(screen.getByText(/No authentication set on this collection/i)).toBeInTheDocument();
 	});
 });
 
