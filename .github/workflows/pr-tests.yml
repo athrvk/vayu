@@ -125,6 +125,7 @@ jobs:
               - 'engine/**'
               - 'build.py'
               - 'VERSION'
+              - '.github/check-windows-deps.py'
               - '.github/workflows/pr-tests.yml'
             installer:
               - 'install.sh'
@@ -276,7 +277,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --quiet pefile
-          python scripts/check-windows-deps.py engine/build-release/vayu-engine.exe
+          python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
 
       - name: Run engine tests
         working-directory: engine

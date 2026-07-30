@@ -1197,7 +1197,7 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path)
                 # still missed the MSVC runtime (VCRUNTIME140.dll and friends
                 # never land in the build directory), so the engine could not
                 # start on a machine without the Visual C++ redistributable.
-                # scripts/check-windows-deps.py enforces this in CI.
+                # .github/check-windows-deps.py enforces this in CI.
                 target_name = "vayu-engine.exe"
             else:
                 target_name = "vayu-engine"

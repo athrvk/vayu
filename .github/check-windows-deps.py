@@ -21,7 +21,7 @@ and it would ship broken. Allowlisting the OS rather than denylisting the CRT
 is deliberate: it catches dependencies nobody has thought of yet.
 
 Usage:
-    python scripts/check-windows-deps.py <path-to-exe-or-dll>
+    python .github/check-windows-deps.py <path-to-exe-or-dll>
 """
 
 import sys

@@ -189,7 +189,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --quiet pefile
-          python scripts/check-windows-deps.py engine/build-release/vayu-engine.exe
+          python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
 
       - name: Copy engine binary to resources (Windows)
         if: runner.os == 'Windows'
@@ -335,6 +335,12 @@ jobs:
   #      WINGET_TOKEN.
   # Until WINGET_TOKEN exists the submit step is skipped and the job is a green
   # no-op, so landing this ahead of the secret can never fail a release tag.
+  #
+  # This covers the normal path only: a tag push, with every platform built. To
+  # publish a tag this never ran for - a release that predates this job, a
+  # re-submission, an older tag - use the "Publish to winget (manual)" workflow
+  # (.github/workflows/winget-publish.yml), which submits an existing release
+  # without rebuilding anything.
   #
   # `needs: build-and-publish` + `success()` means this only runs after the
   # GitHub Release is fully published: build-and-publish is the job that both

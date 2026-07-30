@@ -171,7 +171,7 @@ Two consequences worth knowing before you change the build:
   subdirectory and would leave `qjs` on the dynamic runtime while the rest of
   the tree is static. Mixing two CRTs in one process is not a build error - it
   corrupts the heap at runtime.
-- **`scripts/check-windows-deps.py` enforces this in CI**, on both PRs and
+- **`.github/check-windows-deps.py` enforces this in CI**, on both PRs and
   releases. It reads the built binary's PE import table and fails if anything
   outside a Windows-OS allowlist appears. Allowlisting the OS rather than
   denylisting the CRT is deliberate: it also catches a new third-party
@@ -179,7 +179,7 @@ Two consequences worth knowing before you change the build:
 
   ```powershell
   python -m pip install pefile
-  python scripts/check-windows-deps.py engine/build-release/vayu-engine.exe
+  python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
   ```
 
 ## Running Tests
