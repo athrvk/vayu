@@ -1,13 +1,29 @@
-# GitHub Actions only, on purpose.
+# GitHub Actions and the docs toolchain. Both are CI-side and small enough that
+# a bump is a five-minute read; neither can produce the pull-request volume an
+# application dependency tree does.
 #
-# The repository pulls in ten third-party actions and none are pinned to a
-# commit SHA, so keeping the tags current is the cheapest supply-chain work
-# available. Actions change rarely, so monthly is quiet.
+# Every action is pinned to a tag and none to a commit SHA, so keeping those
+# tags current is the cheapest supply-chain work available. Actions change
+# rarely, so monthly is quiet.
 #
-# npm and vcpkg are deliberately absent. An Electron dependency tree produces a
-# steady stream of pull requests, and with a single code owner every one of them
-# lands on the same reviewer. Worth revisiting when there is more review
-# capacity, not before.
+# There is deliberately no `labels:` key on either entry. Dependabot applies
+# `dependencies` plus a per-ecosystem label (`github_actions`, `python`) by
+# itself and creates any that are missing - which is where this repository's
+# `dependencies` label came from, and why LABELING.md now documents it. Naming
+# a label here that does not exist yet is a config error, so listing them would
+# only add a way to break the file.
+#
+# npm is absent from *this file*, which governs version updates only. An
+# Electron dependency tree produces a steady stream of pull requests, and with
+# a single code owner every one of them lands on the same reviewer. Dependabot
+# security updates are a separate repository-level setting and are switched on,
+# so npm advisories still arrive on their own (#217, #218) - the omission buys
+# quiet, not blindness. Worth revisiting when there is more review capacity.
+#
+# vcpkg is absent because it cannot be present. Dependabot supports no vcpkg
+# ecosystem and no C/C++ package manager at all, so engine/vcpkg.json and its
+# builtin-baseline are bumped by hand. Do not spend time looking for the
+# setting that turns it on.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -23,14 +39,40 @@ updates:
     # Gets a conventional type in front of the title: "ci: Bump the actions
     # group ..." rather than a bare "Bump ...".
     #
-    # It does not make the title pass `pr-title.yml`, which an earlier version
-    # of this comment claimed. Dependabot capitalises its subject and has no
-    # setting to stop it, so the `subjectPattern` rule rejects it regardless of
-    # the prefix. That workflow skips bots instead. The prefix is still worth
-    # setting: it is the half that lands in the commit on master after a squash
-    # merge, where the convention is the point.
+    # It does not make the title pass `pr-title.yml`. Dependabot capitalises
+    # its subject and has no setting to stop it, so the `subjectPattern` rule
+    # rejects it regardless of the prefix. That workflow skips bots instead.
+    # The prefix is still worth setting: it is the half that lands in the
+    # commit on master after a squash merge, where the convention is the point.
     commit-message:
       prefix: ci
-    # There is deliberately no `labels:` key. Dependabot applies (and creates)
-    # `dependencies` on its own, whereas naming a label that does not exist yet
-    # is a config error, and this repository has no `dependencies` label.
+
+  # requirements-docs.txt pins mkdocs-material so that no theme release can
+  # change the published site without a commit here. A pin only works as a
+  # checkpoint if something proposes that commit - otherwise it is a freeze,
+  # and the docs site ages quietly. One dependency, so expect a pull request
+  # every few months at most.
+  #
+  # `directory: /` does find it despite the `-docs` suffix, and does not drag
+  # anything else in with it. Dependabot's pip fetcher
+  # (dependabot-core, python/lib/dependabot/python/shared_file_fetcher.rb)
+  # collects every *.txt and *.in at the path *and one level below it* - so
+  # root plus docs/, engine/, app/ and friends, though not the vendored trees
+  # under engine/vendor/*/ - then keeps a file if its name matches
+  # /requirements/ or if every line parses as a requirement. Only
+  # requirements-docs.txt survives that today: llms.txt has a `>` blockquote,
+  # docs/robots.txt has `User-agent: *`, engine/CMakeLists.txt has
+  # `cmake_minimum_required(...)`, and none of those parse.
+  #
+  # The trap that leaves behind: a new *.txt at the repo root or one level
+  # down, whose every line happens to parse as a requirement, gets picked up
+  # silently. Name anything at that depth so it cannot be mistaken for one.
+  #
+  # `ci` rather than `docs` as the prefix, to match the actions entry above -
+  # this updates the machinery that builds the site, not the site's content.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
