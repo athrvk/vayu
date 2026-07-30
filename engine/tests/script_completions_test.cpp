@@ -29,6 +29,8 @@ namespace {
 
 using vayu::http::routes::get_script_completions;
 
+// monaco.languages.CompletionItemKind.Function
+constexpr int KIND_FUNCTION = 1;
 // monaco.languages.CompletionItemKind.Snippet
 constexpr int KIND_SNIPPET = 28;
 // monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
@@ -166,6 +168,60 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
 
     EXPECT_GE (offered, 10)
     << "the pm.response.to.be matchers are missing from the completion list";
+}
+
+// The same drift, one chain over: an offered `pm.expect` matcher the runtime
+// does not bind is `undefined`, so calling it throws "not a function" and the
+// editor's own suggestion becomes the reason a test fails.
+//
+// The member is looked up rather than executed. A terminal getter (`.to.be.true`)
+// asserts on access, so evaluating it would report whether the assertion held
+// against an arbitrary value - which is not what this guards.
+TEST (ScriptCompletions, EveryOfferedExpectMatcherExistsInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        // The expectation chains are exactly the items whose match text starts
+        // with a dot; `pm.*` items are members of the pm object instead.
+        const std::string match = match_text (item);
+        if (match.empty () || match[0] != '.') {
+            continue;
+        }
+        const std::string chain = match.substr (1);
+        const size_t split      = chain.rfind ('.');
+        const std::string prefix = split == std::string::npos ? "" : chain.substr (0, split);
+        const std::string member =
+        split == std::string::npos ? chain : chain.substr (split + 1);
+        offered++;
+
+        const std::string target = "pm.expect(1)" + (prefix.empty () ? "" : "." + prefix);
+        // A function must be callable; a chainer or terminal getter only has to
+        // be a declared own property of the object it hangs off.
+        const std::string check = item.value ("kind", 0) == KIND_FUNCTION ?
+        "if (typeof " + target + "[\"" + member + "\"] !== \"function\") { throw new Error(\"missing\"); }" :
+        "if (!Object.getOwnPropertyDescriptor(" + target + ", \"" + member +
+        "\")) { throw new Error(\"missing\"); }";
+
+        const std::string script = "pm.test(\"t\", function() { " + check + " });";
+        auto result              = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_TRUE (result.tests[0].passed)
+        << match << " is offered but the runtime does not bind it: "
+        << result.tests[0].error_message;
+    }
+
+    EXPECT_GE (offered, 20)
+    << "the pm.expect assertion chains are missing from the completion list";
 }
 
 } // namespace

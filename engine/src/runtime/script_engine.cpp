@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -238,6 +239,11 @@ void setup_console (JSContext* ctx) {
 struct ExpectState {
     JSValue actual;
     bool negated = false;
+    // Set by the `deep` / `nested` chainers and read by the matcher that ends
+    // the chain, so `to.deep.equal` and `to.have.nested.property` change what
+    // the same matcher compares rather than needing matchers of their own.
+    bool deep   = false;
+    bool nested = false;
 };
 
 JSClassID expect_class_id = 0;
@@ -263,6 +269,246 @@ JSClassDef expect_class = { .class_name = "Expectation",
     .call                               = nullptr,
     .exotic                             = nullptr };
 
+// ----------------------------------------------------------------------------
+// Value comparison for the equality matchers.
+//
+// `equal` is strict and `eql` is deep, which is why they cannot share one
+// comparison: `expect({a:1}).to.equal({a:1})` must fail (different references)
+// while `expect({a:1}).to.eql({a:1})` passes. Chai draws the line there and
+// Postman scripts are written against chai.
+// ----------------------------------------------------------------------------
+
+// `===` without coercion. No strict-equality entry point exists in both
+// vendored runtimes (`JS_IsStrictEqual` is quickjs-ng only; the Unix build is
+// Bellard's), so the rules are applied here: no cross-type equality, `NaN` is
+// not equal to itself, and objects compare by reference.
+bool js_strict_equal (JSContext* ctx, JSValueConst a, JSValueConst b) {
+    if (JS_IsNumber (a) || JS_IsNumber (b)) {
+        if (!JS_IsNumber (a) || !JS_IsNumber (b)) {
+            return false;
+        }
+        double lhs = 0, rhs = 0;
+        JS_ToFloat64 (ctx, &lhs, a);
+        JS_ToFloat64 (ctx, &rhs, b);
+        return lhs == rhs;
+    }
+    if (JS_IsString (a) || JS_IsString (b)) {
+        return JS_IsString (a) && JS_IsString (b) &&
+        js_to_string (ctx, a) == js_to_string (ctx, b);
+    }
+    if (JS_IsBool (a) || JS_IsBool (b)) {
+        return JS_IsBool (a) && JS_IsBool (b) &&
+        JS_ToBool (ctx, a) == JS_ToBool (ctx, b);
+    }
+    if (JS_IsNull (a) || JS_IsNull (b)) {
+        return JS_IsNull (a) && JS_IsNull (b);
+    }
+    if (JS_IsUndefined (a) || JS_IsUndefined (b)) {
+        return JS_IsUndefined (a) && JS_IsUndefined (b);
+    }
+    // Objects, functions and symbols: reference identity.
+    return JS_VALUE_GET_TAG (a) == JS_VALUE_GET_TAG (b) &&
+    JS_VALUE_GET_PTR (a) == JS_VALUE_GET_PTR (b);
+}
+
+// JSON form of a value, empty when it is not serialisable.
+std::string js_to_json (JSContext* ctx, JSValueConst val) {
+    JSValue json = JS_JSONStringify (ctx, val, JS_UNDEFINED, JS_UNDEFINED);
+    std::string out;
+    if (!JS_IsException (json) && JS_IsString (json)) {
+        out = js_to_string (ctx, json);
+    }
+    JS_FreeValue (ctx, json);
+    return out;
+}
+
+// The internal class of an object as `Object.prototype.toString` reports it
+// ("[object Date]"). The deep compare needs it because a `Date` or a `Map`
+// keeps its contents outside the own-property list, so comparing enumerable
+// keys alone would report every pair of them equal. `JS_IsDate` / `JS_IsRegExp`
+// exist only in quickjs-ng, so this asks the language instead of the C API.
+std::string js_class_tag (JSContext* ctx, JSValueConst val) {
+    JSValue global    = JS_GetGlobalObject (ctx);
+    JSValue ctor      = JS_GetPropertyStr (ctx, global, "Object");
+    JSValue proto     = JS_GetPropertyStr (ctx, ctor, "prototype");
+    JSValue to_string = JS_GetPropertyStr (ctx, proto, "toString");
+
+    std::string tag;
+    if (JS_IsFunction (ctx, to_string)) {
+        JSValue result = JS_Call (ctx, to_string, val, 0, nullptr);
+        if (!JS_IsException (result)) {
+            tag = js_to_string (ctx, result);
+        } else {
+            JS_FreeValue (ctx, JS_GetException (ctx));
+        }
+        JS_FreeValue (ctx, result);
+    }
+
+    JS_FreeValue (ctx, to_string);
+    JS_FreeValue (ctx, proto);
+    JS_FreeValue (ctx, ctor);
+    JS_FreeValue (ctx, global);
+    return tag;
+}
+
+// How a value reads in an assertion failure. `JS_ToCString` renders every
+// object as "[object Object]", which tells the script author nothing about
+// which key differed; JSON is what they wrote. A RegExp is the exception -
+// JSON renders one as "{}", while its own toString is the pattern.
+std::string js_describe (JSContext* ctx, JSValueConst val) {
+    if (JS_IsString (val)) {
+        return "'" + js_to_string (ctx, val) + "'";
+    }
+    if (JS_IsObject (val) && !JS_IsFunction (ctx, val) &&
+    js_class_tag (ctx, val) != "[object RegExp]") {
+        const std::string json = js_to_json (ctx, val);
+        if (!json.empty ()) {
+            return json;
+        }
+    }
+    return js_to_string (ctx, val);
+}
+
+// A cyclic structure would recurse forever; the cap turns that into a thrown
+// error rather than a stack overflow. Nothing a script asserts on legitimately
+// nests this far.
+constexpr int kDeepEqualMaxDepth = 64;
+
+// Own enumerable string-keyed property names, in insertion order.
+bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::string>& out) {
+    JSPropertyEnum* tab = nullptr;
+    uint32_t count      = 0;
+    if (JS_GetOwnPropertyNames (
+        ctx, &tab, &count, obj, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+        return false;
+    }
+    out.clear ();
+    out.reserve (count);
+    for (uint32_t i = 0; i < count; i++) {
+        const char* name = JS_AtomToCString (ctx, tab[i].atom);
+        out.emplace_back (name ? name : "");
+        JS_FreeCString (ctx, name);
+        JS_FreeAtom (ctx, tab[i].atom);
+    }
+    js_free (ctx, tab);
+    return true;
+}
+
+// Deep structural equality. Returns 1 (equal), 0 (not equal) or -1 with a
+// pending exception, following the QuickJS convention.
+//
+// This deliberately does not go through `JSON.stringify`, which the previous
+// implementation used: stringify is key-order sensitive ({a:1,b:2} vs {b:2,a:1}
+// compare unequal), silently drops `undefined` members, and cannot see a value
+// it fails to serialise.
+int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
+    if (depth > kDeepEqualMaxDepth) {
+        JS_ThrowRangeError (ctx,
+        "deep equality gave up after %d levels - the compared values are cyclic "
+        "or too deeply nested",
+        kDeepEqualMaxDepth);
+        return -1;
+    }
+
+    if (js_strict_equal (ctx, a, b)) {
+        return 1;
+    }
+
+    // Two NaNs are strictly unequal but deeply equal, as in chai.
+    if (JS_IsNumber (a) && JS_IsNumber (b)) {
+        double lhs = 0, rhs = 0;
+        JS_ToFloat64 (ctx, &lhs, a);
+        JS_ToFloat64 (ctx, &rhs, b);
+        return (std::isnan (lhs) && std::isnan (rhs)) ? 1 : 0;
+    }
+
+    // A primitive that is not strictly equal is never deeply equal, and a
+    // primitive never equals an object (`null` vs `undefined` included).
+    if (!JS_IsObject (a) || !JS_IsObject (b)) {
+        return 0;
+    }
+    // Functions compare by reference only, which strict equality already ruled
+    // out above.
+    if (JS_IsFunction (ctx, a) || JS_IsFunction (ctx, b)) {
+        return 0;
+    }
+
+    const std::string tag = js_class_tag (ctx, a);
+    if (tag != js_class_tag (ctx, b)) {
+        return 0;
+    }
+    if (tag == "[object Date]") {
+        // JSON renders a Date as its ISO instant, which is the comparison chai
+        // makes (and keeps millisecond resolution, unlike toString).
+        return js_to_json (ctx, a) == js_to_json (ctx, b) ? 1 : 0;
+    }
+    if (tag == "[object RegExp]") {
+        return js_to_string (ctx, a) == js_to_string (ctx, b) ? 1 : 0;
+    }
+    if (tag != "[object Object]" && tag != "[object Array]" && tag != "[object Error]") {
+        // Map, Set, typed arrays and the like hold their contents somewhere a
+        // structural compare cannot see, so every pair would look equal. Report
+        // unequal rather than pass silently; reference identity already matched
+        // the only case that is certainly equal.
+        return 0;
+    }
+
+    if (tag == "[object Array]") {
+        JSValue a_len_val = JS_GetPropertyStr (ctx, a, "length");
+        JSValue b_len_val = JS_GetPropertyStr (ctx, b, "length");
+        uint32_t a_len = 0, b_len = 0;
+        JS_ToUint32 (ctx, &a_len, a_len_val);
+        JS_ToUint32 (ctx, &b_len, b_len_val);
+        JS_FreeValue (ctx, a_len_val);
+        JS_FreeValue (ctx, b_len_val);
+        if (a_len != b_len) {
+            return 0;
+        }
+        for (uint32_t i = 0; i < a_len; i++) {
+            JSValue a_elem = JS_GetPropertyUint32 (ctx, a, i);
+            JSValue b_elem = JS_GetPropertyUint32 (ctx, b, i);
+            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1);
+            JS_FreeValue (ctx, a_elem);
+            JS_FreeValue (ctx, b_elem);
+            if (same != 1) {
+                return same;
+            }
+        }
+        return 1;
+    }
+
+    std::vector<std::string> a_keys, b_keys;
+    if (!js_own_enumerable_keys (ctx, a, a_keys) ||
+    !js_own_enumerable_keys (ctx, b, b_keys)) {
+        return -1;
+    }
+    if (a_keys.size () != b_keys.size ()) {
+        return 0;
+    }
+    // Equal sizes plus every key of `a` present in `b` means the key sets are
+    // identical, so order never enters the comparison.
+    for (const auto& key : a_keys) {
+        if (std::find (b_keys.begin (), b_keys.end (), key) == b_keys.end ()) {
+            return 0;
+        }
+        JSValue a_val  = JS_GetPropertyStr (ctx, a, key.c_str ());
+        JSValue b_val  = JS_GetPropertyStr (ctx, b, key.c_str ());
+        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1);
+        JS_FreeValue (ctx, a_val);
+        JS_FreeValue (ctx, b_val);
+        if (same != 1) {
+            return same;
+        }
+    }
+    return 1;
+}
+
+// Compares by whichever rule the chain asked for: `deep` when a `deep` /
+// `eql` chain set it, strict otherwise. -1 signals a pending exception.
+int js_compare_for_chain (JSContext* ctx, JSValueConst a, JSValueConst b, bool deep) {
+    return deep ? js_deep_equal (ctx, a, b, 0) : (js_strict_equal (ctx, a, b) ? 1 : 0);
+}
+
 JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
     (void)argv;
@@ -286,9 +532,45 @@ JSValue expect_be_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return JS_DupValue (ctx, this_val);
 }
 
-JSValue expect_equal (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// `deep` and `nested` are flag-setting chainers: they change what the matcher
+// at the end of the chain compares, then hand the same expectation back.
+JSValue expect_deep_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (state) {
+        state->deep = true;
+    }
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_nested_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (state) {
+        state->nested = true;
+    }
+    return JS_DupValue (ctx, this_val);
+}
+
+// Every callable matcher returns the expectation rather than `undefined`, which
+// is what makes `.and` work: it is a plain passthrough, and the flags a chain
+// has set (`not` included) persist across it exactly as they do in chai.
+JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
+    return JS_DupValue (ctx, this_val);
+}
+
+// Shared body of `equal` and `eql`. `always_deep` is what separates them: `eql`
+// is deep whatever the chain said, `equal` is strict unless `deep` set the flag.
+JSValue expect_equality (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+bool always_deep) {
     if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "equal() requires an argument");
+        return JS_ThrowTypeError (
+        ctx, "%s() requires an argument", always_deep ? "eql" : "equal");
     }
 
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
@@ -296,48 +578,30 @@ JSValue expect_equal (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    // Compare values
-    bool equal = false;
-
-    // Handle different types
-    if (JS_IsNumber (state->actual) && JS_IsNumber (argv[0])) {
-        double a, b;
-        JS_ToFloat64 (ctx, &a, state->actual);
-        JS_ToFloat64 (ctx, &b, argv[0]);
-        equal = (a == b);
-    } else if (JS_IsString (state->actual) && JS_IsString (argv[0])) {
-        std::string a = js_to_string (ctx, state->actual);
-        std::string b = js_to_string (ctx, argv[0]);
-        equal         = (a == b);
-    } else if (JS_IsBool (state->actual) && JS_IsBool (argv[0])) {
-        equal = JS_ToBool (ctx, state->actual) == JS_ToBool (ctx, argv[0]);
-    } else if (JS_IsNull (state->actual) && JS_IsNull (argv[0])) {
-        equal = true;
-    } else if (JS_IsUndefined (state->actual) && JS_IsUndefined (argv[0])) {
-        equal = true;
-    } else {
-        // Try JSON comparison for objects
-        JSValue json1 = JS_JSONStringify (ctx, state->actual, JS_UNDEFINED, JS_UNDEFINED);
-        JSValue json2 = JS_JSONStringify (ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
-        if (!JS_IsException (json1) && !JS_IsException (json2)) {
-            equal = js_to_string (ctx, json1) == js_to_string (ctx, json2);
-        }
-        JS_FreeValue (ctx, json1);
-        JS_FreeValue (ctx, json2);
+    const bool deep = always_deep || state->deep;
+    const int same  = js_compare_for_chain (ctx, state->actual, argv[0], deep);
+    if (same < 0) {
+        return JS_EXCEPTION;
     }
 
-    bool pass = state->negated ? !equal : equal;
-
+    const bool pass = state->negated ? (same == 0) : (same == 1);
     if (!pass) {
-        std::string actual_str   = js_to_string (ctx, state->actual);
-        std::string expected_str = js_to_string (ctx, argv[0]);
-        std::string msg          = state->negated ?
-                 "Expected " + actual_str + " to not equal " + expected_str :
-                 "Expected " + actual_str + " to equal " + expected_str;
+        const std::string relation = std::string (state->negated ? " to not " : " to ") +
+        (deep ? "deeply equal " : "equal ");
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        relation + js_describe (ctx, argv[0]);
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_equal (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    return expect_equality (ctx, this_val, argc, argv, false);
+}
+
+JSValue expect_eql (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    return expect_equality (ctx, this_val, argc, argv, true);
 }
 
 JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -355,7 +619,7 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg);
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -373,7 +637,7 @@ JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         return JS_ThrowTypeError (ctx, "%s", msg);
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -391,7 +655,7 @@ JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg);
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_above (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -421,7 +685,7 @@ JSValue expect_above (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_below (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -451,7 +715,7 @@ JSValue expect_below (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -476,28 +740,56 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         JS_ToUint32 (ctx, &len, length);
         JS_FreeValue (ctx, length);
 
-        std::string needle = js_to_string (ctx, argv[0]);
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue elem = JS_GetPropertyUint32 (ctx, state->actual, i);
-            if (js_to_string (ctx, elem) == needle) {
-                includes = true;
-            }
+        // Membership follows the chain's comparison rule. It used to compare
+        // `JS_ToCString` forms, under which every object member matched every
+        // object needle - both render as "[object Object]".
+        for (uint32_t i = 0; i < len && !includes; i++) {
+            JSValue elem   = JS_GetPropertyUint32 (ctx, state->actual, i);
+            const int same = js_compare_for_chain (ctx, elem, argv[0], state->deep);
             JS_FreeValue (ctx, elem);
-            if (includes)
-                break;
+            if (same < 0) {
+                return JS_EXCEPTION;
+            }
+            includes = (same == 1);
         }
     }
 
     bool pass = state->negated ? !includes : includes;
 
     if (!pass) {
-        const char* msg = state->negated ?
-        "Expected value to not include the substring" :
-        "Expected value to include the substring";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not include " : " to include ") + js_describe (ctx, argv[0]);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
+}
+
+// Splits a `nested.property` path into its segments: "a.b[0].c" walks a, b, 0,
+// c. Chai's escape form (`a\.b` for a literal dot) is not supported; a path is
+// read left to right and a `[` opens an index.
+std::vector<std::string> split_property_path (const std::string& path) {
+    std::vector<std::string> segments;
+    std::string current;
+    for (const char ch : path) {
+        if (ch == '.' || ch == '[') {
+            if (!current.empty ()) {
+                segments.push_back (current);
+                current.clear ();
+            }
+        } else if (ch == ']') {
+            if (!current.empty ()) {
+                segments.push_back (current);
+                current.clear ();
+            }
+        } else {
+            current.push_back (ch);
+        }
+    }
+    if (!current.empty ()) {
+        segments.push_back (current);
+    }
+    return segments;
 }
 
 JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -510,21 +802,53 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    std::string prop_name = js_to_string (ctx, argv[0]);
-    JSAtom atom           = JS_NewAtom (ctx, prop_name.c_str ());
-    bool has_prop         = JS_HasProperty (ctx, state->actual, atom) == 1;
-    JS_FreeAtom (ctx, atom);
-
-    // If second argument provided, also check value
-    if (has_prop && argc >= 2) {
-        JSValue actual_val = JS_GetPropertyStr (ctx, state->actual, prop_name.c_str ());
-        JSValue json1 = JS_JSONStringify (ctx, actual_val, JS_UNDEFINED, JS_UNDEFINED);
-        JSValue json2 = JS_JSONStringify (ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
-        has_prop = js_to_string (ctx, json1) == js_to_string (ctx, json2);
-        JS_FreeValue (ctx, json1);
-        JS_FreeValue (ctx, json2);
-        JS_FreeValue (ctx, actual_val);
+    const std::string prop_name = js_to_string (ctx, argv[0]);
+    const std::vector<std::string> segments =
+    state->nested ? split_property_path (prop_name) :
+                    std::vector<std::string>{ prop_name };
+    if (segments.empty ()) {
+        return JS_ThrowTypeError (ctx, "property() requires a property name");
     }
+
+    // Walk to the parent of the last segment, so a missing intermediate is a
+    // missing property rather than a thrown "cannot read property of
+    // undefined". A plain (non-nested) chain has exactly one segment.
+    JSValue holder = JS_DupValue (ctx, state->actual);
+    bool has_prop  = true;
+    for (size_t i = 0; i + 1 < segments.size (); i++) {
+        if (!JS_IsObject (holder)) {
+            has_prop = false;
+            break;
+        }
+        JSValue next = JS_GetPropertyStr (ctx, holder, segments[i].c_str ());
+        JS_FreeValue (ctx, holder);
+        holder = next;
+    }
+
+    if (has_prop) {
+        if (!JS_IsObject (holder)) {
+            has_prop = false;
+        } else {
+            JSAtom atom = JS_NewAtom (ctx, segments.back ().c_str ());
+            has_prop    = JS_HasProperty (ctx, holder, atom) == 1;
+            JS_FreeAtom (ctx, atom);
+        }
+    }
+
+    // A second argument also checks the value. Chai compares it strictly unless
+    // the chain is `deep`, which is why this cannot stringify: two objects with
+    // the same JSON are still different references.
+    if (has_prop && argc >= 2) {
+        JSValue actual_val = JS_GetPropertyStr (ctx, holder, segments.back ().c_str ());
+        const int same = js_compare_for_chain (ctx, actual_val, argv[1], state->deep);
+        JS_FreeValue (ctx, actual_val);
+        if (same < 0) {
+            JS_FreeValue (ctx, holder);
+            return JS_EXCEPTION;
+        }
+        has_prop = (same == 1);
+    }
+    JS_FreeValue (ctx, holder);
 
     bool pass = state->negated ? !has_prop : has_prop;
 
@@ -532,10 +856,13 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         std::string msg = state->negated ?
         "Expected object to not have property '" + prop_name + "'" :
         "Expected object to have property '" + prop_name + "'";
+        if (argc >= 2) {
+            msg += " equal to " + js_describe (ctx, argv[1]);
+        }
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 // Terminal getters: assert on property access (Chai/Postman paren-less idiom).
@@ -672,7 +999,7 @@ JSValue expect_least (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -701,7 +1028,7 @@ JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -736,7 +1063,7 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -784,7 +1111,7 @@ JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst*
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -825,7 +1152,339 @@ JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
-    return JS_UNDEFINED;
+    return expect_chained (ctx, this_val);
+}
+
+// Matchers a Postman suite reaches for that used to throw "not a function".
+// Each one fails loudly on an argument it cannot use, because a matcher that
+// quietly accepts anything is the false-pass this series exists to remove.
+
+JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !QJS_IsArray (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "oneOf() requires an array of candidates");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue length_val = JS_GetPropertyStr (ctx, argv[0], "length");
+    uint32_t len       = 0;
+    JS_ToUint32 (ctx, &len, length_val);
+    JS_FreeValue (ctx, length_val);
+
+    bool found = false;
+    for (uint32_t i = 0; i < len && !found; i++) {
+        JSValue candidate = JS_GetPropertyUint32 (ctx, argv[0], i);
+        const int same = js_compare_for_chain (ctx, state->actual, candidate, state->deep);
+        JS_FreeValue (ctx, candidate);
+        if (same < 0) {
+            return JS_EXCEPTION;
+        }
+        found = (same == 1);
+    }
+
+    const bool pass = state->negated ? !found : found;
+    if (!pass) {
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be one of " : " to be one of ") +
+        js_describe (ctx, argv[0]);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+// `have.keys` in chai means "exactly these keys". The subset form
+// (`include.keys`) is not supported; see pm-api-compatibility.md.
+JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "keys() requires at least one key name");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!JS_IsObject (state->actual)) {
+        return JS_ThrowTypeError (ctx, "keys() requires an object or array");
+    }
+
+    std::vector<std::string> expected;
+    if (argc == 1 && QJS_IsArray (ctx, argv[0])) {
+        JSValue length_val = JS_GetPropertyStr (ctx, argv[0], "length");
+        uint32_t len       = 0;
+        JS_ToUint32 (ctx, &len, length_val);
+        JS_FreeValue (ctx, length_val);
+        for (uint32_t i = 0; i < len; i++) {
+            JSValue key = JS_GetPropertyUint32 (ctx, argv[0], i);
+            expected.push_back (js_to_string (ctx, key));
+            JS_FreeValue (ctx, key);
+        }
+    } else {
+        for (int i = 0; i < argc; i++) {
+            expected.push_back (js_to_string (ctx, argv[i]));
+        }
+    }
+    std::sort (expected.begin (), expected.end ());
+    expected.erase (std::unique (expected.begin (), expected.end ()), expected.end ());
+
+    std::vector<std::string> actual_keys;
+    if (!js_own_enumerable_keys (ctx, state->actual, actual_keys)) {
+        return JS_EXCEPTION;
+    }
+    std::sort (actual_keys.begin (), actual_keys.end ());
+
+    const bool matches = (actual_keys == expected);
+    const bool pass    = state->negated ? !matches : matches;
+    if (!pass) {
+        std::string listed;
+        for (const auto& key : expected) {
+            listed += (listed.empty () ? "" : ", ") + std::string ("'") + key + "'";
+        }
+        const std::string msg = std::string ("Expected object to ") +
+        (state->negated ? "not have" : "have") + " exactly the keys " + listed;
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !QJS_IsArray (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "members() requires an array");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!QJS_IsArray (ctx, state->actual)) {
+        return JS_ThrowTypeError (ctx, "members() requires the target to be an array");
+    }
+
+    const auto array_length = [ctx] (JSValueConst array) {
+        JSValue length_val = JS_GetPropertyStr (ctx, array, "length");
+        uint32_t len       = 0;
+        JS_ToUint32 (ctx, &len, length_val);
+        JS_FreeValue (ctx, length_val);
+        return len;
+    };
+
+    const uint32_t actual_len   = array_length (state->actual);
+    const uint32_t expected_len = array_length (argv[0]);
+
+    // Same members in any order: pair each expected element with an unused
+    // actual element, so duplicates have to match in count too.
+    bool matches = (actual_len == expected_len);
+    std::vector<bool> claimed (actual_len, false);
+    for (uint32_t i = 0; i < expected_len && matches; i++) {
+        JSValue wanted = JS_GetPropertyUint32 (ctx, argv[0], i);
+        bool paired    = false;
+        for (uint32_t j = 0; j < actual_len && !paired; j++) {
+            if (claimed[j]) {
+                continue;
+            }
+            JSValue candidate = JS_GetPropertyUint32 (ctx, state->actual, j);
+            const int same = js_compare_for_chain (ctx, candidate, wanted, state->deep);
+            JS_FreeValue (ctx, candidate);
+            if (same < 0) {
+                JS_FreeValue (ctx, wanted);
+                return JS_EXCEPTION;
+            }
+            if (same == 1) {
+                claimed[j] = true;
+                paired     = true;
+            }
+        }
+        JS_FreeValue (ctx, wanted);
+        matches = paired;
+    }
+
+    const bool pass = state->negated ? !matches : matches;
+    if (!pass) {
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not have members " : " to have members ") +
+        js_describe (ctx, argv[0]);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!JS_IsFunction (ctx, state->actual)) {
+        return JS_ThrowTypeError (ctx, "throw() requires the target to be a function");
+    }
+
+    JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
+    const bool threw = JS_IsException (result);
+    std::string thrown;
+    if (threw) {
+        JSValue exc = JS_GetException (ctx);
+        thrown      = js_to_string (ctx, exc);
+        JS_FreeValue (ctx, exc);
+    }
+    JS_FreeValue (ctx, result);
+
+    bool matches = threw;
+    if (threw && argc >= 1 && !JS_IsUndefined (argv[0])) {
+        if (JS_IsString (argv[0])) {
+            matches = thrown.find (js_to_string (ctx, argv[0])) != std::string::npos;
+        } else {
+            JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+            if (!JS_IsFunction (ctx, test_fn)) {
+                JS_FreeValue (ctx, test_fn);
+                return JS_ThrowTypeError (ctx,
+                "throw() accepts a message substring or a regular expression");
+            }
+            JSValue subject = JS_NewString (ctx, thrown.c_str ());
+            JSValue tested  = JS_Call (ctx, test_fn, argv[0], 1, &subject);
+            JS_FreeValue (ctx, subject);
+            JS_FreeValue (ctx, test_fn);
+            if (JS_IsException (tested)) {
+                JS_FreeValue (ctx, tested);
+                return JS_EXCEPTION;
+            }
+            matches = JS_ToBool (ctx, tested) == 1;
+            JS_FreeValue (ctx, tested);
+        }
+    }
+
+    const bool pass = state->negated ? !matches : matches;
+    if (!pass) {
+        std::string msg = state->negated ? "Expected the function to not throw" :
+                                           "Expected the function to throw";
+        if (threw) {
+            msg += ", but it threw " + thrown;
+        }
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_instance_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "instanceOf() requires a constructor");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    const int is_instance = JS_IsInstanceOf (ctx, state->actual, argv[0]);
+    if (is_instance < 0) {
+        return JS_EXCEPTION;
+    }
+
+    const bool pass = state->negated ? (is_instance == 0) : (is_instance == 1);
+    if (!pass) {
+        JSValue name_val      = JS_GetPropertyStr (ctx, argv[0], "name");
+        const std::string ctor_name = js_to_string (ctx, name_val);
+        JS_FreeValue (ctx, name_val);
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be an instance of " : " to be an instance of ") +
+        ctor_name;
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_close_to (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError (ctx, "closeTo() requires an expected value and a delta");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double actual = 0, expected = 0, delta = 0;
+    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0 || JS_ToFloat64 (ctx, &delta, argv[1]) < 0) {
+        return JS_ThrowTypeError (ctx, "closeTo() requires numeric values");
+    }
+    if (std::isnan (actual) || std::isnan (expected) || std::isnan (delta)) {
+        return JS_ThrowTypeError (ctx, "closeTo() requires numeric values");
+    }
+
+    const bool close = std::fabs (actual - expected) <= delta;
+    const bool pass  = state->negated ? !close : close;
+    if (!pass) {
+        const std::string msg = "Expected " + std::to_string (actual) +
+        (state->negated ? " to not be within " : " to be within ") +
+        std::to_string (delta) + " of " + std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+JSValue expect_satisfy (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "satisfy() requires a predicate function");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue arg    = JS_DupValue (ctx, state->actual);
+    JSValue result = JS_Call (ctx, argv[0], JS_UNDEFINED, 1, &arg);
+    JS_FreeValue (ctx, arg);
+    if (JS_IsException (result)) {
+        JS_FreeValue (ctx, result);
+        return JS_EXCEPTION;
+    }
+    const bool satisfied = JS_ToBool (ctx, result) == 1;
+    JS_FreeValue (ctx, result);
+
+    const bool pass = state->negated ? !satisfied : satisfied;
+    if (!pass) {
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not satisfy the predicate" : " to satisfy the predicate");
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
+}
+
+// chai's `.to.have.string(sub)`: a substring assertion that, unlike `include`,
+// refuses a non-string target instead of reporting "does not include".
+JSValue expect_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "string() requires a substring");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!JS_IsString (state->actual)) {
+        return JS_ThrowTypeError (ctx, "string() requires the target to be a string");
+    }
+
+    const std::string subject = js_to_string (ctx, state->actual);
+    const std::string needle  = js_to_string (ctx, argv[0]);
+    const bool contains       = subject.find (needle) != std::string::npos;
+    const bool pass           = state->negated ? !contains : contains;
+    if (!pass) {
+        const std::string msg = "Expected '" + subject +
+        (state->negated ? "' to not contain '" : "' to contain '") + needle + "'";
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return expect_chained (ctx, this_val);
 }
 
 JSValue create_expectation (JSContext* ctx, JSValue actual) {
@@ -867,6 +1526,30 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JS_NewCFunction (ctx, expect_to_getter, "at", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, at_atom);
 
+    // Passthrough chainers. "and" continues a chain after a matcher (which is
+    // why every matcher returns the expectation), and "all" is chai's default
+    // quantifier for `.keys`, so it changes nothing - `.any` is deliberately
+    // absent rather than aliased to `all`, which would silently assert more
+    // than the script asked.
+    const char* passthrough_chainers[] = { "and", "all" };
+    for (const char* name : passthrough_chainers) {
+        JSAtom atom = JS_NewAtom (ctx, name);
+        JS_DefinePropertyGetSet (ctx, obj, atom,
+        JS_NewCFunction (ctx, expect_to_getter, name, 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+
+    // Flag-setting chainers.
+    JSAtom deep_atom = JS_NewAtom (ctx, "deep");
+    JS_DefinePropertyGetSet (ctx, obj, deep_atom,
+    JS_NewCFunction (ctx, expect_deep_getter, "deep", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, deep_atom);
+
+    JSAtom nested_atom = JS_NewAtom (ctx, "nested");
+    JS_DefinePropertyGetSet (ctx, obj, nested_atom,
+    JS_NewCFunction (ctx, expect_nested_getter, "nested", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, nested_atom);
+
     // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
     // register them as getters rather than function-valued properties - a bare
     // `.to.be.true` must run the check, not silently return an uncalled function.
@@ -885,9 +1568,29 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
         JS_FreeAtom (ctx, atom);
     }
 
-    // Add callable assertion methods
+    // Add callable assertion methods. `equal` and `eql` are separate functions
+    // on purpose: chai's `equal` is `===` (reference identity for objects) and
+    // `eql` is deep, so aliasing them passes assertions Postman fails.
     JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
-    JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_equal, "eql", 1));
+    JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_eql, "eql", 1));
+    JS_SetPropertyStr (ctx, obj, "eqls", JS_NewCFunction (ctx, expect_eql, "eqls", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "oneOf", JS_NewCFunction (ctx, expect_one_of, "oneOf", 1));
+    JS_SetPropertyStr (ctx, obj, "keys", JS_NewCFunction (ctx, expect_keys, "keys", 1));
+    JS_SetPropertyStr (ctx, obj, "key", JS_NewCFunction (ctx, expect_keys, "key", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "members", JS_NewCFunction (ctx, expect_members, "members", 1));
+    JS_SetPropertyStr (ctx, obj, "throw", JS_NewCFunction (ctx, expect_throw, "throw", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "throws", JS_NewCFunction (ctx, expect_throw, "throws", 1));
+    JS_SetPropertyStr (ctx, obj, "instanceOf",
+    JS_NewCFunction (ctx, expect_instance_of, "instanceOf", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "closeTo", JS_NewCFunction (ctx, expect_close_to, "closeTo", 2));
+    JS_SetPropertyStr (
+    ctx, obj, "satisfy", JS_NewCFunction (ctx, expect_satisfy, "satisfy", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "string", JS_NewCFunction (ctx, expect_string, "string", 1));
     JS_SetPropertyStr (ctx, obj, "above", JS_NewCFunction (ctx, expect_above, "above", 1));
     JS_SetPropertyStr (ctx, obj, "below", JS_NewCFunction (ctx, expect_below, "below", 1));
     JS_SetPropertyStr (ctx, obj, "least", JS_NewCFunction (ctx, expect_least, "least", 1));
