@@ -13,13 +13,24 @@ export interface ImportOptions {
 }
 
 /**
- * Something the parser could not import. Mostly a body Vayu can't represent
- * (file/binary, ws, grpc); `malformed_item` is the odd one out - an `item[]`
- * entry that is not an object at all, which is skipped rather than allowed to
- * abort the file (see `pmFolder`).
+ * Something the parser could not import. Mostly a resource or body Vayu can't
+ * represent (file/binary, ws, grpc). Three are not about representability:
+ * `unsupported_method` is an operation whose HTTP method has no `HttpMethod`
+ * (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec` are shapes the
+ * source file got wrong - a Postman `item[]` entry that is not an object (see
+ * `pmFolder`), an OpenAPI path item or `parameters` list that is not what the
+ * spec allows - which are stepped over rather than allowed to abort the file.
  */
 export interface SkippedItem {
-	kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" | "malformed_item";
+	kind:
+		| "websocket"
+		| "grpc"
+		| "api_spec"
+		| "unit_test"
+		| "file_body"
+		| "malformed_item"
+		| "unsupported_method"
+		| "malformed_spec";
 	count: number;
 }
 
