@@ -454,6 +454,39 @@ got="$(dry_run_line mv -f "/a b" /c)"
 
 printf 'PASS: dry-run rendering\n'
 
+# --- the sudo keep-alive must not hold its caller open ------------------------
+# preauthorize hands its keep-alive's PID back through stdout, and the caller
+# reads it with a command substitution - which waits for *every* process holding
+# the write end of that pipe. A background loop that inherits stdout therefore
+# blocks the caller until the loop exits, which is never: the macOS job hung for
+# its entire timeout, and the runner reported an orphaned `sleep`.
+#
+# This fails by hanging rather than by asserting, so it is written with a
+# deadline instead of a `timeout` command, which macOS does not ship.
+cat >"$TMPROOT/preauth.sh" <<PREAUTH
+VAYU_TEST=1 . "$INSTALLER"
+platform() { printf 'Darwin\n'; }
+sudo() { return 0; }
+pid="\$(preauthorize)"
+printf 'PID:%s' "\$pid"
+kill "\$pid" 2>/dev/null || true
+PREAUTH
+bash "$TMPROOT/preauth.sh" >"$TMPROOT/preauth.out" 2>&1 &
+preauth_pid=$!
+waited=0
+while kill -0 "$preauth_pid" 2>/dev/null && [ "$waited" -lt 15 ]; do
+	sleep 1
+	waited=$((waited + 1))
+done
+if kill -0 "$preauth_pid" 2>/dev/null; then
+	kill "$preauth_pid" 2>/dev/null || true
+	fail "preauthorize blocked its caller - the keep-alive is holding the command substitution open"
+fi
+grep -q '^PID:[0-9]' "$TMPROOT/preauth.out" \
+	|| fail "preauthorize should print the keep-alive pid, got: $(cat "$TMPROOT/preauth.out")"
+
+printf 'PASS: sudo keep-alive\n'
+
 # --- one installer at a time -------------------------------------------------
 # Two runs at once both download and both swap, and the loser can overwrite the
 # winner with an older version. The lock is a mkdir because it has to be atomic

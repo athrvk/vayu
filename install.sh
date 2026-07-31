@@ -599,13 +599,22 @@ preauthorize() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	log "Vayu installs to $INSTALL_DIR and needs administrator access."
+	# stderr, not stdout: this function's stdout is the keep-alive's PID, and a
+	# notice printed there is captured as part of it. That is how the PID the
+	# trap tried to kill became a sentence, leaving the keep-alive orphaned.
+	warn "Vayu installs to $INSTALL_DIR and needs administrator access."
 	sudo -v || die 'Authorization failed - aborting.'
 	# Tied to this script's lifetime explicitly. Each `sudo -n true` *refreshes*
 	# the timestamp, so a loop left running would sustain passwordless sudo for
 	# this terminal indefinitely - the EXIT trap normally kills it, but an
 	# untrapped death (a closed terminal) would orphan it.
-	( while kill -0 "$$" 2>/dev/null; do sleep 60; sudo -n true 2>/dev/null || exit; done ) &
+	# The redirect is load-bearing, not tidiness. This function's caller reads the
+	# PID through a command substitution, and a command substitution waits for
+	# every process still holding the write end of its pipe - so a background
+	# loop that inherits stdout keeps `keepalive="$(preauthorize)"` blocked until
+	# the loop exits, which is never. It hung the macOS job for its full timeout.
+	( while kill -0 "$$" 2>/dev/null; do sleep 60; sudo -n true 2>/dev/null || exit; done ) \
+		>/dev/null 2>&1 &
 	printf '%s' "$!"
 	return 0
 }
