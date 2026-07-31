@@ -52,14 +52,17 @@ export interface SaveContext {
  * reader was the Dock's error line, which this replaces; the copy re-exported
  * from `useSaveManager` already had no reader. Keeping a field nothing reads is
  * the defect this codebase hits most often, so it goes.
+ *
+ * `lastSavedAt` and `pendingSaveId` went the same way, for the same reason:
+ * every match on either name was a write inside this file. `status` now has a
+ * reader for all five of its values - the Dock renders `pending` as "Unsaved
+ * changes", which is the only thing that says so anywhere when auto-save is
+ * turned off. If a "Saved 2m ago" surface ever wants a timestamp back, it
+ * arrives with that surface.
  */
 interface SaveState {
 	// Save status
 	status: SaveStatus;
-	lastSavedAt: number | null;
-
-	// Pending save tracking
-	pendingSaveId: string | null;
 
 	// Active save context - the context that's currently focused/active
 	activeContextId: string | null;
@@ -69,7 +72,7 @@ interface SaveState {
 
 	// Actions
 	setStatus: (status: SaveStatus) => void;
-	markPendingSave: (id: string) => void;
+	markPendingSave: () => void;
 	startSaving: () => void;
 	completeSave: () => void;
 	failSave: (error: string) => void;
@@ -96,11 +99,13 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		set({ status: "saving" });
 		try {
 			await context.save();
-			set({
-				status: "saved",
-				lastSavedAt: Date.now(),
-				pendingSaveId: null,
-			});
+			// Resolving is not proof of success. Every registered context reports
+			// its own failure through `failSave` and then resolves rather than
+			// rejecting (`useSaveManager`, `SettingsMain`, `VariableTableEditor`
+			// all do), so overwriting unconditionally turned a failed Cmd+S into
+			// "Saved" - with the failure toast still on screen next to it.
+			if (get().status === "error") return;
+			set({ status: "saved" });
 			setTimeout(() => {
 				// Only reset to idle if we're still in the "saved" state
 				if (get().status === "saved") get().setStatus("idle");
@@ -112,39 +117,23 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 	return {
 		status: "idle",
-		lastSavedAt: null,
-		pendingSaveId: null,
 		activeContextId: null,
 		contexts: new Map(),
 
 		setStatus: (status) => set({ status }),
 
-		markPendingSave: (id) =>
-			set({
-				status: "pending",
-				pendingSaveId: id,
-			}),
+		markPendingSave: () => set({ status: "pending" }),
 
 		startSaving: () => set({ status: "saving" }),
 
-		completeSave: () =>
-			set({
-				status: "saved",
-				lastSavedAt: Date.now(),
-				pendingSaveId: null,
-			}),
+		completeSave: () => set({ status: "saved" }),
 
 		failSave: (error) => {
-			set({ status: "error", pendingSaveId: null });
+			set({ status: "error" });
 			useToastStore.getState().showToast(error, "error");
 		},
 
-		reset: () =>
-			set({
-				status: "idle",
-				lastSavedAt: null,
-				pendingSaveId: null,
-			}),
+		reset: () => set({ status: "idle" }),
 
 		// Context management
 		registerContext: (context) => {

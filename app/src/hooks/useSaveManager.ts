@@ -70,7 +70,8 @@ export function useSaveManager({
 
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const savedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-	const saveInProgressRef = useRef(false);
+	// Saves are queued, never dropped - see performSave.
+	const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const onSaveRef = useRef(onSave);
 	const hasChangesRef = useRef(hasChanges);
 	const enabledRef = useRef(enabled);
@@ -103,30 +104,49 @@ export function useSaveManager({
 		};
 	}, []);
 
-	// Perform the actual save
-	const performSave = useCallback(async () => {
-		if (saveInProgressRef.current || !entityId) return;
+	// Perform the actual save.
+	//
+	// A save already in flight used to make this a no-op. That silently lied:
+	// the flying request carries the snapshot taken when it started, so anything
+	// typed since is not in it - yet Cmd+S, the quit flush and the
+	// entity-switch flush all awaited that no-op and reported "saved". The
+	// switch case was the destructive one, because the provider resets its state
+	// right after, so the skipped edits were gone rather than merely unsaved.
+	//
+	// Saves are therefore serialized instead of skipped: a caller that arrives
+	// mid-flight queues behind it and its promise resolves only once *its* save
+	// has run. The cost is one redundant round trip when nothing changed in
+	// between, which is the right trade against reporting a save that never
+	// happened.
+	const performSave = useCallback((): Promise<void> => {
+		if (!entityId) return Promise.resolve();
 
-		saveInProgressRef.current = true;
-		startSaving();
+		// Bind the saver now, not when the queue reaches us. An entity switch
+		// flushes from its effect cleanup, which runs before the next render
+		// repoints `onSaveRef` - a queued save that read the ref late would write
+		// the entity the user just switched *to*.
+		const save = onSaveRef.current;
 
-		try {
-			await onSaveRef.current();
-			completeSave();
+		const run = saveQueueRef.current.then(async () => {
+			startSaving();
+			try {
+				await save();
+				completeSave();
 
-			// Reset to idle after showing "saved" status
-			if (savedTimeoutRef.current) {
-				clearTimeout(savedTimeoutRef.current);
+				// Reset to idle after showing "saved" status
+				if (savedTimeoutRef.current) {
+					clearTimeout(savedTimeoutRef.current);
+				}
+				savedTimeoutRef.current = setTimeout(() => {
+					setStatus("idle");
+				}, SAVED_STATUS_DURATION_MS);
+			} catch (error) {
+				console.error("Save failed:", error);
+				failSave(error instanceof Error ? error.message : "Save failed");
 			}
-			savedTimeoutRef.current = setTimeout(() => {
-				setStatus("idle");
-			}, SAVED_STATUS_DURATION_MS);
-		} catch (error) {
-			console.error("Save failed:", error);
-			failSave(error instanceof Error ? error.message : "Save failed");
-		} finally {
-			saveInProgressRef.current = false;
-		}
+		});
+		saveQueueRef.current = run;
+		return run;
 	}, [entityId, startSaving, completeSave, failSave, setStatus]);
 
 	// Register/unregister with centralized save context
@@ -203,7 +223,7 @@ export function useSaveManager({
 
 		// Mark as pending regardless - the "unsaved changes" state (and manual
 		// save via Cmd+S) still applies even when auto-save is turned off.
-		markPendingSave(entityId);
+		markPendingSave();
 
 		// Respect the global auto-save preference: when disabled, leave the entity
 		// marked dirty but never schedule an automatic save.

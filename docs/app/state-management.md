@@ -56,7 +56,15 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 **Key Features:**
 - Deduplication: Singleton types (welcome, variables, settings) only allow one tab at a time
 - LRU eviction: Oldest non-active, non-exempt, clean tabs are closed when over limit
-- Integration with save-store: Dirty tabs are spared from eviction; pending saves are flushed on eviction
+- Integration with save-store: dirty tabs are never selected for eviction. The
+  guard resolves each tab's save-context key by tab *type* (`isTabDirty`),
+  because the registry is keyed by editor and the two do not line up: `settings`
+  and `variables` are singletons with no `entityId`, so a `request-${entityId}`
+  lookup read them as clean and the 13th tab could close a dirty Settings tab.
+  A `variables` tab counts any dirty variable-editor context as its own, since
+  a `Tab` does not record which editor the sidebar has selected - over-matching
+  keeps a tab that could have closed, under-matching loses work. Nothing is
+  flushed *during* eviction; the predicate already refused the tab
 - Persistence: `vayu.tabs` (v1)
 
 **Key Methods:**
@@ -150,8 +158,6 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 ```typescript
 {
   status: "idle" | "pending" | "saving" | "saved" | "error"
-  lastSavedAt: number | null
-  pendingSaveId: string | null
   activeContextId: string | null
   contexts: Map<string, SaveContext>  // Saveable entities
 }
@@ -166,6 +172,21 @@ at each of them means a new caller cannot forget to report.
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
 reader was the Dock's error line, which the toast replaced.
+
+There is no `lastSavedAt` or `pendingSaveId` either, for the same reason - every
+match on either name was a write inside `save-store.ts`. `status` is the store's
+whole public surface, and all five of its values now have a reader: the Dock
+renders `pending` as **"Unsaved changes"**, which is the only place in the app
+that says so. That matters because auto-save is a setting the user can turn off,
+and with it off nothing was written back and nothing said as much (the tab strip
+carries no unsaved-dot on purpose).
+
+**`triggerSave` will not report a success the context did not have.** Registered
+contexts report their own failures through `failSave` and then *resolve* rather
+than rejecting - `useSaveManager`, `SettingsMain` and `VariableTableEditor` all
+do - so `runSave` checks for `status === "error"` after awaiting instead of
+setting `"saved"` unconditionally. Without that check a failed Cmd/Ctrl+S showed
+"Saved" beside its own failure toast.
 
 **SaveContext:**
 ```typescript
@@ -704,6 +725,14 @@ const {
 - **Context registration:** Automatically registers with `useSaveStore()` for app-wide Ctrl/Cmd+S integration and tab LRU coordination
 - **Save status:** Updates centralized save store so UI can show "Saving..." or "Saved" indicators
 - **Entity switching:** Flushes pending saves when entity ID changes (in cleanup, before unmounting)
+- **Saves are queued, never skipped:** a caller arriving while another save is in
+  flight waits behind it and gets its own write, so its promise resolves only
+  once *its* edits are persisted. Skipping (the old behaviour) meant Cmd/Ctrl+S,
+  the quit flush and the entity-switch flush all reported "saved" for edits that
+  were never in the flying snapshot - and the switch then reset the provider,
+  making them unrecoverable. `performSave` binds `onSaveRef.current` at call
+  time rather than when the queue reaches it, so a save queued by the
+  entity-switch cleanup still writes the entity being left
 - **No `debounceMs` parameter:** the delay is a user preference, not a per-caller
   one, so the hook reads it from the store rather than taking it as an option.
   Turning auto-save off in Settings leaves the entity marked dirty - Ctrl/Cmd+S
@@ -795,7 +824,19 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 7. After 3 seconds of inactivity, `performSave()` is called, which calls the `onSave` callback
 8. Save status updates in `useSaveStore()`, and UI shows "Saving..." then "Saved" for 2 seconds
 9. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
-10. On **app quit** (Electron before-quit event), `useSaveStore().flushAll()` saves all dirty contexts
+10. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
+    button), `useSaveStore().flushAll()` saves all dirty contexts
+
+**Both window-destroying paths flush, through one coordinator.** `before-quit`
+always did; `close` did not, and `close` is what the X button fires - it
+destroys the WebContents and nulls the window handle, so the `before-quit` that
+followed found no renderer to ask and skipped the flush entirely (on macOS,
+`close` does not quit at all, so the edits were simply gone with the app still
+running). `electron/save-flush.ts` owns the once-only flush and the 2s ACK
+ceiling for both, which is also why "already flushed" is shared state: a quit
+that flushed and then closes the window must not ask a dying renderer twice.
+It lives outside `main.ts` so it can be tested - `main.ts` creates windows and
+starts the engine at import time.
 
 ### Variable Resolution Priority
 
