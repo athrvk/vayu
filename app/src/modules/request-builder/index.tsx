@@ -38,7 +38,7 @@ import { useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import { resolveAuthForSend, resolveAuthSource } from "./utils/auth-resolution";
+import { resolveAuthSource } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
@@ -63,7 +63,8 @@ export default function RequestBuilder() {
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const showToast = useToastStore((s) => s.showToast);
-	const { executeRequest: engineExecuteRequest } = useEngine();
+	const { executeRequest: engineExecuteRequest, composeRequest: engineComposeRequest } =
+		useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
 
@@ -96,7 +97,10 @@ export default function RequestBuilder() {
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
 
 	// Variable resolver for the current request's collection
-	const { resolveString, resolveObject } = useVariableResolver({
+	// Preview-only since #226: execution resolves engine-side (POST /compose).
+	// `resolveObject` still backs the load dialog's OAuth token-expiry guard,
+	// which previews the effective config without sending anything.
+	const { resolveObject } = useVariableResolver({
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
@@ -168,9 +172,6 @@ export default function RequestBuilder() {
 			if (!fetchedRequest) return null;
 
 			try {
-				// Resolve variables in URL, headers, and body before sending
-				const resolvedUrl = resolveString(request.url);
-
 				// Flatten enabled headers for execution; inject per-request system headers
 				const headersRecord = toFlatHeaders(request.headers);
 				headersRecord["X-Request-ID"] = generateUUID();
@@ -178,20 +179,11 @@ export default function RequestBuilder() {
 					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
 				headersRecord["X-Vayu-Version"] = version;
 
-				const resolvedHeaders = Object.fromEntries(
-					Object.entries(headersRecord).map(([key, value]) => [
-						resolveString(key),
-						resolveString(value),
-					])
-				);
-				// Shared with the History run view's send path - see execute-mapping.ts
-				const execBody = buildExecBody(request, resolveString);
-
-				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
-				const rawAuth = resolveAuthForSend(request.auth, collectionAncestors);
-				const execAuth = rawAuth
-					? (resolveObject(rawAuth) as Record<string, unknown>)
-					: undefined;
+				// Shared with the History run view's send path - see execute-mapping.ts.
+				// Raw: since #226 the engine resolves {{variables}} and inherit auth
+				// (POST /compose), so the editor state goes over as-is - resolving
+				// here too would interpolate the payload twice.
+				const execBody = buildExecBody(request, (s) => s);
 
 				// Script parts: the collection chain root to leaf, then the
 				// request's own. The engine joins them and runs the result as
@@ -210,13 +202,16 @@ export default function RequestBuilder() {
 					request.testScript
 				);
 
-				const result = await engineExecuteRequest(
-					{
+				// Compose engine-side, then execute the composed payload unchanged.
+				// The inline shape (not compose-by-id) is deliberate: Send executes
+				// the *editor state*, which may be ahead of the saved row.
+				const composed = await engineComposeRequest({
+					request: {
 						method: request.method,
-						url: resolvedUrl,
-						headers: resolvedHeaders,
+						url: request.url,
+						headers: headersRecord,
 						body: execBody,
-						auth: execAuth,
+						auth: { ...request.auth },
 						preRequestScripts: preScriptParts,
 						postRequestScripts: postScriptParts,
 						// Always sent, never elided: the engine defaults to
@@ -228,8 +223,13 @@ export default function RequestBuilder() {
 						// engine's own default win silently, which is not a
 						// decision this client should hand over.
 						httpVersion: request.httpVersion,
-						requestId: fetchedRequest.id,
 					},
+					collectionId: fetchedRequest.collectionId,
+					environmentId: activeEnvironmentId || undefined,
+				});
+
+				const result = await engineExecuteRequest(
+					{ ...composed, requestId: fetchedRequest.id },
 					activeEnvironmentId || undefined
 				);
 
@@ -281,10 +281,9 @@ export default function RequestBuilder() {
 		},
 		[
 			fetchedRequest,
+			engineComposeRequest,
 			engineExecuteRequest,
 			activeEnvironmentId,
-			resolveString,
-			resolveObject,
 			queryClient,
 			collectionAncestors,
 		]
@@ -374,75 +373,49 @@ export default function RequestBuilder() {
 
 			setIsStartingLoadTest(true);
 			try {
-				// Resolve variables in URL, headers, and body before sending
-				const resolvedUrl = resolveString(pendingLoadTestRequest.url);
-				const resolvedHeaders = Object.fromEntries(
-					Object.entries(toFlatHeaders(pendingLoadTestRequest.headers)).map(
-						([key, value]) => [resolveString(key), resolveString(value)]
-					)
-				);
-				const resolvedBody = pendingLoadTestRequest.body
-					? resolveString(pendingLoadTestRequest.body)
-					: pendingLoadTestRequest.body;
+				// The raw request half - the engine resolves {{variables}} and
+				// inherit auth when it composes (POST /compose, issue #226).
+				// `buildExecBody` is the same builder Send uses; sharing it is what
+				// keeps a load test measuring the request Send sends.
+				const bodyPayload = buildExecBody(pendingLoadTestRequest, (s) => s);
 
-				// Build body payload matching the discriminated union
-				let bodyPayload:
-					| {
-							mode: string;
-							content?: string;
-							fields?: Array<{ key: string; value: string; enabled: boolean }>;
-					  }
-					| undefined;
-				if (pendingLoadTestRequest.bodyMode === "form-data") {
-					bodyPayload = {
-						mode: "form-data",
-						fields: toKeyValueEntries(pendingLoadTestRequest.formData).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (pendingLoadTestRequest.bodyMode === "x-www-form-urlencoded") {
-					bodyPayload = {
-						mode: "x-www-form-urlencoded",
-						fields: toKeyValueEntries(pendingLoadTestRequest.urlEncoded).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (resolvedBody) {
-					bodyPayload = {
-						mode: pendingLoadTestRequest.bodyMode || "text",
-						content: resolvedBody,
-					};
-				}
-
-				// Resolve auth for load test (same inherit logic as regular execute)
-				const rawLoadTestAuth = resolveAuthForSend(
-					pendingLoadTestRequest.auth,
-					collectionAncestors
-				);
-				const loadTestAuth = rawLoadTestAuth
-					? (resolveObject(rawLoadTestAuth) as Record<string, unknown>)
-					: undefined;
+				// Compose engine-side, then start the run with the composed
+				// request half plus the load shape - never re-resolved.
+				const composed = await engineComposeRequest({
+					request: {
+						method: pendingLoadTestRequest.method,
+						url: pendingLoadTestRequest.url,
+						headers: toFlatHeaders(pendingLoadTestRequest.headers),
+						body: bodyPayload,
+						auth: { ...pendingLoadTestRequest.auth },
+						// Same redirect policy the single-request Send uses, so a
+						// load test measures the same hops the user sees.
+						followRedirects: pendingLoadTestRequest.followRedirects,
+						maxRedirects: pendingLoadTestRequest.maxRedirects,
+						// Same protocol the single-request Send uses, and always
+						// sent for the same reason - see the execute payload above.
+						// One control in the Settings tab governs both modes; the
+						// load dialog decides load shape, not request semantics.
+						httpVersion: pendingLoadTestRequest.httpVersion,
+						// The collection chain's test scripts too. Load runs only ever
+						// validated the request's own, so a collection-level assertion
+						// passed in design mode and was never checked under load.
+						// Scripts ride through composition untouched - the engine
+						// never interpolates script text.
+						tests: scriptParts(
+							collectionAncestors,
+							(c) => c.postRequestScript,
+							fetchedRequest.id,
+							pendingLoadTestRequest.testScript
+						),
+					},
+					collectionId: fetchedRequest.collectionId,
+					environmentId: activeEnvironmentId || undefined,
+				});
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
-					method: pendingLoadTestRequest.method,
-					url: resolvedUrl,
-					headers: resolvedHeaders,
-					body: bodyPayload,
-					auth: loadTestAuth,
-					// Same redirect policy the single-request Send uses, so a
-					// load test measures the same hops the user sees.
-					followRedirects: pendingLoadTestRequest.followRedirects,
-					maxRedirects: pendingLoadTestRequest.maxRedirects,
-					// Same protocol the single-request Send uses, and always
-					// sent for the same reason - see the execute payload above.
-					// One control in the Settings tab governs both modes; the
-					// load dialog decides load shape, not request semantics.
-					httpVersion: pendingLoadTestRequest.httpVersion,
+					...(composed as unknown as StartLoadTestRequest),
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
@@ -463,15 +436,6 @@ export default function RequestBuilder() {
 					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
-					// The collection chain's test scripts too. Load runs only ever
-					// validated the request's own, so a collection-level assertion
-					// passed in design mode and was never checked under load.
-					tests: scriptParts(
-						collectionAncestors,
-						(c) => c.postRequestScript,
-						fetchedRequest.id,
-						pendingLoadTestRequest.testScript
-					),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);
@@ -520,8 +484,7 @@ export default function RequestBuilder() {
 			startRun,
 			openTab,
 			showToast,
-			resolveString,
-			resolveObject,
+			engineComposeRequest,
 			collectionAncestors,
 		]
 	);

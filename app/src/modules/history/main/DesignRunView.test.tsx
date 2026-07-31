@@ -36,8 +36,28 @@ import type { Run, Request } from "@/types";
 const updateRequest = vi.fn();
 const executeRequest = vi.fn();
 
+/**
+ * Identity composition, as the engine's `POST /compose` behaves for an inline
+ * request with nothing to resolve: the request echoed back, an empty auth
+ * (`none`/`noauth`/unresolvable `inherit`) dropped, the environmentId
+ * attached. Composition semantics are engine-owned since #226 and asserted by
+ * request_composer_test.cpp; what this file asserts is that the view hands
+ * compose the replay state and executes the composed payload unchanged.
+ */
+const composeRequest = vi.fn(
+	(body: { request?: Record<string, unknown>; environmentId?: string }) => {
+		const composed: Record<string, unknown> = { ...(body.request ?? {}) };
+		const auth = composed.auth as { mode?: string } | undefined;
+		if (!auth?.mode || ["none", "noauth", "inherit"].includes(auth.mode)) {
+			delete composed.auth;
+		}
+		if (body.environmentId !== undefined) composed.environmentId = body.environmentId;
+		return Promise.resolve(composed);
+	}
+);
+
 vi.mock("@/hooks/useEngine", () => ({
-	useEngine: () => ({ executeRequest }),
+	useEngine: () => ({ executeRequest, composeRequest }),
 }));
 
 // The live request behind the run. `null` is the "request was deleted" case.

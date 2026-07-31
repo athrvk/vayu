@@ -156,12 +156,13 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   one of the three scoped setters instead. The read half (`get`/`has`/`toObject`)
   is supported - see above
 - `replaceIn(...)` on any scope - `{{name}}` interpolation of an arbitrary string.
-  The engine does no `{{var}}` interpolation at all (it is resolved app-side
-  before the payload arrives), so there is nothing to expose
+  Interpolation happens at compose time (`POST /compose`), before any script
+  runs; the resolver is engine-side since #226 but deliberately not yet wired
+  into the sandbox
 - `pm.environment.name` - the active environment's name
 - **Dynamic variables in scripts** - `pm.variables.get("$guid")`,
   `$timestamp`, `$random*` and the rest resolve only in `{{…}}` interpolation,
-  which happens app-side before the payload reaches the engine. A script that
+  which happens at compose time, before any script runs. A script that
   wants a generated value has to write the JavaScript for it. The supported set
   and the reasoning are in
   [variable resolution](./variable-resolution.md#dynamic-variables)
@@ -210,11 +211,11 @@ pm.request.body = JSON.stringify({ n: 2 });
   boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
   `preScriptError`, which the response pane's Console tab shows.
 - **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
-  **app-side, before** the payload reaches the engine
-  (`app/src/modules/request-builder/index.tsx`, `resolveString(request.url)`), whereas the
-  pre-request script runs **later, in the engine**. So `pm.environment.set("host", …)` with
+  at **compose time** (`POST /compose`, engine-side since #226), whereas the
+  pre-request script runs **later**, at execute. So `pm.environment.set("host", …)` with
   a `{{host}}` in the URL affects subsequent runs only - assign `pm.request.url` to change
-  this one.
+  this one. Keeping this order (rather than adopting Postman's script-first one) was
+  #226's decision D1: today's semantics preserved, divergence documented.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 
@@ -259,11 +260,12 @@ its object throws rather than answering as though the header were missing.
 ### TODO (future)
 
 "Set a variable in a pre-request script and have it change the outgoing URL" still does not
-work, and cannot until variable resolution moves (or is duplicated) into the engine and runs
-**after** the pre-request script instead of entirely app-side beforehand. That means sending
-the _unresolved_ URL/headers plus the variable maps to the engine and interpolating `{{…}}`
-in C++ post-script (and applying the same to the load-test path) - a deliberate change in
-resolution ownership, deferred for now (`docs/plans/pending-backlog.md` → **A1**).
+work. Resolution ownership *did* move into the engine (#226 - `POST /compose`
+interpolates), but interpolation deliberately stayed **before** the pre-request
+script (decision D1: today's semantics, not Postman's script-first order).
+Adopting Postman's order is now an engine-side re-ordering rather than an
+ownership change - possible, but a separate, deliberate compatibility decision
+with its own tests.
 
 ---
 

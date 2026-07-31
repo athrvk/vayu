@@ -40,13 +40,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { RequestBuilderProvider } from "@/modules/request-builder/context";
 import RequestBuilderLayout from "@/modules/request-builder/components/RequestBuilderLayout";
-import { useRequestQuery, useCollectionAncestors, isRequestNotFound, queryKeys } from "@/queries";
-import { useEngine, useVariableResolver } from "@/hooks";
+import { useRequestQuery, isRequestNotFound, queryKeys } from "@/queries";
+import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import { resolveAuthForSend } from "@/modules/request-builder/utils/auth-resolution";
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
@@ -64,7 +63,8 @@ interface DesignRunViewProps {
 }
 
 export default function DesignRunView({ run }: DesignRunViewProps) {
-	const { executeRequest: engineExecuteRequest } = useEngine();
+	const { executeRequest: engineExecuteRequest, composeRequest: engineComposeRequest } =
+		useEngine();
 	const { activeEnvironmentId } = useSessionStore();
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
@@ -112,12 +112,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	// other settled error is a transport failure that must not seed at all.
 	const requestLookupFailed = requestLookupErrored && !isRequestNotFound(requestLookupError);
 
-	const collectionAncestors = useCollectionAncestors(liveRequest?.collectionId);
-	const { resolveString, resolveObject } = useVariableResolver({
-		collectionId: liveRequest?.collectionId || undefined,
-	});
-
 	const seed = useMemo(() => seedFromRun(run, liveRequest ?? null), [run, liveRequest]);
+	const liveCollectionId = liveRequest?.collectionId;
 
 	/*
 	 * Memoized because the provider reads it in an effect, not only in a
@@ -160,35 +156,26 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const handleExecute = useCallback(
 		async (request: RequestState): Promise<ResponseState | null> => {
 			try {
-				const resolvedUrl = resolveString(request.url);
-
 				const headersRecord = toFlatHeaders(request.headers);
 				headersRecord["X-Request-ID"] = generateUUID();
 				const version =
 					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
 				headersRecord["X-Vayu-Version"] = version;
 
-				const resolvedHeaders = Object.fromEntries(
-					Object.entries(headersRecord).map(([key, value]) => [
-						resolveString(key),
-						resolveString(value),
-					])
-				);
-				// Shared with the builder's own send path - see execute-mapping.ts
-				const execBody = buildExecBody(request, resolveString);
+				// Shared with the builder's own send path - see execute-mapping.ts.
+				// Raw: the engine resolves {{variables}} and inherit auth at compose
+				// time (#226), against *today's* variables and chain - which is what
+				// a replay has always meant here (D14). The detached copy is exactly
+				// why replay uses the inline compose shape: there is no saved row
+				// behind an edited copy for a by-id compose to load.
+				const execBody = buildExecBody(request, (s) => s);
 
 				/*
-				 * Auth is resolved fresh from the saved request, using the same
-				 * helpers the builder uses - not a third copy of the rules.
 				 * When the request is gone there is nothing to resolve: the seed
-				 * put the recorded `Authorization` into the headers above, so the
-				 * replay goes out exactly as it ran.
+				 * put the recorded `Authorization` into the headers above and
+				 * `auth: { mode: "none" }` on the copy, so the replay goes out
+				 * exactly as it ran - the engine drops a none-auth at compose.
 				 */
-				const rawAuth = resolveAuthForSend(request.auth, collectionAncestors);
-				const execAuth = rawAuth
-					? (resolveObject(rawAuth) as Record<string, unknown>)
-					: undefined;
-
 				const preScriptParts = replayParts(
 					seed.collectionPreScripts,
 					seed.legacyPreScript,
@@ -200,13 +187,13 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					request.testScript
 				);
 
-				const result = await engineExecuteRequest(
-					{
+				const composed = await engineComposeRequest({
+					request: {
 						method: request.method,
-						url: resolvedUrl,
-						headers: resolvedHeaders,
+						url: request.url,
+						headers: headersRecord,
 						body: execBody,
-						auth: execAuth,
+						auth: { ...request.auth },
 						preRequestScripts: preScriptParts,
 						postRequestScripts: postScriptParts,
 						// Always sent, never elided - the engine defaults to
@@ -218,6 +205,16 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// actually used (seeded by design-run-seed.ts), not
 						// whatever the engine would default to.
 						httpVersion: request.httpVersion,
+					},
+					// Scopes the inherit walk and the variable chain; undefined for
+					// an orphaned run, which resolves against environment + globals.
+					collectionId: liveCollectionId,
+					environmentId: activeEnvironmentId || undefined,
+				});
+
+				const result = await engineExecuteRequest(
+					{
+						...composed,
 						// Files the new run under the same request, so a resend
 						// lands beside the run it came from.
 						...(run.requestId ? { requestId: run.requestId } : {}),
@@ -273,11 +270,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 			seed,
 			run.requestId,
 			replayParts,
+			engineComposeRequest,
 			engineExecuteRequest,
 			activeEnvironmentId,
-			resolveString,
-			resolveObject,
-			collectionAncestors,
+			liveCollectionId,
 			queryClient,
 			showToast,
 		]

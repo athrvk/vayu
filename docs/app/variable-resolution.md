@@ -4,6 +4,24 @@ Vayu resolves `{{variableName}}` placeholders at request-execution time using a 
 priority system. Higher-priority layers override lower ones; within each layer the last
 write wins.
 
+**Where resolution runs (since issue #226):** the **engine** owns
+execution-time resolution - `POST /compose` interpolates and resolves
+`inherit` auth, and every client executes the composed result
+(`engine/src/http/request_composer.cpp`). The renderer keeps a **preview-only**
+copy of the same rules (`app/src/lib/variable-resolution.ts`, consumed by
+`useVariableResolver`) for tab titles, previews and the unresolved-token
+painting. The rules on this page are the contract both implement, pinned by
+the shared conformance fixture
+(`engine/tests/fixtures/variable-resolution-conformance.json`), which the
+engine's gtest suite and the renderer's vitest suite both drive.
+
+**Malformed stored data (the D17 rules, decided in #226).** A definition whose
+`enabled` is **absent** (or not a boolean) counts as **enabled** - only an
+explicit `enabled: false` disables. A **non-string stored `value`** reads as
+the empty string. One rule, both sides: the engine enforces it in
+`parse_variables`, the renderer in `lib/variable-resolution.ts`, and the
+fixture varies both fields so a divergence cannot hide.
+
 ## Priority order (lowest → highest)
 
 ```
@@ -99,18 +117,21 @@ in the list, "last" and "wins" are different things.
 collection the winning value came from (absent for `global`), so the popover can
 say *which* environment rather than just "Environment".
 
-### The MCP copy
+### The engine implementation
 
-`app/electron/mcp/resolve.ts` duplicates resolution for the MCP client and is
-**deliberately not** given `getVariableOrigins`. The rule in `CLAUDE.md` is that
-the two copies move together when *semantics* change; these have not - the
-winner is still the last enabled definition in the same precedence order. The
-origins list is display metadata, and MCP renders nothing.
+`engine/src/http/request_composer.cpp` is the execution-time implementation of
+this page (`build_variable_values` + `resolve_template`), reached through
+`POST /compose`. It has no `getVariableOrigins` analogue - the origins list is
+display metadata, and execution has no use for losers. MCP no longer carries a
+copy at all: it composes via the engine and its old `resolve.ts` port is
+deleted (#226).
 
-The resolved map is then used by `resolveString(input)` which replaces all
-`{{name}}` occurrences. An ordinary name nothing defines resolves to the **empty
-string** - the token disappears from the outgoing request. A `{{$name}}` is the
-exception; see below.
+The resolved map is then used by `resolveString(input)` (preview) and
+`resolve_template` (engine) which replace all `{{name}}` occurrences. An
+ordinary name nothing defines resolves to the **empty string** - the token
+disappears from the outgoing request. A `{{$name}}` is the exception; see
+below. Resolution is a **single pass**: a value that itself contains
+`{{other}}` stays literal, and there is no way to escape a literal `{{`.
 
 ---
 
@@ -154,26 +175,30 @@ Three rules decide what happens at a token:
 
 ### What this does not cover
 
-**Scripts.** `pm.variables.get("$guid")` does **not** work. Interpolation happens
-app-side, before the payload reaches the engine; scripts run engine-side, and the
-engine does no `{{…}}` interpolation at all. Generating a value in a script means
-writing the JavaScript for it. See
+**Scripts.** `pm.variables.get("$guid")` does **not** work. Interpolation
+happens at compose time, strictly before any script runs, and script *text* is
+never interpolated - a `{{…}}` inside a script is user JavaScript, and
+rewriting it could not tell a string literal from code (#226, D16). Generating
+a value in a script means writing the JavaScript for it. Now that resolution
+is engine-side the machinery for `pm.variables.get("$guid")` / `replaceIn()`
+exists, but wiring it into the sandbox is deliberately separate work. See
 [pm API compatibility](./pm-api-compatibility.md).
 
-**Load runs generate once, not per iteration.** A run's payload is interpolated
-once, here, and then sent to the engine, which repeats it - so every request in
-the run carries the *same* `{{$guid}}`. The load-test dialog says so when the
-request contains one. Per-iteration values would require the engine to do the
-interpolation, which is deferred backlog item **A1**
-(`docs/plans/pending-backlog.md`); this feature deliberately does not start it.
+**Load runs generate once, not per iteration.** A run's request half is
+composed once (`POST /compose`) and then handed to the engine, which repeats
+it - so every request in the run carries the *same* `{{$guid}}`. The load-test
+dialog says so when the request contains one. Per-iteration values would mean
+interpolating on the load generator's hot path (which targets 60k+ RPS), and
+were deliberately kept out of #226's scope.
 
-### The MCP copy
+### The engine copy of the table
 
-`app/electron/mcp/dynamic-variables.ts` is a duplicate of the table for the MCP
-client, which shares no module graph with `app/src/`. It is the same deliberate
-duplication as the rest of resolution: **the two must change together**, and
-`electron/mcp/resolve.test.ts` compares the two name sets so a name added to one
-copy fails the suite.
+`engine/src/http/request_composer.cpp` carries the C++ generator table that
+actually executes; the renderer's `lib/dynamic-variables.ts` drives
+autocomplete and preview. **The two must list the same names**: the
+conformance fixture pins the name set, and both suites compare their table
+against it, so a name added to one side fails the other side's suite. (MCP's
+`dynamic-variables.ts` copy is deleted - MCP composes via the engine.)
 
 ---
 
@@ -181,9 +206,12 @@ copy fails the suite.
 
 When a request's auth mode is `"inherit"`, Vayu walks the collection ancestor chain
 **leaf-first** (most specific wins) and uses the first collection that defines auth.
-The walk lives in `resolveAuthSource`
-(`modules/request-builder/utils/auth-resolution.ts`) and is resolved in
-`RequestBuilder` before sending to the engine:
+The walk that decides what is *sent* lives in the engine
+(`request_composer.cpp::resolve_inherited_auth`, reached via `POST /compose`);
+the renderer keeps `resolveAuthSource`
+(`modules/request-builder/utils/auth-resolution.ts`) for the UI that *explains*
+inheritance (`InheritanceChain`, `AuthInheritBanner`, the load dialog's OAuth
+guard) - the two must agree on this walk:
 
 ```
 Users auth  →  checked first  (leaf, most specific)
@@ -203,13 +231,16 @@ differently:
 and collapsing it into `none` meant an imported No Auth folder's requests silently
 regained the parent collection's credentials. A collection *below* a `noauth` one
 may still define its own auth - termination is about what is inherited, not a lock
-on the subtree. The MCP server resolves auth the same way in
-`electron/mcp/resolve.ts` (`composeAuth`); the two copies must change together.
+on the subtree. Engine gtest (`request_composer_test.cpp`) covers the
+terminator; an unresolved `inherit` that somehow reaches `POST /execute`
+directly is treated as no auth and logged as a warning.
 
 If no ancestor defines auth the request executes without auth.
 
-Auth variable placeholders (e.g. `{{bearer_token}}`) are resolved through the same
-variable map before the value is sent to the engine.
+Auth variable placeholders (e.g. `{{bearer_token}}`) are resolved through the
+same variable map inside the winning block at compose time - deliberately
+**before** any OAuth 2.0 token cache key is derived from the config, so two
+environments whose configs differ only through `{{vars}}` never share a token.
 
 ---
 
@@ -235,21 +266,34 @@ composition boundary* for the wire shape.
 
 ### Reading a variable from a script
 
-A script does not see `{{name}}` - those are already resolved by the time the
-payload reaches the engine, and that includes the dynamic variables above:
-`pm.variables.get("$guid")` is not a thing Vayu supports. It reads a scope by name (`pm.environment.get`,
+A script does not see `{{name}}` - those are resolved at compose time,
+strictly **before** any script runs, and that includes the dynamic variables
+above: `pm.variables.get("$guid")` is not a thing Vayu supports. A consequence
+worth stating plainly (#226, decision D1): `pm.environment.set("token", …)` in
+a **pre-request script cannot affect `{{token}}` in the same send's URL** -
+the URL arrived already resolved. That is today's semantics preserved
+deliberately; Postman resolves after the pre-request script, so this is a
+known compatibility divergence. A script that must change what is sent edits
+`pm.request` directly (the write-back is applied to the outgoing request).
+
+A script reads a scope by name (`pm.environment.get`,
 `pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
 `pm.variables.get`, which walks **environment → collection → global** and stops
 at the first scope that has the name enabled - this page's priority order, read
 from the top down.
 
-One difference to know about: the script side has a single collection scope, and
-the engine fills it from the request's **immediate parent collection only**
-(`execution.cpp`, where `collectionVariables` is loaded). The chain merge
-described above is done app-side for `{{name}}`, so a variable defined on an
-ancestor collection is visible to `{{name}}` and *not* to
-`pm.collectionVariables.get` / `pm.variables.get`. Read such a value from the
-environment or globals, or define it on the request's own collection. See
+One difference to know about, kept deliberately in #226 (decision D2): the
+script side has a single collection scope, and the engine fills it from the
+request's **immediate parent collection only** (`execution.cpp`, where
+`collectionVariables` is loaded). The chain merge described above applies to
+`{{name}}` (at compose time), so a variable defined on an ancestor collection
+is visible to `{{name}}` and *not* to `pm.collectionVariables.get` /
+`pm.variables.get`. Closing the gap was considered and rejected for now:
+scripts write `collectionVariables` back to the immediate parent
+(`persist_script_variables`), so merging the chain into that scope would copy
+ancestor variables down into the leaf collection on the next script write.
+Read such a value from the environment or globals, or define it on the
+request's own collection. See
 [pm API compatibility](./pm-api-compatibility.md) and
 [scripting.md](../engine/scripting.md#variables-pmvariables).
 
