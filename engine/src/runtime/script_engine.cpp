@@ -53,17 +53,6 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
-// Compatibility macros for QuickJS vs QuickJS-NG API differences
-#ifdef _WIN32
-// QuickJS-NG (Windows): JS_IsArray takes 1 arg, JS_NewClassID takes 2 args
-#define QJS_IsArray(ctx, val) JS_IsArray (val)
-#define QJS_NewClassID(rt, pclass_id) JS_NewClassID (rt, pclass_id)
-#else
-// Original QuickJS (Unix): JS_IsArray takes 2 args, JS_NewClassID takes 1 arg
-#define QJS_IsArray(ctx, val) JS_IsArray (ctx, val)
-#define QJS_NewClassID(rt, pclass_id) JS_NewClassID (pclass_id)
-#endif
-
 #endif
 
 namespace vayu::runtime {
@@ -736,7 +725,7 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         std::string str    = js_to_string (ctx, state->actual);
         std::string substr = js_to_string (ctx, argv[0]);
         includes           = str.find (substr) != std::string::npos;
-    } else if (QJS_IsArray (ctx, state->actual)) {
+    } else if (JS_IsArray (state->actual)) {
         JSValue length = JS_GetPropertyStr (ctx, state->actual, "length");
         uint32_t len;
         JS_ToUint32 (ctx, &len, length);
@@ -944,7 +933,7 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
     bool is_empty = false;
     if (JS_IsString (state->actual)) {
         is_empty = js_to_string (ctx, state->actual).empty ();
-    } else if (QJS_IsArray (ctx, state->actual)) {
+    } else if (JS_IsArray (state->actual)) {
         JSValue length = JS_GetPropertyStr (ctx, state->actual, "length");
         uint32_t len   = 0;
         JS_ToUint32 (ctx, &len, length);
@@ -1084,7 +1073,7 @@ JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst*
         type_name = "null";
     } else if (JS_IsUndefined (state->actual)) {
         type_name = "undefined";
-    } else if (QJS_IsArray (ctx, state->actual)) {
+    } else if (JS_IsArray (state->actual)) {
         type_name = "array";
     } else if (JS_IsString (state->actual)) {
         type_name = "string";
@@ -1163,7 +1152,7 @@ JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 // quietly accepts anything is the false-pass this series exists to remove.
 
 JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1 || !QJS_IsArray (ctx, argv[0])) {
+    if (argc < 1 || !JS_IsArray (argv[0])) {
         return JS_ThrowTypeError (ctx, "oneOf() requires an array of candidates");
     }
 
@@ -1216,7 +1205,7 @@ JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     }
 
     std::vector<std::string> expected;
-    if (argc == 1 && QJS_IsArray (ctx, argv[0])) {
+    if (argc == 1 && JS_IsArray (argv[0])) {
         JSValue length_val = JS_GetPropertyStr (ctx, argv[0], "length");
         uint32_t len       = 0;
         JS_ToUint32 (ctx, &len, length_val);
@@ -1256,7 +1245,7 @@ JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
 }
 
 JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1 || !QJS_IsArray (ctx, argv[0])) {
+    if (argc < 1 || !JS_IsArray (argv[0])) {
         return JS_ThrowTypeError (ctx, "members() requires an array");
     }
 
@@ -1264,7 +1253,7 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     if (!state) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
-    if (!QJS_IsArray (ctx, state->actual)) {
+    if (!JS_IsArray (state->actual)) {
         return JS_ThrowTypeError (ctx, "members() requires the target to be an array");
     }
 
@@ -2381,7 +2370,7 @@ const char* js_type_name (JSContext* ctx, JSValueConst value) {
         return "string";
     if (JS_IsFunction (ctx, value))
         return "function";
-    if (QJS_IsArray (ctx, value))
+    if (JS_IsArray (value))
         return "array";
     if (JS_IsObject (value))
         return "object";
@@ -2547,7 +2536,7 @@ read_header_pair_args (JSContext* ctx, const char* member, int argc, JSValueCons
     }
 
     if (argc == 1 && JS_IsObject (argv[0]) && !JS_IsFunction (ctx, argv[0]) &&
-    !QJS_IsArray (ctx, argv[0])) {
+    !JS_IsArray (argv[0])) {
         JSValue js_key   = JS_GetPropertyStr (ctx, argv[0], "key");
         JSValue js_value = JS_GetPropertyStr (ctx, argv[0], "value");
         JSValueConst pair[2]{ js_key, js_value };
@@ -2836,7 +2825,7 @@ class ScopedValue {
 // @return why the headers were rejected, or nullopt when `out` is filled.
 std::optional<std::string>
 read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) {
-    if (!JS_IsObject (js_headers) || QJS_IsArray (ctx, js_headers) ||
+    if (!JS_IsObject (js_headers) || JS_IsArray (js_headers) ||
     JS_IsFunction (ctx, js_headers)) {
         return "pm.request.headers must be an object, got " +
         std::string (js_type_name (ctx, js_headers));
@@ -3473,14 +3462,14 @@ class ScriptEngine::Impl {
 
         // Register Expectation class
         if (expect_class_id == 0) {
-            QJS_NewClassID (rt, &expect_class_id);
+            JS_NewClassID (rt, &expect_class_id);
         }
         JS_NewClass (rt, expect_class_id, &expect_class);
 
         // Register the pm.response.to.* chain class, whose exotic hook makes an
         // unknown assertion throw instead of silently evaluating to undefined.
         if (response_chain_class_id == 0) {
-            QJS_NewClassID (rt, &response_chain_class_id);
+            JS_NewClassID (rt, &response_chain_class_id);
         }
         JS_NewClass (rt, response_chain_class_id, &response_chain_class);
 

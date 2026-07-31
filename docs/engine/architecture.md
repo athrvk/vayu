@@ -178,9 +178,13 @@ JavaScript execution engine for pre-request and test scripts:
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access
 
-**Platform Support:**
-- **Linux/macOS**: Original QuickJS
-- **Windows**: QuickJS-NG (MSVC-compatible fork)
+**Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
+maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
+CMake on all three platforms. Until #226's review, Linux/macOS ran Bellard's
+original QuickJS while Windows ran NG (the original does not compile under
+MSVC) - two interpreters behind one `pm.*` surface, so an engine-level
+behaviour difference was a Windows-vs-Unix script divergence. The original
+copy is deleted.
 
 ### Auth Resolution & OAuth 2.0
 
