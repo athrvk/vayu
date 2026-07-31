@@ -20,6 +20,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 type Handler = (arg: unknown) => void;
 
@@ -175,6 +180,35 @@ describe("checkForUpdatesNow", () => {
 		);
 		await expect(ipcHandlers.get("update:check")?.(null)).resolves.toMatchObject({
 			status: "unavailable",
+		});
+	});
+});
+
+describe("the macOS update instruction", () => {
+	// macOS never installs an update in-app - an ad-hoc signature gives
+	// Squirrel.Mac nothing to verify, so the strategy is "notify" and the
+	// notification hands the user a command to paste. That command is therefore
+	// the whole macOS update path, and it lives in two places: here and the
+	// README. When the installer moved to the docs site the README was updated
+	// and this string was not, because it is assembled from a template literal
+	// that no `raw.githubusercontent.com/athrvk` grep can see.
+	const readme = readFileSync(join(here, "..", "..", "README.md"), "utf8");
+	const documented = readme.match(/^bash -c "\$\(curl -fsSL \S+install\.sh\)"$/m)?.[0];
+
+	it("finds a command in the README to compare against", () => {
+		// Without this the assertion below passes vacuously if the README's
+		// macOS section is ever reworded past the pattern.
+		expect(documented).toMatch(/install\.sh/);
+	});
+
+	it("hands macOS users exactly the command the README publishes", async () => {
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(win);
+		const pending = checkForUpdatesNow("renderer");
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		await expect(pending).resolves.toMatchObject({
+			strategy: "notify",
+			installCommand: documented,
 		});
 	});
 });

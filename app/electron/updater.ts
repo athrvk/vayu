@@ -19,9 +19,20 @@ function releaseUrl(version: string): string {
 	return `https://github.com/${REPO}/releases/tag/v${version}`;
 }
 
-/** One-liner that re-runs the ad-hoc-signing installer on macOS. */
+/**
+ * One-liner that re-runs the ad-hoc-signing installer on macOS.
+ *
+ * This *is* the macOS update mechanism - the strategy is "notify" because an
+ * ad-hoc signature gives Squirrel.Mac nothing to verify - so it has to stay
+ * byte-identical to the command README.md documents, which
+ * `updater.test.ts` asserts by reading the README.
+ *
+ * Not built from `REPO`: the script is served by the docs site (published from
+ * the repo root by .github/hooks/install_script.py), which has no owner/repo in
+ * its path.
+ */
 function macInstallCommand(): string {
-	return `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh)"`;
+	return `bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"`;
 }
 
 export interface UpdateAvailablePayload {
