@@ -406,6 +406,25 @@ done
 (VAYU_DRYRUN=1 confirm 'unused') || fail "a dry run should never block on a prompt"
 (VAYU_DRYRUN=0 VAYU_ASSUME_YES=1 confirm 'unused') || fail "VAYU_ASSUME_YES should mean yes"
 
+# And the prompt itself, end to end. confirm() reads $VAYU_TTY rather than
+# stdin, so that the documented `bash -c "$(curl …)"` form works and a
+# `curl … | bash` cannot have its own script swallowed by the read - which also
+# makes the terminal substitutable here.
+printf 'n\n' >"$TMPROOT/answer-no"
+if (VAYU_DRYRUN=0 VAYU_TTY="$TMPROOT/answer-no" confirm 'Quit Vayu now?') then
+	fail "typing n at the prompt should decline"
+fi
+printf 'y\n' >"$TMPROOT/answer-yes"
+(VAYU_DRYRUN=0 VAYU_TTY="$TMPROOT/answer-yes" confirm 'Quit Vayu now?') \
+	|| fail "typing y at the prompt should accept"
+# Enter on its own is the documented default.
+printf '\n' >"$TMPROOT/answer-empty"
+(VAYU_DRYRUN=0 VAYU_TTY="$TMPROOT/answer-empty" confirm 'Quit Vayu now?') \
+	|| fail "an empty answer should take the default"
+# And the question has to actually reach the terminal.
+(VAYU_DRYRUN=0 VAYU_TTY="$TMPROOT/answer-yes" confirm 'Quit Vayu now?') >/dev/null 2>&1
+grep -q 'Quit Vayu now? \[Y/n\]' "$TMPROOT/answer-yes" || fail "the prompt should be written to the terminal"
+
 printf 'PASS: confirm parsing\n'
 
 # --- dry-run rendering -------------------------------------------------------

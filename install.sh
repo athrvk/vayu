@@ -54,6 +54,20 @@ LINUX_BIN_LINK="${HOME:-}/.local/bin/vayu"
 # whole 400MB image into the temp dir instead of the one file asked for.
 LINUX_ICON_URL="https://athrvk.github.io/vayu/images/vayu-icon.png"
 
+# --- seams for the end-to-end test ---
+# Not user-facing options. They exist so scripts/test/install_e2e.sh can perform
+# a real install - download, extract, place, relaunch, uninstall - against a
+# local release and a temporary root, instead of the tests only ever reading the
+# commands a dry run would have run. Every one of them defaults to the real
+# thing, so an ordinary run is unaffected.
+VAYU_RELEASE_BASE="${VAYU_RELEASE_BASE:-https://github.com/$REPO/releases/download}"
+VAYU_TTY="${VAYU_TTY:-/dev/tty}"
+if [ -n "${VAYU_ROOT:-}" ]; then
+	DEFAULT_INSTALL_DIR="$VAYU_ROOT/Applications"
+	INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+	APP_PATH="${INSTALL_DIR}/${APP_NAME}.app"
+fi
+
 MODE="install"
 PURGE=0
 FORCE=0
@@ -159,8 +173,7 @@ asset_name() {
 
 download_url() {
 	local version="$1"
-	printf 'https://github.com/%s/releases/download/v%s/%s' \
-		"$REPO" "$version" "$(asset_name "$version")"
+	printf '%s/v%s/%s' "$VAYU_RELEASE_BASE" "$version" "$(asset_name "$version")"
 }
 
 # Directories an existing Vayu could be in, most authoritative first.
@@ -188,12 +201,16 @@ search_dirs() {
 # no bundle, which is the common case. The `return 0` below never runs then, and
 # under `set -euo pipefail` the only reason this has not aborted is that every
 # caller wraps it in `$(…)`, where bash ignores errexit. Do not lean on that.
+# Deduplicated, keeping order: the two search directories collapse to one path
+# whenever $HOME is the root of the Applications directory, and the same bundle
+# listed twice reads as "installed in more than one place" and gets removed
+# twice on uninstall.
 existing_app_paths() {
 	search_dirs | while IFS= read -r dir; do
 		if [ -d "$dir/${APP_NAME}.app" ]; then
 			printf '%s\n' "$dir/${APP_NAME}.app"
 		fi
-	done
+	done | awk '!seen[$0]++'
 	return 0
 }
 
@@ -235,11 +252,15 @@ resolve_install_target() {
 # nobody to ask, so the default stands and the caller says what it is doing.
 confirm() {
 	local prompt="$1" reply=""
-	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
-	[ "${VAYU_ASSUME_YES:-0}" = "1" ] && return 0
-	[ -r /dev/tty ] || return 0
-	printf '%s [Y/n] ' "$prompt" >/dev/tty
-	read -r reply </dev/tty || return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ] || [ "${VAYU_ASSUME_YES:-0}" = "1" ]; then
+		return 0
+	fi
+	[ -r "$VAYU_TTY" ] || return 0
+	# Appended, not truncating. On a terminal the two are identical - it is a
+	# character device - but VAYU_TTY lets the tests point this at a file, and
+	# `>` would erase the answer before the read below could see it.
+	printf '%s [Y/n] ' "$prompt" >>"$VAYU_TTY"
+	read -r reply <"$VAYU_TTY" || return 0
 	if reply_is_no "$reply"; then
 		return 1
 	fi
@@ -324,9 +345,13 @@ exclude_own_processes() {
 # not sit here for the timeout.
 wait_for_exit() {
 	local limit="$1" waited=0
-	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
 	while [ -n "$(running_pids)" ]; do
-		[ "$waited" -ge "$limit" ] && return 1
+		if [ "$waited" -ge "$limit" ]; then
+			return 1
+		fi
 		sleep 1
 		waited=$((waited + 1))
 	done
@@ -436,12 +461,16 @@ installed_version() {
 # 150MB to arrive at the same bundle. --force is the escape hatch for a repair.
 should_skip_install() {
 	local installed="$1" target="$2" force="$3"
-	[ "$force" = "1" ] && return 1
+	if [ "$force" = "1" ]; then
+		return 1
+	fi
 	[ -n "$installed" ] && [ "$installed" = "$target" ]
 }
 
 require_supported_os() {
-	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
 	local tool
 	# Both platforms read $HOME - macOS for the data directories it reports on
 	# uninstall, Linux for everything - and `set -u` turns an unset one into a
@@ -482,7 +511,9 @@ require_supported_os() {
 # authorize, and asking would be a password prompt for nothing.
 preauthorize() {
 	[ "$(platform)" = "Darwin" ] || return 0
-	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
 	printf 'Vayu installs to %s and needs administrator access.\n' "$INSTALL_DIR"
 	sudo -v || { printf 'Authorization failed - aborting.\n' >&2; return 1; }
 	# Tied to this script's lifetime explicitly. Each `sudo -n true` *refreshes*
@@ -520,7 +551,9 @@ download_asset() {
 		return 1
 	fi
 
-	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
 	# Best effort by design: only the macOS zip publishes a .sha256, so a
 	# missing sidecar is the normal Linux case and cannot be told apart from a
 	# failed fetch. A sidecar that *is* fetched and disagrees is fatal.
@@ -762,7 +795,7 @@ do_install() {
 		# closed terminal, or a declined password would otherwise leave the temp
 		# dir, a part-downloaded file beside the app, and a sudo keep-alive
 		# holding a passwordless timestamp open for this terminal.
-		trap 'rm -rf "$workdir"; rm -f "$staged"; [ -n "$KEEPALIVE_PID" ] && kill "$KEEPALIVE_PID" 2>/dev/null' EXIT
+		trap 'rm -rf "$workdir"; rm -f "$staged"; if [ -n "$KEEPALIVE_PID" ]; then kill "$KEEPALIVE_PID" 2>/dev/null || true; fi' EXIT
 		trap 'exit 130' INT TERM HUP
 		preauthorize || exit 1
 
@@ -854,10 +887,15 @@ uninstall_linux() {
 	run rm -rf "$LINUX_APP_DIR"
 	run rm -f "$LINUX_DESKTOP_FILE"
 	run rm -f "$LINUX_ICON_FILE"
-	# Only if it points at the install this script made - someone may well have
-	# their own `vayu` on PATH, and deleting that would be a surprise.
-	if [ -L "$LINUX_BIN_LINK" ] && [ "$(readlink "$LINUX_BIN_LINK")" = "$LINUX_APP_BIN" ]; then
-		run rm -f "$LINUX_BIN_LINK"
+	# Only if it points at an install this script made - someone may well have
+	# their own `vayu` on PATH, and deleting that would be a surprise. Matched on
+	# the layout rather than on $LINUX_APP_BIN as computed right now, because
+	# XDG_DATA_HOME may have been set when the link was created and not when it
+	# is being removed, which used to leave it behind.
+	if [ -L "$LINUX_BIN_LINK" ]; then
+		case "$(readlink "$LINUX_BIN_LINK")" in
+			*/vayu/"${APP_NAME}.AppImage") run rm -f "$LINUX_BIN_LINK" ;;
+		esac
 	fi
 	if command -v update-desktop-database >/dev/null 2>&1; then
 		run_quiet update-desktop-database "$(dirname "$LINUX_DESKTOP_FILE")" || true

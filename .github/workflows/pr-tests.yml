@@ -130,6 +130,7 @@ jobs:
             installer:
               - 'install.sh'
               - 'scripts/test/install_test.sh'
+              - 'scripts/test/install_e2e.sh'
               - '.github/workflows/pr-tests.yml'
 
   app:
@@ -349,8 +350,18 @@ jobs:
       - name: Lint and test installer script
         shell: bash
         run: |
-          shellcheck install.sh scripts/test/install_test.sh
+          shellcheck install.sh scripts/test/install_test.sh scripts/test/install_e2e.sh
           bash scripts/test/install_test.sh
+
+      # The dry-run suite above asserts on the commands the installer would have
+      # run. This one runs it: a real download from a local release, a real
+      # extraction, placement, update and uninstall, into a temporary root. It
+      # is the only thing here that exercises ditto, codesign and the swap on
+      # macOS, or a genuine mv-into-place on Linux - and both bugs that made the
+      # Linux path unusable were invisible to a dry run.
+      - name: End-to-end install, update and uninstall
+        shell: bash
+        run: bash scripts/test/install_e2e.sh
 
       # `bash` on the macOS runner is Homebrew's 5.x, but a stock Mac has only
       # /bin/bash 3.2.57 - and the documented command resolves `bash` from PATH,
@@ -363,6 +374,7 @@ jobs:
         run: |
           /bin/bash --version | head -1
           /bin/bash scripts/test/install_test.sh
+          /bin/bash scripts/test/install_e2e.sh
 
   ci-gate:
     name: CI gate
