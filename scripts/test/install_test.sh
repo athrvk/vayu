@@ -3,7 +3,8 @@
 # this file works, and are disabled file-wide here rather than at 15 call sites.
 # The directives must precede the first command to apply to the whole file.
 # shellcheck disable=SC2034  # VAYU_TEST and VAYU_VERSION are read by the sourced installer
-# shellcheck disable=SC2329  # the stubs below are called by the installer, not from this file
+# shellcheck disable=SC2329,SC2317  # the stubs below are called by the installer, not from this file
+#   (the two codes are the same finding: 0.9/0.10 report it as SC2317, 0.11 as SC2329)
 set -euo pipefail
 
 # Source the installer (at repo root) in test mode so main() does not run.
@@ -489,7 +490,8 @@ download="$(echo "$out" | grep -n 'Downloading' | head -1 | cut -d: -f1)"
 last_quit="$(echo "$out" | grep -n 'QUIT-MARK' | tail -1 | cut -d: -f1)"
 swap="$(echo "$out" | grep -n 'sudo ditto' | head -1 | cut -d: -f1)"
 [ "$first_quit" -lt "$download" ] || fail "the first check belongs before the download"
-[ "$last_quit" -lt "$swap" ] && [ "$last_quit" -gt "$download" ] \
-	|| fail "the second check belongs after the download and before the bundle is replaced"
+if [ "$last_quit" -ge "$swap" ] || [ "$last_quit" -le "$download" ]; then
+	fail "the second check belongs after the download and before the bundle is replaced"
+fi
 
 printf 'PASS: running-app guard\n'
