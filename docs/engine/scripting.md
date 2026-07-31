@@ -396,18 +396,30 @@ Use pm.environment.set(), pm.collectionVariables.set() or pm.globals.set() to
 choose where the value is stored.
 ```
 
-`replaceIn()` - Postman's `{{name}}` interpolation of an arbitrary string - is
-still absent from every scope. Interpolation happens at compose time
-(`POST /compose`, `request_composer.cpp`), before any script runs, and the
-sandbox has not been wired to the resolver; now that the machinery is
-engine-side (#226) it *could* be, but that is deliberately separate work.
+**`pm.variables.replaceIn(template)`** - Postman's `{{name}}` interpolation of
+an arbitrary string - runs the same single-pass resolver `POST /compose` uses
+(`request_composer.cpp::resolve_template`), over the script's scopes in
+`pm.variables`' precedence, at **call time** - so a variable the script set a
+line earlier resolves, unlike `{{}}` in the URL, which was composed before the
+script started. Dynamic variables generate per occurrence:
 
-Likewise, **dynamic variables are not readable from a script.**
-`{{$guid}}`, `{{$timestamp}}` and the rest of the set in
+```javascript
+const id = pm.variables.replaceIn("{{$guid}}"); // fresh UUID v4
+```
+
+It exists only on the merged accessor - the scoped `replaceIn` variants stay
+absent - and its argument must be a string (a non-string is a `TypeError`).
+This is the one sanctioned way to `{{...}}` in a script: script *source* is
+never interpolated (issue #226, D16 - a rewrite cannot tell code from a string
+literal, and splicing values into source is an injection).
+
+**Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
+`{{$timestamp}}` and the rest of the set in
 [variable resolution](../app/variable-resolution.md#dynamic-variables) are
 generated while the payload is composed; by the time a script runs, that
 payload holds the generated *value* and no scope has ever heard of the name.
-`pm.variables.get("$guid")` reads as any other undefined name does.
+`pm.variables.get("$guid")` reads as any other undefined name does - reach the
+generators through `replaceIn`.
 
 ## Console Output
 

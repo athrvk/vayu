@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
@@ -185,7 +186,7 @@ JSValue js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         // Functions are left to JS_ToCString (which yields their source).
         if (JS_IsObject (argv[i]) && !JS_IsFunction (ctx, argv[i])) {
             JSValue indent = JS_NewInt32 (ctx, 2);
-            JSValue json   = JS_JSONStringify (ctx, argv[i], JS_UNDEFINED, indent);
+            JSValue json = JS_JSONStringify (ctx, argv[i], JS_UNDEFINED, indent);
             JS_FreeValue (ctx, indent);
 
             if (!JS_IsException (json) && !JS_IsUndefined (json)) {
@@ -302,8 +303,7 @@ bool js_strict_equal (JSContext* ctx, JSValueConst a, JSValueConst b) {
         js_to_string (ctx, a) == js_to_string (ctx, b);
     }
     if (JS_IsBool (a) || JS_IsBool (b)) {
-        return JS_IsBool (a) && JS_IsBool (b) &&
-        JS_ToBool (ctx, a) == JS_ToBool (ctx, b);
+        return JS_IsBool (a) && JS_IsBool (b) && JS_ToBool (ctx, a) == JS_ToBool (ctx, b);
     }
     if (JS_IsNull (a) || JS_IsNull (b)) {
         return JS_IsNull (a) && JS_IsNull (b);
@@ -409,7 +409,8 @@ bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::
 int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
     if (depth > kDeepEqualMaxDepth) {
         JS_ThrowRangeError (ctx,
-        "deep equality gave up after %d levels - the compared values are cyclic "
+        "deep equality gave up after %d levels - the compared values are "
+        "cyclic "
         "or too deeply nested",
         kDeepEqualMaxDepth);
         return -1;
@@ -483,8 +484,7 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
     }
 
     std::vector<std::string> a_keys, b_keys;
-    if (!js_own_enumerable_keys (ctx, a, a_keys) ||
-    !js_own_enumerable_keys (ctx, b, b_keys)) {
+    if (!js_own_enumerable_keys (ctx, a, a_keys) || !js_own_enumerable_keys (ctx, b, b_keys)) {
         return -1;
     }
     if (a_keys.size () != b_keys.size ()) {
@@ -568,11 +568,8 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
 
 // Shared body of `equal` and `eql`. `always_deep` is what separates them: `eql`
 // is deep whatever the chain said, `equal` is strict unless `deep` set the flag.
-JSValue expect_equality (JSContext* ctx,
-JSValueConst this_val,
-int argc,
-JSValueConst* argv,
-bool always_deep) {
+JSValue
+expect_equality (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, bool always_deep) {
     if (argc < 1) {
         return JS_ThrowTypeError (
         ctx, "%s() requires an argument", always_deep ? "eql" : "equal");
@@ -749,7 +746,7 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         // `JS_ToCString` forms, under which every object member matched every
         // object needle - both render as "[object Object]".
         for (uint32_t i = 0; i < len && !includes; i++) {
-            JSValue elem   = JS_GetPropertyUint32 (ctx, state->actual, i);
+            JSValue elem = JS_GetPropertyUint32 (ctx, state->actual, i);
             const int same = js_compare_for_chain (ctx, elem, argv[0], state->deep);
             JS_FreeValue (ctx, elem);
             if (same < 0) {
@@ -763,7 +760,8 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
     if (!pass) {
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
-        (state->negated ? " to not include " : " to include ") + js_describe (ctx, argv[0]);
+        (state->negated ? " to not include " : " to include ") +
+        js_describe (ctx, argv[0]);
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
@@ -807,10 +805,10 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    const std::string prop_name = js_to_string (ctx, argv[0]);
-    const std::vector<std::string> segments =
-    state->nested ? split_property_path (prop_name) :
-                    std::vector<std::string>{ prop_name };
+    const std::string prop_name             = js_to_string (ctx, argv[0]);
+    const std::vector<std::string> segments = state->nested ?
+    split_property_path (prop_name) :
+    std::vector<std::string>{ prop_name };
     if (segments.empty ()) {
         return JS_ThrowTypeError (ctx, "property() requires a property name");
     }
@@ -1182,7 +1180,8 @@ JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     bool found = false;
     for (uint32_t i = 0; i < len && !found; i++) {
         JSValue candidate = JS_GetPropertyUint32 (ctx, argv[0], i);
-        const int same = js_compare_for_chain (ctx, state->actual, candidate, state->deep);
+        const int same =
+        js_compare_for_chain (ctx, state->actual, candidate, state->deep);
         JS_FreeValue (ctx, candidate);
         if (same < 0) {
             return JS_EXCEPTION;
@@ -1363,8 +1362,9 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 
     const bool pass = state->negated ? !matches : matches;
     if (!pass) {
-        std::string msg = state->negated ? "Expected the function to not throw" :
-                                           "Expected the function to throw";
+        std::string msg = state->negated ?
+        "Expected the function to not throw" :
+        "Expected the function to throw";
         if (threw) {
             msg += ", but it threw " + thrown;
         }
@@ -1391,12 +1391,11 @@ JSValue expect_instance_of (JSContext* ctx, JSValueConst this_val, int argc, JSV
 
     const bool pass = state->negated ? (is_instance == 0) : (is_instance == 1);
     if (!pass) {
-        JSValue name_val      = JS_GetPropertyStr (ctx, argv[0], "name");
+        JSValue name_val            = JS_GetPropertyStr (ctx, argv[0], "name");
         const std::string ctor_name = js_to_string (ctx, name_val);
         JS_FreeValue (ctx, name_val);
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
-        (state->negated ? " to not be an instance of " : " to be an instance of ") +
-        ctor_name;
+        (state->negated ? " to not be an instance of " : " to be an instance of ") + ctor_name;
         return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
     }
 
@@ -1415,7 +1414,8 @@ JSValue expect_close_to (JSContext* ctx, JSValueConst this_val, int argc, JSValu
 
     double actual = 0, expected = 0, delta = 0;
     if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
-    JS_ToFloat64 (ctx, &expected, argv[0]) < 0 || JS_ToFloat64 (ctx, &delta, argv[1]) < 0) {
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0 ||
+    JS_ToFloat64 (ctx, &delta, argv[1]) < 0) {
         return JS_ThrowTypeError (ctx, "closeTo() requires numeric values");
     }
     if (std::isnan (actual) || std::isnan (expected) || std::isnan (delta)) {
@@ -1579,8 +1579,7 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
     JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_eql, "eql", 1));
     JS_SetPropertyStr (ctx, obj, "eqls", JS_NewCFunction (ctx, expect_eql, "eqls", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "oneOf", JS_NewCFunction (ctx, expect_one_of, "oneOf", 1));
+    JS_SetPropertyStr (ctx, obj, "oneOf", JS_NewCFunction (ctx, expect_one_of, "oneOf", 1));
     JS_SetPropertyStr (ctx, obj, "keys", JS_NewCFunction (ctx, expect_keys, "keys", 1));
     JS_SetPropertyStr (ctx, obj, "key", JS_NewCFunction (ctx, expect_keys, "key", 1));
     JS_SetPropertyStr (
@@ -2152,8 +2151,11 @@ constexpr StatusClassMatcher status_class_matchers[] = {
 // property: `pm.response.to.be.ok` is written without parentheses, so a
 // function-valued property would be a discarded reference that asserts nothing
 // (the defect ExpectTrueFalseAssertsOnAccess pins for pm.expect).
-JSValue js_response_be_status_class (
-JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+JSValue js_response_be_status_class (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -2227,8 +2229,10 @@ JSClassID response_chain_class_id = 0;
 // not cover them.
 constexpr const char* response_chain_passthrough[] = { "toJSON", "then" };
 
-int response_chain_unknown_member (
-JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
+int response_chain_unknown_member (JSContext* ctx,
+JSPropertyDescriptor* desc,
+JSValueConst obj,
+JSAtom prop) {
     (void)desc;
 
     // The opaque path doubles as the armed flag. Defining a property looks up
@@ -2261,7 +2265,7 @@ JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
 
     // Anything the prototype answers (toString, hasOwnProperty) is not an
     // assertion either; let the normal lookup continue to it.
-    JSValue proto      = JS_GetPrototype (ctx, obj);
+    JSValue proto = JS_GetPrototype (ctx, obj);
     const int on_proto = JS_IsObject (proto) ? JS_HasProperty (ctx, proto, prop) : 0;
     JS_FreeValue (ctx, proto);
     if (on_proto != 0) {
@@ -2399,9 +2403,12 @@ const char* js_type_name (JSContext* ctx, JSValueConst value) {
 // exists to avoid, and a shadowed method throws loudly instead.
 constexpr int HEADER_METHOD_FLAGS = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
 
-void define_header_entry (JSContext* ctx, JSValue headers, const std::string& name, const std::string& value) {
-    JS_DefinePropertyValueStr (
-    ctx, headers, name.c_str (), JS_NewString (ctx, value.c_str ()), JS_PROP_C_W_E);
+void define_header_entry (JSContext* ctx,
+JSValue headers,
+const std::string& name,
+const std::string& value) {
+    JS_DefinePropertyValueStr (ctx, headers, name.c_str (),
+    JS_NewString (ctx, value.c_str ()), JS_PROP_C_W_E);
 }
 
 bool header_names_equal (const std::string& a, const std::string& b) {
@@ -2477,13 +2484,14 @@ read_header_name_arg (JSContext* ctx, const char* member, int argc, JSValueConst
 
 // The same primitive set the write-back accepts, so a value that survives a
 // method call is a value that survives being sent.
-std::optional<std::string>
-read_header_value_arg (JSContext* ctx, const char* member, const std::string& name, JSValueConst value) {
+std::optional<std::string> read_header_value_arg (JSContext* ctx,
+const char* member,
+const std::string& name,
+JSValueConst value) {
     if (JS_IsString (value) || JS_IsNumber (value) || JS_IsBool (value)) {
         return js_to_string (ctx, value);
     }
-    JS_ThrowTypeError (ctx,
-    "headers.%s: value for '%s' must be a string, number or boolean, got %s",
+    JS_ThrowTypeError (ctx, "headers.%s: value for '%s' must be a string, number or boolean, got %s",
     member, name.c_str (), js_type_name (ctx, value));
     return std::nullopt;
 }
@@ -2556,14 +2564,16 @@ read_header_pair_args (JSContext* ctx, const char* member, int argc, JSValueCons
         return HeaderPair{ *name, *value };
     }
 
-    JS_ThrowTypeError (ctx,
-    "headers.%s takes ({ key, value }) or (name, value)", member);
+    JS_ThrowTypeError (ctx, "headers.%s takes ({ key, value }) or (name, value)", member);
     return std::nullopt;
 }
 
 // magic: 0 = add (refuses an existing name), 1 = upsert (replaces it).
-JSValue js_request_headers_add_or_upsert (
-JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+JSValue js_request_headers_add_or_upsert (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
     const bool is_upsert = magic == 1;
     const char* member   = is_upsert ? "upsert" : "add";
     if (!header_this_is_usable (ctx, this_val, member)) {
@@ -2626,10 +2636,12 @@ void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
         return;
     }
     JS_DefinePropertyValueStr (ctx, headers, "add",
-    JS_NewCFunctionMagic (ctx, js_request_headers_add_or_upsert, "add", 2, JS_CFUNC_generic_magic, 0),
+    JS_NewCFunctionMagic (
+    ctx, js_request_headers_add_or_upsert, "add", 2, JS_CFUNC_generic_magic, 0),
     HEADER_METHOD_FLAGS);
     JS_DefinePropertyValueStr (ctx, headers, "upsert",
-    JS_NewCFunctionMagic (ctx, js_request_headers_add_or_upsert, "upsert", 2, JS_CFUNC_generic_magic, 1),
+    JS_NewCFunctionMagic (ctx, js_request_headers_add_or_upsert, "upsert", 2,
+    JS_CFUNC_generic_magic, 1),
     HEADER_METHOD_FLAGS);
     JS_DefinePropertyValueStr (ctx, headers, "remove",
     JS_NewCFunction (ctx, js_request_headers_remove, "remove", 1), HEADER_METHOD_FLAGS);
@@ -2677,8 +2689,10 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     const size_t body_bytes = data->response->body.size ();
 
     JSValue size = JS_NewObject (ctx);
-    JS_SetPropertyStr (ctx, size, "body", JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes)));
-    JS_SetPropertyStr (ctx, size, "header", JS_NewInt64 (ctx, static_cast<int64_t> (header_bytes)));
+    JS_SetPropertyStr (
+    ctx, size, "body", JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes)));
+    JS_SetPropertyStr (
+    ctx, size, "header", JS_NewInt64 (ctx, static_cast<int64_t> (header_bytes)));
     JS_SetPropertyStr (ctx, size, "total",
     JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes + header_bytes)));
     return size;
@@ -3260,6 +3274,57 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     return snapshot;
 }
 
+// pm.variables.replaceIn - full `{{template}}` resolution of a string the
+// script opts in, at call time.
+//
+// This is the sanctioned way to `{{...}}` inside a script. Script *text* is
+// never interpolated (issue #226, D16: a rewrite cannot tell code from a
+// string literal, and splicing variable values into source is an injection);
+// replaceIn keeps values as data - the same single-pass resolver the engine's
+// POST /compose uses (`resolve_template`), so the semantics are identical:
+// scopes win over generators, a dynamic `{{$guid}}` generates per occurrence,
+// an unknown `$name` keeps its braces, an ordinary unknown name becomes "".
+//
+// Two deliberate differences from compose-time resolution, both consequences
+// of *when* this runs:
+//  - The map is built at call time from the script's scopes, so a variable
+//    set earlier in the same script resolves - unlike `{{}}` in the URL,
+//    which was composed before the script started (D1).
+//  - The collection scope is the script context's: the request's immediate
+//    parent only (the D2 asymmetry), with pm.variables' own precedence
+//    (environment > collection > globals). The raw stored string substitutes,
+//    never the typed value - matching `{{}}`, not pm.variables.get.
+//
+// Strict about its argument: a non-string is a TypeError rather than a
+// coerced "undefined" - the caller almost certainly holds a bug.
+JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx,
+        "pm.variables.replaceIn expects a string, e.g. "
+        "pm.variables.replaceIn(\"{{$guid}}\")");
+    }
+
+    const std::string input = js_to_string (ctx, argv[0]);
+    vayu::http::VariableValues values;
+    // Weakest scope first so a stronger one overwrites - the same walk
+    // toObject() does, and the same answer get() would give per name.
+    for (auto it = std::rbegin (variables_precedence);
+         it != std::rend (variables_precedence); ++it) {
+        Environment* variables = scope_variables (ctx, *it);
+        if (!variables) {
+            continue;
+        }
+        for (const auto& [key, variable] : *variables) {
+            if (variable.enabled) {
+                values[key] = variable.value;
+            }
+        }
+    }
+
+    return JS_NewString (ctx, vayu::http::resolve_template (input, values).c_str ());
+}
+
 // Postman's pm.variables.set writes to the *local* scope: alive for one
 // request, never stored. Vayu has no such scope, and neither substitute is
 // honest - writing to the environment persists a value the author expects to
@@ -3286,6 +3351,8 @@ void setup_pm_variables (JSContext* ctx, JSValue pm) {
     ctx, variables, "has", JS_NewCFunction (ctx, js_pm_variables_has, "has", 1));
     JS_SetPropertyStr (ctx, variables, "toObject",
     JS_NewCFunction (ctx, js_pm_variables_to_object, "toObject", 0));
+    JS_SetPropertyStr (ctx, variables, "replaceIn",
+    JS_NewCFunction (ctx, js_pm_variables_replace_in, "replaceIn", 1));
     JS_SetPropertyStr (
     ctx, variables, "set", JS_NewCFunction (ctx, js_pm_variables_set, "set", 2));
 
@@ -3372,7 +3439,8 @@ class ScriptEngine::Impl {
     ~Impl () {
         std::lock_guard<std::mutex> lock (pool_mutex);
         for (auto& pair : context_pool) {
-            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
+            auto* rt_state =
+            static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
             JS_FreeContext (pair.second);
             JS_FreeRuntime (pair.first);
             delete rt_state;

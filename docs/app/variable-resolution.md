@@ -175,13 +175,13 @@ Three rules decide what happens at a token:
 
 ### What this does not cover
 
-**Scripts.** `pm.variables.get("$guid")` does **not** work. Interpolation
-happens at compose time, strictly before any script runs, and script *text* is
-never interpolated - a `{{…}}` inside a script is user JavaScript, and
-rewriting it could not tell a string literal from code (#226, D16). Generating
-a value in a script means writing the JavaScript for it. Now that resolution
-is engine-side the machinery for `pm.variables.get("$guid")` / `replaceIn()`
-exists, but wiring it into the sandbox is deliberately separate work. See
+**Script text.** A `{{…}}` written directly in script *code* does not resolve
+and never will - it is user JavaScript, and rewriting it could not tell a
+string literal from code (#226, D16). What a script uses instead is
+**`pm.variables.replaceIn("{{$guid}}")`**: the same engine resolver, run at
+call time over a string the script opts in - dynamic variables included, one
+value per occurrence. `pm.variables.get("$guid")` (getter fall-through to the
+generators) is deliberately not wired. See
 [pm API compatibility](./pm-api-compatibility.md).
 
 **Load runs generate once, not per iteration.** A run's request half is
