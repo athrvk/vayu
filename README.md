@@ -127,6 +127,8 @@ Installs the latest release to `/Applications`. You will be prompted for your pa
 
 **To update, run the same command again.** It is also how Vayu updates itself on macOS - the app checks for releases and hands you this command rather than patching itself, because an ad-hoc signature is not something macOS can verify. Updating replaces the app in place and keeps your collections, history, and settings. If Vayu is running it offers to quit it first (and reopens it afterwards); if you are already on the latest version it does nothing. Add `--force` to reinstall anyway, or set `VAYU_ASSUME_YES=1` to skip the prompt.
 
+If you already have Vayu in your own `~/Applications` folder (from dragging it out of a `.dmg`), the update goes there rather than installing a second copy in `/Applications`.
+
 To pin a specific version:
 
 ```sh

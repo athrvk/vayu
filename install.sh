@@ -3,7 +3,10 @@ set -euo pipefail
 
 REPO="athrvk/vayu"
 APP_NAME="Vayu"
-INSTALL_DIR="/Applications"
+# Where a fresh install goes. Both are re-pointed by resolve_install_target when
+# Vayu is already installed somewhere else.
+DEFAULT_INSTALL_DIR="/Applications"
+INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 APP_PATH="${INSTALL_DIR}/${APP_NAME}.app"
 SIDECAR_REL="Contents/Resources/bin/vayu-engine"
 
@@ -64,6 +67,56 @@ download_url() {
 	local version="$1"
 	printf 'https://github.com/%s/releases/download/v%s/%s-%s-universal.zip' \
 		"$REPO" "$version" "$APP_NAME" "$version"
+}
+
+# Directories an existing Vayu could be in, most authoritative first.
+#
+# The second is what dragging the app out of the DMG into your own Applications
+# folder produces. A copy there was invisible to this script, which always wrote
+# /Applications - so the update landed on a bundle the user never launched, and
+# the copy they did launch kept offering the same update forever.
+#
+# A function rather than a list so paths with spaces survive, and so tests can
+# point it somewhere harmless.
+search_dirs() {
+	printf '%s\n' "$DEFAULT_INSTALL_DIR"
+	[ -n "${HOME:-}" ] && printf '%s\n' "$HOME/Applications"
+	return 0
+}
+
+# Every Vayu.app found in those directories, in the same order.
+existing_app_paths() {
+	search_dirs | while IFS= read -r dir; do
+		[ -d "$dir/${APP_NAME}.app" ] && printf '%s\n' "$dir/${APP_NAME}.app"
+	done
+	return 0
+}
+
+# Point the install at the copy that already exists, so an update replaces the
+# app the user actually opens. A fresh install keeps the default.
+#
+# `sudo` is used either way, including for a copy under $HOME that would not
+# need it: one code path is worth more here than skipping a password prompt the
+# script already asks for.
+resolve_install_target() {
+	local first others
+	first="$(existing_app_paths | head -1)"
+	[ -n "$first" ] || return 0
+
+	APP_PATH="$first"
+	INSTALL_DIR="$(dirname "$first")"
+
+	# Two copies is the state this whole function exists to stop repeating.
+	# Updating one of them silently is what leaves someone launching a stale
+	# build while the installer reports success, so say it out loud.
+	others="$(existing_app_paths | tail -n +2)"
+	[ -n "$others" ] || return 0
+	printf 'Vayu is installed in more than one place:\n'
+	printf '%s\n' "$others" | while IFS= read -r path; do
+		printf '  %s\n' "$path"
+	done
+	printf 'Updating %s - remove the other copy, or it will keep launching an old build.\n' "$APP_PATH"
+	return 0
 }
 
 # Ask a yes/no question, defaulting to yes.
@@ -173,6 +226,7 @@ require_macos() {
 
 do_install() {
 	require_macos
+	resolve_install_target
 	(
 		local version url workdir zip expected actual staged keepalive_pid=""
 		local installed quit_by_installer=0
@@ -263,15 +317,23 @@ do_install() {
 
 do_uninstall() {
 	require_macos
-	local support prefs logs caches savedstate
+	local support prefs logs caches savedstate paths
+	# Every copy, not just the default one: leaving the other behind is how
+	# "I uninstalled it" turns into an app that still launches. Falls back to
+	# the default path so a nothing-installed run still says what it looked for.
+	paths="$(existing_app_paths)"
+	[ -n "$paths" ] || paths="$APP_PATH"
 	support="$HOME/Library/Application Support/vayu-client"
 	prefs="$HOME/Library/Preferences/com.vayu.client.plist"
 	logs="$HOME/Library/Logs/vayu-client"
 	caches="$HOME/Library/Caches/com.vayu.client"
 	savedstate="$HOME/Library/Saved Application State/com.vayu.client.savedState"
 
-	printf 'Removing %s (you may be prompted for your password)...\n' "$APP_PATH"
-	run sudo rm -rf "$APP_PATH"
+	printf 'Removing Vayu (you may be prompted for your password)...\n'
+	printf '%s\n' "$paths" | while IFS= read -r path; do
+		printf '  %s\n' "$path"
+		run sudo rm -rf "$path"
+	done
 
 	if [ "${PURGE:-0}" = "1" ]; then
 		printf 'Purging user data...\n'

@@ -93,6 +93,63 @@ echo "$out" | grep -q "rm -f .*com.vayu.client.plist" || fail "purge should remo
 
 printf 'PASS: uninstall dry-run\n'
 
+# --- install target resolution -----------------------------------------------
+# An update has to land on the copy the user actually launches. Dragging the app
+# out of the DMG into ~/Applications used to leave the installer writing
+# /Applications forever, updating a bundle nobody opened.
+TMPROOT="$(mktemp -d)"
+trap 'rm -rf "$TMPROOT"' EXIT
+mkdir -p "$TMPROOT/system" "$TMPROOT/home"
+search_dirs() { printf '%s\n%s\n' "$TMPROOT/system" "$TMPROOT/home"; }
+
+INSTALL_DIR_SAVED="$INSTALL_DIR"
+APP_PATH_SAVED="$APP_PATH"
+
+# Nothing installed: the default stands.
+resolve_install_target
+[ "$APP_PATH" = "$APP_PATH_SAVED" ] || fail "a fresh install should keep the default path, got $APP_PATH"
+
+# Installed only in the home folder: update that one, not /Applications.
+mkdir -p "$TMPROOT/home/${APP_NAME}.app"
+resolve_install_target
+[ "$APP_PATH" = "$TMPROOT/home/${APP_NAME}.app" ] || fail "should target the existing copy, got $APP_PATH"
+[ "$INSTALL_DIR" = "$TMPROOT/home" ] || fail "INSTALL_DIR should follow the target, got $INSTALL_DIR"
+
+# Installed in both: the first search dir wins and the other is reported, since
+# silently updating one of two copies is how a stale build keeps launching.
+mkdir -p "$TMPROOT/system/${APP_NAME}.app"
+# Redirected to a file rather than captured with $(): a command substitution
+# runs in a subshell, so the APP_PATH it resolves would not survive the call.
+# do_install calls it outside its own subshell for the same reason.
+resolve_install_target >"$TMPROOT/resolve.out" 2>&1
+out="$(cat "$TMPROOT/resolve.out")"
+[ "$APP_PATH" = "$TMPROOT/system/${APP_NAME}.app" ] || fail "the first search dir should win, got $APP_PATH"
+echo "$out" | grep -q "more than one place" || fail "a second copy should be reported"
+echo "$out" | grep -q "$TMPROOT/home/${APP_NAME}.app" || fail "the report should name the other copy"
+
+# do_install has to actually resolve the target - computing the right path and
+# then installing over the default one would pass every assertion above.
+#
+# Reset the globals first, or this proves nothing: the direct calls above
+# already left APP_PATH resolved, so do_install would inherit the right answer
+# without ever asking for it.
+INSTALL_DIR="$INSTALL_DIR_SAVED"
+APP_PATH="$APP_PATH_SAVED"
+out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
+echo "$out" | grep -q "sudo ditto .* $TMPROOT/system/${APP_NAME}.app" \
+	|| fail "do_install should install to the resolved target, not the default"
+
+# Uninstall clears every copy it can find, not just the default one.
+out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
+echo "$out" | grep -q "rm -rf $TMPROOT/system/${APP_NAME}.app" || fail "uninstall should remove the system copy"
+echo "$out" | grep -q "rm -rf $TMPROOT/home/${APP_NAME}.app" || fail "uninstall should remove the home copy"
+
+search_dirs() { printf '%s\n' "$DEFAULT_INSTALL_DIR"; }
+INSTALL_DIR="$INSTALL_DIR_SAVED"
+APP_PATH="$APP_PATH_SAVED"
+
+printf 'PASS: install target resolution\n'
+
 # --- running-app guard -------------------------------------------------------
 # Last, because these stub out running_pids/confirm and the stubs would leak
 # into anything after them.

@@ -449,6 +449,17 @@ macOS deletes a running app happily and the process then loses everything it
 loads lazily. Re-running with the latest already installed is a no-op unless
 `--force`; `VAYU_ASSUME_YES=1` skips the quit prompt for unattended runs.
 
+**The install target follows the existing copy** (`resolve_install_target`).
+`/Applications` is only the default for a *fresh* install; if Vayu is already in
+`~/Applications` - what dragging it out of the DMG produces - the update lands
+there, because otherwise it replaces a bundle the user never launches while the
+one they do launch keeps offering the same update. Two copies are reported
+rather than silently picked between, and uninstall removes every copy it finds.
+`sudo` stays unconditional even for a `$HOME` target that would not need it: one
+code path beats saving a password prompt the script already asks for. Note
+`resolve_install_target` assigns globals, so it must not be called inside a
+subshell - `do_install` calls it before its own `( … )`.
+
 **The installer is served from the docs site**, at
 <https://athrvk.github.io/vayu/install.sh> - a third shorter than the
 raw.githubusercontent URL it replaced, which spent most of its 92 characters on
