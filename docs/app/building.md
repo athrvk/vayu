@@ -62,7 +62,8 @@ app/
 ├── package.json        # Dependencies and scripts
 ├── vite.config.ts      # Vite configuration
 ├── tsconfig.json       # TypeScript config (React)
-└── tsconfig.node.json  # TypeScript config (Electron)
+├── tsconfig.node.json  # TypeScript config (Electron main process)
+└── tsconfig.electron-test.json  # Type-check config (Electron tests)
 ```
 
 ## Build Scripts
@@ -77,7 +78,7 @@ app/
 | `pnpm electron:watch` | Watch Electron code for changes |
 | `pnpm electron:build` | Full production build (compile + build + package) |
 | `pnpm electron:pack` | Package Electron app (requires build first) |
-| `pnpm type-check` | TypeScript type checking |
+| `pnpm type-check` | TypeScript type checking (renderer, main process, and the Electron tests) |
 | `pnpm lint` | Run ESLint |
 
 ## Development Workflow
@@ -169,11 +170,23 @@ Configuration is in `electron-builder.json`:
 - JSX: React
 - Path aliases: `@/*` → `src/*`
 
-### Electron (`tsconfig.node.json`)
+### Electron main process (`tsconfig.node.json`)
 
 - Target: ES2020
-- Module: CommonJS (for Electron compatibility)
-- Includes `electron/` directory
+- Module: ESNext (the app is `"type": "module"`)
+- Includes `electron/`, emitting to `dist-electron/`
+- Excludes `electron/**/*.test.ts` - tests are not part of the main process, and
+  emitting them put vitest imports in the shipped bundle
+
+### Electron tests (`tsconfig.electron-test.json`)
+
+- `noEmit` - it exists to type-check what `tsconfig.node.json` excludes
+- Adds the `@/*` → `src/*` alias, which the main-process config deliberately
+  lacks: only a test may cross into `app/src/` (`resolve.test.ts` compares the
+  renderer's dynamic-variable table against the main-process copy)
+- Run by `pnpm type-check`; without it nothing checked these files, and a
+  missing module in `resolve.test.ts` passed CI while breaking
+  `python build.py --dev`
 
 ## Vite Configuration
 

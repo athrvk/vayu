@@ -11,5 +11,11 @@
 		"rootDir": "electron",
 		"noEmit": false
 	},
-	"include": ["electron"]
+	"include": ["electron"],
+	/*
+	 * Tests are not part of the main process - emitting them shipped vitest
+	 * imports into `dist-electron`, and `resolve.test.ts` reaches across to
+	 * `app/src/` (see tsconfig.electron-test.json, which checks them instead).
+	 */
+	"exclude": ["electron/**/*.test.ts"]
 }
