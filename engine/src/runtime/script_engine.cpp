@@ -17,6 +17,7 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -29,7 +30,9 @@
 #include <vector>
 
 #include "vayu/http/status.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/sha256.hpp"
 
 #ifdef VAYU_HAS_QUICKJS
 // Disable warnings for QuickJS C header in C++ code
@@ -1615,6 +1618,290 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
 }
 
 // ============================================================================
+// Base64 globals and pm.crypto
+// ============================================================================
+//
+// Why this is synchronous, and why it is not called `crypto.subtle`.
+//
+// Web Crypto's SubtleCrypto returns Promises. `Promise` exists in this sandbox
+// but nothing drains the job queue - there is no event loop and no setTimeout
+// (see the timeout note on ScriptConfig) - so `await crypto.subtle.digest(...)`
+// would never resume and the script would report a timeout rather than a
+// result. Wearing the Web Crypto name while behaving differently is the exact
+// trap the sandbox-surface tests exist to catch, so the hashing surface takes a
+// name of its own, `pm.crypto`, and is honestly synchronous. `btoa` / `atob`
+// keep their standard names because they are synchronous on the web too, and
+// they keep their standard Latin-1 semantics with them.
+
+// A JS string reaches C++ as UTF-8. `btoa` is defined over code units, not code
+// points, so anything above U+00FF is a range error there; every other caller
+// wants the UTF-8 bytes as they stand. Returning the byte string keeps one
+// conversion rule in one place.
+enum class ByteSource { Utf8, Latin1 };
+
+// Decodes UTF-8 to Latin-1 bytes, failing on any code point above U+00FF.
+// Returns false when the string cannot be represented, leaving `out` unusable.
+bool utf8_to_latin1 (std::string_view in, std::string& out) {
+    out.clear ();
+    out.reserve (in.size ());
+    for (size_t i = 0; i < in.size ();) {
+        const auto lead = static_cast<uint8_t> (in[i]);
+        if (lead < 0x80) {
+            out.push_back (static_cast<char> (lead));
+            i += 1;
+        } else if ((lead & 0xE0) == 0xC0 && i + 1 < in.size ()) {
+            const auto cont = static_cast<uint8_t> (in[i + 1]);
+            if ((cont & 0xC0) != 0x80)
+                return false;
+            const unsigned cp = ((lead & 0x1FU) << 6) | (cont & 0x3FU);
+            if (cp > 0xFF)
+                return false;
+            out.push_back (static_cast<char> (cp));
+            i += 2;
+        } else {
+            // Three- and four-byte sequences are all above U+00FF by
+            // definition, and a malformed lead byte is not representable
+            // either.
+            return false;
+        }
+    }
+    return true;
+}
+
+// Latin-1 bytes back to a JS string: each byte becomes the code point of the
+// same value, which is UTF-8 encoded so QuickJS decodes it to that code unit.
+std::string latin1_to_utf8 (std::string_view in) {
+    std::string out;
+    out.reserve (in.size ());
+    for (const char ch : in) {
+        const auto byte = static_cast<uint8_t> (ch);
+        if (byte < 0x80) {
+            out.push_back (static_cast<char> (byte));
+        } else {
+            out.push_back (static_cast<char> (0xC0 | (byte >> 6)));
+            out.push_back (static_cast<char> (0x80 | (byte & 0x3F)));
+        }
+    }
+    return out;
+}
+
+JSValue js_btoa (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "btoa requires a string");
+    }
+    if (!JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "btoa expects a string");
+    }
+
+    std::string bytes;
+    if (!utf8_to_latin1 (js_to_string (ctx, argv[0]), bytes)) {
+        return JS_ThrowTypeError (ctx,
+        "btoa: the string contains characters outside the Latin-1 range. "
+        "Base64 encodes bytes, so encode the text yourself first (for example "
+        "with pm.crypto's digest output) or restrict it to code points <= "
+        "U+00FF");
+    }
+
+    const std::string encoded = vayu::utils::base64_encode (bytes);
+    return JS_NewStringLen (ctx, encoded.data (), encoded.size ());
+}
+
+JSValue js_atob (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "atob requires a string");
+    }
+    if (!JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "atob expects a string");
+    }
+
+    const auto decoded = vayu::utils::base64_decode (js_to_string (ctx, argv[0]));
+    if (!decoded) {
+        return JS_ThrowTypeError (ctx, "atob: the string is not valid base64");
+    }
+
+    const std::string text = latin1_to_utf8 (*decoded);
+    return JS_NewStringLen (ctx, text.data (), text.size ());
+}
+
+// Reads a hash input: a string contributes its UTF-8 bytes, a Uint8Array its
+// bytes as they are. Anything else throws rather than being stringified -
+// hashing the text "[object Object]" would be a silent wrong answer, and the
+// digest gives the author no clue that it happened.
+// Deliberately built from JS_GetTypedArrayBuffer + JS_GetArrayBuffer rather
+// than JS_GetUint8Array: the engine vendors Bellard's QuickJS on Linux and
+// macOS and quickjs-ng on Windows, and only the latter has the Uint8Array
+// shortcuts. These two calls exist in both.
+bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, std::string& out) {
+    if (JS_IsString (value)) {
+        out = js_to_string (ctx, value);
+        return true;
+    }
+
+    size_t byte_offset  = 0;
+    size_t byte_length  = 0;
+    size_t element_size = 0;
+    JSValue buffer =
+    JS_GetTypedArrayBuffer (ctx, value, &byte_offset, &byte_length, &element_size);
+
+    if (!JS_IsException (buffer)) {
+        // A wider element type would make the digest depend on this machine's
+        // byte order, so only byte-sized views are accepted.
+        if (element_size != 1) {
+            JS_FreeValue (ctx, buffer);
+            JS_ThrowTypeError (ctx,
+            "%s must be a byte-sized typed array (Uint8Array); a %zu-byte "
+            "element type would hash in this machine's byte order",
+            what, element_size);
+            return false;
+        }
+
+        size_t buffer_size = 0;
+        uint8_t* base      = JS_GetArrayBuffer (ctx, &buffer_size, buffer);
+        JS_FreeValue (ctx, buffer);
+
+        // A detached buffer reads as zero length with a null base; hashing
+        // nothing and calling it a digest of the caller's data is the silent
+        // wrong answer this whole path exists to avoid.
+        if (!base || byte_offset + byte_length > buffer_size) {
+            JS_FreeValue (ctx, JS_GetException (ctx));
+            JS_ThrowTypeError (ctx, "%s is backed by a detached buffer", what);
+            return false;
+        }
+
+        out.assign (reinterpret_cast<const char*> (base + byte_offset), byte_length);
+        return true;
+    }
+
+    // JS_GetTypedArrayBuffer threw its own TypeError for the not-a-typed-array
+    // case; replace it with one that names the argument and what is accepted.
+    JS_FreeValue (ctx, JS_GetException (ctx));
+    JS_ThrowTypeError (ctx, "%s must be a string or a Uint8Array", what);
+    return false;
+}
+
+// Turns a digest into whatever the caller asked for. 'bytes' exists so a digest
+// can be fed back in as a key: multi-round key derivation (AWS SigV4 signs with
+// the raw digest of the previous round) is impossible when the only outputs are
+// text.
+JSValue encode_digest (JSContext* ctx,
+const std::array<uint8_t, 32>& digest,
+const std::string& encoding) {
+    const std::string_view raw (
+    reinterpret_cast<const char*> (digest.data ()), digest.size ());
+
+    if (encoding == "bytes") {
+        // Constructed through the global Uint8Array rather than a helper, for
+        // the same cross-vendor reason as read_crypto_bytes.
+        JSValue global = JS_GetGlobalObject (ctx);
+        JSValue ctor   = JS_GetPropertyStr (ctx, global, "Uint8Array");
+        JS_FreeValue (ctx, global);
+        if (!JS_IsFunction (ctx, ctor)) {
+            JS_FreeValue (ctx, ctor);
+            return JS_ThrowTypeError (ctx, "Uint8Array is not available in this context");
+        }
+
+        JSValue buffer = JS_NewArrayBufferCopy (ctx, digest.data (), digest.size ());
+        JSValue array = JS_CallConstructor (ctx, ctor, 1, &buffer);
+        JS_FreeValue (ctx, buffer);
+        JS_FreeValue (ctx, ctor);
+        return array;
+    }
+
+    std::string out;
+    if (encoding == "hex") {
+        out = vayu::utils::hex_encode (raw);
+    } else if (encoding == "base64") {
+        out = vayu::utils::base64_encode (raw);
+    } else if (encoding == "base64url") {
+        out = vayu::utils::base64url_encode (raw);
+    } else {
+        return JS_ThrowTypeError (ctx,
+        "unknown digest encoding '%s' - expected 'hex', 'base64', "
+        "'base64url' or 'bytes'",
+        encoding.c_str ());
+    }
+
+    return JS_NewStringLen (ctx, out.data (), out.size ());
+}
+
+// The encoding argument, which is optional and defaults to hex. An explicit
+// undefined is the same as omitting it; anything else non-string is a typo
+// worth failing on rather than coercing to a name that then fails anyway.
+bool read_digest_encoding (JSContext* ctx, int argc, JSValueConst* argv, int index, std::string& out) {
+    out = "hex";
+    if (argc <= index || JS_IsUndefined (argv[index])) {
+        return true;
+    }
+    if (!JS_IsString (argv[index])) {
+        JS_ThrowTypeError (ctx, "the encoding must be a string");
+        return false;
+    }
+    out = js_to_string (ctx, argv[index]);
+    return true;
+}
+
+JSValue js_crypto_sha256 (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "pm.crypto.sha256 requires data");
+    }
+
+    std::string data;
+    if (!read_crypto_bytes (ctx, argv[0], "pm.crypto.sha256 data", data)) {
+        return JS_EXCEPTION;
+    }
+
+    std::string encoding;
+    if (!read_digest_encoding (ctx, argc, argv, 1, encoding)) {
+        return JS_EXCEPTION;
+    }
+
+    return encode_digest (ctx, vayu::utils::sha256 (data), encoding);
+}
+
+JSValue js_crypto_hmac_sha256 (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 2) {
+        return JS_ThrowTypeError (ctx, "pm.crypto.hmacSha256 requires a key and data");
+    }
+
+    std::string key;
+    if (!read_crypto_bytes (ctx, argv[0], "pm.crypto.hmacSha256 key", key)) {
+        return JS_EXCEPTION;
+    }
+
+    std::string data;
+    if (!read_crypto_bytes (ctx, argv[1], "pm.crypto.hmacSha256 data", data)) {
+        return JS_EXCEPTION;
+    }
+
+    std::string encoding;
+    if (!read_digest_encoding (ctx, argc, argv, 2, encoding)) {
+        return JS_EXCEPTION;
+    }
+
+    return encode_digest (ctx, vayu::utils::hmac_sha256 (key, data), encoding);
+}
+
+void setup_base64_globals (JSContext* ctx) {
+    JSValue global = JS_GetGlobalObject (ctx);
+    JS_SetPropertyStr (ctx, global, "btoa", JS_NewCFunction (ctx, js_btoa, "btoa", 1));
+    JS_SetPropertyStr (ctx, global, "atob", JS_NewCFunction (ctx, js_atob, "atob", 1));
+    JS_FreeValue (ctx, global);
+}
+
+void setup_pm_crypto (JSContext* ctx, JSValue pm) {
+    JSValue crypto = JS_NewObject (ctx);
+    JS_SetPropertyStr (
+    ctx, crypto, "sha256", JS_NewCFunction (ctx, js_crypto_sha256, "sha256", 2));
+    JS_SetPropertyStr (ctx, crypto, "hmacSha256",
+    JS_NewCFunction (ctx, js_crypto_hmac_sha256, "hmacSha256", 3));
+    JS_SetPropertyStr (ctx, pm, "crypto", crypto);
+}
+
+// ============================================================================
 // pm Object Implementation
 // ============================================================================
 
@@ -3038,6 +3325,9 @@ void setup_pm_object (JSContext* ctx) {
     // pm.variables
     setup_pm_variables (ctx, pm);
 
+    // pm.crypto
+    setup_pm_crypto (ctx, pm);
+
     JS_SetPropertyStr (ctx, global, "pm", pm);
     JS_FreeValue (ctx, global);
 }
@@ -3131,6 +3421,7 @@ class ScriptEngine::Impl {
             if (config.enable_console) {
                 setup_console (ctx);
             }
+            setup_base64_globals (ctx);
             setup_pm_object (ctx);
         } else {
             JS_FreeRuntime (rt);

@@ -8,6 +8,7 @@
  */
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -57,6 +58,96 @@ inline std::string base64_encode (std::string_view in) {
         out.push_back ('=');
     }
 
+    return out;
+}
+
+/**
+ * @brief Decode standard base64 (RFC 4648 §4), rejecting anything malformed.
+ *
+ * Returns std::nullopt rather than a best-effort decode: the script sandbox's
+ * `atob` has to throw on bad input, and a caller that silently accepted a
+ * truncated group would hand back bytes the author never encoded. ASCII
+ * whitespace is skipped first (WHATWG `atob` forgives it, and wrapped base64
+ * from a config file or a PEM-ish blob is common), so only non-whitespace
+ * characters outside the alphabet, a '=' in a non-terminal position, or a
+ * length that is not a multiple of 4 after padding are errors.
+ */
+inline std::optional<std::string> base64_decode (std::string_view in) {
+    const auto sextet = [] (char c) -> int {
+        if (c >= 'A' && c <= 'Z')
+            return c - 'A';
+        if (c >= 'a' && c <= 'z')
+            return c - 'a' + 26;
+        if (c >= '0' && c <= '9')
+            return c - '0' + 52;
+        if (c == '+')
+            return 62;
+        if (c == '/')
+            return 63;
+        return -1;
+    };
+
+    std::string packed;
+    packed.reserve (in.size ());
+    for (const char c : in) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f')
+            continue;
+        packed.push_back (c);
+    }
+
+    // Padding is only legal as the last one or two characters of the whole
+    // string; '=' anywhere else is a malformed group, not a short one.
+    size_t pad = 0;
+    while (pad < 2 && !packed.empty () && packed.back () == '=') {
+        packed.pop_back ();
+        ++pad;
+    }
+    if (packed.size () % 4 == 1)
+        return std::nullopt;
+    if (pad != 0 && (packed.size () + pad) % 4 != 0)
+        return std::nullopt;
+
+    std::string out;
+    out.reserve (packed.size () / 4 * 3 + 2);
+
+    uint32_t accum = 0;
+    int bits       = 0;
+    for (const char c : packed) {
+        const int value = sextet (c);
+        if (value < 0)
+            return std::nullopt;
+        accum = (accum << 6) | static_cast<uint32_t> (value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back (static_cast<char> ((accum >> bits) & 0xFF));
+        }
+    }
+
+    // Leftover bits belong to a sextet that encodes no whole byte; they must be
+    // zero, or the input carried data that decoding would drop.
+    if (bits != 0 && (accum & ((1U << bits) - 1)) != 0)
+        return std::nullopt;
+
+    return out;
+}
+
+/**
+ * @brief Lowercase hex of arbitrary bytes.
+ *
+ * The default digest encoding for the script sandbox's hashing surface, and the
+ * one every webhook-signature scheme (Stripe, GitHub, Slack) compares against.
+ */
+inline std::string hex_encode (std::string_view in) {
+    static constexpr char hex[] = "0123456789abcdef";
+
+    std::string out;
+    out.reserve (in.size () * 2);
+    for (const char ch : in) {
+        const auto c = static_cast<uint8_t> (ch);
+        out.push_back (hex[c >> 4]);
+        out.push_back (hex[c & 0x0F]);
+    }
     return out;
 }
 

@@ -590,25 +590,12 @@ properties but one HTTP header, so the write-back rejects it rather than
 picking a winner, and the request is sent unchanged with the reason in
 `preScriptError`.
 
-### Sign a request with a checksum you can actually compute
+### Sign a request
 
-**There is no crypto in the sandbox** - no `crypto`, no `TextEncoder`, no
-`btoa`. A real HMAC is therefore not possible in-script today, and any example
-claiming otherwise is wrong. What *is* possible is a pure-JS digest over a
-canonical string, which is enough for a checksum, a cache key, or a test double
-of a signing scheme:
+`pm.crypto` gives a pre-request script a real HMAC, so the request it rewrites
+can be signed for what it actually became:
 
 ```javascript
-// FNV-1a, 32-bit. Not a cryptographic hash - do not use it as one.
-function fnv1a(text) {
-  var hash = 0x811c9dc5;
-  for (var i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
-  }
-  return ('00000000' + hash.toString(16)).slice(-8);
-}
-
 var timestamp = Date.now().toString();
 var canonical = [
   pm.request.method,
@@ -618,12 +605,53 @@ var canonical = [
 ].join('\n');
 
 pm.request.headers['X-Timestamp'] = timestamp;
-pm.request.headers['X-Checksum'] = fnv1a(canonical + pm.environment.get('secret'));
+pm.request.headers['X-Signature'] =
+  pm.crypto.hmacSha256(pm.environment.get('secret'), canonical);
 ```
 
 Note the ordering: the canonical string is built from `pm.request` *after* the
 other edits, so it covers what is actually sent. If you sign first and rewrite
 the body second, the signature describes a request that never existed.
+
+**Signatures compared as base64** - Shopify's, for instance - only need a
+different last argument:
+
+```javascript
+pm.request.headers['X-Signature'] =
+  pm.crypto.hmacSha256(pm.environment.get('secret'), canonical, 'base64');
+```
+
+#### Derived signing keys (AWS SigV4)
+
+A scheme that chains HMACs cannot be expressed with text output alone: each
+round is keyed by the **raw digest** of the previous one, and hex or base64 is a
+different byte string. That is what the `'bytes'` encoding is for - it returns a
+`Uint8Array`, which is also accepted as a key or as data:
+
+```javascript
+var secret  = pm.environment.get('aws_secret_key');
+var date    = '20150830';
+
+var kDate    = pm.crypto.hmacSha256('AWS4' + secret, date, 'bytes');
+var kRegion  = pm.crypto.hmacSha256(kDate, 'us-east-1', 'bytes');
+var kService = pm.crypto.hmacSha256(kRegion, 'iam', 'bytes');
+var kSigning = pm.crypto.hmacSha256(kService, 'aws4_request', 'bytes');
+
+// stringToSign is built per the SigV4 spec, hashing the canonical request with
+// pm.crypto.sha256(canonicalRequest) - hex, which is what the spec asks for.
+pm.request.headers['Authorization'] =
+  'AWS4-HMAC-SHA256 Credential=…, Signature=' +
+  pm.crypto.hmacSha256(kSigning, stringToSign);
+```
+
+#### What is hashed
+
+A string contributes its **UTF-8** bytes - the same bytes the engine puts on the
+wire, so a digest computed here matches one computed by `sha256sum` over the
+same text. A `Uint8Array` contributes its bytes unchanged; that is the only way
+to key an HMAC with bytes that are not valid UTF-8. Passing anything else (an
+object, a number, `null`) throws rather than being stringified: hashing the text
+`[object Object]` would return a digest that looks perfectly valid.
 
 ### Hand a value to the test script
 
@@ -646,20 +674,43 @@ pm.test('server echoed our nonce', function () {
 
 ### What a script can compute
 
-The sandbox is QuickJS plus exactly two globals, `pm` and `console`. Available:
-`JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`, `Number`,
-`Promise`, `BigInt`, `encodeURIComponent`, `parseInt` and the rest of the ES2020
-built-ins. **Not** available: `crypto`, `btoa` / `atob`, `TextEncoder`, `URL`,
-`URLSearchParams`, `setTimeout`, `require`, `fetch`.
+The sandbox is QuickJS plus `pm`, `console`, and the two base64 globals.
+Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
+`Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
+and the rest of the ES2020 built-ins, plus:
 
-The practical consequences: no HMAC or SHA signing, no base64 (so no
-hand-rolled Basic auth header - use the request's Auth tab, which the engine
-applies), no URL parsing helper - which is why `pm.request.url` has no `.query`
-/ `.path` accessors either, see
-[URL parts are not exposed](#url-parts-are-not-exposed-deferred) - and nothing
-asynchronous. Both halves of this list are pinned by tests in
-`engine/tests/script_engine_test.cpp`, so if a global is ever added this section
-is what needs rewriting.
+| Name | Shape |
+| ---- | ----- |
+| `pm.crypto.sha256(data, encoding?)` | SHA-256; `data` is a string (UTF-8) or `Uint8Array` |
+| `pm.crypto.hmacSha256(key, data, encoding?)` | HMAC-SHA256; key and data take the same types |
+| `btoa(binaryString)` | base64-encode one byte per code unit |
+| `atob(base64)` | decode to a binary string; throws on invalid base64 |
+
+`encoding` is `'hex'` (the default), `'base64'`, `'base64url'` or `'bytes'`;
+`'bytes'` returns a `Uint8Array`, and any other value throws rather than
+silently falling back to hex.
+
+**Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
+`URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
+consequences: no URL parsing helper - which is why `pm.request.url` has no
+`.query` / `.path` accessors either, see
+[URL parts are not exposed](#url-parts-are-not-exposed-deferred) - no hash
+other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and nothing
+asynchronous.
+
+**Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
+is Promise-based. `Promise` exists here, but nothing drains the job queue - there
+is no event loop and no `setTimeout` - so an `await crypto.subtle.digest(...)`
+would never resume and the script would report a timeout rather than a result.
+Vayu therefore takes a name of its own and is honestly synchronous. `btoa` and
+`atob` keep their standard names because they are synchronous on the web too,
+and they keep the rest of their semantics with them: they operate on **binary
+strings**, one byte per code unit, so `btoa` throws on a code point above U+00FF
+rather than silently UTF-8 encoding it.
+
+Both halves of this list are pinned by tests in
+`engine/tests/script_engine_test.cpp`, so if a global is ever added or removed
+this section is what needs rewriting.
 
 ## Limitations
 
