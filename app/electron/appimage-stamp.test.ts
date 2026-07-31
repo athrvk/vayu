@@ -42,11 +42,14 @@ describe("resolveStampPath", () => {
 	});
 
 	it("follows XDG_DATA_HOME, as the installer does", () => {
-		const xdg = path.join(root, "data");
+		// posix on both sides. Built with the host's join, this asserted a
+		// backslash path against a forward-slash one on Windows and the function
+		// correctly answered null - the test was wrong, not the code.
+		const xdg = path.posix.join(root, "data");
 		expect(
 			resolveStampPath({
 				platform: "linux",
-				appImagePath: path.join(xdg, "vayu", "Vayu.AppImage"),
+				appImagePath: path.posix.join(xdg, "vayu", "Vayu.AppImage"),
 				xdgDataHome: xdg,
 				home: root,
 			})
@@ -60,7 +63,7 @@ describe("resolveStampPath", () => {
 		expect(
 			resolveStampPath({
 				platform: "linux",
-				appImagePath: path.join(root, "Downloads", "Vayu.AppImage"),
+				appImagePath: path.posix.join(root, "Downloads", "Vayu.AppImage"),
 				home: root,
 			})
 		).toBeNull();
