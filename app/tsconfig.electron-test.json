@@ -1,0 +1,38 @@
+/*
+ * Type-checks the tests under `electron/`, which `tsconfig.node.json`
+ * deliberately excludes.
+ *
+ * Two configs because the electron tests need something the electron *build*
+ * must not have: `resolve.test.ts` imports `@/lib/dynamic-variables` to compare
+ * the renderer's dynamic-variable table against the main-process copy, and that
+ * comparison is the only thing keeping the deliberate duplication honest. Giving
+ * `tsconfig.node.json` the `@/*` mapping would let production code in
+ * `electron/` reach into `app/src/` too, and would drag renderer sources under
+ * an `outDir`/`rootDir` that exist to emit the main process. So the alias lives
+ * here, where nothing is emitted: `noEmit`, and a `rootDir` widened to `app/`
+ * so a renderer source pulled in by a test is not "outside rootDir".
+ *
+ * Wired into `pnpm type-check`, because nothing else checks these files - the
+ * root config includes `src` only, and `electron:compile` skips them. The
+ * missing `@/lib/dynamic-variables` module went unnoticed through CI and broke
+ * `python build.py --dev` for exactly that reason.
+ */
+{
+	"extends": "./tsconfig.node.json",
+	"compilerOptions": {
+		"composite": false,
+		"noEmit": true,
+		"rootDir": ".",
+		/* Renderer sources reached from a test are DOM code; `electron/` is not. */
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		"types": ["node", "vitest/globals"],
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["src/*"],
+			"@shared/*": ["../shared/*"]
+		}
+	},
+	"include": ["electron/**/*.test.ts"],
+	/* Undo the inherited exclusion - these files are the whole point here. */
+	"exclude": []
+}
