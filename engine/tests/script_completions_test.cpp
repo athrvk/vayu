@@ -415,4 +415,57 @@ TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
     << result.tests[0].error_message;
 }
 
+// The signing surface (#187). Same drift risk as the matchers above, with a
+// sharper edge: an author who is offered `pm.crypto.hmacSha256` and finds it
+// undefined has no fallback - there is no other way to compute an HMAC in the
+// sandbox. This calls every offered pm.crypto member for real rather than
+// checking a name exists, because the failure mode being guarded is the list
+// promising something the runtime never bound.
+TEST (ScriptCompletions, EveryOfferedCryptoMemberIsCallableInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("pm.crypto.", 0) != 0 && label != "btoa" && label != "atob") {
+            continue;
+        }
+        offered++;
+
+        // Call it with arguments of the documented types rather than the
+        // snippet's placeholders, which are not valid JS on their own.
+        std::string call;
+        if (label == "btoa")
+            call = "btoa('abc')";
+        else if (label == "atob")
+            call = "atob('YWJj')";
+        else if (label == "pm.crypto.sha256")
+            call = "pm.crypto.sha256('abc')";
+        else if (label == "pm.crypto.hmacSha256")
+            call = "pm.crypto.hmacSha256('k', 'abc')";
+        else
+            FAIL () << label << " is offered but this test does not know how to call it";
+
+        const std::string script = "pm.test(\"t\", function() { var out = " +
+        call + "; if (typeof out !== 'string' || !out.length) throw new Error('no result'); });";
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_TRUE (result.tests[0].passed)
+        << label << " is offered but the runtime does not provide it: "
+        << result.tests[0].error_message;
+    }
+
+    EXPECT_EQ (offered, 4)
+    << "the signing surface changed - update this test and the docs it backs";
+}
+
 } // namespace

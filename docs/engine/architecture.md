@@ -169,6 +169,11 @@ JavaScript execution engine for pre-request and test scripts:
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
 - **Mutable request**: a pre-request script's `pm.request` writes are applied to the
   request before it is sent (see `docs/engine/scripting.md`)
+- **Signing**: `pm.crypto.sha256` / `.hmacSha256` plus the `btoa` / `atob` globals, so
+  a pre-request script can sign the request it just rewrote. Backed by the already
+  vendored picosha2 (`utils/sha256.hpp`, shared with PKCE) and `utils/encoding.hpp` -
+  **no new dependency, and OpenSSL is still not linked**. Synchronous, because the
+  sandbox has no event loop to settle a Promise on
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access

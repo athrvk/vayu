@@ -112,7 +112,10 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				tab.
 			</>,
 			<>
-				No crypto, base64 or <code className={CODE_CLASS}>URL</code> in the sandbox, and
+				Sign what you send with <code className={CODE_CLASS}>pm.crypto.hmacSha256</code> or{" "}
+				<code className={CODE_CLASS}>pm.crypto.sha256</code> (synchronous, hex by default);{" "}
+				<code className={CODE_CLASS}>btoa</code> / <code className={CODE_CLASS}>atob</code>{" "}
+				are there too. No <code className={CODE_CLASS}>URL</code> parser in the sandbox, and
 				load tests do not run pre-request scripts at all.
 			</>,
 		],

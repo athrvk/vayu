@@ -26,6 +26,8 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()` - read-only, see below     |
+| Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
+| Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
@@ -51,6 +53,37 @@ because Postman writes it to a per-request *local* scope that Vayu does not have
 alternatives (persisting to the environment, or dropping the write) would misrepresent
 what happened. The error names the three scoped setters. See
 [scripting.md](../engine/scripting.md#variables-pmvariables).
+
+### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
+
+Postman exposes **Web Crypto** globally (`crypto.subtle`), whose every method
+returns a Promise. Vayu's sandbox has no event loop and no `setTimeout`, so
+nothing drains the job queue: an `await crypto.subtle.digest(...)` would never
+resume and the script would report a timeout rather than a result. Rather than
+wear a familiar name with unfamiliar behaviour, the surface is `pm.crypto` and
+it returns its result directly.
+
+```javascript
+pm.crypto.sha256('abc');                        // hex, 64 chars
+pm.crypto.sha256('abc', 'base64');              // 'hex' | 'base64' | 'base64url' | 'bytes'
+pm.crypto.hmacSha256(secret, canonicalString);  // hex by default
+```
+
+Strings are hashed as their **UTF-8** bytes. Pass a `Uint8Array` to hash bytes
+directly, and ask for `'bytes'` to get one back - that is what multi-round key
+derivation (AWS SigV4) needs, since each round is keyed by the raw digest of the
+previous one. Anything that is neither a string nor a byte-sized typed array
+throws: stringifying an object would hash the text `[object Object]` and return
+a digest that looks perfectly valid.
+
+`btoa` / `atob` keep their web semantics deliberately - they operate on **binary
+strings**, one byte per code unit, so `btoa` throws on a code point above U+00FF
+instead of silently UTF-8 encoding it. A signature over quietly-substituted
+bytes verifies nowhere.
+
+Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, MD5,
+SHA-1, and any asymmetric algorithm. The engine-side detail is in
+[scripting.md](../engine/scripting.md#what-a-script-can-compute).
 
 ### Assertion chains (`pm.expect`)
 

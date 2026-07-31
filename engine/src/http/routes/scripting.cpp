@@ -541,6 +541,75 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_variables_toObject" } });
 
     // ========================================
+    // pm.crypto - Hashing, and the base64 globals that go with it
+    // ========================================
+    completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.crypto" }, { "detail", "Synchronous hashing" },
+    { "documentation",
+    "SHA-256 and HMAC-SHA256 for signing an outgoing request from a "
+    "pre-request script.\n\nSynchronous, unlike Web Crypto's crypto.subtle: "
+    "the sandbox has no event loop, so a Promise-based API would never "
+    "settle. That is why this is pm.crypto rather than a global named "
+    "crypto." },
+    { "sortText", "0_pm_crypto" } });
+
+    completions.push_back ({ { "label", "pm.crypto.sha256" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.crypto.sha256(${1:data})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.crypto.sha256(data: string | Uint8Array, encoding?: 'hex' | 'base64' "
+    "| 'base64url' | 'bytes'): string | Uint8Array" },
+    { "documentation",
+    "SHA-256 digest, hex by default. A string is hashed as its UTF-8 bytes; "
+    "pass a Uint8Array to hash bytes directly.\n\nExample:\nconst digest = "
+    "pm.crypto.sha256(pm.request.body || '');" },
+    { "sortText", "1_pm_crypto_sha256" } });
+
+    completions.push_back ({ { "label", "pm.crypto.hmacSha256" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.crypto.hmacSha256(${1:key}, ${2:data})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.crypto.hmacSha256(key: string | Uint8Array, data: string | "
+    "Uint8Array, encoding?: 'hex' | 'base64' | 'base64url' | 'bytes'): string "
+    "| Uint8Array" },
+    { "documentation",
+    "HMAC-SHA256, hex by default. Use encoding 'bytes' to get a Uint8Array "
+    "you can pass back as the key, which is what multi-round key derivation "
+    "(AWS SigV4) needs.\n\nExample:\npm.request.headers['X-Signature'] =\n  "
+    "pm.crypto.hmacSha256(pm.environment.get('secret'), canonical);" },
+    { "sortText", "1_pm_crypto_hmacSha256" } });
+
+    completions.push_back ({ { "label", "btoa" }, { "kind", KIND_FUNCTION },
+    { "insertText", "btoa(${1:text})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "btoa(data: string): string" },
+    { "documentation",
+    "Base64-encode a binary string, with the standard web semantics: one byte "
+    "per character, so a code point above U+00FF throws rather than being "
+    "silently UTF-8 encoded." },
+    { "sortText", "2_btoa" } });
+
+    completions.push_back ({ { "label", "atob" }, { "kind", KIND_FUNCTION },
+    { "insertText", "atob(${1:encoded})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "atob(encoded: string): string" },
+    { "documentation",
+    "Decode base64 to a binary string - one character per byte. Throws on "
+    "input that is not valid base64." },
+    { "sortText", "2_atob" } });
+
+    completions.push_back ({ { "label", "Sign the outgoing request" }, { "kind", KIND_SNIPPET },
+    { "insertText",
+    "// Pre-request: sign what is actually about to be sent.\nconst timestamp "
+    "= Date.now().toString();\nconst canonical = [pm.request.method, "
+    "pm.request.url, timestamp, pm.request.body || "
+    "''].join('\\n');\npm.request.headers['X-Timestamp'] = "
+    "timestamp;\npm.request.headers['X-Signature'] = "
+    "pm.crypto.hmacSha256(pm.environment.get(\"${1:secret}\"), canonical);" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Script template" },
+    { "documentation",
+    "HMAC-sign the request from a pre-request script. Build the canonical "
+    "string after any other edits, so the signature covers what is sent." },
+    { "sortText", "3_snippet_sign" } });
+
+    // ========================================
     // console - Console output
     // ========================================
     completions.push_back ({ { "label", "console.log" }, { "kind", KIND_FUNCTION },
