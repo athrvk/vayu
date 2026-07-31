@@ -5,8 +5,10 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useCallback } from "react";
+
 import { Button, Input, MarkdownEditor } from "@/components/ui";
-import { useEntityDraft } from "@/hooks";
+import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { Field, SaveFailed, Stat, formatRelative } from "./shared";
@@ -14,6 +16,8 @@ import { Field, SaveFailed, Stat, formatRelative } from "./shared";
 interface InfoTabProps {
 	collection: Collection;
 	requestCount: number;
+	/** Whether this is the tab on screen - see `useDraftSaveContext`. */
+	active?: boolean;
 }
 
 interface InfoDraft {
@@ -21,7 +25,7 @@ interface InfoDraft {
 	description: string;
 }
 
-export default function InfoTab({ collection, requestCount }: InfoTabProps) {
+export default function InfoTab({ collection, requestCount, active = false }: InfoTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
 	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
@@ -45,14 +49,31 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 	});
 	const { name, description } = draft;
 
-	const handleSave = () => {
-		if (!isDirty || !name.trim()) return;
-		updateCollection.mutate({
+	// A collection must keep a name, so a blank one is not saveable - and the
+	// store-driven paths (Ctrl/Cmd+S, the quit flush) have no disabled button to
+	// stop them, so the guard lives here rather than only on the button.
+	const canSave = isDirty && name.trim().length > 0;
+
+	const persist = useCallback(async () => {
+		if (!canSave) return;
+		await updateCollection.mutateAsync({
 			id: collection.id,
 			name: name.trim(),
 			description,
 		});
-	};
+	}, [canSave, updateCollection, collection.id, name, description]);
+
+	useDraftSaveContext({
+		id: `collection-${collection.id}-info`,
+		name: `Collection: ${collection.name}`,
+		isDirty: canSave,
+		isActive: active,
+		save: persist,
+	});
+
+	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
+	// toast instead, since this callout may not be on screen at all.
+	const handleSave = () => void persist().catch(() => {});
 
 	return (
 		<div className="max-w-[540px] flex flex-col gap-5">
@@ -105,7 +126,7 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 			<div className="flex gap-2">
 				<Button
 					onClick={handleSave}
-					disabled={!isDirty || !name.trim() || updateCollection.isPending}
+					disabled={!canSave || updateCollection.isPending}
 					className="font-semibold"
 				>
 					{updateCollection.isPending ? "Saving…" : "Save Changes"}

@@ -117,8 +117,18 @@ export default function SettingsMain() {
 	const [editedValues, setEditedValues] = useState<Record<string, EditedValue>>({});
 	const [isRestarting, setIsRestarting] = useState(false);
 
-	// Ref for save function to avoid stale closures
+	// Refs for the save function and the live edits, so the category-switch
+	// cleanup below can flush without either becoming one of its dependencies.
 	const handleSaveRef = useRef<(() => Promise<void>) | undefined>(undefined);
+	const saveEntriesRef = useRef<
+		((entries: Record<string, EditedValue>) => Promise<void>) | undefined
+	>(undefined);
+	const editedValuesRef = useRef(editedValues);
+	// Whether the `pending` status on the Dock is one this panel put there. The
+	// unconditional `setStatus("idle")` this replaces ran on mount and on every
+	// clean render, so merely opening Settings wiped an `error` another context
+	// had just published.
+	const markedPendingRef = useRef(false);
 
 	// Filter entries by selected category (calculate before early returns)
 	const categoryEntries =
@@ -136,67 +146,129 @@ export default function SettingsMain() {
 	const hasChanges = Object.keys(editedValues).length > 0;
 	const hasInvalidValues = Object.values(editedValues).some((v) => !v.isValid);
 
-	// Reset edited values when category changes
 	useEffect(() => {
-		setEditedValues({});
-	}, [selectedCategory]);
+		editedValuesRef.current = editedValues;
+	});
 
 	// Mark as pending when there are unsaved changes
 	// This hook must be called before any early returns to follow Rules of Hooks
 	useEffect(() => {
 		if (hasChanges && !hasInvalidValues) {
+			markedPendingRef.current = true;
 			markPendingSave();
-		} else {
+			return;
+		}
+		// Only clear a status this panel set. Anything else on screen - another
+		// context's `error`, or the `saved` a successful save here just
+		// published - is not ours to overwrite.
+		if (markedPendingRef.current) {
+			markedPendingRef.current = false;
 			setStatus("idle");
 		}
 	}, [hasChanges, hasInvalidValues, markPendingSave, setStatus]);
 
+	/**
+	 * Persist an explicit set of edits.
+	 *
+	 * Split out from `handleSave` because the category-switch flush below saves
+	 * the edits captured at the moment of the switch, not whatever is in state by
+	 * the time the write lands. Invalid entries are dropped here rather than
+	 * refused: `handleSave` still refuses the whole batch (the Save button is
+	 * disabled while any value is invalid and the inline error says why), but a
+	 * flush has no screen left to show that error on, so it saves what it can.
+	 */
+	const saveEntries = useCallback(
+		async (entries: Record<string, EditedValue>) => {
+			const updates: Record<string, string> = {};
+			const restartKeys: string[] = [];
+
+			for (const [key, edited] of Object.entries(entries)) {
+				if (!edited.isValid) continue;
+				updates[key] = edited.value;
+
+				// Check if this config requires restart
+				const entry = configResponse?.entries.find((e) => e.key === key);
+				if (entry && isRestartRequired(entry)) {
+					restartKeys.push(key);
+				}
+			}
+			if (Object.keys(updates).length === 0) return;
+
+			// From here the status sequence (saving -> saved -> idle) is this
+			// function's; the pending effect above must keep its hands off it, or
+			// a category switch would idle away the "saving" it just started.
+			markedPendingRef.current = false;
+			startSaving();
+			try {
+				await updateConfigMutation.mutateAsync({ entries: updates });
+				// Clear only what this write actually persisted, and only where the
+				// value is still the one that was written. A category switch flushes
+				// asynchronously, so the user can be typing in the *next* category
+				// by the time this resolves - clearing wholesale took those edits
+				// with it.
+				setEditedValues((prev) => {
+					const next = { ...prev };
+					for (const key of Object.keys(updates)) {
+						if (next[key]?.value === updates[key]) delete next[key];
+					}
+					return next;
+				});
+				completeSave();
+
+				// Track restart-required configs
+				for (const key of restartKeys) {
+					addRestartRequiredKey(key);
+				}
+
+				// Reset to idle after showing "saved" status
+				setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+			} catch (err) {
+				console.error("Failed to save settings:", err);
+				failSave(err instanceof Error ? err.message : "Failed to save settings");
+			}
+		},
+		[
+			configResponse,
+			updateConfigMutation,
+			startSaving,
+			completeSave,
+			failSave,
+			setStatus,
+			addRestartRequiredKey,
+		]
+	);
+
 	// Save changes - MUST be defined before early returns (Rules of Hooks)
 	const handleSave = useCallback(async () => {
 		if (hasInvalidValues || !hasChanges) return;
+		await saveEntries(editedValues);
+	}, [hasInvalidValues, hasChanges, editedValues, saveEntries]);
 
-		const updates: Record<string, string> = {};
-		const restartKeys: string[] = [];
+	useEffect(() => {
+		saveEntriesRef.current = saveEntries;
+	}, [saveEntries]);
 
-		for (const [key, edited] of Object.entries(editedValues)) {
-			updates[key] = edited.value;
-
-			// Check if this config requires restart
-			const entry = configResponse?.entries.find((e) => e.key === key);
-			if (entry && isRestartRequired(entry)) {
-				restartKeys.push(key);
-			}
-		}
-
-		startSaving();
-		try {
-			await updateConfigMutation.mutateAsync({ entries: updates });
-			setEditedValues({});
-			completeSave();
-
-			// Track restart-required configs
-			for (const key of restartKeys) {
-				addRestartRequiredKey(key);
-			}
-
-			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
-		} catch (err) {
-			console.error("Failed to save settings:", err);
-			failSave(err instanceof Error ? err.message : "Failed to save settings");
-		}
-	}, [
-		hasInvalidValues,
-		hasChanges,
-		editedValues,
-		configResponse,
-		updateConfigMutation,
-		startSaving,
-		completeSave,
-		failSave,
-		setStatus,
-		addRestartRequiredKey,
-	]);
+	/**
+	 * Leaving a category saves its edits instead of dropping them.
+	 *
+	 * This effect used to be a bare `setEditedValues({})`: picking another
+	 * category in the sidebar - or navigating away from Settings entirely, which
+	 * runs the same cleanup - discarded whatever had been typed, with no save, no
+	 * prompt, and nothing on screen to say it had happened. Engine settings are
+	 * cheap merge-patches, so they are saved rather than confirmed; the switch is
+	 * not itself a destructive act.
+	 *
+	 * The cleanup reads the edits through a ref because it runs before this
+	 * commit's effect bodies, so the ref still holds the *outgoing* category's
+	 * values - which is exactly what needs writing.
+	 */
+	useEffect(() => {
+		setEditedValues({});
+		return () => {
+			const pending = editedValuesRef.current;
+			if (Object.keys(pending).length > 0) void saveEntriesRef.current?.(pending);
+		};
+	}, [selectedCategory]);
 
 	// Keep handleSave ref updated
 	useEffect(() => {
