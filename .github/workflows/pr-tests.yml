@@ -336,8 +336,20 @@ jobs:
       - name: Lint and test installer script
         shell: bash
         run: |
-          shellcheck install.sh
+          shellcheck install.sh scripts/test/install_test.sh
           bash scripts/test/install_test.sh
+
+      # `bash` on the macOS runner is Homebrew's 5.x, but a stock Mac has only
+      # /bin/bash 3.2.57 - and the documented command resolves `bash` from PATH,
+      # so that is what most users actually run this under. Nothing in the
+      # script needs bash 4, and this is what keeps it that way: a `mapfile`, an
+      # associative array or a `${var,,}` would pass every other job and fail on
+      # every Mac.
+      - name: Test installer under macOS's own bash 3.2
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash scripts/test/install_test.sh
 
   ci-gate:
     name: CI gate

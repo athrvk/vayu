@@ -63,10 +63,24 @@ KEEPALIVE_PID=""
 # direct call to the place_* functions.
 INSTALL_VERSION=""
 
+# What a dry run prints for a command. Arguments containing whitespace are
+# quoted, because "$*" alone renders `mv -f "/a b" /c` and `mv -f /a "b /c"`
+# identically - and the tests read these lines.
+dry_run_line() {
+	local rendered="" arg
+	for arg in "$@"; do
+		case "$arg" in
+			*[[:space:]]*) rendered="$rendered '$arg'" ;;
+			*) rendered="$rendered $arg" ;;
+		esac
+	done
+	printf '[dry-run]%s\n' "$rendered"
+}
+
 # Run a command, or just print it when VAYU_DRYRUN=1.
 run() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
-		printf '[dry-run] %s\n' "$*"
+		dry_run_line "$@"
 	else
 		"$@"
 	fi
@@ -79,7 +93,7 @@ run() {
 # steps are visible to the tests.
 run_quiet() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
-		printf '[dry-run] %s\n' "$*"
+		dry_run_line "$@"
 	else
 		"$@" >/dev/null 2>&1
 	fi
@@ -108,7 +122,11 @@ parse_args() {
 			--purge) PURGE=1 ;;
 			--force) FORCE=1 ;;
 			--help|-h) MODE="help" ;;
-			*) printf 'Unknown option: %s\n' "$1" >&2; return 2 ;;
+			*)
+				printf 'Unknown option: %s\n' "$1" >&2
+				printf 'Run with --help to see what this script accepts.\n' >&2
+				return 2
+				;;
 		esac
 		shift
 	done
@@ -222,9 +240,19 @@ confirm() {
 	[ -r /dev/tty ] || return 0
 	printf '%s [Y/n] ' "$prompt" >/dev/tty
 	read -r reply </dev/tty || return 0
-	case "$reply" in
-		[nN]*) return 1 ;;
-		*) return 0 ;;
+	if reply_is_no "$reply"; then
+		return 1
+	fi
+	return 0
+}
+
+# Split out of confirm() because confirm() needs a terminal to reach its own
+# parsing - so in every test it either returns early or is stubbed away, and the
+# answer that aborts an install was never actually parsed by a test.
+reply_is_no() {
+	case "$1" in
+		[nN]*) return 0 ;;
+		*) return 1 ;;
 	esac
 }
 
@@ -425,7 +453,7 @@ require_supported_os() {
 			# they were missing from this list, which is how a missing tool
 			# turned into a failure partway through an install instead of a
 			# refusal to start one.
-			for tool in curl unzip codesign xattr shasum ditto plutil osascript sudo; do
+			for tool in curl codesign xattr shasum ditto plutil osascript sudo; do
 				command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
 			done
 			;;
@@ -511,7 +539,12 @@ download_asset() {
 stage_macos() {
 	local workdir="$1" staged="$1/${APP_NAME}.app"
 	printf 'Extracting...\n'
-	run unzip -q -o "$workdir/vayu.zip" -d "$workdir"
+	# ditto, not unzip: this is an .app bundle, and ditto is Apple's own
+	# extractor for these archives - it preserves the symlinks and permissions
+	# inside Contents/Frameworks that unzip has a long history of mangling. It
+	# is already a dependency (the install step below uses it), and it is what
+	# electron-updater uses to unpack the same zip.
+	run ditto -x -k "$workdir/vayu.zip" "$workdir"
 
 	printf 'Signing (ad-hoc) and removing quarantine...\n'
 	run codesign --force --sign - "$staged/$SIDECAR_REL"

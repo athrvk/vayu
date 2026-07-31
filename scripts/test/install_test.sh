@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Shellchecked in CI alongside install.sh. Two rules cannot see through the way
+# this file works, and are disabled file-wide here rather than at 15 call sites.
+# The directives must precede the first command to apply to the whole file.
+# shellcheck disable=SC2034  # VAYU_TEST and VAYU_VERSION are read by the sourced installer
+# shellcheck disable=SC2329  # the stubs below are called by the installer, not from this file
 set -euo pipefail
 
 # Source the installer (at repo root) in test mode so main() does not run.
@@ -9,6 +14,27 @@ VAYU_TEST=1
 INSTALLER="$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+
+# Sandbox before anything runs. Every path the installer reads or writes is
+# redirected into a temp tree, so the suite cannot see - or report on - a real
+# Vayu on the machine running it. Without this the macOS section below asked the
+# host about /Applications/Vayu.app and its live processes, which is green on a
+# clean CI runner and answers differently on a developer Mac with Vayu open.
+TMPROOT="$(mktemp -d)"
+trap 'rm -rf "$TMPROOT"' EXIT
+mkdir -p "$TMPROOT/system" "$TMPROOT/home" "$TMPROOT/data"
+
+DEFAULT_INSTALL_DIR="$TMPROOT/system"
+INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+APP_PATH="$INSTALL_DIR/${APP_NAME}.app"
+search_dirs() { printf '%s\n%s\n' "$TMPROOT/system" "$TMPROOT/home"; }
+
+LINUX_APP_DIR="$TMPROOT/data/vayu"
+LINUX_APP_BIN="$LINUX_APP_DIR/${APP_NAME}.AppImage"
+LINUX_VERSION_FILE="$LINUX_APP_DIR/version"
+LINUX_DESKTOP_FILE="$TMPROOT/data/applications/vayu.desktop"
+LINUX_ICON_FILE="$TMPROOT/data/icons/hicolor/256x256/apps/vayu.png"
+LINUX_BIN_LINK="$TMPROOT/bin/vayu"
 
 # The installer decides everything about *what* to do the same way on both
 # platforms and almost nothing about *how*, so every test below states which
@@ -74,6 +100,9 @@ echo "$out" | grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" \
 	|| fail "install should ad-hoc sign the app bundle"
 echo "$out" | grep -q "xattr -cr .*${APP_NAME}.app" \
 	|| fail "install should strip quarantine on the staged app"
+# ditto, not unzip: Apple's own extractor for these archives, and the one that
+# preserves the symlinks and permissions inside an .app bundle.
+echo "$out" | grep -q "ditto -x -k .*vayu.zip" || fail "the zip should be extracted with ditto"
 # Copied in beside the installed bundle and swapped, never deleted first: a
 # rm-then-copy that dies partway leaves the user with no Vayu at all, having
 # started from a working one.
@@ -115,11 +144,6 @@ printf 'PASS: macOS uninstall dry-run\n'
 # An update has to land on the copy the user actually launches. Dragging the app
 # out of the DMG into ~/Applications used to leave the installer writing
 # /Applications forever, updating a bundle nobody opened.
-TMPROOT="$(mktemp -d)"
-trap 'rm -rf "$TMPROOT"' EXIT
-mkdir -p "$TMPROOT/system" "$TMPROOT/home"
-search_dirs() { printf '%s\n%s\n' "$TMPROOT/system" "$TMPROOT/home"; }
-
 INSTALL_DIR_SAVED="$INSTALL_DIR"
 APP_PATH_SAVED="$APP_PATH"
 
@@ -162,7 +186,6 @@ out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -rf $TMPROOT/system/${APP_NAME}.app" || fail "uninstall should remove the system copy"
 echo "$out" | grep -q "rm -rf $TMPROOT/home/${APP_NAME}.app" || fail "uninstall should remove the home copy"
 
-search_dirs() { printf '%s\n' "$DEFAULT_INSTALL_DIR"; }
 INSTALL_DIR="$INSTALL_DIR_SAVED"
 APP_PATH="$APP_PATH_SAVED"
 
@@ -170,13 +193,6 @@ printf 'PASS: macOS install target resolution\n'
 
 # --- Linux -------------------------------------------------------------------
 platform() { printf 'Linux\n'; }
-
-LINUX_APP_DIR="$TMPROOT/data/vayu"
-LINUX_APP_BIN="$LINUX_APP_DIR/${APP_NAME}.AppImage"
-LINUX_VERSION_FILE="$LINUX_APP_DIR/version"
-LINUX_DESKTOP_FILE="$TMPROOT/data/applications/vayu.desktop"
-LINUX_ICON_FILE="$TMPROOT/data/icons/hicolor/256x256/apps/vayu.png"
-LINUX_BIN_LINK="$TMPROOT/bin/vayu"
 
 got="$(download_url 0.1.3)"
 want="https://github.com/athrvk/vayu/releases/download/v0.1.3/Vayu-0.1.3-x86_64.AppImage"
@@ -367,12 +383,38 @@ fi
 uname() { case "${1:-}" in -m) printf 'x86_64\n' ;; *) printf 'Linux\n' ;; esac; }
 (VAYU_DRYRUN=0 require_supported_os) >/dev/null 2>&1 \
 	|| fail "x86_64 Linux should be accepted"
-if (VAYU_DRYRUN=0 HOME= require_supported_os) >/dev/null 2>&1; then
+if (VAYU_DRYRUN=0 HOME='' require_supported_os) >/dev/null 2>&1; then
 	fail "an unset HOME should be refused before anything is written"
 fi
 unset -f uname
 
 printf 'PASS: host checks\n'
+
+# --- the answer that aborts an install ---------------------------------------
+# confirm() cannot reach its own parsing without a terminal, so every test above
+# either returns early (VAYU_DRYRUN) or stubs it out - meaning "n" had never
+# been parsed by anything. The parsing lives in reply_is_no for that reason.
+for answer in n N no NO nope "No thanks"; do
+	reply_is_no "$answer" || fail "'$answer' should decline"
+done
+for answer in y Y yes "" maybe later; do
+	if reply_is_no "$answer"; then fail "'$answer' should not decline"; fi
+done
+
+# The two shortcuts have to mean yes, or an unattended run would hang or abort.
+(VAYU_DRYRUN=1 confirm 'unused') || fail "a dry run should never block on a prompt"
+(VAYU_DRYRUN=0 VAYU_ASSUME_YES=1 confirm 'unused') || fail "VAYU_ASSUME_YES should mean yes"
+
+printf 'PASS: confirm parsing\n'
+
+# --- dry-run rendering -------------------------------------------------------
+# The tests read these lines, so an argument with a space in it must not render
+# the same as two arguments - a $HOME with a space would otherwise let an
+# assertion match a command the installer never ran.
+got="$(dry_run_line mv -f "/a b" /c)"
+[ "$got" = "[dry-run] mv -f '/a b' /c" ] || fail "spaces in an argument should be quoted, got: $got"
+
+printf 'PASS: dry-run rendering\n'
 
 # --- running-app guard -------------------------------------------------------
 # Last, because these stub out running_pids/confirm and the stubs would leak
@@ -432,5 +474,22 @@ fi
 if echo "$out" | grep -q "ditto"; then
 	fail "declining the quit must not replace the bundle"
 fi
+
+# Two guards, not one: the first spares you a download you would abandon, the
+# second covers the app being reopened while a slow download ran. A single
+# guard passes every assertion above, so count and place them explicitly.
+platform() { printf 'Darwin\n'; }
+unset -f confirm
+quit_running_app() { printf 'QUIT-MARK\n'; return 0; }
+out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
+[ "$(echo "$out" | grep -c 'QUIT-MARK')" = "2" ] \
+	|| fail "the app should be checked twice: before the download and before the swap"
+first_quit="$(echo "$out" | grep -n 'QUIT-MARK' | head -1 | cut -d: -f1)"
+download="$(echo "$out" | grep -n 'Downloading' | head -1 | cut -d: -f1)"
+last_quit="$(echo "$out" | grep -n 'QUIT-MARK' | tail -1 | cut -d: -f1)"
+swap="$(echo "$out" | grep -n 'sudo ditto' | head -1 | cut -d: -f1)"
+[ "$first_quit" -lt "$download" ] || fail "the first check belongs before the download"
+[ "$last_quit" -lt "$swap" ] && [ "$last_quit" -gt "$download" ] \
+	|| fail "the second check belongs after the download and before the bundle is replaced"
 
 printf 'PASS: running-app guard\n'
