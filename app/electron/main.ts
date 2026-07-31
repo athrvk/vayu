@@ -13,6 +13,7 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
+import { stampInstalledVersion } from "./appimage-stamp.js";
 import {
 	VayuMcpService,
 	DEFAULT_MCP_SAFETY_CONFIG,
@@ -647,6 +648,22 @@ function setupIpcHandlers() {
 app.whenReady().then(async () => {
 	// Setup IPC handlers first
 	setupIpcHandlers();
+
+	// Tell install.sh which version is actually installed. On Linux the
+	// AppImage updates itself, and the version file the installer wrote does
+	// not move with it - so the next `install.sh` run would re-download a
+	// release already on disk. No-op on every other platform and for an
+	// AppImage running from anywhere but the managed path. Fire and forget:
+	// the file is advisory and startup must not wait on it.
+	void stampInstalledVersion(
+		{
+			platform: process.platform,
+			appImagePath: process.env.APPIMAGE,
+			xdgDataHome: process.env.XDG_DATA_HOME,
+			home: app.getPath("home"),
+		},
+		app.getVersion()
+	);
 
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).

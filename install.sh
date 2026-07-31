@@ -37,6 +37,13 @@ LINUX_APP_BIN="$LINUX_APP_DIR/${APP_NAME}.AppImage"
 # The AppImage carries no version anywhere readable without mounting it, so the
 # installer records what it wrote. Losing this file only means the next run
 # re-downloads rather than skipping - it is a cache, not state.
+#
+# The app writes it too, at startup, from electron/appimage-stamp.ts. It has to:
+# the Linux AppImage updates itself in place (electron-updater, the "silent"
+# strategy), so after a self-update this file would still name the version the
+# installer put there and the next run would re-download 160MB for nothing. Both
+# writers agree on the format - the version, one line, trailing newline - and
+# this side trims whitespace when reading.
 LINUX_VERSION_FILE="$LINUX_APP_DIR/version"
 LINUX_DESKTOP_FILE="$LINUX_DATA_HOME/applications/vayu.desktop"
 LINUX_ICON_FILE="$LINUX_DATA_HOME/icons/hicolor/256x256/apps/vayu.png"
