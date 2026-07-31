@@ -41,6 +41,13 @@ export const queryKeys = {
 		// invalidate/patch every variant at once.
 		list: (filters: Record<string, unknown> = {}) =>
 			[...queryKeys.runs.lists(), filters] as const,
+		// The last completed design run for a request is one row cached as a
+		// plain `RunListResponse`, so it must NOT sit under `lists()`: the
+		// delete-run patch walks every cache under that prefix as `InfiniteData`
+		// and threw on this shape (`old.pages` undefined) for any open request
+		// tab. Its own family keeps the two apart at the root.
+		lastDesign: (requestId: string) =>
+			[...queryKeys.runs.all, "lastDesign", requestId] as const,
 		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,

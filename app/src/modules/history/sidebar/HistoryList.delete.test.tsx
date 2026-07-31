@@ -26,6 +26,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { ApiError } from "@/services";
+import { useTabsStore } from "@/stores";
 import HistoryList from "./HistoryList";
 
 const showToast = vi.fn();
@@ -183,5 +184,33 @@ describe("HistoryList when the delete is refused", () => {
 
 		await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith("r1"));
 		expect(showToast).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * Tabs are persisted, so a run tab left open after its run is deleted is not
+ * merely stale - it rehydrates into a pane that can never load, on every
+ * restart, forever. Deleting a request already closes its tabs; a run did not.
+ */
+describe("HistoryList closing the deleted run's tab", () => {
+	beforeEach(() => {
+		useTabsStore.setState({ openTabs: [], activeTabId: null });
+		useTabsStore.getState().openTab({ type: "run", entityId: "r1" });
+	});
+
+	it("closes the run's tab once the engine has deleted it", async () => {
+		await openDeleteDialog();
+		await confirmDelete();
+
+		await waitFor(() => expect(useTabsStore.getState().openTabs).toHaveLength(0));
+	});
+
+	it("keeps the tab when the delete was refused - the run is still there", async () => {
+		mutateAsync.mockRejectedValue(new ApiError(409, "UNKNOWN_ERROR", "HTTP 409: Conflict", {}));
+		await openDeleteDialog();
+		await confirmDelete();
+
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r1"]);
 	});
 });

@@ -26,15 +26,15 @@
  */
 
 import { History } from "lucide-react";
-import { useRunQuery, useRunReportQuery } from "@/queries";
+import { useRunQuery, useRunReportQuery, isRunNotFound } from "@/queries";
 import { useTabsStore } from "@/stores";
-import { Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 
 export default function HistoryDetail() {
-	const { openTabs, activeTabId } = useTabsStore();
+	const { openTabs, activeTabId, closeTab } = useTabsStore();
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -79,7 +79,31 @@ export default function HistoryDetail() {
 	// History" - it walked the user away from the run instead of offering the
 	// one thing that might work, a retry. A transient engine hiccup left no way
 	// back in short of re-selecting the run.
+	//
+	// A deleted run is the other case entirely, and the tab strip is where it
+	// arrives from: tabs persist, so a run deleted in another window (or before
+	// the last quit) rehydrates into this pane on launch. Retrying a 404 can
+	// only fail again, so that one offers the move that works instead.
 	if (runError || !run) {
+		if (isRunNotFound(runError)) {
+			return (
+				<ErrorState
+					title="This run no longer exists"
+					detail="It was deleted from History. Nothing here can be recovered - closing the tab is safe."
+					action={
+						activeTab ? (
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => closeTab(activeTab.id)}
+							>
+								Close tab
+							</Button>
+						) : undefined
+					}
+				/>
+			);
+		}
 		const detail = runError instanceof Error ? runError.message : null;
 		return (
 			<ErrorState

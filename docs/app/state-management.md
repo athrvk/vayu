@@ -477,10 +477,14 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 - **`useRunsQuery(q?)`** - Run history as an **infinite query** over the
   paginated `GET /runs` `{data, pagination}` envelope, newest first. Mirrors
   `useRunTimeSeriesQuery`'s `getNextPageParam` on the same envelope shape;
-  `fetchNextPage` pages older runs in on demand. The 5s `refetchInterval` keeps
-  the loaded pages fresh - in the default (unpaged) state that is **only the
-  first page**, so new runs (which land on page 1 under `start_time DESC`)
-  appear without re-fetching older pages. `q` is the optional server-side search.
+  `fetchNextPage` pages older runs in on demand. `q` is the optional
+  server-side search.
+  - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
+    only page 1 is loaded, **off** once the user has paged older runs in.
+    Refetching an infinite query re-fetches *every* loaded page in sequence, so
+    a user ten pages deep drove ~10 engine requests per tick. Only page 1 can
+    gain rows (`start_time DESC`) anyway; a paged list refreshes on the next
+    mutation or invalidation instead of on a timer.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
     (dedupe by id guards the momentary double-row a head insertion can cause
     across two refetched pages). **`runsTotal(data)`** - the server's total from
@@ -492,15 +496,39 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
   for a request, in **one** filtered call
   (`?requestId=&type=design&status=completed&limit=1`) - the server sorts
   `start_time DESC`, so its single row is the answer. No client-side
-  download-and-filter.
-- **`useRunQuery(runId)`** - Fetch single run (full `configSnapshot`)
-- **`useRunReportQuery(runId)`** - Fetch final report for a run
+  download-and-filter. It caches a **plain `RunListResponse`**, so it has its
+  own key family (`queryKeys.runs.lastDesign(requestId)`) and deliberately does
+  **not** sit under `runs.lists()`: `RequestBuilderProvider` mounts it for every
+  open request tab, and the delete-run patch walks that prefix as
+  `InfiniteData`. Keeping the two shapes apart at the root is the rule - a
+  prefix patch must never meet a cache shape it did not write.
+- **`useRunQuery(runId)`** / **`runDetailOptions(runId)`** - Fetch a single run
+  (full `configSnapshot`). Same 404 contract as `requestDetailOptions`: only an
+  `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it
+  with `isRunNotFound`, never by message), and that error is **never retried** -
+  a run tab is persisted and outlives its run, so a deleted run used to retry
+  forever behind a "Try again" that could not work. Everything else - a 5xx, an
+  unreachable engine - is rethrown untouched and keeps the default retry budget.
+  `HistoryDetail` renders the two cases differently: "this run no longer exists"
+  with **Close tab**, versus "couldn't load this run" with **Try again**.
+- **`useRunReportQuery(runId)`** - Fetch final report for a run. Also written by
+  `LoadTestService` at stream end via `queryClient.fetchQuery`, so opening the
+  run in History reads the cached copy rather than re-fetching a report that
+  cannot change.
 
 **Mutations:**
 - **`useStopRunMutation()`** - Stop a running load test
 - **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
   variant in place (drops the row, decrements the mirrored `total`) plus the
-  all-runs cache.
+  all-runs cache, and evicts the run's report. The list updater shape-guards
+  (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces.
+
+**Deleting a run closes its tabs.** Both delete flows - `HistoryList`'s row
+delete and Settings' *Clear run history* - call
+`closeTabsForEntities(ids, "run")` for the runs the engine actually accepted (a
+409'd run keeps its tab, because the run is still there). Tabs are persisted, so
+a run tab left open after its run is gone is not merely stale: it rehydrates
+into a pane that can never load on every restart.
 
 #### Engine Health & Config
 
@@ -810,8 +838,8 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 6. As metrics stream in, `addMetricsBatch()` efficiently folds them into historical metrics (capped at 3,000) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
-9. `useRunReportQuery(runId)` fetches the final report and is stored in `dashboard-store.finalReport`
-10. Dashboard switches to "completed" mode showing the final report
+9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, so History reuses it) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
+10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll
 
 ### Saving a Request with Auto-Save
 

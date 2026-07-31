@@ -39,8 +39,16 @@ interface TabsState {
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	closeTab: (tabId: string) => void;
-	/** Close every tab bound to one of the given entity ids (e.g. after deletion). */
-	closeTabsForEntities: (entityIds: Iterable<string>) => void;
+	/**
+	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
+	 *
+	 * `type` narrows the sweep to one kind of tab. Ids are engine-generated and
+	 * do not collide across families, so it is not needed for correctness - it
+	 * states at the call site which tabs a deletion is allowed to close, which
+	 * is the difference between "close the run tabs for these deleted runs" and
+	 * "close whatever happens to carry these ids".
+	 */
+	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
 	/** Replace the active tab in place (used when welcome tab spawns a request) */
 	replaceActiveTab: (tab: Omit<Tab, "id">) => void;
@@ -161,11 +169,14 @@ export const useTabsStore = create<TabsState>()(
 				set({ openTabs: remaining, activeTabId: nextActiveId });
 			},
 
-			closeTabsForEntities: (entityIds) => {
+			closeTabsForEntities: (entityIds, type) => {
 				const ids = new Set(entityIds);
 				if (ids.size === 0) return;
 				const { openTabs, activeTabId } = get();
-				const shouldClose = (t: Tab) => t.entityId !== null && ids.has(t.entityId);
+				const shouldClose = (t: Tab) =>
+					t.entityId !== null &&
+					ids.has(t.entityId) &&
+					(type === undefined || t.type === type);
 
 				const remaining = openTabs.filter((t) => !shouldClose(t));
 				if (remaining.length === openTabs.length) return; // nothing matched

@@ -25,6 +25,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { useTabsStore } from "@/stores";
 import GeneralPanel from "./GeneralPanel";
 
 const deleteRun = vi.fn((_id: string) => Promise.resolve());
@@ -78,6 +79,26 @@ describe("GeneralPanel - clear run history", () => {
 
 		await waitFor(() => expect(deleteRun).toHaveBeenCalledTimes(runs.length));
 		expect(confirmSpy).not.toHaveBeenCalled();
+	});
+
+	it("closes the run tabs it emptied, and only those the engine accepted", async () => {
+		// r2's delete is refused (a run still stopping answers 409), so its run
+		// is still there and its tab has to stay. Tabs persist, so a tab left
+		// open for a deleted run comes back as a dead pane on the next launch.
+		deleteRun.mockImplementation((id: string) =>
+			id === "r2" ? Promise.reject(new Error("still stopping")) : Promise.resolve()
+		);
+		useTabsStore.setState({ openTabs: [], activeTabId: null });
+		useTabsStore.getState().openTab({ type: "run", entityId: "r1" });
+		useTabsStore.getState().openTab({ type: "run", entityId: "r2" });
+
+		render(<GeneralPanel />);
+		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+		fireEvent.click(await screen.findByRole("button", { name: /^delete$/i }));
+
+		await waitFor(() =>
+			expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r2"])
+		);
 	});
 
 	it("deletes nothing when the dialog is cancelled", async () => {
