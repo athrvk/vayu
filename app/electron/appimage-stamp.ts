@@ -53,15 +53,23 @@ export function resolveStampPath(env: StampEnvironment): string | null {
 	if (env.platform !== "linux") return null;
 	if (!env.appImagePath) return null;
 
-	const dataHome = env.xdgDataHome || (env.home ? path.join(env.home, ".local", "share") : "");
+	// posix, not the host's separator. These are Linux paths by definition - the
+	// layout install.sh writes - and on Windows `path.join` would answer with
+	// backslashes and `path.resolve` would prepend a drive letter, so nothing
+	// could ever match and the function would silently return null everywhere.
+	// That is not hypothetical: it is what the Windows CI runner reported.
+	const join = path.posix.join;
+	const dataHome = env.xdgDataHome || (env.home ? join(env.home, ".local", "share") : "");
 	if (!dataHome) return null;
 
-	const appDir = path.join(dataHome, "vayu");
-	// Compared as paths, not inodes: a symlinked $HOME would need a realpath on
+	const appDir = join(dataHome, "vayu");
+	// Compared as strings, not inodes: a symlinked $HOME would need a realpath on
 	// both sides, and this runs on every startup for a purely advisory file.
-	if (path.resolve(env.appImagePath) !== path.join(appDir, "Vayu.AppImage")) return null;
+	// APPIMAGE is set by the AppImage runtime to an absolute path, so there is
+	// nothing to normalise away.
+	if (env.appImagePath !== join(appDir, "Vayu.AppImage")) return null;
 
-	return path.join(appDir, "version");
+	return join(appDir, "version");
 }
 
 /**

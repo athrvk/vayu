@@ -20,7 +20,7 @@ APP_NAME="Vayu"
 platform() { uname -s; }
 
 # --- macOS layout ---
-# Where a fresh install goes. Both are re-pointed by resolve_install_target when
+# Where a fresh install goes. Both are re-pointed by adopt_install_target when
 # Vayu is already installed somewhere else.
 DEFAULT_INSTALL_DIR="/Applications"
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"

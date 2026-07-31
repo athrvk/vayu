@@ -22,20 +22,23 @@ import { resolveStampPath, stampInstalledVersion, writeVersionStamp } from "./ap
 let root: string;
 
 beforeEach(() => {
-	root = mkdtempSync(path.join(tmpdir(), "vayu-stamp-"));
+	// Forward slashes even on Windows: resolveStampPath computes the Linux
+	// layout with posix semantics, and Node's fs accepts either separator - so
+	// one root can serve both the path arithmetic and the real writes below.
+	root = mkdtempSync(path.join(tmpdir(), "vayu-stamp-")).replace(/\\/g, "/");
 });
 
 afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
-const managed = (home: string) => path.join(home, ".local", "share", "vayu", "Vayu.AppImage");
+const managed = (home: string) => path.posix.join(home, ".local", "share", "vayu", "Vayu.AppImage");
 
 describe("resolveStampPath", () => {
 	it("points beside the AppImage install.sh manages", () => {
 		expect(
 			resolveStampPath({ platform: "linux", appImagePath: managed(root), home: root })
-		).toBe(path.join(root, ".local", "share", "vayu", "version"));
+		).toBe(path.posix.join(root, ".local", "share", "vayu", "version"));
 	});
 
 	it("follows XDG_DATA_HOME, as the installer does", () => {
@@ -47,7 +50,7 @@ describe("resolveStampPath", () => {
 				xdgDataHome: xdg,
 				home: root,
 			})
-		).toBe(path.join(xdg, "vayu", "version"));
+		).toBe(path.posix.join(xdg, "vayu", "version"));
 	});
 
 	it("declines for an AppImage running from anywhere else", () => {
@@ -121,9 +124,9 @@ describe("stampInstalledVersion", () => {
 				"2.0.0"
 			)
 		).resolves.toBe(true);
-		expect(readFileSync(path.join(root, ".local", "share", "vayu", "version"), "utf8")).toBe(
-			"2.0.0\n"
-		);
+		expect(
+			readFileSync(path.posix.join(root, ".local", "share", "vayu", "version"), "utf8")
+		).toBe("2.0.0\n");
 	});
 
 	it("writes nothing at all on macOS", async () => {
