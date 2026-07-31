@@ -32,9 +32,10 @@ const listeners = new Map<string, Handler>();
 const ipcHandlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
 const checkForUpdates = vi.fn().mockResolvedValue(null);
+const quit = vi.fn();
 
 vi.mock("electron", () => ({
-	app: { getVersion: () => "0.9.0" },
+	app: { getVersion: () => "0.9.0", quit: (...args: unknown[]) => quit(...args) },
 	dialog: {
 		showMessageBox: (...args: unknown[]) => showMessageBox(...args),
 	},
@@ -199,6 +200,19 @@ describe("the macOS update instruction", () => {
 		// Without this the assertion below passes vacuously if the README's
 		// macOS section is ever reworded past the pattern.
 		expect(documented).toMatch(/install\.sh/);
+	});
+
+	it("can quit the app so the pasted command can replace it", async () => {
+		// The installer cannot replace a bundle whose processes are running. It
+		// can quit Vayu itself, but only through an Apple Event that macOS gates
+		// behind an Automation consent prompt - quitting from in here needs no
+		// permission and takes main.ts's before-quit path, which flushes saves
+		// and stops the engine first.
+		quit.mockClear();
+		const { initAutoUpdater } = await loadUpdater("darwin");
+		initAutoUpdater(win);
+		await ipcHandlers.get("update:quitForUpdate")?.(null);
+		expect(quit).toHaveBeenCalled();
 	});
 
 	it("hands macOS users exactly the command the README publishes", async () => {

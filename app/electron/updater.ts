@@ -118,6 +118,20 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
 	ipcMain.handle("update:check", () => checkForUpdatesNow("renderer"));
 
+	// The macOS notify path's other half: the installer cannot replace a bundle
+	// whose processes are still running, so it has to quit Vayu itself - and
+	// from a terminal that means an Apple Event, which macOS gates behind an
+	// Automation consent prompt the user has to notice and approve.
+	//
+	// Quitting from in here needs no such permission and takes the ordinary
+	// `before-quit` path in main.ts, which flushes pending renderer saves and
+	// stops the engine and MCP server before exiting. So the app quitting itself
+	// is strictly better than the script killing it, and the script's own quit
+	// stays as the fallback for anyone who runs the command directly.
+	ipcMain.handle("update:quitForUpdate", () => {
+		app.quit();
+	});
+
 	if (strategy === "disabled") {
 		console.log("[Updater] disabled (development)");
 		return;

@@ -99,6 +99,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	> => ipcRenderer.invoke("update:check"),
 	openReleasePage: (url: string): Promise<void> =>
 		ipcRenderer.invoke("update:openReleasePage", url),
+	// macOS notify path: the installer needs Vayu closed before it can replace
+	// the bundle, and quitting from in here skips the Automation consent prompt
+	// a terminal would hit.
+	quitForUpdate: (): Promise<void> => ipcRenderer.invoke("update:quitForUpdate"),
 
 	// Menu-driven navigation
 	onOpenSettings: (callback: () => void) => {
