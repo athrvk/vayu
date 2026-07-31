@@ -25,12 +25,17 @@ of it on your machine: no account, no cloud sync, no telemetry.
 Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
 <!-- Keep these in step with the Download section of README.md, which is the
-     canonical copy - both point at the same release assets and install.sh. -->
+     canonical copy - both point at the same release assets and install.sh.
+
+     The macOS URL is this site serving the repo's own install.sh, published at
+     the site root by .github/hooks/install_script.py. It is a real file, not a
+     redirect, so it only refreshes when this site deploys - which is why
+     workflows/docs.yml watches install.sh too. -->
 
 === "macOS"
 
     ```sh
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+    bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
     Installs the latest release to `/Applications`, and asks for your password

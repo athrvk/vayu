@@ -158,6 +158,10 @@ plugins:
 
 hooks:
   - hooks/brand_assets.py
+  # Publishes the repo-root install.sh at <site_url>install.sh, which is the URL
+  # the macOS install command curls. Keep `install.sh` in the `paths:` filters of
+  # workflows/docs.yml or the published copy goes stale - see the hook.
+  - hooks/install_script.py
   # Turns the analytics + consent blocks below off when GOOGLE_ANALYTICS_KEY is
   # unset, which an empty `!ENV` value does not do on its own.
   - hooks/analytics.py

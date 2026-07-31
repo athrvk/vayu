@@ -153,11 +153,15 @@ main() {
 }
 
 usage() {
+	# The docs site serves this very script at that URL (published from the repo
+	# root by .github/hooks/install_script.py), so the lines below are the exact
+	# commands README.md and docs/index.md give.
+	local url="https://athrvk.github.io/vayu/install.sh"
 	cat <<EOF
 Vayu installer
-  install:        bash -c "\$(curl -fsSL <url>)"
-  pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl -fsSL <url>)"
-  uninstall:      bash -c "\$(curl -fsSL <url>)" -- --uninstall [--purge]
+  install:        bash -c "\$(curl -fsSL $url)"
+  pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl -fsSL $url)"
+  uninstall:      bash -c "\$(curl -fsSL $url)" -- --uninstall [--purge]
 EOF
 }
 
