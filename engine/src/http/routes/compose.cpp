@@ -30,22 +30,15 @@ void register_compose_routes (RouteContext& ctx) {
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
             "POST /compose - Invalid JSON: " + std::string (e.what ()));
-            // Nested error shape (issue #173's decided format) - this endpoint
-            // postdates that decision, so it never speaks the flat legacy shape.
-            res.status = 400;
-            res.set_content (
-            nlohmann::json{ { "error",
-                            { { "code", "invalid_compose_request" },
-                            { "message", "Invalid JSON: " + std::string (e.what ()) } } } }
-            .dump (),
-            "application/json");
+            send_error (res, 400, "Invalid JSON: " + std::string (e.what ()),
+            "invalid_compose_request");
             return;
         }
 
         auto [status, payload] = compose_request_core (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning (
-            "POST /compose - " + std::to_string (status) + ": " + payload.dump ());
+            vayu::utils::log_warning ("POST /compose - " + std::to_string (status) +
+            ": " + error_message_of (payload));
         }
         res.status = status;
         res.set_content (payload.dump (), "application/json");

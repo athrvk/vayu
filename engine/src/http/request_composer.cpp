@@ -17,6 +17,7 @@
 #include <regex>
 #include <unordered_set>
 
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -86,7 +87,9 @@ std::string iso_timestamp () {
 #else
     gmtime_r (&t, &utc);
 #endif
-    char buf[32];
+    // Sized for snprintf's worst case over full-range ints, so -Wformat-
+    // truncation has nothing to warn about; real output is 24 characters.
+    char buf[96];
     std::snprintf (buf, sizeof (buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
     utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
     utc.tm_sec, static_cast<int> (ms.count ()));
@@ -305,10 +308,11 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
 
 namespace {
 
+// Builds through routes.hpp's error_body so /compose carries the same nested
+// shape as every other route (issue #173 landed while #226 was in flight).
 std::pair<int, nlohmann::json>
 compose_error (int status, const char* code, const std::string& message) {
-    return { status,
-        nlohmann::json{ { "error", { { "code", code }, { "message", message } } } } };
+    return { status, routes::error_body (status, message, code) };
 }
 
 // Append one script part, skipping blanks - the same rule the clients'

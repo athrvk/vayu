@@ -994,8 +994,8 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
 unchanged. An auth that resolves to "send nothing" is an absent `auth` field.
 
-**Errors** use the nested shape (this endpoint postdates the flat/nested split
-and never speaks the flat legacy shape):
+**Errors** use the engine's single nested shape (see the top of this page),
+with specific codes:
 
 - `404` `{"error": {"code": "request_not_found", "message": "..."}}` - unknown `requestId`.
 - `400` `{"error": {"code": "invalid_compose_request", "message": "..."}}` -
