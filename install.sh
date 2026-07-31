@@ -258,7 +258,9 @@ request_quit() {
 			;;
 		*)
 			printf '%s\n' "$(running_pids)" | while IFS= read -r pid; do
-				[ -n "$pid" ] && run_quiet kill -TERM "$pid" || true
+				if [ -n "$pid" ]; then
+					run_quiet kill -TERM "$pid" || true
+				fi
 			done
 			;;
 	esac
@@ -273,7 +275,9 @@ force_quit() {
 			;;
 		*)
 			printf '%s\n' "$(running_pids)" | while IFS= read -r pid; do
-				[ -n "$pid" ] && run_quiet kill -KILL "$pid" || true
+				if [ -n "$pid" ]; then
+					run_quiet kill -KILL "$pid" || true
+				fi
 			done
 			;;
 	esac
