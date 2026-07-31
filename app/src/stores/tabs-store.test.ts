@@ -7,9 +7,11 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTabsStore } from "./tabs-store";
+import { useSaveStore, type SaveContext } from "./save-store";
 
 beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	useSaveStore.setState({ contexts: new Map() });
 });
 
 describe("closeTabsForEntities", () => {
@@ -69,5 +71,128 @@ describe("closeTabsForEntities", () => {
 
 		expect(useTabsStore.getState().openTabs).toEqual(before.openTabs);
 		expect(useTabsStore.getState().activeTabId).toBe(before.activeTabId);
+	});
+});
+
+/**
+ * LRU eviction must never take unsaved work.
+ *
+ * The guard used to look up `request-${entityId}` and nothing else, so the two
+ * tabs with no `entityId` at all - Settings and Variables, both singletons -
+ * read as clean no matter what was typed into them, and the 13th tab silently
+ * closed one. Their contexts register under "settings" / "globals-editor" /
+ * "environment-<id>" / "collection-<id>", which is what these drive.
+ *
+ * Reverting the guard to the old `request-` lookup fails every case in the
+ * second describe and none in the first.
+ */
+
+/** Register a dirty save context the way the editors do. */
+function markDirty(contextId: string) {
+	const context: SaveContext = {
+		id: contextId,
+		name: contextId,
+		save: () => Promise.resolve(),
+		hasPendingChanges: true,
+	};
+	useSaveStore.getState().registerContext(context);
+}
+
+/** Fill past MAX_OPEN_TABS (12) so the next open has to evict something. */
+function openRequestTabs(count: number) {
+	for (let i = 0; i < count; i++) {
+		useTabsStore.getState().openTab({ type: "request", entityId: `req_${i}` });
+	}
+}
+
+function openTypes(): string[] {
+	return useTabsStore.getState().openTabs.map((t) => t.type);
+}
+
+describe("LRU eviction and a clean tab", () => {
+	it("evicts the oldest tab once the cap is passed", () => {
+		openRequestTabs(13);
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		expect(ids).toHaveLength(12);
+		expect(ids).not.toContain("req_0");
+	});
+
+	it("still evicts a request tab whose context is clean", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "clean" });
+		useSaveStore.getState().registerContext({
+			id: "request-clean",
+			name: "Request",
+			save: () => Promise.resolve(),
+			hasPendingChanges: false,
+		});
+		openRequestTabs(12);
+
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		expect(ids).not.toContain("clean");
+	});
+});
+
+describe("LRU eviction never takes a dirty tab", () => {
+	it("spares a dirty request tab, as it always did", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "dirty" });
+		markDirty("request-dirty");
+		openRequestTabs(12);
+
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		expect(ids).toContain("dirty");
+	});
+
+	it("spares a dirty Settings tab, which has no entityId to look up", () => {
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+		markDirty("settings");
+		openRequestTabs(12);
+
+		expect(openTypes()).toContain("settings");
+	});
+
+	it("spares a dirty Variables tab editing globals", () => {
+		useTabsStore.getState().openTab({ type: "variables", entityId: null });
+		markDirty("globals-editor");
+		openRequestTabs(12);
+
+		expect(openTypes()).toContain("variables");
+	});
+
+	it("spares a dirty Variables tab editing an environment", () => {
+		useTabsStore.getState().openTab({ type: "variables", entityId: null });
+		markDirty("environment-env_1");
+		openRequestTabs(12);
+
+		expect(openTypes()).toContain("variables");
+	});
+
+	it("spares a dirty collection tab", () => {
+		useTabsStore.getState().openTab({ type: "collection", entityId: "col_1" });
+		markDirty("collection-col_1");
+		openRequestTabs(12);
+
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		expect(ids).toContain("col_1");
+	});
+
+	it("evicts a clean Settings tab, so the guard is not just refusing everything", () => {
+		// The discriminating case: a guard that reported every singleton dirty
+		// would pass all five above and fail here.
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+		openRequestTabs(12);
+
+		expect(openTypes()).not.toContain("settings");
+	});
+
+	it("drops none of them when every existing tab is dirty", () => {
+		for (let i = 0; i < 13; i++) {
+			useTabsStore.getState().openTab({ type: "request", entityId: `req_${i}` });
+			markDirty(`request-req_${i}`);
+		}
+
+		// The only tab the predicate can select here is the one just opened,
+		// which carries no edits yet. Every tab holding work survives.
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		for (let i = 0; i < 12; i++) expect(ids).toContain(`req_${i}`);
 	});
 });

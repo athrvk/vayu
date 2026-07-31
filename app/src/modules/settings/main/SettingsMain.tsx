@@ -145,7 +145,7 @@ export default function SettingsMain() {
 	// This hook must be called before any early returns to follow Rules of Hooks
 	useEffect(() => {
 		if (hasChanges && !hasInvalidValues) {
-			markPendingSave("settings");
+			markPendingSave();
 		} else {
 			setStatus("idle");
 		}

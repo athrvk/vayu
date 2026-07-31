@@ -439,7 +439,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		// revert the change. Mirrors removeVariable.
 		variablesRef.current = newVariables;
 		setHasPendingChanges(true);
-		markPendingSave(contextId);
+		markPendingSave();
 	};
 
 	const removeVariable = (index: number) => {

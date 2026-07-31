@@ -8,7 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { useSaveStore } from "./save-store";
+import { useSaveStore, type SaveContext } from "./save-store";
 
 export type TabType =
 	| "welcome"
@@ -48,6 +48,51 @@ interface TabsState {
 	closeAll: () => void;
 }
 
+/**
+ * Does this tab hold unsaved edits?
+ *
+ * The save registry is keyed by *editor*, and editors do not line up with tabs.
+ * `settings` and `variables` are singletons with no `entityId`, so the old
+ * `request-${entityId}` lookup returned nothing for them and read as clean:
+ * a dirty Settings tab was eligible for LRU eviction, taking its edits with it.
+ * The real keys are `settings` (`SettingsMain`) and `globals-editor` /
+ * `environment-<id>` / `collection-<id>` (`VariableTableEditor`).
+ *
+ * The variables tab hosts whichever of those three editors the sidebar has
+ * selected and a `Tab` does not record which, so any dirty variable-editor
+ * context counts as that tab's. A `collection-<id>` context can equally come
+ * from a collection tab's Variables sub-tab, so this over-matches - which is
+ * the safe direction. Over-matching keeps a tab that could have closed;
+ * under-matching discards someone's work.
+ */
+function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
+	const isDirty = (key: string) => contexts.get(key)?.hasPendingChanges === true;
+
+	switch (tab.type) {
+		case "request":
+			return tab.entityId !== null && isDirty(`request-${tab.entityId}`);
+		case "collection":
+			return tab.entityId !== null && isDirty(`collection-${tab.entityId}`);
+		case "settings":
+			return isDirty("settings");
+		case "variables":
+			for (const [key, ctx] of contexts) {
+				if (!ctx.hasPendingChanges) continue;
+				if (
+					key === "globals-editor" ||
+					key.startsWith("environment-") ||
+					key.startsWith("collection-")
+				) {
+					return true;
+				}
+			}
+			return false;
+		// welcome, dashboard and run register no save context at all.
+		default:
+			return false;
+	}
+}
+
 function makeId() {
 	return typeof crypto !== "undefined" && crypto.randomUUID
 		? crypto.randomUUID()
@@ -78,23 +123,20 @@ export const useTabsStore = create<TabsState>()(
 				const newTab: Tab = { ...tabDef, id: makeId() };
 				let tabs = [...openTabs, newTab];
 
-				// LRU eviction when over cap
+				// LRU eviction when over cap. Nothing is flushed on the way out:
+				// the predicate below refuses to select a dirty tab, so the flush
+				// branch that used to sit here was unreachable by construction - and
+				// had it ever run, `void ctx.save()` would have dropped the
+				// rejection. Eviction simply never takes unsaved work.
 				if (tabs.length > MAX_OPEN_TABS) {
 					// Find the oldest non-active, non-exempt, non-dirty tab
 					const contexts = useSaveStore.getState().contexts;
 					const evictIndex = tabs.findIndex((t) => {
 						if (t.id === activeTabId) return false;
 						if (LRU_EXEMPT_TYPES.includes(t.type)) return false;
-						const ctx = t.entityId ? contexts.get(`request-${t.entityId}`) : null;
-						return !ctx?.hasPendingChanges;
+						return !isTabDirty(t, contexts);
 					});
 					if (evictIndex !== -1) {
-						const evicted = tabs[evictIndex];
-						// Flush any lingering save context for the evicted tab
-						if (evicted.entityId) {
-							const ctx = contexts.get(`request-${evicted.entityId}`);
-							if (ctx?.hasPendingChanges) void ctx.save();
-						}
 						tabs.splice(evictIndex, 1);
 					}
 				}

@@ -71,3 +71,36 @@ describe("save failure reporting", () => {
 		expect(code).toMatch(/saveStatus === "saved"/);
 	});
 });
+
+/**
+ * `pending` was the same defect one field over: `markPendingSave` set it on
+ * every edit and no surface rendered it. That is harmless while auto-save is
+ * on - the status resolves itself within the delay - but auto-save is a
+ * setting, and with it off nothing in the app said "unsaved" at all. The tab
+ * strip deliberately carries no unsaved-dot, so the Dock is the only place
+ * left to say it.
+ */
+describe("unsaved work is visible", () => {
+	it("renders the pending status the save pipeline writes", () => {
+		expect(code).toMatch(/saveStatus === "pending"/);
+		expect(code).toMatch(/Unsaved changes/);
+	});
+
+	it("scanned a real Dock, not an empty string", () => {
+		expect(code.length).toBeGreaterThan(1000);
+	});
+
+	it("is reachable from the store the editors actually call", () => {
+		// The seam: if `markPendingSave` stops setting "pending", the Dock case
+		// above renders for nothing.
+		useSaveStore.getState().markPendingSave();
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("gives every status a reader now that the write-only fields are gone", () => {
+		// `lastSavedAt` and `pendingSaveId` were written by this store and read
+		// by nothing; deleting them left `status` as its whole public surface.
+		expect(Object.keys(useSaveStore.getState())).not.toContain("lastSavedAt");
+		expect(Object.keys(useSaveStore.getState())).not.toContain("pendingSaveId");
+	});
+});

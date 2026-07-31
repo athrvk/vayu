@@ -174,6 +174,17 @@ export function Dock() {
 						{isEngineConnected ? "Connected" : "Disconnected"}
 					</span>
 
+					{/*
+					 * "Unsaved changes" is the only place in the app that says so.
+					 * The tab strip deliberately has no unsaved-dot because
+					 * auto-save is the safety net - but auto-save is a setting the
+					 * user can turn off, and with it off nothing was ever written
+					 * back and nothing said as much. `pending` was set on every
+					 * edit and rendered nowhere.
+					 */}
+					{saveStatus === "pending" && (
+						<span className="text-xs text-muted-foreground">Unsaved changes</span>
+					)}
 					{saveStatus === "saving" && (
 						<span className="text-xs text-muted-foreground">Saving…</span>
 					)}

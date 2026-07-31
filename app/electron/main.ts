@@ -13,6 +13,7 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
+import { createSaveFlusher } from "./save-flush.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
 import {
 	VayuMcpService,
@@ -76,12 +77,26 @@ let engineSidecar: EngineSidecar | null = null;
 let mcpService: VayuMcpService | null = null;
 let mainWindow: BrowserWindow | null = null;
 
-// Track if we've already sent the before-quit flush message
-let flushSent = false;
+// Shared by the quit path and the window-close path - see save-flush.ts for why
+// there is only one of these.
+const saveFlusher = createSaveFlusher({
+	requestFlush: () => {
+		if (!mainWindow || mainWindow.webContents.isDestroyed()) return false;
+		mainWindow.webContents.send("before-quit");
+		return true;
+	},
+	onFlushed: (listener) => {
+		ipcMain.once("before-quit-flushed", listener);
+		return () => ipcMain.removeListener("before-quit-flushed", listener);
+	},
+	schedule: (listener, ms) => {
+		setTimeout(listener, ms);
+	},
+});
 
 function createWindow() {
-	// Reset flush flag when creating a new window
-	flushSent = false;
+	// A new window means a new renderer with its own unsaved work.
+	saveFlusher.reset();
 
 	// Load persisted window state
 	const windowState = loadWindowState({
@@ -171,6 +186,19 @@ function createWindow() {
 				height: TITLEBAR_HEIGHT,
 			});
 		}
+	});
+
+	// The X button destroys the renderer before `before-quit` can ask it for
+	// anything (and on macOS it never quits at all), so the flush has to happen
+	// here. Bound to this window rather than to `mainWindow`, which may point at
+	// a replacement by the time the flush lands.
+	const closingWindow = mainWindow;
+	closingWindow.on("close", (event) => {
+		if (saveFlusher.hasFlushed()) return;
+		event.preventDefault();
+		saveFlusher.flush(() => {
+			if (!closingWindow.isDestroyed()) closingWindow.close();
+		});
 	});
 
 	mainWindow.on("closed", () => {
@@ -713,24 +741,11 @@ app.on("window-all-closed", () => {
 // Ensure saves are flushed and engine is stopped when the app quits
 app.on("before-quit", (event) => {
 	// First pass: ask the renderer to flush pending saves. Quit resumes as
-	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck.
-	if (!flushSent) {
-		flushSent = true;
+	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. A close
+	// that already flushed falls straight through to the second pass.
+	if (!saveFlusher.hasFlushed()) {
 		event.preventDefault();
-		let resumed = false;
-		const resumeQuit = () => {
-			if (resumed) return;
-			resumed = true;
-			ipcMain.removeListener("before-quit-flushed", resumeQuit);
-			app.quit();
-		};
-		if (!mainWindow) {
-			resumeQuit();
-			return;
-		}
-		ipcMain.once("before-quit-flushed", resumeQuit);
-		setTimeout(resumeQuit, 2000);
-		mainWindow.webContents.send("before-quit");
+		saveFlusher.flush(() => app.quit());
 		return;
 	}
 
