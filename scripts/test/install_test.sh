@@ -104,15 +104,18 @@ echo "$out" | grep -q "xattr -cr .*${APP_NAME}.app" \
 # ditto, not unzip: Apple's own extractor for these archives, and the one that
 # preserves the symlinks and permissions inside an .app bundle.
 echo "$out" | grep -q "ditto -x -k .*vayu.zip" || fail "the zip should be extracted with ditto"
-# Copied in beside the installed bundle and swapped, never deleted first: a
-# rm-then-copy that dies partway leaves the user with no Vayu at all, having
-# started from a working one.
+# Copied in beside the installed bundle and swapped in by rename, so there is no
+# moment at which neither exists. The strong form of that is the last assertion:
+# a working install is *moved aside*, never deleted, until the new one is in
+# place - deleting first leaves the user with no Vayu at all if anything fails
+# afterwards.
 echo "$out" | grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}.new" \
 	|| fail "install should ditto the signed app in beside the existing one"
 echo "$out" | grep -q "sudo mv ${APP_PATH}.new ${APP_PATH}$" \
 	|| fail "install should swap the new bundle into place"
-[ "$(echo "$out" | grep -c "sudo rm -rf ${APP_PATH}$")" = "1" ] \
-	|| fail "the installed bundle should be removed exactly once, immediately before the swap"
+if echo "$out" | grep -q "sudo rm -rf ${APP_PATH}$"; then
+	fail "the installed bundle must be moved aside, never deleted before the swap"
+fi
 
 printf 'PASS: macOS install dry-run\n'
 
@@ -149,38 +152,46 @@ INSTALL_DIR_SAVED="$INSTALL_DIR"
 APP_PATH_SAVED="$APP_PATH"
 
 # Nothing installed: the default stands.
-resolve_install_target
-[ "$APP_PATH" = "$APP_PATH_SAVED" ] || fail "a fresh install should keep the default path, got $APP_PATH"
+[ "$(resolved_install_path)" = "$APP_PATH_SAVED" ] \
+	|| fail "a fresh install should keep the default path, got $(resolved_install_path)"
 
 # Installed only in the home folder: update that one, not /Applications.
 mkdir -p "$TMPROOT/home/${APP_NAME}.app"
-resolve_install_target
-[ "$APP_PATH" = "$TMPROOT/home/${APP_NAME}.app" ] || fail "should target the existing copy, got $APP_PATH"
+[ "$(resolved_install_path)" = "$TMPROOT/home/${APP_NAME}.app" ] \
+	|| fail "should target the existing copy, got $(resolved_install_path)"
+# The one place the globals are assigned, so that assignment is what is tested.
+adopt_install_target >/dev/null
 [ "$INSTALL_DIR" = "$TMPROOT/home" ] || fail "INSTALL_DIR should follow the target, got $INSTALL_DIR"
 
 # Installed in both: the first search dir wins and the other is reported, since
 # silently updating one of two copies is how a stale build keeps launching.
 mkdir -p "$TMPROOT/system/${APP_NAME}.app"
-# Redirected to a file rather than captured with $(): a command substitution
-# runs in a subshell, so the APP_PATH it resolves would not survive the call.
-# do_install calls it outside its own subshell for the same reason.
-resolve_install_target >"$TMPROOT/resolve.out" 2>&1
-out="$(cat "$TMPROOT/resolve.out")"
-[ "$APP_PATH" = "$TMPROOT/system/${APP_NAME}.app" ] || fail "the first search dir should win, got $APP_PATH"
+# Now that resolution prints instead of assigning, this is an ordinary capture -
+# it used to have to be redirected to a file, because a command substitution
+# runs in a subshell and the assignment would not have survived.
+out="$(adopt_install_target 2>&1)"
+[ "$(resolved_install_path)" = "$TMPROOT/system/${APP_NAME}.app" ] \
+	|| fail "the first search dir should win, got $(resolved_install_path)"
 echo "$out" | grep -q "more than one place" || fail "a second copy should be reported"
 echo "$out" | grep -q "$TMPROOT/home/${APP_NAME}.app" || fail "the report should name the other copy"
 
-# do_install has to actually resolve the target - computing the right path and
+# do_install has to actually adopt the target - computing the right path and
 # then installing over the default one would pass every assertion above.
 #
-# Reset the globals first, or this proves nothing: the direct calls above
-# already left APP_PATH resolved, so do_install would inherit the right answer
-# without ever asking for it.
+# Reset the globals first, or this proves nothing: the calls above already left
+# APP_PATH resolved, so do_install would inherit the right answer without ever
+# asking for it.
 INSTALL_DIR="$INSTALL_DIR_SAVED"
 APP_PATH="$APP_PATH_SAVED"
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-echo "$out" | grep -q "sudo ditto .* $TMPROOT/system/${APP_NAME}.app" \
+echo "$out" | grep -q "sudo ditto .* $TMPROOT/system/${APP_NAME}.app.new" \
 	|| fail "do_install should install to the resolved target, not the default"
+# An existing bundle is renamed out of the way and only deleted once the new one
+# has landed, so an interrupted swap can be undone.
+echo "$out" | grep -q "sudo mv $TMPROOT/system/${APP_NAME}.app $TMPROOT/system/${APP_NAME}.app.old" \
+	|| fail "the existing bundle should be moved aside, not deleted"
+echo "$out" | grep -q "sudo rm -rf $TMPROOT/system/${APP_NAME}.app.old$" \
+	|| fail "the previous bundle should be removed only after the swap"
 
 # Uninstall clears every copy it can find, not just the default one.
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
@@ -199,11 +210,11 @@ got="$(download_url 0.1.3)"
 want="https://github.com/athrvk/vayu/releases/download/v0.1.3/Vayu-0.1.3-x86_64.AppImage"
 [ "$got" = "$want" ] || fail "Linux download_url mismatch: $got"
 
-# resolve_install_target is macOS-only: Linux owns a single path, so there is
-# nowhere for a second copy to hide and nothing to resolve.
+# Target resolution is macOS-only: Linux owns a single path, so there is nowhere
+# for a second copy to hide and nothing to resolve.
 APP_PATH_SAVED="$APP_PATH"
-resolve_install_target
-[ "$APP_PATH" = "$APP_PATH_SAVED" ] || fail "resolve_install_target should be a no-op on Linux"
+adopt_install_target >/dev/null
+[ "$APP_PATH" = "$APP_PATH_SAVED" ] || fail "adopting a target should be a no-op on Linux"
 
 # installed_version: the AppImage keeps its version inside a squashfs image, so
 # the installer stamps what it wrote. Both the binary and the stamp have to be
@@ -327,6 +338,13 @@ printf 'PASS: no self-match when run from argv\n'
 # --- download integrity ------------------------------------------------------
 # Real curl against file:// URLs - no network, no stubs, and it exercises the
 # actual failure handling rather than a mock of it.
+#
+# Each call is wrapped in a subshell because download_asset dies rather than
+# returning a status for its caller to check: `step || exit 1` at every call
+# site reads like error handling and is not - bash disables errexit for the
+# whole body of a function invoked that way, which is how a failed download once
+# came back as success. The cost is that a dying function cannot be called
+# in-process by a test, which a subshell answers.
 payload="$TMPROOT/asset.bin"
 dest="$TMPROOT/downloaded.bin"
 printf 'pretend this is 150MB of AppImage\n' >"$payload"
@@ -335,18 +353,18 @@ printf 'pretend this is 150MB of AppImage\n' >"$payload"
 # `download_asset ... || exit 1`, and bash disables errexit for the whole body
 # of a function invoked that way - so an unchecked curl fell straight through
 # and the caller installed whatever was, or was not, on disk.
-if download_asset "file://$TMPROOT/does-not-exist" "$dest" >/dev/null 2>&1; then
+if (download_asset "file://$TMPROOT/does-not-exist" "$dest") >/dev/null 2>&1; then
 	fail "a failed download must not report success"
 fi
 
 # A published checksum that matches verifies...
 printf '%s  asset.bin\n' "$(sha256_of "$payload")" >"$payload.sha256"
-download_asset "file://$payload" "$dest" >/dev/null 2>&1 \
+(download_asset "file://$payload" "$dest") >/dev/null 2>&1 \
 	|| fail "a matching checksum should verify"
 
 # ...and one that disagrees aborts rather than installing the file.
 printf '%s  asset.bin\n' "deadbeef" >"$payload.sha256"
-if download_asset "file://$payload" "$dest" >/dev/null 2>&1; then
+if (download_asset "file://$payload" "$dest") >/dev/null 2>&1; then
 	fail "a mismatched checksum must abort the install"
 fi
 rm -f "$payload.sha256"
@@ -435,6 +453,62 @@ got="$(dry_run_line mv -f "/a b" /c)"
 [ "$got" = "[dry-run] mv -f '/a b' /c" ] || fail "spaces in an argument should be quoted, got: $got"
 
 printf 'PASS: dry-run rendering\n'
+
+# --- one installer at a time -------------------------------------------------
+# Two runs at once both download and both swap, and the loser can overwrite the
+# winner with an older version. The lock is a mkdir because it has to be atomic
+# without flock, which macOS's shell does not have.
+LOCK="$(lock_dir)"
+rm -rf "$LOCK"
+acquire_lock || fail "an uncontended lock should be taken"
+if (acquire_lock) >/dev/null 2>&1; then
+	fail "a second installer should refuse to start while one holds the lock"
+fi
+release_lock
+[ -e "$LOCK" ] && fail "release_lock should remove the lock"
+acquire_lock || fail "the lock should be free again"
+release_lock
+
+# A crashed run must not lock the machine out forever. Nothing here holds the
+# lock for an hour: the longest step is a download, and nothing waits on input.
+mkdir -p "$LOCK"
+touch -t 200001010000 "$LOCK" 2>/dev/null || touch -d '2000-01-01' "$LOCK"
+acquire_lock || fail "a stale lock should be broken, not obeyed"
+release_lock
+
+printf 'PASS: install lock\n'
+
+# --- what a killed run leaves behind -----------------------------------------
+# Staging files sit beside the install, are invisible in a file manager, and
+# nothing else ever removes them.
+platform() { printf 'Linux\n'; }
+mkdir -p "$LINUX_APP_DIR"
+touch "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
+out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
+echo "$out" | grep -q "rm -f ${LINUX_APP_DIR}/.${APP_NAME}.AppImage.part" \
+	|| fail "a part-downloaded AppImage should be swept"
+rm -f "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
+
+# On macOS a lone .old means a run died between the two renames of the swap,
+# and the version it replaced is the only copy left - so it goes back, rather
+# than being deleted along with the rest of the debris.
+platform() { printf 'Darwin\n'; }
+APP_PATH_SAVED="$APP_PATH"
+APP_PATH="$TMPROOT/sweep/${APP_NAME}.app"
+mkdir -p "$TMPROOT/sweep/${APP_NAME}.app.old"
+out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
+echo "$out" | grep -q "mv ${APP_PATH}.old ${APP_PATH}$" \
+	|| fail "an interrupted swap should put the previous version back"
+mkdir -p "$APP_PATH"
+out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
+echo "$out" | grep -q "rm -rf ${APP_PATH}.old" \
+	|| fail "with the install present, the old bundle is just debris"
+if echo "$out" | grep -q "mv ${APP_PATH}.old"; then
+	fail "the old bundle must not be restored over a good install"
+fi
+APP_PATH="$APP_PATH_SAVED"
+
+printf 'PASS: staging sweep\n'
 
 # --- running-app guard -------------------------------------------------------
 # Last, because these stub out running_pids/confirm and the stubs would leak

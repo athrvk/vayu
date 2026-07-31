@@ -71,11 +71,21 @@ fi
 MODE="install"
 PURGE=0
 FORCE=0
-KEEPALIVE_PID=""
-# The version being installed, read by place_linux for its version stamp.
-# Declared here rather than only inside do_install so `set -u` cannot bite a
-# direct call to the place_* functions.
-INSTALL_VERSION=""
+
+# Everything this script says goes through these three, so "did it explain
+# itself" is answerable by reading them rather than by auditing 40 printfs, and
+# so a failure always exits the same way.
+#
+# die() is the important one. Every fallible step used to be written as
+# `step || exit 1` at the call site, which reads like error handling and is not:
+# bash disables errexit for the entire body of a function invoked in an ||
+# context, so an unchecked command *inside* that function fell through silently.
+# That is precisely how a failed download came to be reported as success. A step
+# that cannot continue now says so itself, here, rather than trusting each
+# caller to remember a suffix.
+log()  { printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+die()  { printf '%s\n' "$*" >&2; exit 1; }
 
 # What a dry run prints for a command. Arguments containing whitespace are
 # quoted, because "$*" alone renders `mv -f "/a b" /c` and `mv -f /a "b /c"`
@@ -138,7 +148,7 @@ parse_args() {
 			--help|-h) MODE="help" ;;
 			*)
 				printf 'Unknown option: %s\n' "$1" >&2
-				printf 'Run with --help to see what this script accepts.\n' >&2
+				warn 'Run with --help to see what this script accepts.'
 				return 2
 				;;
 		esac
@@ -214,33 +224,111 @@ existing_app_paths() {
 	return 0
 }
 
-# Point the install at the copy that already exists, so an update replaces the
-# app the user actually opens. A fresh install keeps the default.
+# One installer at a time.
+#
+# Two runs at once - a double-paste, or an update starting while another is
+# mid-flight - both download and both swap, and the loser can overwrite the
+# winner's install with an older version. `mkdir` is the lock: it is atomic on
+# every filesystem this runs on, needs no flock (which macOS's shell lacks),
+# and leaves a directory whose mtime says how old the claim is.
+lock_dir() {
+	printf '%s/.vayu-install.lock' "${TMPDIR:-/tmp}"
+}
+
+acquire_lock() {
+	local lock
+	lock="$(lock_dir)"
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
+	if mkdir "$lock" 2>/dev/null; then
+		return 0
+	fi
+	# A lock older than an hour is a crashed run, not a live one: the longest
+	# thing here is a 160MB download, and nothing waits on user input while
+	# holding it.
+	if [ -n "$(find "$lock" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then
+		warn 'Ignoring a stale install lock left by an earlier run.'
+		rm -rf "$lock"
+		mkdir "$lock" 2>/dev/null && return 0
+	fi
+	die 'Another Vayu install is already running. Wait for it to finish, or remove '"$lock"
+}
+
+release_lock() {
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
+	rm -rf "$(lock_dir)"
+}
+
+# Anything a killed run left half-written. Nothing else removes these: they sit
+# beside the install, they are invisible in a file manager, and the next run
+# would otherwise copy over one of them.
+sweep_staging() {
+	case "$(platform)" in
+		Darwin)
+			run rm -rf "${APP_PATH}.new"
+			# .old is only ever a bundle mid-swap, so its presence means a run
+			# died between two renames - and the install it belongs to is
+			# whichever of the two exists.
+			if [ -d "${APP_PATH}.old" ] && [ ! -d "$APP_PATH" ]; then
+				warn 'A previous install was interrupted - restoring the version it replaced.'
+				run sudo mv "${APP_PATH}.old" "$APP_PATH"
+			else
+				run rm -rf "${APP_PATH}.old"
+			fi
+			;;
+		*)
+			run rm -f "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
+			run rm -f "$LINUX_ICON_FILE.part"
+			;;
+	esac
+	return 0
+}
+
+# The bundle an install should replace: the copy that already exists, so an
+# update lands on the app the user actually opens, or the default for a fresh
+# install. Prints rather than assigning - a function that reached in and changed
+# APP_PATH could not be called from a subshell, and that rule had to be written
+# down in three places because the code could not express it.
 #
 # `sudo` is used either way on macOS, including for a copy under $HOME that
 # would not need it: one code path is worth more here than skipping a password
 # prompt the script already asks for.
-resolve_install_target() {
-	local first others
-	[ "$(platform)" = "Darwin" ] || return 0
+resolved_install_path() {
+	local first=""
+	if [ "$(platform)" = "Darwin" ]; then
+		first="$(existing_app_paths | head -1)"
+	fi
+	if [ -n "$first" ]; then
+		printf '%s' "$first"
+	else
+		printf '%s' "$APP_PATH"
+	fi
+}
 
-	first="$(existing_app_paths | head -1)"
-	[ -n "$first" ] || return 0
-
-	APP_PATH="$first"
-	INSTALL_DIR="$(dirname "$first")"
-
-	# Two copies is the state this whole function exists to stop repeating.
-	# Updating one of them silently is what leaves someone launching a stale
-	# build while the installer reports success, so say it out loud.
-	others="$(existing_app_paths | tail -n +2)"
+# Two copies is the state this exists to stop repeating: updating one of them
+# silently is what leaves someone launching a stale build while the installer
+# reports success. Separate from the resolution above so that neither has to
+# both compute and narrate.
+report_extra_installs() {
+	local chosen="$1" others
+	others="$(existing_app_paths | grep -vxF "$chosen" || true)"
 	[ -n "$others" ] || return 0
-	printf 'Vayu is installed in more than one place:\n'
+	log 'Vayu is installed in more than one place:'
 	printf '%s\n' "$others" | while IFS= read -r path; do
-		printf '  %s\n' "$path"
+		log "  $path"
 	done
-	printf 'Updating %s - remove the other copy, or it will keep launching an old build.\n' "$APP_PATH"
-	return 0
+	log "Updating $chosen - remove the other copy, or it will keep launching an old build."
+}
+
+# Point the globals at the resolved bundle. The assignment is here, at one call
+# site each in do_install and do_uninstall, rather than hidden inside a function.
+adopt_install_target() {
+	APP_PATH="$(resolved_install_path)"
+	INSTALL_DIR="$(dirname "$APP_PATH")"
+	report_extra_installs "$APP_PATH"
 }
 
 # Ask a yes/no question, defaulting to yes.
@@ -415,23 +503,21 @@ force_quit() {
 quit_running_app() {
 	[ -n "$(running_pids)" ] || return 0
 
-	printf 'Vayu is running, and cannot be replaced while it is.\n'
+	log 'Vayu is running, and cannot be replaced while it is.'
 	if ! confirm 'Quit Vayu now?'; then
-		printf 'Not quitting - aborting so the running app is not replaced underneath itself.\n' >&2
-		printf 'Quit Vayu and re-run this command.\n' >&2
-		return 1
+		warn 'Not quitting - aborting so the running app is not replaced underneath itself.'
+		die 'Quit Vayu and re-run this command.'
 	fi
 
-	printf 'Quitting Vayu...\n'
+	log 'Quitting Vayu...'
 	request_quit
 	wait_for_exit 15 && return 0
 
-	printf 'Vayu did not respond - stopping it.\n'
+	log 'Vayu did not respond - stopping it.'
 	force_quit
 	wait_for_exit 5 && return 0
 
-	printf 'Could not stop Vayu. Quit it manually and re-run this command.\n' >&2
-	return 1
+	die 'Could not stop Vayu. Quit it manually and re-run this command.'
 }
 
 # Version of the installed app, or nothing if Vayu is not installed.
@@ -475,7 +561,7 @@ require_supported_os() {
 	# Both platforms read $HOME - macOS for the data directories it reports on
 	# uninstall, Linux for everything - and `set -u` turns an unset one into a
 	# bare "unbound variable" halfway through.
-	[ -n "${HOME:-}" ] || { printf 'HOME is not set - the installer needs it.\n' >&2; exit 1; }
+	[ -n "${HOME:-}" ] || die 'HOME is not set - the installer needs it.'
 	case "$(platform)" in
 		Darwin)
 			# ditto, plutil, osascript and sudo are used as surely as the rest;
@@ -483,7 +569,7 @@ require_supported_os() {
 			# turned into a failure partway through an install instead of a
 			# refusal to start one.
 			for tool in curl codesign xattr shasum ditto plutil osascript sudo; do
-				command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
+				command -v "$tool" >/dev/null 2>&1 || die "Required tool missing: $tool"
 			done
 			;;
 		Linux)
@@ -491,16 +577,15 @@ require_supported_os() {
 			# otherwise download a 404 page and chmod +x it.
 			case "$(uname -m)" in
 				x86_64|amd64) ;;
-				*) printf 'Vayu publishes x86_64 Linux builds only (this machine is %s).\n' "$(uname -m)" >&2; exit 1 ;;
+				*) die "Vayu publishes x86_64 Linux builds only (this machine is $(uname -m))." ;;
 			esac
 			# No pgrep: the running-app check reads /proc directly, on purpose.
 			for tool in curl ps; do
-				command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
+				command -v "$tool" >/dev/null 2>&1 || die "Required tool missing: $tool"
 			done
 			;;
 		*)
-			printf 'Vayu installer supports macOS and Linux. Windows: winget install athrvk.Vayu\n' >&2
-			exit 1
+			die 'Vayu installer supports macOS and Linux. Windows: winget install athrvk.Vayu'
 			;;
 	esac
 }
@@ -514,14 +599,14 @@ preauthorize() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	printf 'Vayu installs to %s and needs administrator access.\n' "$INSTALL_DIR"
-	sudo -v || { printf 'Authorization failed - aborting.\n' >&2; return 1; }
+	log "Vayu installs to $INSTALL_DIR and needs administrator access."
+	sudo -v || die 'Authorization failed - aborting.'
 	# Tied to this script's lifetime explicitly. Each `sudo -n true` *refreshes*
 	# the timestamp, so a loop left running would sustain passwordless sudo for
 	# this terminal indefinitely - the EXIT trap normally kills it, but an
 	# untrapped death (a closed terminal) would orphan it.
 	( while kill -0 "$$" 2>/dev/null; do sleep 60; sudo -n true 2>/dev/null || exit; done ) &
-	KEEPALIVE_PID=$!
+	printf '%s' "$!"
 	return 0
 }
 
@@ -547,8 +632,7 @@ download_asset() {
 	# the version beside it, so the next run said "already installed".
 	# Default curl meter (drop -s) shows %, size, speed and ETA on stderr.
 	if ! run curl -fL "$url" -o "$dest"; then
-		printf 'Download failed - nothing was installed.\n' >&2
-		return 1
+		die 'Download failed - nothing was installed.'
 	fi
 
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
@@ -560,8 +644,8 @@ download_asset() {
 	curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null || return 0
 	expected="$(awk '{print $1}' "$dest.sha256")"
 	actual="$(sha256_of "$dest")"
-	[ "$expected" = "$actual" ] || { printf 'Checksum mismatch - aborting.\n' >&2; return 1; }
-	printf 'Checksum verified.\n'
+	[ "$expected" = "$actual" ] || die 'Checksum mismatch - aborting.'
+	log 'Checksum verified.'
 	return 0
 }
 
@@ -571,7 +655,7 @@ download_asset() {
 # leaves a broken bundle in /Applications. No sudo needed for any of it.
 stage_macos() {
 	local workdir="$1" staged="$1/${APP_NAME}.app"
-	printf 'Extracting...\n'
+	log 'Extracting...'
 	# ditto, not unzip: this is an .app bundle, and ditto is Apple's own
 	# extractor for these archives - it preserves the symlinks and permissions
 	# inside Contents/Frameworks that unzip has a long history of mangling. It
@@ -579,24 +663,34 @@ stage_macos() {
 	# electron-updater uses to unpack the same zip.
 	run ditto -x -k "$workdir/vayu.zip" "$workdir"
 
-	printf 'Signing (ad-hoc) and removing quarantine...\n'
+	log 'Signing (ad-hoc) and removing quarantine...'
 	run codesign --force --sign - "$staged/$SIDECAR_REL"
 	run codesign --force --deep --sign - "$staged"
 	run xattr -cr "$staged"
 }
 
 place_macos() {
-	local workdir="$1" incoming="${APP_PATH}.new"
-	printf 'Installing to %s...\n' "$INSTALL_DIR"
-	# Copy in beside the installed bundle and swap, rather than deleting first.
-	# rm-then-ditto leaves the user with no Vayu at all if the copy dies partway
-	# - a full disk, a Ctrl-C between the two lines, a read error in the staged
-	# bundle - having started from a working one. The swap is a rename on the
-	# same volume, so the window where neither exists is as short as it gets.
-	run sudo rm -rf "$incoming"
+	local workdir="$1" incoming="${APP_PATH}.new" previous="${APP_PATH}.old"
+	# $2 is the version; macOS reads it back out of the bundle, so it is unused.
+	log "Installing to $INSTALL_DIR..."
+	# Copy in beside the installed bundle, move the old one aside, swap, and only
+	# then delete it. Deleting first leaves the user with no Vayu at all if
+	# anything goes wrong afterwards - a full disk, a Ctrl-C, a read error in the
+	# staged bundle - having started from a working one. Every step here is a
+	# rename on one volume, so there is no moment at which neither bundle exists.
+	run sudo rm -rf "$incoming" "$previous"
 	run sudo ditto "$workdir/${APP_NAME}.app" "$incoming"
-	run sudo rm -rf "$APP_PATH"
-	run sudo mv "$incoming" "$APP_PATH"
+	if [ -d "$APP_PATH" ]; then
+		run sudo mv "$APP_PATH" "$previous"
+	fi
+	if ! run sudo mv "$incoming" "$APP_PATH"; then
+		if [ -d "$previous" ]; then
+			warn 'Install failed - putting the previous version back.'
+			run sudo mv "$previous" "$APP_PATH"
+		fi
+		die 'Could not move the new version into place.'
+	fi
+	run sudo rm -rf "$previous"
 }
 
 # --- Linux install --------------------------------------------------------
@@ -633,16 +727,16 @@ EOF
 }
 
 place_linux() {
-	local workdir="$1"
+	local workdir="$1" version="$2"
 	printf 'Installing to %s...\n' "$LINUX_APP_DIR"
 	run mkdir -p "$LINUX_APP_DIR"
 	# A rename within one directory, so the AppImage is either the old one or
 	# the new one and never a half-written file that is executable and
 	# launchable. See staged_asset_path for why it is staged where it is.
 	run mv -f "$(staged_asset_path "$workdir")" "$LINUX_APP_BIN"
-	printf '%s\n' "$INSTALL_VERSION" | write_file "$LINUX_VERSION_FILE"
+	printf '%s\n' "$version" | write_file "$LINUX_VERSION_FILE"
 
-	printf 'Registering the desktop entry...\n'
+	log 'Registering the desktop entry...'
 	desktop_entry | write_file "$LINUX_DESKTOP_FILE"
 
 	# Best effort, both of them: a missing icon or an unrefreshed database is a
@@ -657,7 +751,7 @@ place_linux() {
 		run mv -f "$LINUX_ICON_FILE.part" "$LINUX_ICON_FILE"
 	else
 		run rm -f "$LINUX_ICON_FILE.part"
-		printf 'Could not fetch the launcher icon - Vayu will use a generic one.\n'
+		log 'Could not fetch the launcher icon - Vayu will use a generic one.'
 	fi
 	if command -v update-desktop-database >/dev/null 2>&1; then
 		run_quiet update-desktop-database "$(dirname "$LINUX_DESKTOP_FILE")" || true
@@ -691,9 +785,9 @@ place_linux() {
 		ldconfig_bin="/sbin/ldconfig"
 	fi
 	if [ -n "$ldconfig_bin" ] && ! "$ldconfig_bin" -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
-		printf 'Note: libfuse2 was not found. If Vayu does not start, install it\n'
-		printf '      (Debian/Ubuntu: sudo apt install libfuse2) or run it with\n'
-		printf '      APPIMAGE_EXTRACT_AND_RUN=1.\n'
+		log 'Note: libfuse2 was not found. If Vayu does not start, install it'
+		log '      (Debian/Ubuntu: sudo apt install libfuse2) or run it with'
+		log '      APPIMAGE_EXTRACT_AND_RUN=1.'
 	fi
 }
 
@@ -708,8 +802,8 @@ stage_download() {
 
 place_app() {
 	case "$(platform)" in
-		Darwin) place_macos "$1" ;;
-		*)      place_linux "$1" ;;
+		Darwin) place_macos "$1" "$2" ;;
+		*)      place_linux "$1" "$2" ;;
 	esac
 }
 
@@ -752,27 +846,29 @@ installed_app_path() {
 
 do_install() {
 	require_supported_os
-	resolve_install_target
+	acquire_lock
+	trap release_lock EXIT
+	adopt_install_target
+	# Before anything else looks at the install: a leftover .new or .part is
+	# what a killed run leaves, and on macOS a lone .old means the previous
+	# version still needs putting back.
+	sweep_staging
 	(
-		local version url workdir staged installed quit_by_installer=0
+		local version url workdir staged installed quit_by_installer=0 keepalive=""
 		# `version="$(resolve_version)"` on its own would abort the subshell at
 		# the assignment under `set -e` whenever the lookup failed - taking the
 		# message below with it, so a rate-limited or offline run exited 1 in
 		# silence. Both failures now reach the same explanation.
 		if ! version="$(resolve_version)" || [ -z "$version" ]; then
-			printf 'Could not determine which version to install.\n' >&2
-			printf 'Check your connection, or pin one with VAYU_VERSION=x.y.z\n' >&2
-			exit 1
+			warn 'Could not determine which version to install.'
+			die 'Check your connection, or pin one with VAYU_VERSION=x.y.z'
 		fi
 		url="$(download_url "$version")"
-		# Read by place_linux for the version stamp; exported through a global
-		# because this subshell is the only thing that ever sets it.
-		INSTALL_VERSION="$version"
 
 		installed="$(installed_version || true)"
 		if should_skip_install "$installed" "$version" "$FORCE"; then
 			printf 'Vayu %s is already installed - nothing to do.\n' "$version"
-			printf 'Re-run with --force to reinstall it anyway.\n'
+			log 'Re-run with --force to reinstall it anyway.'
 			exit 0
 		fi
 
@@ -785,7 +881,7 @@ do_install() {
 		# Before the download, so declining costs nothing. Checked again just
 		# before the files are replaced, in case it was relaunched meanwhile.
 		if [ -n "$(running_pids)" ]; then
-			quit_running_app || exit 1
+			quit_running_app
 			quit_by_installer=1
 		fi
 
@@ -795,23 +891,23 @@ do_install() {
 		# closed terminal, or a declined password would otherwise leave the temp
 		# dir, a part-downloaded file beside the app, and a sudo keep-alive
 		# holding a passwordless timestamp open for this terminal.
-		trap 'rm -rf "$workdir"; rm -f "$staged"; if [ -n "$KEEPALIVE_PID" ]; then kill "$KEEPALIVE_PID" 2>/dev/null || true; fi' EXIT
+		trap 'rm -rf "$workdir"; rm -f "$staged"; if [ -n "$keepalive" ]; then kill "$keepalive" 2>/dev/null || true; fi' EXIT
 		trap 'exit 130' INT TERM HUP
-		preauthorize || exit 1
+		keepalive="$(preauthorize)"
 
 		run mkdir -p "$(dirname "$staged")"
-		download_asset "$url" "$staged" || exit 1
+		download_asset "$url" "$staged"
 		stage_download "$workdir"
 
 		# The download and staging above take long enough for someone to open
 		# Vayu again after quitting it. Replacing the files now would be the
 		# exact thing the earlier prompt avoided, so ask once more.
 		if [ -n "$(running_pids)" ]; then
-			quit_running_app || exit 1
+			quit_running_app
 			quit_by_installer=1
 		fi
 
-		place_app "$workdir"
+		place_app "$workdir" "$version"
 
 		# Said on both paths: the update case - app running, so it gets
 		# reopened - is the common one, and it was the one that never confirmed
@@ -819,7 +915,7 @@ do_install() {
 		printf 'Done. Vayu %s is installed at %s\n' "$version" "$(installed_app_path)"
 		if [ "$quit_by_installer" = "1" ]; then
 			# It was running when the user started this, so put it back.
-			printf 'Reopening Vayu...\n'
+			log 'Reopening Vayu...'
 			launch_app
 		fi
 	)
@@ -827,12 +923,15 @@ do_install() {
 
 do_uninstall() {
 	require_supported_os
+	acquire_lock
+	trap release_lock EXIT
 	# Point at the copy that actually exists before looking for its processes,
 	# and quit it for the same reason the install path does: deleting files out
 	# from under a live app leaves it half-working until someone notices. On
 	# Linux it is deleting the AppImage backing a live mount.
-	resolve_install_target
-	quit_running_app || exit 1
+	adopt_install_target
+	sweep_staging
+	quit_running_app
 	case "$(platform)" in
 		Darwin) uninstall_macos ;;
 		*)      uninstall_linux ;;
@@ -852,26 +951,26 @@ uninstall_macos() {
 	caches="$HOME/Library/Caches/com.vayu.client"
 	savedstate="$HOME/Library/Saved Application State/com.vayu.client.savedState"
 
-	printf 'Removing Vayu (you may be prompted for your password)...\n'
+	log 'Removing Vayu (you may be prompted for your password)...'
 	printf '%s\n' "$paths" | while IFS= read -r path; do
 		printf '  %s\n' "$path"
 		run sudo rm -rf "$path"
 	done
 
 	if [ "${PURGE:-0}" = "1" ]; then
-		printf 'Purging user data...\n'
+		log 'Purging user data...'
 		run rm -rf "$support"
 		run rm -f "$prefs"
 		run rm -rf "$logs"
 		run rm -rf "$caches"
 		run rm -rf "$savedstate"
-		printf 'Vayu and its data have been removed.\n'
+		log 'Vayu and its data have been removed.'
 	else
-		printf 'Vayu removed. User data was kept at:\n'
+		log 'Vayu removed. User data was kept at:'
 		printf '  %s\n' "$support"
 		printf '  %s\n' "$prefs"
 		printf '  %s\n' "$logs"
-		printf 'Re-run with --purge to remove these too.\n'
+		log 'Re-run with --purge to remove these too.'
 	fi
 }
 
@@ -882,7 +981,7 @@ uninstall_linux() {
 	config="${XDG_CONFIG_HOME:-$HOME/.config}/vayu-client"
 	cache="${XDG_CACHE_HOME:-$HOME/.cache}/vayu-client"
 
-	printf 'Removing Vayu...\n'
+	log 'Removing Vayu...'
 	printf '  %s\n' "$LINUX_APP_DIR"
 	run rm -rf "$LINUX_APP_DIR"
 	run rm -f "$LINUX_DESKTOP_FILE"
@@ -902,15 +1001,15 @@ uninstall_linux() {
 	fi
 
 	if [ "${PURGE:-0}" = "1" ]; then
-		printf 'Purging user data...\n'
+		log 'Purging user data...'
 		run rm -rf "$config"
 		run rm -rf "$cache"
-		printf 'Vayu and its data have been removed.\n'
+		log 'Vayu and its data have been removed.'
 	else
-		printf 'Vayu removed. User data was kept at:\n'
+		log 'Vayu removed. User data was kept at:'
 		printf '  %s\n' "$config"
 		printf '  %s\n' "$cache"
-		printf 'Re-run with --purge to remove these too.\n'
+		log 'Re-run with --purge to remove these too.'
 	fi
 }
 
