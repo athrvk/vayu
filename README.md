@@ -120,7 +120,7 @@ Or download the installer directly:
 ### macOS
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
 Installs the latest release to `/Applications`. You will be prompted for your password once. Vayu is distributed unsigned - the installer ad-hoc signs it and clears the quarantine flag so it opens without the "damaged app" warning.
@@ -128,13 +128,13 @@ Installs the latest release to `/Applications`. You will be prompted for your pa
 To pin a specific version:
 
 ```sh
-VAYU_VERSION=0.2.1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+VAYU_VERSION=0.2.1 bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
 To uninstall:
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)" -- --uninstall
+bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)" -- --uninstall
 ```
 
 Add `--purge` to also remove settings and data. Or drag `Vayu.app` from `/Applications` to the Trash.

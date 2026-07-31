@@ -432,6 +432,21 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
 
+**The installer is served from the docs site**, at
+<https://athrvk.github.io/vayu/install.sh> - a third shorter than the
+raw.githubusercontent URL it replaced, which spent most of its 92 characters on
+`owner/repo/branch`. The file stays at the repo root (that is where shellcheck
+and `install_test.sh` look); `.github/hooks/install_script.py` registers it as a
+generated file at the site root, so there is no second copy to drift. That makes
+`install.sh` a **docs-site input**, so it is listed in the `paths:` filters of
+`.github/workflows/docs.yml` - without that line, editing the installer would not
+redeploy the site and the published copy would silently fall behind master. The
+old raw URL is unaffected and keeps working. Documented as `bash -c "$(curl -fsSL
+...)"` rather than `curl ... | bash`: the wrapper buffers the whole script before
+running any of it and leaves stdin on the terminal, so the installer can still
+grow an interactive prompt (`sudo -v` already reads `/dev/tty`, so both forms
+work today).
+
 **Windows also publishes to winget, automatically.** The `publish-winget` job in
 `release.yml` submits `Vayu-x64.exe` to `microsoft/winget-pkgs` after the
 release is built, so `winget install athrvk.Vayu` follows each tag with no

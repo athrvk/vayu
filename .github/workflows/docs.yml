@@ -27,6 +27,11 @@ on:
       - '.github/mkdocs.yml'
       - '.github/hooks/**'
       - 'shared/icon_png/**'
+      # Published at the site root by hooks/install_script.py, and the URL the
+      # macOS install command curls. It is not under docs/, so without this line
+      # a change to the installer would not redeploy the site and the published
+      # script would silently fall behind master.
+      - 'install.sh'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
   pull_request:
@@ -37,6 +42,7 @@ on:
       - '.github/mkdocs.yml'
       - '.github/hooks/**'
       - 'shared/icon_png/**'
+      - 'install.sh'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
