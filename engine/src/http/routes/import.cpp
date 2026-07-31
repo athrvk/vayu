@@ -37,28 +37,28 @@ std::pair<int, nlohmann::json> import_fetch (const std::string& request_body) {
     try {
         req = nlohmann::json::parse (request_body);
     } catch (const std::exception&) {
-        return { 400, nlohmann::json{ { "error", "Invalid JSON body" } } };
+        return { 400, error_body (400, "Invalid JSON body") };
     }
 
     if (!req.contains ("url") || !req["url"].is_string ()) {
-        return { 400, nlohmann::json{ { "error", "Invalid URL" } } };
+        return { 400, error_body (400, "Invalid URL") };
     }
     const std::string url = req["url"].get<std::string> ();
     if (url.rfind ("http://", 0) != 0 && url.rfind ("https://", 0) != 0) {
-        return { 400, nlohmann::json{ { "error", "Invalid URL" } } };
+        return { 400, error_body (400, "Invalid URL") };
     }
 
     vayu::http::Client client;
     auto result = client.get (url);
     if (!result.is_ok ()) {
-        return { 502, nlohmann::json{ { "error", "Failed to fetch: " + client.last_error () } } };
+        return { 502, error_body (502, "Failed to fetch: " + client.last_error ()) };
     }
 
     const auto& resp = result.value ();
     if (resp.has_error ()) {
         const std::string detail =
         resp.error_message.empty () ? "connection error" : resp.error_message;
-        return { 502, nlohmann::json{ { "error", "Failed to fetch: " + detail } } };
+        return { 502, error_body (502, "Failed to fetch: " + detail) };
     }
     std::string content_type = "application/octet-stream";
     for (const auto& [key, value] : resp.headers) {
@@ -89,16 +89,19 @@ const nlohmann::json EMPTY_ITEMS = nlohmann::json::array ();
 
 /** A 400 about the payload as a whole. */
 std::pair<int, nlohmann::json> body_error (const std::string& message) {
-    return { 400, nlohmann::json{ { "error", message } } };
+    return { 400, error_body (400, message) };
 }
 
 /**
  * A 400 that names the offending item by its temp id, so a client importing
  * hundreds of items can point at the one that failed. `item` is part of the
- * endpoint's documented error shape.
+ * endpoint's documented error shape and sits *inside* the error object, next to
+ * the code and message, so a client reads one place for the whole failure.
  */
 std::pair<int, nlohmann::json> item_error (const std::string& message, const std::string& temp_id) {
-    return { 400, nlohmann::json{ { "error", message }, { "item", temp_id } } };
+    auto body                 = error_body (400, message);
+    body["error"]["item"]     = temp_id;
+    return { 400, body };
 }
 
 /**
@@ -279,7 +282,9 @@ apply_item_fields (Apply apply, const char* kind, const std::string& temp_id) {
         return item_error (std::string ("Invalid ") + kind + ": " + e.what (), temp_id);
     }
     if (err) {
-        err->second["item"] = temp_id;
+        // Inside the error object, next to the code and message the shared
+        // applier already built - the same place `item_error` puts it.
+        err->second["error"]["item"] = temp_id;
         return err;
     }
     return std::nullopt;
@@ -493,7 +498,7 @@ void register_import_routes (RouteContext& ctx) {
      * means none). Each item carries a `tempId`; a collection may carry
      * `parentTempId`, a request must carry `collectionTempId`. All other fields
      * are the ones the matching POST /<resource> accepts, minus `id`.
-     * Returns: 200 `{"idMap": {...}}`, or 400 with `{"error", "item"}` naming the
+     * Returns: 200 `{"idMap": {...}}`, or 400 with `error.item` naming the
      * item that failed - in which case nothing at all was written.
      */
     ctx.server.Post ("/import/apply",
@@ -513,7 +518,7 @@ void register_import_routes (RouteContext& ctx) {
             auto [status, response] = import_apply_response (ctx.db, body);
             if (status != 200) {
                 vayu::utils::log_warning ("POST /import/apply - " + std::to_string (status) +
-                ": " + response["error"].get<std::string> ());
+                ": " + error_message_of (response));
             } else {
                 vayu::utils::log_info ("POST /import/apply - applied " +
                 std::to_string (response["idMap"].size ()) + " items");

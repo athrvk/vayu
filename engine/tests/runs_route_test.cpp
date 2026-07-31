@@ -377,7 +377,8 @@ TEST_F (RunsRouteTest, ReportMissingRunIs404) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_nope");
     EXPECT_EQ (status, 404);
     ASSERT_TRUE (body.contains ("error"));
-    EXPECT_TRUE (body["error"].is_string ());
+    EXPECT_EQ (body["error"]["code"], "not_found");
+    EXPECT_EQ (body["error"]["message"], "Run not found");
 }
 
 // A completed run reports from its stored summary - no metric rows involved.

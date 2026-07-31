@@ -78,8 +78,8 @@ int64_t offset) {
  * json_body}. Serves both `GET /runs/:id/metrics` (canonical) and the legacy
  * `GET /stats/:id?format=json`, so the two paths cannot drift.
  *
- * A missing run is a definitive 404 with the flat `{"error": message}` shape
- * `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
+ * A missing run is a definitive 404 with the `{"error": {"code", "message"}}`
+ * shape `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
  * snake_case `LoadTestMetrics` shape, consumed without a transformer) in the
  * `{data, pagination}` envelope - read straight from `metric_ticks`, or, for a
  * run recorded before that table existed, regrouped from its legacy EAV rows.
@@ -94,7 +94,7 @@ std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id, int64_t limit, int64_t offset) {
     auto run = db.get_run (run_id);
     if (!run) {
-        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+        return { 404, error_body (404, "Run not found") };
     }
 
     // Ticks decide the path: a run has them or it predates the table. Counting

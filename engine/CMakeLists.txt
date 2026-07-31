@@ -402,6 +402,7 @@ if(VAYU_BUILD_TESTS)
         tests/runs_route_test.cpp
         tests/collections_route_test.cpp
         tests/resource_write_route_test.cpp
+        tests/error_shape_route_test.cpp
         tests/globals_route_test.cpp
         tests/script_variables_test.cpp
         tests/stats_route_test.cpp

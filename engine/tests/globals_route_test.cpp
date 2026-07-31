@@ -130,7 +130,8 @@ TEST_F (GlobalsRouteTest, WrongShapeVariablesIsRejected) {
     { json (42), json ("token"), json::array ({ 1, 2 }), json (true) }) {
         auto [status, body] = save_globals_response (*db_, json{ { "variables", bad } });
         EXPECT_EQ (status, 400) << "variables = " << bad.dump ();
-        EXPECT_NE (body["error"].get<std::string> ().find ("variables"), std::string::npos);
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("variables"), std::string::npos);
     }
 
     EXPECT_EQ (stored_variables (), before)

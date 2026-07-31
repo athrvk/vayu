@@ -164,7 +164,7 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsClientId) {
     auto [status, body] = create_collection_response (
     *db_, json{ { "id", "col_fixed" }, { "name", "New" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
     EXPECT_FALSE (db_->get_collection ("col_fixed").has_value ())
     << "a rejected create must not persist anything";
 
@@ -178,7 +178,7 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateRejectsNullClientId) {
     auto [status, body] =
     create_collection_response (*db_, json{ { "id", nullptr }, { "name", "New" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
     EXPECT_TRUE (db_->get_collections ().empty ());
 }
 
@@ -191,7 +191,7 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsRejected) {
     auto [status, body] =
     create_collection_response (*db_, json{ { "id", id }, { "name", "Impostor" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
 
     auto stored = db_->get_collection (id);
     ASSERT_TRUE (stored.has_value ());
@@ -204,7 +204,8 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsMismatchedBodyId) {
     auto [status, body] = update_collection_response (
     *db_, id, json{ { "id", "col_somewhere_else" }, { "name", "Renamed" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
+    std::string::npos);
     EXPECT_EQ (db_->get_collection (id)->name, "Original")
     << "a body id naming another record must not write through the path id";
 }
@@ -227,7 +228,8 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsNullBodyId) {
     auto [status, body] = update_collection_response (
     *db_, id, json{ { "id", nullptr }, { "name", "Renamed" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
+    std::string::npos);
     EXPECT_EQ (db_->get_collection (id)->name, "Original");
 }
 
@@ -237,20 +239,21 @@ TEST_F (ResourceWriteRouteTest, UpdateRejectsBodyIdBeforeLookingTheRecordUp) {
     auto [status, body] = update_collection_response (
     *db_, "col_does_not_exist", json{ { "id", "col_other" }, { "name", "X" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
+    std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateRequiresName) {
     auto [status, body] = create_collection_response (*db_, json::object ());
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("name"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("name"), std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateMissingIsNotFound) {
     auto [status, body] =
     update_collection_response (*db_, "col_does_not_exist", json{ { "name", "X" } });
     EXPECT_EQ (status, 404);
-    EXPECT_EQ (body["error"], "Collection not found");
+    EXPECT_EQ (body["error"]["message"], "Collection not found");
     EXPECT_FALSE (db_->get_collection ("col_does_not_exist").has_value ())
     << "a 404 must not leave a record behind";
 }
@@ -296,7 +299,7 @@ TEST_F (ResourceWriteRouteTest, CollectionNullNameIsRejected) {
     auto [status, body] =
     update_collection_response (*db_, id, json{ { "name", nullptr } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("name"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("name"), std::string::npos);
     EXPECT_EQ (db_->get_collection (id)->name, "Keep me");
 }
 
@@ -325,7 +328,8 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
             auto [status, body] =
             update_collection_response (*db_, id, json{ { field, bad } });
             EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
-            EXPECT_NE (body["error"].get<std::string> ().find (field), std::string::npos)
+            EXPECT_NE (body["error"]["message"].get<std::string> ().find (field),
+            std::string::npos)
             << "the 400 must name the field";
         }
     }
@@ -343,7 +347,8 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected)
             auto [status, body] = create_collection_response (
             *db_, json{ { "name", "N" }, { field, bad } });
             EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
-            EXPECT_NE (body["error"].get<std::string> ().find (field), std::string::npos);
+            EXPECT_NE (body["error"]["message"].get<std::string> ().find (field),
+            std::string::npos);
         }
     }
     EXPECT_TRUE (db_->get_collections ().empty ())
@@ -379,7 +384,7 @@ TEST_F (ResourceWriteRouteTest, RequestCreateRejectsClientId) {
     json{ { "id", id }, { "collectionId", collection }, { "name", "Impostor" },
     { "method", "POST" }, { "url", "https://evil.example" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
     EXPECT_EQ (db_->get_request (id)->name, "R");
     EXPECT_EQ (db_->get_requests_in_collection (collection).size (), 1U)
     << "a rejected create must not persist a second row under a generated id";
@@ -392,7 +397,8 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateRejectsMismatchedBodyId) {
     auto [status, body] = update_request_response (
     *db_, id, json{ { "id", "req_somewhere_else" }, { "name", "Renamed" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
+    std::string::npos);
     EXPECT_EQ (db_->get_request (id)->name, "R");
 }
 
@@ -404,7 +410,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateRequiresItsNoDefaultFields) {
         body.erase (missing);
         auto [status, error] = create_request_response (*db_, body);
         EXPECT_EQ (status, 400) << "missing " << missing;
-        EXPECT_NE (error["error"].get<std::string> ().find (missing), std::string::npos);
+        EXPECT_NE (error["error"]["message"].get<std::string> ().find (missing),
+        std::string::npos);
     }
 }
 
@@ -412,7 +419,7 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateMissingIsNotFound) {
     auto [status, body] =
     update_request_response (*db_, "req_does_not_exist", json{ { "name", "X" } });
     EXPECT_EQ (status, 404);
-    EXPECT_EQ (body["error"], "Request not found");
+    EXPECT_EQ (body["error"]["message"], "Request not found");
     EXPECT_FALSE (db_->get_request ("req_does_not_exist").has_value ());
 }
 
@@ -456,7 +463,8 @@ TEST_F (ResourceWriteRouteTest, RequestNullNoDefaultFieldIsRejected) {
         auto [status, body] =
         update_request_response (*db_, id, json{ { field, nullptr } });
         EXPECT_EQ (status, 400) << field << ": null on a no-default field";
-        EXPECT_NE (body["error"].get<std::string> ().find (field), std::string::npos);
+        EXPECT_NE (body["error"]["message"].get<std::string> ().find (field),
+        std::string::npos);
     }
     EXPECT_EQ (db_->get_request (id)->url, "https://example.com");
 }
@@ -467,7 +475,8 @@ TEST_F (ResourceWriteRouteTest, RequestInvalidMethodIsRejected) {
              json{ { "collectionId", collection }, { "name", "R" },
              { "method", "TELEPORT" }, { "url", "https://example.com" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("method"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("method"),
+    std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
@@ -477,7 +486,8 @@ TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
              { "url", "https://example.com" },
              { "headers", json::array ({ json{ { "key", "X" } } }) } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("index 0"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("index 0"),
+    std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
@@ -495,7 +505,8 @@ TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
             auto [status, error] =
             update_request_response (*db_, id, json{ { field, bad } });
             EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
-            EXPECT_NE (error["error"].get<std::string> ().find (field), std::string::npos);
+            EXPECT_NE (error["error"]["message"].get<std::string> ().find (field),
+            std::string::npos);
         }
     }
 
@@ -515,7 +526,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateWrongShapeObjectFieldIsRejected) {
             payload[field]       = bad;
             auto [status, error] = create_request_response (*db_, payload);
             EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
-            EXPECT_NE (error["error"].get<std::string> ().find (field), std::string::npos);
+            EXPECT_NE (error["error"]["message"].get<std::string> ().find (field),
+            std::string::npos);
         }
     }
     EXPECT_TRUE (db_->get_requests_in_collection (collection).empty ())
@@ -598,7 +610,7 @@ TEST_F (ResourceWriteRouteTest, RequestCreateInvalidHttpVersionIsRejectedAndNotS
              json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
              { "url", "https://example.com" }, { "httpVersion", "http3" } });
     EXPECT_EQ (status, 400);
-    const auto message = body["error"].get<std::string> ();
+    const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos)
     << "the 400 must name the offending field";
     EXPECT_NE (message.find ("http3"), std::string::npos)
@@ -620,7 +632,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateNonStringHttpVersionIsRejected) {
              json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
              { "url", "https://example.com" }, { "httpVersion", 2 } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("httpVersion"), std::string::npos);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("httpVersion"), std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentHttpVersionKeepsExisting) {
@@ -680,7 +693,7 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateInvalidHttpVersionIsRejectedAndUnch
     auto [status, body] =
     update_request_response (*db_, id, json{ { "httpVersion", "spdy" } });
     EXPECT_EQ (status, 400);
-    const auto message = body["error"].get<std::string> ();
+    const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos);
     EXPECT_NE (message.find ("spdy"), std::string::npos);
     EXPECT_EQ (db_->get_request (id)->http_version, "http2")
@@ -716,7 +729,7 @@ TEST_F (ResourceWriteRouteTest, EnvironmentCreateRejectsClientId) {
     auto [status, body] =
     create_environment_response (*db_, json{ { "id", id }, { "name", "Impostor" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"], ENGINE_OWNS_ID);
+    EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
     EXPECT_EQ (db_->get_environment (id)->name, "Original");
     EXPECT_EQ (db_->get_environments ().size (), 1U)
     << "a rejected create must not persist a second row under a generated id";
@@ -731,7 +744,8 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateRejectsMismatchedBodyId) {
     auto [status, body] = update_environment_response (
     *db_, id, json{ { "id", "env_somewhere_else" }, { "name", "Renamed" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"].get<std::string> ().find ("Body 'id'"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
+    std::string::npos);
     EXPECT_EQ (db_->get_environment (id)->name, "Original");
 }
 
@@ -739,7 +753,7 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateMissingIsNotFound) {
     auto [status, body] =
     update_environment_response (*db_, "env_does_not_exist", json{ { "name", "X" } });
     EXPECT_EQ (status, 404);
-    EXPECT_EQ (body["error"], "Environment not found");
+    EXPECT_EQ (body["error"]["message"], "Environment not found");
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentNullVariablesResetsToEmptyObject) {
@@ -811,7 +825,8 @@ TEST_F (ResourceWriteRouteTest, EnvironmentWrongShapeVariablesIsRejected) {
         auto [status, body] =
         update_environment_response (*db_, id, json{ { "variables", bad } });
         EXPECT_EQ (status, 400) << "variables = " << bad.dump ();
-        EXPECT_NE (body["error"].get<std::string> ().find ("variables"), std::string::npos);
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("variables"), std::string::npos);
     }
     EXPECT_EQ (db_->get_environment (id)->variables, before)
     << "a rejected write must not reach the column";

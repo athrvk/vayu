@@ -82,10 +82,12 @@ class RequestsRouteTest : public ::testing::Test {
 TEST_F (RequestsRouteTest, MissingRequestIs404) {
     auto [status, body] = vayu::http::routes::get_request_response (*db_, "req_nope");
     EXPECT_EQ (status, 404);
-    // Flat {"error": message} shape, matching send_error. The app maps on the
-    // status code, so the body only has to be well-formed, not richly typed.
+    // The one error shape (issue #173): a nested object carrying a per-status
+    // code and the message. The app's http-client reads `error.message`, so a
+    // flat string here would surface as a bare "HTTP 404".
     ASSERT_TRUE (body.contains ("error"));
-    EXPECT_TRUE (body["error"].is_string ());
+    EXPECT_EQ (body["error"]["code"], "not_found");
+    EXPECT_EQ (body["error"]["message"], "Request not found");
 }
 
 // GET /requests must contain every row of the collection and preserve the

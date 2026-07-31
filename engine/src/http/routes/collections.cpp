@@ -42,8 +42,8 @@ namespace vayu::http::routes {
  * this fix to import ordering.
  *
  * Extracted so the wiring is covered without an in-process HTTP server - see
- * collections_route_test.cpp. The error body matches send_error's flat
- * `{"error": message}` shape.
+ * collections_route_test.cpp. The error body is built by `error_body`, like
+ * every other error the engine emits.
  */
 std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
 vayu::db::Database& db, const std::string& id,
@@ -52,17 +52,15 @@ const std::optional<std::string>& parent_id) {
         return std::nullopt; // No parent -> no cycle possible.
     }
     if (*parent_id == id) {
-        return std::make_pair (400,
-        nlohmann::json{ { "error", "A collection cannot be its own parent" } });
+        return std::make_pair (400, error_body (400, "A collection cannot be its own parent"));
     }
 
     std::unordered_set<std::string> visited;
     std::optional<std::string> cursor = parent_id;
     while (cursor.has_value ()) {
         if (*cursor == id) {
-            return std::make_pair (400,
-            nlohmann::json{
-            { "error", "Cannot move a collection into its own descendant" } });
+            return std::make_pair (
+            400, error_body (400, "Cannot move a collection into its own descendant"));
         }
         if (!visited.insert (*cursor).second) {
             break; // Already seen -> pre-existing corrupt cycle; stop, bounded.
@@ -168,8 +166,8 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
 
     if (db.get_collection (id).has_value ()) {
         return { 409,
-            nlohmann::json{ { "error",
-            "Collection '" + id + "' already exists; use PUT /collections/:id to update" } } };
+            error_body (409, "Collection '" + id +
+            "' already exists; use PUT /collections/:id to update") };
     }
 
     vayu::db::Collection c;
@@ -203,7 +201,7 @@ const nlohmann::json& json) {
     }
     auto existing = db.get_collection (id);
     if (!existing) {
-        return { 404, nlohmann::json{ { "error", "Collection not found" } } };
+        return { 404, error_body (404, "Collection not found") };
     }
 
     vayu::db::Collection c = *existing;
@@ -252,7 +250,7 @@ void register_collection_routes (RouteContext& ctx) {
             auto [status, body] = create_collection_response (ctx.db, json);
             if (status != 200) {
                 vayu::utils::log_warning ("POST /collections - " +
-                std::to_string (status) + ": " + body["error"].get<std::string> ());
+                std::to_string (status) + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "POST /collections - Created collection: id=" + body["id"].get<std::string> () +
@@ -284,7 +282,7 @@ void register_collection_routes (RouteContext& ctx) {
             if (status != 200) {
                 vayu::utils::log_warning ("PUT /collections/:id - " +
                 std::to_string (status) + " for id=" + collection_id + ": " +
-                body["error"].get<std::string> ());
+                error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "PUT /collections/:id - Updated collection: id=" + collection_id +

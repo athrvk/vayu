@@ -66,8 +66,8 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 
     if (db.get_environment (id).has_value ()) {
         return { 409,
-            nlohmann::json{ { "error",
-            "Environment '" + id + "' already exists; use PUT /environments/:id to update" } } };
+            error_body (409, "Environment '" + id +
+            "' already exists; use PUT /environments/:id to update") };
     }
 
     vayu::db::Environment e;
@@ -97,7 +97,7 @@ const nlohmann::json& json) {
     }
     auto existing = db.get_environment (id);
     if (!existing) {
-        return { 404, nlohmann::json{ { "error", "Environment not found" } } };
+        return { 404, error_body (404, "Environment not found") };
     }
 
     vayu::db::Environment e = *existing;
@@ -146,7 +146,7 @@ void register_environment_routes (RouteContext& ctx) {
             auto [status, body] = create_environment_response (ctx.db, json);
             if (status != 200) {
                 vayu::utils::log_warning ("POST /environments - " +
-                std::to_string (status) + ": " + body["error"].get<std::string> ());
+                std::to_string (status) + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "POST /environments - Created environment: id=" + body["id"].get<std::string> () +
@@ -179,7 +179,7 @@ void register_environment_routes (RouteContext& ctx) {
             if (status != 200) {
                 vayu::utils::log_warning ("PUT /environments/:id - " +
                 std::to_string (status) + " for id=" + environment_id + ": " +
-                body["error"].get<std::string> ());
+                error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "PUT /environments/:id - Updated environment: id=" + environment_id +

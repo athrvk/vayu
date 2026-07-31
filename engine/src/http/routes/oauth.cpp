@@ -30,10 +30,15 @@ namespace vayu::http::routes {
 
 namespace {
 
-nlohmann::json error_body (const oauth::TokenError& err) {
-    nlohmann::json e;
-    e["code"]    = err.code;
-    e["message"] = err.message;
+/**
+ * A token failure in the shared error shape, with the provider's own reply
+ * carried as extra keys *inside* the error object - the same place
+ * `/import/apply` puts its `item`, so a client reads one object for the whole
+ * failure regardless of which route produced it.
+ */
+nlohmann::json token_error_body (const oauth::TokenError& err) {
+    auto body  = routes::error_body (err.http_status, err.message, err.code);
+    auto& e    = body["error"];
     if (err.provider_status != 0) {
         e["providerStatus"] = err.provider_status;
     }
@@ -43,7 +48,7 @@ nlohmann::json error_body (const oauth::TokenError& err) {
     if (!err.provider_error_description.empty ()) {
         e["providerErrorDescription"] = err.provider_error_description;
     }
-    return nlohmann::json{ { "error", e } };
+    return body;
 }
 
 int64_t now_ms_epoch () {
@@ -64,9 +69,8 @@ oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
     try {
         req = nlohmann::json::parse (request_body);
     } catch (const nlohmann::json::exception& e) {
-        return { 400, nlohmann::json{ { "error",
-                     { { "code", "oauth2_invalid_config" },
-                     { "message", "Invalid JSON: " + std::string (e.what ()) } } } } };
+        return { 400, error_body (400, "Invalid JSON: " + std::string (e.what ()),
+                     "oauth2_invalid_config") };
     }
 
     const auto config = req.value ("config", nlohmann::json ());
@@ -83,7 +87,7 @@ oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
 
     auto result = oauth::acquire_token (db, config, force, interactive);
     if (auto* err = std::get_if<oauth::TokenError> (&result)) {
-        return { err->http_status, error_body (*err) };
+        return { err->http_status, token_error_body (*err) };
     }
     return { 200, oauth::serialize_token (std::get<vayu::db::OAuthToken> (result)) };
 }
@@ -152,11 +156,8 @@ void register_oauth_routes (RouteContext& ctx) {
             body = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             res.status = 400;
-            res.set_content (nlohmann::json{ { "error",
-                                 { { "code", "oauth2_invalid_config" },
-                                 { "message", std::string ("Invalid JSON: ") + e.what () } } } }
-            .dump (),
-            "application/json");
+            send_error (res, 400, std::string ("Invalid JSON: ") + e.what (),
+            "oauth2_invalid_config");
             return;
         }
         const auto config = body.value ("config", nlohmann::json ());
@@ -164,10 +165,8 @@ void register_oauth_routes (RouteContext& ctx) {
         auto result       = ctx.authorize_manager.start (ctx.db, config, mode);
         if (!result.ok) {
             res.status = result.http_status;
-            res.set_content (nlohmann::json{ { "error",
-                                 { { "code", result.error_code },
-                                 { "message", result.error_message } } } }
-            .dump (),
+            res.set_content (
+            error_body (res.status, result.error_message, result.error_code).dump (),
             "application/json");
             return;
         }

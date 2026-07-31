@@ -81,7 +81,12 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   environment / globals queries, which refetch.
 - **No rollback, and no retry.** The engine write is atomic (validation over the whole
   payload, then one transaction), so a *rejected* payload persisted nothing and the error
-  the modal shows is the engine's, naming the item that broke. The old per-item loop needed
+  the modal shows is the engine's, naming the item that broke. The engine names it by
+  `tempId` (inside the error object - see
+  [api-reference](../../engine/api-reference.md));
+  `importFailureMessage` (`services/importers/failure-message.ts`) resolves that back to
+  the name shown in the preview, since `c37` means nothing to whoever chose the file.
+  The old per-item loop needed
   best-effort deletion of already-created roots; that code is gone. What atomicity does
   **not** cover is a lost response: `/import/apply` has no idempotency key and mints fresh
   ids per temp id on every call, so a second attempt after a committed-but-unanswered write

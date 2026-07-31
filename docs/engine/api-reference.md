@@ -2,16 +2,27 @@
 
 **Base URL:** `http://127.0.0.1:9876` (default, configurable via `--port`)
 
-All endpoints return JSON. Most error responses follow this format:
+All endpoints return JSON. **Every** error response has one shape - an `error`
+object carrying a machine-readable `code` and a human-readable `message`:
 
 ```json
 {
-  "error": "Error message"
+  "error": {
+    "code": "bad_request",
+    "message": "Missing required field: name"
+  }
 }
 ```
 
-The OAuth 2.0 endpoints (`/oauth2/*`) use a **nested** error shape that also
-carries a machine-readable code (and any provider detail):
+`code` is per-status unless the route names a more specific one: `bad_request`
+(400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`
+(409), `bad_gateway` (502), `unavailable` (503), `internal_error` (5xx). Routes
+with their own vocabulary pass it instead - `invalid_config` (`POST /config`),
+`invalid_run_config` (`POST /runs`), and the `oauth2_*` family.
+
+Any per-error detail sits **inside** the same object, so a client reads one
+place for the whole failure - `item` on `POST /import/apply`, the provider's
+reply on `/oauth2/*`:
 
 ```json
 {
@@ -23,6 +34,11 @@ carries a machine-readable code (and any provider detail):
   }
 }
 ```
+
+Most routes used to emit a flat `{"error": "message"}` instead, which the app's
+http-client could not read - every validation message surfaced as a bare
+`HTTP 400` (issue #173). The client still accepts the flat shape so a newer app
+can read an older engine, but the engine no longer produces it.
 
 ## Deprecated aliases
 
@@ -77,7 +93,7 @@ A create must **not** carry an `id`. The engine generates one via `generate_id`,
 giving the `<prefix>_<uuidv4>` form, and a body containing the field is a `400`:
 
 ```json
-{"error": "id is assigned by the engine; omit it (bulk import: POST /import/apply)"}
+{"error": {"code": "bad_request", "message": "id is assigned by the engine; omit it (bulk import: POST /import/apply)"}}
 ```
 
 Presence alone is rejected, `null` included - `id` is not a settable field with a
@@ -91,14 +107,14 @@ anything was persisted; import sends one
 
 On `PUT`, the path is the identity. A body `id` matching it is accepted and
 ignored; one that disagrees - including `null` - is a `400`
-(`{"error": "Body 'id' must match the id in the path ('col_1') or be omitted"}`),
+(message `Body 'id' must match the id in the path ('col_1') or be omitted`),
 because the payload otherwise names two different records and guessing between
 them is how a `PUT` to one id rewrites another. This is checked before the record
 is looked up, so a malformed body answers `400` whether or not the target exists.
 
 Since no create can select an id, the pre-existing "id already exists" `409` -
 whose body names the update path, e.g.
-`{"error": "Collection 'col_1' already exists; use PUT /collections/:id to update"}` -
+message `Collection 'col_1' already exists; use PUT /collections/:id to update` -
 is now reachable only on a `generate_id` collision, which 122 bits of entropy put
 out of reach. It stays as a guard: on that draw the alternative is overwriting a
 live record.
@@ -135,7 +151,7 @@ verb rather than a silently discarded write. Those fields are a collection's
 
 A field that is present and not `null` must have the shape below, on both verbs.
 Anything else is a `400` naming the field, e.g.
-`{"error": "Invalid 'auth': must be a JSON object"}`.
+message `Invalid 'auth': must be a JSON object`.
 
 | Field | Shape |
 |---|---|
@@ -366,12 +382,11 @@ on a cycle (below).
 
 **Cycle validation (both verbs):** `parentId` is validated to keep the
 collection tree acyclic, since a
-cycle would make the cascade delete below loop forever. Both cases return `400`
-with the flat `{"error": message}` shape:
+cycle would make the cascade delete below loop forever. Both cases return `400`:
 
-- `parentId` equal to the collection's own `id` - `{"error": "A collection cannot be its own parent"}`.
+- `parentId` equal to the collection's own `id` - message `A collection cannot be its own parent`.
 - `parentId` pointing at one of the collection's own descendants (a reparent that
-  would form a cycle) - `{"error": "Cannot move a collection into its own descendant"}`.
+  would form a cycle) - message `Cannot move a collection into its own descendant`.
 
 Parent *existence* is intentionally not checked: the import orchestrator creates
 collections in bulk, so requiring the parent to exist first would couple to
@@ -584,10 +599,10 @@ invalid UTF-8 replaced rather than throwing, so binary or malformed content can
 never turn into a `500`.
 
 **Errors:**
-- `400` `{ "error": "Invalid JSON body" }` - the request body did not parse.
-- `400` `{ "error": "Invalid URL" }` - `url` is missing, not a string, or does
+- `400` `Invalid JSON body` - the request body did not parse.
+- `400` `Invalid URL` - `url` is missing, not a string, or does
   not start with `http://` / `https://`.
-- `502` `{ "error": "Failed to fetch: <detail>" }` - the upstream request failed
+- `502` `Failed to fetch: <detail>` - the upstream request failed
   (connection error, transport failure).
 
 ### POST /import/apply
@@ -655,28 +670,35 @@ Every `tempId` sent appears in `idMap`.
 and the write itself is a single SQLite transaction. A `400` therefore means
 **nothing was persisted** - there is no partial tree to clean up.
 
-**Errors:** every `400` carries `error`, and the per-item ones also carry `item`
-(the offending `tempId`) so a large import can name what broke.
-- `400` `{ "error": "Invalid JSON body" }` - the body did not parse.
-- `400` `{ "error": "Body must be a JSON object" }`.
-- `400` `{ "error": "Invalid 'collections': must be an array" }` - a section was
+**Errors:** every `400` uses the standard error object, and the per-item ones add
+an `item` key **inside** it (the offending `tempId`) so a large import can name
+what broke:
+
+```json
+{ "error": { "code": "bad_request", "message": "Duplicate tempId 'c1'", "item": "c1" } }
+```
+
+Messages, by case:
+- `400` `Invalid JSON body` - the body did not parse.
+- `400` `Body must be a JSON object`.
+- `400` `Invalid 'collections': must be an array` - a section was
   present but not an array (same for `requests` / `environments`).
-- `400` `{ "error": "Invalid collection at index 2: 'tempId' must be a non-empty string" }`.
-- `400` `{ "error": "Invalid collection at index 0: 'id' is not accepted - the engine assigns ids; reference items by 'tempId'" }`.
-- `400` `{ "error": "Duplicate tempId 'c1'", "item": "c1" }`.
-- `400` `{ "error": "Unknown parentTempId 'c9'", "item": "c2" }`, and the same for
+- `400` `Invalid collection at index 2: 'tempId' must be a non-empty string`.
+- `400` `Invalid collection at index 0: 'id' is not accepted - the engine assigns ids; reference items by 'tempId'`.
+- `400` `Duplicate tempId 'c1'`, with `item: "c1"`.
+- `400` `Unknown parentTempId 'c9'`, with `item: "c2"`, and the same for
   `collectionTempId` - including a `collectionTempId` that names an environment
   rather than a collection.
-- `400` `{ "error": "Cycle in parentTempId references at 'c1'", "item": "c2" }` -
+- `400` `Cycle in parentTempId references at 'c1'`, with `item: "c2"` -
   a cycle (including a self-parent) in the payload's own parent graph. The
   stored-tree walk that guards `POST /collections` cannot see this one, because
   none of these rows exist yet, and a cycle makes cascade delete loop forever
   (issue #79).
-- `400` `{ "error": "Missing required field: name", "item": "c1" }` and the other
+- `400` `Missing required field: name`, with `item: "c1"`, and the other
   per-field errors of the matching `POST /<resource>`, including a wrong-typed
   field (`"name": 42`), which is a `400` rather than a `500`.
-- `400` `{ "error": "Import too large: 10001 items exceeds the limit of 10000 per call" }`.
-- `500` `{ "error": "<detail>" }` - the transaction itself failed; nothing was
+- `400` `Import too large: 10001 items exceeds the limit of 10000 per call`.
+- `500` `<detail>` - the transaction itself failed; nothing was
   written.
 
 ## Environments
@@ -878,8 +900,8 @@ else re-acquires). `interactive` is only used for the `authorization_code` grant
 ```
 
 `expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
-Errors use the nested shape: `400` invalid config, `401` provider rejected the
-request, `409` interactive authorization required, `502` network error.
+Errors carry an `oauth2_*` code: `400` invalid config, `401` provider rejected
+the request, `409` interactive authorization required, `502` network error.
 
 #### GET /oauth2/token?key=&lt;cacheKey&gt;
 
@@ -1151,9 +1173,8 @@ load.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
-a `400` carrying the nested error shape (`{"error": {"code":
-"invalid_run_config", "message": "..."}}`), whose message names the offending
-field and why the bound exists:
+a `400` whose `error.code` is `invalid_run_config` rather than the per-status
+default, and whose message names the offending field and why the bound exists:
 
 | Field | Accepted | Rejected because |
 |-------|----------|------------------|
@@ -1174,7 +1195,7 @@ collector, so the modulo cannot divide by zero even for a caller that bypasses
 this route.
 
 **Shutdown refuses new runs.** Once the daemon has begun draining its run
-workers, `POST /runs` answers `503 {"error": "Engine is shutting down"}` rather
+workers, `POST /runs` answers `503` with the message `Engine is shutting down` rather
 than accepting a run nothing will ever execute. The window is small - the HTTP
 server stops before the drain begins - but it is not empty, and a request
 already in a handler when the drain starts must not be able to spawn a worker
@@ -1183,7 +1204,7 @@ past it (see `RunManager::shutdown`).
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
-required) or `400`, using the nested `/oauth2` error shape, so a bad token never
+required) or `400`, carrying the `/oauth2` error codes, so a bad token never
 surfaces as a silently-failed run.
 
 **Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are
@@ -1303,7 +1324,7 @@ the `requests_sent` row having already been seen for the same timestamp, and the
 producer writes `error_rate` first, so it read a completed count of 0 and every
 bucket of every run reported 0 failed requests.
 
-A missing run returns `404` with `{"error":"Run not found"}`.
+A missing run returns `404` with the message `Run not found`.
 
 **Storage (response shape unchanged).** Each `data[]` entry is one stored row of
 `metric_ticks` - the engine writes the tick object once, at write time, instead
@@ -1751,7 +1772,10 @@ daemon restarted under it) has nobody to race and is deleted immediately.
 **409 Conflict** (still stopping - nothing was deleted):
 ```json
 {
-  "error": "Run is still stopping; it was not deleted. Retry once it reports a terminal status."
+  "error": {
+    "code": "conflict",
+    "message": "Run is still stopping; it was not deleted. Retry once it reports a terminal status."
+  }
 }
 ```
 

@@ -85,20 +85,20 @@ class HttpClient {
 
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
-				// The engine emits two error shapes and always has. Most routes
-				// use `send_error` in routes.hpp, which writes a flat
-				// `{"error": "some message"}`; a handful (POST /config, the
-				// POST /runs config check, the auth pre-flight) write a nested
-				// `{"error": {"code", "message"}}`. Reading only the nested one
-				// meant every flat error - which is the large majority, and
-				// includes every validation message the requests, collections
-				// and environments routes produce - surfaced as a bare
-				// "HTTP 400" with the reason silently dropped.
+				// The engine emits one shape since issue #173:
+				// `{"error": {"code", "message"}}`, built by `error_body` in
+				// routes.hpp. It used to emit two - most routes wrote a flat
+				// `{"error": "some message"}` and a handful wrote the nested
+				// object - and reading only the nested one dropped every
+				// validation message the requests, collections and environments
+				// routes produce, surfacing them as a bare "HTTP 400".
 				//
-				// Accept both here rather than converting 38 call sites across
-				// nine route files: the fix belongs wherever the payload is
-				// read, it makes every existing flat error legible at once, and
-				// a route that later moves to the nested shape keeps working.
+				// The flat branch stays as a fallback, not as an alternative
+				// contract: the app and the engine sidecar are not updated
+				// atomically, so a new app can be talking to an older engine,
+				// and reading its message is better than showing the status
+				// line. Anything else - a body that is not JSON, an `error`
+				// that is neither - still falls back to the status text.
 				const rawError: unknown = errorData?.error;
 				const nested = typeof rawError === "object" && rawError !== null;
 				const errorCode = nested

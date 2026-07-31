@@ -62,7 +62,7 @@ TEST (NormalizeRunHttpVersion, RejectsUnrecognizedString) {
     auto err  = normalize_run_http_version (json);
     ASSERT_TRUE (err.has_value ());
     EXPECT_EQ (err->first, 400);
-    const std::string message = err->second["error"].get<std::string> ();
+    const std::string message = err->second["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos);
     // Every wire value must be named in the rejection, the same guarantee
     // resource_write_route_test.cpp holds the CRUD route to.
@@ -77,7 +77,8 @@ TEST (NormalizeRunHttpVersion, RejectsNonStringValue) {
     auto err  = normalize_run_http_version (json);
     ASSERT_TRUE (err.has_value ());
     EXPECT_EQ (err->first, 400);
-    EXPECT_NE (err->second["error"].get<std::string> ().find ("httpVersion"),
+    EXPECT_NE (
+    err->second["error"]["message"].get<std::string> ().find ("httpVersion"),
     std::string::npos);
 }
 

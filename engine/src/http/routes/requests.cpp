@@ -35,14 +35,14 @@ namespace vayu::http::routes {
  * (`serialize(const db::Request&)`), so the client transforms it identically.
  *
  * Extracted so the wiring (404 vs 200 + body) is covered without an in-process
- * HTTP server - see requests_route_test.cpp. The error body matches
- * `send_error`'s flat `{"error": message}` shape.
+ * HTTP server - see requests_route_test.cpp. The error body is built by
+ * `error_body`, like every other error the engine emits.
  */
 std::pair<int, nlohmann::json> get_request_response (vayu::db::Database& db,
 const std::string& id) {
     auto request = db.get_request (id);
     if (!request) {
-        return { 404, nlohmann::json{ { "error", "Request not found" } } };
+        return { 404, error_body (404, "Request not found") };
     }
     return { 200, vayu::json::serialize (*request) };
 }
@@ -105,8 +105,8 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
     }
     if (!value.is_array ()) {
         return std::make_pair (400,
-        nlohmann::json{ { "error",
-        std::string ("Invalid '") + key + "': must be an array of {key, value, enabled}" } });
+        error_body (400, std::string ("Invalid '") + key +
+        "': must be an array of {key, value, enabled}"));
     }
     for (size_t i = 0; i < value.size (); ++i) {
         const auto& entry = value[i];
@@ -114,9 +114,8 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
         !entry.contains ("value") || !entry["value"].is_string () ||
         !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
             return std::make_pair (400,
-            nlohmann::json{ { "error",
-            std::string ("Invalid ") + key + " entry at index " + std::to_string (i) +
-            ": missing required field (key, value, or enabled)" } });
+            error_body (400, std::string ("Invalid ") + key + " entry at index " +
+            std::to_string (i) + ": missing required field (key, value, or enabled)"));
         }
     }
     out = value.dump ();
@@ -174,7 +173,7 @@ bool is_create) {
     }
     auto method = vayu::parse_method (method_str);
     if (!method) {
-        return std::make_pair (400, nlohmann::json{ { "error", "Invalid HTTP method" } });
+        return std::make_pair (400, error_body (400, "Invalid HTTP method"));
     }
     r.method = *method;
 
@@ -238,8 +237,8 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
 
     if (db.get_request (id).has_value ()) {
         return { 409,
-            nlohmann::json{ { "error",
-            "Request '" + id + "' already exists; use PUT /requests/:id to update" } } };
+            error_body (409,
+            "Request '" + id + "' already exists; use PUT /requests/:id to update") };
     }
 
     vayu::db::Request r;
@@ -269,7 +268,7 @@ const nlohmann::json& json) {
     }
     auto existing = db.get_request (id);
     if (!existing) {
-        return { 404, nlohmann::json{ { "error", "Request not found" } } };
+        return { 404, error_body (404, "Request not found") };
     }
 
     vayu::db::Request r = *existing;
@@ -357,7 +356,7 @@ void register_request_routes (RouteContext& ctx) {
             auto [status, body] = create_request_response (ctx.db, json);
             if (status != 200) {
                 vayu::utils::log_warning ("POST /requests - " +
-                std::to_string (status) + ": " + body["error"].get<std::string> ());
+                std::to_string (status) + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "POST /requests - Created request: id=" + body["id"].get<std::string> () +
@@ -390,7 +389,7 @@ void register_request_routes (RouteContext& ctx) {
             auto [status, body] = update_request_response (ctx.db, request_id, json);
             if (status != 200) {
                 vayu::utils::log_warning ("PUT /requests/:id - " + std::to_string (status) +
-                " for id=" + request_id + ": " + body["error"].get<std::string> ());
+                " for id=" + request_id + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "PUT /requests/:id - Updated request: id=" + request_id +
