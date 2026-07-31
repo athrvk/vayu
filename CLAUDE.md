@@ -430,68 +430,16 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 **Tag *after* the release commit lands on the default branch.** When the version bump goes through a pull request (the usual path), run steps 1-2 on the feature branch so the bump merges with the PR, but do **not** tag the PR-branch commit. A squash/rebase merge rewrites the commit hash, so a tag on the pre-merge commit would point at a commit that never reaches the default branch. Wait for the PR to merge, then run step 3 against the merged commit on the default branch (`git checkout <default-branch> && git pull && git tag v$(cat VERSION) && git push origin --tags`). The tag triggers the release build, so it must sit on the canonical merged history.
 
-macOS and Linux ship a one-command installer: `install.sh` (repo root). On macOS it downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). On Linux it installs the AppImage under `~/.local/share/vayu` with a `.desktop` entry, an icon, and a `vayu` symlink when `~/.local/bin` is on `PATH` - **no sudo anywhere on that path**, since everything is under `$HOME`. Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
+**`install.sh` (repo root) installs *and updates*, on macOS and Linux.** macOS: downloads the release zip, ad-hoc signs app + sidecar, strips quarantine, `sudo`-installs to `/Applications`. Linux: AppImage + `.desktop` entry + icon + a `vayu` symlink when `~/.local/bin` is on `PATH`, all under `~/.local/share/vayu`, **no sudo**. Both share every decision and dispatch only the actions, on `platform()` - a function wrapping `uname -s`, so tests can force either branch on either host. Tested by `scripts/test/install_test.sh` (`VAYU_DRYRUN=1`), shellchecked in CI on both. Published by the docs site: `.github/hooks/install_script.py` registers the repo-root file at the site root, which is why `install.sh` is in the `paths:` filters of `docs.yml` - without that the published copy silently falls behind master. Documented as `bash -c "$(curl …)"`, not `curl … | bash`, so the script is buffered before it runs and stdin stays on the terminal.
 
-**The two platforms share the decisions and split the actions.** Which version, whether it is already installed, whether the app must be quit first, and the whole prompt/skip/`--force` machinery are written once; only `asset_name`, `stage_*`, `place_*`, `installed_version`, `running_pids`, `request_quit`/`force_quit`, `launch_app` and `uninstall_*` dispatch. They dispatch on **`platform()`, a function wrapping `uname -s`** rather than a constant, so `install_test.sh` can force either branch on either host - CI runs the suite on both, and without the stub each host would silently skip the other half. Linux specifics worth keeping in mind: the AppImage's version is inside a squashfs image, so the installer stamps `~/.local/share/vayu/version` and reads that back (a stamp with no AppImage does **not** count as installed). **That stamp has two writers.** The Linux AppImage self-updates (`resolveUpdateStrategy` returns `silent` there), which moves the binary on without touching the file, so `electron/appimage-stamp.ts` rewrites it at every startup - startup being the one moment the app knows its own version regardless of how it arrived. It writes *only* when `process.env.APPIMAGE` is the managed path: an AppImage run out of `~/Downloads` must not relabel the installed copy. The paths are a deliberate second copy of `LINUX_APP_DIR` / `LINUX_APP_BIN` / `LINUX_VERSION_FILE` in `install.sh` (a shell script and an Electron main process cannot share a constant) - move the install location and you move it in both. Beyond that: the AppImage is staged **beside its destination**, not in `$TMPDIR`, because `mv` across filesystems copies through the destination instead of renaming (and `/tmp` is tmpfs on most systemd distros, so a 160MB download would go to RAM); and the launcher icon is fetched from the docs site (`brand_assets.py` publishes the same PNG the app uses) rather than `--appimage-extract`, which some runtimes answer by unpacking the entire 400MB image.
+Six things about it that the code cannot tell you:
 
-**Never detect the running app by matching command lines.** The documented invocation is `bash -c "$(curl …)"`, which puts *this entire script, comments included*, into the installer's own argv - so any `pgrep -f` pattern that appears literally anywhere in `install.sh` matches the installer itself and every subshell it forks (`running_pids` is always called as `$(running_pids)`, and a fork has a new PID with the same argv). A comment reading "the AppImage mounts itself under `/tmp/.mount_Vayu*`" sat directly above a pattern matching exactly that, so on Linux the script always found Vayu running, always failed to quit it, and **aborted every install on every machine** - while the test suite stayed green, because sourcing the file never puts it in argv. `linux_running_pids` now reads `/proc/<pid>/exe`, `macos_running_pids` still uses `pgrep` but both filter through `exclude_own_processes` (process group, not `$$`/`$PPID`), and `install_test.sh` runs the script through `bash -c "$(cat install.sh)"` so the argv form is actually exercised.
-
-**Release assets carry the version** (`Vayu-<v>-universal.zip`, `Vayu-<v>-x86_64.AppImage`) while `Vayu-x64.exe` and `Vayu-amd64.deb` do not - an accident of electron-builder's per-target defaults. So `/releases/latest/download/<name>` works for Windows and Debian and **404s for macOS and Linux**; the README pointed at a `Vayu-x86_64.AppImage` that has never existed. Link the installer or `/releases/latest` instead of inventing an unversioned asset URL.
-
-**`install.sh` is the macOS *update* path, not just the install path.**
-`resolveUpdateStrategy` returns `notify` on darwin - an ad-hoc signature gives
-Squirrel.Mac nothing to verify - so the app never patches itself and its update
-notification hands the user this exact command. Two consequences. First, the
-command in `macInstallCommand()` (`app/electron/updater.ts`) must match the one
-README publishes; `updater.test.ts` asserts that by reading the README, because
-the string is built from a template literal that no URL grep can see - that is
-how it went stale when the installer moved to the docs site. Second, the script
-has to assume the app is *running* when it starts: it quits a running Vayu
-through an Apple Event (`osascript ... to quit`, which Electron handles like
-Cmd-Q, so `before-quit` flushes pending saves and stops the engine and MCP
-server) before replacing the bundle, falls back to `pkill` if that is refused or
-ignored, and **aborts rather than deleting the bundle under a live process**.
-macOS deletes a running app happily and the process then loses everything it
-loads lazily. Re-running with the latest already installed is a no-op unless
-`--force`; `VAYU_ASSUME_YES=1` skips the quit prompt for unattended runs.
-
-**The polite quit differs per platform, and Linux's only works because of
-`electron/quit-signals.ts`.** macOS has an Apple Event; Linux has only a signal,
-and Node's default disposition for `SIGTERM`/`SIGINT`/`SIGHUP` terminates the
-process outright - skipping `before-quit` entirely, so pending saves are lost
-and the engine and MCP children are orphaned. `installQuitOnSignal(process, …)`
-in `main.ts` routes them into `app.quit()` instead, at most once (a second
-signal during the async flush would start a competing shutdown). Delete that and
-the Linux installer's quit silently becomes a data-losing kill. The app can also
-quit itself for an update - `update:quitForUpdate` behind the **Quit to update**
-button on the macOS notify path - which is the only quit that needs no
-Automation consent.
-
-**The install target follows the existing copy** (`resolve_install_target`).
-`/Applications` is only the default for a *fresh* install; if Vayu is already in
-`~/Applications` - what dragging it out of the DMG produces - the update lands
-there, because otherwise it replaces a bundle the user never launches while the
-one they do launch keeps offering the same update. Two copies are reported
-rather than silently picked between, and uninstall removes every copy it finds.
-`sudo` stays unconditional even for a `$HOME` target that would not need it: one
-code path beats saving a password prompt the script already asks for. Note
-`resolve_install_target` assigns globals, so it must not be called inside a
-subshell - `do_install` calls it before its own `( … )`.
-
-**The installer is served from the docs site**, at
-<https://athrvk.github.io/vayu/install.sh> - a third shorter than the
-raw.githubusercontent URL it replaced, which spent most of its 92 characters on
-`owner/repo/branch`. The file stays at the repo root (that is where shellcheck
-and `install_test.sh` look); `.github/hooks/install_script.py` registers it as a
-generated file at the site root, so there is no second copy to drift. That makes
-`install.sh` a **docs-site input**, so it is listed in the `paths:` filters of
-`.github/workflows/docs.yml` - without that line, editing the installer would not
-redeploy the site and the published copy would silently fall behind master. The
-old raw URL is unaffected and keeps working. Documented as `bash -c "$(curl -fsSL
-...)"` rather than `curl ... | bash`: the wrapper buffers the whole script before
-running any of it and leaves stdin on the terminal, so the installer can still
-grow an interactive prompt (`sudo -v` already reads `/dev/tty`, so both forms
-work today).
+- **It is the macOS *update* path** - `resolveUpdateStrategy` returns `notify` there, since an ad-hoc signature gives Squirrel.Mac nothing to verify. So the app is usually *running* when the script starts, and `macInstallCommand()` (`app/electron/updater.ts`) must match the command README publishes; `updater.test.ts` asserts that by reading the README, because a template literal is invisible to a URL grep.
+- **Never detect the running app by matching command lines.** `bash -c "$(curl …)"` puts the whole script - comments included - into its own argv, so a `pgrep -f` pattern appearing anywhere in the file matches the installer itself. That aborted every Linux install while the suite stayed green, because sourcing the file never populates argv. Linux reads `/proc/<pid>/exe`, both platforms filter by process group, and `install_test.sh` exercises the real `bash -c "$(cat install.sh)"` form.
+- **`electron/quit-signals.ts` is load-bearing.** Linux has no Apple Event, so the installer quits with `SIGTERM`, and Node's default would kill the process without running `before-quit` - losing pending saves and orphaning the engine. The app can also quit itself (`update:quitForUpdate`, the **Quit to update** button), the only quit needing no Automation consent.
+- **The install target follows the existing copy** (`resolve_install_target`). `/Applications` is only the *fresh install* default; two copies are reported rather than silently picked between, and uninstall removes every copy. It assigns globals, so never call it inside a subshell.
+- **The Linux version stamp (`~/.local/share/vayu/version`) has two writers**: the installer, and `electron/appimage-stamp.ts` at startup - the AppImage self-updates in place and would otherwise leave the stamp stale. That module duplicates `install.sh`'s path constants; move one, move both.
+- **Release assets carry versions** (`Vayu-<v>-universal.zip`, `Vayu-<v>-x86_64.AppImage`) while `Vayu-x64.exe` and `Vayu-amd64.deb` do not, so `/releases/latest/download/<name>` **404s for macOS and Linux**. Link the installer or `/releases/latest`; never invent an unversioned asset URL.
 
 **Windows also publishes to winget, automatically.** The `publish-winget` job in
 `release.yml` submits `Vayu-x64.exe` to `microsoft/winget-pkgs` after the
