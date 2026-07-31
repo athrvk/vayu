@@ -26,6 +26,7 @@ import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
 import { parseImport } from "@/services/importers/factory";
 import { UnrecognisedFormatError, type ImportResult } from "@/services/importers/types";
+import { importFailureMessage } from "@/services/importers/failure-message";
 import { MethodBadge } from "@/components/shared";
 
 type Tab = "file" | "url" | "paste";
@@ -143,7 +144,10 @@ export function ImportModal() {
 			// globals write) leaves the tree committed. Surface the error and leave the
 			// modal in its error phase; the mutation invalidates on every outcome, so
 			// whatever did land is already visible behind this dialog.
-			setError((e as Error).message || "Import failed");
+			//
+			// The engine names the item that broke by its temp id; `importFailureMessage`
+			// resolves that back to the name shown in the preview (issue #173).
+			setError(importFailureMessage(e, result));
 			setPhase("error");
 		}
 	};

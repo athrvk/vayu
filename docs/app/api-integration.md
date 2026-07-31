@@ -62,6 +62,17 @@ class ApiError extends Error {
 }
 ```
 
+Every engine error body is `{"error": {"code", "message"}}`, so `message` is the
+engine's own text (a validation reason, a not-found) and `errorCode` is its
+`code` - per-status (`bad_request`, `not_found`, ...) unless the route names a
+more specific one. Two fallbacks sit behind that, and both matter: a body in the
+**legacy flat** shape (`{"error": "..."}`, which a pre-#173 engine sends and the
+sidecar's version can lag the app's) still yields its string as the message, and
+a body carrying neither falls back to `HTTP <status>: <statusText>`. `response`
+keeps the raw body, which is where per-error detail lives - `error.item` on a
+failed bulk import, the provider fields on `/oauth2`. See
+[the engine's error contract](../engine/api-reference.md).
+
 **Error Types:**
 - `isTimeout`: Request timeout
 - `isNetworkError`: Connection/DNS errors
@@ -208,9 +219,10 @@ takes as long as the stop does, and it **rejects with a 409** if the run's worke
 has not finished writing in time - nothing is deleted in that case. Callers must
 handle that rejection: `HistoryList` turns it into a toast telling the user to
 retry, and Settings' *Clear run history* already counts per-run failures through
-`Promise.allSettled`. The engine's error body is a bare `{"error": "..."}`
-string, which `httpClient` cannot read into `ApiError.message` (it looks for
-`error.message`), so the wording is the caller's, keyed off `statusCode`.
+`Promise.allSettled`. The wording of that toast is the caller's, keyed off
+`statusCode`, rather than the engine's message - which is a caller's choice now
+that `httpClient` reads the message on every error shape (issue #173), not a
+constraint.
 
 #### Scripting
 

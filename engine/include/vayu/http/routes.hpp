@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "vayu/core/run_manager.hpp"
@@ -38,11 +39,79 @@ inline int64_t now_ms () {
 }
 
 /**
+ * @brief The error code an error body carries when its call site does not name one.
+ *
+ * Codes are per-status rather than per-message so a caller can branch on the
+ * class of failure without string-matching the message, and so the ~50 existing
+ * call sites needed no per-site invention. A route that has a more specific code
+ * (`invalid_config`, the `oauth2_*` family) passes it explicitly.
+ */
+inline const char* default_error_code (int status) {
+    switch (status) {
+    case 400: return "bad_request";
+    case 401: return "unauthorized";
+    case 403: return "forbidden";
+    case 404: return "not_found";
+    case 409: return "conflict";
+    case 502: return "bad_gateway";
+    case 503: return "unavailable";
+    default: return status >= 500 ? "internal_error" : "error";
+    }
+}
+
+/**
+ * @brief The one error body shape the engine emits: `{"error": {"code", "message"}}`.
+ *
+ * The engine used to emit two shapes - this nested one from `/config` and
+ * `/oauth2`, and a flat `{"error": "<message>"}` from `send_error` and the
+ * testable-core route helpers. The app's shared http-client reads
+ * `errorData.error.message`, and on a flat body that is `undefined` (a string
+ * carries no `.message`), so every validation message the CRUD routes built was
+ * dropped and surfaced as a bare "HTTP 400" (issue #173). Build error bodies
+ * here rather than inline, so a new route cannot reintroduce the split.
+ *
+ * Extra per-error detail belongs *inside* the nested object (see `item_error`
+ * in import.cpp), which keeps `error` the single place a client has to look.
+ */
+inline nlohmann::json
+error_body (int status, const std::string& message, std::string_view code = {}) {
+    const std::string error_code =
+    code.empty () ? default_error_code (status) : std::string (code);
+    return nlohmann::json{ { "error",
+    { { "code", error_code }, { "message", message } } } };
+}
+
+/**
+ * @brief Read the human-readable message out of an error body.
+ *
+ * Route handlers log the message of the response their testable core returned,
+ * and a raw `body["error"].get<std::string>()` throws once that value is an
+ * object - turning a 404 log line into a 500. Tolerates the legacy flat shape
+ * so this is also safe against a body built elsewhere.
+ */
+inline std::string error_message_of (const nlohmann::json& body) {
+    const auto error = body.find ("error");
+    if (error == body.end ()) {
+        return {};
+    }
+    if (error->is_string ()) {
+        return error->get<std::string> ();
+    }
+    if (error->is_object () && error->contains ("message") && (*error)["message"].is_string ()) {
+        return (*error)["message"].get<std::string> ();
+    }
+    return error->dump ();
+}
+
+/**
  * @brief Send a JSON error response
  */
-inline void send_error (httplib::Response& res, int status, const std::string& message) {
+inline void send_error (httplib::Response& res,
+int status,
+const std::string& message,
+std::string_view code = {}) {
     res.status = status;
-    res.set_content (nlohmann::json{ { "error", message } }.dump (), "application/json");
+    res.set_content (error_body (status, message, code).dump (), "application/json");
 }
 
 /**
@@ -144,8 +213,7 @@ bool is_create) {
     }
     if (!value.is_object ()) {
         return std::make_pair (400,
-        nlohmann::json{
-        { "error", std::string ("Invalid '") + key + "': must be a JSON object" } });
+        error_body (400, std::string ("Invalid '") + key + "': must be a JSON object"));
     }
     out = value.dump ();
     return std::nullopt;
@@ -244,15 +312,13 @@ bool is_create) {
             return std::nullopt;
         }
         return std::make_pair (400,
-        nlohmann::json{ { "error",
-        std::string ("Invalid '") + key + "': '" + candidate +
-        "' is not a valid HTTP version. Valid values: " + http_version_valid_list () } });
+        error_body (400, std::string ("Invalid '") + key + "': '" + candidate +
+        "' is not a valid HTTP version. Valid values: " + http_version_valid_list ()));
     }
 
     return std::make_pair (400,
-    nlohmann::json{ { "error",
-    std::string ("Invalid '") + key +
-    "': must be a string. Valid values: " + http_version_valid_list () } });
+    error_body (400, std::string ("Invalid '") + key +
+    "': must be a string. Valid values: " + http_version_valid_list ()));
 }
 
 /**
@@ -266,14 +332,14 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
     if (!json.contains (key)) {
         if (is_create) {
             return std::make_pair (400,
-            nlohmann::json{ { "error", std::string ("Missing required field: ") + key } });
+            error_body (400, std::string ("Missing required field: ") + key));
         }
         return std::nullopt; // Absent on update -> keep.
     }
     if (json[key].is_null ()) {
         return std::make_pair (400,
-        nlohmann::json{ { "error",
-        std::string ("Invalid '") + key + "': null is not allowed (this field has no default)" } });
+        error_body (400, std::string ("Invalid '") + key +
+        "': null is not allowed (this field has no default)"));
     }
     out = json[key].get<std::string> ();
     return std::nullopt;
@@ -298,9 +364,8 @@ const nlohmann::json& json) {
         return std::nullopt;
     }
     return std::make_pair (400,
-    nlohmann::json{ { "error",
-    "id is assigned by the engine; omit it "
-    "(bulk import: POST /import/apply)" } });
+    error_body (400, "id is assigned by the engine; omit it "
+    "(bulk import: POST /import/apply)"));
 }
 
 /**
@@ -322,8 +387,7 @@ reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_i
         return std::nullopt;
     }
     return std::make_pair (400,
-    nlohmann::json{ { "error",
-    "Body 'id' must match the id in the path ('" + path_id + "') or be omitted" } });
+    error_body (400, "Body 'id' must match the id in the path ('" + path_id + "') or be omitted"));
 }
 
 /**

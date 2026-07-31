@@ -371,7 +371,7 @@ TEST_F (DeleteRunTest, UnknownRunIs404) {
     vayu::http::routes::delete_run_response (*db, manager, "nope", 100);
 
     EXPECT_EQ (status, 404);
-    EXPECT_EQ (body["error"], "Run not found");
+    EXPECT_EQ (body["error"]["message"], "Run not found");
 }
 
 TEST_F (DeleteRunTest, FinishedRunIsDeletedOutright) {

@@ -67,12 +67,11 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     return entry_json;
 }
 
-// Build the nested error body the app's http-client reads
-// (`errorData.error.message`); the flat `{"error": "..."}` shape is dropped by
-// the client and surfaces only as a bare "HTTP 400".
+// A /config validation failure, which names its own code rather than taking the
+// per-status default. Thin wrapper over the shared builder so the shape stays in
+// one place (routes.hpp).
 nlohmann::json config_error (const std::string& message) {
-    return nlohmann::json{ { "error",
-    { { "code", "invalid_config" }, { "message", message } } } };
+    return error_body (400, message, "invalid_config");
 }
 
 } // namespace

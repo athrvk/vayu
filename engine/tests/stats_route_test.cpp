@@ -4,7 +4,7 @@
  *
  * This core backs both the canonical GET /runs/:id/metrics and the legacy
  * GET /stats/:id?format=json, so the two paths cannot drift. It must:
- *   - return a definitive 404 {"error": ...} for a missing run,
+ *   - return a definitive 404 {"error": {"code", "message"}} for a missing run,
  *   - return 200 with an empty `data` array and a well-formed pagination
  *     envelope for a run that has no metrics yet,
  *   - group Metric rows into per-timestamp tick buckets carrying the app's
@@ -157,7 +157,8 @@ TEST_F (StatsRouteTest, MissingRunIs404) {
     vayu::http::routes::run_time_series_response (*db_, "run_nope", 5000, 0);
     EXPECT_EQ (status, 404);
     ASSERT_TRUE (body.contains ("error"));
-    EXPECT_TRUE (body["error"].is_string ());
+    EXPECT_EQ (body["error"]["code"], "not_found");
+    EXPECT_EQ (body["error"]["message"], "Run not found");
 }
 
 TEST_F (StatsRouteTest, ExistingRunWithNoMetricsIs200WithEmptyEnvelope) {

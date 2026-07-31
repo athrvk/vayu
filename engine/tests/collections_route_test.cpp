@@ -103,7 +103,7 @@ TEST_F (CollectionsRouteTest, SelfParentRejectedWith400) {
     auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_a");
     ASSERT_TRUE (err.has_value ());
     EXPECT_EQ (err->first, 400);
-    EXPECT_EQ (err->second["error"], "A collection cannot be its own parent");
+    EXPECT_EQ (err->second["error"]["message"], "A collection cannot be its own parent");
 }
 
 TEST_F (CollectionsRouteTest, ReparentIntoDescendantRejectedWith400) {
@@ -115,7 +115,7 @@ TEST_F (CollectionsRouteTest, ReparentIntoDescendantRejectedWith400) {
     auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_c");
     ASSERT_TRUE (err.has_value ());
     EXPECT_EQ (err->first, 400);
-    EXPECT_EQ (err->second["error"], "Cannot move a collection into its own descendant");
+    EXPECT_EQ (err->second["error"]["message"], "Cannot move a collection into its own descendant");
 }
 
 TEST_F (CollectionsRouteTest, LegalReparentSucceeds) {

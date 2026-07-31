@@ -378,7 +378,7 @@ const std::string& run_id,
 int64_t stop_wait_ms) {
     auto run = db.get_run (run_id);
     if (!run) {
-        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+        return { 404, error_body (404, "Run not found") };
     }
 
     if (auto context = run_manager.get_run (run_id)) {
@@ -400,9 +400,8 @@ int64_t stop_wait_ms) {
                 "DELETE /runs/:id - Run did not settle within " +
                 std::to_string (stop_wait_ms) + "ms, refusing to delete: " + run_id);
                 return { 409,
-                    nlohmann::json{ { "error",
-                    "Run is still stopping; it was not deleted. Retry once it "
-                    "reports a terminal status." } } };
+                    error_body (409, "Run is still stopping; it was not deleted. Retry once it "
+                    "reports a terminal status.") };
             }
             std::this_thread::sleep_for (std::chrono::milliseconds (20));
         }
@@ -415,7 +414,8 @@ int64_t stop_wait_ms) {
 
 /**
  * Testable core of GET /runs/:id/report, returning {http_status, json_body}. A
- * missing run is a definitive 404 with the flat `{"error": message}` shape.
+ * missing run is a definitive 404 in the shared `{"error": {"code", "message"}}`
+ * shape.
  *
  * Two sources feed the whole-run aggregates, in order:
  *   1. `runs.summary` - the values the run itself computed at completion. Used
@@ -435,7 +435,7 @@ std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id) {
     auto run = db.get_run (run_id);
     if (!run) {
-        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+        return { 404, error_body (404, "Run not found") };
     }
 
     auto results = db.get_results (run_id);

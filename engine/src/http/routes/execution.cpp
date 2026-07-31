@@ -684,19 +684,11 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Range-check the numeric config *before* the run row exists, so a
-        // rejected request leaves nothing behind. The nested error shape is
-        // deliberate: the app's http-client reads `errorData.error.message`
-        // and drops the flat `{"error": "..."}` body, which would surface this
-        // as a bare "HTTP 400" with no reason (same shape as the auth
-        // pre-flight below and POST /config).
+        // rejected request leaves nothing behind. `invalid_run_config` is the
+        // specific code this failure carries in place of the per-status default.
         if (auto invalid = validate_run_config (json)) {
             vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
-            res.status = 400;
-            res.set_content (
-            nlohmann::json{
-            { "error", { { "code", "invalid_run_config" }, { "message", *invalid } } } }
-            .dump (),
-            "application/json");
+            send_error (res, 400, *invalid, "invalid_run_config");
             return;
         }
 
@@ -759,10 +751,8 @@ void register_execution_routes (RouteContext& ctx) {
             preflight.message);
             res.status =
             (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
-            res.set_content (nlohmann::json{ { "error",
-                                 { { "code", preflight.detail_code },
-                                 { "message", preflight.message } } } }
-            .dump (),
+            res.set_content (
+            error_body (res.status, preflight.message, preflight.detail_code).dump (),
             "application/json");
             return;
         }
