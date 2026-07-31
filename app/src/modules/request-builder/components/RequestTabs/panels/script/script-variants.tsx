@@ -80,6 +80,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.globals.get("variable")',
 			'pm.collectionVariables.get("variable")',
 			'pm.request.headers["X-Timestamp"] = Date.now().toString()',
+			'pm.request.headers.upsert("X-Trace", traceId)',
 			'delete pm.request.headers["Authorization"]',
 			'pm.request.url = pm.request.url + "?trace=1"',
 			"pm.request.body = JSON.stringify({ n: 2 })",
@@ -97,9 +98,13 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				runs, so setting <code className={CODE_CLASS}>Authorization</code> here replaces it.
 			</>,
 			<>
-				Header names are case-sensitive in JS: use the exact name (
+				Indexing is case-sensitive in JS: use the exact name (
 				<code className={CODE_CLASS}>Authorization</code>, not{" "}
-				<code className={CODE_CLASS}>authorization</code>).
+				<code className={CODE_CLASS}>authorization</code>). The methods -{" "}
+				<code className={CODE_CLASS}>get</code>, <code className={CODE_CLASS}>has</code>,{" "}
+				<code className={CODE_CLASS}>upsert</code>, <code className={CODE_CLASS}>add</code>,{" "}
+				<code className={CODE_CLASS}>remove</code> - are not, and{" "}
+				<code className={CODE_CLASS}>add</code> throws on a name that is already there.
 			</>,
 			<>
 				A value the engine cannot send rejects the whole edit and the request is sent
@@ -128,14 +133,18 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			"});",
 			"pm.response.json()",
 			"pm.response.text()",
-			'pm.response.headers["content-type"]',
+			'pm.response.headers.get("Content-Type")',
+			"pm.response.reason()",
+			"pm.response.size().total",
 		],
 		notes: [
 			<>
-				<code className={CODE_CLASS}>pm.response.headers</code> is a plain object, not
-				Postman&apos;s <code className={CODE_CLASS}>HeaderList</code>: there is no{" "}
-				<code className={CODE_CLASS}>.get()</code>, and the engine lower-cases every key as
-				it parses the response, so index it with the lower-cased name.
+				<code className={CODE_CLASS}>pm.response.headers</code> is a plain object with{" "}
+				<code className={CODE_CLASS}>get()</code> /{" "}
+				<code className={CODE_CLASS}>has()</code> over it. Those two are case-insensitive;
+				indexing is not, and the engine lower-cases every key as it parses the response - so{" "}
+				<code className={CODE_CLASS}>headers[&quot;content-type&quot;]</code> needs the
+				lower-cased name while <code className={CODE_CLASS}>get()</code> does not.
 			</>,
 			<>
 				<code className={CODE_CLASS}>pm.request</code> is readable here as a record of what

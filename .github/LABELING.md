@@ -63,7 +63,7 @@ These labels narrow a change to a **feature sub-area**, one level finer than `co
 
 ### Type Labels (`type:*`)
 
-These labels describe the **kind of change** (the WHAT). **Applied manually**—they describe intent, not just what files were touched. Pick the single most appropriate type. Type labels use **semantic colors** (red for problems, green for features, blue for improvements, amber for warnings/optimization) to visually distinguish them from component labels.
+These labels describe the **kind of change** (the WHAT). **Applied manually** - they describe intent, not just what files were touched. Pick the single most appropriate type. Type labels use **semantic colors** (red for problems, green for features, blue for improvements, amber for warnings/optimization) to visually distinguish them from component labels.
 
 | Label | Color | Description | Use when |
 |-------|-------|-------------|----------|
@@ -112,7 +112,9 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 | `wontfix` | Light gray (#BBBFC4) | This will not be worked on | Close issue that won't be addressed |
 | `invalid` | Light gray (#BBBFC4) | Invalid or incomplete | Close issue that's not applicable |
 | `question` | Gold (#D4AF37) | Further information is requested | Issue needs clarification |
-| `github_actions` | Gray (#95A5A6) | GitHub Actions related | Workflows or action-specific issues |
+| `github_actions` | Gray (#95A5A6) | GitHub Actions related | Auto-applied by Dependabot to action bumps; also used manually |
+| `javascript` | Green (#168700) | Pull requests that update JavaScript | Auto-applied by Dependabot to npm bumps; not applied by hand |
+| `python` | Set by Dependabot | Pull requests that update Python | Auto-applied by Dependabot to `requirements-docs.txt` bumps; does not exist until the first one opens |
 | `flaky` | Amber (#F39C12) | Flaky test or unreliable behavior | Test intermittently fails |
 | `memory-leak` | Red (#E74C3C) | Memory leak detected | Suspected or confirmed memory leak |
 | `performance` | Amber (#F39C12) | Performance-related issue | Used for tracking perf problems (use `type:perf` for PRs) |
@@ -196,4 +198,4 @@ exception: kept and restyled as manual-only companions to `component:ci` /
 
 ## Applying Labels to the Repository
 
-There is no script in this repo for creating/updating GitHub labels—label colors and descriptions above must be applied directly in the repository's label settings (**Settings → Labels**) or via the GitHub API/CLI (`gh label create` / `gh label edit`) by someone with write access. Existing labels not covered above (manual `priority:*`, `status:*`, etc.) are created on first use.
+There is no script in this repo for creating/updating GitHub labels - label colors and descriptions above must be applied directly in the repository's label settings (**Settings → Labels**) or via the GitHub API/CLI (`gh label create` / `gh label edit`) by someone with write access. Existing labels not covered above (manual `priority:*`, `status:*`, etc.) are created on first use.

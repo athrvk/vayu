@@ -119,9 +119,43 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.response.headers" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",
-    "Response headers as key-value pairs. Access individual headers like "
-    "pm.response.headers['Content-Type']." },
+    "Response headers as key-value pairs, keyed by the lower-cased name the "
+    "HTTP client parsed. Index it (pm.response.headers['content-type']) or use "
+    "the case-insensitive get()/has() over it." },
     { "sortText", "1_pm_response_headers" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.get" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.get(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.get(name: string): string | undefined" },
+    { "documentation",
+    "Read a response header by name, case-insensitively. Returns undefined "
+    "when the header is absent.\n\nExample:\nconst type = "
+    "pm.response.headers.get('Content-Type');" },
+    { "sortText", "1_pm_response_headers_get" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.has" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.has(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.has(name: string): boolean" },
+    { "documentation", "Whether the response carries a header of that name, case-insensitively." },
+    { "sortText", "1_pm_response_headers_has" } });
+
+    completions.push_back ({ { "label", "pm.response.reason" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.reason()" }, { "detail", "pm.response.reason(): string" },
+    { "documentation",
+    "The status line's reason phrase ('OK', 'Not Found'). A client-side "
+    "failure reports vayu's synthetic status 0 as 'Error'." },
+    { "sortText", "1_pm_response_reason" } });
+
+    completions.push_back ({ { "label", "pm.response.size" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.size()" },
+    { "detail", "pm.response.size(): { body: number, header: number, total: number }" },
+    { "documentation",
+    "Response size in bytes. `body` is the body the script can read through "
+    "text(); `header` is the serialised header block reconstructed from the "
+    "parsed headers, so it is not a wire-exact figure." },
+    { "sortText", "1_pm_response_size" } });
 
     completions.push_back ({ { "label", "pm.response.json" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.json()" }, { "detail", "pm.response.json(): any" },
@@ -243,6 +277,55 @@ nlohmann::json get_script_completions () {
     "Names are case-sensitive here (use 'Authorization', not "
     "'authorization'), and values must be a string, number or boolean." },
     { "sortText", "1_pm_request_headers" } });
+
+    // The methods over that same object. They are non-enumerable properties of
+    // it, so they never reach the wire, and they write the property the
+    // write-back reads - method and assignment cannot disagree.
+    completions.push_back ({ { "label", "pm.request.headers.get" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.get(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.get(name: string): string | undefined" },
+    { "documentation",
+    "Read an outgoing header by name, case-insensitively - unlike indexing, "
+    "which is case-sensitive. Returns undefined when it is absent." },
+    { "sortText", "1_pm_request_headers_get" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.has" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.has(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.has(name: string): boolean" },
+    { "documentation", "Whether the outgoing request carries that header, case-insensitively." },
+    { "sortText", "1_pm_request_headers_has" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.upsert" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.upsert({ key: \"${1:X-Header}\", value: ${2:\"value\"} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.upsert({ key, value }) | (name, value)" },
+    { "documentation",
+    "Add the header, replacing any existing one of that name whatever its "
+    "casing. The pre-request equivalent of assigning to "
+    "pm.request.headers[name], and the safe choice when you do not know "
+    "whether the header is already there." },
+    { "sortText", "1_pm_request_headers_upsert" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.add" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.add({ key: \"${1:X-Header}\", value: ${2:\"value\"} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.add({ key, value }) | (name, value)" },
+    { "documentation",
+    "Add a header that is not there yet. Throws if one of that name already "
+    "exists - a request cannot carry the same header twice, so use upsert() to "
+    "replace it." },
+    { "sortText", "1_pm_request_headers_add" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.remove" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.remove(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.remove(name: string): void" },
+    { "documentation",
+    "Remove a header from the outgoing request, including one the Auth tab "
+    "applied. Case-insensitive, and removing an absent header is a no-op." },
+    { "sortText", "1_pm_request_headers_remove" } });
 
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
