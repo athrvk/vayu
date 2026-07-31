@@ -432,6 +432,23 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
 
+**`install.sh` is the macOS *update* path, not just the install path.**
+`resolveUpdateStrategy` returns `notify` on darwin - an ad-hoc signature gives
+Squirrel.Mac nothing to verify - so the app never patches itself and its update
+notification hands the user this exact command. Two consequences. First, the
+command in `macInstallCommand()` (`app/electron/updater.ts`) must match the one
+README publishes; `updater.test.ts` asserts that by reading the README, because
+the string is built from a template literal that no URL grep can see - that is
+how it went stale when the installer moved to the docs site. Second, the script
+has to assume the app is *running* when it starts: it quits a running Vayu
+through an Apple Event (`osascript ... to quit`, which Electron handles like
+Cmd-Q, so `before-quit` flushes pending saves and stops the engine and MCP
+server) before replacing the bundle, falls back to `pkill` if that is refused or
+ignored, and **aborts rather than deleting the bundle under a live process**.
+macOS deletes a running app happily and the process then loses everything it
+loads lazily. Re-running with the latest already installed is a no-op unless
+`--force`; `VAYU_ASSUME_YES=1` skips the quit prompt for unattended runs.
+
 **The installer is served from the docs site**, at
 <https://athrvk.github.io/vayu/install.sh> - a third shorter than the
 raw.githubusercontent URL it replaced, which spent most of its 92 characters on

@@ -42,6 +42,11 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
     quarantine flag - without that, macOS reports it as damaged.
 
+    **Updating is the same command.** It keeps your collections and settings,
+    offers to quit Vayu if it is running (and reopens it after), and does
+    nothing if you already have the latest version - `--force` reinstalls
+    anyway.
+
     Pin a version with `VAYU_VERSION=0.2.1` in front of the command, or
     uninstall by re-running it with `-- --uninstall`.
 
