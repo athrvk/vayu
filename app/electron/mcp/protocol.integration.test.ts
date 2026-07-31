@@ -45,6 +45,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		listCollections: async () => [{ id: "col_1", name: "API" }],
 		listEnvironments: async () => [],
+		// Identity composition: the request echoed back, as the engine's
+		// POST /compose returns for an inline request with nothing to resolve.
+		composeRequest: async (body: { request?: object; environmentId?: string }) => ({
+			...(body.request ?? {}),
+			...(body.environmentId !== undefined ? { environmentId: body.environmentId } : {}),
+		}),
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		...overrides,
 	} as unknown as EngineClient;

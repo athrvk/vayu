@@ -179,6 +179,18 @@ export class EngineClient {
 
 	// --- Execute -------------------------------------------------------------
 
+	/**
+	 * Compose a request engine-side: `POST /compose` resolves `{{variables}}`
+	 * and `inherit` auth (walking the collection chain) and returns the
+	 * execute-ready payload that {@link executeRequest} / {@link startRun}
+	 * accept unchanged. Pure - it sends nothing and creates no run row, which
+	 * is what lets the allowlist gate read the *resolved* URL before any
+	 * traffic flows. This replaced the MCP-side composition copy (issue #226).
+	 */
+	composeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/compose", payload, signal);
+	}
+
 	executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/execute", payload, signal);
 	}

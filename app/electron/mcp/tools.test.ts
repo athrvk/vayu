@@ -9,7 +9,27 @@ import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { dispatchTool, toolCatalog, TOOLS, type ToolContext } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import type { EngineClient } from "./engine-client.js";
+import { EngineRequestError, type EngineClient } from "./engine-client.js";
+
+/**
+ * Default `composeRequest` fake: the engine's identity composition for an
+ * inline request with nothing to resolve - the request echoed back with the
+ * environmentId attached. Composition *semantics* (variable resolution, the
+ * inherit walk, by-id assembly) are engine-owned since #226 and tested by the
+ * engine's request_composer_test.cpp plus the shared conformance fixture;
+ * what these tests own is MCP's plumbing around the call: what reaches
+ * `/compose`, that the allowlist gates on the *composed* URL, and that the
+ * composed payload reaches `/execute` / `/runs` unchanged. Tests that need a
+ * "resolved" or by-id result override this with a canned payload.
+ */
+function identityCompose() {
+	return vi.fn().mockImplementation((body: { request?: object; environmentId?: string }) => {
+		const composed: Record<string, unknown> = { ...(body.request ?? {}) };
+		if (typeof composed.method === "string") composed.method = composed.method.toUpperCase();
+		if (body.environmentId !== undefined) composed.environmentId = body.environmentId;
+		return Promise.resolve(composed);
+	});
+}
 
 /** Build a fake EngineClient with vi.fn()s for the methods under test. */
 function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
@@ -20,6 +40,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue([]),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
+		composeRequest: identityCompose(),
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
@@ -246,12 +267,22 @@ describe("data-write tools", () => {
 
 describe("run_collection_smoke", () => {
 	test("runs each request and reports pass/fail; skips off-allowlist hosts", async () => {
+		const composedByRequest: Record<string, object> = {
+			r1: { method: "GET", url: "https://api.example.com/ok" },
+			r2: { method: "GET", url: "https://api.example.com/bad" },
+			r3: { method: "GET", url: "https://evil.test/x" },
+		};
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([
 				{ id: "r1", name: "ok", method: "GET", url: "https://api.example.com/ok" },
 				{ id: "r2", name: "bad", method: "GET", url: "https://api.example.com/bad" },
 				{ id: "r3", name: "offlist", method: "GET", url: "https://evil.test/x" },
 			]),
+			composeRequest: vi
+				.fn()
+				.mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve(composedByRequest[requestId])
+				),
 			executeRequest: vi
 				.fn()
 				.mockResolvedValueOnce({ status: 200, testResults: [] })
@@ -270,39 +301,41 @@ describe("run_collection_smoke", () => {
 			skipped: number;
 		};
 		expect(summary).toMatchObject({ total: 3, passed: 1, failed: 1, skipped: 1 });
-		// The off-allowlist request was never executed.
+		// The off-allowlist request was never executed - and the gate read the
+		// *composed* URL, which is why composition (pure, sends nothing) may run
+		// for it while execution must not.
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
 
-	test("composes each request like the app: vars resolved, inherited auth + scripts applied", async () => {
-		const client = fakeClient({
-			listCollections: vi.fn().mockResolvedValue([
+	test("composes each request engine-side and executes the composed payload unchanged", async () => {
+		// Canned engine output mirroring what POST /compose returns for a saved
+		// request: variables resolved, inherited auth applied, chain + own script
+		// parts attached. The composition itself is asserted engine-side
+		// (request_composer_test.cpp); MCP's job is to request it by id and
+		// forward it byte-for-byte.
+		const composed = {
+			method: "GET",
+			url: "https://api.example.com/users",
+			headers: { Accept: "application/json" },
+			auth: { mode: "bearer", token: "abc123" },
+			preRequestScripts: [
+				{ origin: "collection", id: "c1", script: "pm.collectionVariables.set('x', 1)" },
+			],
+			postRequestScripts: [
 				{
-					id: "c1",
-					parentId: null,
-					variables: { host: { value: "api.example.com", enabled: true } },
-					auth: { mode: "bearer", token: "{{token}}" },
-					preRequestScript: "pm.collectionVariables.set('x', 1)",
-					postRequestScript: "",
-				},
-			]),
-			getEnvironment: vi.fn().mockResolvedValue({
-				id: "env_1",
-				name: "Dev",
-				variables: { token: { value: "abc123", enabled: true } },
-			}),
-			listRequests: vi.fn().mockResolvedValue([
-				{
+					origin: "request",
 					id: "r1",
-					collectionId: "c1",
-					name: "get user",
-					method: "get",
-					url: "https://{{host}}/users",
-					// No auth field on the request → defaults to inherit → collection bearer.
-					headers: [{ key: "Accept", value: "application/json", enabled: true }],
-					postRequestScript: "pm.test('ok', () => pm.response.to.have.status(200))",
+					script: "pm.test('ok', () => pm.response.to.have.status(200))",
 				},
-			]),
+			],
+			requestId: "r1",
+			environmentId: "env_1",
+		};
+		const client = fakeClient({
+			listRequests: vi
+				.fn()
+				.mockResolvedValue([{ id: "r1", collectionId: "c1", name: "get user" }]),
+			composeRequest: vi.fn().mockResolvedValue(composed),
 			executeRequest: vi
 				.fn()
 				.mockResolvedValue({ status: 200, testResults: [{ passed: true }] }),
@@ -313,29 +346,37 @@ describe("run_collection_smoke", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBeFalsy();
+		// Composed by id, scoped by the caller's environment.
+		expect(client.composeRequest).toHaveBeenCalledWith(
+			{ requestId: "r1", environmentId: "env_1" },
+			undefined
+		);
+		// Executed exactly as composed - resolved once, never re-resolved.
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(outgoing).toMatchObject({
-			method: "GET",
-			url: "https://api.example.com/users", // {{host}} resolved
-			headers: { Accept: "application/json" }, // KeyValueEntry[] flattened
-			auth: { mode: "bearer", token: "abc123" }, // inherited from collection, {{token}} resolved
-			// collection pre-script part + request post-script part, engine joins them
-			preRequestScripts: [
-				{
-					origin: "collection",
-					id: "c1",
-					script: "pm.collectionVariables.set('x', 1)",
-				},
-			],
-			postRequestScripts: [
-				{
-					origin: "request",
-					id: "r1",
-					script: "pm.test('ok', () => pm.response.to.have.status(200))",
-				},
-			],
-		});
+		expect(outgoing).toEqual(composed);
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
+	});
+
+	test("a request that fails to compose is reported failed, not dropped", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "broken" }]),
+			composeRequest: vi
+				.fn()
+				.mockRejectedValue(new EngineRequestError("Engine responded 500", 500, "boom")),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const summary = res.structuredContent as {
+			failed: number;
+			results: Array<{ error?: string }>;
+		};
+		expect(summary.failed).toBe(1);
+		expect(summary.results[0].error).toMatch(/500/);
+		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 });
 
@@ -541,32 +582,36 @@ describe("dispatchTool", () => {
 		}
 	);
 
-	test("run_request resolves {{variables}} in the URL from the environment", async () => {
+	test("run_request hands /compose the raw request and executes what it returns", async () => {
+		// The engine resolves {{host}}; MCP must send it raw (never pre-resolved -
+		// that would be a second interpolation pass) and forward the composed URL.
 		const client = fakeClient({
-			getEnvironment: vi.fn().mockResolvedValue({
-				id: "env_1",
-				name: "Dev",
-				variables: { host: { value: "api.example.com", enabled: true } },
-			}),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/users" }),
 		});
 		const res = await dispatchTool(
 			"run_request",
-			{ url: "https://{{host}}/users", environmentId: "env_1" },
+			{ url: "https://{{host}}/users", environmentId: "env_1", collectionId: "c1" },
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBeFalsy();
+		expect(client.composeRequest).toHaveBeenCalledWith(
+			{
+				request: { method: "GET", url: "https://{{host}}/users" },
+				collectionId: "c1",
+				environmentId: "env_1",
+			},
+			undefined
+		);
 		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.url).toBe("https://api.example.com/users");
 	});
 
-	test("run_request forwards a resolved auth block for the engine to apply", async () => {
-		const client = fakeClient({
-			getEnvironment: vi.fn().mockResolvedValue({
-				id: "env_1",
-				name: "Dev",
-				variables: { apiToken: { value: "s3cret", enabled: true } },
-			}),
-		});
+	test("run_request sends the auth block raw for the engine to resolve and apply", async () => {
+		// `{{apiToken}}` and the inherit walk are engine-side; MCP forwards the
+		// block untouched inside the compose body.
+		const client = fakeClient();
 		const res = await dispatchTool(
 			"run_request",
 			{
@@ -577,58 +622,19 @@ describe("dispatchTool", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBeFalsy();
-		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(payload.auth).toEqual({ mode: "bearer", token: "s3cret" });
-	});
-
-	test("run_request forwards a resolved oauth2 block (engine mints the token)", async () => {
-		const client = fakeClient({
-			getEnvironment: vi.fn().mockResolvedValue({
-				id: "env_1",
-				name: "Dev",
-				variables: { apiSecret: { value: "s3cret", enabled: true } },
-			}),
-		});
-		const res = await dispatchTool(
-			"run_request",
-			{
-				url: "https://api.example.com/x",
-				environmentId: "env_1",
-				auth: {
-					mode: "oauth2",
-					config: {
-						grantType: "client_credentials",
-						clientId: "cid",
-						clientSecret: "{{apiSecret}}",
-						tokenUrl: "https://auth.example.com/token",
-						autoFetchToken: true,
-					},
-				},
-			},
-			ctxWith(client, { allowlist: ["api.example.com"] })
-		);
-		expect(res.isError).toBeFalsy();
-		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		// MCP forwards the fully-resolved oauth2 config; the engine acquires the token.
-		expect(payload.auth).toEqual({
-			mode: "oauth2",
-			config: {
-				grantType: "client_credentials",
-				clientId: "cid",
-				clientSecret: "s3cret",
-				tokenUrl: "https://auth.example.com/token",
-				autoFetchToken: true,
-			},
-		});
+		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(composeBody.request.auth).toEqual({ mode: "bearer", token: "{{apiToken}}" });
 	});
 
 	test("run_request off-allowlist check runs against the RESOLVED host", async () => {
+		// {{host}} resolves (engine-side) to a host that is not allowlisted; the
+		// gate must read the composed URL, not the raw argument. Composition
+		// itself is pure - no traffic - so composing before gating is safe, but
+		// execution must never happen.
 		const client = fakeClient({
-			getEnvironment: vi.fn().mockResolvedValue({
-				id: "env_1",
-				name: "Dev",
-				variables: { host: { value: "evil.test", enabled: true } },
-			}),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://evil.test/x" }),
 		});
 		const res = await dispatchTool(
 			"run_request",
@@ -712,34 +718,54 @@ describe("dispatchTool", () => {
 	//
 	// The gap these close: `start_load_run` used to send only an ad-hoc `tests`
 	// string, so "load test this saved request" through MCP ran none of the
-	// assertions the same request runs in the app. Composition is now
-	// `composeSavedRequest` - the same function run_collection_smoke uses - and
+	// assertions the same request runs in the app. Composition is engine-side
+	// (`POST /compose`, #226) - the same path run_collection_smoke uses - and
 	// the composed scripts ride under `postRequestScripts`, which POST /runs
 	// reads as an alias of `tests`.
 
-	const savedRequest = {
-		id: "req_1",
-		collectionId: "col_1",
-		name: "Get users",
-		method: "post",
+	// Canned engine output for composing req_1 by id: what
+	// request_composer_test.cpp proves the engine produces.
+	const composedSavedRequest = {
+		method: "POST",
 		url: "https://api.example.com/users",
-		headers: [{ key: "X-Api", value: "v1", enabled: true }],
+		headers: { "X-Api": "v1" },
 		body: { mode: "json", content: '{"a":1}' },
-		preRequestScript: "pm.request.headers['X-Sig'] = 'abc';",
-		postRequestScript: "pm.test('own', function () {});",
+		preRequestScripts: [
+			{ origin: "request", id: "req_1", script: "pm.request.headers['X-Sig'] = 'abc';" },
+		],
+		postRequestScripts: [
+			{
+				origin: "collection",
+				id: "col_1",
+				name: "API",
+				script: "pm.test('chain', function () {});",
+			},
+			{ origin: "request", id: "req_1", script: "pm.test('own', function () {});" },
+		],
+		followRedirects: true,
+		maxRedirects: 10,
+		httpVersion: "auto",
+		requestId: "req_1",
 	};
 
-	const savedRequestClient = (over: Record<string, unknown> = {}) =>
+	// The fake mirrors the engine's overlay rule: inline `request` fields lay
+	// over the stored request before the composed result comes back.
+	const savedRequestClient = (composedOverrides: Record<string, unknown> = {}) =>
 		fakeClient({
-			getRequest: vi.fn().mockResolvedValue(savedRequest),
-			listCollections: vi.fn().mockResolvedValue([
-				{
-					id: "col_1",
-					name: "API",
-					postRequestScript: "pm.test('chain', function () {});",
-				},
-			]),
-			...over,
+			composeRequest: vi
+				.fn()
+				.mockImplementation(
+					({ requestId, request }: { requestId?: string; request?: object }) =>
+						requestId === "req_1"
+							? Promise.resolve({
+									...composedSavedRequest,
+									...composedOverrides,
+									...(request ?? {}),
+								})
+							: Promise.reject(
+									new EngineRequestError("Engine responded 404", 404, "")
+								)
+				),
 		});
 
 	test("start_load_run composes a saved request, chain test scripts included", async () => {
@@ -838,15 +864,12 @@ describe("dispatchTool", () => {
 	});
 
 	// The saved request stores http1.1 and the agent asks for http2, so a pass
-	// cannot come from both sides agreeing on the "auto" default. `httpVersion`
-	// has to be read with the other agent-stated overrides: this branch never
-	// calls `buildExecutionPayload`, and `composeSavedRequest` always emits a
-	// protocol, so reading it anywhere else loses to the stored value and the
-	// tool's `httpVersion` argument is advertised but never applied here.
+	// cannot come from both sides agreeing on the "auto" default. The override
+	// must ride inside the compose body's `request` overlay - /compose always
+	// emits a stored request's protocol, so an override left out of the overlay
+	// loses to the stored value while the tool advertises the argument.
 	test("start_load_run: an explicit httpVersion overrides the saved request's", async () => {
-		const client = savedRequestClient({
-			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
-		});
+		const client = savedRequestClient({ httpVersion: "http1.1" });
 		const res = await dispatchTool(
 			"start_load_run",
 			{ requestId: "req_1", httpVersion: "http2", duration: "30s", confirmed: true },
@@ -854,6 +877,8 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
+		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(composeBody.request).toMatchObject({ httpVersion: "http2" });
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
 		// Only the stated field is overridden; the rest of the request stands.
@@ -862,11 +887,9 @@ describe("dispatchTool", () => {
 	});
 
 	// The other half of the rule: with nothing stated the stored protocol runs,
-	// so the override must not write a default over it.
+	// so no overlay may be sent that would write a default over it.
 	test("start_load_run keeps the saved request's httpVersion when none is stated", async () => {
-		const client = savedRequestClient({
-			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
-		});
+		const client = savedRequestClient({ httpVersion: "http1.1" });
 		const res = await dispatchTool(
 			"start_load_run",
 			{ requestId: "req_1", duration: "30s", confirmed: true },
@@ -874,6 +897,8 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
+		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(composeBody.request).toBeUndefined();
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http1.1");
 	});
@@ -904,7 +929,11 @@ describe("dispatchTool", () => {
 	});
 
 	test("start_load_run reports an unknown requestId instead of running an empty request", async () => {
-		const client = fakeClient({ getRequest: vi.fn().mockResolvedValue(null) });
+		const client = fakeClient({
+			composeRequest: vi
+				.fn()
+				.mockRejectedValue(new EngineRequestError("Engine responded 404", 404, "")),
+		});
 		const res = await dispatchTool(
 			"start_load_run",
 			{ requestId: "req_missing", duration: "30s", confirmed: true },
@@ -916,7 +945,9 @@ describe("dispatchTool", () => {
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
-	test("start_load_run enforces caps before any engine call", async () => {
+	test("start_load_run enforces caps before any run is started", async () => {
+		// Composition (pure, sends nothing) may run first - the caps and the
+		// allowlist stand between the composed payload and any actual traffic.
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"start_load_run",
