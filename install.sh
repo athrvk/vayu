@@ -51,6 +51,10 @@ MODE="install"
 PURGE=0
 FORCE=0
 KEEPALIVE_PID=""
+# The version being installed, read by place_linux for its version stamp.
+# Declared here rather than only inside do_install so `set -u` cannot bite a
+# direct call to the place_* functions.
+INSTALL_VERSION=""
 
 # Run a command, or just print it when VAYU_DRYRUN=1.
 run() {
@@ -105,7 +109,9 @@ parse_args() {
 
 resolve_version() {
 	if [ -n "${VAYU_VERSION:-}" ]; then
-		printf '%s' "$VAYU_VERSION"
+		# Leading v stripped the same way the tag lookup below strips it, so
+		# VAYU_VERSION=v0.12.0 does not build a /download/vv0.12.0/ URL.
+		printf '%s' "${VAYU_VERSION#v}"
 		return 0
 	fi
 	curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
@@ -144,14 +150,24 @@ download_url() {
 # this script owns, so there is nowhere else for a copy to hide.
 search_dirs() {
 	printf '%s\n' "$DEFAULT_INSTALL_DIR"
-	[ -n "${HOME:-}" ] && printf '%s\n' "$HOME/Applications"
+	if [ -n "${HOME:-}" ]; then
+		printf '%s\n' "$HOME/Applications"
+	fi
 	return 0
 }
 
 # Every Vayu.app found in those directories, in the same order.
+#
+# Written with an `if` rather than `[ -d … ] && printf`: the latter makes the
+# loop - and so the pipeline - exit non-zero whenever the *last* search dir has
+# no bundle, which is the common case. The `return 0` below never runs then, and
+# under `set -euo pipefail` the only reason this has not aborted is that every
+# caller wraps it in `$(…)`, where bash ignores errexit. Do not lean on that.
 existing_app_paths() {
 	search_dirs | while IFS= read -r dir; do
-		[ -d "$dir/${APP_NAME}.app" ] && printf '%s\n' "$dir/${APP_NAME}.app"
+		if [ -d "$dir/${APP_NAME}.app" ]; then
+			printf '%s\n' "$dir/${APP_NAME}.app"
+		fi
 	done
 	return 0
 }
@@ -207,24 +223,66 @@ confirm() {
 
 # PIDs of everything running out of the install we are about to replace.
 #
-# macOS: the app, its Electron helpers and the vayu-engine sidecar all live
-# inside the bundle, so one path prefix covers them. Matched on the path rather
-# than the process name, so a Vayu installed somewhere else is left alone.
+# The hazard here is subtle and cost this script an outage: the documented
+# invocation is `bash -c "$(curl ...)"`, which puts this entire file - comments
+# and all - into the installer's own argv. Any `pgrep -f` pattern that appears
+# literally anywhere in this source matches the installer itself, and every
+# subshell it forks (running_pids is always called as `$(running_pids)`, and a
+# fork inherits the argv with a new PID). An earlier version of this function
+# had a comment naming the AppImage's mount directory directly above a pattern
+# matching it, so on Linux it always found "Vayu" running, always failed to
+# quit it, and aborted every install on every machine.
 #
-# Linux: the AppImage mounts itself under /tmp/.mount_Vayu* and the helpers run
-# from there, so the installed path alone would only find the main process.
+# So: Linux asks the kernel what each process is actually executing instead of
+# reading command lines, and both platforms drop the installer's own process
+# group. Keep it that way - do not reintroduce a cmdline match on Linux, and
+# keep the macOS bundle path out of this file's text.
 running_pids() {
 	case "$(platform)" in
-		Darwin)
-			pgrep -f "${APP_PATH}/" 2>/dev/null | grep -vx -e "$$" -e "$PPID" || true
-			;;
-		*)
-			{
-				pgrep -f "$LINUX_APP_BIN" 2>/dev/null || true
-				pgrep -f "/\.mount_${APP_NAME}" 2>/dev/null || true
-			} | sort -u | grep -vx -e "$$" -e "$PPID" || true
-			;;
+		Darwin) macos_running_pids ;;
+		*)      linux_running_pids ;;
 	esac
+}
+
+# The app, its Electron helpers and the vayu-engine sidecar all live inside the
+# bundle, so one path prefix covers them - and matching the path rather than the
+# process name leaves a Vayu installed elsewhere alone.
+macos_running_pids() {
+	pgrep -f "${APP_PATH}/" 2>/dev/null | exclude_own_processes
+}
+
+# /proc/<pid>/exe, not the command line. The AppImage runtime executes the
+# .AppImage file itself; everything it starts executes out of the directory the
+# runtime mounts under /tmp. Once the file has been replaced the link reads
+# "<path> (deleted)", which still means the old install is running.
+linux_running_pids() {
+	local proc exe
+	for proc in /proc/[0-9]*; do
+		exe="$(readlink "$proc/exe" 2>/dev/null)" || continue
+		case "$exe" in
+			"$LINUX_APP_BIN"|"$LINUX_APP_BIN "*) ;;
+			/tmp/.mount_"$APP_NAME"*) ;;
+			*) continue ;;
+		esac
+		printf '%s\n' "${proc#/proc/}"
+	done | exclude_own_processes
+}
+
+# Drop the installer's own processes. $$ and $PPID are not enough on their own:
+# every caller runs this inside a command substitution, and that subshell has a
+# PID of its own. The process group covers the whole tree in one comparison.
+exclude_own_processes() {
+	local own pid pgid
+	own="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+	while IFS= read -r pid; do
+		[ -n "$pid" ] || continue
+		pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+		if [ -n "$own" ] && [ "$pgid" = "$own" ]; then
+			continue
+		fi
+		printf '%s\n' "$pid"
+	done
+	return 0
 }
 
 # Wait for those processes to go away. Dry-run never quits anything, so it must
@@ -350,9 +408,17 @@ should_skip_install() {
 require_supported_os() {
 	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
 	local tool
+	# Both platforms read $HOME - macOS for the data directories it reports on
+	# uninstall, Linux for everything - and `set -u` turns an unset one into a
+	# bare "unbound variable" halfway through.
+	[ -n "${HOME:-}" ] || { printf 'HOME is not set - the installer needs it.\n' >&2; exit 1; }
 	case "$(platform)" in
 		Darwin)
-			for tool in curl unzip codesign xattr shasum; do
+			# ditto, plutil, osascript and sudo are used as surely as the rest;
+			# they were missing from this list, which is how a missing tool
+			# turned into a failure partway through an install instead of a
+			# refusal to start one.
+			for tool in curl unzip codesign xattr shasum ditto plutil osascript sudo; do
 				command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
 			done
 			;;
@@ -363,8 +429,8 @@ require_supported_os() {
 				x86_64|amd64) ;;
 				*) printf 'Vayu publishes x86_64 Linux builds only (this machine is %s).\n' "$(uname -m)" >&2; exit 1 ;;
 			esac
-			[ -n "${HOME:-}" ] || { printf 'HOME is not set - the Linux installer needs it.\n' >&2; exit 1; }
-			for tool in curl pgrep; do
+			# No pgrep: the running-app check reads /proc directly, on purpose.
+			for tool in curl ps; do
 				command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
 			done
 			;;
@@ -384,9 +450,11 @@ preauthorize() {
 	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
 	printf 'Vayu installs to %s and needs administrator access.\n' "$INSTALL_DIR"
 	sudo -v || { printf 'Authorization failed - aborting.\n' >&2; return 1; }
-	# The loop stops once sudo can no longer refresh non-interactively, i.e.
-	# once this script has exited.
-	( while true; do sleep 60; sudo -n true 2>/dev/null || exit; done ) &
+	# Tied to this script's lifetime explicitly. Each `sudo -n true` *refreshes*
+	# the timestamp, so a loop left running would sustain passwordless sudo for
+	# this terminal indefinitely - the EXIT trap normally kills it, but an
+	# untrapped death (a closed terminal) would orphan it.
+	( while kill -0 "$$" 2>/dev/null; do sleep 60; sudo -n true 2>/dev/null || exit; done ) &
 	KEEPALIVE_PID=$!
 	return 0
 }
@@ -404,10 +472,23 @@ sha256_of() {
 download_asset() {
 	local url="$1" dest="$2" expected actual
 	printf 'Downloading %s\n' "$url"
+	# The status has to be checked by hand rather than left to `set -e`. This
+	# function is called as `download_asset ... || exit 1`, and bash disables
+	# errexit for the *whole body* of a function invoked in an || context - so
+	# without this an interrupted transfer (curl exit 18, the likely failure for
+	# a 150MB download) fell through, reported success, and got installed. On
+	# Linux that overwrote a working AppImage with a fragment and then stamped
+	# the version beside it, so the next run said "already installed".
 	# Default curl meter (drop -s) shows %, size, speed and ETA on stderr.
-	run curl -fL "$url" -o "$dest"
+	if ! run curl -fL "$url" -o "$dest"; then
+		printf 'Download failed - nothing was installed.\n' >&2
+		return 1
+	fi
 
 	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
+	# Best effort by design: only the macOS zip publishes a .sha256, so a
+	# missing sidecar is the normal Linux case and cannot be told apart from a
+	# failed fetch. A sidecar that *is* fetched and disagrees is fatal.
 	curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null || return 0
 	expected="$(awk '{print $1}' "$dest.sha256")"
 	actual="$(sha256_of "$dest")"
@@ -432,22 +513,32 @@ stage_macos() {
 }
 
 place_macos() {
-	local workdir="$1"
+	local workdir="$1" incoming="${APP_PATH}.new"
 	printf 'Installing to %s...\n' "$INSTALL_DIR"
+	# Copy in beside the installed bundle and swap, rather than deleting first.
+	# rm-then-ditto leaves the user with no Vayu at all if the copy dies partway
+	# - a full disk, a Ctrl-C between the two lines, a read error in the staged
+	# bundle - having started from a working one. The swap is a rename on the
+	# same volume, so the window where neither exists is as short as it gets.
+	run sudo rm -rf "$incoming"
+	run sudo ditto "$workdir/${APP_NAME}.app" "$incoming"
 	run sudo rm -rf "$APP_PATH"
-	run sudo ditto "$workdir/${APP_NAME}.app" "$APP_PATH"
+	run sudo mv "$incoming" "$APP_PATH"
 }
 
 # --- Linux install --------------------------------------------------------
 
 stage_linux() {
-	local workdir="$1"
-	run chmod +x "$workdir/vayu.AppImage"
+	run chmod +x "$(staged_asset_path "$1")"
 }
 
 # The launcher entry. Written rather than lifted out of the AppImage so the Exec
 # line points at the installed path instead of wherever it was unpacked, and so
 # it stays correct when the AppImage is replaced by an update.
+#
+# Exec is quoted because the Desktop Entry spec word-splits the value: with a
+# space anywhere in $HOME or $XDG_DATA_HOME an unquoted path makes the launcher
+# try to run the first word, and the menu entry silently does nothing.
 #
 # StartupWMClass matches the window class Electron sets from productName -
 # without it the running window is a second, nameless icon in the dock or task
@@ -459,7 +550,7 @@ Type=Application
 Name=Vayu
 GenericName=API Client
 Comment=API testing and load testing with a native engine
-Exec=${LINUX_APP_BIN} %U
+Exec="${LINUX_APP_BIN}" %U
 Icon=vayu
 Terminal=false
 Categories=Development;WebDevelopment;
@@ -472,9 +563,10 @@ place_linux() {
 	local workdir="$1"
 	printf 'Installing to %s...\n' "$LINUX_APP_DIR"
 	run mkdir -p "$LINUX_APP_DIR"
-	# mv, not cp: replacing the file wholesale means a half-written AppImage can
-	# never be left executable and launchable.
-	run mv -f "$workdir/vayu.AppImage" "$LINUX_APP_BIN"
+	# A rename within one directory, so the AppImage is either the old one or
+	# the new one and never a half-written file that is executable and
+	# launchable. See staged_asset_path for why it is staged where it is.
+	run mv -f "$(staged_asset_path "$workdir")" "$LINUX_APP_BIN"
 	printf '%s\n' "$INSTALL_VERSION" | write_file "$LINUX_VERSION_FILE"
 
 	printf 'Registering the desktop entry...\n'
@@ -484,8 +576,16 @@ place_linux() {
 	# cosmetic problem, and neither is worth failing an install that otherwise
 	# succeeded.
 	run mkdir -p "$(dirname "$LINUX_ICON_FILE")"
-	run_quiet curl -fsSL "$LINUX_ICON_URL" -o "$LINUX_ICON_FILE" \
-		|| printf 'Could not fetch the launcher icon - Vayu will use a generic one.\n'
+	# Downloaded to a temp name and moved: curl creates the output file before
+	# it sees the response status, so fetching straight to the destination
+	# leaves a zero-byte vayu.png behind on a 404 - which the desktop
+	# environment then caches as the app's icon.
+	if run_quiet curl -fsSL "$LINUX_ICON_URL" -o "$LINUX_ICON_FILE.part"; then
+		run mv -f "$LINUX_ICON_FILE.part" "$LINUX_ICON_FILE"
+	else
+		run rm -f "$LINUX_ICON_FILE.part"
+		printf 'Could not fetch the launcher icon - Vayu will use a generic one.\n'
+	fi
 	if command -v update-desktop-database >/dev/null 2>&1; then
 		run_quiet update-desktop-database "$(dirname "$LINUX_DESKTOP_FILE")" || true
 	fi
@@ -508,7 +608,16 @@ place_linux() {
 	# The single most common "the AppImage does not start" report for any
 	# Electron app, and it is not something an installer can fix - but being
 	# told beforehand beats a launcher icon that does nothing.
-	if command -v ldconfig >/dev/null 2>&1 && ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+	# ldconfig lives in /sbin, which is not on a non-root PATH on Debian, so
+	# `command -v` alone would skip the check for exactly the desktop users who
+	# need it.
+	local ldconfig_bin=""
+	if command -v ldconfig >/dev/null 2>&1; then
+		ldconfig_bin="ldconfig"
+	elif [ -x /sbin/ldconfig ]; then
+		ldconfig_bin="/sbin/ldconfig"
+	fi
+	if [ -n "$ldconfig_bin" ] && ! "$ldconfig_bin" -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
 		printf 'Note: libfuse2 was not found. If Vayu does not start, install it\n'
 		printf '      (Debian/Ubuntu: sudo apt install libfuse2) or run it with\n'
 		printf '      APPIMAGE_EXTRACT_AND_RUN=1.\n'
@@ -531,12 +640,20 @@ place_app() {
 	esac
 }
 
-# Where the downloaded asset is staged inside the temp dir. Fixed names rather
-# than the asset's own, so the staging functions do not need the version.
+# Where the downloaded asset is staged. Fixed names rather than the asset's own,
+# so the staging functions do not need the version.
+#
+# Linux stages *beside the destination*, not in the temp dir, for two reasons.
+# /tmp is tmpfs on most systemd distros, so a 160MB download would go into RAM
+# and can ENOSPC on a small machine. More importantly `mv` across filesystems is
+# not a rename - coreutils copies through the destination path and unlinks the
+# source afterwards - so an interrupt would leave exactly the half-written
+# executable that moving the file is supposed to make impossible. Same
+# filesystem, real rename.
 staged_asset_path() {
 	case "$(platform)" in
 		Darwin) printf '%s/vayu.zip' "$1" ;;
-		*)      printf '%s/vayu.AppImage' "$1" ;;
+		*)      printf '%s/.%s.AppImage.part' "$LINUX_APP_DIR" "$APP_NAME" ;;
 	esac
 }
 
@@ -564,9 +681,16 @@ do_install() {
 	require_supported_os
 	resolve_install_target
 	(
-		local version url workdir installed quit_by_installer=0
-		version="$(resolve_version)"
-		[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
+		local version url workdir staged installed quit_by_installer=0
+		# `version="$(resolve_version)"` on its own would abort the subshell at
+		# the assignment under `set -e` whenever the lookup failed - taking the
+		# message below with it, so a rate-limited or offline run exited 1 in
+		# silence. Both failures now reach the same explanation.
+		if ! version="$(resolve_version)" || [ -z "$version" ]; then
+			printf 'Could not determine which version to install.\n' >&2
+			printf 'Check your connection, or pin one with VAYU_VERSION=x.y.z\n' >&2
+			exit 1
+		fi
 		url="$(download_url "$version")"
 		# Read by place_linux for the version stamp; exported through a global
 		# because this subshell is the only thing that ever sets it.
@@ -593,10 +717,17 @@ do_install() {
 		fi
 
 		workdir="$(mktemp -d)"
+		staged="$(staged_asset_path "$workdir")"
+		# Installed *before* preauthorize, and on the signals too: a Ctrl-C, a
+		# closed terminal, or a declined password would otherwise leave the temp
+		# dir, a part-downloaded file beside the app, and a sudo keep-alive
+		# holding a passwordless timestamp open for this terminal.
+		trap 'rm -rf "$workdir"; rm -f "$staged"; [ -n "$KEEPALIVE_PID" ] && kill "$KEEPALIVE_PID" 2>/dev/null' EXIT
+		trap 'exit 130' INT TERM HUP
 		preauthorize || exit 1
-		trap 'rm -rf "$workdir"; [ -n "$KEEPALIVE_PID" ] && kill "$KEEPALIVE_PID" 2>/dev/null' EXIT
 
-		download_asset "$url" "$(staged_asset_path "$workdir")" || exit 1
+		run mkdir -p "$(dirname "$staged")"
+		download_asset "$url" "$staged" || exit 1
 		stage_download "$workdir"
 
 		# The download and staging above take long enough for someone to open
@@ -609,18 +740,26 @@ do_install() {
 
 		place_app "$workdir"
 
+		# Said on both paths: the update case - app running, so it gets
+		# reopened - is the common one, and it was the one that never confirmed
+		# which version had actually landed.
+		printf 'Done. Vayu %s is installed at %s\n' "$version" "$(installed_app_path)"
 		if [ "$quit_by_installer" = "1" ]; then
 			# It was running when the user started this, so put it back.
 			printf 'Reopening Vayu...\n'
 			launch_app
-		else
-			printf 'Done. Vayu %s is installed at %s\n' "$version" "$(installed_app_path)"
 		fi
 	)
 }
 
 do_uninstall() {
 	require_supported_os
+	# Point at the copy that actually exists before looking for its processes,
+	# and quit it for the same reason the install path does: deleting files out
+	# from under a live app leaves it half-working until someone notices. On
+	# Linux it is deleting the AppImage backing a live mount.
+	resolve_install_target
+	quit_running_app || exit 1
 	case "$(platform)" in
 		Darwin) uninstall_macos ;;
 		*)      uninstall_linux ;;

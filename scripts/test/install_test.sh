@@ -6,6 +6,8 @@ VAYU_TEST=1
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 
+INSTALLER="$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
+
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 # The installer decides everything about *what* to do the same way on both
@@ -72,8 +74,15 @@ echo "$out" | grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" \
 	|| fail "install should ad-hoc sign the app bundle"
 echo "$out" | grep -q "xattr -cr .*${APP_NAME}.app" \
 	|| fail "install should strip quarantine on the staged app"
-echo "$out" | grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}" \
-	|| fail "install should ditto the signed app into /Applications"
+# Copied in beside the installed bundle and swapped, never deleted first: a
+# rm-then-copy that dies partway leaves the user with no Vayu at all, having
+# started from a working one.
+echo "$out" | grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}.new" \
+	|| fail "install should ditto the signed app in beside the existing one"
+echo "$out" | grep -q "sudo mv ${APP_PATH}.new ${APP_PATH}$" \
+	|| fail "install should swap the new bundle into place"
+[ "$(echo "$out" | grep -c "sudo rm -rf ${APP_PATH}$")" = "1" ] \
+	|| fail "the installed bundle should be removed exactly once, immediately before the swap"
 
 printf 'PASS: macOS install dry-run\n'
 
@@ -201,8 +210,13 @@ echo "$out" | grep -q "curl -fL" || fail "--force should download even at the sa
 # A newer version updates, and says so.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
 echo "$out" | grep -q "Updating Vayu 0.1.3 to 0.2.0" || fail "an existing install should be reported as an update"
-echo "$out" | grep -q "chmod +x .*vayu.AppImage" || fail "the AppImage has to be made executable"
-echo "$out" | grep -q "mv -f .*vayu.AppImage ${LINUX_APP_BIN}" || fail "the AppImage should be moved into place"
+echo "$out" | grep -q "chmod +x ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part" \
+	|| fail "the AppImage has to be made executable"
+# Staged in the destination directory, not the temp dir: a cross-filesystem mv
+# copies through the destination instead of renaming, so an interrupt would
+# leave the half-written executable the rename exists to prevent.
+echo "$out" | grep -q "mv -f ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part ${LINUX_APP_BIN}" \
+	|| fail "the AppImage should be renamed into place from beside its destination"
 echo "$out" | grep -q "write ${LINUX_VERSION_FILE}" || fail "the installed version should be stamped"
 echo "$out" | grep -q "write ${LINUX_DESKTOP_FILE}" || fail "a desktop entry should be registered"
 
@@ -218,7 +232,11 @@ printf 'PASS: Linux install dry-run\n'
 # The desktop entry is what makes Vayu appear in the launcher at all - the
 # AppImage on its own is a file in ~/Downloads with no icon and no menu entry.
 entry="$(desktop_entry)"
-echo "$entry" | grep -q "^Exec=${LINUX_APP_BIN} %U$" || fail "Exec should point at the installed AppImage"
+# Quoted: the Desktop Entry spec word-splits Exec, so an unquoted path with a
+# space anywhere in $HOME makes the launcher try to run the first word and the
+# menu entry silently does nothing.
+echo "$entry" | grep -q "^Exec=\"${LINUX_APP_BIN}\" %U$" \
+	|| fail "Exec should be the quoted path to the installed AppImage"
 echo "$entry" | grep -q "^Type=Application$" || fail "desktop entry needs a Type"
 echo "$entry" | grep -q "^Categories=Development;" || fail "desktop entry should be filed under Development"
 # Without this the running window is a second, nameless icon in the dock rather
@@ -268,6 +286,94 @@ echo "$out" | grep -q "rm -f ${LINUX_BIN_LINK}" || fail "uninstall should remove
 
 printf 'PASS: Linux uninstall dry-run\n'
 
+# --- invoked the way users invoke it -----------------------------------------
+# Everything above sources install.sh, which is not how anyone runs it. The
+# documented command is `bash -c "$(curl ...)"`, and that puts the entire file -
+# comments included - into the installer's own argv. A `pgrep -f` pattern that
+# matches any text in this script therefore matches the installer itself and
+# every subshell it forks, and no amount of sourcing-based testing can see it.
+#
+# That is not theoretical: a comment naming the AppImage's mount directory sat
+# directly above a pattern matching it, so running_pids always reported Vayu as
+# running, quit_running_app always failed to stop it, and every Linux install
+# aborted. This is the only test that would have caught it.
+for os in Linux Darwin; do
+	got="$(VAYU_TEST=1 bash -c "$(cat "$INSTALLER")
+platform() { printf '$os\n'; }
+printf 'PIDS[%s]' \"\$(running_pids | tr '\n' ' ')\"")"
+	[ "$got" = "PIDS[]" ] \
+		|| fail "$os: running_pids matched the installer's own process: $got"
+done
+
+printf 'PASS: no self-match when run from argv\n'
+
+# --- download integrity ------------------------------------------------------
+# Real curl against file:// URLs - no network, no stubs, and it exercises the
+# actual failure handling rather than a mock of it.
+payload="$TMPROOT/asset.bin"
+dest="$TMPROOT/downloaded.bin"
+printf 'pretend this is 150MB of AppImage\n' >"$payload"
+
+# A failed transfer must not be reported as success. download_asset is called as
+# `download_asset ... || exit 1`, and bash disables errexit for the whole body
+# of a function invoked that way - so an unchecked curl fell straight through
+# and the caller installed whatever was, or was not, on disk.
+if download_asset "file://$TMPROOT/does-not-exist" "$dest" >/dev/null 2>&1; then
+	fail "a failed download must not report success"
+fi
+
+# A published checksum that matches verifies...
+printf '%s  asset.bin\n' "$(sha256_of "$payload")" >"$payload.sha256"
+download_asset "file://$payload" "$dest" >/dev/null 2>&1 \
+	|| fail "a matching checksum should verify"
+
+# ...and one that disagrees aborts rather than installing the file.
+printf '%s  asset.bin\n' "deadbeef" >"$payload.sha256"
+if download_asset "file://$payload" "$dest" >/dev/null 2>&1; then
+	fail "a mismatched checksum must abort the install"
+fi
+rm -f "$payload.sha256"
+
+printf 'PASS: download integrity\n'
+
+# --- version resolution ------------------------------------------------------
+# Only the VAYU_VERSION shortcut was covered, so the parsing that every
+# unpinned install depends on had no test at all.
+unset VAYU_VERSION
+curl() {
+	cat <<'JSON'
+{ "url": "https://api.github.com/repos/athrvk/vayu/releases/1", "tag_name": "v9.9.9",
+  "name": "v9.9.9", "body": "tag_name is mentioned in this body too" }
+JSON
+}
+[ "$(resolve_version)" = "9.9.9" ] || fail "resolve_version should read the tag, got $(resolve_version)"
+unset -f curl
+
+# A pinned version is normalised the same way, so VAYU_VERSION=v0.1.3 does not
+# build a /download/vv0.1.3/ URL.
+VAYU_VERSION=v0.1.3
+[ "$(resolve_version)" = "0.1.3" ] || fail "a leading v should be stripped, got $(resolve_version)"
+unset VAYU_VERSION
+
+printf 'PASS: version resolution\n'
+
+# --- host checks -------------------------------------------------------------
+# require_supported_os returns early under VAYU_DRYRUN, which every other test
+# sets - so its real checks had never run.
+uname() { case "${1:-}" in -m) printf 'aarch64\n' ;; *) printf 'Linux\n' ;; esac; }
+if (VAYU_DRYRUN=0 require_supported_os) >/dev/null 2>&1; then
+	fail "an arm64 Linux machine should be refused, not sent a 404 to chmod +x"
+fi
+uname() { case "${1:-}" in -m) printf 'x86_64\n' ;; *) printf 'Linux\n' ;; esac; }
+(VAYU_DRYRUN=0 require_supported_os) >/dev/null 2>&1 \
+	|| fail "x86_64 Linux should be accepted"
+if (VAYU_DRYRUN=0 HOME= require_supported_os) >/dev/null 2>&1; then
+	fail "an unset HOME should be refused before anything is written"
+fi
+unset -f uname
+
+printf 'PASS: host checks\n'
+
 # --- running-app guard -------------------------------------------------------
 # Last, because these stub out running_pids/confirm and the stubs would leak
 # into anything after them.
@@ -293,6 +399,20 @@ out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
 echo "$out" | grep -q "kill -TERM 99999" || fail "Linux should ask the app to quit with SIGTERM"
 if echo "$out" | grep -q "kill -KILL"; then fail "SIGKILL should only follow an ignored SIGTERM"; fi
 echo "$out" | grep -q "launch ${LINUX_APP_BIN}" || fail "an app quit by the installer should be reopened"
+
+# That last assertion is weaker than it looks on its own: wait_for_exit returns
+# immediately under VAYU_DRYRUN, so the escalation is unreachable in every other
+# test and deleting it outright would keep the suite green. Force the "app
+# ignored the request" path to cover it for real.
+wait_for_exit() { return 1; }
+if out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"; then
+	fail "an app that will not quit should abort the install"
+fi
+echo "$out" | grep -q "kill -TERM 99999" || fail "the polite signal should come first"
+echo "$out" | grep -q "kill -KILL 99999" || fail "an ignored SIGTERM should escalate to SIGKILL"
+echo "$out" | grep -q "Could not stop Vayu" || fail "a Vayu that will not die should say so"
+if echo "$out" | grep -q "mv -f"; then fail "nothing should be replaced when the app is still running"; fi
+unset -f wait_for_exit
 
 # Declining leaves the install untouched: nothing replaced, non-zero exit.
 confirm() { return 1; }
