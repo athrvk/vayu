@@ -15,13 +15,15 @@
  * Within the collection chain, variables closer to the leaf override those closer to the root.
  * Cached per (collectionId, environmentId) via useMemo.
  *
- * **The MCP copy (`app/electron/mcp/resolve.ts`) is deliberately not changed
- * alongside this file.** CLAUDE.md requires the two resolution copies to move
- * together when *semantics* change, and they have not: the winner is still the
- * last enabled definition in the same precedence order, byte for byte. What is
- * new here is `getVariableOrigins`, which keeps the definitions that lost so the
- * UI can explain the winner. MCP renders nothing and has no use for it, so
- * duplicating it there would add a second copy of something with no reader.
+ * A `{{$name}}` nothing defines is generated from the dynamic-variable table
+ * (`lib/dynamic-variables.ts`) rather than looked up - see `resolveString`.
+ *
+ * **What the MCP copy (`app/electron/mcp/resolve.ts`) does and does not share.**
+ * CLAUDE.md requires the two resolution copies to move together when *semantics*
+ * change. Dynamic variables are such a change, so MCP has the same table and the
+ * same fall-through order (`resolve.test.ts` compares the two name sets).
+ * `getVariableOrigins` is not shared: it keeps the definitions that lost so the
+ * UI can explain the winner, and MCP renders nothing.
  */
 
 import { useMemo, useCallback } from "react";
@@ -29,6 +31,11 @@ import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/qu
 import { useSessionStore } from "@/stores";
 import type { VariableValue, ResolvedVariable, VariableOrigin, Collection } from "@/types";
 import { castByType } from "@/lib/variable-cast";
+import {
+	isDynamicVariableName,
+	isKnownDynamicVariable,
+	resolveDynamicVariable,
+} from "@/lib/dynamic-variables";
 
 interface UseVariableResolverOptions {
 	collectionId?: string;
@@ -189,12 +196,30 @@ export function useVariableResolver(
 		[originsByName]
 	);
 
+	/**
+	 * Scopes first, then the dynamic-variable table.
+	 *
+	 * The order is the compatible one: a collection that already defines a
+	 * variable literally named `$guid` keeps its value, and only a name nothing
+	 * defines reaches a generator. Each generator is called *inside* the replace
+	 * callback, so it runs once per occurrence - two `{{$guid}}` in one body are
+	 * two different ids, which is the reason to write them.
+	 *
+	 * An unknown `$name` keeps its braces rather than resolving to "". A typo'd
+	 * generator that sent an empty field silently is the defect this table was
+	 * added to fix (issue #186); leaving `{{$randomInteger}}` on the wire makes
+	 * it visible in the request, and `EditableVariable` keeps painting the token
+	 * as unresolved. Ordinary unknown names still resolve to "" - unchanged.
+	 */
 	const resolveString = useCallback(
 		(input: string): string => {
 			if (!input || typeof input !== "string") return input;
-			return input.replace(VARIABLE_PATTERN, (_match, varName) => {
-				const source = variableMap[varName.trim()];
-				return source ? source.value : "";
+			return input.replace(VARIABLE_PATTERN, (match, varName) => {
+				const name = varName.trim();
+				const source = variableMap[name];
+				if (source) return source.value;
+				if (isDynamicVariableName(name)) return resolveDynamicVariable(name) ?? match;
+				return "";
 			});
 		},
 		[variableMap]
@@ -227,7 +252,12 @@ export function useVariableResolver(
 			if (!input || typeof input !== "string") return false;
 			const matches = input.match(VARIABLE_PATTERN);
 			if (!matches) return false;
-			return matches.some((match) => !variableMap[match.slice(2, -2).trim()]);
+			return matches.some((match) => {
+				const name = match.slice(2, -2).trim();
+				// A generator resolves without being defined anywhere, so a name
+				// the table has is not unresolved. An unknown `$name` still is.
+				return !variableMap[name] && !isKnownDynamicVariable(name);
+			});
 		},
 		[variableMap]
 	);

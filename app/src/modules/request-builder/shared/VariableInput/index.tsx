@@ -29,8 +29,10 @@ import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
 import EditableVariable from "./EditableVariable";
+import DynamicVariableToken from "./DynamicVariableToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
+import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
 interface VariableInputProps {
 	value: string;
@@ -48,6 +50,9 @@ interface VariableInputProps {
 	 */
 	"aria-label"?: string;
 }
+
+/** The generator table by name, for the overlay's token lookup. */
+const DYNAMIC_BY_NAME = new Map(DYNAMIC_VARIABLES.map((v) => [v.name, v]));
 
 // Parse text into segments (text and variables)
 function parseSegments(
@@ -312,6 +317,20 @@ export default function VariableInput({
 		return segments.map((seg, i) => {
 			if (seg.type === "variable" && seg.varName) {
 				const varInfo = allVariables[seg.varName];
+				// A generator only shows through when nothing defines the name -
+				// the same order the resolver uses, so the token cannot describe a
+				// value the request will not carry.
+				const dynamic = varInfo ? undefined : DYNAMIC_BY_NAME.get(seg.varName);
+				if (dynamic) {
+					return (
+						<span key={`${i}-${seg.varName}`} data-variable-token>
+							<DynamicVariableToken
+								name={dynamic.name}
+								description={dynamic.description}
+							/>
+						</span>
+					);
+				}
 				return (
 					<span
 						key={`${i}-${seg.varName}`}

@@ -32,6 +32,7 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
 import { variableCompletionContext } from "@/lib/variable-completion";
+import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
 const CLOSE_BRACES = "}}";
 
@@ -47,6 +48,9 @@ export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/** Sorts after every scope above, so a generator never outranks a real variable. */
+const DYNAMIC_SORT_GROUP = 8;
 
 export function useVariableCompletionProvider() {
 	const monaco = useMonaco();
@@ -84,7 +88,9 @@ export function useVariableCompletionProvider() {
 				const closing = rest.startsWith(CLOSE_BRACES) ? "" : CLOSE_BRACES;
 
 				const variables = getAllVariables();
-				const suggestions = Object.entries(variables).map(([name, info]) => ({
+				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(
+					variables
+				).map(([name, info]) => ({
 					label: name,
 					kind: monaco.languages.CompletionItemKind.Variable,
 					insertText: `{{${name}${closing}`,
@@ -100,6 +106,27 @@ export function useVariableCompletionProvider() {
 					filterText: `{{${name}`,
 					range,
 				}));
+
+				/*
+				 * Dynamic variables sort after every user variable: they are offered
+				 * in every workspace, whatever it holds, so interleaving them would
+				 * push a collection's own names down the list. `Function`, not
+				 * `Variable` - the icon is the only thing in the list that says a
+				 * value is generated per use rather than stored somewhere.
+				 */
+				for (const dynamic of DYNAMIC_VARIABLES) {
+					if (dynamic.name in variables) continue; // a real variable shadows it
+					suggestions.push({
+						label: dynamic.name,
+						kind: monaco.languages.CompletionItemKind.Function,
+						insertText: `{{${dynamic.name}${closing}`,
+						detail: dynamic.description,
+						documentation: "Generated per use",
+						sortText: `${DYNAMIC_SORT_GROUP}${dynamic.name}`,
+						filterText: `{{${dynamic.name}`,
+						range,
+					});
+				}
 
 				return { suggestions };
 			},

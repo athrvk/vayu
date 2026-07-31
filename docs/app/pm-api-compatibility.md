@@ -126,6 +126,12 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   The engine does no `{{var}}` interpolation at all (it is resolved app-side
   before the payload arrives), so there is nothing to expose
 - `pm.environment.name` - the active environment's name
+- **Dynamic variables in scripts** - `pm.variables.get("$guid")`,
+  `$timestamp`, `$random*` and the rest resolve only in `{{…}}` interpolation,
+  which happens app-side before the payload reaches the engine. A script that
+  wants a generated value has to write the JavaScript for it. The supported set
+  and the reasoning are in
+  [variable resolution](./variable-resolution.md#dynamic-variables)
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`, and `pm.response.cookies`
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.

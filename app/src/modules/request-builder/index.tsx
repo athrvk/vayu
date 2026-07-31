@@ -42,6 +42,7 @@ import { resolveAuthForSend, resolveAuthSource } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
+import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
 import { buildExecBody, responseFromExecuteResult } from "./utils/execute-mapping";
 import type {
 	HttpMethod,
@@ -598,6 +599,7 @@ export default function RequestBuilder() {
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
+					hasDynamicVariables={requestUsesDynamicVariables(pendingLoadTestRequest)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 				/>
 			)}
