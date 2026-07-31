@@ -48,6 +48,15 @@ export const queryKeys = {
 		timeSeries: (id: string) => [...queryKeys.runs.all, "timeSeries", id] as const,
 	},
 
+	// Warm-cache pass over every collection's requests (see
+	// usePrefetchCollectionsAndRequests). Keyed here rather than inline so it
+	// can be invalidated when the set of collections changes - it succeeds once
+	// and would otherwise never re-run for a collection created mid-session.
+	prefetch: {
+		all: ["prefetch"] as const,
+		allRequests: () => [...queryKeys.prefetch.all, "all-requests"] as const,
+	},
+
 	// Environments
 	environments: {
 		all: ["environments"] as const,

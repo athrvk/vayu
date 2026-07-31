@@ -26,7 +26,6 @@ const collections: Array<Record<string, unknown>> = [];
 const environments: Array<Record<string, unknown>> = [];
 const session = {
 	activeEnvironmentId: null as string | null,
-	activeCollectionId: null as string | null,
 };
 
 vi.mock("@/queries", () => ({
@@ -51,7 +50,6 @@ beforeEach(() => {
 	globals.variables = {};
 	collections.length = 0;
 	environments.length = 0;
-	session.activeCollectionId = null;
 	session.activeEnvironmentId = null;
 });
 

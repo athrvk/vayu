@@ -10,6 +10,7 @@ export { useEngine } from "./useEngine";
 export { useSaveManager } from "./useSaveManager";
 export { useEntityDraft } from "./useEntityDraft";
 export { useVariableResolver } from "./useVariableResolver";
+export { useActiveEnvironmentGuard } from "./useActiveEnvironmentGuard";
 export { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 export { useElectronTheme } from "./useElectronTheme";
 export { useResizable } from "./useResizable";
