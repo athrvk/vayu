@@ -35,6 +35,8 @@ import type {
 	UpdateRequestRequest,
 	CreateEnvironmentRequest,
 	UpdateEnvironmentRequest,
+	ComposeRequestRequest,
+	ComposedRequest,
 	ExecuteRequestRequest,
 	StartLoadTestRequest,
 	StartLoadTestResponse,
@@ -217,6 +219,16 @@ export const apiService = {
 	},
 
 	// Execution
+	/**
+	 * Compose a request engine-side (`POST /compose`): `{{variables}}` and
+	 * `inherit` auth resolved, execute-ready payload back. Pure - nothing is
+	 * sent - and `/execute` / `/runs` never interpolate, so composing here and
+	 * executing the result resolves everything exactly once (issue #226).
+	 */
+	async composeRequest(data: ComposeRequestRequest): Promise<ComposedRequest> {
+		return await httpClient.post<ComposedRequest>(API_ENDPOINTS.COMPOSE_REQUEST, data);
+	},
+
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
 		return await httpClient.post<SanityResult>(API_ENDPOINTS.EXECUTE_REQUEST, data, {
 			timeout: proxiedRequestTimeoutMs(),

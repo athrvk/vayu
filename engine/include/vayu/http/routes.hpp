@@ -437,6 +437,7 @@ void register_environment_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);
 void register_run_routes (RouteContext& ctx);
 void register_execution_routes (RouteContext& ctx);
+void register_compose_routes (RouteContext& ctx);
 void register_metrics_routes (RouteContext& ctx);
 void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);

@@ -167,25 +167,22 @@ Notes:
 
 ### Request composition
 
-In Vayu the **renderer** - not the engine - prepares a request before sending
-it: it resolves `{{variables}}` and walks the collection ancestor chain to
-resolve `inherit` auth. The engine *applies* a concrete `auth` block (bearer /
-basic / apikey / oauth2, incl. its token cache); it performs **no** `{{var}}`
-interpolation and drops `{"mode":"inherit"}` as "resolved app-side"
-(`auth_resolver.cpp::parse_auth`).
+The **engine** owns request composition (`POST /compose`, issue #226): it
+resolves `{{variables}}` and walks the collection ancestor chain to resolve
+`inherit` auth, then returns the execute-ready payload `POST /execute` /
+`POST /runs` accept unchanged. Composition is pure - nothing is sent - which
+is exactly what MCP's safety model needs: every execute/load tool composes
+first, checks the **allowlist against the composed (resolved) URL**, and only
+then executes the composed payload, byte-for-byte, so nothing is ever
+interpolated twice.
 
-Scripts are handled differently: both clients collect the collection-chain
-pre/post scripts (root→leaf) and the request's own as an ordered list of parts,
-each naming where it came from (`{ origin, id, name?, script }`), and send the
-list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - the
-**engine** joins the parts with `"\n\n"` and runs the result (parts whose
-script is blank are dropped). The renderer's load path builds the same kind of
-list for its `tests` field on `POST /runs`; MCP's only `POST /runs` caller
-(`start_load_run`) has no collection to chain-compose from - it forwards an
-agent-supplied ad-hoc string as-is, the same as `run_request`'s ad-hoc
-`preRequestScript`/`postRequestScript`, not a chain-built list. Composing the
-*content* of a script list is engine-side now; building the ordered *list* is
-still client-side, so it still needs both clients to agree.
+Scripts: the by-id compose path builds the ordered part list
+(`{ origin, id, name?, script }` - collection chain root→leaf, then the
+request's own) engine-side from the stored rows. The renderer's inline path
+still builds its own list from its editor state; MCP no longer builds any.
+MCP's ad-hoc tools forward agent-supplied strings
+(`preRequestScript`/`postRequestScript`) inside the inline request - scripts
+ride through composition untouched, never interpolated.
 
 **One validation script, one name.** The post-response script is one field in
 the app - the request builder's **Tests** tab - and has historically reached the
@@ -205,44 +202,35 @@ validated by assertions that never ran. Under load the script runs against
 *sampled* responses (`max_response_samples` / `response_sample_rate`), not every
 one.
 
-Because MCP talks to the engine directly, it must do that preparation itself.
-`resolve.ts` is the main-process port of the renderer pipeline
-(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-resolution.ts` +
-`utils/script-parts.ts`) and is applied so a tool call behaves like the app
-clicking Send:
+How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
 
-- **Variables** - resolved in URL, headers, and body with the app's precedence
-  (environment > collection chain, leaf→root > globals; enabled only; unknown →
-  empty string). The allowlist is checked against the **resolved** host.
-  Dynamic variables (`{{$guid}}`, `{{$timestamp}}`, `{{$random*}}`) are generated
-  per occurrence from `electron/mcp/dynamic-variables.ts`, the main-process copy
-  of the renderer's table - a scope that defines the name wins, and an unknown
-  `$name` keeps its braces rather than emptying. `start_load_run` interpolates
-  once like the app does, so a run repeats one generated value across its
-  iterations; see
+- **Variables** - the engine resolves URL, headers, and body with the app's
+  precedence (environment > collection chain, leaf→root > globals; enabled
+  only; unknown → empty string; dynamic variables like `{{$guid}}` generated
+  per occurrence). MCP hands it raw strings and checks the allowlist against
+  the **composed** host. `start_load_run` composes once, like the app, so a
+  run repeats one generated value across its iterations; see
   [variable resolution](../app/variable-resolution.md#dynamic-variables).
-- **Auth** - `run_collection_smoke` applies each saved request's stored auth
-  (`inherit` resolves against the collection chain); `run_request` /
-  `start_load_run` accept an explicit `auth` block. In all cases variables inside
-  the block are resolved and the engine applies it (oauth2 uses its token cache).
-- **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
-  script parts (root→leaf) and the request's own, and sends the list for the
-  engine to join and run, so a request's tests and setup actually execute.
-  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
-  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
-  takes the same `postRequestScript` for a URL-only run.
+- **Auth** - `run_collection_smoke` composes each saved request by id, so its
+  stored auth applies (`inherit` resolved against the collection chain);
+  `run_request` / `start_load_run` accept an explicit `auth` block and forward
+  it raw inside the inline request - the engine resolves variables in it (and
+  `inherit`, when a `collectionId` scopes the walk) and applies it at execute
+  (oauth2 uses its token cache).
+- **Scripts** - composing by id attaches the collection chain's + the
+  request's own script parts engine-side, so a request's tests and setup
+  actually execute. `run_request` takes an agent-written `preRequestScript` /
+  `postRequestScript` instead, since an ad-hoc call has no chain to compose
+  from; `start_load_run` takes the same `postRequestScript` for a URL-only run.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`
-  has no such arg: it replays each saved request exactly as-is, so its stored
-  `httpVersion` goes through `composeSavedRequest` unconditionally, the same
-  path the renderer uses. `start_load_run` with a `requestId` composes the same
-  way, and a stated `httpVersion` overrides the composed one like any other
-  agent-stated field - it is read with those overrides rather than with the
-  ad-hoc payload fields, which that branch never builds. On a URL-only call
-  there is no saved row behind the request, so `httpVersion` is forwarded only
-  when the caller actually supplies it - unlike the saved-request path, there is
-  nothing concrete to protect from an engine-side default by always sending it.
+  has no such arg: it replays each saved request exactly as-is, and `POST
+  /compose` always emits a stored request's protocol. `start_load_run` with a
+  `requestId` lays a stated `httpVersion` over the stored one through the
+  compose body's `request` overlay, like any other agent-stated field. On a
+  URL-only call there is no saved row behind the request, so `httpVersion` is
+  forwarded only when the caller actually supplies it.
 - **One post-request script, three names, all accepted everywhere.** It is
   stored as `postRequestScript` (on a request and on a collection), sent as
   `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
@@ -254,15 +242,17 @@ clicking Send:
   shows the agent a single name (see *One validation script, one name* above) -
   that is now a courtesy rather than a translation the wire depends on.
 - **Load-testing a saved request** - `start_load_run` with a `requestId`
-  composes it through the same `composeSavedRequest` that backs
-  `run_collection_smoke`: variables resolved, stored auth applied through the
-  collection chain, and the chain's + its own test scripts attached. Any field
-  stated explicitly (url, method, headers, body, httpVersion, postRequestScript)
-  overrides the composed one; an explicit script *replaces* the composed ones rather than
+  composes it by id, exactly as `run_collection_smoke` and the app do:
+  variables resolved, stored auth applied through the collection chain, and the
+  chain's + its own test scripts attached. Any field stated explicitly (url,
+  method, headers, body, auth, httpVersion) rides in the compose body's
+  `request` overlay and replaces the stored one *before* resolution; an
+  explicit `postRequestScript` *replaces* the composed script parts rather than
   joining them. Without a `requestId` the run is ad-hoc and `url` is required.
   A saved request's **pre-request** script cannot run under load - `POST /runs`
-  has no such hook - so it is left out of the payload and the count of dropped
-  scripts is reported in the tool's result rather than passing silently.
+  has no such hook - so the composed `preRequestScripts` are stripped from the
+  payload and the count of dropped scripts is reported in the tool's result
+  rather than passing silently.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved
@@ -274,19 +264,17 @@ clicking Send:
   at all - `POST /runs` runs only the deferred `tests` script - so it does not
   offer the field rather than accepting one that would never run.
 
-Resolution only fetches the variable sources when a call needs them (a field
-carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the
-extra round-trips. `run_request` / `start_load_run` take optional `environmentId`
-and `collectionId` to scope resolution.
+`run_request` / `start_load_run` take optional `environmentId` and
+`collectionId` to scope resolution; both are forwarded to `POST /compose`.
+An unknown `requestId` is the engine's definitive 404, surfaced as a readable
+"no saved request with id" tool error.
 
-> **Known duplication (deferred).** `resolve.ts` is a deliberate port of the
-> renderer's composition pipeline, so the same semantics now live in two places
-> (renderer + MCP). This is because the engine only does composition partway (it
-> loads variables, applies auth, and joins/runs script parts, but does not
-> interpolate `{{var}}`, resolve `inherit`, or build the ordered script-part
-> list). The intended fix is to finish composition in the engine and let clients
-> go thin. Until then, **keep the two copies in sync and don't add a third.**
-> See `docs/plans/pending-backlog.md` → **A1**.
+> **History.** Until issue #226 MCP carried `resolve.ts` - a full main-process
+> port of the renderer's composition pipeline - because the engine composed
+> only partway. That copy (and its `dynamic-variables.ts` twin) is deleted;
+> the engine path is the single implementation, and the renderer's remaining
+> resolver is preview-only. Do not reintroduce client-side composition here -
+> a new engine client should call `POST /compose`.
 
 ## Resources
 
@@ -383,7 +371,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`.                                    |
-| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, script-part lists. |
+| `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.            |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |

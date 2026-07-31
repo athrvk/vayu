@@ -196,9 +196,14 @@ contract.
 #### Execution
 
 ```typescript
+apiService.composeRequest(data): Promise<ComposedRequest>
 apiService.executeRequest(data): Promise<SanityResult>
 apiService.startLoadTest(data): Promise<StartLoadTestResponse>
 ```
+
+`composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
+`inherit` auth engine-side and returns the payload the other two accept
+unchanged - every send site composes first, so nothing is interpolated twice.
 
 #### Run Management
 
@@ -345,11 +350,26 @@ export const API_ENDPOINTS = {
 ### Single Request Execution
 
 1. **User Action**: Clicks "Send" in RequestBuilder
-2. **Variable Resolution**: `useVariableResolver()` resolves `{{variables}}` in URL, headers, body
-3. **Request Transformation**: Frontend format → backend format
-4. **API Call**: `apiService.executeRequest()` → `POST /execute`
+2. **Request Transformation**: Frontend format → backend format (raw - no
+   client-side `{{variable}}` resolution)
+3. **Composition**: `apiService.composeRequest()` → `POST /compose` - the
+   engine resolves `{{variables}}` and `inherit` auth against the request's
+   `collectionId` chain and the active `environmentId`, and returns the
+   execute-ready payload (issue #226)
+4. **API Call**: `apiService.executeRequest()` with the composed payload,
+   unchanged → `POST /execute`
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
+
+The renderer sends the **inline** compose shape (`{ request, collectionId,
+environmentId }`) rather than compose-by-id, because Send executes the *editor
+state* - possibly unsaved, or a detached History replay copy that has no saved
+row at all. `requestId` is attached to the execute payload afterwards purely to
+link the run to the saved request in History; `environmentId` scopes both
+composition and the engine's script context / variable persistence.
+`useVariableResolver()` still exists but is **preview-only** (tab titles,
+previews, unresolved-token painting) - see
+[variable-resolution](./variable-resolution.md).
 
 Auth (bearer/basic/api-key/oauth2) is resolved **engine-side** from the request's
 `auth` object - the app no longer builds `Authorization` headers itself. When a
@@ -383,9 +403,11 @@ await apiService.executeRequest({
 
 `preRequestScripts` / `postRequestScripts` are an ordered list of `ScriptPart`s
 (`{ origin: "collection" | "request", id?, name?, script }`), not a single
-string: the collection chain's scripts (root→leaf), then the request's own,
-built client-side by `scriptParts()` (`request-builder/utils/script-parts.ts`
-for the renderer, `resolve.ts` for MCP). The **engine** joins the parts and runs
+string: the collection chain's scripts (root→leaf), then the request's own.
+The renderer builds the list from its editor state (`scriptParts()` in
+`request-builder/utils/script-parts.ts`) and it rides through `POST /compose`
+untouched - script text is never interpolated; the by-id compose path (used by
+MCP) builds the same list engine-side. The **engine** joins the parts and runs
 the result - see `docs/engine/architecture.md` → *Request composition boundary*.
 
 **Redirect policy and protocol are always sent, never elided.**
@@ -427,8 +449,13 @@ request/status line instead of a hardcoded `HTTP/1.1`.
 ### Load Test Execution
 
 1. **User Action**: Configures and starts load test
-2. **Request Transformation**: Frontend `LoadTestConfig` → backend format
-3. **API Call**: `apiService.startLoadTest()` → `POST /runs`
+2. **Composition**: the request half (method/url/headers/body/auth/`tests`
+   script parts) goes raw through `apiService.composeRequest()` → `POST
+   /compose`, same as Send - so a load test measures the same composed request
+   Send sends
+3. **Request Transformation**: composed request half + frontend
+   `LoadTestConfig` → backend format
+4. **API Call**: `apiService.startLoadTest()` → `POST /runs`
 4. **Response**: `{ runId: "run_123", status: "running" }`
 5. **Dashboard Initialization**: `useDashboardStore().startRun(runId)`
 6. **SSE Connection**: `useSSE()` connects to `/runs/:runId/live`

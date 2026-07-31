@@ -124,21 +124,21 @@ The build script will:
 
 ## Platform-Specific Notes
 
+All platforms script with the same vendored engine: QuickJS-NG
+(`engine/vendor/quickjs-ng`, built via its own CMake as the `qjs` target).
+
 ### Linux
 
-- Uses original QuickJS (vendored in `engine/vendor/quickjs`)
 - Requires development headers: `libcurl-dev`, `sqlite3-dev`
 - Recommended: Use Ninja for faster builds
 
 ### macOS
 
-- Uses original QuickJS (vendored)
 - Requires Xcode Command Line Tools
 - Homebrew LLVM paths are automatically detected for clang-tidy
 
 ### Windows
 
-- Uses QuickJS-NG (MSVC-compatible fork in `engine/vendor/quickjs-ng`)
 - Requires Visual Studio 2022 or later
 - Uses vcpkg for all dependencies
 - CMake generator defaults to Visual Studio solution
@@ -230,8 +230,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### QuickJS Build Errors
 
-- **Linux/macOS**: Ensure `engine/vendor/quickjs/quickjs.c` exists
-- **Windows**: Ensure `engine/vendor/quickjs-ng/CMakeLists.txt` exists
+- Ensure `engine/vendor/quickjs-ng/CMakeLists.txt` exists (all platforms build
+  the same vendored QuickJS-NG)
 
 ### Linker Errors
 

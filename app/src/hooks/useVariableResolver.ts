@@ -18,12 +18,14 @@
  * A `{{$name}}` nothing defines is generated from the dynamic-variable table
  * (`lib/dynamic-variables.ts`) rather than looked up - see `resolveString`.
  *
- * **What the MCP copy (`app/electron/mcp/resolve.ts`) does and does not share.**
- * CLAUDE.md requires the two resolution copies to move together when *semantics*
- * change. Dynamic variables are such a change, so MCP has the same table and the
- * same fall-through order (`resolve.test.ts` compares the two name sets).
- * `getVariableOrigins` is not shared: it keeps the definitions that lost so the
- * UI can explain the winner, and MCP renders nothing.
+ * **This is a preview, not the execution path.** Since issue #226 the engine
+ * owns execution-time resolution (`POST /compose`); what this hook feeds is
+ * display - tab titles, previews, the unresolved-token painting, the "why this
+ * value" popover. The substitution rules live in `lib/variable-resolution.ts`
+ * and are held to the engine's behaviour by the shared conformance fixture, so
+ * the preview cannot quietly drift from what actually gets sent.
+ * `getVariableOrigins` keeps the definitions that lost so the UI can explain
+ * the winner; execution has no use for losers, so the engine has no analogue.
  */
 
 import { useMemo, useCallback } from "react";
@@ -31,11 +33,13 @@ import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/qu
 import { useSessionStore } from "@/stores";
 import type { VariableValue, ResolvedVariable, VariableOrigin, Collection } from "@/types";
 import { castByType } from "@/lib/variable-cast";
+import { isKnownDynamicVariable } from "@/lib/dynamic-variables";
 import {
-	isDynamicVariableName,
-	isKnownDynamicVariable,
-	resolveDynamicVariable,
-} from "@/lib/dynamic-variables";
+	coerceVariableValue,
+	isEnabledDefinition,
+	resolveTemplate,
+	VARIABLE_PATTERN,
+} from "@/lib/variable-resolution";
 
 interface UseVariableResolverOptions {
 	collectionId?: string;
@@ -56,8 +60,6 @@ interface UseVariableResolverReturn {
 	 */
 	getVariableOrigins: (name: string) => VariableOrigin[];
 }
-
-const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
 /** Build root-first ancestor chain for a collection (inclusive of the collection itself). */
 function buildCollectionChain(startId: string, collections: Collection[]): Collection[] {
@@ -106,10 +108,14 @@ export function useVariableResolver(
 				scope,
 				sourceId: source?.id,
 				sourceName: source?.name,
-				value: v.value,
+				// D17 (issue #226): a non-string stored value reads as "", and only
+				// an explicit `enabled: false` disables - absent counts as enabled,
+				// matching the importers and the engine's parse_variables. The
+				// preview must agree with what /compose will actually substitute.
+				value: coerceVariableValue(v.value),
 				secret: v.secret,
 				type: v.type,
-				enabled: !!v.enabled,
+				enabled: isEnabledDefinition(v),
 				// Filled in below, once the whole list for this name exists.
 				winner: false,
 			});
@@ -212,16 +218,7 @@ export function useVariableResolver(
 	 * as unresolved. Ordinary unknown names still resolve to "" - unchanged.
 	 */
 	const resolveString = useCallback(
-		(input: string): string => {
-			if (!input || typeof input !== "string") return input;
-			return input.replace(VARIABLE_PATTERN, (match, varName) => {
-				const name = varName.trim();
-				const source = variableMap[name];
-				if (source) return source.value;
-				if (isDynamicVariableName(name)) return resolveDynamicVariable(name) ?? match;
-				return "";
-			});
-		},
+		(input: string): string => resolveTemplate(input, (name) => variableMap[name]?.value),
 		[variableMap]
 	);
 

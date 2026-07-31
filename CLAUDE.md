@@ -319,6 +319,7 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing) |
 | POST | `/execute` | Send a single request (auth resolved engine-side) |
 | POST | `/runs` | Start a load test run |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
@@ -376,49 +377,58 @@ Three things worth knowing before you design around them:
   an omitted `false` would silently follow the 3xx the user asked to see.
   **`verifySSL` is still engine-only**; it was deliberately not exposed.
 
-## Request composition (known duplication - do not add a third copy)
+## Request composition (engine-owned - POST /compose)
 
-Preparing a request before it executes - resolving `{{variables}}` and resolving
-`inherit` auth via the collection-chain walk - happens **client-side** today, and
-is therefore **duplicated** across the two engine clients:
+The **engine owns** request composition (issue #226, backlog A1 shipped):
+`POST /compose` (`engine/src/http/request_composer.cpp`) resolves
+`{{variables}}` and `inherit` auth (collection-chain walk, `noauth`
+terminates, `none` steps over) and returns the execute-ready payload that
+`POST /execute` / `POST /runs` accept unchanged. Compose is **pure** (sends
+nothing, no run row) and the execution endpoints **never interpolate**, so a
+payload is resolved exactly once - that split is load-bearing, do not "merge"
+compose into execute. Two entry shapes: `requestId` (stored request; MCP uses
+this, and gates its allowlist on the *composed* URL) and an inline `request`
+(+ `collectionId` scope; the renderer uses this because Send/replay execute
+*editor state*, which may be unsaved or detached). Inline over stored = the
+overlay MCP's `start_load_run` overrides ride on.
 
-- **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
-  `app/src/modules/request-builder/index.tsx` + `utils/auth-resolution.ts`.
-- **MCP:** `app/electron/mcp/resolve.ts`.
+**The renderer's resolver is preview-only.** `useVariableResolver` /
+`app/src/lib/variable-resolution.ts` back tab titles, previews, the
+unresolved-token painting and the OAuth-guard preview - never a payload. The
+preview must show what the engine will substitute, so its rules are pinned to
+the engine's by the **cross-language conformance fixture**
+(`engine/tests/fixtures/variable-resolution-conformance.json`), read by both
+`request_composer_test.cpp` (gtest) and
+`variable-resolution.conformance.test.ts` (vitest). Change resolution
+semantics → change engine + renderer lib + fixture together; a case added to
+the fixture fails whichever side forgot. The dynamic-variable name set
+(`$guid`, `$timestamp`, …) is part of that fixture-pinned contract (C++ table
+in `request_composer.cpp`, renderer table in `lib/dynamic-variables.ts`).
+The D17 malformed-data rules (absent/non-boolean `enabled` = enabled;
+non-string `value` = "") live engine-side in `parse_variables` and
+renderer-side in `lib/variable-resolution.ts`. Interpolation happens strictly
+**before** the pre-request script (D1 - deliberate Postman divergence), and
+script text is never interpolated (D16). **MCP has no composition copy
+anymore** (`resolve.ts` deleted) - a new engine client should call
+`POST /compose`, never re-implement resolution client-side.
 
-Composing the collection-chain + request pre/post scripts is **no longer** part
-of that duplication: both clients now collect an ordered list of `ScriptPart`s
-(root-to-leaf chain, then the request's own, each naming its origin) and send
-the list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - and
-the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
-path sends the same kind of list as `tests` on `POST /runs`; MCP's
-`start_load_run` sends it as `postRequestScripts` when given a `requestId`
-(`tools.ts::composeLoadRunRequest`, reusing `composeSavedRequest`), or an
-agent-supplied ad-hoc `tests` string for a URL-only run. **Both names reach the
-same script**: `read_post_request_script` (`engine/src/http/script_parts.cpp`)
-owns every spelling the post-request script answers to - stored as
-`postRequestScript`, `postRequestScript(s)` on `/execute`, `tests` on `/runs` -
-and both routes read through it, so a payload composed for one endpoint can
-start the other kind of run unchanged. Add a spelling to that table, never to a
-route. Each client still builds its own script-part list itself (the
-`scriptParts` helper in
-`app/src/modules/request-builder/utils/script-parts.ts` and in
-`app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
-cannot import from `app/src/`), so a change to the list-building rule (e.g. what
-counts as blank) still needs both copies changed together.
+Script parts: clients on the inline path still build the ordered `ScriptPart`
+list themselves (`scriptParts` in
+`app/src/modules/request-builder/utils/script-parts.ts` - now the only
+client-side copy); the by-id path builds it engine-side
+(`compose_script_parts`). The **engine** joins parts with `"\n\n"` and runs
+the result. **Both names reach the same script**: `read_post_request_script`
+(`engine/src/http/script_parts.cpp`) owns every spelling the post-request
+script answers to - stored as `postRequestScript`, `postRequestScript(s)` on
+`/execute`, `tests` on `/runs` - and both routes read through it, so a payload
+composed for one endpoint can start the other kind of run unchanged. Add a
+spelling to that table, never to a route.
 
-The endpoint names above are the canonical ones (`POST /execute`, `POST /runs`);
-the old `POST /request` / `POST /run` still work as deprecated aliases.
-
-The engine does the rest of execution (loads variables for script context, applies
-concrete auth incl. OAuth2, joins and runs the script parts) but intentionally
-does **no** `{{var}}` interpolation and drops `{"mode":"inherit"}` as "resolved
-app-side". If you change resolution/auth/script-list-building semantics, **change
-both client copies together** and keep them in sync (guarded by
-`app/electron/mcp/resolve.test.ts`). **Do not add a third copy** - a new engine
-client should reuse `resolve.ts`. The intended long-term fix (consolidate the
-remaining variable/auth resolution into the engine) is deferred and documented in
-`docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
+The endpoint names above are the canonical ones (`POST /compose`,
+`POST /execute`, `POST /runs`); the old `POST /request` / `POST /run` still
+work as deprecated aliases. An unresolved `{"mode":"inherit"}` reaching an
+execution endpoint is treated as no auth and logged as a **warning** - it
+means a client skipped composition.
 
 ## Releasing
 

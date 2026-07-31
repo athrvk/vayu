@@ -321,11 +321,26 @@ vayu::Environment parse_variables (const std::string& json_str) {
                 if (!value.is_object ()) {
                     continue;
                 }
+                // Per-field tolerance is the D17 rule of issue #226, decided
+                // once here for every reader: a non-string `value` reads as ""
+                // and a non-boolean `enabled` counts as enabled (absent already
+                // did). `Json::value()` would instead throw on the first
+                // malformed field, and the catch below then discarded the whole
+                // scope - one bad variable silently emptied every other one.
                 vayu::Variable var;
-                var.value   = value.value ("value", "");
-                var.enabled = value.value ("enabled", true);
-                var.secret  = value.value ("secret", false);
-                var.type    = value.value ("type", std::string{ "string" });
+                if (auto it = value.find ("value"); it != value.end () && it->is_string ()) {
+                    var.value = it->get<std::string> ();
+                }
+                if (auto it = value.find ("enabled");
+                    it != value.end () && it->is_boolean ()) {
+                    var.enabled = it->get<bool> ();
+                }
+                if (auto it = value.find ("secret"); it != value.end () && it->is_boolean ()) {
+                    var.secret = it->get<bool> ();
+                }
+                if (auto it = value.find ("type"); it != value.end () && it->is_string ()) {
+                    var.type = it->get<std::string> ();
+                }
                 if (auto it = value.find ("createdAt");
                     it != value.end () && it->is_number ()) {
                     var.created_at = it->get<int64_t> ();

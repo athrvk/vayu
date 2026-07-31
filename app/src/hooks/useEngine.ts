@@ -9,12 +9,24 @@
 
 import { useState, useCallback } from "react";
 import { ApiError, apiService } from "@/services";
-import type { SanityResult, ExecuteRequestRequest } from "@/types";
+import type {
+	SanityResult,
+	ExecuteRequestRequest,
+	ComposeRequestRequest,
+	ComposedRequest,
+} from "@/types";
 
 interface UseEngineReturn {
 	/**
+	 * Compose a request engine-side (`POST /compose`, issue #226): the raw
+	 * editor state (plus scope ids) in, the execute-ready payload out -
+	 * `{{variables}}` and `inherit` auth resolved by the engine, exactly once.
+	 * Throws on failure; callers surface it the same way as an execute failure.
+	 */
+	composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>;
+	/**
 	 * Execute a request against the engine.
-	 * Accepts a pre-resolved ExecuteRequestRequest (flat headers, resolved auth/body).
+	 * Accepts a composed ExecuteRequestRequest (flat headers, resolved auth/body).
 	 */
 	executeRequest: (
 		params: ExecuteRequestRequest,
@@ -28,6 +40,12 @@ interface UseEngineReturn {
 export function useEngine(): UseEngineReturn {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	const composeRequest = useCallback(
+		(params: ComposeRequestRequest): Promise<ComposedRequest> =>
+			apiService.composeRequest(params),
+		[]
+	);
 
 	const executeRequest = useCallback(
 		async (
@@ -77,6 +95,7 @@ export function useEngine(): UseEngineReturn {
 	}, []);
 
 	return {
+		composeRequest,
 		executeRequest,
 		stopLoadTest,
 		isExecuting,

@@ -122,9 +122,14 @@ Auth parse_auth (const nlohmann::json& auth) {
         return NoAuth{};
     }
     if (mode == "inherit") {
-        // Expected to be resolved app-side before reaching the engine.
-        vayu::utils::log_debug (
-        "parse_auth: received unresolved 'inherit' auth; treating as none");
+        // Expected to be resolved before reaching an execution endpoint -
+        // POST /compose owns the inherit walk (request_composer.cpp). A
+        // warning, not a debug line: an unresolved 'inherit' leaking through
+        // means a client-side regression, and the request is about to execute
+        // unauthenticated - that must show up in default-level logs (#226).
+        vayu::utils::log_warning (
+        "parse_auth: received unresolved 'inherit' auth; treating as none "
+        "(compose the request via POST /compose first)");
         return NoAuth{};
     }
     if (mode == "bearer") {

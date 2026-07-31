@@ -227,9 +227,7 @@ char *skip_prefix(const char *str, const char *prefix)
 
 char *get_basename(const char *filename)
 {
-    char *p;
-
-    p = strrchr(filename, '/');
+    const char *p = strrchr(filename, '/');
     if (!p)
         return NULL;
     return strdup_len(filename, p - filename);
@@ -652,7 +650,7 @@ static void agent_start(void *arg)
 
                 args[0] = JS_NewArrayBuffer(ctx, agent->broadcast_sab_buf,
                                             agent->broadcast_sab_size,
-                                            NULL, NULL, true);
+                                            /*max_len*/0, NULL, NULL, true);
                 args[1] = JS_NewInt32(ctx, agent->broadcast_val);
                 ret_val = JS_Call(ctx, agent->broadcast_func, JS_UNDEFINED,
                                   2, (JSValueConst *)args);
@@ -909,6 +907,13 @@ static JSValue js_IsHTMLDDA(JSContext *ctx, JSValueConst this_val,
     return JS_NULL;
 }
 
+static JSValue js_gc(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    JS_RunGC(JS_GetRuntime(ctx));
+    return JS_UNDEFINED;
+}
+
 static JSValue add_helpers1(JSContext *ctx)
 {
     JSValue global_obj;
@@ -918,6 +923,8 @@ static JSValue add_helpers1(JSContext *ctx)
 
     JS_SetPropertyStr(ctx, global_obj, "print",
                       JS_NewCFunction(ctx, js_print_262, "print", 1));
+    JS_SetPropertyStr(ctx, global_obj, "gc",
+                      JS_NewCFunction(ctx, js_gc, "gc", 0));
 
     is_html_dda = JS_NewCFunction(ctx, js_IsHTMLDDA, "IsHTMLDDA", 0);
     JS_SetIsHTMLDDA(ctx, is_html_dda);
@@ -961,24 +968,11 @@ static char *load_file(const char *filename, size_t *lenp)
     return buf;
 }
 
-static int json_module_init(JSContext *ctx, JSModuleDef *m)
-{
-    JSValue val;
-    val = JS_GetModulePrivateValue(ctx, m);
-    JS_SetModuleExport(ctx, m, "default", val);
-    return 0;
-}
-
 static JSModuleDef *js_module_loader_test(JSContext *ctx,
                                           const char *module_name, void *opaque,
                                           JSValueConst attributes)
 {
-    size_t buf_len;
-    uint8_t *buf;
-    JSModuleDef *m;
-    JSValue func_val;
     char *filename, *slash, path[1024];
-    int res;
 
     // interpret import("bar.js") from path/to/foo.js as
     // import("path/to/bar.js") but leave import("./bar.js") untouched
@@ -991,46 +985,7 @@ static JSModuleDef *js_module_loader_test(JSContext *ctx,
             module_name = path;
         }
     }
-
-    /* check for JSON module */
-    res = js_module_test_json(ctx, attributes);
-    if (res < 0)
-        return NULL;
-
-    buf = js_load_file(ctx, &buf_len, module_name);
-    if (!buf) {
-        JS_ThrowReferenceError(ctx, "could not load module filename '%s'",
-                               module_name);
-        return NULL;
-    }
-
-    if (res > 0 || js__has_suffix(module_name, ".json")) {
-        /* compile as JSON */
-        JSValue val;
-        val = JS_ParseJSON(ctx, (char *)buf, buf_len, module_name);
-        js_free(ctx, buf);
-        if (JS_IsException(val))
-            return NULL;
-        m = JS_NewCModule(ctx, module_name, json_module_init);
-        if (!m) {
-            JS_FreeValue(ctx, val);
-            return NULL;
-        }
-        JS_AddModuleExport(ctx, m, "default");
-        JS_SetModulePrivateValue(ctx, m, val);
-        return m;
-    }
-
-    /* compile the module */
-    func_val = JS_Eval(ctx, (char *)buf, buf_len, module_name,
-                       JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
-    js_free(ctx, buf);
-    if (JS_IsException(func_val))
-        return NULL;
-    /* the module is already referenced, so we must free it */
-    m = JS_VALUE_GET_PTR(func_val);
-    JS_FreeValue(ctx, func_val);
-    return m;
+    return js_module_load(ctx, module_name, opaque, attributes, js_load_file);
 }
 
 int is_line_sep(char c)
@@ -1871,10 +1826,10 @@ int run_test(ThreadLocalStorage *tls, const char *filename, int *msec)
     harness = harness_dir;
 
     if (!harness) {
-        p = strstr(filename, "test/");
-        if (p) {
+        const char *p1 = strstr(filename, "test/");
+        if (p1) {
             snprintf(harnessbuf, sizeof(harnessbuf), "%.*s%s",
-                     (int)(p - filename), filename, "harness");
+                     (int)(p1 - filename), filename, "harness");
         }
         harness = harnessbuf;
     }
@@ -2033,7 +1988,7 @@ int run_test(ThreadLocalStorage *tls, const char *filename, int *msec)
 
 /* run a test when called by test262-harness+eshost */
 int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
-                             bool is_module)
+                             bool is_module, bool can_block)
 {
     JSRuntime *rt;
     JSContext *ctx;
@@ -2041,7 +1996,6 @@ int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
     size_t buf_len;
     int eval_flags, ret_code, ret;
     JSValue res_val;
-    bool can_block;
 
     outfile = stdout; /* for js_print_262 */
 
@@ -2058,7 +2012,6 @@ int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
     }
     JS_SetRuntimeInfo(rt, filename);
 
-    can_block = true;
     JS_SetCanBlock(rt, can_block);
 
     /* loader for ES6 modules */
@@ -2181,7 +2134,8 @@ void help(void)
            "-d dir         run all test files in directory tree 'dir'\n"
            "-e file        load the known errors from 'file'\n"
            "-f file        execute single test from 'file'\n"
-           "-x file        exclude tests listed in 'file'\n",
+           "-x file        exclude tests listed in 'file'\n"
+           "--no-can-block set [[CanBlock]] to false (Atomics.wait will throw)\n",
            JS_GetVersion());
     exit(1);
 }
@@ -2204,6 +2158,7 @@ int main(int argc, char **argv)
     const char *ignore = "";
     bool is_test262_harness = false;
     bool is_module = false;
+    bool can_block = true;
     bool enable_progress = true;
 
     js_std_set_worker_new_context_func(JS_NewCustomContext);
@@ -2272,6 +2227,8 @@ int main(int argc, char **argv)
             is_test262_harness = true;
         } else if (str_equal(arg, "--module")) {
             is_module = true;
+        } else if (str_equal(arg, "--no-can-block")) {
+            can_block = false;
         } else {
             fatal(1, "unknown option: %s", arg);
             break;
@@ -2282,7 +2239,7 @@ int main(int argc, char **argv)
         help();
 
     if (is_test262_harness) {
-        return run_test262_harness_test(tls, argv[optind], is_module);
+        return run_test262_harness_test(tls, argv[optind], is_module, can_block);
     }
 
     nthreads = max_int(nthreads, 1);

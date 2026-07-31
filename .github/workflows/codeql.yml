@@ -57,14 +57,12 @@ jobs:
           # cheaper as well as quieter.
           #
           # `engine/vendor` is the tree this list was describing all along and
-          # did not name: 90 tracked .js files across the two vendored QuickJS
-          # copies (quickjs on Linux/macOS, quickjs-ng on Windows). Three of
-          # them are upstream examples and tests written in QuickJS's own
-          # dialect - BigDecimal (`13591409m`) and BigFloat (`1l`) literals,
-          # which are engine extensions and not valid JavaScript - so every
-          # scan reported "Could not process some files due to syntax errors"
-          # against files Vayu never compiles, ships or runs. Node's parser
-          # rejects the same three.
+          # did not name: dozens of tracked .js files inside the vendored
+          # QuickJS-NG copy (one engine on every platform since #226's review;
+          # the original Bellard copy is deleted) - upstream examples, tests
+          # and repl sources that Vayu never compiles, ships or runs, some in
+          # QuickJS's own dialect, which made every scan report "Could not
+          # process some files due to syntax errors" against them.
           config: |
             paths-ignore:
               - '**/node_modules'

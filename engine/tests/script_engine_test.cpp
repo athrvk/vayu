@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <regex>
 
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -519,7 +520,8 @@ TEST_F (ScriptEngineTest, ExpectAndChainsAndKeepsAssertingAfterTheJoin) {
     ASSERT_EQ (result.tests.size (), 3);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
     EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
-    EXPECT_FALSE (result.tests[2].passed) << "the assertion after .and did not run";
+    EXPECT_FALSE (result.tests[2].passed)
+    << "the assertion after .and did not run";
 }
 
 TEST_F (ScriptEngineTest, ExpectOneOf) {
@@ -855,11 +857,11 @@ TEST_F (ScriptEngineTest, ResponseToBeJsonAndWithBody) {
     request, response, env);
     EXPECT_TRUE (json_result.success) << json_result.tests[0].error_message;
 
-    response.body   = "not json at all";
-    auto not_json   = engine.execute_test (R"(
+    response.body = "not json at all";
+    auto not_json = engine.execute_test (R"(
         pm.test("json body", function() { pm.response.to.be.json; });
     )",
-      request, response, env);
+    request, response, env);
     ASSERT_EQ (not_json.tests.size (), 1u);
     EXPECT_FALSE (not_json.tests[0].passed);
 
@@ -887,7 +889,8 @@ TEST_F (ScriptEngineTest, ResponseToChainRejectsUnknownAssertions) {
         auto result = engine.execute_test (script, request, response, env);
         ASSERT_EQ (result.tests.size (), 1u) << script;
         EXPECT_FALSE (result.tests[0].passed) << script;
-        EXPECT_NE (result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        EXPECT_NE (
+        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
         << script << " -> " << result.tests[0].error_message;
     }
 }
@@ -1507,8 +1510,8 @@ TEST_F (ScriptEngineTest, PreRequestHeaderAddRefusesAValueItCannotSend) {
     request, env);
 
     EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("must be a string, number or boolean"),
-    std::string::npos)
+    EXPECT_NE (
+    result.error_message.find ("must be a string, number or boolean"), std::string::npos)
     << result.error_message;
     EXPECT_FALSE (request.headers.contains ("X-Object"));
 }
@@ -2034,7 +2037,7 @@ TEST_F (ScriptEngineTest, EveryVariableScopeExposesTheSameSurfaceAndPmVariablesE
         }
         // The merged accessor reads across scopes; it deliberately has no
         // unset/clear, since it owns no scope to remove a name from.
-        var merged = ['get', 'has', 'toObject', 'set'];
+        var merged = ['get', 'has', 'toObject', 'replaceIn', 'set'];
         for (var k = 0; k < merged.length; k++) {
             if (!pm.variables || typeof pm.variables[merged[k]] !== 'function') {
                 missing.push('variables.' + merged[k]);
@@ -2195,6 +2198,92 @@ TEST_F (ScriptEngineTest, PmVariablesResolvesEnvironmentThenCollectionThenGlobal
     EXPECT_EQ (globals["mergedHasDisabled"].value, "false");
 }
 
+// pm.variables.replaceIn - the sanctioned way to use {{...}} inside a script
+// (script *text* is never interpolated; see D16 in issue #226). Semantics must
+// match the engine's compose-time resolver: same precedence, same unknown-name
+// pair, same single pass, raw stored strings.
+TEST_F (ScriptEngineTest, ReplaceInResolvesScopesLikeTheRequestFieldsDo) {
+    Environment globals;
+    globals["everywhere"] = Variable{ "from-globals", false, true };
+    Environment collVars;
+    collVars["everywhere"] = Variable{ "from-collection", false, true };
+    collVars["nested"]     = Variable{ "{{everywhere}}", false, true };
+    Environment environment;
+    environment["everywhere"] = Variable{ "from-environment", false, true };
+    environment["disabled"]   = Variable{ "hidden", false, false };
+    environment["$guid"]      = Variable{ "pinned-guid", false, true };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &environment;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('winner', pm.variables.replaceIn('{{everywhere}}'));
+        pm.globals.set('unknownPlain', pm.variables.replaceIn('[{{missing}}]'));
+        pm.globals.set('unknownDollar', pm.variables.replaceIn('{{$notAGenerator}}'));
+        pm.globals.set('definedDollar', pm.variables.replaceIn('{{$guid}}'));
+        pm.globals.set('disabledIsInvisible', pm.variables.replaceIn('[{{disabled}}]'));
+        // Single pass, like every other {{}} in Vayu: a value containing
+        // {{other}} stays literal rather than being rescanned.
+        pm.globals.set('singlePass', pm.variables.replaceIn('{{nested}}'));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["winner"].value, "from-environment");
+    EXPECT_EQ (globals["unknownPlain"].value, "[]");
+    EXPECT_EQ (globals["unknownDollar"].value, "{{$notAGenerator}}");
+    EXPECT_EQ (globals["definedDollar"].value, "pinned-guid");
+    EXPECT_EQ (globals["disabledIsInvisible"].value, "[]");
+    EXPECT_EQ (globals["singlePass"].value, "{{everywhere}}");
+}
+
+TEST_F (ScriptEngineTest, ReplaceInGeneratesDynamicVariablesPerOccurrence) {
+    auto result = engine.execute_prerequest (R"JS(
+        var pair = pm.variables.replaceIn('{{$guid}}|{{$guid}}').split('|');
+        pm.environment.set('a', pair[0]);
+        pm.environment.set('b', pair[1]);
+        pm.environment.set('ts', pm.variables.replaceIn('{{$timestamp}}'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const std::regex uuid_v4 (
+    "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+    EXPECT_TRUE (std::regex_match (env["a"].value, uuid_v4)) << env["a"].value;
+    EXPECT_TRUE (std::regex_match (env["b"].value, uuid_v4)) << env["b"].value;
+    // Once per occurrence - two {{$guid}} in one template are two ids.
+    EXPECT_NE (env["a"].value, env["b"].value);
+    EXPECT_FALSE (env["ts"].value.empty ());
+}
+
+// The map is built at call time, so - unlike {{}} in the URL, which was
+// composed before the script started (D1) - a value the script itself just
+// set resolves. This is the property that makes replaceIn useful for
+// building signed payloads mid-script.
+TEST_F (ScriptEngineTest, ReplaceInSeesAVariableSetEarlierInTheSameScript) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('minted', 'fresh-value');
+        pm.environment.set('resolved', pm.variables.replaceIn('{{minted}}'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["resolved"].value, "fresh-value");
+}
+
+TEST_F (ScriptEngineTest, ReplaceInRejectsANonStringArgument) {
+    for (const char* bad : { "pm.variables.replaceIn()", "pm.variables.replaceIn(42)",
+         "pm.variables.replaceIn(undefined)", "pm.variables.replaceIn({})" }) {
+        auto result = engine.execute_prerequest (bad, request, env);
+        EXPECT_FALSE (result.success) << bad;
+        EXPECT_NE (result.error_message.find ("replaceIn expects a string"), std::string::npos)
+        << bad << " -> " << result.error_message;
+    }
+}
+
 // Postman's pm.variables.set writes to a local scope that lives for one request.
 // Vayu has none, and both substitutes lie: writing to the environment persists
 // a value the author expects to vanish, dropping it loses a write they believe
@@ -2330,8 +2419,8 @@ TEST_F (ScriptEngineTest, HeaderMethodsRefuseBadInputByName) {
     << env["empty"].value;
     // Detaching leaves `this` undefined, which would otherwise read as "no such
     // header" - a wrong answer dressed as a real one.
-    EXPECT_NE (env["detached"].value.find ("must be called on a headers object"),
-    std::string::npos)
+    EXPECT_NE (
+    env["detached"].value.find ("must be called on a headers object"), std::string::npos)
     << env["detached"].value;
 }
 

@@ -232,6 +232,37 @@ export interface ExecuteRequestRequest {
 export type ExecuteRequestResponse = SanityResult;
 
 /**
+ * ComposeRequestRequest - the `POST /compose` body (issue #226).
+ *
+ * The engine owns request composition: it resolves `{{variables}}` (with the
+ * app's precedence) and `inherit` auth (walking the collection chain), and
+ * returns the execute-ready payload that `POST /execute` / `POST /runs`
+ * accept unchanged. Pure - nothing is sent, no run row is created - and the
+ * execution endpoints never interpolate, so a payload is resolved exactly
+ * once.
+ *
+ * Two entry shapes, combinable: `requestId` composes the stored request;
+ * `request` is an inline unresolved request (the renderer's editor state,
+ * which may be unsaved or a detached replay copy) - given both, the inline
+ * fields lay over the stored ones before resolution. `collectionId` scopes an
+ * inline request's variable chain and inherit walk (a stored request's own
+ * collection wins).
+ */
+export interface ComposeRequestRequest {
+	requestId?: string;
+	request?: Record<string, unknown>;
+	collectionId?: string;
+	environmentId?: string;
+}
+
+/**
+ * What `POST /compose` returns: an `ExecuteRequestRequest` plus whatever
+ * extra fields rode through composition verbatim (e.g. the load path's
+ * `tests` script parts - scripts are never interpolated).
+ */
+export type ComposedRequest = ExecuteRequestRequest & Record<string, unknown>;
+
+/**
  * StartLoadTestRequest - Matches POST /run backend endpoint
  * The backend expects a flat structure with:
  * - HTTP request fields (method, url, headers, body) at root level

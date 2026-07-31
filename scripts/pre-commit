@@ -43,7 +43,7 @@ for FILE in $FILES; do
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
-        clang-tidy "$FILE" -- -Iengine/include -Iengine/vendor/quickjs
+        clang-tidy "$FILE" -- -Iengine/include -Iengine/vendor/quickjs-ng
     fi
 done
 

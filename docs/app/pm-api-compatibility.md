@@ -25,7 +25,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
-| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()` - read-only, see below     |
+| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
@@ -53,6 +53,34 @@ because Postman writes it to a per-request *local* scope that Vayu does not have
 alternatives (persisting to the environment, or dropping the write) would misrepresent
 what happened. The error names the three scoped setters. See
 [scripting.md](../engine/scripting.md#variables-pmvariables).
+
+### `{{templates}}` in scripts (`pm.variables.replaceIn`)
+
+`pm.variables.replaceIn(template)` resolves `{{name}}` placeholders in a string
+with the exact semantics the request's own URL/headers/body get at compose
+time: scopes first (in `pm.variables`' precedence), then the dynamic-variable
+table - so `{{$guid}}`, `{{$timestamp}}` and the `{{$random*}}` set generate a
+fresh value **per occurrence**, an unknown `$name` keeps its braces, an
+ordinary unknown name becomes `""`, and resolution is a single pass over the
+raw stored strings.
+
+```javascript
+const id      = pm.variables.replaceIn("{{$guid}}");
+const payload = pm.variables.replaceIn('{"user": "{{userId}}", "trace": "{{$guid}}"}');
+```
+
+This is the **only** way `{{...}}` works inside a script, and that is
+deliberate (issue #226, decision D16): script *source* is never interpolated,
+because a rewrite cannot tell code from a string literal and splicing variable
+values into JavaScript is an injection. `replaceIn` keeps values as data the
+script explicitly asked to resolve.
+
+Two timing consequences worth knowing: the map is built **at call time**, so a
+variable the script set a line earlier resolves (unlike `{{}}` in the URL,
+which was composed before the script started); and the collection scope is the
+script context's - the request's immediate parent only, the same asymmetry
+`pm.collectionVariables` has. The argument must be a string; anything else is
+a `TypeError` rather than a silently coerced `"undefined"`.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
@@ -155,16 +183,17 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.variables.set(...)` - throws; Vayu has no local scope to write to, so name
   one of the three scoped setters instead. The read half (`get`/`has`/`toObject`)
   is supported - see above
-- `replaceIn(...)` on any scope - `{{name}}` interpolation of an arbitrary string.
-  The engine does no `{{var}}` interpolation at all (it is resolved app-side
-  before the payload arrives), so there is nothing to expose
+- `replaceIn(...)` on the **scoped** accessors (`pm.environment.replaceIn`,
+  `pm.globals.replaceIn`, `pm.collectionVariables.replaceIn`) - only the merged
+  `pm.variables.replaceIn(template)` exists (see below), and it answers with
+  the same precedence `{{name}}` uses, which is what a template means everywhere
+  else in Vayu
 - `pm.environment.name` - the active environment's name
-- **Dynamic variables in scripts** - `pm.variables.get("$guid")`,
-  `$timestamp`, `$random*` and the rest resolve only in `{{…}}` interpolation,
-  which happens app-side before the payload reaches the engine. A script that
-  wants a generated value has to write the JavaScript for it. The supported set
-  and the reasoning are in
-  [variable resolution](./variable-resolution.md#dynamic-variables)
+- **Dynamic variables via `pm.variables.get("$guid")`** - the *getter* does not
+  fall through to the generator table; only `{{…}}` templates reach it. A script
+  wanting a generated value uses `pm.variables.replaceIn("{{$guid}}")` (see
+  below) or writes the JavaScript for it. The supported set and the reasoning
+  are in [variable resolution](./variable-resolution.md#dynamic-variables)
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`, and `pm.response.cookies`
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
@@ -210,11 +239,11 @@ pm.request.body = JSON.stringify({ n: 2 });
   boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
   `preScriptError`, which the response pane's Console tab shows.
 - **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
-  **app-side, before** the payload reaches the engine
-  (`app/src/modules/request-builder/index.tsx`, `resolveString(request.url)`), whereas the
-  pre-request script runs **later, in the engine**. So `pm.environment.set("host", …)` with
+  at **compose time** (`POST /compose`, engine-side since #226), whereas the
+  pre-request script runs **later**, at execute. So `pm.environment.set("host", …)` with
   a `{{host}}` in the URL affects subsequent runs only - assign `pm.request.url` to change
-  this one.
+  this one. Keeping this order (rather than adopting Postman's script-first one) was
+  #226's decision D1: today's semantics preserved, divergence documented.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 
@@ -259,11 +288,12 @@ its object throws rather than answering as though the header were missing.
 ### TODO (future)
 
 "Set a variable in a pre-request script and have it change the outgoing URL" still does not
-work, and cannot until variable resolution moves (or is duplicated) into the engine and runs
-**after** the pre-request script instead of entirely app-side beforehand. That means sending
-the _unresolved_ URL/headers plus the variable maps to the engine and interpolating `{{…}}`
-in C++ post-script (and applying the same to the load-test path) - a deliberate change in
-resolution ownership, deferred for now (`docs/plans/pending-backlog.md` → **A1**).
+work. Resolution ownership *did* move into the engine (#226 - `POST /compose`
+interpolates), but interpolation deliberately stayed **before** the pre-request
+script (decision D1: today's semantics, not Postman's script-first order).
+Adopting Postman's order is now an engine-side re-ordering rather than an
+ownership change - possible, but a separate, deliberate compatibility decision
+with its own tests.
 
 ---
 

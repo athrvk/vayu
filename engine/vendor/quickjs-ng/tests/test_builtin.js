@@ -385,6 +385,65 @@ function test_string()
            /*JS_STRING_KIND_SLICE*/1);
 }
 
+function rope_concat(n, dir)
+{
+    var i, s;
+    s = "";
+    if (dir > 0) {
+        for(i = 0; i < n; i++)
+            s += String.fromCharCode(i & 0xffff);
+    } else {
+        for(i = n - 1; i >= 0; i--)
+            s = String.fromCharCode(i & 0xffff) + s;
+    }
+
+    for(i = 0; i < n; i++) {
+        /* test before the assert to go faster */
+        if (s.charCodeAt(i) != (i & 0xffff)) {
+            assert(s.charCodeAt(i), i & 0xffff);
+        }
+    }
+}
+
+function test_rope()
+{
+    var i, s, s2;
+
+    /* test forward and backward concatenation */
+    rope_concat(100000, 1);
+    rope_concat(100000, -1);
+
+    /* test rope comparison */
+    s = "";
+    s2 = "";
+    for (i = 0; i < 10000; i++) {
+        s += "abc";
+        s2 += "abc";
+    }
+    assert(s === s2, true);
+    assert(s < s2, false);
+    assert(s > s2, false);
+
+    /* test rope indexing */
+    s = "";
+    for (i = 0; i < 10000; i++)
+        s += "x";
+    assert(s.length, 10000);
+    assert(s[0], "x");
+    assert(s[5000], "x");
+    assert(s[9999], "x");
+
+    /* test rope with string methods */
+    s = "";
+    for (i = 0; i < 1000; i++)
+        s += "test";
+    assert(s.indexOf("test"), 0);
+    assert(s.lastIndexOf("test"), 3996);
+    assert(s.includes("test"), true);
+    assert(s.slice(0, 8), "testtest");
+    assert(s.substring(0, 8), "testtest");
+}
+
 function test_math()
 {
     var a;
@@ -587,8 +646,11 @@ function test_typed_array()
     };
     b = a.slice();
     assert(a.buffer, b.buffer);
-    assert(a.toString(), "0,0,0,255");
-    assert(b.toString(), "0,0,255,255");
+    // the copy is byte by byte in increasing order, so bytes already
+    // copied are read back as source values when the target overlaps
+    // the source ahead of it
+    assert(a.toString(), "0,0,0,0");
+    assert(b.toString(), "0,0,0,0");
 
     const TypedArray = class extends Object.getPrototypeOf(Uint8Array) {};
     let caught = false;
@@ -627,6 +689,28 @@ function test_typed_array()
     Object.defineProperty(ArrayBuffer, Symbol.species, desc); // restore
     assert(ex instanceof TypeError);
     assert("ArrayBuffer is detached", ex.message);
+
+    var buffer = new ArrayBuffer(2);
+    var ta = new Uint16Array(buffer);
+    var desc = Object.getOwnPropertyDescriptor(ta, "0");
+    ta[0] = 42;
+    assert(ta[0], 42);
+    Object.defineProperty(ta, "0", {value: 1337});
+    assert(ta[0], 1337);
+    assert(desc.writable, true);
+    assert(desc.enumerable, true);
+    assert(desc.configurable, true);
+
+    var buffer = new ArrayBuffer(2).sliceToImmutable();
+    var ta = new Uint16Array(buffer);
+    var desc = Object.getOwnPropertyDescriptor(ta, "0");
+    ta[0] = 42;
+    assert(ta[0], 0);
+    Object.defineProperty(ta, "0", {value: 1337});
+    assert(ta[0], 0);
+    assert(desc.writable, true);
+    assert(desc.enumerable, true);
+    assert(desc.configurable, true);
 }
 
 function test_json()
@@ -652,6 +736,18 @@ function test_json()
   3
  ]
 ]`);
+
+    /* the space argument can be a rope, which is not a JSString: it must be
+       linearized before its characters are read, else the gap is filled with
+       the raw bytes of the rope's internal JSValues */
+    var rope = "a".repeat(600) + "b".repeat(600);
+    var expected = '{\n' + "a".repeat(10) + '"x": 1\n}';
+    assert(JSON.stringify({x:1}, null, rope), expected);
+    assert(JSON.stringify({x:1}, null, new String(rope)), expected);
+    /* wide char rope */
+    var wide = "é".repeat(600) + "è".repeat(600);
+    assert(JSON.stringify({x:1}, null, wide),
+           '{\n' + "é".repeat(10) + '"x": 1\n}');
 }
 
 function test_date()
@@ -826,7 +922,7 @@ function test_regexp()
     } catch (_ex) {
         ex = _ex;
     }
-    assert(ex?.message, "invalid class range");
+    assert(ex?.message, "invalid character in class in regular expression");
 
     eval("/[\\-]/");
     eval("/[\\-]/u");
@@ -1113,6 +1209,31 @@ function test_proxy_iter()
     assert(a[1], "y");
 }
 
+function test_proxy_own_keys_huge_length()
+{
+    for (const length of [0x20000000, 0x40000000, 0xfffffffe, 0xffffffff]) {
+        const p = new Proxy({}, { ownKeys() { return {length}; } });
+        /* index 0 is undefined, so this must fail on the very first entry */
+        assertThrows(TypeError, function() { Object.keys(p); });
+        assertThrows(TypeError, function() { Object.getOwnPropertyNames(p); });
+    }
+
+    const keys = ["a", "b", Symbol("c")];
+    const p = new Proxy({}, {
+        ownKeys() {
+            return new Proxy({length: 0xffffffff}, {
+                get(t, k) {
+                    if (k === "length") return 0xffffffff;
+                    const i = Number(k);
+                    if (i < keys.length) return keys[i];
+                    throw new RangeError("stop at " + i);
+                },
+            });
+        },
+    });
+    assertThrows(RangeError, function() { Object.getOwnPropertyNames(p); });
+}
+
 /* CVE-2023-31922 */
 function test_proxy_is_array()
 {
@@ -1207,6 +1328,7 @@ test_function();
 test_enum();
 test_array();
 test_string();
+test_rope();
 test_math();
 test_number();
 test_eval();
@@ -1221,6 +1343,7 @@ test_set();
 test_weak_set();
 test_generator();
 test_proxy_iter();
+test_proxy_own_keys_huge_length();
 test_proxy_is_array();
 test_finalization_registry();
 test_exception_source_pos();

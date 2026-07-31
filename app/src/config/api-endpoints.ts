@@ -48,6 +48,10 @@ export const API_ENDPOINTS = {
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 
 	// Execution
+	// Composition first, execution second: POST /compose resolves {{variables}}
+	// and inherit auth engine-side and returns the payload the two execution
+	// endpoints accept unchanged (issue #226).
+	COMPOSE_REQUEST: `/compose`,
 	EXECUTE_REQUEST: `/execute`,
 	START_LOAD_TEST: `/runs`,
 

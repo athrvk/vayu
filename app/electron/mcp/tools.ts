@@ -23,16 +23,10 @@ import { EngineRequestError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import { checkAllowlist, checkLoadCaps } from "./safety.js";
 import { compareReports } from "./compare.js";
-import {
-	loadResolutionContext,
-	composeAuth,
-	composeSavedRequest,
-	HTTP_VERSIONS,
-	type AuthRecord,
-	type Resolver,
-	type ResolutionContext,
-	type SavedRequestLike,
-} from "./resolve.js";
+import { HTTP_VERSIONS } from "./http-versions.js";
+
+/** An auth block as stored/forwarded (discriminated by `mode`). */
+type AuthRecord = Record<string, unknown> & { mode?: string };
 
 // --- Elicitation -------------------------------------------------------------
 
@@ -181,85 +175,76 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 class ToolArgError extends Error {}
 
 /**
- * The request fields an agent stated directly, resolved - and *only* the ones it
- * actually supplied, so this can be laid over an already-composed saved request
- * without a `method: "GET"` default clobbering its stored verb.
+ * The request fields an agent stated directly, raw - and *only* the ones it
+ * actually supplied, so this can be laid over a saved request by `POST
+ * /compose` without a `method: "GET"` default clobbering its stored verb.
  *
- * Separate from {@link buildExecutionPayload} so the ad-hoc path and the
- * saved-request path share one copy of the header/body shaping rules rather
- * than growing a second. When a `resolver` is supplied, `{{variables}}` are
- * substituted in the URL, header keys/values, and body content (the app
- * resolves these renderer-side before the engine ever sees them; MCP must do
- * the same). The body is emitted as `{ mode, content }` - the shape the
- * engine's `deserialize_request` reads (it keys off `mode`, not `type`).
+ * Nothing here resolves `{{variables}}` anymore: composition - interpolation
+ * and the `inherit` auth walk - is engine-owned (issue #226), and MCP hands
+ * the engine raw strings. The body is emitted as `{ mode, content }` - the
+ * shape the engine's `deserialize_request` reads (it keys off `mode`, not
+ * `type`).
  */
-function readRequestOverrides(
-	args: Record<string, unknown>,
-	resolver?: Resolver
-): Record<string, unknown> {
-	const rs = (s: string): string => resolver?.resolveString(s) ?? s;
+function readRequestOverrides(args: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
-	// Upper-cased because the engine's `parse_method` matches the verb exactly,
-	// and because `composeSavedRequest` already normalises this - the two paths
-	// have to agree on what a saved request's method looks like on the wire.
+	// Upper-cased because the engine's `parse_method` matches the verb exactly
+	// (compose normalises this too; being explicit keeps previews readable).
 	const method = str(args, "method");
 	if (method !== undefined) out.method = method.toUpperCase();
 	const url = str(args, "url");
-	if (url !== undefined) out.url = rs(url);
+	if (url !== undefined) out.url = url;
 	if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 		const headers: Record<string, string> = {};
 		for (const [key, value] of Object.entries(args.headers as Record<string, unknown>)) {
-			headers[rs(key)] = rs(String(value));
+			headers[key] = String(value);
 		}
 		out.headers = headers;
 	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
-		out.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
+		out.body = { mode: str(args, "bodyType") ?? "text", content: bodyContent };
 	}
-	// httpVersion is an override, so it has to be read here rather than on the
-	// ad-hoc payload builder: `composeLoadRunRequest`'s saved-request branch
-	// never calls that builder, and `composeSavedRequest` always emits a
-	// protocol - so a `start_load_run { requestId, httpVersion }` would go out
-	// at the *stored* protocol while the tool advertised the argument.
-	//
-	// Forwarded only when the agent supplies one. On a URL-only call there is no
-	// stored row to protect from an engine-side default, the same treatment
-	// `followRedirects` / `maxRedirects` get here; an absent field already
-	// resolves to Auto (`deserialize_request` only assigns inside
-	// `if (json.contains(...))`). The `run_request` / `start_load_run` Zod
-	// schemas restrict the value to a known protocol.
+	// httpVersion is an override like any other field here: `POST /compose`
+	// always emits a stored request's protocol, so a `start_load_run
+	// { requestId, httpVersion }` must lay the agent's choice over it.
+	// Forwarded only when the agent supplies one - on a URL-only call an
+	// absent field already resolves to Auto engine-side. The `run_request` /
+	// `start_load_run` Zod schemas restrict the value to a known protocol.
 	const httpVersion = str(args, "httpVersion");
 	if (httpVersion !== undefined) out.httpVersion = httpVersion;
 	return out;
 }
 
 /**
- * Build the engine `/execute` or `/runs` body from loose tool arguments.
- * `opts.url` lets the caller pass an already-resolved URL (it is resolved once,
- * up front, for the allowlist check).
+ * Compose a request engine-side and return the execute-ready payload.
+ *
+ * This is the one place MCP's execute/load tools obtain a resolved request:
+ * `POST /compose` owns `{{variable}}` interpolation and the `inherit` auth
+ * walk (issue #226 deleted the MCP-side copy). Composition is pure - nothing
+ * is sent - which is what lets the caller run the allowlist gate on the
+ * *resolved* URL before any traffic flows, and the composed payload is passed
+ * to `/execute` or `/runs` unchanged, so it is never interpolated twice.
+ *
+ * A 404 for a named `requestId` surfaces as a {@link ToolArgError} so the
+ * agent reads "no such saved request", not a transport failure.
  */
-function buildExecutionPayload(
-	args: Record<string, unknown>,
-	opts?: { resolver?: Resolver; url?: string }
-): Record<string, unknown> {
-	const overrides = readRequestOverrides(args, opts?.resolver);
-	const payload: Record<string, unknown> = {
-		...overrides,
-		method: (overrides.method as string | undefined) ?? "GET",
-		url: opts?.url ?? (overrides.url as string | undefined) ?? requireStr(args, "url"),
-	};
-	// Scripts are deliberately *not* forwarded here. Each handler adds its own,
-	// because what a script *is* differs by caller: an ad-hoc string from the
-	// agent, or the chain-composed `postRequestScripts` list that
-	// `composeLoadRunRequest` builds from a saved request. Forwarding a string
-	// here would quietly sit beside a composed list and, since the engine reads
-	// the list first, be ignored.
-	for (const key of ["requestId", "environmentId"]) {
-		const v = str(args, key);
-		if (v !== undefined) payload[key] = v;
+async function composeViaEngine(
+	client: EngineClient,
+	body: Record<string, unknown>,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	try {
+		const composed = await client.composeRequest(body, signal);
+		if (!composed || typeof composed !== "object" || Array.isArray(composed)) {
+			throw new ToolArgError("Engine returned an unusable composed request.");
+		}
+		return composed as Record<string, unknown>;
+	} catch (err) {
+		if (err instanceof EngineRequestError && err.status === 404 && body.requestId) {
+			throw new ToolArgError(`No saved request with id "${String(body.requestId)}".`);
+		}
+		throw err;
 	}
-	return payload;
 }
 
 /**
@@ -289,9 +274,6 @@ function readValidationScript(args: Record<string, unknown>): string | undefined
 	return post ?? tests;
 }
 
-/** Regex used only to *detect* whether resolution is needed (non-global: no lastIndex state). */
-const TEMPLATE_RE = /\{\{[^{}]+\}\}/;
-
 /** Read an optional agent-supplied `auth` block (a `{ mode, … }` object). */
 function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
 	const a = args.auth;
@@ -299,49 +281,21 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
 }
 
 /**
- * Build the resolution scope for an ad-hoc execute/load call. Loading the
- * variable sources (globals/collection/environment) costs engine round-trips,
- * so we skip it entirely unless the call actually needs it: some field carries
- * a `{{template}}`, or the auth is `inherit` (which must walk the collection
- * chain). When nothing needs resolving, an identity context is returned.
- */
-async function resolutionScopeFor(
-	args: Record<string, unknown>,
-	client: EngineClient,
-	signal?: AbortSignal
-): Promise<ResolutionContext> {
-	const authArg = readAuthArg(args);
-	const templated = TEMPLATE_RE.test(
-		JSON.stringify([str(args, "url"), args.headers ?? null, str(args, "body"), authArg ?? null])
-	);
-	if (!templated && authArg?.mode !== "inherit") {
-		return { chain: [], resolveString: (s) => s, resolveObject: (v) => v };
-	}
-	return loadResolutionContext(client, {
-		collectionId: str(args, "collectionId"),
-		environmentId: str(args, "environmentId"),
-		signal,
-	});
-}
-
-/**
  * Build the request half of a `POST /runs` body - everything except the load
  * shape (mode, duration, concurrency…).
  *
- * **Two shapes, one rule.** Given a `requestId`, the saved request is composed
- * exactly as the app composes it for a load run and as `run_collection_smoke`
- * composes it for a Send - variables resolved, its stored auth applied through
- * the collection chain, and the chain's + its own test scripts attached. That
- * composition is `composeSavedRequest`, reused rather than reimplemented, so
- * "what a saved request means" has one definition for both tools. Anything the
- * agent states explicitly - url, method, headers, body, auth, tests - overrides
- * the composed field. Without a `requestId` the run is ad-hoc and `url` is
- * required.
+ * **Two shapes, one rule.** Given a `requestId`, `POST /compose` composes the
+ * saved request exactly as the app composes it for a load run and as
+ * `run_collection_smoke` composes it for a Send - variables resolved, its
+ * stored auth applied through the collection chain, and the chain's + its own
+ * test scripts attached. Anything the agent states explicitly - url, method,
+ * headers, body, auth, tests - is laid over the stored request *before*
+ * resolution, so overrides carrying `{{variables}}` resolve too. Without a
+ * `requestId` the run is ad-hoc and `url` is required.
  *
  * The composed scripts stay under `postRequestScripts`: `POST /runs` reads that
  * name as an alias of `tests` (`read_post_request_script`), which is what lets
- * one composed request start either kind of run without a second shape. Before
- * that alias existed, this tool could not have sent them at all.
+ * one composed request start either kind of run without a second shape.
  *
  * `droppedPreRequestScripts` counts what a load run cannot honour - the engine
  * has no pre-request hook on `POST /runs`, so a saved request that signs itself
@@ -354,49 +308,42 @@ async function composeLoadRunRequest(
 	signal?: AbortSignal
 ): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
 	const savedId = str(args, "requestId");
-	let payload: Record<string, unknown>;
-	let resolver: ResolutionContext;
-	let droppedPreRequestScripts = 0;
+	const overrides = readRequestOverrides(args);
+	const authArg = readAuthArg(args);
+	if (authArg) overrides.auth = authArg;
 
+	const composeBody: Record<string, unknown> = {
+		collectionId: str(args, "collectionId"),
+		environmentId: str(args, "environmentId"),
+	};
 	if (savedId === undefined) {
 		if (str(args, "url") === undefined) {
 			throw new ToolArgError(
 				'Pass "url" for an ad-hoc load run, or "requestId" to load-test a saved request.'
 			);
 		}
-		resolver = await resolutionScopeFor(args, ctx.client, signal);
-		payload = buildExecutionPayload(args, {
-			resolver,
-			url: resolver.resolveString(requireStr(args, "url")),
-		});
+		composeBody.request = {
+			...overrides,
+			method: (overrides.method as string | undefined) ?? "GET",
+			url: requireStr(args, "url"),
+		};
 	} else {
-		const saved = (await ctx.client.getRequest(savedId, signal)) as SavedRequestLike | null;
-		if (!saved || typeof saved !== "object") {
-			throw new ToolArgError(`No saved request with id "${savedId}".`);
-		}
-		const environmentId = str(args, "environmentId");
-		// The saved request's own collection scopes resolution; an explicit
-		// collectionId is only a fallback for a request that has none.
-		resolver = await loadResolutionContext(ctx.client, {
-			collectionId: saved.collectionId || str(args, "collectionId"),
-			environmentId,
-			signal,
-		});
-		const composed = composeSavedRequest(saved, resolver.chain, resolver, environmentId);
-		droppedPreRequestScripts = composed.preRequestScripts?.length ?? 0;
-		const { preRequestScripts: _unrunnable, ...runnable } = composed;
-		payload = { ...runnable, ...readRequestOverrides(args, resolver) };
+		composeBody.requestId = savedId;
+		if (Object.keys(overrides).length > 0) composeBody.request = overrides;
 	}
 
-	const authArg = readAuthArg(args);
-	if (authArg) {
-		const auth = composeAuth(authArg, resolver.chain, resolver);
-		if (auth) payload.auth = auth;
-	}
+	const payload = await composeViaEngine(ctx.client, composeBody, signal);
+
+	// A saved request's pre-request scripts cannot run under load; strip them
+	// from the payload but report how many were dropped.
+	const droppedPreRequestScripts = Array.isArray(payload.preRequestScripts)
+		? payload.preRequestScripts.length
+		: 0;
+	delete payload.preRequestScripts;
 
 	// An agent-written validation script replaces the composed one rather than
 	// joining it, and must clear `postRequestScripts` to do so: /runs reads both
-	// names now, prefers the list, and would otherwise run the saved request's
+	// names, prefers the list, and would otherwise run the saved request's
 	// assertions while silently ignoring the ones the agent asked for. This is
 	// the only place either name is placed on a run payload - the handler does
 	// not add it again.
@@ -703,21 +650,44 @@ export const TOOLS: McpTool[] = [
 			tests: validationScriptAliasInput,
 		},
 		handler: async (args, ctx, signal) => {
-			const rc = await resolutionScopeFor(args, ctx.client, signal);
-			const url = rc.resolveString(requireStr(args, "url"));
-			const gate = checkAllowlist(url, ctx.config);
-			if (!gate.ok) return errorResult(gate.error!);
-			const payload = buildExecutionPayload(args, { resolver: rc, url });
-			// `/execute`'s own key names for the two ad-hoc scripts.
+			const request: Record<string, unknown> = {
+				...readRequestOverrides(args),
+				url: requireStr(args, "url"),
+			};
+			if (request.method === undefined) request.method = "GET";
+			// `/execute`'s own key names for the two ad-hoc scripts. Scripts ride
+			// through composition untouched - the engine never interpolates them.
 			const preScript = str(args, "preRequestScript");
-			if (preScript !== undefined) payload.preRequestScript = preScript;
+			if (preScript !== undefined) request.preRequestScript = preScript;
 			const postScript = readValidationScript(args);
-			if (postScript !== undefined) payload.postRequestScript = postScript;
+			if (postScript !== undefined) request.postRequestScript = postScript;
 			const authArg = readAuthArg(args);
-			if (authArg) {
-				const auth = composeAuth(authArg, rc.chain, rc);
-				if (auth) payload.auth = auth;
+			if (authArg) request.auth = authArg;
+
+			// Compose engine-side (pure), gate on the *resolved* URL, then execute
+			// the composed payload unchanged - resolved exactly once.
+			let payload: Record<string, unknown>;
+			try {
+				payload = await composeViaEngine(
+					ctx.client,
+					{
+						request,
+						collectionId: str(args, "collectionId"),
+						environmentId: str(args, "environmentId"),
+					},
+					signal
+				);
+			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
 			}
+			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config);
+			if (!gate.ok) return errorResult(gate.error!);
+			// `requestId` here only links the run to a saved request for History;
+			// it must not reach /compose, which would compose the *stored* row
+			// instead of the arguments the agent actually gave.
+			const linkId = str(args, "requestId");
+			if (linkId !== undefined) payload.requestId = linkId;
 			return callEngine(() => ctx.client.executeRequest(payload, signal));
 		},
 	},
@@ -916,15 +886,8 @@ export const TOOLS: McpTool[] = [
 			const collectionId = requireStr(args, "collectionId");
 			const environmentId = str(args, "environmentId");
 			let requests: unknown;
-			let rc: ResolutionContext;
 			try {
-				// Fetch the requests and the resolution scope (collection chain +
-				// variable sources) concurrently - the scope is shared across every
-				// request in the collection.
-				[requests, rc] = await Promise.all([
-					ctx.client.listRequests(collectionId, signal),
-					loadResolutionContext(ctx.client, { collectionId, environmentId, signal }),
-				]);
+				requests = await ctx.client.listRequests(collectionId, signal);
 			} catch (err) {
 				return engineErrorResult(err);
 			}
@@ -935,13 +898,36 @@ export const TOOLS: McpTool[] = [
 			let skipped = 0;
 
 			for (const item of list) {
-				const req = (item ?? {}) as SavedRequestLike;
+				const req = (item ?? {}) as {
+					id?: string;
+					name?: string;
+					method?: string;
+					url?: string;
+				};
 				const name = String(req.name ?? req.id ?? "request");
-				// Compose the request the same way the app's Send does: resolve
-				// variables, apply stored/inherited auth, and compose scripts.
-				const outgoing = composeSavedRequest(req, rc.chain, rc, environmentId);
-				const method = outgoing.method;
-				const url = outgoing.url;
+				// Compose the request the same way the app's Send does - engine-side
+				// (`POST /compose`): variables resolved, stored/inherited auth
+				// applied, and the chain's + its own scripts attached.
+				let outgoing: Record<string, unknown>;
+				try {
+					outgoing = await composeViaEngine(
+						ctx.client,
+						{ requestId: String(req.id ?? ""), environmentId },
+						signal
+					);
+				} catch (err) {
+					results.push({
+						name,
+						method: String(req.method ?? "GET"),
+						url: String(req.url ?? ""),
+						ok: false,
+						error: err instanceof Error ? err.message : String(err),
+					});
+					failed++;
+					continue;
+				}
+				const method = String(outgoing.method ?? "GET");
+				const url = String(outgoing.url ?? "");
 
 				const gate = checkAllowlist(url, ctx.config);
 				if (!gate.ok) {
