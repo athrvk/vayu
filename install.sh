@@ -599,23 +599,30 @@ preauthorize() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	# stderr, not stdout: this function's stdout is the keep-alive's PID, and a
-	# notice printed there is captured as part of it. That is how the PID the
-	# trap tried to kill became a sentence, leaving the keep-alive orphaned.
-	warn "Vayu installs to $INSTALL_DIR and needs administrator access."
+	log "Vayu installs to $INSTALL_DIR and needs administrator access."
 	sudo -v || die 'Authorization failed - aborting.'
-	# Tied to this script's lifetime explicitly. Each `sudo -n true` *refreshes*
-	# the timestamp, so a loop left running would sustain passwordless sudo for
-	# this terminal indefinitely - the EXIT trap normally kills it, but an
-	# untrapped death (a closed terminal) would orphan it.
-	# The redirect is load-bearing, not tidiness. This function's caller reads the
-	# PID through a command substitution, and a command substitution waits for
-	# every process still holding the write end of its pipe - so a background
-	# loop that inherits stdout keeps `keepalive="$(preauthorize)"` blocked until
-	# the loop exits, which is never. It hung the macOS job for its full timeout.
-	( while kill -0 "$$" 2>/dev/null; do sleep 60; sudo -n true 2>/dev/null || exit; done ) \
-		>/dev/null 2>&1 &
-	printf '%s' "$!"
+	return 0
+}
+
+# Sudo's timestamp can expire during a slow download, so it is renewed once
+# immediately before the only steps that need it.
+#
+# This replaced a background loop that refreshed every 60 seconds, which was the
+# wrong shape three ways over: each refresh *extends* passwordless sudo rather
+# than merely preserving it, so a loop that outlived the script - a closed
+# terminal, an untrapped signal - held that window open for the terminal; the
+# loop had to be killed from a trap, which meant carrying its PID around and
+# returning it through a command substitution that the loop itself then blocked;
+# and killing the loop still left its current `sleep` orphaned, which is what
+# the CI runner kept reporting. One `sudo -v` at the point of use needs none of
+# that. If the timestamp did expire, this is where the password is asked for
+# again, which is the honest moment to ask.
+refresh_sudo() {
+	[ "$(platform)" = "Darwin" ] || return 0
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		return 0
+	fi
+	sudo -v || die 'Authorization expired and could not be renewed - nothing was installed.'
 	return 0
 }
 
@@ -863,7 +870,7 @@ do_install() {
 	# version still needs putting back.
 	sweep_staging
 	(
-		local version url workdir staged installed quit_by_installer=0 keepalive=""
+		local version url workdir staged installed quit_by_installer=0
 		# `version="$(resolve_version)"` on its own would abort the subshell at
 		# the assignment under `set -e` whenever the lookup failed - taking the
 		# message below with it, so a rate-limited or offline run exited 1 in
@@ -900,9 +907,9 @@ do_install() {
 		# closed terminal, or a declined password would otherwise leave the temp
 		# dir, a part-downloaded file beside the app, and a sudo keep-alive
 		# holding a passwordless timestamp open for this terminal.
-		trap 'rm -rf "$workdir"; rm -f "$staged"; if [ -n "$keepalive" ]; then kill "$keepalive" 2>/dev/null || true; fi' EXIT
+		trap 'rm -rf "$workdir"; rm -f "$staged"' EXIT
 		trap 'exit 130' INT TERM HUP
-		keepalive="$(preauthorize)"
+		preauthorize
 
 		run mkdir -p "$(dirname "$staged")"
 		download_asset "$url" "$staged"
@@ -916,6 +923,8 @@ do_install() {
 			quit_by_installer=1
 		fi
 
+		# The download sits between the password prompt and here.
+		refresh_sudo
 		place_app "$workdir" "$version"
 
 		# Said on both paths: the update case - app running, so it gets
