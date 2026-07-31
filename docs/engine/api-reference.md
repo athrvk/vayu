@@ -849,7 +849,7 @@ hits the wire:
 
 | `auth.mode` | Effect |
 |-------------|--------|
-| `none` / `inherit` | No-op (`inherit` is resolved app-side before it reaches the engine) |
+| `none` / `inherit` | No-op (`inherit` is resolved by [`POST /compose`](#post-compose) before it reaches an execution endpoint; one arriving unresolved is a warning in the logs) |
 | `bearer` | `Authorization: Bearer <token>` |
 | `basic` | `Authorization: Basic <base64(user:pass)>` |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
@@ -937,6 +937,70 @@ and `cacheKey` is returned.
 
 ## Execution
 
+### POST /compose
+
+Compose a request without sending it: resolve `{{variables}}` and `inherit`
+auth engine-side and return the execute-ready payload that `POST /execute` and
+`POST /runs` accept unchanged (issue #226). Pure - no traffic, no run row -
+which is what lets a client (e.g. MCP's allowlist gate) inspect the *resolved*
+request before anything is sent. The execution endpoints never interpolate, so
+composing here and executing the result resolves everything exactly once; a
+payload that skips composition is sent byte-for-byte as supplied.
+
+**Request** - at least one of `requestId` / `request` is required:
+
+```json
+{
+  "requestId": "req_1234567890",   // Optional: compose the saved request
+  "request": {                      // Optional: an inline unresolved request
+    "method": "POST",
+    "url": "https://{{host}}/users",
+    "headers": { "X-Token": "{{token}}" },
+    "body": { "mode": "json", "content": "{\"name\":\"{{name}}\"}" },
+    "auth": { "mode": "inherit" },
+    "preRequestScripts": [],
+    "postRequestScripts": []
+  },
+  "collectionId": "col_1234567890", // Optional: chain scope for an inline request
+  "environmentId": "env_1234567890" // Optional: environment scope
+}
+```
+
+- **`requestId`** composes the stored request wholesale: URL, flattened enabled
+  headers (later duplicates win), body, auth (absent auth defaults to
+  `inherit`), the ordered script-part lists (collection chain root→leaf, then
+  the request's own), and the stored execution options (`followRedirects` /
+  `maxRedirects` / `httpVersion`, always emitted). The request's own collection
+  scopes resolution; `collectionId` is only a fallback for a request without
+  one. An unknown id is a definitive **404**.
+- **`request`** is an inline unresolved request in the `POST /execute` body
+  shape. Given *alongside* `requestId`, its fields lay over the stored ones
+  before resolution - how an override like "retarget this saved request at
+  another URL" works. Given alone, `collectionId` scopes the variable chain and
+  the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
+  erroring - composition works with no collection or environment at all.
+
+**What gets resolved:** the URL, header keys and values, body `content` and
+`fields`, and every string inside the winning auth block - after `inherit` is
+walked (leaf→root; an explicit `noauth` terminates the walk, `none` is stepped
+over) and strictly before any OAuth 2.0 cache key is derived from the config.
+Script text is **never** interpolated - a `{{...}}` in a script is user
+JavaScript. Resolution semantics (precedence, unknown names, dynamic
+variables, the D17 malformed-data rules) are specified in
+[variable-resolution](../app/variable-resolution.md) and pinned by the shared
+conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json`).
+
+**Response:** `200` with the composed payload - the `POST /execute` body shape,
+with `requestId` / `environmentId` echoed so the result can be POSTed onward
+unchanged. An auth that resolves to "send nothing" is an absent `auth` field.
+
+**Errors** use the nested shape (this endpoint postdates the flat/nested split
+and never speaks the flat legacy shape):
+
+- `404` `{"error": {"code": "request_not_found", "message": "..."}}` - unknown `requestId`.
+- `400` `{"error": {"code": "invalid_compose_request", "message": "..."}}` -
+  malformed JSON, neither `requestId` nor `request`, or a field of the wrong type.
+
 ### POST /execute
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
@@ -1020,11 +1084,11 @@ negotiates 1.1, since h2 is not offered over cleartext). This is what was
 actually negotiated, and the two can differ. The renderer always sends this
 field on every execute, never eliding it even when it equals the default - the
 same rule `followRedirects` follows, and for the same reason: an omitted field
-lets an engine-side default win silently. MCP's saved-request path
-(`run_collection_smoke`) does the same through `composeExecutionOptions`; its
-two ad-hoc tools (`run_request` / `start_load_run`) forward `httpVersion` only
-when the caller supplies it, since there is no saved request behind an ad-hoc
-call for an omission to silently override (see
+lets an engine-side default win silently. MCP's saved-request paths get the
+same guarantee from `POST /compose`, which always emits a stored request's
+execution options; its two ad-hoc tools (`run_request` / `start_load_run`)
+forward `httpVersion` only when the caller supplies it, since there is no
+saved request behind an ad-hoc call for an omission to silently override (see
 [mcp.md](mcp.md#request-composition)). It governs **both** Send and load test -
 `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually
 stored (see [Requests](#requests) above); `POST /runs` (below) is simply the

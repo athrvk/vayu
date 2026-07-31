@@ -207,34 +207,61 @@ applied to the outgoing request rather than being left to the UI. This lives in
 PKCE hashing uses the vendored MIT **picosha2** single-header (no OpenSSL). See
 the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
-### Request composition boundary (client-side today)
+### Request composition boundary (engine-owned via POST /compose)
 
-The engine composes a request only **partway**. On `POST /execute` it loads the
-environment, globals, and the request's collection variables (into the QuickJS
-script context), resolves/applies concrete auth, and now also **joins and runs
-the pre/post script parts** - but it does **not**:
+The engine owns request composition since issue #226 (backlog A1).
+`POST /compose` (`routes/compose.cpp` → `compose_request_core` in
+`src/http/request_composer.cpp`) takes a `requestId` (a saved request) and/or
+an inline unresolved `request`, plus `collectionId` / `environmentId` scope
+ids, and returns the execute-ready payload that `POST /execute` and `POST
+/runs` accept unchanged. Composition:
 
-- interpolate `{{variables}}` into the URL / headers / body (no `{{}}` handling
-  exists anywhere in `engine/`), or
-- resolve `inherit` auth by walking the collection ancestor chain (`parse_auth`
-  drops `{"mode":"inherit"}` as "resolved app-side").
+- builds the effective variable map (globals < collection chain root→leaf <
+  environment, enabled definitions only) and interpolates `{{variables}}` into
+  the URL, header keys/values, body content/fields, and the auth block -
+  single-pass, raw stored strings, unknown plain names to `""`, unknown
+  `$names` kept braced, dynamic variables (`{{$guid}}`, …) generated per
+  occurrence;
+- resolves `inherit` auth by walking the collection ancestor chain leaf→root
+  (an explicit `noauth` terminates the walk, `none` is stepped over), and
+  resolves variables inside the winning block **before** any OAuth 2.0 cache
+  key can be derived from it;
+- for a `requestId`, assembles the whole payload from the stored row: flattened
+  enabled headers, body, execution options, and the ordered script-part lists
+  from the chain plus the request's own. An inline `request` given alongside a
+  `requestId` lays over the stored fields before resolution (how MCP's
+  `start_load_run` overrides work).
 
-Those two steps are done **client-side**, so they are duplicated in the app
-renderer and the MCP layer (`app/electron/mcp/resolve.ts`). Consolidating them
-into the engine - so clients pass a `requestId` + `environmentId` and the engine
-composes - is a deferred maintainability item: see
-`docs/plans/pending-backlog.md` → **A1**. Do not start it without an explicit ask.
+Composition is **pure** - nothing is sent, no run row is created - and the
+execution endpoints still interpolate **nothing**, so a payload is resolved
+exactly once and ad-hoc bodies with literal `{{...}}` are safe on the direct
+`/execute` / `/runs` path. Interpolation therefore always happens strictly
+*before* the pre-request script runs (a deliberate divergence from Postman's
+script-first order; a `pm.environment.set` cannot affect `{{var}}` in the same
+send's URL). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+is treated as no auth and logged as a **warning** - it means a client skipped
+composition.
 
-Script composition moved partly server-side already: clients send an ordered
-list of parts (`{ origin: "collection" | "request", id?, name?, script }` -
+Clients: the renderer sends its editor state through the inline shape (Send,
+load test, and History's replay - editor state can be unsaved or a detached
+copy, which is why compose-by-id alone would not do); MCP composes saved
+requests by id and gates its allowlist on the *composed* URL. The renderer
+keeps a preview-only copy of the substitution rules
+(`app/src/lib/variable-resolution.ts`) for tab titles, previews and the
+unresolved-token painting; the shared conformance fixture
+(`engine/tests/fixtures/variable-resolution-conformance.json`) holds it to the
+engine's behaviour.
+
+Script composition: clients on the inline path send an ordered list of parts
+(`{ origin: "collection" | "request", id?, name?, script }` -
 `preRequestScripts` / `postRequestScripts` on `POST /execute`, `tests` on
 `POST /runs`; the legacy single-string field still works) built by walking the
 collection chain root-to-leaf then appending the request's own (`scriptParts`
-in `app/src/modules/request-builder/utils/script-parts.ts` and in
-`app/electron/mcp/resolve.ts`). The engine joins the parts with `"\n\n"`,
+in `app/src/modules/request-builder/utils/script-parts.ts`); the by-id path
+builds the same list engine-side. The engine joins the parts with `"\n\n"`,
 dropping any whose script is empty or only whitespace, and runs the result once
-(`engine/src/http/script_parts.cpp::read_script`). Building that ordered list -
-not joining it - is what remains client-side.
+(`engine/src/http/script_parts.cpp::read_script`). Script text is **never**
+interpolated - a `{{...}}` inside a script is user JavaScript, not a template.
 
 ### Database (`SQLite`)
 

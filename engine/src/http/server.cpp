@@ -125,6 +125,7 @@ void Server::setup_routes () {
     routes::register_globals_routes (*route_ctx_);
     routes::register_run_routes (*route_ctx_);
     routes::register_execution_routes (*route_ctx_);
+    routes::register_compose_routes (*route_ctx_);
     routes::register_metrics_routes (*route_ctx_);
     routes::register_scripting_routes (*route_ctx_);
     routes::register_import_routes (*route_ctx_);

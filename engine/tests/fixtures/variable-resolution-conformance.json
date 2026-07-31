@@ -1,0 +1,186 @@
+{
+  "$comment": "Cross-language conformance fixture for {{variable}} resolution (issue #226). Read by BOTH the engine gtest suite (request_composer_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/lib/variable-resolution.conformance.test.ts) - the engine owns execution-time resolution, the renderer's copy is preview-only, and this table is what keeps the two from drifting. Each scope is a raw stored-variables bag exactly as it sits in SQLite, so deliberately malformed entries (non-string values, absent or non-boolean 'enabled') exercise the D17 rules on both sides: a definition with absent 'enabled' is enabled, and a non-string 'value' reads as empty string. 'chain' is the collection ancestor chain, root first.",
+  "dynamicVariableNames": [
+    "$guid",
+    "$randomUUID",
+    "$timestamp",
+    "$isoTimestamp",
+    "$randomInt",
+    "$randomAlphaNumeric",
+    "$randomBoolean",
+    "$randomEmail",
+    "$randomFirstName",
+    "$randomLastName",
+    "$randomFullName",
+    "$randomCompanyName",
+    "$randomUrl",
+    "$randomIP",
+    "$randomPassword"
+  ],
+  "cases": [
+    {
+      "name": "environment beats collection chain beats globals",
+      "scopes": {
+        "globals": { "host": { "value": "globals.test", "enabled": true } },
+        "chain": [{ "host": { "value": "chain.test", "enabled": true } }],
+        "environment": { "host": { "value": "env.test", "enabled": true } }
+      },
+      "input": "https://{{host}}/api",
+      "expected": "https://env.test/api"
+    },
+    {
+      "name": "within the chain, leaf overrides root",
+      "scopes": {
+        "chain": [
+          { "host": { "value": "root.test", "enabled": true } },
+          { "host": { "value": "leaf.test", "enabled": true } }
+        ]
+      },
+      "input": "{{host}}",
+      "expected": "leaf.test"
+    },
+    {
+      "name": "globals resolve when nothing shadows them",
+      "scopes": { "globals": { "token": { "value": "g-123", "enabled": true } } },
+      "input": "Bearer {{token}}",
+      "expected": "Bearer g-123"
+    },
+    {
+      "name": "a disabled higher-precedence definition falls back to the next scope",
+      "scopes": {
+        "chain": [{ "host": { "value": "chain.test", "enabled": true } }],
+        "environment": { "host": { "value": "env.test", "enabled": false } }
+      },
+      "input": "{{host}}",
+      "expected": "chain.test"
+    },
+    {
+      "name": "a name whose every definition is disabled resolves to empty",
+      "scopes": {
+        "globals": { "gone": { "value": "a", "enabled": false } },
+        "environment": { "gone": { "value": "b", "enabled": false } }
+      },
+      "input": "[{{gone}}]",
+      "expected": "[]"
+    },
+    {
+      "name": "D17: absent 'enabled' counts as enabled",
+      "scopes": { "environment": { "host": { "value": "implicit.test" } } },
+      "input": "{{host}}",
+      "expected": "implicit.test"
+    },
+    {
+      "name": "D17: a non-boolean 'enabled' counts as enabled",
+      "scopes": { "environment": { "host": { "value": "loose.test", "enabled": "yes" } } },
+      "input": "{{host}}",
+      "expected": "loose.test"
+    },
+    {
+      "name": "D17: a numeric stored value reads as empty string",
+      "scopes": { "environment": { "port": { "value": 8080, "enabled": true } } },
+      "input": "p={{port}}",
+      "expected": "p="
+    },
+    {
+      "name": "D17: an object stored value reads as empty string",
+      "scopes": {
+        "environment": { "blob": { "value": { "nested": true }, "enabled": true } }
+      },
+      "input": "b={{blob}}",
+      "expected": "b="
+    },
+    {
+      "name": "D17: a null stored value reads as empty string",
+      "scopes": { "environment": { "nil": { "value": null, "enabled": true } } },
+      "input": "n={{nil}};still={{nil}}",
+      "expected": "n=;still="
+    },
+    {
+      "name": "D17: one malformed definition does not discard its siblings",
+      "scopes": {
+        "environment": {
+          "bad": { "value": 42, "enabled": true },
+          "good": { "value": "kept", "enabled": true }
+        }
+      },
+      "input": "{{good}}/{{bad}}",
+      "expected": "kept/"
+    },
+    {
+      "name": "an ordinary unknown name resolves to empty string",
+      "scopes": { "environment": { "known": { "value": "x", "enabled": true } } },
+      "input": "a={{missing}}&b={{known}}",
+      "expected": "a=&b=x"
+    },
+    {
+      "name": "an unknown $name keeps its braces (issue #186)",
+      "scopes": {},
+      "input": "id={{$notAGenerator}}",
+      "expected": "id={{$notAGenerator}}"
+    },
+    {
+      "name": "a user-defined variable named $guid beats the generator",
+      "scopes": { "environment": { "$guid": { "value": "pinned-guid", "enabled": true } } },
+      "input": "{{$guid}}",
+      "expected": "pinned-guid"
+    },
+    {
+      "name": "whitespace around the name is trimmed",
+      "scopes": { "environment": { "host": { "value": "trim.test", "enabled": true } } },
+      "input": "{{ host }}",
+      "expected": "trim.test"
+    },
+    {
+      "name": "single pass: a value containing {{other}} is not rescanned",
+      "scopes": {
+        "environment": {
+          "a": { "value": "{{b}}", "enabled": true },
+          "b": { "value": "resolved-b", "enabled": true }
+        }
+      },
+      "input": "{{a}}",
+      "expected": "{{b}}"
+    },
+    {
+      "name": "empty braces never match and stay literal",
+      "scopes": { "environment": { "x": { "value": "1", "enabled": true } } },
+      "input": "{{}}{{x}}",
+      "expected": "{{}}1"
+    },
+    {
+      "name": "nested braces never match",
+      "scopes": { "environment": { "x": { "value": "1", "enabled": true } } },
+      "input": "{{a{{x}}b}}",
+      "expected": "{{a1b}}"
+    },
+    {
+      "name": "repeated occurrences each substitute",
+      "scopes": { "environment": { "x": { "value": "v", "enabled": true } } },
+      "input": "{{x}}-{{x}}-{{x}}",
+      "expected": "v-v-v"
+    },
+    {
+      "name": "an empty stored value substitutes as empty",
+      "scopes": { "environment": { "empty": { "value": "", "enabled": true } } },
+      "input": "[{{empty}}]",
+      "expected": "[]"
+    },
+    {
+      "name": "a name with inner spaces is a lookup, not a syntax error",
+      "scopes": { "environment": { "a b": { "value": "spaced", "enabled": true } } },
+      "input": "{{a b}}",
+      "expected": "spaced"
+    },
+    {
+      "name": "the raw string is substituted, never the typed value",
+      "scopes": {
+        "environment": {
+          "n": { "value": "007", "enabled": true, "type": "number" },
+          "j": { "value": "{\"k\": 1}", "enabled": true, "type": "json" }
+        }
+      },
+      "input": "{{n}}|{{j}}",
+      "expected": "007|{\"k\": 1}"
+    }
+  ]
+}

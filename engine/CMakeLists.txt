@@ -249,6 +249,7 @@ add_library(vayu_core STATIC
     src/http/client.cpp
     src/http/auth_resolver.cpp
     src/http/request_builder.cpp
+    src/http/request_composer.cpp
     src/http/oauth_client.cpp
     src/http/event_loop.cpp
     src/http/event_loop/curl_callbacks.cpp
@@ -360,13 +361,14 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/globals.cpp
         src/http/routes/runs.cpp
         src/http/routes/execution.cpp
+        src/http/routes/compose.cpp
         src/http/routes/metrics.cpp
         src/http/routes/scripting.cpp
         src/http/routes/import.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
     )
-    
+
     target_link_libraries(vayu-engine PRIVATE
         vayu_core
         httplib::httplib
@@ -431,7 +433,9 @@ if(VAYU_BUILD_TESTS)
         tests/dns_cache_test.cpp
         tests/http_version_support_test.cpp
         tests/http_version_test.cpp
+        tests/request_composer_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/compose.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
         src/http/routes/runs.cpp
@@ -445,6 +449,14 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/scripting.cpp
     )
     
+    # The cross-language conformance fixture lives in the source tree and is
+    # read at test runtime by path (the app's vitest suite reads the same file),
+    # so the tests need to know where the sources are regardless of the build
+    # or ctest working directory.
+    target_compile_definitions(vayu_tests PRIVATE
+        VAYU_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
     target_link_libraries(vayu_tests PRIVATE
         vayu_core
         GTest::gtest
