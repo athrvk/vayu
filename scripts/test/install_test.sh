@@ -454,24 +454,27 @@ got="$(dry_run_line mv -f "/a b" /c)"
 
 printf 'PASS: dry-run rendering\n'
 
-# --- authorization leaves nothing running ------------------------------------
-# preauthorize used to start a background loop that refreshed sudo every 60
-# seconds. It hung the macOS job (a command substitution waits for every process
-# holding its pipe, so the loop blocked the caller reading its PID), and killing
-# the loop still left its current `sleep` behind - the runner reported eight of
-# them in one job. It is a single `sudo -v` now, renewed at the point of use, so
-# the invariant worth holding is simply: authorizing starts no processes.
+# --- authorization ------------------------------------------------------------
+# Two invariants, and the second is why privileged() exists at all.
+#
+# 1. Authorizing starts no processes. It used to start a loop refreshing sudo
+#    every 60 seconds, which hung the macOS job (a command substitution waits
+#    for every process holding its pipe) and left an orphaned `sleep` behind
+#    even when the kill worked - the runner reported eight in one job.
+# 2. No privileged command can run before authorize(). That was a convention,
+#    and the convention broke: sweep_staging deleted a bundle in /Applications
+#    without sudo two lines above one that used it, both before the password was
+#    ever asked for.
 cat >"$TMPROOT/preauth.sh" <<PREAUTH
 VAYU_TEST=1 . "$INSTALLER"
 platform() { printf 'Darwin\n'; }
 sudo() { return 0; }
-preauthorize >/dev/null 2>&1
+authorize >/dev/null 2>&1
 refresh_sudo >/dev/null 2>&1
-# Anything still running would be a child of this shell.
 pgrep -P \$\$ >/dev/null 2>&1 && printf 'LEFTOVER' || printf 'CLEAN'
 PREAUTH
-# Run against a deadline: the failure this guards against is a hang, which no
-# assertion can catch, and macOS does not ship `timeout`.
+# Against a deadline: the failure this guards is a hang, and macOS ships no
+# `timeout`.
 bash "$TMPROOT/preauth.sh" >"$TMPROOT/preauth.out" 2>&1 &
 preauth_pid=$!
 waited=0
@@ -486,7 +489,28 @@ fi
 grep -q '^CLEAN$' "$TMPROOT/preauth.out" \
 	|| fail "authorizing left a process behind: $(cat "$TMPROOT/preauth.out")"
 
-printf 'PASS: authorization leaves nothing running\n'
+# Privileged work before authorize() is refused, loudly, rather than running.
+AUTHORIZED_SAVED="$AUTHORIZED"
+AUTHORIZED=0
+platform() { printf 'Darwin\n'; }
+if (VAYU_DRYRUN=1 privileged rm -rf /nowhere) >/dev/null 2>&1; then
+	fail "a privileged command must not run before authorize()"
+fi
+# Captured, not piped: under `set -o pipefail` the refusal's own non-zero exit
+# becomes the pipeline's status, so `… | grep -q` fails even when grep matches.
+out="$( (VAYU_DRYRUN=1 privileged rm -rf /nowhere) 2>&1 || true)"
+echo "$out" | grep -q 'before authorize' || fail "refusing should say why, got: $out"
+AUTHORIZED=1
+(VAYU_DRYRUN=1 privileged rm -rf /nowhere) >/dev/null 2>&1 \
+	|| fail "a privileged command should run once authorized"
+# And on Linux it is a bug by construction: nothing there needs root.
+platform() { printf 'Linux\n'; }
+if (VAYU_DRYRUN=1 privileged rm -rf /nowhere) >/dev/null 2>&1; then
+	fail "privileged should refuse outright on Linux"
+fi
+AUTHORIZED="$AUTHORIZED_SAVED"
+
+printf 'PASS: authorization\n'
 
 # --- one installer at a time -------------------------------------------------
 # Two runs at once both download and both swap, and the loser can overwrite the
@@ -526,7 +550,13 @@ rm -f "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
 # On macOS a lone .old means a run died between the two renames of the swap,
 # and the version it replaced is the only copy left - so it goes back, rather
 # than being deleted along with the rest of the debris.
+#
+# The sweep is privileged on macOS - it moves bundles in /Applications - so it
+# has to be authorized first, exactly as do_install and do_uninstall do. Without
+# this the call dies with "attempted before authorize()", which is the guard
+# doing its job rather than a test problem.
 platform() { printf 'Darwin\n'; }
+AUTHORIZED=1
 APP_PATH_SAVED="$APP_PATH"
 APP_PATH="$TMPROOT/sweep/${APP_NAME}.app"
 mkdir -p "$TMPROOT/sweep/${APP_NAME}.app.old"
@@ -596,7 +626,9 @@ platform() { printf 'Darwin\n'; }
 if out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"; then
 	fail "declining the quit should abort the install"
 fi
-if echo "$out" | grep -q "sudo rm -rf ${APP_PATH}"; then
+# Anchored: the staging sweep legitimately removes "${APP_PATH}.new" before any
+# of this, and an unanchored match reads that as deleting the install itself.
+if echo "$out" | grep -q "sudo rm -rf ${APP_PATH}$"; then
 	fail "declining the quit must not delete the running app"
 fi
 if echo "$out" | grep -q "ditto"; then

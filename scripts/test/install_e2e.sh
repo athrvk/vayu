@@ -32,6 +32,29 @@ mkdir -p "$ROOT" "$ROOT/sys/Applications" "$RELEASES"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
+# A stand-in for sudo, so the privileged path is observable.
+#
+# CI runners have passwordless sudo and no terminal, which is why three bugs in
+# a row lived here unseen: a keep-alive that hung the job, a notice written to
+# the channel carrying a PID, an orphaned `sleep`. Substituting sudo turns that
+# blind spot into a log - every privileged command is recorded, and setting
+# SUDO_DENY makes authorization fail the way a wrong password does.
+SUDO_STUB="$WORK/sudo-stub"
+SUDO_LOG="$WORK/sudo.log"
+cat >"$SUDO_STUB" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SUDO_LOG"
+if [ -n "${SUDO_DENY:-}" ]; then
+	printf 'Sorry, try again.\n' >&2
+	exit 1
+fi
+# -v only refreshes a timestamp; anything else is a real command to run.
+[ "$1" = "-v" ] && exit 0
+exec "$@"
+STUB
+chmod +x "$SUDO_STUB"
+export SUDO_LOG
+
 # The installer runs with $HOME and the macOS Applications directory both inside
 # the temp tree, so a real install cannot touch the machine running this.
 # VAYU_TTY keeps the quit prompt away from the terminal, VAYU_ASSUME_YES answers
@@ -46,6 +69,7 @@ installer() {
 		VAYU_RELEASE_BASE="file://$RELEASES" \
 		VAYU_ASSUME_YES=1 \
 		VAYU_TTY=/dev/null \
+		VAYU_SUDO="$SUDO_STUB" \
 		PATH="$PATH" \
 		bash "$INSTALLER" "$@"
 }
@@ -218,4 +242,41 @@ case "$OS" in
 esac
 
 printf 'PASS: real uninstall\n'
+
+# --- the privileged path, on the platform that has one ------------------------
+# Everything above proves the install works when sudo always says yes. These two
+# cover what CI's passwordless runners otherwise hide.
+
+if [ "$OS" = "Darwin" ]; then
+	# Nothing privileged may precede the notice that explains why a password is
+	# being asked for. The bug this replaces: sweep_staging deleted and restored
+	# bundles in /Applications before authorization was ever requested.
+	rm -f "$SUDO_LOG"
+	make_release 2.0.0
+	out="$(VAYU_VERSION=2.0.0 installer 2>&1)" || fail "install failed: $out"
+	[ -s "$SUDO_LOG" ] || fail "the macOS install should have used sudo at all"
+	[ "$(head -1 "$SUDO_LOG")" = "-v" ] \
+		|| fail "the first privileged call must be the authorization, got: $(head -1 "$SUDO_LOG")"
+	printf '%s\n' "$out" | grep -q "needs administrator access" \
+		|| fail "the password prompt should be explained before it appears"
+
+	# A refused password leaves the install exactly as it was.
+	before="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$target/Contents/Info.plist")"
+	make_release 2.1.0
+	if out="$(SUDO_DENY=1 VAYU_VERSION=2.1.0 installer 2>&1)"; then
+		fail "a refused password should abort the install"
+	fi
+	after="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$target/Contents/Info.plist")"
+	[ "$before" = "$after" ] || fail "a refused password changed the install: $before -> $after"
+
+	printf 'PASS: privileged path\n'
+else
+	# The Linux path writes only under $HOME, so the invariant is the opposite
+	# one: it must never reach for root at all. privileged() refuses outright
+	# there, but this proves nothing tries.
+	[ -s "$SUDO_LOG" ] && fail "the Linux install used sudo: $(cat "$SUDO_LOG")"
+
+	printf 'PASS: no privilege escalation on Linux\n'
+fi
+
 printf 'e2e: all checks passed on %s\n' "$OS"

@@ -295,11 +295,53 @@ jobs:
           cp app/release/*.zip artifacts/
           # electron-updater reads the .zip feed (not the .dmg) on macOS.
           cp app/release/latest-mac.yml artifacts/ 2>/dev/null || true
-          for f in artifacts/*.zip; do
-            [ -e "$f" ] || continue
-            shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
-          done
           ls -lh artifacts/
+
+      # A .sha256 beside every installer, on all three platforms.
+      #
+      # install.sh verifies a download against this sidecar when one exists -
+      # and until now only the macOS zip had one, so the Linux path fetched
+      # 160MB over `curl | bash` with nothing to check it against and the
+      # verification code was dead. The sidecar is what makes it real, so it is
+      # generated for every artifact rather than the one that happened to have
+      # it, and a missing one is a release-blocking error rather than a silent
+      # skip: a checksum that is sometimes absent is a checksum nobody can rely
+      # on. The .yml feeds are excluded - electron-updater carries its own
+      # hashes inside them.
+      - name: Checksum artifacts (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          count=0
+          for f in artifacts/*; do
+            case "$f" in *.yml|*.sha256) continue ;; esac
+            shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No artifacts to checksum - the collect step should have failed first." >&2
+            exit 1
+          fi
+          echo "Checksummed $count artifact(s):"
+          for f in artifacts/*.sha256; do printf '  %s  %s\n' "$(cat "$f")" "$(basename "${f%.sha256}")"; done
+
+      - name: Checksum artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem artifacts -File | Where-Object { $_.Extension -notin '.yml', '.sha256' }
+          if ($files.Count -eq 0) {
+            Write-Error "No artifacts to checksum - the collect step should have failed first."
+            exit 1
+          }
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            # No trailing newline difference to worry about: install.sh reads
+            # the first field, and the Unix side writes the same bare hash.
+            [System.IO.File]::WriteAllText("$($f.FullName).sha256", "$hash`n")
+            Write-Host "  $hash  $($f.Name)"
+          }
 
       # Prefer the curated, hand-written notes committed at .github/release-notes/<tag>.md
       # (Keep a Changelog format, see CLAUDE.md). If that file is absent for this tag,

@@ -85,7 +85,26 @@ FORCE=0
 # caller to remember a suffix.
 log()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*" >&2; }
-die()  { printf '%s\n' "$*" >&2; exit 1; }
+die()  { die_with "$EXIT_FAILED" "$@"; }
+
+# Exit codes, because things wrap this script - the app's own update
+# notification hands it to a user, and a fleet tool may run it unattended. "It
+# exited 1" cannot tell those callers apart: a refused password, an unsupported
+# machine and a failed download all need different reactions, and "already
+# installed" is not a failure at all.
+EXIT_OK=0
+EXIT_FAILED=1
+EXIT_USAGE=2
+EXIT_DECLINED=3
+EXIT_UNSUPPORTED=4
+EXIT_INTERRUPTED=130
+
+die_with() {
+	local code="$1"
+	shift
+	printf '%s\n' "$*" >&2
+	exit "$code"
+}
 
 # What a dry run prints for a command. Arguments containing whitespace are
 # quoted, because "$*" alone renders `mv -f "/a b" /c` and `mv -f /a "b /c"`
@@ -149,7 +168,7 @@ parse_args() {
 			*)
 				printf 'Unknown option: %s\n' "$1" >&2
 				warn 'Run with --help to see what this script accepts.'
-				return 2
+				return "$EXIT_USAGE"
 				;;
 		esac
 		shift
@@ -268,15 +287,15 @@ release_lock() {
 sweep_staging() {
 	case "$(platform)" in
 		Darwin)
-			run rm -rf "${APP_PATH}.new"
+			privileged rm -rf "${APP_PATH}.new"
 			# .old is only ever a bundle mid-swap, so its presence means a run
 			# died between two renames - and the install it belongs to is
 			# whichever of the two exists.
 			if [ -d "${APP_PATH}.old" ] && [ ! -d "$APP_PATH" ]; then
 				warn 'A previous install was interrupted - restoring the version it replaced.'
-				run sudo mv "${APP_PATH}.old" "$APP_PATH"
+				privileged mv "${APP_PATH}.old" "$APP_PATH"
 			else
-				run rm -rf "${APP_PATH}.old"
+				privileged rm -rf "${APP_PATH}.old"
 			fi
 			;;
 		*)
@@ -506,7 +525,7 @@ quit_running_app() {
 	log 'Vayu is running, and cannot be replaced while it is.'
 	if ! confirm 'Quit Vayu now?'; then
 		warn 'Not quitting - aborting so the running app is not replaced underneath itself.'
-		die 'Quit Vayu and re-run this command.'
+		die_with "$EXIT_DECLINED" 'Quit Vayu and re-run this command.'
 	fi
 
 	log 'Quitting Vayu...'
@@ -577,7 +596,7 @@ require_supported_os() {
 			# otherwise download a 404 page and chmod +x it.
 			case "$(uname -m)" in
 				x86_64|amd64) ;;
-				*) die "Vayu publishes x86_64 Linux builds only (this machine is $(uname -m))." ;;
+				*) die_with "$EXIT_UNSUPPORTED" "Vayu publishes x86_64 Linux builds only (this machine is $(uname -m))." ;;
 			esac
 			# No pgrep: the running-app check reads /proc directly, on purpose.
 			for tool in curl ps; do
@@ -585,7 +604,7 @@ require_supported_os() {
 			done
 			;;
 		*)
-			die 'Vayu installer supports macOS and Linux. Windows: winget install athrvk.Vayu'
+			die_with "$EXIT_UNSUPPORTED" 'Vayu installer supports macOS and Linux. Windows: winget install athrvk.Vayu'
 			;;
 	esac
 }
@@ -594,13 +613,50 @@ require_supported_os() {
 # than after the download, and refreshed in the background so a slow connection
 # cannot let it expire mid-install. Linux writes only under $HOME - nothing to
 # authorize, and asking would be a password prompt for nothing.
-preauthorize() {
+# Every privileged command in this script goes through here, and nothing may run
+# before authorize() has been called.
+#
+# The rule used to be a convention, and conventions here have a record: an
+# earlier sweep_staging deleted a bundle in /Applications *without* sudo two
+# lines above one that used it, and ran both before the password was ever asked
+# for - so a standard user got a silent failure and everyone else got an
+# unexplained prompt. Neither is reviewable by eye. Now the ordering is a
+# precondition: privileged() refuses to run un-authorized, so the mistake is a
+# loud abort during development rather than a surprise on someone's machine.
+#
+# VAYU_SUDO exists so scripts/test/install_e2e.sh can substitute a stub that
+# records what was run and can refuse - the interactive and privileged paths are
+# invisible to CI otherwise, because the runners have passwordless sudo and no
+# terminal, which is exactly where the last three bugs lived.
+SUDO="${VAYU_SUDO:-sudo}"
+AUTHORIZED=0
+
+privileged() {
+	if [ "$(platform)" != "Darwin" ]; then
+		# Linux writes only under $HOME. A privileged call there is a bug, not a
+		# case to handle.
+		die "Internal error: privileged $1 attempted on $(platform), which needs no root."
+	fi
+	if [ "$AUTHORIZED" != "1" ]; then
+		die "Internal error: privileged $1 attempted before authorize()."
+	fi
+	run "$SUDO" "$@"
+}
+
+# Ask for the password once, up front, with the reason attached. Idempotent, so
+# a second caller costs nothing.
+authorize() {
 	[ "$(platform)" = "Darwin" ] || return 0
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		AUTHORIZED=1
+		return 0
+	fi
+	if [ "$AUTHORIZED" = "1" ]; then
 		return 0
 	fi
 	log "Vayu installs to $INSTALL_DIR and needs administrator access."
-	sudo -v || die 'Authorization failed - aborting.'
+	"$SUDO" -v || die_with "$EXIT_DECLINED" 'Authorization failed - aborting.'
+	AUTHORIZED=1
 	return 0
 }
 
@@ -622,7 +678,7 @@ refresh_sudo() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	sudo -v || die 'Authorization expired and could not be renewed - nothing was installed.'
+	"$SUDO" -v || die 'Authorization expired and could not be renewed - nothing was installed.'
 	return 0
 }
 
@@ -647,17 +703,25 @@ download_asset() {
 	# Linux that overwrote a working AppImage with a fragment and then stamped
 	# the version beside it, so the next run said "already installed".
 	# Default curl meter (drop -s) shows %, size, speed and ETA on stderr.
-	if ! run curl -fL "$url" -o "$dest"; then
+	# --retry, because this is 160MB over whatever connection the user has and a
+	# transient failure is the common one. curl retries on transport errors and
+	# 5xx, not on a 404, so a genuinely missing asset still fails immediately.
+	if ! run curl -fL --retry 3 --retry-delay 2 --retry-connrefused "$url" -o "$dest"; then
 		die 'Download failed - nothing was installed.'
 	fi
 
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
 	fi
-	# Best effort by design: only the macOS zip publishes a .sha256, so a
-	# missing sidecar is the normal Linux case and cannot be told apart from a
-	# failed fetch. A sidecar that *is* fetched and disagrees is fatal.
-	curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null || return 0
+	# Every release artifact publishes a .sha256 (see the checksum steps in
+	# .github/workflows/release.yml). A missing one means an old release, or a
+	# fetch that failed - both worth saying, neither worth refusing over, since
+	# the alternative is telling someone their working install cannot proceed
+	# because a 65-byte file did not arrive.
+	if ! curl -fsSL "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
+		warn 'No checksum published for this download - skipping verification.'
+		return 0
+	fi
 	expected="$(awk '{print $1}' "$dest.sha256")"
 	actual="$(sha256_of "$dest")"
 	[ "$expected" = "$actual" ] || die 'Checksum mismatch - aborting.'
@@ -694,19 +758,19 @@ place_macos() {
 	# anything goes wrong afterwards - a full disk, a Ctrl-C, a read error in the
 	# staged bundle - having started from a working one. Every step here is a
 	# rename on one volume, so there is no moment at which neither bundle exists.
-	run sudo rm -rf "$incoming" "$previous"
-	run sudo ditto "$workdir/${APP_NAME}.app" "$incoming"
+	privileged rm -rf "$incoming" "$previous"
+	privileged ditto "$workdir/${APP_NAME}.app" "$incoming"
 	if [ -d "$APP_PATH" ]; then
-		run sudo mv "$APP_PATH" "$previous"
+		privileged mv "$APP_PATH" "$previous"
 	fi
-	if ! run sudo mv "$incoming" "$APP_PATH"; then
+	if ! privileged mv "$incoming" "$APP_PATH"; then
 		if [ -d "$previous" ]; then
 			warn 'Install failed - putting the previous version back.'
-			run sudo mv "$previous" "$APP_PATH"
+			privileged mv "$previous" "$APP_PATH"
 		fi
 		die 'Could not move the new version into place.'
 	fi
-	run sudo rm -rf "$previous"
+	privileged rm -rf "$previous"
 }
 
 # --- Linux install --------------------------------------------------------
@@ -865,9 +929,12 @@ do_install() {
 	acquire_lock
 	trap release_lock EXIT
 	adopt_install_target
-	# Before anything else looks at the install: a leftover .new or .part is
-	# what a killed run leaves, and on macOS a lone .old means the previous
-	# version still needs putting back.
+	# Authorization first, because the sweep below is privileged on macOS - it
+	# deletes and restores bundles in /Applications. This is the ordering that
+	# privileged() now enforces rather than asks for.
+	authorize
+	# A leftover .new or .part is what a killed run leaves, and on macOS a lone
+	# .old means the previous version still needs putting back.
 	sweep_staging
 	(
 		local version url workdir staged installed quit_by_installer=0
@@ -885,7 +952,7 @@ do_install() {
 		if should_skip_install "$installed" "$version" "$FORCE"; then
 			printf 'Vayu %s is already installed - nothing to do.\n' "$version"
 			log 'Re-run with --force to reinstall it anyway.'
-			exit 0
+			exit "$EXIT_OK"
 		fi
 
 		if [ -n "$installed" ]; then
@@ -908,8 +975,7 @@ do_install() {
 		# dir, a part-downloaded file beside the app, and a sudo keep-alive
 		# holding a passwordless timestamp open for this terminal.
 		trap 'rm -rf "$workdir"; rm -f "$staged"' EXIT
-		trap 'exit 130' INT TERM HUP
-		preauthorize
+		trap 'exit "$EXIT_INTERRUPTED"' INT TERM HUP
 
 		run mkdir -p "$(dirname "$staged")"
 		download_asset "$url" "$staged"
@@ -948,6 +1014,10 @@ do_uninstall() {
 	# from under a live app leaves it half-working until someone notices. On
 	# Linux it is deleting the AppImage backing a live mount.
 	adopt_install_target
+	# Uninstalling deletes bundles in /Applications, so it needs the same
+	# authorization the install path takes - it used to reach sudo without ever
+	# asking, which is how an uninstall produced an unexplained prompt.
+	authorize
 	sweep_staging
 	quit_running_app
 	case "$(platform)" in
@@ -972,7 +1042,7 @@ uninstall_macos() {
 	log 'Removing Vayu (you may be prompted for your password)...'
 	printf '%s\n' "$paths" | while IFS= read -r path; do
 		printf '  %s\n' "$path"
-		run sudo rm -rf "$path"
+		privileged rm -rf "$path"
 	done
 
 	if [ "${PURGE:-0}" = "1" ]; then
@@ -1060,6 +1130,10 @@ elsewhere) and ad-hoc signs it. Linux installs the AppImage under
 Updating quits a running Vayu first (it asks). Set VAYU_ASSUME_YES=1 to skip
 the prompt. Re-running when the latest version is already installed does
 nothing unless --force is given.
+
+Exit codes: 0 done (including "already installed"), 1 failed, 2 bad usage,
+3 declined (you said no, or the password was refused), 4 unsupported machine,
+130 interrupted.
 EOF
 }
 
