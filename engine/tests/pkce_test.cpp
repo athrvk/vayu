@@ -13,14 +13,11 @@
 
 namespace {
 
+// Delegates rather than repeating the table: vayu::utils::hex_encode is the one
+// hex encoder, and a second copy here would not receive its fixes.
 std::string hex (const std::array<uint8_t, 32>& d) {
-    static constexpr char h[] = "0123456789abcdef";
-    std::string out;
-    for (uint8_t b : d) {
-        out.push_back (h[b >> 4]);
-        out.push_back (h[b & 0xf]);
-    }
-    return out;
+    return vayu::utils::hex_encode (
+    std::string_view (reinterpret_cast<const char*> (d.data ()), d.size ()));
 }
 
 TEST (Sha256, Fips180Vectors) {
