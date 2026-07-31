@@ -79,6 +79,8 @@ interface ElectronAPI {
 	restartToInstallUpdate: () => Promise<void>;
 	checkForUpdates: () => Promise<UpdateCheckResult>;
 	openReleasePage: (url: string) => Promise<void>;
+	/** macOS notify path: quit so the pasted installer command can replace the app. */
+	quitForUpdate: () => Promise<void>;
 
 	// Menu-driven navigation
 	onOpenSettings: (callback: () => void) => () => void;

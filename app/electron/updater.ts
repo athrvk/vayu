@@ -19,9 +19,20 @@ function releaseUrl(version: string): string {
 	return `https://github.com/${REPO}/releases/tag/v${version}`;
 }
 
-/** One-liner that re-runs the ad-hoc-signing installer on macOS. */
+/**
+ * One-liner that re-runs the ad-hoc-signing installer on macOS.
+ *
+ * This *is* the macOS update mechanism - the strategy is "notify" because an
+ * ad-hoc signature gives Squirrel.Mac nothing to verify - so it has to stay
+ * byte-identical to the command README.md documents, which
+ * `updater.test.ts` asserts by reading the README.
+ *
+ * Not built from `REPO`: the script is served by the docs site (published from
+ * the repo root by .github/hooks/install_script.py), which has no owner/repo in
+ * its path.
+ */
 function macInstallCommand(): string {
-	return `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh)"`;
+	return `bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"`;
 }
 
 export interface UpdateAvailablePayload {
@@ -106,6 +117,20 @@ export function initAutoUpdater(win: BrowserWindow): void {
 	});
 
 	ipcMain.handle("update:check", () => checkForUpdatesNow("renderer"));
+
+	// The macOS notify path's other half: the installer cannot replace a bundle
+	// whose processes are still running, so it has to quit Vayu itself - and
+	// from a terminal that means an Apple Event, which macOS gates behind an
+	// Automation consent prompt the user has to notice and approve.
+	//
+	// Quitting from in here needs no such permission and takes the ordinary
+	// `before-quit` path in main.ts, which flushes pending renderer saves and
+	// stops the engine and MCP server before exiting. So the app quitting itself
+	// is strictly better than the script killing it, and the script's own quit
+	// stays as the fallback for anyone who runs the command directly.
+	ipcMain.handle("update:quitForUpdate", () => {
+		app.quit();
+	});
 
 	if (strategy === "disabled") {
 		console.log("[Updater] disabled (development)");

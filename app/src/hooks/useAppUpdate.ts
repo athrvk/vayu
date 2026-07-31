@@ -22,6 +22,8 @@ interface AppUpdateState {
 	dismiss: () => void;
 	restartToInstall: () => void;
 	openReleasePage: () => void;
+	/** macOS notify path: quit so the copied installer command can replace the app. */
+	quitForUpdate: () => void;
 }
 
 /**
@@ -64,6 +66,9 @@ export function useAppUpdate(): AppUpdateState {
 	const openReleasePage = useCallback(() => {
 		if (update) void window.electronAPI?.openReleasePage(update.releaseUrl);
 	}, [update]);
+	const quitForUpdate = useCallback(() => {
+		void window.electronAPI?.quitForUpdate();
+	}, []);
 
 	// Only surface once we have something actionable and the user hasn't dismissed it.
 	const shouldShow =
@@ -75,5 +80,6 @@ export function useAppUpdate(): AppUpdateState {
 		dismiss,
 		restartToInstall,
 		openReleasePage,
+		quitForUpdate,
 	};
 }

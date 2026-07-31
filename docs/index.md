@@ -42,6 +42,11 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
     quarantine flag - without that, macOS reports it as damaged.
 
+    **Updating is the same command.** It keeps your collections and settings,
+    offers to quit Vayu if it is running (and reopens it after), and does
+    nothing if you already have the latest version - `--force` reinstalls
+    anyway.
+
     Pin a version with `VAYU_VERSION=0.2.1` in front of the command, or
     uninstall by re-running it with `-- --uninstall`.
 
@@ -63,12 +68,21 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 === "Linux"
 
     ```sh
-    chmod +x Vayu-x86_64.AppImage
-    ./Vayu-x86_64.AppImage
+    bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
-    Download [**Vayu-x86_64.AppImage**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
-    first. It is self-contained: no wizard, no root.
+    The same command as macOS. It installs the AppImage under
+    `~/.local/share/vayu` and registers a launcher entry, so Vayu shows up in
+    your applications menu. Nothing it writes leaves your home directory, so it
+    never asks for root. Re-run it to update. x86_64 only.
+
+    Or take the AppImage from the
+    [latest release](https://github.com/athrvk/vayu/releases/latest) and run it
+    yourself - it is self-contained either way.
+
+    If it does not start, your system is probably missing FUSE 2:
+    `sudo apt install libfuse2`, or run it once with
+    `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 [All releases](https://github.com/athrvk/vayu/releases){ .md-button }
 [Build from source instead](building.md){ .md-button }

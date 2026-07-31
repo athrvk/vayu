@@ -27,7 +27,7 @@
  */
 
 import { useState } from "react";
-import { ArrowUpCircle, Check, Copy, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ArrowUpCircle, Check, Copy, ExternalLink, Loader2, Power, RefreshCw } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import type { UpdateCheckResult } from "@/types/electron";
 
@@ -115,18 +115,35 @@ export function UpdatesCard() {
 								Release notes
 							</Button>
 							{installCommand && (
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => void copyInstallCommand(installCommand)}
-								>
-									{copied ? (
-										<Check className="w-4 h-4 mr-1.5" />
-									) : (
-										<Copy className="w-4 h-4 mr-1.5" />
-									)}
-									{copied ? "Copied" : "Copy install command"}
-								</Button>
+								<>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => void copyInstallCommand(installCommand)}
+									>
+										{copied ? (
+											<Check className="w-4 h-4 mr-1.5" />
+										) : (
+											<Copy className="w-4 h-4 mr-1.5" />
+										)}
+										{copied ? "Copied" : "Copy install command"}
+									</Button>
+									{/*
+									 * The installer has to close Vayu before it
+									 * can replace the bundle. Doing it from here
+									 * runs the app's normal shutdown and skips
+									 * the Automation consent prompt a terminal
+									 * would trigger for the same thing.
+									 */}
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => void api.quitForUpdate()}
+									>
+										<Power className="w-4 h-4 mr-1.5" />
+										Quit to update
+									</Button>
+								</>
 							)}
 						</div>
 					</div>

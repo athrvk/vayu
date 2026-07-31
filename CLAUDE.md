@@ -430,22 +430,20 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 **Tag *after* the release commit lands on the default branch.** When the version bump goes through a pull request (the usual path), run steps 1-2 on the feature branch so the bump merges with the PR, but do **not** tag the PR-branch commit. A squash/rebase merge rewrites the commit hash, so a tag on the pre-merge commit would point at a commit that never reaches the default branch. Wait for the PR to merge, then run step 3 against the merged commit on the default branch (`git checkout <default-branch> && git pull && git tag v$(cat VERSION) && git push origin --tags`). The tag triggers the release build, so it must sit on the canonical merged history.
 
-macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
+**`install.sh` (repo root) installs *and updates*, on macOS and Linux.** macOS: downloads the release zip, ad-hoc signs app + sidecar, strips quarantine, `sudo`-installs to `/Applications`. Linux: AppImage + `.desktop` entry + icon + a `vayu` symlink when `~/.local/bin` is on `PATH`, all under `~/.local/share/vayu`, **no sudo**. Both share every decision and dispatch only the actions, on `platform()` - a function wrapping `uname -s`, so tests can force either branch on either host. Tested by `scripts/test/install_test.sh` (`VAYU_DRYRUN=1`), shellchecked in CI on both. Published by the docs site: `.github/hooks/install_script.py` registers the repo-root file at the site root, which is why `install.sh` is in the `paths:` filters of `docs.yml` - without that the published copy silently falls behind master. Documented as `bash -c "$(curl …)"`, not `curl … | bash`, so the script is buffered before it runs and stdin stays on the terminal.
 
-**The installer is served from the docs site**, at
-<https://athrvk.github.io/vayu/install.sh> - a third shorter than the
-raw.githubusercontent URL it replaced, which spent most of its 92 characters on
-`owner/repo/branch`. The file stays at the repo root (that is where shellcheck
-and `install_test.sh` look); `.github/hooks/install_script.py` registers it as a
-generated file at the site root, so there is no second copy to drift. That makes
-`install.sh` a **docs-site input**, so it is listed in the `paths:` filters of
-`.github/workflows/docs.yml` - without that line, editing the installer would not
-redeploy the site and the published copy would silently fall behind master. The
-old raw URL is unaffected and keeps working. Documented as `bash -c "$(curl -fsSL
-...)"` rather than `curl ... | bash`: the wrapper buffers the whole script before
-running any of it and leaves stdin on the terminal, so the installer can still
-grow an interactive prompt (`sudo -v` already reads `/dev/tty`, so both forms
-work today).
+Six things about it that the code cannot tell you:
+
+- **It is the macOS *update* path** - `resolveUpdateStrategy` returns `notify` there, since an ad-hoc signature gives Squirrel.Mac nothing to verify. So the app is usually *running* when the script starts, and `macInstallCommand()` (`app/electron/updater.ts`) must match the command README publishes; `updater.test.ts` asserts that by reading the README, because a template literal is invisible to a URL grep.
+- **Never detect the running app by matching command lines.** `bash -c "$(curl …)"` puts the whole script - comments included - into its own argv, so a `pgrep -f` pattern appearing anywhere in the file matches the installer itself. That aborted every Linux install while the suite stayed green, because sourcing the file never populates argv. Linux reads `/proc/<pid>/exe`, both platforms filter by process group, and `install_test.sh` exercises the real `bash -c "$(cat install.sh)"` form.
+- **`electron/quit-signals.ts` is load-bearing.** Linux has no Apple Event, so the installer quits with `SIGTERM`, and Node's default would kill the process without running `before-quit` - losing pending saves and orphaning the engine. The app can also quit itself (`update:quitForUpdate`, the **Quit to update** button), the only quit needing no Automation consent.
+- **The install target follows the existing copy.** `/Applications` is only the *fresh install* default; two copies are reported rather than silently picked between, and uninstall removes every copy. Resolution (`resolved_install_path`) prints and the single assignment lives in `adopt_install_target`, so nothing here is unsafe to call from a subshell.
+- **The Linux version stamp (`~/.local/share/vayu/version`) has two writers**: the installer, and `electron/appimage-stamp.ts` at startup - the AppImage self-updates in place and would otherwise leave the stamp stale. That module duplicates `install.sh`'s path constants; move one, move both.
+- **Every `sudo` goes through `privileged()`, which refuses to run before `authorize()`.** The ordering used to be a convention and the convention broke: `sweep_staging` deleted a bundle in `/Applications` *without* sudo two lines above one that used it, both before the password was ever asked for. `VAYU_SUDO` lets `install_e2e.sh` substitute a stub, which is the only way CI can see the privileged path at all - the runners have passwordless sudo and no terminal, which is where three bugs in a row hid.
+- **Every release artifact publishes a `.sha256`** (checksum steps in `release.yml`), so the installer's verification is real on all three platforms rather than dead code outside macOS.
+- **Errors go through `die()`, never `step || exit 1` at a call site.** Bash disables `errexit` for the whole body of a function invoked in an `||` context, so an unchecked command inside it falls through - that is how a failed download was once reported as success. A step that cannot continue says so itself. The cost: a dying function cannot be called in-process by a test, so `install_test.sh` wraps those calls in a subshell.
+- **Two suites, two jobs.** `install_test.sh` is dry-run and owns the *decisions* (which version, which platform branch, which order, sudo or not - including the other platform's branch, which is why it stubs `platform()`). `scripts/test/install_e2e.sh` runs the installer for real against a local release in a temp root and owns the *effects*. Put a new assertion in whichever answers it; do not duplicate.
+- **Release assets carry versions** (`Vayu-<v>-universal.zip`, `Vayu-<v>-x86_64.AppImage`) while `Vayu-x64.exe` and `Vayu-amd64.deb` do not, so `/releases/latest/download/<name>` **404s for macOS and Linux**. Link the installer or `/releases/latest`; never invent an unversioned asset URL.
 
 **Windows also publishes to winget, automatically.** The `publish-winget` job in
 `release.yml` submits `Vayu-x64.exe` to `microsoft/winget-pkgs` after the

@@ -130,6 +130,7 @@ jobs:
             installer:
               - 'install.sh'
               - 'scripts/test/install_test.sh'
+              - 'scripts/test/install_e2e.sh'
               - '.github/workflows/pr-tests.yml'
 
   app:
@@ -323,21 +324,57 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install shellcheck (Linux)
-        if: runner.os == 'Linux'
+      # Pinned, and the same build on both runners. Ubuntu's apt and Homebrew
+      # ship different versions, and shellcheck's findings differ between them:
+      # a file clean under one has twice failed here on a rule the other does
+      # not emit, and once the *same* finding arrived under a different code
+      # (SC2317 in 0.9/0.10, SC2329 in 0.11). Pinning makes a local run mean
+      # something, and moves a version bump into a commit someone chose to make.
+      - name: Install shellcheck
+        shell: bash
+        env:
+          SHELLCHECK_VERSION: v0.10.0
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shellcheck
-
-      - name: Install shellcheck (macOS)
-        if: runner.os == 'macOS'
-        run: command -v shellcheck || brew install shellcheck
+          case "${RUNNER_OS}-$(uname -m)" in
+            Linux-x86_64)   target=linux.x86_64 ;;
+            Linux-aarch64)  target=linux.aarch64 ;;
+            macOS-arm64)    target=darwin.aarch64 ;;
+            macOS-x86_64)   target=darwin.x86_64 ;;
+            *) echo "::error::No pinned shellcheck build for ${RUNNER_OS}-$(uname -m)"; exit 1 ;;
+          esac
+          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.${target}.tar.xz"
+          curl -fsSL "$url" | tar -xJ
+          sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
 
       - name: Lint and test installer script
         shell: bash
         run: |
-          shellcheck install.sh
+          shellcheck install.sh scripts/test/install_test.sh scripts/test/install_e2e.sh
           bash scripts/test/install_test.sh
+
+      # The dry-run suite above asserts on the commands the installer would have
+      # run. This one runs it: a real download from a local release, a real
+      # extraction, placement, update and uninstall, into a temporary root. It
+      # is the only thing here that exercises ditto, codesign and the swap on
+      # macOS, or a genuine mv-into-place on Linux - and both bugs that made the
+      # Linux path unusable were invisible to a dry run.
+      - name: End-to-end install, update and uninstall
+        shell: bash
+        run: bash scripts/test/install_e2e.sh
+
+      # `bash` on the macOS runner is Homebrew's 5.x, but a stock Mac has only
+      # /bin/bash 3.2.57 - and the documented command resolves `bash` from PATH,
+      # so that is what most users actually run this under. Nothing in the
+      # script needs bash 4, and this is what keeps it that way: a `mapfile`, an
+      # associative array or a `${var,,}` would pass every other job and fail on
+      # every Mac.
+      - name: Test installer under macOS's own bash 3.2
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash scripts/test/install_test.sh
+          /bin/bash scripts/test/install_e2e.sh
 
   ci-gate:
     name: CI gate

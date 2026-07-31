@@ -21,13 +21,16 @@ import { UpdatesCard } from "./UpdatesCard";
 
 const checkForUpdates = vi.fn();
 const openReleasePage = vi.fn();
+const quitForUpdate = vi.fn();
 
 beforeEach(() => {
 	checkForUpdates.mockReset();
 	openReleasePage.mockReset();
+	quitForUpdate.mockReset();
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		checkForUpdates,
 		openReleasePage,
+		quitForUpdate,
 	};
 });
 
@@ -90,6 +93,38 @@ describe("UpdatesCard", () => {
 		render(<UpdatesCard />);
 		await clickCheck();
 		expect(await screen.findByRole("button", { name: /install command/i })).toBeInTheDocument();
+	});
+
+	it("offers to quit, since the copied command cannot replace a running app", async () => {
+		// Copying the command is only half of it - the installer aborts rather
+		// than delete a bundle whose processes are live. Quitting from here also
+		// avoids the Automation consent prompt the script's own quit hits.
+		checkForUpdates.mockResolvedValue({
+			status: "available",
+			version: "1.0.0",
+			strategy: "notify",
+			releaseUrl: "u",
+			installCommand: "curl … | bash",
+		});
+		render(<UpdatesCard />);
+		await clickCheck();
+		fireEvent.click(await screen.findByRole("button", { name: /quit to update/i }));
+		expect(quitForUpdate).toHaveBeenCalled();
+	});
+
+	it("does not offer to quit on a platform that installs its own update", async () => {
+		// The silent path restarts into the update by itself; a quit button
+		// there would just close the app for no reason.
+		checkForUpdates.mockResolvedValue({
+			status: "available",
+			version: "1.0.0",
+			strategy: "silent",
+			releaseUrl: "u",
+		});
+		render(<UpdatesCard />);
+		await clickCheck();
+		expect(await screen.findByText(/is available/)).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /quit to update/i })).toBeNull();
 	});
 
 	it("does not call an unavailable build an error", async () => {

@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { ArrowUpCircle, Check, Copy, ExternalLink, RotateCw, X } from "lucide-react";
+import { ArrowUpCircle, Check, Copy, ExternalLink, Power, RotateCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 
@@ -15,11 +15,13 @@ import { useAppUpdate } from "@/hooks/useAppUpdate";
  *
  *   - silent platforms (Windows, Linux AppImage): the update is already
  *     downloaded - offer a restart-to-install.
- *   - macOS (ad-hoc signed): offer to copy the one-line installer command.
+ *   - macOS (ad-hoc signed): offer to copy the one-line installer command, and
+ *     to quit so the command can replace the app it is pasted for.
  *   - other notify platforms (.deb): link to the release page.
  */
 function UpdateBanner() {
-	const { update, readyToInstall, dismiss, restartToInstall, openReleasePage } = useAppUpdate();
+	const { update, readyToInstall, dismiss, restartToInstall, openReleasePage, quitForUpdate } =
+		useAppUpdate();
 	const [copied, setCopied] = useState(false);
 
 	if (!update) return null;
@@ -46,10 +48,24 @@ function UpdateBanner() {
 					Restart &amp; install
 				</Button>
 			) : update.installCommand ? (
-				<Button size="sm" variant="secondary" onClick={copyInstallCommand}>
-					{copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-					{copied ? "Copied" : "Copy install command"}
-				</Button>
+				<>
+					<Button size="sm" variant="secondary" onClick={copyInstallCommand}>
+						{copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+						{copied ? "Copied" : "Copy install command"}
+					</Button>
+					{/*
+					 * The installer cannot replace a bundle whose processes are
+					 * still running, so it quits Vayu itself - but from a
+					 * terminal that is an Apple Event, which macOS gates behind
+					 * an Automation consent prompt. Quitting from here needs no
+					 * permission and runs the normal shutdown, so the paste
+					 * lands on an app that is already closed.
+					 */}
+					<Button size="sm" variant="ghost" onClick={quitForUpdate}>
+						<Power className="size-4" />
+						Quit to update
+					</Button>
+				</>
 			) : (
 				<Button size="sm" variant="secondary" onClick={openReleasePage}>
 					<ExternalLink className="size-4" />
