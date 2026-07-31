@@ -12,6 +12,7 @@ import { EngineSidecar } from "./sidecar.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
+import { installQuitOnSignal } from "./quit-signals.js";
 import {
 	VayuMcpService,
 	DEFAULT_MCP_SAFETY_CONFIG,
@@ -727,3 +728,11 @@ app.on("before-quit", (event) => {
 		})();
 	}
 });
+
+// A signal is how anything outside the UI asks Vayu to stop, and Node's default
+// is to terminate the process where it stands - skipping the handler above
+// entirely, so pending saves are lost and the engine and MCP children are
+// orphaned. This routes them into the same shutdown Cmd-Q takes. It matters
+// most on Linux, where install.sh has no Apple Event to quit the app with
+// before it replaces the AppImage, only a signal.
+installQuitOnSignal(process, () => app.quit());

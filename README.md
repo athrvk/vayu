@@ -145,17 +145,17 @@ Add `--purge` to also remove settings and data. Or drag `Vayu.app` from `/Applic
 
 ### Linux
 
-1. Download [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
-2. Make it executable:
-   ```sh
-   chmod +x Vayu-x86_64.AppImage
-   ```
-3. Run it:
-   ```sh
-   ./Vayu-x86_64.AppImage
-   ```
+```sh
+bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
+```
 
-No installation wizard or root access required. The AppImage is self-contained.
+The same command as macOS. On Linux it installs the AppImage to `~/.local/share/vayu` and registers a launcher entry, so Vayu appears in your applications menu instead of sitting in `~/Downloads` as an executable file. **No root** - everything it writes is under your home directory. If `~/.local/bin` is on your `PATH`, you also get a `vayu` command.
+
+Re-run it to update; add `-- --uninstall` (plus `--purge` for your data) to remove it. x86_64 only, matching the published builds.
+
+Or download the AppImage yourself from the [latest release](https://github.com/athrvk/vayu/releases/latest) (`Vayu-<version>-x86_64.AppImage`), `chmod +x` it and run it - it is self-contained, with no wizard and no root either way.
+
+> If Vayu doesn't start, your system may be missing FUSE 2, which AppImages need: `sudo apt install libfuse2` on Debian/Ubuntu, or run it once with `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
 

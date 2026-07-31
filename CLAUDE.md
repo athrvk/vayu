@@ -430,7 +430,11 @@ remaining variable/auth resolution into the engine) is deferred and documented i
 
 **Tag *after* the release commit lands on the default branch.** When the version bump goes through a pull request (the usual path), run steps 1-2 on the feature branch so the bump merges with the PR, but do **not** tag the PR-branch commit. A squash/rebase merge rewrites the commit hash, so a tag on the pre-merge commit would point at a commit that never reaches the default branch. Wait for the PR to merge, then run step 3 against the merged commit on the default branch (`git checkout <default-branch> && git pull && git tag v$(cat VERSION) && git push origin --tags`). The tag triggers the release build, so it must sit on the canonical merged history.
 
-macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
+macOS and Linux ship a one-command installer: `install.sh` (repo root). On macOS it downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). On Linux it installs the AppImage under `~/.local/share/vayu` with a `.desktop` entry, an icon, and a `vayu` symlink when `~/.local/bin` is on `PATH` - **no sudo anywhere on that path**, since everything is under `$HOME`. Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
+
+**The two platforms share the decisions and split the actions.** Which version, whether it is already installed, whether the app must be quit first, and the whole prompt/skip/`--force` machinery are written once; only `asset_name`, `stage_*`, `place_*`, `installed_version`, `running_pids`, `request_quit`/`force_quit`, `launch_app` and `uninstall_*` dispatch. They dispatch on **`platform()`, a function wrapping `uname -s`** rather than a constant, so `install_test.sh` can force either branch on either host - CI runs the suite on both, and without the stub each host would silently skip the other half. Linux specifics worth keeping in mind: the AppImage's version is inside a squashfs image, so the installer stamps `~/.local/share/vayu/version` and reads that back (a stamp with no AppImage does **not** count as installed); `pgrep` has to match `/tmp/.mount_Vayu*` as well as the installed path, because that is where the AppImage's helper processes actually run; and the launcher icon is fetched from the docs site (`brand_assets.py` publishes the same PNG the app uses) rather than `--appimage-extract`, which some runtimes answer by unpacking the entire 400MB image.
+
+**Release assets carry the version** (`Vayu-<v>-universal.zip`, `Vayu-<v>-x86_64.AppImage`) while `Vayu-x64.exe` and `Vayu-amd64.deb` do not - an accident of electron-builder's per-target defaults. So `/releases/latest/download/<name>` works for Windows and Debian and **404s for macOS and Linux**; the README pointed at a `Vayu-x86_64.AppImage` that has never existed. Link the installer or `/releases/latest` instead of inventing an unversioned asset URL.
 
 **`install.sh` is the macOS *update* path, not just the install path.**
 `resolveUpdateStrategy` returns `notify` on darwin - an ad-hoc signature gives
@@ -448,6 +452,18 @@ ignored, and **aborts rather than deleting the bundle under a live process**.
 macOS deletes a running app happily and the process then loses everything it
 loads lazily. Re-running with the latest already installed is a no-op unless
 `--force`; `VAYU_ASSUME_YES=1` skips the quit prompt for unattended runs.
+
+**The polite quit differs per platform, and Linux's only works because of
+`electron/quit-signals.ts`.** macOS has an Apple Event; Linux has only a signal,
+and Node's default disposition for `SIGTERM`/`SIGINT`/`SIGHUP` terminates the
+process outright - skipping `before-quit` entirely, so pending saves are lost
+and the engine and MCP children are orphaned. `installQuitOnSignal(process, …)`
+in `main.ts` routes them into `app.quit()` instead, at most once (a second
+signal during the async flush would start a competing shutdown). Delete that and
+the Linux installer's quit silently becomes a data-losing kill. The app can also
+quit itself for an update - `update:quitForUpdate` behind the **Quit to update**
+button on the macOS notify path - which is the only quit that needs no
+Automation consent.
 
 **The install target follows the existing copy** (`resolve_install_target`).
 `/Applications` is only the default for a *fresh* install; if Vayu is already in

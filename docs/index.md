@@ -68,12 +68,21 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 === "Linux"
 
     ```sh
-    chmod +x Vayu-x86_64.AppImage
-    ./Vayu-x86_64.AppImage
+    bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
-    Download [**Vayu-x86_64.AppImage**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
-    first. It is self-contained: no wizard, no root.
+    The same command as macOS. It installs the AppImage under
+    `~/.local/share/vayu` and registers a launcher entry, so Vayu shows up in
+    your applications menu. Nothing it writes leaves your home directory, so it
+    never asks for root. Re-run it to update. x86_64 only.
+
+    Or take the AppImage from the
+    [latest release](https://github.com/athrvk/vayu/releases/latest) and run it
+    yourself - it is self-contained either way.
+
+    If it does not start, your system is probably missing FUSE 2:
+    `sudo apt install libfuse2`, or run it once with
+    `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 [All releases](https://github.com/athrvk/vayu/releases){ .md-button }
 [Build from source instead](building.md){ .md-button }
