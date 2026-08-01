@@ -320,14 +320,21 @@ Three rules make the offered set match what the call can actually read:
   variables only, because that is the one scope it reads - a collection
   variable offered there would be a name that returns `undefined`. Only the
   merged `pm.variables.get` lists all three.
-- **Collection variables are not offered yet.** Collection scope is
+- **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
-  has no request to take a `collectionId` from. The live list is therefore
-  environment + global. The `{{name}}` provider is scoped the same way for the
-  same reason, so whatever gives one of them a request context gives both - and
-  that is also when decision D2 starts to matter here, since the script's
-  collection scope is the immediate parent while the resolver merges the chain.
+  has no request builder context to take a `collectionId` from. Both providers
+  get one from `useActiveCollectionId` instead - the active tab's request's
+  collection, or a collection tab itself - so the list is globals + the
+  collection chain + the active environment, the same set every other surface
+  offers.
+- **The script list narrows that chain back down.** Decision D2 applies here:
+  the engine fills a script's collection scope from the immediate parent
+  collection, so an ancestor's variable is dropped from
+  `pm.collectionVariables.get()` and from the merged `pm.variables.get()`.
+  Offering it would offer a name that returns `undefined`, which is the same
+  failure the rule above prevents. The `{{name}}` list keeps the whole chain,
+  because that is what compose-time resolution actually reads.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no

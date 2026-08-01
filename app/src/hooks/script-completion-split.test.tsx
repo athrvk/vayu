@@ -58,6 +58,9 @@ vi.mock("./useVariableResolver", () => ({
 	useVariableResolver: () => ({ getAllVariables: () => variables }),
 }));
 
+/** The providers scope themselves to the active tab; scoping is covered by `variable-completion-scope.test.tsx`. */
+vi.mock("./useActiveCollectionId", () => ({ useActiveCollectionId: () => undefined }));
+
 /** One `pm.*` entry is enough to tell "the list appeared" from "it yielded". */
 vi.mock("@/queries", () => ({
 	useScriptCompletionsQuery: () => ({

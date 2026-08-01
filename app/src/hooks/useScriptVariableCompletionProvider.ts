@@ -25,6 +25,13 @@
  * resolves to `undefined`. `scriptVariableCompletionContext` decides which set
  * applies; this hook only renders it.
  *
+ * **And collection scope is narrower here than in a body.** Decision D2: the
+ * engine fills a script's single collection scope from the request's immediate
+ * parent collection, while the resolver merges the whole ancestor chain (which
+ * is right for `{{name}}`, resolved at compose time). So an ancestor's variable
+ * is dropped from this list - offering it would be the same `undefined` the
+ * rule above exists to prevent. See docs/app/variable-resolution.md.
+ *
  * Call once (in App). A completion provider is global per language, so a single
  * registration covers every script editor instance. The same shape as
  * `useScriptCompletionProvider` and `useVariableCompletionProvider` beside it.
@@ -34,6 +41,7 @@ import { useEffect } from "react";
 import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
+import { useActiveCollectionId } from "./useActiveCollectionId";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
@@ -51,19 +59,13 @@ const DYNAMIC_SORT_GROUP = 8;
 export function useScriptVariableCompletionProvider() {
 	const monaco = useMonaco();
 	/*
-	 * No `collectionId`, so no collection variables - collection scope is
-	 * explicit only, and a Monaco completion provider is registered once per
-	 * language rather than per editor, so it has no request to take one from.
-	 * The `{{name}}` provider beside it is scoped the same way for the same
-	 * reason; whatever gives one of them a request context gives both.
-	 *
-	 * That also makes the engine's D2 divergence unreachable from here (the
-	 * script's collection scope is the immediate parent only, while this
-	 * resolver would merge the chain): with no collection variables to offer,
-	 * there is nothing for that rule to narrow. Re-derive it here if this
-	 * provider ever learns which request it is completing for.
+	 * The active tab's collection, since a provider registered per language has
+	 * no request builder context to take one from and the resolver offers no
+	 * collection variables without it. It is also the *immediate* collection,
+	 * which is what the D2 narrowing below needs.
 	 */
-	const { getAllVariables } = useVariableResolver();
+	const collectionId = useActiveCollectionId();
+	const { getAllVariables } = useVariableResolver({ collectionId });
 
 	useEffect(() => {
 		if (!monaco) return;
@@ -100,6 +102,11 @@ export function useScriptVariableCompletionProvider() {
 					// `pm.environment.get` reads one scope; only the merged
 					// `pm.variables` sees them all.
 					.filter(([, info]) => context.scope === "all" || info.scope === context.scope)
+					// D2: a script's collection scope is the immediate collection, not
+					// the merged chain the resolver returns.
+					.filter(
+						([, info]) => info.scope !== "collection" || info.sourceId === collectionId
+					)
 					.map(([name, info]) => ({
 						label: name,
 						kind: monaco.languages.CompletionItemKind.Variable,
@@ -141,5 +148,5 @@ export function useScriptVariableCompletionProvider() {
 		});
 
 		return () => disposable.dispose();
-	}, [monaco, getAllVariables]);
+	}, [monaco, getAllVariables, collectionId]);
 }
