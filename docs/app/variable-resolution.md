@@ -317,6 +317,45 @@ request's own collection. See
 [pm API compatibility](./pm-api-compatibility.md) and
 [scripting.md](../engine/scripting.md#variables-pmvariables).
 
+#### Autocomplete inside the accessors
+
+The script editors complete variable **names** inside the string argument of a
+`pm.*` accessor - `pm.environment.get("…")`, and the `set` / `has` / `unset`
+spellings beside it (`useScriptVariableCompletionProvider`). The `{{name}}`
+list is deliberately *not* registered for `javascript`: braces are not the
+syntax in a script, so offering them there would teach the wrong thing. The
+names are the same names; only the place you type them differs.
+
+Three rules make the offered set match what the call can actually read:
+
+- **The accessor picks the scope.** `pm.environment.get` lists environment
+  variables only, because that is the one scope it reads - a collection
+  variable offered there would be a name that returns `undefined`. Only the
+  merged `pm.variables.get` lists all three.
+- **Collection variables come from the active tab.** Collection scope is
+  explicit-only (see *Collection scope is explicit only* above) and a Monaco
+  completion provider is registered once per *language*, not per editor, so it
+  has no request builder context to take a `collectionId` from. Both providers
+  get one from `useActiveCollectionId` instead - the active tab's request's
+  collection, or a collection tab itself - so the list is globals + the
+  collection chain + the active environment, the same set every other surface
+  offers.
+- **The script list narrows that chain back down.** Decision D2 applies here:
+  the engine fills a script's collection scope from the immediate parent
+  collection, so an ancestor's variable is dropped from
+  `pm.collectionVariables.get()` and from the merged `pm.variables.get()`.
+  Offering it would offer a name that returns `undefined`, which is the same
+  failure the rule above prevents. The `{{name}}` list keeps the whole chain,
+  because that is what compose-time resolution actually reads.
+- **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
+  template and interpolates it, so it gets brace-style completion including
+  `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
+  generator is offered there.
+
+The dotted `pm.*` completions (served by the engine, see
+[the scripting docs](../engine/scripting.md)) yield inside a string literal so
+the two lists never appear together.
+
 ---
 
 ## Scope labels

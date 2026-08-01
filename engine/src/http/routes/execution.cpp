@@ -286,14 +286,25 @@ const vayu::ScriptResult& post_script_result) {
         response_json["testResults"] = test_results;
     }
 
-    // Combine console output from both scripts
-    std::vector<std::string> all_console_output;
-    for (const auto& line : pre_script_result.console_output) {
-        all_console_output.push_back ("[pre] " + line);
-    }
-    for (const auto& line : post_script_result.console_output) {
-        all_console_output.push_back (line);
-    }
+    /*
+     * Combine console output from both scripts.
+     *
+     * `source` is a field rather than the `"[pre] "` text prefix this used to
+     * carry: the prefix was indistinguishable from a script that logged a line
+     * beginning with those six characters, and adding a second prefix for the
+     * level would have doubled that ambiguity instead of removing it.
+     */
+    nlohmann::json all_console_output = nlohmann::json::array ();
+    const auto append = [&all_console_output] (const char* source,
+                        const std::vector<vayu::ConsoleEntry>& entries) {
+        for (const auto& entry : entries) {
+            all_console_output.push_back ({ { "source", source },
+            { "level", vayu::to_string (entry.level) },
+            { "message", entry.message } });
+        }
+    };
+    append ("pre", pre_script_result.console_output);
+    append ("test", post_script_result.console_output);
     if (!all_console_output.empty ()) {
         response_json["consoleLogs"] = all_console_output;
     }

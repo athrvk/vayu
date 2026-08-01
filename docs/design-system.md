@@ -1026,6 +1026,19 @@ ring 2px out and the panel still cuts it off. The `components/ui` primitives are
 unaffected either way, since they set `focus-visible:outline-none` and paint
 their own ring.
 
+**Which is why a primitive fixes its own clipping, with `ring-inset`.** Neither
+`.panel-clip` nor `.focus-ring-inset` reaches a Tailwind `ring` - both move
+`outline-offset`, and a primitive has already turned its outline off. `TabsTrigger`
+is the worked example: a trigger fills its list's height exactly (measured in the
+running app, both boxes were 74->98) and the three scrolling strips - the response
+viewer, the request builder and Collection Detail - are `overflow-x-auto
+overflow-y-hidden`, so an outward `ring-2` had no room at the top or bottom and
+rendered as two cut-off vertical strokes. `focus-visible:ring-inset` on the
+trigger fixes every strip at once, present and future; padding the three lists
+would have fixed it three times. Same reasoning as *prefer clearance* above,
+reached the other way round: the clipping is on the list and the ring is on the
+trigger, and only one of those is a single place. Guarded by `tabs.test.tsx`.
+
 **Prefer clearance to tucking-in for a control that also appears outside a
 clipping panel.** Both fix the clipping; only clearance keeps one control
 looking like one control. The row-enable checkbox is the worked example: a plain

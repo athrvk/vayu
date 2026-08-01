@@ -1091,8 +1091,41 @@ TEST_F (ScriptEngineTest, ConsoleLog) {
 
     EXPECT_TRUE (result.success);
     ASSERT_GE (result.console_output.size (), 2);
-    EXPECT_EQ (result.console_output[0], "Hello, World!");
-    EXPECT_EQ (result.console_output[1], "Value: 42");
+    EXPECT_EQ (result.console_output[0].message, "Hello, World!");
+    EXPECT_EQ (result.console_output[1].message, "Value: 42");
+}
+
+// The four methods were bound to one C function that recorded no level, so
+// every line reached the app looking identical whether the script called
+// `log` or `error` - the Console tab had nothing to differentiate on.
+TEST_F (ScriptEngineTest, ConsoleRecordsTheLevelItWasCalledWith) {
+    auto result = engine.execute_test (R"(
+        console.log("plain");
+        console.info("noted");
+        console.warn("careful");
+        console.error("broken");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.console_output.size (), 4u);
+    EXPECT_EQ (result.console_output[0].level, vayu::ConsoleLevel::Log);
+    EXPECT_EQ (result.console_output[1].level, vayu::ConsoleLevel::Info);
+    EXPECT_EQ (result.console_output[2].level, vayu::ConsoleLevel::Warn);
+    EXPECT_EQ (result.console_output[3].level, vayu::ConsoleLevel::Error);
+
+    // The message must survive the level being carried beside it.
+    EXPECT_EQ (result.console_output[3].message, "broken");
+}
+
+// The wire spellings are what the app matches on, so they are part of the
+// contract rather than an implementation detail of the enum.
+TEST_F (ScriptEngineTest, ConsoleLevelWireSpellings) {
+    EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Log), "log");
+    EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Info), "info");
+    EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Warn), "warn");
+    EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Error), "error");
 }
 
 // ============================================================================
@@ -1121,7 +1154,7 @@ TEST_F (ScriptEngineTest, ComposedPartsShareOneScope) {
 
     EXPECT_TRUE (result.success);
     ASSERT_GE (result.console_output.size (), 1);
-    EXPECT_EQ (result.console_output[0], "got 42");
+    EXPECT_EQ (result.console_output[0].message, "got 42");
 }
 
 // ============================================================================

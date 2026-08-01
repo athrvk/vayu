@@ -1134,9 +1134,23 @@ run-shaped way of stating the same field, not a second store.
       "passed": true
     }
   ],
-  "consoleLogs": []
+  "consoleLogs": [
+    { "source": "pre", "level": "log", "message": "token refreshed" },
+    { "source": "test", "level": "error", "message": "unexpected shape" }
+  ]
 }
 ```
+
+**`consoleLogs` entries carry their own source and level.** `source` is which of
+the request's two scripts wrote the line (`"pre"` for the pre-request script,
+`"test"` for the post-request one) and `level` is the `console.*` method that was
+called - `"log"`, `"info"`, `"warn"` or `"error"`. Releases before this one sent
+a flat `string[]` with the source encoded as a `"[pre] "` text prefix and no
+level at all, which was indistinguishable from a script logging that string
+itself; a client that may talk to an older engine should read a bare string as
+`{"source": "test", "level": "log"}`, or `"pre"` when the prefix is present. The
+field is omitted entirely when neither script logged anything. See
+[scripting.md](scripting.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated**
 (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -
@@ -1875,6 +1889,60 @@ Get script engine API completions for UI autocomplete.
   ]
 }
 ```
+
+### GET /scripting/types
+
+The same `pm.*` surface as TypeScript declarations, for Monaco's TypeScript
+worker. A completion list can only populate a dropdown; the declarations are
+what give hover documentation over an existing call, signature help while
+typing arguments, and go-to-definition within the surface.
+
+The declarations are **generated from the completion table above**, not
+maintained separately - a hand-written `pm.d.ts` in the app would be a second
+declaration of a surface the engine owns, and the two would drift the first
+time a method was added to one and not the other. The derivation works because
+a completion entry already carries its type: a function's `detail` is its
+signature, a field's `detail` is its type. See
+`engine/src/http/routes/script_types.cpp`.
+
+Output is deterministic - the same table always produces byte-identical text,
+so a client may cache on `version`.
+
+**Response:**
+```json
+{
+  "version": "1.0.0",
+  "engine": "quickjs",
+  "libUri": "ts:vayu/pm.d.ts",
+  "typeDefinitions": "interface VayuExpectTo {\n\tequal(expected: any): VayuExpectation;\n…"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `libUri` | Model URI the app registers the declarations under (`addExtraLib`) |
+| `typeDefinitions` | The `.d.ts` source |
+
+The file also declares the host globals the sandbox **lacks** (`setTimeout`,
+`fetch`, `require`, `URL`, …) as `never`, with the reason as documentation. That
+is not padding: the app must suppress "Cannot find name" wholesale, because a
+collection-level script part is joined to the request's before the engine runs
+it, so a name declared there is undeclared as far as the editor's model can see.
+Declaring the absent globals keeps the real mistake caught ("not callable")
+while that suppression is in force. A test executes `typeof <name>` in the real
+script engine for every entry, so the list cannot drift from the runtime.
+
+Two things the generated file cannot get from the table, both handled in
+`script_types.cpp` and guarded by `script_types_test.cpp`:
+
+- **Chain vocabulary.** A getter that *continues* an assertion chain (`.to.not`,
+  `.and`) and one that *performs* an assertion (`.to.be.true`) are identical as
+  completion entries - both are non-functions whose `detail` restates their own
+  name. Only meaning separates them, so the meaning is named in the generator.
+- **Unparseable parameter lists.** Two entries document an overload in prose
+  TypeScript cannot parse (`upsert({ key, value }) | (name, value)`). Those fall
+  back to `(...args: any[])`, keeping the member callable rather than emitting a
+  file that does not compile.
 
 ## HTTP Status Codes
 

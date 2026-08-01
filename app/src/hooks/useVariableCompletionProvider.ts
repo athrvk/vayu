@@ -22,6 +22,13 @@
  * sibling scope accessors, or the merged `pm.variables.get()`, and offering
  * brace completion there would teach the wrong thing.
  *
+ * **Scoped to the active tab's collection.** A provider is registered once per
+ * language, so unlike `VariableInput` it has no request builder context to take
+ * a `collectionId` from - and without one `useVariableResolver` leaves every
+ * collection-scope variable out. `useActiveCollectionId` supplies it, so the
+ * list is globals + the whole ancestor chain + the active environment, which is
+ * exactly the set `{{name}}` resolves against at compose time.
+ *
  * Called once, in App - a completion provider is global per language, so one
  * registration covers every editor instance. The same shape as
  * `useScriptCompletionProvider` beside it.
@@ -31,6 +38,7 @@ import { useEffect } from "react";
 import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
+import { useActiveCollectionId } from "./useActiveCollectionId";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
@@ -54,7 +62,7 @@ const DYNAMIC_SORT_GROUP = 8;
 
 export function useVariableCompletionProvider() {
 	const monaco = useMonaco();
-	const { getAllVariables } = useVariableResolver();
+	const { getAllVariables } = useVariableResolver({ collectionId: useActiveCollectionId() });
 
 	useEffect(() => {
 		if (!monaco) return;

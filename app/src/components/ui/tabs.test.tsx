@@ -9,12 +9,13 @@
  */
 
 /**
- * The tab primitive's two load-bearing behaviours.
+ * The tab primitive's load-bearing behaviours.
  *
- * Both are rendered rather than source-scanned. A scan cannot see either: the
- * width reservation is a layout effect of an element that carries no
- * distinguishing class, and the active colour arrives through a `data-[state=]`
- * variant that only exists once Radix has decided which trigger is selected.
+ * All are rendered rather than source-scanned. A scan cannot see any of them:
+ * the width reservation is a layout effect of an element that carries no
+ * distinguishing class, and both the active colour and the force-mounted
+ * panel's hiding arrive through `data-[state=]` variants that only exist once
+ * Radix has decided which trigger is selected.
  */
 
 import { describe, it, expect } from "vitest";
@@ -131,6 +132,80 @@ describe("ghost trigger colours", () => {
 		const list = screen.getByRole("tablist");
 		expect(list.className).not.toMatch(/\bborder-b\b/);
 		expect(list.className).not.toMatch(/\bbg-muted\b/);
+	});
+
+	it("draws the focus ring inside the trigger, where nothing can clip it", () => {
+		render(<Fixture />);
+		const trigger = screen.getByRole("tab", { name: "Variables" });
+
+		/*
+		 * A trigger fills its list's height exactly - measured in the running
+		 * app, both boxes were 74->98 - and the three scrolling lists (response
+		 * viewer, request builder, Collection Detail) are `overflow-x-auto
+		 * overflow-y-hidden`, which clips. So an outward `ring-2` had no room at
+		 * the top or the bottom and rendered as two cut-off vertical strokes.
+		 *
+		 * `ring-inset` is the fix that cannot be undone from a call site, which
+		 * matters because the clipping lives on the *list* and the ring on the
+		 * *trigger*: padding the lists would fix it three times and stay fixed
+		 * only until the fourth scrolling tab strip.
+		 */
+		expect(trigger.className).toContain("focus-visible:ring-2");
+		expect(trigger.className, "an outward ring is clipped by a scrolling tab strip").toContain(
+			"focus-visible:ring-inset"
+		);
+	});
+});
+
+describe("a force-mounted panel stays out of sight", () => {
+	/*
+	 * Radix's `forceMount` means "always present", not "present but hidden":
+	 * `present` becomes `forceMount || isSelected`, and the panel's `hidden`
+	 * attribute is `!present` - so a force-mounted inactive panel renders with
+	 * no `hidden` at all. Collection Detail force-mounts its four draft-holding
+	 * panels to keep unsaved work alive, and every one of them was painted on
+	 * top of whichever tab the user had actually selected.
+	 *
+	 * Hiding is the primitive's job, for the same reason TabLabel's width
+	 * reservation is: a call site that reaches for `forceMount` is thinking
+	 * about the draft it is saving, not about Radix's presence model.
+	 */
+	function Forced() {
+		return (
+			<Tabs defaultValue="two">
+				<TabsList>
+					<TabsTrigger value="one">
+						<TabLabel>One</TabLabel>
+					</TabsTrigger>
+					<TabsTrigger value="two">
+						<TabLabel>Two</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one" forceMount>
+					one
+				</TabsContent>
+				<TabsContent value="two">two</TabsContent>
+			</Tabs>
+		);
+	}
+
+	it("keeps the inactive panel mounted", () => {
+		render(<Forced />);
+		// The whole point of force-mounting: the draft is still there.
+		expect(screen.getByText("one")).toBeInTheDocument();
+	});
+
+	it("hides it on data-state, since Radix leaves off `hidden`", () => {
+		render(<Forced />);
+		const inactive = screen.getByText("one");
+
+		expect(inactive).toHaveAttribute("data-state", "inactive");
+		// Radix's own mechanism is absent here - this is the gap being filled.
+		expect(inactive).not.toHaveAttribute("hidden");
+		// jsdom applies no Tailwind, so the class list is the observable.
+		expect(inactive.className, "a force-mounted panel renders over the active one").toContain(
+			"data-[state=inactive]:hidden"
+		);
 	});
 });
 

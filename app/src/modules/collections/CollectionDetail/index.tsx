@@ -167,8 +167,10 @@ export default function CollectionDetail() {
 					<TabsContent
 						key={t.id}
 						value={t.id}
-						// Radix hides a force-mounted panel with `hidden` rather than
-						// unmounting it, which is what lets the draft survive.
+						// A force-mounted panel is kept alive rather than unmounted,
+						// which is what lets the draft survive. Radix leaves it
+						// *visible* too - our TabsContent hides an inactive one on
+						// `data-state`; see components/ui/tabs.tsx.
 						forceMount={
 							TABS_HOLDING_DRAFTS.has(t.id) && visited.has(t.id) ? true : undefined
 						}

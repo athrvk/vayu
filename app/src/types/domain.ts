@@ -565,10 +565,35 @@ export interface TestResult {
 	error?: string;
 }
 
+/** Which `console.*` method a script line came from. Engine spellings. */
+export type ConsoleLevel = "log" | "info" | "warn" | "error";
+
+/** Which of a request's two scripts wrote a line. */
+export type ConsoleLogSource = "pre" | "test";
+
+/**
+ * One line of script console output.
+ *
+ * The engine used to send a bare string and encode the source as a `"[pre] "`
+ * text prefix, which was indistinguishable from a script that logged a line
+ * starting with those characters - and carried no level at all, so the Console
+ * tab drew `console.error` exactly like `console.log`. Both are fields now.
+ */
+export interface ConsoleLogEntry {
+	source: ConsoleLogSource;
+	level: ConsoleLevel;
+	message: string;
+}
+
 export interface SanityResult extends HttpResponse {
 	requestId?: string;
 	testResults?: TestResult[];
-	consoleLogs?: string[];
+	/**
+	 * A `string` is the pre-structured shape, kept in the type so the fallback in
+	 * `parse-logs.ts` is visible rather than a cast. A renderer can meet one when
+	 * it is talking to an older engine sidecar.
+	 */
+	consoleLogs?: Array<ConsoleLogEntry | string>;
 	preScriptError?: string;
 	postScriptError?: string;
 	error?: string;
@@ -826,4 +851,22 @@ export interface ScriptCompletionsResponse {
 	version: string;
 	engine: string;
 	completions: ScriptCompletion[];
+}
+
+/**
+ * The TypeScript declarations for the `pm.*` surface, generated engine-side
+ * from the same completion table (`GET /scripting/types`).
+ *
+ * Feeding these to Monaco's TypeScript worker is what turns a suggestion list
+ * into hover documentation, signature help and typo diagnostics. They are
+ * generated rather than hand-written in this repo on purpose: a `pm.d.ts` here
+ * would be a second declaration of a surface the engine owns.
+ */
+export interface ScriptTypeDefinitionsResponse {
+	version: string;
+	engine: string;
+	/** Model URI the declarations are registered under - `ts:vayu/pm.d.ts`. */
+	libUri: string;
+	/** The `.d.ts` source itself. */
+	typeDefinitions: string;
 }

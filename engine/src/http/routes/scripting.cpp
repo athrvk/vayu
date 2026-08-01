@@ -1010,6 +1010,32 @@ void register_scripting_routes (RouteContext& ctx) {
             send_error (res, 500, e.what ());
         }
     });
+
+    /**
+     * GET /scripting/types
+     * Returns the TypeScript declarations for the same surface, generated from
+     * the completion table above (see script_types.cpp). The app feeds these to
+     * Monaco's TypeScript worker, which is what turns a suggestion list into
+     * hover documentation, signature help and typo diagnostics.
+     *
+     * Served as text in a JSON envelope rather than as a `.d.ts` body so the
+     * app can cache on `version` without re-parsing the declarations.
+     */
+    ctx.server.Get ("/scripting/types",
+    [&ctx] (const httplib::Request&, httplib::Response& res) {
+        vayu::utils::log_info (
+        "GET /scripting/types - Generating script type declarations");
+        try {
+            const std::string dts = generate_script_typedefs ();
+            nlohmann::json response = { { "version", "1.0.0" }, { "engine", "quickjs" },
+                { "libUri", "ts:vayu/pm.d.ts" }, { "typeDefinitions", dts } };
+            send_json (res, response);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /scripting/types - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
 }
 
 } // namespace vayu::http::routes

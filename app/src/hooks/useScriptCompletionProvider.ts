@@ -22,6 +22,8 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useScriptCompletionsQuery } from "@/queries";
 import { completionReplaceStartColumn } from "@/lib/script-completion-range";
+import { calleeOnlyInsertText } from "@/lib/script-completion-insert";
+import { openStringLiteral } from "@/lib/script-variable-completion";
 
 /** Script editors mount with language="javascript". */
 const SCRIPT_LANGUAGE = "javascript";
@@ -44,6 +46,18 @@ export function useScriptCompletionProvider() {
 				const linePrefix = model
 					.getLineContent(position.lineNumber)
 					.slice(0, position.column - 1);
+
+				/*
+				 * Nothing in this list belongs inside a string literal. The chain
+				 * regex is happy to match the word under the caret wherever it sits,
+				 * so `pm.environment.get("ba` offered the whole dotted `pm.*` surface
+				 * and accepting one replaced the half-typed variable name with
+				 * `pm.response.body`. A string argument is exactly where the
+				 * *variable* list belongs (`useScriptVariableCompletionProvider`), so
+				 * yielding here is what leaves the right list showing alone.
+				 */
+				if (openStringLiteral(linePrefix)) return { suggestions: [] };
+
 				const range: Monaco.IRange = {
 					startLineNumber: position.lineNumber,
 					endLineNumber: position.lineNumber,
@@ -51,19 +65,37 @@ export function useScriptCompletionProvider() {
 					endColumn: position.column,
 				};
 
-				const suggestions: Monaco.languages.CompletionItem[] = completions.map((c) => ({
-					label: c.label,
-					kind: c.kind as Monaco.languages.CompletionItemKind,
-					insertText: c.insertText,
-					insertTextRules: c.insertTextRules as
-						| Monaco.languages.CompletionItemInsertTextRule
-						| undefined,
-					detail: c.detail,
-					documentation: c.documentation,
-					sortText: c.sortText,
-					filterText: c.filterText,
-					range,
-				}));
+				/*
+				 * Most `pm.*` completions are snippets carrying their own argument
+				 * list, which is the wrong shape when the call is already written:
+				 * completing `pm.variables.rep|("$guid")` left
+				 * `pm.variables.replaceIn("template")("$guid")` behind. Where the
+				 * line already opens a call, insert the callee alone.
+				 */
+				const lineSuffix = model
+					.getLineContent(position.lineNumber)
+					.slice(position.column - 1);
+
+				const suggestions: Monaco.languages.CompletionItem[] = completions.map((c) => {
+					const callee = calleeOnlyInsertText(c.insertText, lineSuffix);
+					return {
+						label: c.label,
+						kind: c.kind as Monaco.languages.CompletionItemKind,
+						insertText: callee ?? c.insertText,
+						// A bare path holds no placeholders, and keeping the snippet
+						// rule would have Monaco read a `$` in one as the start of one.
+						insertTextRules: callee
+							? undefined
+							: (c.insertTextRules as
+									| Monaco.languages.CompletionItemInsertTextRule
+									| undefined),
+						detail: c.detail,
+						documentation: c.documentation,
+						sortText: c.sortText,
+						filterText: c.filterText,
+						range,
+					};
+				});
 
 				return { suggestions };
 			},

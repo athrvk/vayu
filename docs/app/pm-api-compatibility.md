@@ -317,6 +317,45 @@ registration is global per language, so one call covers every script editor inst
 > values (Function = 1, Field = 3, Variable = 4, Snippet = 28); changing the engine
 > constants requires an engine rebuild for new icons to take effect.
 
+### Type declarations (hover, signature help)
+
+A completion list can only fill a dropdown. Hover documentation over an existing call and
+signature help while typing arguments come from Monaco's **TypeScript worker**, which
+wants a `.d.ts` - served at `GET /scripting/types` and **generated from the same
+completion table**, so the surface stays declared once. `useScriptTypeDefinitions`
+(`app/src/hooks/useScriptTypeDefinitions.ts`, called once in `App`) registers it with
+`addExtraLib`.
+
+It also configures the worker to match the sandbox: `lib: ["es2022"]` with **no `dom`**,
+because the runtime has no `fetch`, `setTimeout` or `URL` and the editor must not offer
+them; and `target: ESNext`, because ES2020 would flag `Object.hasOwn` and
+`Array.prototype.at`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
+
+**Semantic diagnostics are on**, which is what makes `pm.response.staus` squiggle with a
+"Did you mean 'status'?" - and, through the same analysis, what makes quick fixes, rename,
+find-references and go-to-definition work inside a script. Those providers all default to
+enabled in Monaco; `useScriptTypeDefinitions` sets them explicitly so a changed default
+cannot remove them silently.
+
+Exactly two diagnostics are suppressed (`diagnosticCodesToIgnore`), because a *correct*
+script in this editor produces them. Both follow from the editor holding a fragment while
+the engine runs something larger:
+
+| Code | Message | Why it is wrong here |
+|------|---------|----------------------|
+| `1108` | A `return` statement can only be used within a function body | The engine wraps every script in an IIFE before running it, so a top-level `return` to bail out early is legal |
+| `2304` | Cannot find name `x` | A collection-level script part is joined to the request's (with `\n\n`) before the engine runs the result, so a name declared there is undeclared as far as this model can see |
+
+Suppressing `2304` would normally cost the best diagnostic of all - `fetch` and
+`setTimeout`, which the sandbox does not have. It does not, because the engine **declares
+the globals it lacks** as `never` (`ABSENT_GLOBALS` in `script_types.cpp`): calling one is
+"not callable" rather than "cannot find name", and hover explains why. That list is held
+to the runtime by a test that executes `typeof <name>` in the real script engine for every
+entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first run.
+
+Narrow that suppression list rather than widening it: each code on it is a real mistake
+going unreported in exchange for not crying wolf on correct code.
+
 ---
 
 ## Where it lives
@@ -325,6 +364,9 @@ registration is global per language, so one call covers every script editor inst
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pm` runtime (QuickJS bindings) | `engine/src/runtime/script_engine.cpp`                                                                                                                  |
 | Completion metadata endpoint    | `engine/src/http/routes/scripting.cpp`                                                                                                                  |
+| Type declaration generator      | `engine/src/http/routes/script_types.cpp`                                                                                                               |
+| Type declaration fetch + cache  | `app/src/queries/script-types.ts`                                                                                                                       |
+| Monaco type registration        | `app/src/hooks/useScriptTypeDefinitions.ts`                                                                                                             |
 | Completion fetch + cache        | `app/src/queries/script-completions.ts`                                                                                                                 |
 | Monaco completion provider      | `app/src/hooks/useScriptCompletionProvider.ts`                                                                                                          |
 | Shared editor wrapper           | `app/src/components/ui/code-editor.tsx`                                                                                                                 |
