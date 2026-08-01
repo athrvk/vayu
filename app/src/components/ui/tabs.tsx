@@ -90,7 +90,12 @@ function TabsTrigger({
 				"text-xs font-medium text-muted-foreground",
 				"ring-offset-background transition-colors",
 				"hover:text-foreground",
-				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				// `ring-inset`, because a trigger fills its list's height exactly and
+				// the scrolling strips are `overflow-y-hidden` - an outward ring had
+				// no room and rendered as two clipped vertical strokes. Inset also
+				// keeps the fix on the trigger, where the ring is, rather than
+				// asking every present and future tab strip to leave room for it.
+				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 				"disabled:pointer-events-none disabled:opacity-50",
 				// Every state change here is a `data-[state=]` variant rather than a
 				// swapped class, so the class list is identical either way and only
@@ -123,6 +128,19 @@ function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPr
 			data-slot="tabs-content"
 			className={cn(
 				"ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				// Radix's `forceMount` means "always present", not "present but
+				// hidden": it makes `present` unconditionally true and the panel's
+				// `hidden` attribute is `!present`, so a force-mounted inactive
+				// panel carries no `hidden` and paints straight over the selected
+				// one. Collection Detail force-mounts four panels to keep unsaved
+				// drafts alive and stacked all of them on screen at once.
+				//
+				// Hiding belongs here rather than at the call site for the same
+				// reason TabLabel's width reservation does - a caller reaching for
+				// `forceMount` is thinking about the draft it is protecting, not
+				// about Radix's presence model. Inert for a panel that is not
+				// force-mounted, since Radix never renders one.
+				"data-[state=inactive]:hidden",
 				className
 			)}
 			{...props}
