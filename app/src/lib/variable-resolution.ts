@@ -27,12 +27,14 @@
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
  *  - single pass, no recursion; the raw string, never the typed value
+ *
+ * The `{{name}}` matcher itself is `VARIABLE_PATTERN` from
+ * `constants/variables.ts` - this module used to declare its own identical
+ * copy, which is how the app came to hold four (issue #227).
  */
 
+import { VARIABLE_PATTERN } from "@/constants/variables";
 import { isDynamicVariableName, resolveDynamicVariable } from "./dynamic-variables";
-
-/** Matches `{{name}}` - no nested braces, no escape hatch. */
-export const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
 /** A stored variable definition as it may actually arrive off disk - loose. */
 export interface StoredVariableLike {

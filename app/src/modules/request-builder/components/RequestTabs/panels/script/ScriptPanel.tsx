@@ -25,7 +25,7 @@ import { useRequestBuilderContext } from "../../../../context";
 import InheritedScriptsNotice from "../InheritedScriptsNotice";
 import LegacyScriptNotice from "../LegacyScriptNotice";
 import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
-import { referencedVariables } from "./referenced-variables";
+import { referencedVariables } from "@/lib/referenced-variables";
 
 /** How many referenced names get a chip before the rest become a count. */
 const CHIP_LIMIT = 5;

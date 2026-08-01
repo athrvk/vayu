@@ -27,6 +27,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
+import { referencedVariables } from "@/lib/referenced-variables";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
@@ -69,14 +70,10 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 		mutation: updateCollection,
 	});
 
-	const usedVars = useMemo(() => {
-		const envPattern =
-			/pm\.(?:environment|globals|collectionVariables)\.get\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-		const templatePattern = /\{\{([^{}]+)\}\}/g;
-		const fromGet = [...script.matchAll(envPattern)].map((m) => m[1]);
-		const fromTpl = [...script.matchAll(templatePattern)].map((m) => m[1].trim());
-		return [...new Set([...fromGet, ...fromTpl])];
-	}, [script]);
+	// Both kinds go through the shared extraction. This tab used to re-implement
+	// it - the same two regexes, the same dedupe - so the empty-name filter that
+	// landed in the helper never reached the pre- and post-request tabs here.
+	const usedVars = useMemo(() => referencedVariables(script), [script]);
 
 	const persist = useCallback(async () => {
 		if (!isDirty) return;

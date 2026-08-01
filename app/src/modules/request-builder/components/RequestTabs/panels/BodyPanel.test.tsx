@@ -30,6 +30,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
@@ -57,7 +58,7 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 		// And remembers the Content-Type row it wrote through these.
 		getAutoContentType: () => null,
 		setAutoContentType: () => {},
-		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
+		resolveString: (s: string) => s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`),
 		// The form-data / urlencoded modes render the key/value table, which
 		// reaches VariableInput for every cell.
 		getAllVariables: () => ({}),
