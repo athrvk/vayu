@@ -484,6 +484,15 @@ manual step. It runs only on a tag push and only if the whole build matrix
 succeeded, and it skips silently when the `WINGET_TOKEN` secret is absent - so
 a release can never fail because of it.
 
+It keeps the **five newest versions** on winget (`max-versions-to-keep`) and
+drops older ones as each release is submitted. Unbounded, every version ever
+released stays installable at an explicit `--version`, including 0.10.0, whose
+engine cannot start without the Visual C++ redistributable. The manual workflow
+below deliberately does *not* prune, because it exists partly to publish an
+older tag and pruning keeps the *newest* N - it could delete the very version
+being submitted. The next tagged release restores the cap on its own. Pruning
+affects the winget index only; the GitHub Releases page keeps everything.
+
 For anything the tag-triggered path does not cover - a release that predates
 the automation, a re-submission after a winget-pkgs pull request was closed,
 publishing an older tag - run the **Publish to winget (manual)** workflow
