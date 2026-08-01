@@ -432,6 +432,20 @@ console.warn('Warning message');
 console.error('Error message');
 ```
 
+Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
+rather than `[object Object]`; a value that cannot be serialized (a circular
+reference, say) becomes `[Object: unserializable]`.
+
+**The level travels with the line.** Each entry on the wire is
+`{ "source": "pre" | "test", "level": "log" | "info" | "warn" | "error",
+"message": "..." }` - see
+[`consoleLogs` in the API reference](api-reference.md#post-execute). The four
+methods are bound to one C function distinguished by QuickJS's `magic`
+argument (`setup_console`), so the level is captured at the call; it cannot be
+recovered from the text afterwards, which is why it used to be lost. The app's
+Console tab draws `warn` and `error` in their status tokens and labels every
+non-`log` line in a gutter.
+
 ## Examples
 
 ### Validate JSON Response
@@ -728,9 +742,17 @@ this section is what needs rewriting.
 
 ## Limitations
 
-QuickJS supports ES2020 features with some limitations:
+The **language** is current; what is missing is the **host environment**:
 
-- **No ES2021+ features**: No optional chaining (`?.`), nullish coalescing (`??`), etc.
+- **Modern syntax works.** Optional chaining (`?.`) and nullish coalescing
+  (`??`) are ES2020 and supported, as are later additions like
+  `Array.prototype.at`, `Object.hasOwn` and `String.prototype.replaceAll`. This
+  section used to say the opposite, listing `?.` and `??` as "ES2021+" and
+  unavailable - wrong on both counts, so any workaround written around that
+  claim can go. What limits a script is the global list above, not the syntax.
+- **No host globals**: no `setTimeout`, `fetch`, `URL`, `TextEncoder`,
+  `structuredClone` or `crypto.subtle` - see the table above for what replaces
+  the ones that have a replacement.
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem or network access
 - **Memory limit**: 64MB per script execution

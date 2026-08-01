@@ -90,6 +90,10 @@ export const queryKeys = {
 	},
 
 	// Script Completions
+	scriptTypes: {
+		all: ["scriptTypes"] as const,
+	},
+
 	scriptCompletions: {
 		all: ["scriptCompletions"] as const,
 	},

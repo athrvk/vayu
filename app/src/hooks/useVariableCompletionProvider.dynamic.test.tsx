@@ -54,6 +54,9 @@ vi.mock("./useVariableResolver", () => ({
 	useVariableResolver: () => ({ getAllVariables: () => variables }),
 }));
 
+/** The providers scope themselves to the active tab; scoping is covered by `variable-completion-scope.test.tsx`. */
+vi.mock("./useActiveCollectionId", () => ({ useActiveCollectionId: () => undefined }));
+
 import { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 
 /** Completions offered for a line whose caret sits inside an open `{{`. */

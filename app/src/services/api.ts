@@ -28,6 +28,7 @@ import type {
 	EngineHealth,
 	SanityResult,
 	ScriptCompletionsResponse,
+	ScriptTypeDefinitionsResponse,
 	CreateCollectionRequest,
 	UpdateCollectionRequest,
 	ListRequestsParams,
@@ -307,6 +308,10 @@ export const apiService = {
 	// Scripting
 	async getScriptCompletions(): Promise<ScriptCompletionsResponse> {
 		return await httpClient.get<ScriptCompletionsResponse>(API_ENDPOINTS.SCRIPT_COMPLETIONS);
+	},
+
+	async getScriptTypeDefinitions(): Promise<ScriptTypeDefinitionsResponse> {
+		return await httpClient.get<ScriptTypeDefinitionsResponse>(API_ENDPOINTS.SCRIPT_TYPES);
 	},
 
 	// Import

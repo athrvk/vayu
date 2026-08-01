@@ -67,6 +67,7 @@ export { useConfigQuery, useUpdateConfigMutation } from "./config";
 
 // Script Completions
 export { useScriptCompletionsQuery } from "./script-completions";
+export { useScriptTypeDefinitionsQuery } from "./script-types";
 
 // OAuth 2.0
 export {

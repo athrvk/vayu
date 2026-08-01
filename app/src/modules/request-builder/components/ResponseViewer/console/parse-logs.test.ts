@@ -6,28 +6,62 @@
  */
 
 /**
- * Splitting one flat log array back into the two scripts that wrote it.
+ * Turning the engine's console output into what the panel renders.
  *
- * The engine runs both scripts in one QuickJS context and returns their output
- * as one array, prefixing pre-request lines with `"[pre] "`. This was inline in
- * `ConsoleOutput`, so the edges below were reachable only by rendering the tab
- * and reading its sections - which is how a log whose own text begins with
- * `[pre]` would have gone unnoticed.
+ * Two shapes reach this decoder. The structured one carries the script and the
+ * `console.*` level as fields. The bare-string one is what a pre-structured
+ * engine sent: the script encoded as a `"[pre] "` prefix, and no level at all -
+ * which is why `console.error` used to look exactly like `console.log`.
+ *
+ * The legacy edges below are kept rather than deleted with the format: they are
+ * still reachable against an older sidecar, and they were only ever visible by
+ * rendering the Console tab and reading its sections.
  */
 
 import { describe, it, expect } from "vitest";
 import { parseConsoleLogs, splitBySource } from "./parse-logs";
 
-describe("which script a line came from", () => {
+describe("structured entries", () => {
+	it("keeps the level the script called", () => {
+		expect(
+			parseConsoleLogs([
+				{ source: "pre", level: "error", message: "boom" },
+				{ source: "test", level: "warn", message: "careful" },
+			])
+		).toEqual([
+			{ source: "pre", level: "error", message: "boom" },
+			{ source: "test", level: "warn", message: "careful" },
+		]);
+	});
+
+	it("reads a level it has never heard of as `log` rather than dropping the line", () => {
+		// What a *newer* engine would send. A line the panel refuses to draw is
+		// worse than one drawn in the plain tone.
+		const [entry] = parseConsoleLogs([
+			{ source: "test", level: "trace" as "log", message: "still shown" },
+		]);
+		expect(entry).toEqual({ source: "test", level: "log", message: "still shown" });
+	});
+
+	it("does not treat a `[pre] ` message as a prefix", () => {
+		// The whole reason the source became a field: this line is from the test
+		// script and merely happens to start with those six characters.
+		expect(parseConsoleLogs([{ source: "test", level: "log", message: "[pre] x" }])).toEqual([
+			{ source: "test", level: "log", message: "[pre] x" },
+		]);
+	});
+});
+
+describe("the pre-structured string shape", () => {
 	it("reads the engine's prefix and strips it", () => {
 		expect(parseConsoleLogs(["[pre] setting a token"])).toEqual([
-			{ source: "pre", message: "setting a token" },
+			{ source: "pre", level: "log", message: "setting a token" },
 		]);
 	});
 
 	it("treats an unprefixed line as the test script", () => {
 		expect(parseConsoleLogs(["assertion passed"])).toEqual([
-			{ source: "test", message: "assertion passed" },
+			{ source: "test", level: "log", message: "assertion passed" },
 		]);
 	});
 
@@ -35,13 +69,13 @@ describe("which script a line came from", () => {
 		// A pre-request script that logs the string "[pre] " itself. Stripping
 		// globally would eat the payload.
 		expect(parseConsoleLogs(["[pre] echo: [pre] x"])).toEqual([
-			{ source: "pre", message: "echo: [pre] x" },
+			{ source: "pre", level: "log", message: "echo: [pre] x" },
 		]);
 	});
 
 	it("needs the prefix at the start, not merely present", () => {
 		expect(parseConsoleLogs(["result was [pre] shaped"])).toEqual([
-			{ source: "test", message: "result was [pre] shaped" },
+			{ source: "test", level: "log", message: "result was [pre] shaped" },
 		]);
 	});
 
@@ -49,14 +83,24 @@ describe("which script a line came from", () => {
 		// `console.log()` with no argument is a real thing a script does, and a
 		// vanished line is worse than a blank one.
 		expect(parseConsoleLogs(["[pre] ", ""])).toEqual([
-			{ source: "pre", message: "" },
-			{ source: "test", message: "" },
+			{ source: "pre", level: "log", message: "" },
+			{ source: "test", level: "log", message: "" },
 		]);
 	});
 
 	it("preserves order within the array", () => {
 		const parsed = parseConsoleLogs(["[pre] a", "b", "[pre] c"]);
 		expect(parsed.map((l) => l.message)).toEqual(["a", "b", "c"]);
+	});
+
+	it("mixes with structured entries in one array", () => {
+		// Not a shape the engine sends, but the decoder is per-entry and saying so
+		// is cheaper than reasoning about it later.
+		const parsed = parseConsoleLogs([
+			"[pre] old",
+			{ source: "test", level: "warn", message: "new" },
+		]);
+		expect(parsed.map((l) => l.level)).toEqual(["log", "warn"]);
 	});
 });
 
