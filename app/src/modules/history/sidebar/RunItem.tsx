@@ -12,6 +12,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge } from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
+import { formatConcurrency } from "@/constants/load-test-modes";
 import {
 	CheckCircle2,
 	XCircle,
@@ -196,7 +197,7 @@ export default function RunItem({
 						{run.summary.concurrency && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Activity className="w-3 h-3" />
-								{run.summary.concurrency} workers
+								{formatConcurrency(run.summary.concurrency)}
 							</span>
 						)}
 						{loadTestType && (
