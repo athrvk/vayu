@@ -7,33 +7,78 @@
 
 /**
  * Fetches a GraphQL schema by sending the standard introspection query through
- * the engine (apiService.executeRequest), avoiding CORS and reusing the
- * request's auth headers.
+ * the engine (`POST /compose` then `POST /execute`), avoiding CORS and giving
+ * introspection the same credentials the request itself would send.
+ *
+ * Composition is the engine's (issue #226): the endpoint's `{{variables}}` and
+ * its auth block - `inherit` walked through the collection chain, OAuth 2.0
+ * included - are resolved by `POST /compose`, and the introspection query is
+ * overlaid onto what comes back. Introspection therefore holds no resolution
+ * logic of its own. It used to send only the request's header rows, so any
+ * endpoint whose credentials came from the Auth panel answered 401 and the
+ * schema never loaded (issue #228).
  */
 
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
-import type { ExecuteRequestRequest } from "@/types";
+import type { ComposedRequest, ExecuteRequestRequest } from "@/types";
 
-export function buildIntrospectionRequest(
-	url: string,
-	headers: Record<string, string>
-): ExecuteRequestRequest {
-	return {
+/**
+ * What introspection needs in order to compose: the endpoint as the user typed
+ * it, plus the scope that resolves it. Nothing here is resolved by the
+ * renderer - `{{vars}}` and `inherit` go over unresolved on purpose, because
+ * resolving them twice is the defect `POST /compose` exists to prevent.
+ */
+export interface IntrospectionTarget {
+	/** Endpoint URL as typed, `{{variables}}` intact. */
+	url: string;
+	/** Header rows as typed (enabled-only, flattened), `{{variables}}` intact. */
+	headers: Record<string, string>;
+	/** The request's auth block, `inherit` included. Absent means no auth. */
+	auth?: Record<string, unknown>;
+	/** Scopes the variable chain and the `inherit` walk. */
+	collectionId?: string;
+	environmentId?: string;
+}
+
+/**
+ * Overlay the introspection query onto a composed payload.
+ *
+ * Only the three composed fields introspection needs are carried over - url,
+ * headers and the concrete auth. The rest of the composed request is
+ * deliberately dropped: its body is not an introspection query, and its script
+ * parts belong to sending the request, not to loading a schema in the
+ * background.
+ */
+export function buildIntrospectionRequest(composed: ComposedRequest): ExecuteRequestRequest {
+	const request: ExecuteRequestRequest = {
 		method: "POST",
-		url,
-		headers: { ...headers, "Content-Type": "application/json" },
+		url: composed.url,
+		headers: { ...composed.headers, "Content-Type": "application/json" },
 		// The engine expects a structured body ({ mode, content }), not a raw
 		// string - content is the serialized JSON the server receives.
 		body: { mode: "json", content: JSON.stringify({ query: getIntrospectionQuery() }) },
 	};
+	// Compose erases `auth` when it resolves to nothing, and never returns a
+	// still-`inherit` block; either way an absent field is the engine's "send
+	// nothing", so only a concrete block is forwarded.
+	const mode = typeof composed.auth?.mode === "string" ? composed.auth.mode : undefined;
+	if (composed.auth && mode !== "inherit") request.auth = composed.auth;
+	return request;
 }
 
-export async function introspectSchema(
-	url: string,
-	headers: Record<string, string>
-): Promise<GraphQLSchema> {
-	const res = await apiService.executeRequest(buildIntrospectionRequest(url, headers));
+export async function introspectSchema(target: IntrospectionTarget): Promise<GraphQLSchema> {
+	const composed = await apiService.composeRequest({
+		request: {
+			method: "POST",
+			url: target.url,
+			headers: target.headers,
+			...(target.auth ? { auth: target.auth } : {}),
+		},
+		collectionId: target.collectionId,
+		environmentId: target.environmentId,
+	});
+	const res = await apiService.executeRequest(buildIntrospectionRequest(composed));
 	if (res.status < 200 || res.status >= 300) {
 		throw new Error(`Introspection failed: HTTP ${res.status}`);
 	}

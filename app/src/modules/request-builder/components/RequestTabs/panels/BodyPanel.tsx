@@ -49,6 +49,8 @@ import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
 import { useResizable } from "@/hooks/useResizable";
+import { useSessionStore } from "@/stores";
+import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
 import { switchContentType, withoutContentType } from "./body/content-type";
@@ -156,6 +158,9 @@ export default function BodyPanel() {
 		getAutoContentType,
 		setAutoContentType,
 	} = useRequestBuilderContext();
+	// The environment scoping GraphQL introspection's compose call - the same id
+	// the builder's Send path passes.
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const [showResolved, setShowResolved] = useState(false);
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
@@ -192,14 +197,25 @@ export default function BodyPanel() {
 	 */
 	const [addedContentType, setAddedContentType] = useState<string | null>(null);
 
-	const resolvedGqlUrl = resolveString(request.url || "").trim();
-	const buildResolvedHeaders = (): Record<string, string> =>
-		Object.fromEntries(
-			Object.entries(toFlatHeaders(request.headers)).map(([k, v]) => [
-				resolveString(k),
-				resolveString(v),
-			])
-		);
+	/*
+	 * What GraphQL introspection needs, unresolved: since #228 it composes
+	 * engine-side, so the URL, the header rows and the auth block go over as
+	 * typed and `POST /compose` resolves them - including an `inherit` that only
+	 * the collection chain can settle, which is what an Auth-panel-authed
+	 * endpoint needs to answer introspection at all.
+	 *
+	 * `resolvedUrl` is the one preview-resolved value here, and it is never
+	 * sent: it identifies the cache entry, so editing a variable the URL
+	 * interpolates points at a different schema instead of reusing the old one.
+	 */
+	const gqlSchemaTarget: SchemaTarget = {
+		url: (request.url || "").trim(),
+		resolvedUrl: resolveString(request.url || "").trim(),
+		headers: toFlatHeaders(request.headers),
+		auth: { ...request.auth },
+		collectionId: request.collectionId || undefined,
+		environmentId: activeEnvironmentId || undefined,
+	};
 
 	const handleModeChange = (mode: BodyMode) => {
 		/*
@@ -383,8 +399,7 @@ export default function BodyPanel() {
 						<GraphQLBody
 							body={request.body || ""}
 							onBodyChange={(b) => updateField("body", b)}
-							resolvedUrl={resolvedGqlUrl}
-							resolvedHeaders={buildResolvedHeaders}
+							schemaTarget={gqlSchemaTarget}
 							onEditorMount={handleEditorMount}
 							active
 						/>

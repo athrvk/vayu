@@ -65,11 +65,11 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	});
 
 	// Re-run diagnostics for open graphql models only when the active schema
-	// reference actually changes - the store also mutates on activeUrl/status
+	// reference actually changes - the store also mutates on active-target/status
 	// changes, which must not trigger a full re-validation pass.
 	let lastSchema = useSchemaCache.getState().getActiveSchema();
 	useSchemaCache.subscribe((state) => {
-		const schema = state.activeUrl ? (state.byUrl[state.activeUrl]?.schema ?? null) : null;
+		const schema = state.activeKey ? (state.byKey[state.activeKey]?.schema ?? null) : null;
 		if (schema === lastSchema) return;
 		lastSchema = schema;
 		for (const model of monaco.editor.getModels()) {
