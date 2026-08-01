@@ -22,6 +22,7 @@ import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProvider";
+import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCompletionProvider";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useSaveStore } from "./stores/save-store";
 
@@ -54,6 +55,10 @@ function App() {
 	// `{{variable}}` completion in the body editors. Global per language, so one
 	// registration covers every editor instance - same as the line above.
 	useVariableCompletionProvider();
+	// Variable names inside `pm.environment.get("…")` and its siblings - the
+	// script editors' equivalent of the line above, since a script names
+	// variables through the accessors rather than through braces.
+	useScriptVariableCompletionProvider();
 
 	// Bridge native menu items (Preferences…/Settings) to in-app navigation
 	useMenuActions();

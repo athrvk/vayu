@@ -305,6 +305,33 @@ request's own collection. See
 [pm API compatibility](./pm-api-compatibility.md) and
 [scripting.md](../engine/scripting.md#variables-pmvariables).
 
+#### Autocomplete inside the accessors
+
+The script editors complete variable **names** inside the string argument of a
+`pm.*` accessor - `pm.environment.get("…")`, and the `set` / `has` / `unset`
+spellings beside it (`useScriptVariableCompletionProvider`). The `{{name}}`
+list is deliberately *not* registered for `javascript`: braces are not the
+syntax in a script, so offering them there would teach the wrong thing. The
+names are the same names; only the place you type them differs.
+
+Three rules make the offered set match what the call can actually read:
+
+- **The accessor picks the scope.** `pm.environment.get` lists environment
+  variables only, because that is the one scope it reads - a collection
+  variable offered there would be a name that returns `undefined`. Only the
+  merged `pm.variables.get` lists all three.
+- **Ancestor collection variables are excluded**, per decision D2 above. They
+  resolve for `{{name}}` and are invisible to a script, which makes this the
+  one place the two completion lists legitimately disagree.
+- **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
+  template and interpolates it, so it gets brace-style completion including
+  `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
+  generator is offered there.
+
+The dotted `pm.*` completions (served by the engine, see
+[the scripting docs](../engine/scripting.md)) yield inside a string literal so
+the two lists never appear together.
+
 ---
 
 ## Scope labels

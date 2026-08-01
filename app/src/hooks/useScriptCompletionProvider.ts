@@ -22,6 +22,7 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useScriptCompletionsQuery } from "@/queries";
 import { completionReplaceStartColumn } from "@/lib/script-completion-range";
+import { openStringLiteral } from "@/lib/script-variable-completion";
 
 /** Script editors mount with language="javascript". */
 const SCRIPT_LANGUAGE = "javascript";
@@ -44,6 +45,18 @@ export function useScriptCompletionProvider() {
 				const linePrefix = model
 					.getLineContent(position.lineNumber)
 					.slice(0, position.column - 1);
+
+				/*
+				 * Nothing in this list belongs inside a string literal. The chain
+				 * regex is happy to match the word under the caret wherever it sits,
+				 * so `pm.environment.get("ba` offered the whole dotted `pm.*` surface
+				 * and accepting one replaced the half-typed variable name with
+				 * `pm.response.body`. A string argument is exactly where the
+				 * *variable* list belongs (`useScriptVariableCompletionProvider`), so
+				 * yielding here is what leaves the right list showing alone.
+				 */
+				if (openStringLiteral(linePrefix)) return { suggestions: [] };
+
 				const range: Monaco.IRange = {
 					startLineNumber: position.lineNumber,
 					endLineNumber: position.lineNumber,
