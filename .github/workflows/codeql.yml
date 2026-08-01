@@ -102,7 +102,11 @@ jobs:
             ninja-build \
             build-essential \
             pkg-config \
-            ca-certificates
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
 
       # The dependency archives can still be cached: vcpkg builds them, not the
       # engine, so CodeQL does not need to trace their compilation. Only the

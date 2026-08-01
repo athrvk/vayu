@@ -30,6 +30,18 @@ python build.py --test-only
   - MSVC 2022+ (Windows)
 - **vcpkg**: Package manager (auto-detected or install separately)
 - **Ninja**: Build system (optional, but recommended for faster builds)
+- **Autotools** (Linux and macOS only): `autoconf`, `autoconf-archive`,
+  `automake` and `libtool`. vcpkg builds **libsodium** from source through its
+  autotools path and runs `autoreconf` first, so a box without these fails at
+  dependency install with *"libsodium currently requires the following programs
+  from the system package manager"*, before any Vayu source is compiled.
+  `python build.py --setup` installs them. Windows needs nothing extra -
+  the port builds libsodium with MSBuild there.
+
+  ```bash
+  sudo apt install autoconf autoconf-archive automake libtool   # Debian/Ubuntu
+  brew install autoconf autoconf-archive automake libtool       # macOS
+  ```
 
 ## Manual Build
 
