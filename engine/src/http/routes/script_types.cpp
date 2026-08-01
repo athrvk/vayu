@@ -29,6 +29,11 @@
  */
 
 #include <algorithm>
+// <cctype> for isalpha/isalnum and <cstddef> for size_t: libstdc++ pulls both
+// in transitively through <string>, MSVC and libc++ do not promise to, and this
+// file is built on all three.
+#include <cctype>
+#include <cstddef>
 #include <map>
 #include <string>
 #include <vector>
