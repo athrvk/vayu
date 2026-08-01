@@ -164,10 +164,20 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 ```
 
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
-raises an error toast carrying the reason. Eight call sites reach it - the
-collection tree's create / delete / duplicate / rename, `useSaveManager`,
-`SettingsMain`, `VariableTableEditor` - and doing the reporting here rather than
-at each of them means a new caller cannot forget to report.
+raises an error toast carrying the reason. Its call sites are the collection
+tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
+`VariableTableEditor`, `useDraftSaveContext` and `ContextBar` - and doing the
+reporting here rather than at each of them means a new caller cannot forget to
+report. The last two were added because both could fail in complete silence:
+`ContextBar` fired three mutations with no `onError` at all, and the
+manual-draft editors rendered an inline callout that a quit flush has no screen
+to show.
+
+**Only the context that set a status clears it.** `SettingsMain` used to run an
+unconditional `setStatus("idle")` whenever it had nothing pending - which
+included mount - so merely opening Settings wiped an `error` another context had
+just published to the Dock. It now tracks whether the `pending` on screen is its
+own and leaves anything else alone.
 
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
@@ -208,7 +218,11 @@ const {
 } = useSaveStore();
 ```
 
-**Non-persisted**. See `useSaveManager` hook for registration details.
+**Non-persisted**. See `useSaveManager` (autosave editors) and
+`useDraftSaveContext` (manual save-button editors) for registration details.
+Between them every dirty editor in the app is in this registry, which is what
+`flushAll` walks on quit - a surface that is not registered is not merely
+unsaved on quit, it is invisible.
 
 #### `response-store.ts` - Response Cache
 
@@ -788,6 +802,51 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 });
 ```
 
+**The draft lives in component state, so its panel must not unmount.** Radix
+unmounts an inactive `TabsContent`; `CollectionDetail` therefore force-mounts the
+four draft-holding tabs (Info, Auth, Pre-request, Post-request) from their first
+visit onwards, so an intra-collection tab switch stops discarding the draft.
+This is the same call, for the same reason, as the request builder's body drafts
+living in `RequestBuilderProvider` rather than in `BodyPanel` (see
+`request-builder/utils/body-drafts.ts`). The Variables tab is deliberately not
+force-mounted: it autosaves and claims the store's active context on mount, so
+keeping it alive behind another tab would point Ctrl/Cmd+S at the wrong editor.
+
+A *collection* switch still reseeds and discards, deliberately - it is the
+hook's documented behaviour above, and pinned by `useEntityDraft.test.ts`.
+
+### `useDraftSaveContext()` - Registering a Manual Draft
+
+The counterpart to `useSaveManager`'s registration half, for editors using the
+`useEntityDraft` model. Located in `app/src/hooks/useDraftSaveContext.ts`. Used
+by `InfoTab`, `AuthTab` and `ScriptTab`.
+
+```typescript
+useDraftSaveContext({
+  id: `collection-${collection.id}-auth`,  // Unique per editor
+  name: `Collection auth: ${collection.name}`,
+  isDirty,                                 // From useEntityDraft
+  isActive: active,                        // Is this the tab on screen?
+  save: persist,                           // Rejecting is how failure is reported
+});
+```
+
+**Behaviour:**
+- **Registration only.** It schedules nothing; the Save button stays the primary
+  affordance. The defect it fixes is that the *other* ways to save - Ctrl/Cmd+S,
+  the quit flush, tab eviction - could not reach these editors at all, because
+  none of the three tabs ever called `registerContext`.
+- **`isActive` decides who owns Ctrl/Cmd+S.** `triggerSave` prefers the active
+  context, and these editors stay mounted while hidden, so without it the last
+  sibling to mount would answer for the panel on screen.
+- **A failure toasts rather than resolving quietly.** The editors render an
+  inline `SaveFailed` callout for a button press, but a quit flush has no callout
+  on screen, and `runSave` reads a resolved promise as success - swallowing here
+  would report "Saved" for a write that failed.
+- **The save must carry its own validity guard.** A disabled button does not stop
+  the store-driven paths, which is why `InfoTab` refuses a blank collection name
+  inside `persist` and not only on the button.
+
 ## State Flow Examples
 
 ### Executing a Single Request
@@ -857,16 +916,20 @@ starts the engine at import time.
 
 3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
 
-4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` - do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
-5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes.
+5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
 
-6. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
+    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - `ContextBar` did neither, so a rejected edit sat on screen looking committed.
 
-7. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
+6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 
-8. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+7. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
 
-9. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+8. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
 
-10. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.
+9. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+
+10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+
+11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.

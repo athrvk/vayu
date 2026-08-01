@@ -31,6 +31,9 @@ import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mutation = {
+	// `mutateAsync`, not `mutate`: the tab's save has to be awaitable so the
+	// quit flush and Ctrl/Cmd+S can report a real outcome (useDraftSaveContext).
+	mutateAsync: vi.fn(() => Promise.resolve()),
 	mutate: vi.fn(),
 	reset: vi.fn(),
 	isPending: false,
@@ -87,6 +90,7 @@ function wrap(collection: Collection) {
 
 beforeEach(() => {
 	mutation.mutate.mockReset();
+	mutation.mutateAsync.mockClear();
 	mutation.reset.mockReset();
 	mutation.isPending = false;
 	mutation.isError = false;
@@ -155,7 +159,7 @@ describe("AuthTab with an editable auth mode", () => {
 		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
 		fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
-		expect(mutation.mutate).toHaveBeenCalledWith({ id: "c1", auth: { mode: "noauth" } });
+		expect(mutation.mutateAsync).toHaveBeenCalledWith({ id: "c1", auth: { mode: "noauth" } });
 	});
 
 	it("says no auth when there genuinely is none", () => {
