@@ -50,6 +50,7 @@ import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
 	responseFromExecuteResult,
+	scriptsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
 import { generateUUID } from "@/modules/request-builder/utils/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
@@ -242,7 +243,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				// A resend is a new run, so History has to hear about it.
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
-				if (preScriptParts) {
+				// Same gate as the builder's send path, from the same helper.
+				if (scriptsMayWriteVariables(preScriptParts, postScriptParts)) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });

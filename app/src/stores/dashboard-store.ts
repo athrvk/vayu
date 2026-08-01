@@ -109,14 +109,9 @@ interface DashboardState {
 	setError: (error: string | null) => void;
 	setActiveView: (view: DashboardView) => void;
 	setStopping: (stopping: boolean) => void;
-	reset: () => void;
-
-	// Helpers
-	getLatestMetrics: () => LoadTestMetrics | null;
-	getMetricsWindow: (seconds: number) => LoadTestMetrics[];
 }
 
-export const useDashboardStore = create<DashboardState>((set, get) => ({
+export const useDashboardStore = create<DashboardState>((set) => ({
 	currentRunId: null,
 	mode: "running",
 	isStreaming: false,
@@ -235,40 +230,4 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	setError: (error) => set({ error }),
 	setActiveView: (view) => set({ activeView: view }),
 	setStopping: (stopping) => set({ isStopping: stopping }),
-
-	reset: () =>
-		set({
-			currentRunId: null,
-			mode: "running",
-			isStreaming: false,
-			currentMetrics: null,
-			historicalMetrics: [],
-			finalReport: null,
-			error: null,
-			activeView: "metrics",
-			isStopping: false,
-			loadTestConfig: null,
-			requestInfo: null,
-			sourceRequestId: null,
-			peakConcurrency: 0,
-			breakpoint: INITIAL_BREAKPOINT,
-		}),
-
-	// Helpers
-	getLatestMetrics: () => {
-		const { historicalMetrics } = get();
-		return historicalMetrics.length > 0
-			? historicalMetrics[historicalMetrics.length - 1]
-			: null;
-	},
-
-	getMetricsWindow: (seconds) => {
-		const { historicalMetrics } = get();
-		if (historicalMetrics.length === 0) return [];
-
-		const latest = historicalMetrics[historicalMetrics.length - 1];
-		const cutoffTime = latest.timestamp - seconds * 1000;
-
-		return historicalMetrics.filter((m) => m.timestamp >= cutoffTime);
-	},
 }));

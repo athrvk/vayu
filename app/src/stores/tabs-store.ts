@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useSaveStore, type SaveContext } from "./save-store";
+import { useResponseStore } from "./response-store";
 
 export type TabType =
 	| "welcome"
@@ -39,13 +40,17 @@ interface TabsState {
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	closeTab: (tabId: string) => void;
-	/** Close every tab bound to one of the given entity ids (e.g. after deletion). */
-	closeTabsForEntities: (entityIds: Iterable<string>) => void;
+	/**
+	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
+	 *
+	 * `type` narrows the sweep to one kind of tab. Ids are engine-generated and
+	 * do not collide across families, so it is not needed for correctness - it
+	 * states at the call site which tabs a deletion is allowed to close, which
+	 * is the difference between "close the run tabs for these deleted runs" and
+	 * "close whatever happens to carry these ids".
+	 */
+	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
-	/** Replace the active tab in place (used when welcome tab spawns a request) */
-	replaceActiveTab: (tab: Omit<Tab, "id">) => void;
-	/** Close all tabs */
-	closeAll: () => void;
 }
 
 /**
@@ -91,6 +96,29 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 		default:
 			return false;
 	}
+}
+
+/** The slice of the store that reaches localStorage - see `partialize` below. */
+interface PersistedTabs {
+	openTabs: Tab[];
+	activeTabId: string | null;
+}
+
+/**
+ * Version translation for the persisted tab list.
+ *
+ * zustand *discards* a payload whose stamped version does not match `version`
+ * unless a `migrate` is supplied - it logs to the console and hands the store
+ * its defaults - so a future bump without this would silently close everyone's
+ * tabs. This is where that bump goes: add a branch per old version. Until then
+ * there is one shape, and the only work is refusing a payload that is not it.
+ */
+function migrateTabs(persisted: unknown): PersistedTabs {
+	const stored = (persisted ?? {}) as Partial<PersistedTabs>;
+	return {
+		openTabs: Array.isArray(stored.openTabs) ? stored.openTabs : [],
+		activeTabId: typeof stored.activeTabId === "string" ? stored.activeTabId : null,
+	};
 }
 
 function makeId() {
@@ -161,11 +189,28 @@ export const useTabsStore = create<TabsState>()(
 				set({ openTabs: remaining, activeTabId: nextActiveId });
 			},
 
-			closeTabsForEntities: (entityIds) => {
+			closeTabsForEntities: (entityIds, type) => {
 				const ids = new Set(entityIds);
 				if (ids.size === 0) return;
+
+				// A delete that can name a request takes its response with it: the
+				// collection tree reaches here after deleting a request or a whole
+				// collection, nothing else evicts from that map, and each entry
+				// holds a body plus its raw copy. Skipped for a `type`-scoped sweep
+				// that is not about requests - `"run"` ids cannot key a response, so
+				// walking them would only look like it meant something. Done before
+				// the early return below, since a deleted request with no open tab
+				// still leaves a response behind.
+				if (type === undefined || type === "request") {
+					const { clearResponse } = useResponseStore.getState();
+					for (const id of ids) clearResponse(id);
+				}
+
 				const { openTabs, activeTabId } = get();
-				const shouldClose = (t: Tab) => t.entityId !== null && ids.has(t.entityId);
+				const shouldClose = (t: Tab) =>
+					t.entityId !== null &&
+					ids.has(t.entityId) &&
+					(type === undefined || t.type === type);
 
 				const remaining = openTabs.filter((t) => !shouldClose(t));
 				if (remaining.length === openTabs.length) return; // nothing matched
@@ -193,31 +238,6 @@ export const useTabsStore = create<TabsState>()(
 					set({ activeTabId: tabId });
 				}
 			},
-
-			replaceActiveTab: (tabDef) => {
-				const { openTabs, activeTabId } = get();
-				if (!activeTabId) {
-					get().openTab(tabDef);
-					return;
-				}
-				// If a tab for this entity already exists elsewhere, focus it instead
-				const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
-				const existing = openTabs.find(
-					(t) =>
-						t.id !== activeTabId &&
-						(isSingleton
-							? t.type === tabDef.type
-							: t.type === tabDef.type && t.entityId === tabDef.entityId)
-				);
-				if (existing) {
-					set({ activeTabId: existing.id });
-					return;
-				}
-				const newTab: Tab = { ...tabDef, id: activeTabId };
-				set({ openTabs: openTabs.map((t) => (t.id === activeTabId ? newTab : t)) });
-			},
-
-			closeAll: () => set({ openTabs: [], activeTabId: null }),
 		}),
 		{
 			name: STORAGE_KEYS.TABS_STORE,
@@ -226,6 +246,7 @@ export const useTabsStore = create<TabsState>()(
 				openTabs: state.openTabs,
 				activeTabId: state.activeTabId,
 			}),
+			migrate: migrateTabs,
 		}
 	)
 );

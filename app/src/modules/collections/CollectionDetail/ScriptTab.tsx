@@ -22,10 +22,10 @@
  * Used by both the Pre-request and Post-request tabs in CollectionDetail.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
-import { useEntityDraft } from "@/hooks";
+import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
@@ -35,6 +35,8 @@ type ScriptKind = "pre" | "post";
 interface ScriptTabProps {
 	collection: Collection;
 	kind: ScriptKind;
+	/** Whether this is the tab on screen - see `useDraftSaveContext`. */
+	active?: boolean;
 }
 
 const QUICK_REF: Array<[string, string]> = [
@@ -44,7 +46,7 @@ const QUICK_REF: Array<[string, string]> = [
 	["Response (post only)", "pm.response.json()\npm.response.code\npm.response.responseTime"],
 ];
 
-export default function ScriptTab({ collection, kind }: ScriptTabProps) {
+export default function ScriptTab({ collection, kind, active = false }: ScriptTabProps) {
 	const isPre = kind === "pre";
 	const fieldKey = isPre ? "preRequestScript" : "postRequestScript";
 
@@ -76,10 +78,22 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 		return [...new Set([...fromGet, ...fromTpl])];
 	}, [script]);
 
-	const handleSave = () => {
+	const persist = useCallback(async () => {
 		if (!isDirty) return;
-		updateCollection.mutate({ id: collection.id, [fieldKey]: script });
-	};
+		await updateCollection.mutateAsync({ id: collection.id, [fieldKey]: script });
+	}, [isDirty, updateCollection, collection.id, fieldKey, script]);
+
+	useDraftSaveContext({
+		id: `collection-${collection.id}-${fieldKey}`,
+		name: `Collection ${isPre ? "pre-request" : "post-request"} script: ${collection.name}`,
+		isDirty,
+		isActive: active,
+		save: persist,
+	});
+
+	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
+	// toast instead, since this callout may not be on screen at all.
+	const handleSave = () => void persist().catch(() => {});
 
 	const handleClear = () => {
 		setScript("");

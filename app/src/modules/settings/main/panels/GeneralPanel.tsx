@@ -29,7 +29,7 @@ import {
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
-import { useToastStore } from "@/stores";
+import { useToastStore, useTabsStore } from "@/stores";
 import { useAllRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
@@ -53,6 +53,7 @@ export default function GeneralPanel() {
 	// not just a polled page.
 	const { data: runs = [] } = useAllRunsQuery();
 	const invalidateRuns = useInvalidateRuns();
+	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
@@ -81,6 +82,13 @@ export default function GeneralPanel() {
 		try {
 			const results = await Promise.allSettled(runs.map((r) => apiService.deleteRun(r.id)));
 			const failed = results.filter((r) => r.status === "rejected").length;
+			// Close the tab of every run that actually went away - by index, so a
+			// run the engine refused (a 409 while it is still stopping) keeps its
+			// tab. Without this the tabs persist and rehydrate as dead panes.
+			closeTabsForEntities(
+				runs.filter((_, i) => results[i].status === "fulfilled").map((r) => r.id),
+				"run"
+			);
 			invalidateRuns();
 			showToast(
 				failed === 0

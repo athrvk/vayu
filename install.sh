@@ -159,6 +159,23 @@ parse_args() {
 	MODE="install"
 	PURGE=0
 	FORCE=0
+
+	# The documented command is `bash -c "$(curl …)"`, and bash assigns the
+	# first word *after* the script text to $0 rather than $1. So a flag
+	# appended without the `--` separator - `bash -c "$(curl …)" --force` -
+	# never reaches "$@" at all, and used to be dropped in silence: the run
+	# reported "already installed - nothing to do" while ignoring the --force
+	# it had just been handed. Putting it back is the whole fix; the `--` form
+	# stays correct and is still what the docs show.
+	#
+	# `--` itself must not be recovered - with the separator present bash puts
+	# *that* in $0 and the real flags in "$@", so prepending it would turn a
+	# correct invocation into "Unknown option: --".
+	case "$0" in
+		--) ;;
+		-*) set -- "$0" "$@" ;;
+	esac
+
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 			--uninstall) MODE="uninstall" ;;
@@ -173,6 +190,13 @@ parse_args() {
 		esac
 		shift
 	done
+
+	# --purge only means anything while removing things. Accepting it on an
+	# install and then ignoring it is the same silent-drop defect as above.
+	if [ "$PURGE" = "1" ] && [ "$MODE" != "uninstall" ]; then
+		warn '--purge removes your Vayu data and only applies to --uninstall.'
+		return "$EXIT_USAGE"
+	fi
 }
 
 resolve_version() {
@@ -1058,7 +1082,7 @@ uninstall_macos() {
 		printf '  %s\n' "$support"
 		printf '  %s\n' "$prefs"
 		printf '  %s\n' "$logs"
-		log 'Re-run with --purge to remove these too.'
+		log 'Re-run with --uninstall --purge to remove these too.'
 	fi
 }
 
@@ -1097,7 +1121,7 @@ uninstall_linux() {
 		log 'Vayu removed. User data was kept at:'
 		printf '  %s\n' "$config"
 		printf '  %s\n' "$cache"
-		log 'Re-run with --purge to remove these too.'
+		log 'Re-run with --uninstall --purge to remove these too.'
 	fi
 }
 
@@ -1122,6 +1146,11 @@ Vayu installer - macOS and Linux (x86_64)
   pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl -fsSL $url)"
   reinstall:      bash -c "\$(curl -fsSL $url)" -- --force
   uninstall:      bash -c "\$(curl -fsSL $url)" -- --uninstall [--purge]
+  this help:      bash -c "\$(curl -fsSL $url)" -- --help
+
+The \`--\` above is the conventional way to separate bash's arguments from the
+script's, and is what the docs show. Leaving it out works too - the flag lands
+in \$0 rather than \$1 and the script picks it up from there.
 
 macOS installs the app bundle to /Applications (or over an existing copy
 elsewhere) and ad-hoc signs it. Linux installs the AppImage under

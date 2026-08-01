@@ -205,6 +205,12 @@ apiService.startLoadTest(data): Promise<StartLoadTestResponse>
 `inherit` auth engine-side and returns the payload the other two accept
 unchanged - every send site composes first, so nothing is interpolated twice.
 
+**GraphQL schema introspection is a send site too** (`lib/graphql/introspect.ts`,
+issue #228): it composes the endpoint, overlays the introspection query onto the
+composed `url` / `headers` / `auth`, and executes that - which is how an
+endpoint whose credentials live in the Auth panel gets introspected at all. It
+sends the composed request's auth but neither its body nor its script parts.
+
 #### Run Management
 
 ```typescript

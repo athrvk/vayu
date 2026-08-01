@@ -28,7 +28,7 @@ import {
 	TooltipTrigger,
 	TooltipContent,
 } from "@/components/ui";
-import { useSchemaCache } from "@/lib/graphql/schema-cache";
+import { schemaCacheKey, useSchemaCache, type SchemaTarget } from "@/lib/graphql/schema-cache";
 import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
@@ -37,10 +37,13 @@ import { parseGraphQLBody, serializeGraphQLBody } from "./graphql-body";
 export interface GraphQLBodyProps {
 	body: string;
 	onBodyChange: (body: string) => void;
-	/** The request URL with `{{variables}}` already resolved. */
-	resolvedUrl: string;
-	/** Headers with `{{variables}}` already resolved, for introspection. */
-	resolvedHeaders: () => Record<string, string>;
+	/**
+	 * The endpoint to introspect: the request as typed plus its scope, which
+	 * the engine composes (`POST /compose`) before the introspection query is
+	 * sent. Unresolved on purpose - only `resolvedUrl` inside it is a preview,
+	 * and it is used for cache identity and display, never sent.
+	 */
+	schemaTarget: SchemaTarget;
 	/** Registers each editor so the panel can relayout them on a height change. */
 	onEditorMount: OnMount;
 	/** True while the mode is graphql - drives the schema lifecycle. */
@@ -94,8 +97,7 @@ function PaneTitle({ children }: { children: string }) {
 export function GraphQLBody({
 	body,
 	onBodyChange,
-	resolvedUrl,
-	resolvedHeaders,
+	schemaTarget,
 	onEditorMount,
 	active,
 }: GraphQLBodyProps) {
@@ -110,23 +112,29 @@ export function GraphQLBody({
 		setVariablesModelUri(editorInstance.getModel()?.uri.toString() ?? null);
 	};
 
-	// Track the resolved endpoint as the active schema URL and (debounced)
-	// introspect it, so the editors' language providers can validate and
-	// autocomplete against the real schema.
+	/*
+	 * Track the endpoint as the active schema target and (debounced) introspect
+	 * it, so the editors' language providers can validate and autocomplete
+	 * against the real schema.
+	 *
+	 * Keyed on the cache key rather than the URL: the credentials are part of
+	 * the target now, so changing environment - or the auth block - is a
+	 * different schema to fetch, not the same one already cached.
+	 */
+	const targetKey = schemaCacheKey(schemaTarget);
 	useEffect(() => {
 		if (!active) {
-			useSchemaCache.getState().setActiveUrl(null);
+			useSchemaCache.getState().setActiveTarget(null);
 			return;
 		}
-		useSchemaCache.getState().setActiveUrl(resolvedUrl || null);
-		if (!resolvedUrl) return;
-		const headers = resolvedHeaders();
+		useSchemaCache.getState().setActiveTarget(schemaTarget);
+		if (!schemaTarget.url) return;
 		const id = setTimeout(() => {
-			void useSchemaCache.getState().ensureSchema(resolvedUrl, headers);
+			void useSchemaCache.getState().ensureSchema(schemaTarget);
 		}, TIMING.GRAPHQL_INTROSPECTION_DEBOUNCE_MS);
 		return () => clearTimeout(id);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [active, resolvedUrl]);
+	}, [active, targetKey]);
 
 	// The query is always a valid string, so derive it from the body directly.
 	const query = useMemo(() => parseGraphQLBody(body || "").query, [body]);
@@ -168,8 +176,8 @@ export function GraphQLBody({
 	}, [active, query, activeSchema, variablesModelUri]);
 
 	const refresh = () => {
-		if (!resolvedUrl) return;
-		void useSchemaCache.getState().refreshSchema(resolvedUrl, resolvedHeaders());
+		if (!schemaTarget.url) return;
+		void useSchemaCache.getState().refreshSchema(schemaTarget);
 	};
 
 	return (
@@ -179,7 +187,7 @@ export function GraphQLBody({
 					<PaneTitle>Query</PaneTitle>
 					<div className="flex items-center gap-2">
 						<SchemaStatusBadge status={schemaStatus} />
-						{resolvedUrl && (
+						{schemaTarget.url && (
 							/*
 							 * Bespoke tiny affordance (12px, no button chrome), so it wraps
 							 * Tooltip by hand rather than using TooltipIconButton, whose

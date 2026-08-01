@@ -81,8 +81,16 @@ export function useVariableResolver(
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
-	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useSessionStore();
-	const activeCollectionId = options?.collectionId || storeCollectionId;
+	const { activeEnvironmentId } = useSessionStore();
+	/*
+	 * Collection scope is explicit only. There used to be a session-store
+	 * fallback (`activeCollectionId`) for option-less callers, but nothing ever
+	 * wrote it - so it could only ever hold a value rehydrated from an old
+	 * build, silently scoping resolution to a collection the user had left. An
+	 * option-less caller now resolves against globals + environment, which is
+	 * what it was already getting on every fresh install.
+	 */
+	const activeCollectionId = options?.collectionId ?? null;
 
 	/**
 	 * Every definition of every name, in precedence order (lowest first):

@@ -65,13 +65,19 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   a `Tab` does not record which editor the sidebar has selected - over-matching
   keeps a tab that could have closed, under-matching loses work. Nothing is
   flushed *during* eviction; the predicate already refused the tab
-- Persistence: `vayu.tabs` (v1)
+- Response eviction: `closeTabsForEntities` clears each id's entry in
+  `response-store`. Both callers reach it after a delete, and nothing else
+  evicts from that map
+- Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
+  a payload whose *stamped* version differs from the store's when no `migrate`
+  is supplied, so the stub is where the next bump goes; it also refuses a
+  payload of the wrong shape rather than handing a non-array to every reader
 
 **Key Methods:**
 ```typescript
-const { openTab, closeTab, focusTab, replaceActiveTab, closeAll } = useTabsStore();
+const { openTab, closeTab, focusTab, closeTabsForEntities } = useTabsStore();
 openTab({ type: "request", entityId: "req-123" });
-replaceActiveTab({ type: "request", entityId: "req-456" }); // Replace active in place
+closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
 ```
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
@@ -104,25 +110,53 @@ setDrawerWidth("collections", 300); // Clamp to [220, 480]
 
 **Persistence:** `vayu.layout` (v1)
 
-#### `session-store.ts` - Active Environment & Collection
+#### `session-store.ts` - Active Environment
 
-Tracks the active environment (for variable resolution) and active collection context, persisted across sessions.
+Tracks the active environment (for variable resolution) and the collection the
+user last worked in (a new-request target only), persisted across sessions.
 
 **State:**
 ```typescript
 {
   activeEnvironmentId: string | null
-  activeCollectionId: string | null
+  lastCollectionId: string | null
 }
 ```
 
 **Key Methods:**
 ```typescript
 const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
-setActiveCollectionId(collectionId);
+setLastCollectionId(collectionId);
 ```
 
-**Persistence:** `vayu.session` (v1)
+**Persistence:** `vayu.session` (v2)
+
+**A persisted id must not outlive what it names.** `activeEnvironmentId` rides
+on every composed payload, so a dangling one is not cosmetic - the switcher
+renders "No Environment" through a defensive `find()` while the wire still
+carries a deleted id. It is cleared at both ends:
+`useDeleteEnvironmentMutation` clears it when the active environment is the one
+deleted (in the mutation, so both delete flows are covered), and
+`useActiveEnvironmentGuard()` - mounted once in `App.tsx` - clears an id the
+engine's environment list does not contain. That guard keys on the query's
+`isSuccess`, never on the list being empty: an unreachable engine produces an
+empty list too, and clearing on that would discard a good selection whenever
+the app started before the engine did.
+
+`activeCollectionId` was **removed** in v2. It had a reader (the resolver's
+fallback scope) and no writer, so it was permanently null on a fresh install
+and, on an older one, rehydrated a collection the user had long left and
+silently scoped `{{var}}` previews to it. The persist `migrate` drops the
+stored key. `lastCollectionId` is the field that looks similar and is not: it
+has a real writer and feeds only the welcome screen's new-request target - it
+must never feed the resolver.
+
+The migration rebuilds the payload from the fields v2 knows rather than deleting
+that one key, which is also the shape check: a hand-edited or half-written entry
+degrades to defaults instead of handing a non-string id to the switcher. That
+whitelist is where the next bump goes - zustand discards a payload whose
+*stamped* version does not match when no `migrate` is supplied, which is the
+same reason `tabs-store` carries one.
 
 **`activeEnvironmentId` is a cache of engine state, not the source of truth.**
 The engine owns which environment is active (`environments.is_active`, at most
@@ -144,6 +178,12 @@ and two pieces of wiring keep the two in step:
   loop. Both directions wait on `isSuccess`; an unreachable engine returns an
   empty list that is indistinguishable from "no environments exist", and
   adopting from that would clear a good selection on every cold start.
+
+It composes with `useActiveEnvironmentGuard` above rather than replacing it, and
+is mounted after it: the guard answers "does this id still exist", this hook
+answers "which id does the engine hold". Order matters only in the one case
+where both would act - a dangling id should be dropped, not pushed back at the
+engine as a selection.
 
 Editing an environment's variables deliberately sends no `isActive`
 (absent means "keep" on a PUT): echoing a cached value back would let a
@@ -169,12 +209,16 @@ Merged store managing engine connection status and restart-required notification
 const {
   isEngineConnected, setEngineConnected,
   engineError, setEngineError,
-  pendingRestart, setPendingRestart, addRestartRequiredKey, clearRestartRequired,
-  reset
+  pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
 ```
 
-**Non-persisted** (reset on app restart).
+`engineError` is what the failed health poll recorded (`queries/health.ts`), and
+the Dock's connection indicator renders it in a tooltip when the engine is down -
+"Disconnected" alone read the same for a refused connection, a timeout and a TLS
+failure.
+
+**Non-persisted** (cleared on app restart).
 
 #### `save-store.ts` - Centralized Auto-Save
 
@@ -190,10 +234,20 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 ```
 
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
-raises an error toast carrying the reason. Eight call sites reach it - the
-collection tree's create / delete / duplicate / rename, `useSaveManager`,
-`SettingsMain`, `VariableTableEditor` - and doing the reporting here rather than
-at each of them means a new caller cannot forget to report.
+raises an error toast carrying the reason. Its call sites are the collection
+tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
+`VariableTableEditor`, `useDraftSaveContext` and `ContextBar` - and doing the
+reporting here rather than at each of them means a new caller cannot forget to
+report. The last two were added because both could fail in complete silence:
+`ContextBar` fired three mutations with no `onError` at all, and the
+manual-draft editors rendered an inline callout that a quit flush has no screen
+to show.
+
+**Only the context that set a status clears it.** `SettingsMain` used to run an
+unconditional `setStatus("idle")` whenever it had nothing pending - which
+included mount - so merely opening Settings wiped an `error` another context had
+just published to the Dock. It now tracks whether the `pending` on screen is its
+own and leaves anything else alone.
 
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
@@ -234,7 +288,11 @@ const {
 } = useSaveStore();
 ```
 
-**Non-persisted**. See `useSaveManager` hook for registration details.
+**Non-persisted**. See `useSaveManager` (autosave editors) and
+`useDraftSaveContext` (manual save-button editors) for registration details.
+Between them every dirty editor in the app is in this registry, which is what
+`flushAll` walks on quit - a surface that is not registered is not merely
+unsaved on quit, it is invisible.
 
 #### `response-store.ts` - Response Cache
 
@@ -254,6 +312,12 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
 ```
 
+**Eviction:** `clearResponse` runs from `useDeleteRequestMutation` (the delete is
+what makes the response unreachable) and from `tabs-store`'s
+`closeTabsForEntities` (the collection cascade, which knows every descendant id).
+Nothing else drops an entry, so a map with no eviction at all grew for the whole
+session - each entry holds a body plus its raw copy.
+
 **Non-persisted** (responses are reloadable from backend).
 
 #### `client-settings-store.ts` - Renderer Preferences
@@ -268,7 +332,18 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
-**Persisted** to localStorage (via `zustand/persist`); workspace/session state (open tabs, layout, active collection) is deliberately excluded from the reset.
+**Persisted** to localStorage (via `zustand/persist`), `version: 1` with a
+pass-through `migrate`; workspace/session state (open tabs, layout, active
+collection) is deliberately excluded from the reset.
+
+**Nested preferences are completed against their defaults on rehydrate**
+(`mergeWithNestedDefaults`). zustand's merge is a shallow top-level spread, so a
+stored `editor` / `autoSave` / `notifications` / `loadTestCeilings` object
+replaces its defaults whole and a key added after that payload was written
+arrives `undefined` - `notifications.maxVisible` feeds `slice(-maxVisible)` in
+`toast-store`, and `slice(-undefined)` caps nothing. Adding an object-valued
+preference means adding a line to that merge; the store's test enumerates them
+rather than trusting the list.
 
 #### `dashboard-store.ts` - Load Test Metrics & State
 
@@ -307,10 +382,13 @@ const {
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   setFinalReport, setError, setActiveView, setStopping,
   setLiveWindowSeconds,  // Update the live retention window (from useLiveChartWindow)
-  reset,
-  getLatestMetrics, getMetricsWindow
+  setMaxRetainedTicks
 } = useDashboardStore();
 ```
+
+There is deliberately no store-wide `reset`: `startRun` already wipes the series,
+the report and the aggregates, and a reset on top of it nulls `currentRunId` -
+the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
 
@@ -346,7 +424,7 @@ off. There is no `setTimeout` in the store.
 
 **Key Methods:**
 ```typescript
-const { showToast, dismissToast, dismissAll } = useToastStore();
+const { showToast, dismissToast } = useToastStore();
 
 showToast("Run history cleared", "success");   // string form, still supported
 showToast({                                     // returns the toast id
@@ -489,7 +567,6 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 #### Environments & Variables
 
 - **`useEnvironmentsQuery()`** - Fetch all environments
-- **`useEnvironmentQuery(id)`** - Fetch single environment
 - **`useGlobalsQuery()`** - Fetch global variables
 
 **Mutations:**
@@ -503,10 +580,14 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 - **`useRunsQuery(q?)`** - Run history as an **infinite query** over the
   paginated `GET /runs` `{data, pagination}` envelope, newest first. Mirrors
   `useRunTimeSeriesQuery`'s `getNextPageParam` on the same envelope shape;
-  `fetchNextPage` pages older runs in on demand. The 5s `refetchInterval` keeps
-  the loaded pages fresh - in the default (unpaged) state that is **only the
-  first page**, so new runs (which land on page 1 under `start_time DESC`)
-  appear without re-fetching older pages. `q` is the optional server-side search.
+  `fetchNextPage` pages older runs in on demand. `q` is the optional
+  server-side search.
+  - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
+    only page 1 is loaded, **off** once the user has paged older runs in.
+    Refetching an infinite query re-fetches *every* loaded page in sequence, so
+    a user ten pages deep drove ~10 engine requests per tick. Only page 1 can
+    gain rows (`start_time DESC`) anyway; a paged list refreshes on the next
+    mutation or invalidation instead of on a timer.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
     (dedupe by id guards the momentary double-row a head insertion can cause
     across two refetched pages). **`runsTotal(data)`** - the server's total from
@@ -518,15 +599,39 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
   for a request, in **one** filtered call
   (`?requestId=&type=design&status=completed&limit=1`) - the server sorts
   `start_time DESC`, so its single row is the answer. No client-side
-  download-and-filter.
-- **`useRunQuery(runId)`** - Fetch single run (full `configSnapshot`)
-- **`useRunReportQuery(runId)`** - Fetch final report for a run
+  download-and-filter. It caches a **plain `RunListResponse`**, so it has its
+  own key family (`queryKeys.runs.lastDesign(requestId)`) and deliberately does
+  **not** sit under `runs.lists()`: `RequestBuilderProvider` mounts it for every
+  open request tab, and the delete-run patch walks that prefix as
+  `InfiniteData`. Keeping the two shapes apart at the root is the rule - a
+  prefix patch must never meet a cache shape it did not write.
+- **`useRunQuery(runId)`** / **`runDetailOptions(runId)`** - Fetch a single run
+  (full `configSnapshot`). Same 404 contract as `requestDetailOptions`: only an
+  `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it
+  with `isRunNotFound`, never by message), and that error is **never retried** -
+  a run tab is persisted and outlives its run, so a deleted run used to retry
+  forever behind a "Try again" that could not work. Everything else - a 5xx, an
+  unreachable engine - is rethrown untouched and keeps the default retry budget.
+  `HistoryDetail` renders the two cases differently: "this run no longer exists"
+  with **Close tab**, versus "couldn't load this run" with **Try again**.
+- **`useRunReportQuery(runId)`** - Fetch final report for a run. Also written by
+  `LoadTestService` at stream end via `queryClient.fetchQuery`, so opening the
+  run in History reads the cached copy rather than re-fetching a report that
+  cannot change.
 
 **Mutations:**
 - **`useStopRunMutation()`** - Stop a running load test
 - **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
   variant in place (drops the row, decrements the mirrored `total`) plus the
-  all-runs cache.
+  all-runs cache, and evicts the run's report. The list updater shape-guards
+  (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces.
+
+**Deleting a run closes its tabs.** Both delete flows - `HistoryList`'s row
+delete and Settings' *Clear run history* - call
+`closeTabsForEntities(ids, "run")` for the runs the engine actually accepted (a
+409'd run keeps its tab, because the run is still there). Tabs are persisted, so
+a run tab left open after its run is gone is not merely stale: it rehydrates
+into a pane that can never load on every restart.
 
 #### Engine Health & Config
 
@@ -557,6 +662,25 @@ export const queryKeys = {
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
 - Some mutations use optimistic updates and cache updates for instant UI feedback
+- **A cascade delete invalidates coarsely, on purpose.** Deleting a collection
+  deletes its descendant collections and all their requests *engine-side*, and
+  which rows those are is engine-side knowledge - a client that re-derives the
+  subtree to patch caches surgically will drift from the engine's definition of
+  "descendant". So `useDeleteCollectionMutation` invalidates
+  `collections.all` + `requests.all` wholesale. `requests.detail` entries carry
+  `staleTime: Infinity`, so without this a deleted request stays fresh forever
+  and keeps feeding restored tabs.
+- **The warm-cache prefetch is a query too.** `usePrefetchCollectionsAndRequests`
+  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
+  creating a collection can invalidate it - it succeeds once at startup and
+  would otherwise never re-run for a collection created mid-session.
+
+**Retry policy:** the shared default is `shouldRetryQuery` (`lib/query-client.ts`),
+not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
+deleted row answers identically every time, so retrying it only delays the error
+the caller is waiting on. 4xx is never retried; everything else (5xx, timeout,
+unreachable engine - which `http-client.ts` throws as a plain `Error`, not an
+`ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
 
 **Stale Time:**
 - Collections/Requests: 30 seconds
@@ -626,6 +750,11 @@ const {
 1. Environment variables
 2. Collection variables
 3. Global variables
+
+Collection scope comes from the `collectionId` option and nowhere else - a
+caller that passes none resolves against globals + environment. See
+`docs/app/variable-resolution.md` for why the session-store fallback was
+removed.
 
 `ResolvedVariable` carries `sourceId` / `sourceName` - the specific environment
 or collection the winning value came from (absent for `global`).
@@ -814,6 +943,51 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 });
 ```
 
+**The draft lives in component state, so its panel must not unmount.** Radix
+unmounts an inactive `TabsContent`; `CollectionDetail` therefore force-mounts the
+four draft-holding tabs (Info, Auth, Pre-request, Post-request) from their first
+visit onwards, so an intra-collection tab switch stops discarding the draft.
+This is the same call, for the same reason, as the request builder's body drafts
+living in `RequestBuilderProvider` rather than in `BodyPanel` (see
+`request-builder/utils/body-drafts.ts`). The Variables tab is deliberately not
+force-mounted: it autosaves and claims the store's active context on mount, so
+keeping it alive behind another tab would point Ctrl/Cmd+S at the wrong editor.
+
+A *collection* switch still reseeds and discards, deliberately - it is the
+hook's documented behaviour above, and pinned by `useEntityDraft.test.ts`.
+
+### `useDraftSaveContext()` - Registering a Manual Draft
+
+The counterpart to `useSaveManager`'s registration half, for editors using the
+`useEntityDraft` model. Located in `app/src/hooks/useDraftSaveContext.ts`. Used
+by `InfoTab`, `AuthTab` and `ScriptTab`.
+
+```typescript
+useDraftSaveContext({
+  id: `collection-${collection.id}-auth`,  // Unique per editor
+  name: `Collection auth: ${collection.name}`,
+  isDirty,                                 // From useEntityDraft
+  isActive: active,                        // Is this the tab on screen?
+  save: persist,                           // Rejecting is how failure is reported
+});
+```
+
+**Behaviour:**
+- **Registration only.** It schedules nothing; the Save button stays the primary
+  affordance. The defect it fixes is that the *other* ways to save - Ctrl/Cmd+S,
+  the quit flush, tab eviction - could not reach these editors at all, because
+  none of the three tabs ever called `registerContext`.
+- **`isActive` decides who owns Ctrl/Cmd+S.** `triggerSave` prefers the active
+  context, and these editors stay mounted while hidden, so without it the last
+  sibling to mount would answer for the panel on screen.
+- **A failure toasts rather than resolving quietly.** The editors render an
+  inline `SaveFailed` callout for a button press, but a quit flush has no callout
+  on screen, and `runSave` reads a resolved promise as success - swallowing here
+  would report "Saved" for a write that failed.
+- **The save must carry its own validity guard.** A disabled button does not stop
+  the store-driven paths, which is why `InfoTab` refuses a blank collection name
+  inside `persist` and not only on the button.
+
 ## State Flow Examples
 
 ### Executing a Single Request
@@ -825,6 +999,7 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
 7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
+8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run
 
@@ -836,8 +1011,8 @@ const { draft, setDraft, isDirty, reset } = useEntityDraft({
 6. As metrics stream in, `addMetricsBatch()` efficiently folds them into historical metrics (capped at 3,000) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
-9. `useRunReportQuery(runId)` fetches the final report and is stored in `dashboard-store.finalReport`
-10. Dashboard switches to "completed" mode showing the final report
+9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, so History reuses it) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
+10. Dashboard switches to "completed" mode showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll
 
 ### Saving a Request with Auto-Save
 
@@ -883,16 +1058,20 @@ starts the engine at import time.
 
 3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
 
-4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` - do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
-5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes.
+5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
 
-6. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
+    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - `ContextBar` did neither, so a rejected edit sat on screen looking committed.
 
-7. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
+6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 
-8. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+7. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
 
-9. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+8. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
 
-10. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.
+9. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+
+10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+
+11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.

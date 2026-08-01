@@ -44,14 +44,14 @@ export {
 	useRunReportQuery,
 	useLastDesignRunQuery,
 	useDeleteRunMutation,
-	useAddRunToCache,
 	useInvalidateRuns,
+	isRunNotFound,
 } from "./runs";
+export { RunNotFoundError } from "./runs";
 
 // Environments
 export {
 	useEnvironmentsQuery,
-	useEnvironmentQuery,
 	useCreateEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 	useSetActiveEnvironmentMutation,

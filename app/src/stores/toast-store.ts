@@ -81,7 +81,6 @@ interface ToastState {
 	showToast: (input: string | ToastOptions, variant?: ToastVariant) => string;
 	/** Closes the toast; it leaves the queue TIMING.TOAST_EXIT_MS later. */
 	dismissToast: (id: string) => void;
-	dismissAll: () => void;
 }
 
 export const useToastStore = create<ToastState>((set, get) => ({
@@ -155,9 +154,5 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		setTimeout(() => {
 			set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 		}, TIMING.TOAST_EXIT_MS);
-	},
-
-	dismissAll: () => {
-		for (const t of get().toasts) get().dismissToast(t.id);
 	},
 }));

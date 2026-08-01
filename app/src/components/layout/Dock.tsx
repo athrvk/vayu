@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { FolderOpen, Clock, Braces, PanelRight, Settings } from "lucide-react";
+import { FolderOpen, Clock, Braces, Info, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
@@ -118,10 +118,72 @@ function DockButton({ active, onClick, label, shortcut, children }: DockButtonPr
 	);
 }
 
+/**
+ * The connection light - and, when it is out, why.
+ *
+ * `engineError` is written on every failed health poll (`queries/health.ts`)
+ * and was read by nothing: the strip said "Disconnected" whether the engine had
+ * refused the connection, timed out, or died mid-request, and the only place
+ * the difference existed was devtools. It rides a tooltip rather than the strip
+ * because the text is whatever the transport produced and can run long, and the
+ * strip is a 2rem ambient row - the same reason `save-store`'s failure reason
+ * became a toast rather than a line here.
+ *
+ * The trigger is focusable, so the reason is reachable by keyboard and not only
+ * by hover, and the icon exists to say there is something to hover at all.
+ */
+function EngineStatus() {
+	const isEngineConnected = useEngineStore((s) => s.isEngineConnected);
+	const engineError = useEngineStore((s) => s.engineError);
+
+	/*
+	 * success-text, not status-success. The status tokens are tuned as fills and
+	 * indicators; as 12px text `status-success` measures 2.21:1 on the light
+	 * panel, well under the 4.5 AA needs. The `-text` variant is the accessible
+	 * pair (4.57 light / 9.58 dark) and the dot inherits it via bg-current,
+	 * clearing the 3:1 that non-text indicators need too.
+	 */
+	const className = cn(
+		"flex items-center gap-1 text-xs",
+		isEngineConnected ? "text-success-text" : "text-muted-foreground"
+	);
+	const label = (
+		<>
+			<span className="w-1.5 h-1.5 rounded-full bg-current" />
+			{isEngineConnected ? "Connected" : "Disconnected"}
+		</>
+	);
+
+	if (isEngineConnected || !engineError) {
+		return <span className={className}>{label}</span>;
+	}
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					tabIndex={0}
+					className={cn(
+						className,
+						"cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					)}
+				>
+					{label}
+					<Info className="w-3 h-3" aria-hidden="true" />
+				</span>
+			</TooltipTrigger>
+			{/* Wraps rather than truncates: an engine message names a port, a path
+			    or a TLS failure, and the tail is the part that identifies it. */}
+			<TooltipContent side="top">
+				<p className="max-w-64 whitespace-normal break-words">{engineError}</p>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
-	const { isEngineConnected } = useEngineStore();
 	const saveStatus = useSaveStore((s) => s.status);
 
 	// No TooltipProvider of its own. A bare nested one would reset this strip to
@@ -156,23 +218,7 @@ export function Dock() {
 
 				{/* Middle - ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
-					{/*
-					 * success-text, not status-success. The status tokens are tuned as
-					 * fills and indicators; as 12px text `status-success` measures
-					 * 2.21:1 on the light panel, well under the 4.5 AA needs. The
-					 * `-text` variant is the accessible pair (4.57 light / 9.58 dark)
-					 * and the dot inherits it via bg-current, clearing the 3:1 that
-					 * non-text indicators need too.
-					 */}
-					<span
-						className={cn(
-							"flex items-center gap-1 text-xs",
-							isEngineConnected ? "text-success-text" : "text-muted-foreground"
-						)}
-					>
-						<span className="w-1.5 h-1.5 rounded-full bg-current" />
-						{isEngineConnected ? "Connected" : "Disconnected"}
-					</span>
+					<EngineStatus />
 
 					{/*
 					 * "Unsaved changes" is the only place in the app that says so.

@@ -78,6 +78,32 @@ interface VariableRow {
 
 type VariableEditorType = "globals" | "environment" | "collection";
 
+/**
+ * Row-wise equality over every field a row carries.
+ *
+ * Used to tell "the cache echo of the save I just made" from "someone typed
+ * while it was in flight", which is the difference between clearing the dirty
+ * flag and silently losing an edit. Compared by value rather than by array
+ * identity on purpose: a reseed that happens to produce identical rows must
+ * count as unchanged, and identity would call it a change and leave the editor
+ * dirty forever.
+ */
+function sameRows(a: VariableRow[], b: VariableRow[]): boolean {
+	if (a.length !== b.length) return false;
+	return a.every((row, i) => {
+		const other = b[i];
+		return (
+			row.key === other.key &&
+			row.value === other.value &&
+			row.enabled === other.enabled &&
+			(row.secret ?? false) === (other.secret ?? false) &&
+			(row.type ?? "string") === (other.type ?? "string") &&
+			row.createdAt === other.createdAt &&
+			(row.isNew ?? false) === (other.isNew ?? false)
+		);
+	});
+}
+
 interface VariableEditorConfig {
 	type: VariableEditorType;
 	// For globals
@@ -174,9 +200,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
 	const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(new Set());
-	const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const variablesRef = useRef<VariableRow[]>([]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+	// The dirty flag, readable from an effect without being one of its
+	// dependencies - the row-init effect has to know whether the user has
+	// uncommitted edits *at the moment the cache changes under it*, and taking
+	// the state as a dep would re-run the effect on every flip of the flag.
+	const hasPendingChangesRef = useRef(false);
 
 	// Determine context ID and name
 	const contextId =
@@ -229,6 +259,35 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[]
 	);
 
+	// Every edit goes through here so the ref and the state can never disagree.
+	const markDirty = useCallback(() => {
+		hasPendingChangesRef.current = true;
+		setHasPendingChanges(true);
+		markPendingSave();
+	}, [markPendingSave]);
+
+	/**
+	 * Compare-and-clear: only drop the dirty flag if the rows are still the ones
+	 * this save wrote.
+	 *
+	 * A save snapshots `variablesRef` when it starts, so anything typed before it
+	 * lands is not in the payload. Clearing unconditionally marked those edits
+	 * saved - the debounce and the blur handler both skip a clean editor - and
+	 * they never reached the engine. Staying dirty leaves the normal paths (blur,
+	 * Cmd+S, the quit flush) to write them.
+	 */
+	const finishSave = useCallback(
+		(snapshot: VariableRow[]) => {
+			if (sameRows(variablesRef.current, snapshot)) {
+				hasPendingChangesRef.current = false;
+				setHasPendingChanges(false);
+			}
+			completeSave();
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+		},
+		[completeSave, setStatus]
+	);
+
 	// Auto-save function (payload order by createdAt so round-trip preserves order)
 	const performSave = useCallback(async () => {
 		const varsToSave = variablesRef.current;
@@ -269,9 +328,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					{ variables: variablesObj },
 					{
 						onSuccess: () => {
-							setHasPendingChanges(false);
-							completeSave();
-							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+							finishSave(varsToSave);
 							resolve();
 						},
 						onError: (error) => {
@@ -293,9 +350,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					},
 					{
 						onSuccess: () => {
-							setHasPendingChanges(false);
-							completeSave();
-							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+							finishSave(varsToSave);
 							resolve();
 						},
 						onError: (error) => {
@@ -313,9 +368,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					},
 					{
 						onSuccess: () => {
-							setHasPendingChanges(false);
-							completeSave();
-							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+							finishSave(varsToSave);
 							resolve();
 						},
 						onError: (error) => {
@@ -335,9 +388,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		updateEnvironmentMutation,
 		updateCollectionMutation,
 		startSaving,
-		completeSave,
+		finishSave,
 		failSave,
-		setStatus,
 	]);
 
 	// Keep performSaveRef updated
@@ -355,15 +407,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		});
 		setActiveContext(contextId);
 
-		// Alias the ref object (not .current) so cleanup still reads the live
-		// .current - the timeout handle is scheduled after mount during debounced
-		// save, so cleanup must clear whatever is actually pending, not a stale copy.
-		const timeoutRef = saveTimeoutRef;
 		return () => {
 			unregisterContext(contextId);
-			if (timeoutRef.current) {
-				clearTimeout(timeoutRef.current);
-			}
 		};
 	}, [contextId, contextName, registerContext, unregisterContext, setActiveContext]);
 
@@ -372,33 +417,34 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		updateContext(contextId, { hasPendingChanges });
 	}, [contextId, hasPendingChanges, updateContext]);
 
-	// Handle blur - save when user leaves the field
+	// Handle blur - save when user leaves the field.
+	//
+	// There is no debounce here and never was: `saveTimeoutRef` was cleared in
+	// three places and assigned in none, so the three `clearTimeout` calls it
+	// guarded were always no-ops. Saves fire on blur and on the toggles.
 	const handleBlur = useCallback(() => {
 		if (hasPendingChanges) {
-			if (saveTimeoutRef.current) {
-				clearTimeout(saveTimeoutRef.current);
-			}
 			performSaveRef.current();
 		}
 	}, [hasPendingChanges]);
 
-	// Handle focus - cancel any pending save
-	const handleFocus = useCallback(() => {
-		if (saveTimeoutRef.current) {
-			clearTimeout(saveTimeoutRef.current);
-		}
-	}, []);
-
-	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom)
-	// Key the init effect on the identity of the active data source so it re-runs
-	// when the user switches between globals / a specific environment / collection.
-	const dataSourceKey =
-		type === "globals"
-			? globalsData
-			: type === "environment"
-				? environment?.id
-				: collection?.id;
+	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom).
+	// `contextId` is the identity of the active data source, so the effect
+	// reseeds when the user switches between globals / a specific environment /
+	// collection.
+	const lastSeededSourceRef = useRef<string | null>(null);
 	useEffect(() => {
+		const isNewDataSource = lastSeededSourceRef.current !== contextId;
+		lastSeededSourceRef.current = contextId;
+
+		// A save's `onSuccess` writes the query cache, which arrives back here as
+		// a new `dataVariables`. Rebuilding rows from it would revert anything
+		// typed while that save was in flight - the payload was snapshotted
+		// before those keystrokes, so the cache is genuinely one edit behind.
+		// Only a *different* entity is allowed to overwrite uncommitted edits;
+		// a refetch or an echo of our own write waits for the editor to be clean.
+		if (!isNewDataSource && hasPendingChangesRef.current) return;
+
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
 			const entries = sortByCreatedAt(Object.entries(dataVariables));
 			const rows: VariableRow[] = entries.map(([key, val]) => ({
@@ -423,7 +469,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				{ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true },
 			]);
 		}
-	}, [dataSourceKey, dataVariables, sortByCreatedAt]);
+	}, [contextId, dataVariables, sortByCreatedAt]);
 
 	const updateVariable = (index: number, field: keyof VariableRow, value: string | boolean) => {
 		const newVariables = [...variables];
@@ -443,8 +489,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		// would persist the pre-edit value and the backend re-sync would then
 		// revert the change. Mirrors removeVariable.
 		variablesRef.current = newVariables;
-		setHasPendingChanges(true);
-		markPendingSave();
+		markDirty();
 	};
 
 	const removeVariable = (index: number) => {
@@ -453,8 +498,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
 		}
 		setVariables(newVariables);
-		setHasPendingChanges(true);
 		variablesRef.current = newVariables;
+		markDirty();
 		performSaveRef.current();
 	};
 
@@ -661,7 +706,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 											onChange={(e) =>
 												updateVariable(index, "key", e.target.value)
 											}
-											onFocus={handleFocus}
 											onBlur={handleBlur}
 											placeholder="variable_name"
 											className={cn(
@@ -680,7 +724,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												onChange={(e) =>
 													updateVariable(index, "value", e.target.value)
 												}
-												onFocus={handleFocus}
 												onBlur={handleBlur}
 												placeholder="value"
 												className={cn(

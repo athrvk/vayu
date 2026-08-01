@@ -8,7 +8,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
@@ -16,6 +16,7 @@ import {
 	DEFAULT_SLO_THRESHOLD_MS,
 	SLO_THRESHOLD_MAX_MS,
 } from "@/constants/client-settings";
+import { DEFAULT_NOTIFICATION_PREFS } from "@/constants/toast";
 import { DEFAULT_MONO_FONT } from "@/constants/appearance";
 
 describe("client-settings store", () => {
@@ -83,5 +84,94 @@ describe("client-settings store", () => {
 		expect(SETTINGS_STORAGE_KEYS).not.toContain(STORAGE_KEYS.TABS_STORE);
 		expect(SETTINGS_STORAGE_KEYS).not.toContain(STORAGE_KEYS.SESSION_STORE);
 		expect(SETTINGS_STORAGE_KEYS).not.toContain(STORAGE_KEYS.LAYOUT_STORE);
+	});
+});
+
+/**
+ * What survives a reload.
+ *
+ * Two failure modes, both of which hand a component `undefined` where it reads
+ * a number. Zustand discards a persisted payload whose stamped version does not
+ * match unless a `migrate` is supplied, and its default merge is a top-level spread -
+ * so a stored nested object replaces its defaults wholesale, and the next key
+ * added to `NotificationPrefs` or `EditorPrefs` would arrive undefined for
+ * every existing user. `notifications.maxVisible` is the live example:
+ * `toast-store` caps the queue with `slice(-maxVisible)`, and `slice(-undefined)`
+ * is `slice(NaN)` - no cap at all, silently.
+ */
+describe("client-settings rehydration", () => {
+	const seed = (payload: unknown) =>
+		localStorage.setItem(STORAGE_KEYS.CLIENT_SETTINGS, JSON.stringify(payload));
+
+	// Explicit, not inherited: the suite above leaves the store wherever its last
+	// case put it, and a rehydration test that starts from the value it is about
+	// to assert proves nothing.
+	beforeEach(() => {
+		useClientSettingsStore.setState({
+			sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS,
+			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
+		});
+	});
+
+	afterEach(() => localStorage.removeItem(STORAGE_KEYS.CLIENT_SETTINGS));
+
+	it("keeps preferences written before the store carried a version", async () => {
+		// zustand only compares versions when the payload stamped one (`typeof
+		// version === "number"`), so declaring `version: 1` does not strand the
+		// unversioned payloads already in everyone's localStorage. Pinned because
+		// the bump would be a bad trade if it did.
+		expect(DEFAULT_SLO_THRESHOLD_MS).not.toBe(350); // the assertion below must bite
+		seed({ state: { sloThresholdMs: 350 } });
+
+		await useClientSettingsStore.persist.rehydrate();
+
+		expect(useClientSettingsStore.getState().sloThresholdMs).toBe(350);
+	});
+
+	it("translates a stamped older version instead of discarding it", async () => {
+		// What `migrate` is actually for. A stamped version that does not match
+		// is discarded outright when no migrate is supplied - zustand logs and
+		// hands the store its defaults - so the next bump would silently reset
+		// every preference. This is that bump, rehearsed one version early.
+		seed({ version: 0, state: { sloThresholdMs: 350 } });
+
+		await useClientSettingsStore.persist.rehydrate();
+
+		expect(useClientSettingsStore.getState().sloThresholdMs).toBe(350);
+	});
+
+	it("completes a nested object stored before a key was added to it", async () => {
+		seed({ version: 1, state: { notifications: { position: "top-right" } } });
+
+		await useClientSettingsStore.persist.rehydrate();
+
+		const n = useClientSettingsStore.getState().notifications;
+		expect(n.position).toBe("top-right"); // the stored key still wins
+		expect(n.maxVisible).toBe(DEFAULT_NOTIFICATION_PREFS.maxVisible);
+		expect(n.minSeverity).toBe(DEFAULT_NOTIFICATION_PREFS.minSeverity);
+	});
+
+	it("completes every object-valued preference, not only the ones named today", async () => {
+		// Enumerated rather than listed: a fifth nested preference that nobody
+		// wired into the merge fails here instead of shipping `undefined` keys.
+		const nested = (): Record<string, Record<string, unknown>> =>
+			Object.fromEntries(
+				Object.entries(useClientSettingsStore.getState()).filter(
+					([, v]) => v !== null && typeof v === "object"
+				)
+			) as Record<string, Record<string, unknown>>;
+
+		const expected = nested();
+		const keys = Object.keys(expected);
+		expect(keys.length).toBeGreaterThan(3); // guards the enumeration itself
+
+		for (const key of keys) {
+			seed({ version: 1, state: { [key]: {} } });
+			await useClientSettingsStore.persist.rehydrate();
+
+			expect({ [key]: Object.keys(nested()[key]).sort() }).toEqual({
+				[key]: Object.keys(expected[key]).sort(),
+			});
+		}
 	});
 });

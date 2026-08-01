@@ -107,6 +107,60 @@ function applyMonoStack(stack: string): void {
 	document.documentElement.style.setProperty("--font-mono", stack);
 }
 
+/** A stored nested preference object, completed against the current defaults. */
+function completeNested<T extends object>(defaults: T, stored: unknown): T {
+	return stored && typeof stored === "object" && !Array.isArray(stored)
+		? { ...defaults, ...(stored as Partial<T>) }
+		: { ...defaults };
+}
+
+/**
+ * Zustand's shallow merge, plus one level of defaults under each nested object.
+ *
+ * The default merge is a top-level spread, so a payload written before a key
+ * was added to one of these objects replaces the whole object and ships
+ * `undefined` for the new key: `notifications.maxVisible` feeds
+ * `slice(-maxVisible)` in `toast-store`, and `slice(-undefined)` is
+ * `slice(NaN)` - the toast cap silently stops capping. `loadTestCeilings`
+ * already carried that defense written out by hand.
+ *
+ * Every object-valued preference needs a line here, and the store's own test
+ * enumerates them rather than trusting this list - a fifth nested pref that is
+ * not completed fails there.
+ */
+function mergeWithNestedDefaults(
+	persisted: unknown,
+	current: ClientSettingsState
+): ClientSettingsState {
+	if (!persisted || typeof persisted !== "object") return current;
+	const stored = persisted as Partial<ClientSettingsState>;
+	return {
+		...current,
+		...stored,
+		editor: completeNested(DEFAULT_EDITOR_PREFS, stored.editor),
+		autoSave: completeNested(DEFAULT_AUTO_SAVE_PREFS, stored.autoSave),
+		notifications: completeNested(DEFAULT_NOTIFICATION_PREFS, stored.notifications),
+		loadTestCeilings: completeNested(DEFAULT_LOAD_TEST_CEILINGS, stored.loadTestCeilings),
+	};
+}
+
+/**
+ * Version translation for the stored preferences.
+ *
+ * There is one shape so far, so this only has to hand the payload back -
+ * `mergeWithNestedDefaults` fills in anything missing. It exists for the next
+ * bump: zustand *discards* a payload whose stamped version does not match when
+ * no `migrate` is given (it logs and hands the store its defaults), so a bump
+ * without one resets every preference. Add a branch here instead.
+ *
+ * The payloads already in users' localStorage carry no version at all, and
+ * zustand only compares when one was stamped - which is why declaring
+ * `version: 1` here does not reset anyone.
+ */
+function migrateClientSettings(persisted: unknown) {
+	return (persisted ?? {}) as Partial<ClientSettingsState>;
+}
+
 /** Flag the document so the global CSS can collapse transitions/animations. */
 function applyReducedMotion(on: boolean): void {
 	if (typeof document === "undefined") return;
@@ -164,6 +218,9 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 		{
 			name: STORAGE_KEYS.CLIENT_SETTINGS,
 			storage: createJSONStorage(() => localStorage),
+			version: 1,
+			migrate: migrateClientSettings,
+			merge: mergeWithNestedDefaults,
 			partialize: (s) => ({
 				editor: s.editor,
 				monoFont: s.monoFont,
@@ -194,12 +251,10 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 					// Re-clamp on the way out of storage. The bounds are the
 					// engine's crash guards, and a build that tightens one
 					// would otherwise keep offering the stored ceiling above
-					// it. The spread also fills in a key added after the
-					// stored payload was written.
-					state.loadTestCeilings = clampCeilings({
-						...DEFAULT_LOAD_TEST_CEILINGS,
-						...state.loadTestCeilings,
-					});
+					// it. Filling in a key added after the payload was written
+					// is `mergeWithNestedDefaults`'s job now, for every nested
+					// object rather than this one.
+					state.loadTestCeilings = clampCeilings(state.loadTestCeilings);
 				}
 			},
 		}
