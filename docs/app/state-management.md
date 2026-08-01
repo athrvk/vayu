@@ -1,6 +1,6 @@
 # State Management
 
-The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, import modal) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.
+The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, client settings, toasts, import modal) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.
 
 ## Architecture Overview
 
@@ -82,15 +82,16 @@ closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops respons
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
 
-Manages the left drawer (collections/history/variables), the right context bar, and request/response split ratio.
+Manages the left drawer (collections/history/variables/settings), the right context bar, and request/response split ratio.
 
 **State:**
 ```typescript
 {
   drawerOpen: boolean                    // Is the left drawer visible?
-  drawerView: "collections" | "history" | "variables"
-  drawerWidths: Record<DrawerView, number>  // Per-view width (220–480px)
+  drawerView: DrawerView                 // "collections" | "history" | "variables" | "settings"
+  drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
+  contextBarWidth: number
   requestSplitRatio: number              // 0–1; left/request pane fraction
 }
 ```
@@ -100,15 +101,24 @@ Manages the left drawer (collections/history/variables), the right context bar, 
 const {
   drawerOpen, setDrawerOpen, toggleDrawer,
   drawerView, setDrawerView, activateDrawerView,
-  setDrawerWidth,
+  drawerWidth, setDrawerWidth,
   contextBarOpen, setContextBarOpen, toggleContextBar,
+  contextBarWidth, setContextBarWidth,
   requestSplitRatio, setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
-setDrawerWidth("collections", 300); // Clamp to [220, 480]
+setDrawerWidth(300); // Clamped to [PANEL_MIN_WIDTH, PANEL_MAX_WIDTH] (constants/layout.ts)
 ```
 
-**Persistence:** `vayu.layout` (v1)
+**One drawer width, not one per view.** v2 stored a width per view, so switching
+from Collections to History resized the main content under the user; the **v3**
+migration collapses them onto a single `drawerWidth`, keeping whatever
+Collections (the default view) had. Re-introducing a per-view width re-introduces
+that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
+`PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
+
+**Persistence:** `vayu.layout` (v3, with real migrations for both bumps - the one
+store in the app doing persistence versioning end to end)
 
 #### `session-store.ts` - Active Environment
 
@@ -322,19 +332,39 @@ session - each entry holds a body plus its raw copy.
 
 #### `client-settings-store.ts` - Renderer Preferences
 
-Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
+Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
 
-**Key exports:**
+**State:**
 ```typescript
-const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, loadTestCeilings, ...
+{
+  editor: EditorPrefs            // fontSize, wordWrap, minimap, lineNumbers, tabSize
+  monoFont: MonoFontChoice       // a preset or "custom"
+  monoFontCustom: string         // used when monoFont === "custom"
+  chartBucketSeconds: number     // time-bucket width for the dashboard charts
+  sloThresholdMs: number         // p99 latency the capacity breakpoint triggers at
+  liveRefreshMs: number          // how often live metrics commit into the store
+  autoSave: AutoSavePrefs        // { enabled, delayMs }
+  reducedMotion: boolean         // mirrored onto <html data-reduced-motion>
+  notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
+  loadTestCeilings: LoadTestCeilings
+}
+```
+
+```typescript
 import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by "Reset app settings"
 ```
+
+`monoFont` and `reducedMotion` also touch the DOM (`--font-mono`,
+`data-reduced-motion`), so their setters and `onRehydrateStorage` both apply
+them - a preference that only lands on the next reload reads as a broken
+setting.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
 **Persisted** to localStorage (via `zustand/persist`), `version: 1` with a
 pass-through `migrate`; workspace/session state (open tabs, layout, active
-collection) is deliberately excluded from the reset.
+environment) is deliberately excluded from the reset, as is the live chart
+window - that one is engine config, so it resets with the engine's settings.
 
 **Nested preferences are completed against their defaults on rehydrate**
 (`mergeWithNestedDefaults`). zustand's merge is a shallow top-level spread, so a
@@ -381,7 +411,7 @@ const {
   startRun, stopRun, setStreaming,
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   setFinalReport, setError, setActiveView, setStopping,
-  setLiveWindowSeconds,  // Update the live retention window (from useLiveChartWindow)
+  setLiveWindowSeconds,  // Update the live retention window (from useLiveChartSettings)
   setMaxRetainedTicks
 } = useDashboardStore();
 ```
@@ -434,13 +464,27 @@ showToast({                                     // returns the toast id
 });
 ```
 
-Variants are `info` | `success` | `warning` | `error`, with durations of 4s / 4s
-/ 6s / 10s from `TIMING.TOAST_DURATION_MS`. `warning` is for a refusal ("A load
-test is already running") as distinct from a failure.
+Variants are `info` | `success` | `warning` | `error`, with base durations of 4s
+/ 4s / 6s / 10s from `TIMING.TOAST_DURATION_MS`. `warning` is for a refusal ("A
+load test is already running") as distinct from a failure.
 
-Two policies live here because the primitive has no opinion on them: an
+**Three of the policies are user preferences** (`notifications` on
+`client-settings-store`, shapes in `constants/toast.ts`), applied here on the way
+in:
+
+- `minSeverity` - a floor, compared by `passesSeverityFloor`. Below it
+  `showToast` returns an id and shows nothing.
+- `durationScale` - a **multiplier** over the per-variant duration
+  (`scaledDuration`), not a replacement for it, so halving keeps the ratio
+  between a confirmation and a failure. `never` becomes `NEVER_DISMISS_MS`
+  rather than `Infinity`, which the primitive's `setTimeout` would coerce to 1.
+- `maxVisible` - the stack cap, defaulting to `MAX_TOASTS` (4); past it the
+  oldest is dropped.
+
+Two more policies live here because the primitive has no opinion on them: an
 identical message and variant already on screen is **collapsed rather than
-stacked**, and past `MAX_TOASTS` (4) the oldest is dropped. Removal is driven by
+stacked**, and an explicit `duration` from the caller wins over the scale.
+Removal is driven by
 the primitive's `onOpenChange(false)`, which covers timeout, close button and
 swipe alike, so there is one removal path rather than three - but it *closes*
 the toast rather than dropping it, and the entry leaves the queue
@@ -547,22 +591,41 @@ TanStack Query manages server state with automatic caching, refetching, and sync
 
 ### Query Hooks
 
-Located in `app/src/services/queries/` (or `hooks/`), with types and cache invalidation centralized in `app/src/services/queries/keys.ts`.
+Located in `app/src/queries/`, one file per resource family, all re-exported
+from `app/src/queries/index.ts`, which is what callers import from. The key
+factory lives beside them in `app/src/queries/keys.ts`. A couple of hooks with a
+single consumer are imported from their file directly (`useRunTimeSeriesQuery`
+from `@/queries/runs`); everything with more than one is in the barrel.
 
 #### Collections & Requests
 
-- **`useCollectionsQuery()`** - Fetch all collections
-- **`useCollectionQuery(id)`** - Fetch single collection
+- **`useCollectionsQuery()`** - Fetch all collections (there is no
+  single-collection query: a collection is read out of this list)
 - **`useRequestsQuery(collectionId)`** - Fetch requests in a collection
-- **`useRequestQuery(requestId)`** - Fetch single request
+- **`useMultipleCollectionRequests(collectionIds)`** - The same list for several
+  collections at once, as parallel queries
+- **`useRequestQuery(requestId)`** / **`requestDetailOptions(requestId)`** - One
+  request by id (`GET /requests/:id`), used by a restored request tab and by a
+  design-run copy on cold start. Only an `ApiError` with `statusCode === 404`
+  becomes **`RequestNotFoundError`** (test it with `isRequestNotFound`); a 5xx or
+  an unreachable engine is rethrown untouched, because a transport failure must
+  not read as "this request was deleted"
+- **`useCollectionAncestors(collectionId)`** - The collection's ancestor chain
+  including itself, root first, derived from the collections list rather than
+  fetched
+- **`usePrefetchCollectionsAndRequests()`** - Warm-cache pass over every
+  collection's requests at startup
 
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
-- **`useDeleteCollectionMutation()`** - Delete collection (with cache removal)
+- **`useDeleteCollectionMutation()`** - Delete collection (invalidates coarsely,
+  see below)
 - **`useCreateRequestMutation()`** - Create request
 - **`useUpdateRequestMutation()`** - Update request
-- **`useDeleteRequestMutation()`** - Delete request
+- **`useDeleteRequestMutation()`** - Delete request (also clears the response)
+- **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
+  `POST /import/apply` in one transaction
 
 #### Environments & Variables
 
@@ -572,6 +635,9 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 **Mutations:**
 - **`useCreateEnvironmentMutation()`**
 - **`useUpdateEnvironmentMutation()`**
+- **`useSetActiveEnvironmentMutation()`** - The only writer of the active
+  environment; PUTs `isActive` and mirrors it into `session-store`, rolling the
+  store back if the engine refuses
 - **`useDeleteEnvironmentMutation()`**
 - **`useUpdateGlobalsMutation()`**
 
@@ -619,8 +685,16 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
   run in History reads the cached copy rather than re-fetching a report that
   cannot change.
 
+- **`useRunTimeSeriesQuery(runId)`** (`@/queries/runs`) - The stored per-tick
+  series behind the History charts, as an infinite query over the same
+  `{data, pagination}` envelope. Historical data cannot change, so
+  `staleTime: Infinity`.
+
 **Mutations:**
-- **`useStopRunMutation()`** - Stop a running load test
+- **Stopping a run is not a mutation hook.** It is
+  `useEngine().stopLoadTest(runId)`, which calls `apiService.stopRun` and
+  returns a boolean rather than throwing - the dashboard's Stop button reports
+  the refusal itself.
 - **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
   variant in place (drops the row, decrements the mirrored `total`) plus the
   all-runs cache, and evicts the run's report. The list updater shape-guards
@@ -633,31 +707,61 @@ delete and Settings' *Clear run history* - call
 a run tab left open after its run is gone is not merely stale: it rehydrates
 into a pane that can never load on every restart.
 
-#### Engine Health & Config
+#### Engine Health, Config & OAuth
 
-- **`useHealthQuery()`** - Health check with automatic polling (enables connection indicator)
-- **`useConfigQuery()`** - Fetch engine configuration
-- **`useScriptCompletionsQuery()`** - Fetch script autocomplete data (for request scripting)
+- **`useHealthQuery()`** - Health check, polled every
+  `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `isEngineConnected` /
+  `engineError` on `engine-store`, so the connection indicator follows it
+- **`useConfigQuery()`** / **`useUpdateConfigMutation()`** - Engine configuration
+  (`QUERY_CACHE.CONFIG_STALE_TIME_MS`); also the home of the live chart window,
+  which is engine config rather than a renderer preference
+- **`useScriptCompletionsQuery()`** - Script autocomplete data, served by the
+  engine and static per engine version
+  (`QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS`)
+- **`useOAuth2TokenStatusQuery(cacheKey)`**,
+  **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
+  engine-side OAuth 2.0 token cache
 
 ### Query Keys & Cache Invalidation
 
-Centralized in `app/src/services/queries/keys.ts`, using TanStack Query's hierarchical key factory pattern:
+Centralized in `app/src/queries/keys.ts`, using TanStack Query's hierarchical key
+factory pattern. **Copy the shapes from that file rather than hand-writing a
+key** - a key that differs by one segment is not an error, it is a silent cache
+miss that presents as a data bug:
 
 ```typescript
-export const queryKeys = {
-  collections: {
-    all: () => ['collections'],
-    list: () => ['collections', 'list'],
-    detail: (id: string) => ['collections', id],
-  },
-  requests: {
-    all: () => ['requests'],
-    listByCollection: (collectionId: string) => ['requests', { collectionId }],
-    detail: (id: string) => ['requests', id],
-  },
-  // ... etc
-};
+// app/src/queries/keys.ts (abridged)
+collections: {
+  all: ["collections"],                                   // a constant, not a call
+  lists: () => ["collections", "list"],
+  list: () => ["collections", "list"],
+  details: () => ["collections", "detail"],
+  detail: (id) => ["collections", "detail", id],
+},
+requests: {
+  all: ["requests"],
+  lists: () => ["requests", "list"],
+  listByCollection: (collectionId) => ["requests", "list", { collectionId }],
+  details: () => ["requests", "detail"],
+  detail: (id) => ["requests", "detail", id],
+},
+runs: {
+  all: ["runs"],
+  lists: () => ["runs", "list"],
+  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q)
+  lastDesign: (requestId) => ["runs", "lastDesign", requestId],
+  allRuns: () => ["runs", "allRuns"],
+  detail: (id) => ["runs", "detail", id],
+  report: (id) => ["runs", "report", id],
+  timeSeries: (id) => ["runs", "timeSeries", id],
+},
+// environments mirrors collections; globals / health / config /
+// scriptCompletions / oauth / prefetch each own a root.
 ```
+
+The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
+query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` sits under
+`runs.all` but deliberately **not** under `runs.lists()` - see below.
 
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
@@ -682,53 +786,87 @@ the caller is waiting on. 4xx is never retried; everything else (5xx, timeout,
 unreachable engine - which `http-client.ts` throws as a plain `Error`, not an
 `ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
 
-**Stale Time:**
-- Collections/Requests: 30 seconds
-- Environments: 30 seconds
-- Health: 5 seconds (polling - drives connection status)
-- Runs: 10 seconds
-- Run Reports: 1 minute (lazily refetched if stale when opened)
+**Cache policy lives in `config/cache.ts` (`QUERY_CACHE`), not in the call
+sites.** Name the constant when you need a duration; restating the number here
+is how this section drifted before. The current shape:
+
+| Query | Policy |
+|-------|--------|
+| Collections, requests lists, environments, globals, runs list | `DEFAULT_STALE_TIME_MS` (30s) via the shared client |
+| Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once and mutations invalidate it |
+| Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable |
+| Run time series | `staleTime: Infinity`, `RUNS_GC_TIME_MS` (30m) |
+| Engine config | `CONFIG_STALE_TIME_MS` (1m) |
+| Script completions | `SCRIPT_COMPLETIONS_STALE_TIME_MS` (1h), same gc time |
+| Health | `staleTime: 0`, refetched every `TIMING.HEALTH_CHECK_INTERVAL_MS` (30s) |
+
+Polling intervals are separate from staleness: the runs list polls every 5s
+**only while unpaged** (`runsPollInterval`), health polls on
+`TIMING.HEALTH_CHECK_INTERVAL_MS`, and the shared client sets
+`refetchOnWindowFocus: false` - a desktop app that refetched everything on focus
+would fight the editor the user just came back to.
 
 ## Custom Hooks
 
-### `useEngine()` - Request & Load Test Execution
+### `useEngine()` - Compose, Execute, Stop
 
-Provides functions to execute single requests and start load tests, with loading state and error handling.
+Wraps the three engine calls that are not queries, with `isExecuting` / `error`
+for the caller to render.
 
 **API:**
 ```typescript
 const {
-  executeRequest: (request: Request, environmentId?: string) => Promise<ExecutionResponse>
-  startLoadTest: (request: Request, config: LoadTestConfig, environmentId?: string) => Promise<{ runId: string }>
-  stopLoadTest: (runId: string) => Promise<void>
+  composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>
+  executeRequest: (params: ExecuteRequestRequest, environmentId?: string) => Promise<SanityResult | null>
+  stopLoadTest: (runId: string) => Promise<boolean>
   isExecuting: boolean
   error: string | null
 } = useEngine();
 ```
 
-**Features:**
-- Request transformation (frontend format → backend format)
-- Automatic error handling and user feedback
-- Environment variable resolution (if needed pre-flight)
+- **`composeRequest`** is `POST /compose` - the engine resolves `{{variables}}`
+  and `inherit` auth and hands back the execute-ready payload (issue #226). It
+  **throws** on failure; the caller surfaces it like an execute failure.
+- **`executeRequest`** takes an *already composed* payload. It never throws:
+  a failure comes back as a `SanityResult` with `status: 0` and an
+  `errorCode`, because the response pane renders the failure the same way it
+  renders a response.
+- **`stopLoadTest`** returns `false` rather than throwing when the engine
+  refuses.
+- **Starting a load test is not here.** The request builder composes, then calls
+  `apiService.startLoadTest()` (`POST /runs`), `useDashboardStore().startRun()`
+  and `loadTestService.startMonitoring()` in that order, at one call site -
+  registering the run before attaching the stream is what keeps the dashboard
+  from showing a stream with no run behind it.
 
-### `useSSE()` - Live Metrics Stream
+### Live Metrics Streaming - `loadTestService` + `sseClient`
 
-Subscribes to Server-Sent Events for live load test metrics during a run.
+There is **no React hook for the metrics stream**, on purpose. The stream has to
+outlive whichever view is mounted (navigate away from the dashboard mid-run and
+the run keeps streaming), so it is a module singleton:
+`services/load-test-service.ts` holds the state machine and
+`services/sse-client.ts` the `EventSource`.
 
-**API:**
 ```typescript
-useSSE({
-  runId: string | null
-  enabled: boolean
-});
+import { loadTestService } from "@/services/load-test-service";
+
+loadTestService.startMonitoring(runId);  // after useDashboardStore().startRun(...)
+loadTestService.stopMonitoring();
 ```
 
-**Features:**
-- Automatic connection/disconnection based on `runId` and `enabled`
-- Connects to `/runs/:runId/live` (engine endpoint)
-- Replayable tick stream with explicit `complete` event (no custom reconnect logic needed)
-- Forwards metrics to `useDashboardStore().addMetricsBatch()`
-- Transient errors left to browser's built-in `EventSource` retry
+- Connects to `GET /runs/:runId/live`, a **replayable** tick topic read from
+  offset 0 - so attaching, or re-attaching from History mid-run, rebuilds the
+  charts rather than starting blank.
+- Every tick is buffered; commits into `useDashboardStore().addMetricsBatch()`
+  are throttled to `METRICS_UI_THROTTLE_MS` so `historicalMetrics` keeps the
+  full 10 Hz signal while renders stay bounded.
+- The engine sends an explicit `complete` event, so a `CLOSED` readyState is a
+  genuine failure. **There is no custom reconnect**: `EventSource` cannot set
+  `Last-Event-ID` on a fresh connection, so a manual reconnect would replay the
+  whole topic and duplicate every tick already plotted. The browser's own
+  intra-connection retry does carry it and is left alone; once the browser gives
+  up, recovery is converging on `GET /runs/:id/report`, which the service does in
+  its close handler.
 
 ### `useVariableResolver()` - Variable Resolution
 
@@ -1004,11 +1142,11 @@ useDraftSaveContext({
 ### Starting a Load Test Run
 
 1. User configures load test in the dashboard modal (duration, concurrency, etc.)
-2. `useEngine().startLoadTest()` is called with the request, config, and optional environment ID
+2. The request half is composed engine-side (`useEngine().composeRequest()`), then `apiService.startLoadTest()` sends the composed payload plus the load config to `POST /runs`
 3. Engine responds with `runId`
-4. `useDashboardStore().startRun(runId, config, requestInfo)` initializes dashboard state
-5. `useSSE({ runId, enabled: true })` hook connects to `/runs/:runId/live`
-6. As metrics stream in, `addMetricsBatch()` efficiently folds them into historical metrics (capped at 3,000) and updates running aggregates (peak concurrency, SLO breakpoint)
+4. `useDashboardStore().startRun(runId, config, requestInfo, requestId)` initializes dashboard state
+5. `loadTestService.startMonitoring(runId)` connects to `/runs/:runId/live`
+6. As metrics stream in, `addMetricsBatch()` folds them into historical metrics (trimmed to `liveWindowSeconds`, backstopped by `maxRetainedTicks`) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
 9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, so History reuses it) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
@@ -1020,10 +1158,10 @@ useDraftSaveContext({
 2. Component mounts `useSaveManager()` with the request ID and save callback
 3. Hook registers the context with `useSaveStore()` for Ctrl/Cmd+S integration
 4. User edits the request (URL, headers, body, etc.)
-5. `hasChanges` is marked true, triggering a 3-second debounce timer
-6. If the user makes another change within 3 seconds, the timer resets
-7. After 3 seconds of inactivity, `performSave()` is called, which calls the `onSave` callback
-8. Save status updates in `useSaveStore()`, and UI shows "Saving..." then "Saved" for 2 seconds
+5. `hasChanges` is marked true, triggering the debounce timer - `autoSave.delayMs` from `client-settings-store`, 5s by default (Settings → General offers 5s / 30s / 1m)
+6. A further change within that window resets the timer
+7. After the delay elapses with no edit, `performSave()` is called, which calls the `onSave` callback
+8. Save status updates in `useSaveStore()`, and the Dock shows "Saving..." then "Saved" for `TIMING.SAVED_STATUS_DURATION_MS`
 9. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
 10. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
     button), `useSaveStore().flushAll()` saves all dirty contexts
@@ -1041,7 +1179,7 @@ starts the engine at import time.
 
 ### Variable Resolution Priority
 
-1. User activates a request in a tab with active environment and collection selected (stored in `useSessionStore()`)
+1. User activates a request in a tab. The environment comes from `useSessionStore().activeEnvironmentId`; the collection comes from the request's own `collectionId` - **not** from the session store, which has held no collection scope since the `vayu.session` v2 migration
 2. Component calls `useVariableResolver({ collectionId, environmentId })`
 3. Hook fetches globals, collection variables, and environment variables via TanStack Query
 4. When `resolveString("https://{{baseUrl}}/{{path}}")` is called:
@@ -1066,11 +1204,11 @@ starts the engine at import time.
 
 6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 
-7. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
+7. **Tab LRU and dirty state:** The tab store reads the save registry and refuses to evict a dirty tab (`isTabDirty`, matched by tab *type* - the registry is keyed by editor and the two do not line up). Nothing is flushed during eviction, because the predicate has already declined to take unsaved work; over the cap with every candidate dirty, no tab closes at all.
 
 8. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
 
-9. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+9. **Live metric retention is a time window, not a point count.** `addMetricsBatch` trims ticks older than `liveWindowSeconds` (the engine's `liveReplayWindowMs`, 5m by default, `null` = full run), with `maxRetainedTicks` (`DEFAULT_MAX_RETAINED_TICKS`, 50,000) as a memory backstop. Both are engine config so the replayed span and the displayed span cannot disagree. The only knob in `config/metrics.ts` is `METRICS_UI_THROTTLE_MS`, the SSE commit throttle; chart cost is bounded by bucketing (`chartBucketSeconds`), not by dropping ticks.
 
 10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
 

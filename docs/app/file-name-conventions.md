@@ -31,7 +31,7 @@ This document defines the standard file naming conventions for the Vayu applicat
 
 **Examples:**
 - `useEngine.ts`
-- `useSSE.ts`
+- `useEntityDraft.ts`
 - `useSaveManager.ts`
 - `useVariableResolver.ts`
 - `useHeadersManager.ts`
