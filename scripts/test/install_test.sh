@@ -67,7 +67,50 @@ parse_args
 # parse_args: unknown -> non-zero
 if parse_args --bogus 2>/dev/null; then fail "unknown arg should fail"; fi
 
+# parse_args: --purge is meaningless without --uninstall, and used to be
+# accepted and then ignored - an install that printed nothing about the flag it
+# had just been handed.
+if parse_args --purge 2>/dev/null; then fail "--purge without --uninstall should fail"; fi
+# A rejected parse still assigned PURGE on its way out, and every later test in
+# this file reads the same globals.
+parse_args
+[ "$PURGE" = "0" ] || fail "a rejected parse should not leave PURGE set"
+
 printf 'PASS: parse_args\n'
+
+# --- flags that bash hands to $0 instead of $1 --------------------------------
+# `bash -c "$(curl …)" --force` - the documented command with a flag appended,
+# but no `--` - assigns the *first* word after the script to $0 and only the
+# rest to $1..$n. So the flag vanished: the run answered "already installed -
+# nothing to do" while ignoring the --force it was given, and offered no clue
+# why. Sourcing install.sh can never reproduce that, because sourcing never
+# populates $0 with a flag, so these run the real form.
+argv_case() { # <expected MODE/FORCE/PURGE> <args as the user would type them>
+	local expect="$1" got
+	shift
+	got="$(VAYU_TEST=1 bash -c "$(cat "$INSTALLER")
+parse_args \"\$@\"
+printf 'MODE=%s FORCE=%s PURGE=%s' \"\$MODE\" \"\$FORCE\" \"\$PURGE\"" "$@")"
+	[ "$got" = "$expect" ] || fail "argv [$*]: expected $expect, got $got"
+}
+
+argv_case 'MODE=install FORCE=0 PURGE=0'
+argv_case 'MODE=install FORCE=1 PURGE=0' --force
+argv_case 'MODE=uninstall FORCE=0 PURGE=1' --uninstall --purge
+argv_case 'MODE=help FORCE=0 PURGE=0' -h
+# The documented `--` form still parses - and `--` itself must not be recovered
+# out of $0 as if it were a flag, which is where a naive `-*` match breaks.
+argv_case 'MODE=install FORCE=1 PURGE=0' -- --force
+argv_case 'MODE=uninstall FORCE=0 PURGE=1' -- --uninstall --purge
+
+# A typo must still be rejected rather than silently dropped, which is the same
+# defect wearing a different hat.
+if VAYU_TEST=1 bash -c "$(cat "$INSTALLER")
+parse_args \"\$@\"" --forse 2>/dev/null; then
+	fail "a misspelled flag in \$0 should fail, not be ignored"
+fi
+
+printf 'PASS: flags recovered from argv\n'
 
 # resolve_version: pinned via env (no network)
 VAYU_VERSION=0.1.2
@@ -136,6 +179,9 @@ out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -rf ${APP_PATH}" || fail "uninstall should remove the app bundle"
 echo "$out" | grep -q "Application Support/vayu-client" || fail "uninstall should mention the data dir"
 echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
+# The hint has to be a command that works: `--purge` on its own is rejected,
+# so printing it alone sent people at an error.
+echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should name a runnable command"
 
 # uninstall --purge: also removes data dirs
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
@@ -295,6 +341,9 @@ echo "$out" | grep -q "rm -rf ${LINUX_APP_DIR}" || fail "uninstall should remove
 echo "$out" | grep -q "rm -f ${LINUX_DESKTOP_FILE}" || fail "uninstall should remove the desktop entry"
 echo "$out" | grep -q "rm -f ${LINUX_ICON_FILE}" || fail "uninstall should remove the icon"
 echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
+# The hint has to be a command that works: `--purge` on its own is rejected,
+# so printing it alone sent people at an error.
+echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should name a runnable command"
 if echo "$out" | grep -q '^\[dry-run\] sudo'; then fail "Linux uninstall must not run sudo"; fi
 
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
@@ -325,9 +374,19 @@ printf 'PASS: Linux uninstall dry-run\n'
 # directly above a pattern matching it, so running_pids always reported Vayu as
 # running, quit_running_app always failed to stop it, and every Linux install
 # aborted. This is the only test that would have caught it.
+#
+# The sandbox paths are re-declared inside the subshell for the same reason the
+# top of this file redirects them: without it the macOS branch asked the host
+# about the real /Applications/Vayu.app, so a developer with Vayu open failed
+# this test and a CI runner passed it. Injecting them also sharpens the test -
+# the paths now appear in the installer's own argv, which is exactly the
+# condition being guarded against, so the process-group exclusion has to work
+# rather than merely not being exercised.
 for os in Linux Darwin; do
 	got="$(VAYU_TEST=1 bash -c "$(cat "$INSTALLER")
 platform() { printf '$os\n'; }
+APP_PATH='$TMPROOT/system/${APP_NAME}.app'
+LINUX_APP_BIN='$TMPROOT/data/vayu/${APP_NAME}.AppImage'
 printf 'PIDS[%s]' \"\$(running_pids | tr '\n' ' ')\"")"
 	[ "$got" = "PIDS[]" ] \
 		|| fail "$os: running_pids matched the installer's own process: $got"
