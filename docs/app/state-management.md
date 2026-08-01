@@ -715,9 +715,13 @@ into a pane that can never load on every restart.
 - **`useConfigQuery()`** / **`useUpdateConfigMutation()`** - Engine configuration
   (`QUERY_CACHE.CONFIG_STALE_TIME_MS`); also the home of the live chart window,
   which is engine config rather than a renderer preference
-- **`useScriptCompletionsQuery()`** - Script autocomplete data, served by the
-  engine and static per engine version
-  (`QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS`)
+- **`useScriptCompletionsQuery()`** / **`useScriptTypeDefinitionsQuery()`** - the
+  `pm.*` completion list and the engine-generated `.d.ts` behind Monaco's hover
+  text and diagnostics. Both derive from one engine-side table that changes only
+  with the engine binary, so both take
+  `QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS` and the same gc time; the type
+  definitions also cap retries at `SCRIPT_COMPLETIONS_RETRY`, since losing them
+  costs hover text rather than the editor
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
@@ -756,7 +760,7 @@ runs: {
   timeSeries: (id) => ["runs", "timeSeries", id],
 },
 // environments mirrors collections; globals / health / config /
-// scriptCompletions / oauth / prefetch each own a root.
+// scriptCompletions / scriptTypes / oauth / prefetch each own a root.
 ```
 
 The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
