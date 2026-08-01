@@ -54,32 +54,8 @@ vi.mock("@monaco-editor/react", () => ({ useMonaco: () => monacoStub }));
 
 const variables: Record<string, { value: string; scope: string }> = {};
 
-/**
- * Which collection each name is defined on, for the D2 rule below. Defaults to
- * the active one, so only a test that cares has to say anything.
- */
-const ACTIVE_COLLECTION = "leaf";
-const definedOn: Record<string, string> = {};
-
 vi.mock("./useVariableResolver", () => ({
-	useVariableResolver: () => ({
-		getAllVariables: () => variables,
-		getVariableOrigins: (name: string) =>
-			variables[name]?.scope === "collection"
-				? [
-						{
-							scope: "collection",
-							sourceId: definedOn[name] ?? ACTIVE_COLLECTION,
-							enabled: true,
-						},
-					]
-				: [],
-	}),
-}));
-
-vi.mock("@/stores", () => ({
-	useSessionStore: (select: (s: { activeCollectionId: string }) => unknown) =>
-		select({ activeCollectionId: ACTIVE_COLLECTION }),
+	useVariableResolver: () => ({ getAllVariables: () => variables }),
 }));
 
 /** One `pm.*` entry is enough to tell "the list appeared" from "it yielded". */
@@ -111,13 +87,20 @@ const pmLabels = (line: string) =>
 
 beforeEach(() => {
 	for (const key of Object.keys(variables)) delete variables[key];
-	for (const key of Object.keys(definedOn)) delete definedOn[key];
 	variables.apiHost = { value: "https://api.test", scope: "environment" };
 	variables.retries = { value: "3", scope: "collection" };
 	variables.traceId = { value: "abc", scope: "global" };
 });
 
 describe("variable names in the script editors", () => {
+	/*
+	 * `collection` is exercised here because the filter handles it, not because
+	 * the app reaches it today: collection scope is explicit-only on the
+	 * resolver and this provider registers once per language, with no request to
+	 * take a `collectionId` from. So the live list is environment + global. The
+	 * case is kept so the filter stays correct for whatever gives the provider a
+	 * request context - see the note in the hook.
+	 */
 	it("offers the accessor's own scope, and not the other two", () => {
 		expect(variableNames('pm.environment.get("')).toEqual(["apiHost"]);
 		expect(variableNames('pm.collectionVariables.get("')).toEqual(["retries"]);
@@ -155,19 +138,6 @@ describe("variable names in the script editors", () => {
 			'pm.environment.get("'
 		).find((s) => s.label === "apiKey");
 		expect(item?.detail).toBe("secret");
-	});
-
-	/**
-	 * D2 (#226): the engine fills the script's collection scope from the
-	 * request's immediate parent only, so an ancestor's variable resolves for
-	 * `{{name}}` and reads back `undefined` in a script. The `{{` list offers it
-	 * and this one must not - the single place the two lists legitimately differ.
-	 */
-	it("drops a variable defined on an ancestor collection, which a script cannot read", () => {
-		variables.inherited = { value: "from-parent", scope: "collection" };
-		definedOn.inherited = "ancestor";
-		expect(variableNames('pm.collectionVariables.get("')).toEqual(["retries"]);
-		expect(variableNames('pm.variables.get("')).not.toContain("inherited");
 	});
 
 	it("offers nothing outside a name argument", () => {

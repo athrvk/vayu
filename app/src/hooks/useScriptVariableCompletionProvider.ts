@@ -30,11 +30,10 @@
  * `useScriptCompletionProvider` and `useVariableCompletionProvider` beside it.
  */
 
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
-import { useSessionStore } from "@/stores";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
@@ -51,31 +50,20 @@ const DYNAMIC_SORT_GROUP = 8;
 
 export function useScriptVariableCompletionProvider() {
 	const monaco = useMonaco();
-	const { getAllVariables, getVariableOrigins } = useVariableResolver();
-	const activeCollectionId = useSessionStore((s) => s.activeCollectionId);
-
-	/**
-	 * The one place this list must be narrower than the `{{name}}` one.
+	/*
+	 * No `collectionId`, so no collection variables - collection scope is
+	 * explicit only, and a Monaco completion provider is registered once per
+	 * language rather than per editor, so it has no request to take one from.
+	 * The `{{name}}` provider beside it is scoped the same way for the same
+	 * reason; whatever gives one of them a request context gives both.
 	 *
-	 * The engine fills the script's single collection scope from the request's
-	 * **immediate parent collection only** (#226, decision D2), while this
-	 * resolver merges the whole chain root→leaf. So a variable defined on an
-	 * *ancestor* collection resolves for `{{name}}` and is `undefined` to
-	 * `pm.collectionVariables.get` and `pm.variables.get` alike - precisely the
-	 * name this list exists to stop you guessing at.
+	 * That also makes the engine's D2 divergence unreachable from here (the
+	 * script's collection scope is the immediate parent only, while this
+	 * resolver would merge the chain): with no collection variables to offer,
+	 * there is nothing for that rule to narrow. Re-derive it here if this
+	 * provider ever learns which request it is completing for.
 	 */
-	const readableByScript = useCallback(
-		(name: string, scope: string) => {
-			if (scope !== "collection") return true;
-			return getVariableOrigins(name).some(
-				(origin) =>
-					origin.scope === "collection" &&
-					origin.sourceId === activeCollectionId &&
-					origin.enabled
-			);
-		},
-		[getVariableOrigins, activeCollectionId]
-	);
+	const { getAllVariables } = useVariableResolver();
 
 	useEffect(() => {
 		if (!monaco) return;
@@ -110,13 +98,8 @@ export function useScriptVariableCompletionProvider() {
 				const variables = getAllVariables();
 				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(variables)
 					// `pm.environment.get` reads one scope; only the merged
-					// `pm.variables` sees them all - and neither sees an ancestor
-					// collection's variables.
-					.filter(
-						([name, info]) =>
-							(context.scope === "all" || info.scope === context.scope) &&
-							readableByScript(name, info.scope)
-					)
+					// `pm.variables` sees them all.
+					.filter(([, info]) => context.scope === "all" || info.scope === context.scope)
 					.map(([name, info]) => ({
 						label: name,
 						kind: monaco.languages.CompletionItemKind.Variable,
@@ -158,5 +141,5 @@ export function useScriptVariableCompletionProvider() {
 		});
 
 		return () => disposable.dispose();
-	}, [monaco, getAllVariables, readableByScript]);
+	}, [monaco, getAllVariables]);
 }

@@ -320,9 +320,14 @@ Three rules make the offered set match what the call can actually read:
   variables only, because that is the one scope it reads - a collection
   variable offered there would be a name that returns `undefined`. Only the
   merged `pm.variables.get` lists all three.
-- **Ancestor collection variables are excluded**, per decision D2 above. They
-  resolve for `{{name}}` and are invisible to a script, which makes this the
-  one place the two completion lists legitimately disagree.
+- **Collection variables are not offered yet.** Collection scope is
+  explicit-only (see *Collection scope is explicit only* above) and a Monaco
+  completion provider is registered once per *language*, not per editor, so it
+  has no request to take a `collectionId` from. The live list is therefore
+  environment + global. The `{{name}}` provider is scoped the same way for the
+  same reason, so whatever gives one of them a request context gives both - and
+  that is also when decision D2 starts to matter here, since the script's
+  collection scope is the immediate parent while the resolver merges the chain.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
