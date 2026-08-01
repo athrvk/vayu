@@ -317,6 +317,27 @@ registration is global per language, so one call covers every script editor inst
 > values (Function = 1, Field = 3, Variable = 4, Snippet = 28); changing the engine
 > constants requires an engine rebuild for new icons to take effect.
 
+### Type declarations (hover, signature help)
+
+A completion list can only fill a dropdown. Hover documentation over an existing call and
+signature help while typing arguments come from Monaco's **TypeScript worker**, which
+wants a `.d.ts` - served at `GET /scripting/types` and **generated from the same
+completion table**, so the surface stays declared once. `useScriptTypeDefinitions`
+(`app/src/hooks/useScriptTypeDefinitions.ts`, called once in `App`) registers it with
+`addExtraLib`.
+
+It also configures the worker to match the sandbox: `lib: ["es2022"]` with **no `dom`**,
+because the runtime has no `fetch`, `setTimeout` or `URL` and the editor must not offer
+them; and `target: ESNext`, because ES2020 would flag `Object.hasOwn` and
+`Array.prototype.at`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
+
+**Semantic diagnostics are deliberately off.** A script editor holds a *fragment* - the
+engine wraps it in an IIFE - and a request's pre- and post-request scripts are separate
+models that cannot see each other's declarations, so validation would squiggle correct
+scripts. Everything the declarations are wanted for is produced without diagnostics. The
+declarations themselves are ready for it: they compile clean under `--strict` and do
+reject `pm.response.staus`.
+
 ---
 
 ## Where it lives
@@ -325,6 +346,9 @@ registration is global per language, so one call covers every script editor inst
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pm` runtime (QuickJS bindings) | `engine/src/runtime/script_engine.cpp`                                                                                                                  |
 | Completion metadata endpoint    | `engine/src/http/routes/scripting.cpp`                                                                                                                  |
+| Type declaration generator      | `engine/src/http/routes/script_types.cpp`                                                                                                               |
+| Type declaration fetch + cache  | `app/src/queries/script-types.ts`                                                                                                                       |
+| Monaco type registration        | `app/src/hooks/useScriptTypeDefinitions.ts`                                                                                                             |
 | Completion fetch + cache        | `app/src/queries/script-completions.ts`                                                                                                                 |
 | Monaco completion provider      | `app/src/hooks/useScriptCompletionProvider.ts`                                                                                                          |
 | Shared editor wrapper           | `app/src/components/ui/code-editor.tsx`                                                                                                                 |

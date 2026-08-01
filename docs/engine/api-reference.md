@@ -1876,6 +1876,51 @@ Get script engine API completions for UI autocomplete.
 }
 ```
 
+### GET /scripting/types
+
+The same `pm.*` surface as TypeScript declarations, for Monaco's TypeScript
+worker. A completion list can only populate a dropdown; the declarations are
+what give hover documentation over an existing call, signature help while
+typing arguments, and go-to-definition within the surface.
+
+The declarations are **generated from the completion table above**, not
+maintained separately - a hand-written `pm.d.ts` in the app would be a second
+declaration of a surface the engine owns, and the two would drift the first
+time a method was added to one and not the other. The derivation works because
+a completion entry already carries its type: a function's `detail` is its
+signature, a field's `detail` is its type. See
+`engine/src/http/routes/script_types.cpp`.
+
+Output is deterministic - the same table always produces byte-identical text,
+so a client may cache on `version`.
+
+**Response:**
+```json
+{
+  "version": "1.0.0",
+  "engine": "quickjs",
+  "libUri": "ts:vayu/pm.d.ts",
+  "typeDefinitions": "interface VayuExpectTo {\n\tequal(expected: any): VayuExpectation;\n…"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `libUri` | Model URI the app registers the declarations under (`addExtraLib`) |
+| `typeDefinitions` | The `.d.ts` source |
+
+Two things the generated file cannot get from the table, both handled in
+`script_types.cpp` and guarded by `script_types_test.cpp`:
+
+- **Chain vocabulary.** A getter that *continues* an assertion chain (`.to.not`,
+  `.and`) and one that *performs* an assertion (`.to.be.true`) are identical as
+  completion entries - both are non-functions whose `detail` restates their own
+  name. Only meaning separates them, so the meaning is named in the generator.
+- **Unparseable parameter lists.** Two entries document an overload in prose
+  TypeScript cannot parse (`upsert({ key, value }) | (name, value)`). Those fall
+  back to `(...args: any[])`, keeping the member callable rather than emitting a
+  file that does not compile.
+
 ## HTTP Status Codes
 
 | Code | Meaning |

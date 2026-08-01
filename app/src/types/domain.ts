@@ -827,3 +827,21 @@ export interface ScriptCompletionsResponse {
 	engine: string;
 	completions: ScriptCompletion[];
 }
+
+/**
+ * The TypeScript declarations for the `pm.*` surface, generated engine-side
+ * from the same completion table (`GET /scripting/types`).
+ *
+ * Feeding these to Monaco's TypeScript worker is what turns a suggestion list
+ * into hover documentation, signature help and typo diagnostics. They are
+ * generated rather than hand-written in this repo on purpose: a `pm.d.ts` here
+ * would be a second declaration of a surface the engine owns.
+ */
+export interface ScriptTypeDefinitionsResponse {
+	version: string;
+	engine: string;
+	/** Model URI the declarations are registered under - `ts:vayu/pm.d.ts`. */
+	libUri: string;
+	/** The `.d.ts` source itself. */
+	typeDefinitions: string;
+}
