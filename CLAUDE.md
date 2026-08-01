@@ -6,6 +6,11 @@ Vayu is a high-performance API testing and load-testing platform. It uses a **si
 - **App** (`/app`): Electron + React + TypeScript, licensed Apache-2.0
 - **Build script**: `build.py` is the single entry point for all build operations
 
+## Core Principle
+
+Make architectural decisions for the long term. Do not accept a stopgap that
+only works for now and is meant to be replaced later.
+
 ## Project Structure
 
 ```
