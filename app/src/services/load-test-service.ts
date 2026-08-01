@@ -15,6 +15,9 @@
 
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/queries/keys";
+import { QUERY_CACHE } from "@/config/cache";
 import { useDashboardStore, useClientSettingsStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
@@ -158,13 +161,32 @@ class LoadTestService {
 		// Fetch the canonical final report from the engine and store it so the
 		// dashboard shows definitive completed-view data (final percentiles, reconciled
 		// error rate, setup overhead) - one terminal truth, same as the 404-path.
+		//
+		// Through the query cache, not a bare fetch: opening the same run in
+		// History reads `runs.report(runId)` and would otherwise re-fetch a
+		// report that cannot change.
 		if (runId) {
 			try {
-				const report = await apiService.getRunReport(runId);
-				store.setFinalReport(report);
+				const report = await queryClient.fetchQuery({
+					queryKey: queryKeys.runs.report(runId),
+					queryFn: () => apiService.getRunReport(runId),
+					staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+				});
+				// Re-read the store *after* the await. Finishing run A and
+				// immediately starting run B leaves this continuation holding A's
+				// report while the dashboard shows B; applying it flipped B to
+				// "completed" with A's percentiles. The window is one local round
+				// trip, which is exactly long enough.
+				if (useDashboardStore.getState().currentRunId === runId) {
+					useDashboardStore.getState().setFinalReport(report);
+				}
 			} catch (e) {
 				console.warn("[LoadTestService] report fetch failed", e);
 			}
+			// The run has reached a terminal state, so the lists that carry its
+			// status are stale until the next 5s poll - and once the user has
+			// paged History, that poll is off.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 			this.activeRunId = null;
 		}
 	}

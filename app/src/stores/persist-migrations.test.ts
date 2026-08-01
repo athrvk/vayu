@@ -18,9 +18,11 @@
  * have closed everyone's tabs and forgotten their active environment, quietly,
  * as a side effect of an unrelated change.
  *
- * The stubs are pass-throughs because there is one shape so far. What is worth
- * pinning is that the *seam* exists: these cases rehearse the next bump by
- * feeding each store a payload stamped with an older version.
+ * These cases rehearse that bump end to end - through `persist.rehydrate()`,
+ * not by calling `migrate` directly - so they cover the seam rather than the
+ * function. (`session-store.test.ts` covers the v1 -> v2 field drop itself;
+ * what is here is that a stamped payload survives the trip at all, and that a
+ * malformed one degrades to defaults instead of reaching a reader.)
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -33,11 +35,7 @@ const seed = (key: string, payload: unknown) => localStorage.setItem(key, JSON.s
 beforeEach(() => {
 	localStorage.clear();
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
-	useSessionStore.setState({
-		activeEnvironmentId: null,
-		activeCollectionId: null,
-		lastCollectionId: null,
-	});
+	useSessionStore.setState({ activeEnvironmentId: null, lastCollectionId: null });
 });
 
 describe("tabs-store rehydration", () => {
@@ -72,10 +70,10 @@ describe("tabs-store rehydration", () => {
 describe("session-store rehydration", () => {
 	it("carries the active ids across a version bump", async () => {
 		seed(STORAGE_KEYS.SESSION_STORE, {
-			version: 0,
+			version: 1,
 			state: {
 				activeEnvironmentId: "env_1",
-				activeCollectionId: "col_1",
+				activeCollectionId: "col_1", // dropped by the v1 -> v2 migration
 				lastCollectionId: "col_2",
 			},
 		});
@@ -84,20 +82,22 @@ describe("session-store rehydration", () => {
 
 		const s = useSessionStore.getState();
 		expect(s.activeEnvironmentId).toBe("env_1");
-		expect(s.activeCollectionId).toBe("col_1");
 		expect(s.lastCollectionId).toBe("col_2");
+		expect(s).not.toHaveProperty("activeCollectionId");
 	});
 
 	it("refuses a non-string id rather than handing one to the resolver", async () => {
+		// A non-string `activeEnvironmentId` does not just mislead the switcher:
+		// it rides on every `/compose` payload.
 		seed(STORAGE_KEYS.SESSION_STORE, {
-			version: 0,
-			state: { activeEnvironmentId: 42, activeCollectionId: {}, lastCollectionId: null },
+			version: 1,
+			state: { activeEnvironmentId: 42, lastCollectionId: {} },
 		});
 
 		await useSessionStore.persist.rehydrate();
 
 		const s = useSessionStore.getState();
 		expect(s.activeEnvironmentId).toBeNull();
-		expect(s.activeCollectionId).toBeNull();
+		expect(s.lastCollectionId).toBeNull();
 	});
 });

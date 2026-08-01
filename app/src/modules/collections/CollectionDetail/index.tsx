@@ -33,6 +33,28 @@ const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "variables", label: "Variables" },
 ];
 
+/**
+ * Tabs that hold an unsaved draft, and therefore must not be torn down when the
+ * user looks at a sibling.
+ *
+ * These four use the manual save-button model (`useEntityDraft`), which keeps
+ * the draft in component state. Radix unmounts an inactive `TabsContent`, so
+ * writing a script, glancing at Auth and coming back used to lose the script -
+ * no save, no prompt, no trace. Keeping them mounted is the same fix, for the
+ * same reason, as the request builder's body drafts living in its provider
+ * rather than in `BodyPanel` (see `request-builder/utils/body-drafts.ts`).
+ *
+ * `variables` is absent deliberately: it autosaves and registers its own save
+ * context on mount, so keeping it alive behind another tab would leave the
+ * variables editor claiming Ctrl/Cmd+S while something else is on screen.
+ */
+const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set([
+	"info",
+	"auth",
+	"pre-script",
+	"post-script",
+]);
+
 export default function CollectionDetail() {
 	const { openTabs, activeTabId } = useTabsStore();
 
@@ -61,6 +83,10 @@ export default function CollectionDetail() {
 	);
 
 	const [tab, setTab] = useState<CollectionTab>("info");
+	// Panels are force-mounted from their first visit onwards, not from mount:
+	// a draft can only exist in a tab the user has opened, and two of these
+	// carry a Monaco editor that costs nothing while nobody has asked for it.
+	const [visited, setVisited] = useState<ReadonlySet<CollectionTab>>(() => new Set(["info"]));
 
 	// Loading and missing are different answers. `collections` defaults to `[]`,
 	// so a collection tab restored from a previous session resolves to nothing
@@ -107,7 +133,11 @@ export default function CollectionDetail() {
 			{/* Tab bar */}
 			<Tabs
 				value={tab}
-				onValueChange={(v) => setTab(v as CollectionTab)}
+				onValueChange={(v) => {
+					const next = v as CollectionTab;
+					setTab(next);
+					setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+				}}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
 				{/* The active trigger's weight change used to shift its neighbours
@@ -137,15 +167,36 @@ export default function CollectionDetail() {
 					<TabsContent
 						key={t.id}
 						value={t.id}
+						// Radix hides a force-mounted panel with `hidden` rather than
+						// unmounting it, which is what lets the draft survive.
+						forceMount={
+							TABS_HOLDING_DRAFTS.has(t.id) && visited.has(t.id) ? true : undefined
+						}
 						className="mt-0 flex-1 overflow-auto p-6 bg-background"
 					>
 						{t.id === "info" && (
-							<InfoTab collection={collection} requestCount={requests.length} />
+							<InfoTab
+								collection={collection}
+								requestCount={requests.length}
+								active={tab === "info"}
+							/>
 						)}
-						{t.id === "auth" && <AuthTab collection={collection} />}
-						{t.id === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
+						{t.id === "auth" && (
+							<AuthTab collection={collection} active={tab === "auth"} />
+						)}
+						{t.id === "pre-script" && (
+							<ScriptTab
+								collection={collection}
+								kind="pre"
+								active={tab === "pre-script"}
+							/>
+						)}
 						{t.id === "post-script" && (
-							<ScriptTab collection={collection} kind="post" />
+							<ScriptTab
+								collection={collection}
+								kind="post"
+								active={tab === "post-script"}
+							/>
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
 					</TabsContent>

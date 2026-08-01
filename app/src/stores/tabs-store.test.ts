@@ -73,6 +73,28 @@ describe("closeTabsForEntities", () => {
 		expect(useTabsStore.getState().openTabs).toEqual(before.openTabs);
 		expect(useTabsStore.getState().activeTabId).toBe(before.activeTabId);
 	});
+
+	it("closes only the named kind of tab when a type is given", () => {
+		// Deleting a run must not reach a request tab that happens to carry the
+		// same id. Ids are engine-generated and do not collide, so this is about
+		// the call site stating what a deletion is allowed to close.
+		useTabsStore.getState().openTab({ type: "run", entityId: "x" });
+		openRequests(["x"]);
+
+		useTabsStore.getState().closeTabsForEntities(["x"], "run");
+
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs.map((t) => t.type)).toEqual(["request"]);
+	});
+
+	it("still closes every kind when no type is given", () => {
+		useTabsStore.getState().openTab({ type: "run", entityId: "x" });
+		openRequests(["x"]);
+
+		useTabsStore.getState().closeTabsForEntities(["x"]);
+
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
 });
 
 /**
@@ -252,6 +274,17 @@ describe("closeTabsForEntities evicts stored responses", () => {
 		useTabsStore.getState().closeTabsForEntities(["r_no_tab"]);
 
 		expect(useResponseStore.getState().getResponse("r_no_tab")).toBeNull();
+	});
+
+	it("leaves responses alone for a run-scoped sweep", () => {
+		// Clear-history and the run-delete path pass run ids with `type: "run"`.
+		// A run id cannot key a response, so walking them would only look like it
+		// meant something - and would collide if the id families ever overlapped.
+		storeResponse("r1");
+
+		useTabsStore.getState().closeTabsForEntities(["r1"], "run");
+
+		expect(useResponseStore.getState().getResponse("r1")).not.toBeNull();
 	});
 
 	it("leaves responses alone when handed nothing", () => {

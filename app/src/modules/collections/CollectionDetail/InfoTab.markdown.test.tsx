@@ -36,6 +36,7 @@ import { TooltipProvider } from "@/components/ui";
 import type { Collection } from "@/types";
 
 const mutation = {
+	mutateAsync: vi.fn(() => Promise.resolve()),
 	mutate: vi.fn(),
 	reset: vi.fn(),
 	isPending: false,

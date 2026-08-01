@@ -23,7 +23,7 @@
  * are in scope.
  */
 
-import type { SanityResult } from "@/types";
+import type { SanityResult, ScriptPart } from "@/types";
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "./key-value";
 
@@ -151,4 +151,28 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		preScriptError: result.preScriptError,
 		postScriptError: result.postScriptError,
 	};
+}
+
+/**
+ * Whether an execute that ran these script parts could have written a variable
+ * the UI is showing, and so needs the environment/globals/collection caches
+ * invalidated.
+ *
+ * Both kinds count. The gate used to read `if (preScriptParts)` at both call
+ * sites, which is the same "copy that never receives the fix" trap this module
+ * exists to close: `pm.environment.set` / `pm.globals.set` /
+ * `pm.collectionVariables.set` persist engine-side from a post-request (Tests
+ * tab) script exactly as they do from a pre-request one, so a request whose
+ * only script was in the Tests tab stored the value while the variables editor
+ * and the resolver kept showing the old one - `refetchOnWindowFocus` is off, so
+ * nothing else was coming to correct it.
+ *
+ * Empty part lists are treated as no script, matching what the call sites'
+ * truthiness checks already did with `undefined`.
+ */
+export function scriptsMayWriteVariables(
+	preScriptParts?: ScriptPart[],
+	postScriptParts?: ScriptPart[]
+): boolean {
+	return Boolean(preScriptParts?.length) || Boolean(postScriptParts?.length);
 }

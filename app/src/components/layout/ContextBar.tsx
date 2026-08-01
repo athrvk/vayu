@@ -8,7 +8,7 @@
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PanelResizeHandle } from "./PanelResizeHandle";
-import { useLayoutStore, useTabsStore, useSessionStore } from "@/stores";
+import { useLayoutStore, useTabsStore, useSessionStore, useSaveStore } from "@/stores";
 import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
@@ -62,32 +62,65 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
+	const failSave = useSaveStore((s) => s.failSave);
 
 	if (!contextBarOpen || activeTab?.type !== "request") return null;
 
-	// Write the edited value back to the scope the resolved variable came from
-	const commitValue = (name: string, resolved: ResolvedVariable, newValue: string) => {
+	/**
+	 * Write the edited value back to the scope the resolved variable came from.
+	 *
+	 * Takes the input element, not the string, because every failure below has to
+	 * put the old value back on screen. These inputs are uncontrolled -
+	 * `defaultValue` with a `key` derived from the stored value - so a rejected
+	 * save changes nothing: the cache is untouched, therefore the key is
+	 * untouched, therefore React keeps the DOM node and the typed text sits there
+	 * looking committed. Failures used to end here entirely (no `onError`, no
+	 * `isError` reader, and there is no global `MutationCache.onError` either),
+	 * which is the same defect `CollectionDetail/shared.tsx` documents for the
+	 * collection tabs.
+	 */
+	const commitValue = (name: string, resolved: ResolvedVariable, input: HTMLInputElement) => {
+		const newValue = input.value;
 		if (newValue === resolved.value) return;
+
+		const rollBack = (message: string) => {
+			input.value = resolved.value;
+			failSave(message);
+		};
+		// `failSave` is the app's one save-failure surface (it toasts and sets the
+		// Dock's status) - see the note on it in save-store.
+		const onError = (error: unknown) =>
+			rollBack(error instanceof Error ? error.message : `Couldn't save {{${name}}}`);
+		// The definition this bar resolved against is gone - deleted from its
+		// scope, or the active environment changed, between render and blur.
+		// Writing it back would resurrect it, so the edit is refused; saying so
+		// is the difference between "refused" and "silently swallowed".
+		const gone = () =>
+			rollBack(`{{${name}}} is no longer defined in its ${resolved.scope} scope`);
 
 		if (resolved.scope === "global") {
 			const vars = globalsData?.variables;
-			if (!vars?.[name]) return;
-			updateGlobalsMutation.mutate({
-				variables: { ...vars, [name]: { ...vars[name], value: newValue } },
-			});
+			if (!vars?.[name]) return gone();
+			updateGlobalsMutation.mutate(
+				{ variables: { ...vars, [name]: { ...vars[name], value: newValue } } },
+				{ onError }
+			);
 			return;
 		}
 
 		if (resolved.scope === "environment") {
 			const env = environments.find((e) => e.id === activeEnvironmentId);
-			if (!env?.variables?.[name]) return;
-			updateEnvironmentMutation.mutate({
-				id: env.id,
-				variables: {
-					...env.variables,
-					[name]: { ...env.variables[name], value: newValue },
+			if (!env?.variables?.[name]) return gone();
+			updateEnvironmentMutation.mutate(
+				{
+					id: env.id,
+					variables: {
+						...env.variables,
+						[name]: { ...env.variables[name], value: newValue },
+					},
 				},
-			});
+				{ onError }
+			);
 			return;
 		}
 
@@ -95,14 +128,17 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 		if (request?.collectionId) {
 			const chain = buildLeafFirstChain(request.collectionId, collections);
 			const source = chain.find((col) => col.variables?.[name]?.enabled);
-			if (!source?.variables) return;
-			updateCollectionMutation.mutate({
-				id: source.id,
-				variables: {
-					...source.variables,
-					[name]: { ...source.variables[name], value: newValue },
+			if (!source?.variables) return gone();
+			updateCollectionMutation.mutate(
+				{
+					id: source.id,
+					variables: {
+						...source.variables,
+						[name]: { ...source.variables[name], value: newValue },
+					},
 				},
-			});
+				{ onError }
+			);
 		}
 	};
 
@@ -168,7 +204,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 										key={`${name}:${resolved.value}`}
 										defaultValue={resolved.value}
 										className="h-7 text-xs font-mono"
-										onBlur={(e) => commitValue(name, resolved, e.target.value)}
+										onBlur={(e) => commitValue(name, resolved, e.target)}
 										onKeyDown={(e) => {
 											if (e.key === "Enter") {
 												e.currentTarget.blur();

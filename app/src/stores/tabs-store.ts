@@ -40,8 +40,16 @@ interface TabsState {
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	closeTab: (tabId: string) => void;
-	/** Close every tab bound to one of the given entity ids (e.g. after deletion). */
-	closeTabsForEntities: (entityIds: Iterable<string>) => void;
+	/**
+	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
+	 *
+	 * `type` narrows the sweep to one kind of tab. Ids are engine-generated and
+	 * do not collide across families, so it is not needed for correctness - it
+	 * states at the call site which tabs a deletion is allowed to close, which
+	 * is the difference between "close the run tabs for these deleted runs" and
+	 * "close whatever happens to carry these ids".
+	 */
+	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
 }
 
@@ -181,21 +189,28 @@ export const useTabsStore = create<TabsState>()(
 				set({ openTabs: remaining, activeTabId: nextActiveId });
 			},
 
-			closeTabsForEntities: (entityIds) => {
+			closeTabsForEntities: (entityIds, type) => {
 				const ids = new Set(entityIds);
 				if (ids.size === 0) return;
 
-				// Both callers reach this after a delete (a request, or a collection
-				// with everything under it), so the responses keyed by those ids can
-				// never be displayed again - nothing else evicts from that map and
-				// each entry holds a body plus its raw copy. Done before the early
-				// return below: a deleted request with no open tab still leaves a
-				// response behind. `clearResponse` on an id with none is a no-op.
-				const { clearResponse } = useResponseStore.getState();
-				for (const id of ids) clearResponse(id);
+				// A delete that can name a request takes its response with it: the
+				// collection tree reaches here after deleting a request or a whole
+				// collection, nothing else evicts from that map, and each entry
+				// holds a body plus its raw copy. Skipped for a `type`-scoped sweep
+				// that is not about requests - `"run"` ids cannot key a response, so
+				// walking them would only look like it meant something. Done before
+				// the early return below, since a deleted request with no open tab
+				// still leaves a response behind.
+				if (type === undefined || type === "request") {
+					const { clearResponse } = useResponseStore.getState();
+					for (const id of ids) clearResponse(id);
+				}
 
 				const { openTabs, activeTabId } = get();
-				const shouldClose = (t: Tab) => t.entityId !== null && ids.has(t.entityId);
+				const shouldClose = (t: Tab) =>
+					t.entityId !== null &&
+					ids.has(t.entityId) &&
+					(type === undefined || t.type === type);
 
 				const remaining = openTabs.filter((t) => !shouldClose(t));
 				if (remaining.length === openTabs.length) return; // nothing matched

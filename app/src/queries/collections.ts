@@ -52,7 +52,7 @@ export function usePrefetchCollectionsAndRequests() {
 
 	// Prefetch requests for all collections when collections are loaded
 	useQuery({
-		queryKey: ["prefetch", "all-requests"],
+		queryKey: queryKeys.prefetch.allRequests(),
 		queryFn: async () => {
 			// Prefetch requests for each collection in parallel
 			await Promise.all(
@@ -241,6 +241,10 @@ export function useCreateCollectionMutation() {
 				const next = old ? [...old, newCollection] : [newCollection];
 				return next.sort(compareCollectionOrder);
 			});
+			// The warm-cache pass is a query like any other: it succeeded once at
+			// startup and would stay fresh forever, so a collection created
+			// mid-session never got one. Invalidating re-runs it over the new set.
+			queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 		},
 	});
 }
@@ -277,10 +281,22 @@ export function useDeleteCollectionMutation() {
 				queryKeys.collections.list(),
 				(old) => old?.filter((c) => c.id !== deletedId) ?? []
 			);
-			// Invalidate requests for this collection
-			queryClient.invalidateQueries({
-				queryKey: queryKeys.requests.listByCollection(deletedId),
-			});
+			/*
+			 * The engine cascade-deletes every descendant collection and their
+			 * requests, and which rows those are is engine-side knowledge - the
+			 * client must not re-derive the tree to patch caches surgically, or
+			 * the two definitions of "descendant" drift.
+			 *
+			 * So both families are invalidated wholesale. `requests.all` rather
+			 * than this collection's list: descendants had their own list caches,
+			 * and `requests.detail` entries carry `staleTime: Infinity`, so
+			 * without this a deleted request stays fresh forever and keeps feeding
+			 * restored tabs. `collections.all` covers the descendants left behind
+			 * by the single-id filter above, which the ancestor walk and the
+			 * resolver would otherwise still see.
+			 */
+			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 		},
 	});
 }

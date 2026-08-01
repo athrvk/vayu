@@ -49,7 +49,7 @@ function deleteRunErrorMessage(error: unknown): string {
 }
 
 export default function HistoryList() {
-	const { openTab, openTabs, activeTabId } = useTabsStore();
+	const { openTab, openTabs, activeTabId, closeTabsForEntities } = useTabsStore();
 	const { activateDrawerView } = useLayoutStore();
 	const {
 		searchQuery,
@@ -140,6 +140,9 @@ export default function HistoryList() {
 		setDeletingId(runIdToDelete);
 		try {
 			await deleteRunMutation.mutateAsync(runIdToDelete);
+			// The run is gone; its tabs are persisted, so leaving them open would
+			// rehydrate a pane for a run that cannot load on every restart.
+			closeTabsForEntities([runIdToDelete], "run");
 			if (selectedRunId === runIdToDelete) {
 				navigateToHistory();
 			}

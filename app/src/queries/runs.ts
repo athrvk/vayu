@@ -19,6 +19,7 @@ import {
 	type InfiniteData,
 } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
@@ -26,6 +27,22 @@ import type { Run, RunListResponse } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
+
+/** How often the unpaged run list re-asks the engine. */
+const RUNS_POLL_MS = 5000;
+
+/**
+ * Polling is gated to the unpaged state on purpose.
+ *
+ * Refetching an infinite query re-fetches *every* loaded page in sequence, so a
+ * user ten pages deep drove ~10 engine requests every 5s for as long as the
+ * drawer stayed open. Only page 1 can gain rows anyway (`start_time DESC`), and
+ * paging older runs in is an explicit act - once the user has done it the list
+ * refreshes on the next mutation or invalidation instead of on a timer.
+ */
+export function runsPollInterval(loadedPages: number): number | false {
+	return loadedPages > 1 ? false : RUNS_POLL_MS;
+}
 
 /**
  * Fetch run history as an infinite query over the `{data, pagination}`
@@ -48,7 +65,7 @@ export function useRunsQuery(q?: string) {
 			lastPage.pagination.hasMore
 				? lastPage.pagination.offset + lastPage.pagination.limit
 				: undefined,
-		refetchInterval: 5000, // 5 seconds
+		refetchInterval: (query) => runsPollInterval(query.state.data?.pages.length ?? 0),
 	});
 }
 
@@ -90,6 +107,29 @@ export function useAllRunsQuery() {
 }
 
 /**
+ * A run that the engine says is gone, as opposed to an engine that did not
+ * answer. Deleting a run is permanent and its tab can outlive it (a persisted
+ * tab rehydrates on the next launch), so the pane has to tell "this was
+ * deleted - close the tab" from "the engine is down - try again". Callers
+ * discriminate with `isRunNotFound`, never by matching the message.
+ *
+ * The same contract `RequestNotFoundError` carries for requests.
+ */
+export class RunNotFoundError extends Error {
+	readonly runId: string;
+	constructor(runId: string) {
+		super(`Run ${runId} no longer exists`);
+		this.name = "RunNotFoundError";
+		this.runId = runId;
+	}
+}
+
+/** True only for a genuine deletion, never for a transport failure. */
+export function isRunNotFound(error: unknown): error is RunNotFoundError {
+	return error instanceof RunNotFoundError;
+}
+
+/**
  * Fetch one run, including its configSnapshot and - for a design run - the
  * stored exchange. The report is a load-test aggregate and carries no
  * configuration for a design run, so this is the only source for it.
@@ -98,8 +138,23 @@ export function useAllRunsQuery() {
 export function runDetailOptions(runId: string | null) {
 	return {
 		queryKey: queryKeys.runs.detail(runId ?? ""),
-		queryFn: () => apiService.getRun(runId!),
+		queryFn: async () => {
+			try {
+				return await apiService.getRun(runId!);
+			} catch (error) {
+				// A definitive deletion, distinct from a transport failure.
+				if (error instanceof ApiError && error.statusCode === 404) {
+					throw new RunNotFoundError(runId!);
+				}
+				throw error;
+			}
+		},
 		enabled: !!runId,
+		// Never retry a real deletion - a 404 is final, and a zombie run tab
+		// retrying it forever is exactly what the global retry produced. A
+		// transport failure still gets the default budget.
+		retry: (count: number, error: unknown) =>
+			!isRunNotFound(error) && count < QUERY_CACHE.DEFAULT_QUERY_RETRY,
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
 	};
 }
@@ -153,12 +208,8 @@ export function useRunTimeSeriesQuery(runId: string | null) {
  */
 export function useLastDesignRunQuery(requestId: string | null | undefined) {
 	const { data, isLoading: runLoading } = useQuery({
-		queryKey: queryKeys.runs.list({
-			requestId: requestId ?? "",
-			type: "design",
-			status: "completed",
-			limit: 1,
-		}),
+		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.lastDesign`.
+		queryKey: queryKeys.runs.lastDesign(requestId ?? ""),
 		queryFn: () =>
 			apiService.listRuns({
 				requestId: requestId!,
@@ -198,7 +249,10 @@ export function useDeleteRunMutation() {
 			queryClient.setQueriesData<InfiniteData<RunListResponse>>(
 				{ queryKey: queryKeys.runs.lists() },
 				(old) => {
-					if (!old) return old;
+					// Belt to `runs.lastDesign`'s braces: a prefix patch must never
+					// assume the shape of a cache it did not write. Anything that is
+					// not paged is left alone rather than thrown on.
+					if (!old || !Array.isArray(old.pages)) return old;
 					return {
 						...old,
 						pages: old.pages.map((page) => {
@@ -228,39 +282,6 @@ export function useDeleteRunMutation() {
 			});
 		},
 	});
-}
-
-/**
- * Add a new run to the front of the first list page (after starting a load
- * test), so it shows immediately without waiting for the next poll.
- */
-export function useAddRunToCache() {
-	const queryClient = useQueryClient();
-
-	return (newRun: Run) => {
-		queryClient.setQueriesData<InfiniteData<RunListResponse>>(
-			{ queryKey: queryKeys.runs.lists() },
-			(old) => {
-				if (!old || old.pages.length === 0) return old;
-				const [first, ...rest] = old.pages;
-				return {
-					...old,
-					pages: [
-						{
-							...first,
-							data: [newRun, ...first.data],
-							pagination: {
-								...first.pagination,
-								total: first.pagination.total + 1,
-								returned: first.data.length + 1,
-							},
-						},
-						...rest,
-					],
-				};
-			}
-		);
-	};
 }
 
 /**

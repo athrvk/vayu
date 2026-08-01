@@ -28,6 +28,7 @@ import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import { useTabsStore, useSessionStore, useDashboardStore, useToastStore } from "@/stores";
 import {
 	useRequestQuery,
+	isRequestNotFound,
 	useUpdateRequestMutation,
 	useCollectionAncestors,
 	queryKeys,
@@ -43,7 +44,11 @@ import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-v
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
 import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
-import { buildExecBody, responseFromExecuteResult } from "./utils/execute-mapping";
+import {
+	buildExecBody,
+	responseFromExecuteResult,
+	scriptsMayWriteVariables,
+} from "./utils/execute-mapping";
 import type {
 	HttpMethod,
 	LoadTestConfig,
@@ -82,6 +87,7 @@ export default function RequestBuilder() {
 		data: fetchedRequest,
 		isLoading,
 		isError,
+		error: requestLookupError,
 		refetch,
 	} = useRequestQuery(selectedRequestId);
 
@@ -254,8 +260,10 @@ export default function RequestBuilder() {
 					);
 				}
 
-				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
-				if (preScriptParts) {
+				// Refresh variables so script-set values (e.g. pm.environment.set)
+				// appear in the UI - post-request scripts write them too, see the
+				// helper's note.
+				if (scriptsMayWriteVariables(preScriptParts, postScriptParts)) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -516,29 +524,41 @@ export default function RequestBuilder() {
 	}
 
 	/*
-	 * Reaching here means the lookup errored. `useRequestQuery` hits
-	 * `GET /requests/:id`, so a genuine deletion (404) is authoritative rather
-	 * than the cold-start race it used to be; a transport failure lands here too,
-	 * but the retry below recovers it once the engine is back. The message reads
-	 * for the common case (deleted), and a centred "Request not found" with no
-	 * way out used to leave the user to work out that closing the tab was the
-	 * only move. Deleting a request already closes its tabs
-	 * (`closeTabsForEntities`), so the usual cause is a delete from another
-	 * window or a database restored underneath the app.
+	 * Reaching here means the lookup errored, and the two reasons need different
+	 * panes. `useRequestQuery` hits `GET /requests/:id`, so a genuine deletion
+	 * throws the `RequestNotFoundError` sentinel and is authoritative - telling
+	 * the user their request is gone is correct, and offering a retry is not,
+	 * since a 404 can only 404 again. Every other failure (a 5xx, an engine that
+	 * is not up yet) means the request is very probably still there and only the
+	 * lookup failed; saying "no longer exists" there is a lie that invites the
+	 * user to close a tab they will want back. Discriminated by type, never by
+	 * message - same rule as `DesignRunView`.
+	 *
+	 * Deleting a request already closes its tabs (`closeTabsForEntities`), so the
+	 * usual cause of the deleted branch is a delete from another window or a
+	 * database restored underneath the app.
 	 */
+	const requestWasDeleted =
+		isRequestNotFound(requestLookupError) || (!isError && !fetchedRequest);
 	if (isError || !fetchedRequest) {
-		return (
+		const closeTabAction = activeTab ? (
+			<Button variant="outline" size="sm" onClick={() => closeTab(activeTab.id)}>
+				Close tab
+			</Button>
+		) : undefined;
+
+		return requestWasDeleted ? (
 			<ErrorState
 				title="This request no longer exists"
 				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered - closing the tab is safe."
+				action={closeTabAction}
+			/>
+		) : (
+			<ErrorState
+				title="Couldn't load this request"
+				detail="The engine could not be reached, or it failed to answer. The request itself is probably fine."
 				onRetry={() => refetch()}
-				action={
-					activeTab ? (
-						<Button variant="outline" size="sm" onClick={() => closeTab(activeTab.id)}>
-							Close tab
-						</Button>
-					) : undefined
-				}
+				action={closeTabAction}
 			/>
 		);
 	}

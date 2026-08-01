@@ -89,6 +89,14 @@ for ([key, val] of env.variables)
 `buildCollectionChain(startId, collections)` walks `parentId` links upward and
 returns the chain with the root at index 0.
 
+**Collection scope is explicit only.** It comes from the `collectionId` option
+and nothing else; a caller that passes none resolves against globals +
+environment. There used to be a session-store fallback (`activeCollectionId`),
+but nothing ever wrote that field, so it could only ever hold a value
+rehydrated from an old build - scoping a preview to a collection the user had
+left, or deleted, versions ago. It was removed in the `vayu.session` v2
+migration.
+
 The resolved `Record<string, ResolvedVariable>` is **derived** from that list
 (the origin carrying `winner: true`) rather than built beside it, so the two
 cannot disagree about which definition won. A name whose every definition is

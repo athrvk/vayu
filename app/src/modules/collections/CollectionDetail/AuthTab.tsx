@@ -16,6 +16,8 @@
  * resolve to.
  */
 
+import { useCallback } from "react";
+
 import {
 	Button,
 	Select,
@@ -32,7 +34,7 @@ import {
 	uneditableAuthLabel,
 	type CollectionAuthMode,
 } from "@/constants/auth-modes";
-import { useEntityDraft } from "@/hooks";
+import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
@@ -93,9 +95,11 @@ function defaultsFor(mode: CollectionAuthMode): CollectionAuth {
 
 interface AuthTabProps {
 	collection: Collection;
+	/** Whether this is the tab on screen - see `useDraftSaveContext`. */
+	active?: boolean;
 }
 
-export default function AuthTab({ collection }: AuthTabProps) {
+export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
 	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
@@ -116,10 +120,22 @@ export default function AuthTab({ collection }: AuthTabProps) {
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
 
-	const handleSave = () => {
+	const persist = useCallback(async () => {
 		if (!isDirty) return;
-		updateCollection.mutate({ id: collection.id, auth });
-	};
+		await updateCollection.mutateAsync({ id: collection.id, auth });
+	}, [isDirty, updateCollection, collection.id, auth]);
+
+	useDraftSaveContext({
+		id: `collection-${collection.id}-auth`,
+		name: `Collection auth: ${collection.name}`,
+		isDirty,
+		isActive: active,
+		save: persist,
+	});
+
+	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
+	// toast instead, since this callout may not be on screen at all.
+	const handleSave = () => void persist().catch(() => {});
 
 	const handleModeChange = (next: CollectionAuthMode) => {
 		setAuth(defaultsFor(next));
