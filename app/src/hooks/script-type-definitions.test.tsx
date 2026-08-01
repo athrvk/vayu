@@ -28,6 +28,7 @@ const dispose = vi.fn();
 const addExtraLib = vi.fn(() => ({ dispose }));
 const setCompilerOptions = vi.fn();
 const setDiagnosticsOptions = vi.fn();
+const setModeConfiguration = vi.fn();
 const getCompilerOptions = vi.fn(() => ({ strict: false }));
 
 const monacoStub = {
@@ -37,7 +38,9 @@ const monacoStub = {
 			addExtraLib,
 			setCompilerOptions,
 			setDiagnosticsOptions,
+			setModeConfiguration,
 			getCompilerOptions,
+			modeConfiguration: { inlayHints: true },
 		},
 	},
 };
@@ -106,17 +109,58 @@ describe("useScriptTypeDefinitions", () => {
 		expect(options.strict).toBe(false);
 	});
 
-	/*
-	 * Deliberate, and the reason is in the hook: a script editor holds a
-	 * fragment, and the two fragments of one request are separate models, so
-	 * semantic validation would squiggle correct scripts. If this flips, it
-	 * should be because that changed - not by accident.
-	 */
-	it("leaves semantic diagnostics off", async () => {
+	it("turns semantic validation on - that is what squiggles a typo", async () => {
 		renderHook(() => useScriptTypeDefinitions(), { wrapper });
 		await waitFor(() => expect(setDiagnosticsOptions).toHaveBeenCalled());
 		expect(setDiagnosticsOptions.mock.calls[0][0]).toMatchObject({
-			noSemanticValidation: true,
+			noSemanticValidation: false,
+			noSyntaxValidation: false,
+		});
+	});
+
+	/*
+	 * The two diagnostics a *correct* script produces here, both because the
+	 * editor holds a fragment while the engine runs something larger: a
+	 * top-level `return` (the engine wraps the script in an IIFE) and a name
+	 * declared in the collection-level part (joined before the engine runs it).
+	 *
+	 * The exact list matters in both directions. Too narrow and correct scripts
+	 * squiggle; too wide and real mistakes go unreported - so assert the codes,
+	 * not merely that something is suppressed.
+	 */
+	it("suppresses only the two diagnostics a correct script produces", async () => {
+		renderHook(() => useScriptTypeDefinitions(), { wrapper });
+		await waitFor(() => expect(setDiagnosticsOptions).toHaveBeenCalled());
+		const options = setDiagnosticsOptions.mock.calls[0][0] as {
+			diagnosticCodesToIgnore: number[];
+		};
+		// 1108 top-level return, 2304 cannot find name.
+		expect(options.diagnosticCodesToIgnore).toEqual([1108, 2304]);
+		// 2339/2551 (property does not exist / did you mean) and 2345 (bad
+		// argument type) are the point of the feature and must survive.
+		expect(options.diagnosticCodesToIgnore).not.toContain(2551);
+		expect(options.diagnosticCodesToIgnore).not.toContain(2339);
+		expect(options.diagnosticCodesToIgnore).not.toContain(2345);
+	});
+
+	/*
+	 * Quick fixes, rename, references and go-to-definition all default to true
+	 * in Monaco, so this asserts intent rather than a change: they arrived with
+	 * diagnostics and a default flipping off would remove them silently.
+	 */
+	it("keeps the language-service providers on, over the existing config", async () => {
+		renderHook(() => useScriptTypeDefinitions(), { wrapper });
+		await waitFor(() => expect(setModeConfiguration).toHaveBeenCalled());
+		expect(setModeConfiguration.mock.calls[0][0]).toMatchObject({
+			diagnostics: true,
+			codeActions: true,
+			rename: true,
+			references: true,
+			definitions: true,
+			hovers: true,
+			signatureHelp: true,
+			// Spread over what was already there, not a replacement of it.
+			inlayHints: true,
 		});
 	});
 

@@ -22,6 +22,7 @@
 #include <string>
 
 #include "vayu/http/routes.hpp"
+#include "vayu/runtime/script_engine.hpp"
 
 namespace vayu::http::routes {
 // Defined in scripting.cpp.
@@ -142,6 +143,59 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "upsert(...args: any[])"));
     EXPECT_TRUE (contains (dts, "add(...args: any[])"));
+}
+
+// The declarations name the host globals the sandbox lacks (`setTimeout`,
+// `fetch`, …) so that using one is an error the editor can explain, rather than
+// the bare "Cannot find name" the app has to suppress wholesale.
+//
+// A hand-written list of what a runtime does *not* have is exactly the kind
+// that rots silently - nothing fails when the runtime gains one. So rather than
+// trusting it, this runs `typeof <name>` in the real script engine for every
+// entry. Give QuickJS a `setTimeout` and the test that claims it has none
+// fails, which is the only honest way to hold this list to the sandbox.
+TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
+#ifdef VAYU_HAS_QUICKJS
+    const std::string dts = generate_script_typedefs ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+
+    size_t checked = 0;
+    // Read the names back out of the generated file rather than restating them,
+    // so the test cannot agree with a stale copy of the list.
+    for (size_t pos = dts.find ("declare const "); pos != std::string::npos;
+         pos        = dts.find ("declare const ", pos + 1)) {
+        const size_t start = pos + std::string ("declare const ").size ();
+        const size_t colon = dts.find (':', start);
+        if (colon == std::string::npos) {
+            continue;
+        }
+        const std::string name = dts.substr (start, colon - start);
+        const size_t end       = dts.find (';', colon);
+        if (end == std::string::npos ||
+        dts.substr (colon, end - colon).find ("never") == std::string::npos) {
+            continue; // a real global (`pm`, `console`), not an absent one
+        }
+
+        const auto result = engine.execute ("pm.__t = typeof " + name + ";", ctx);
+        EXPECT_TRUE (result.success)
+        << "probing '" << name << "' threw: " << result.error_message;
+        const auto again = engine.execute (
+        "if (typeof " + name + " !== 'undefined') { throw new Error('present'); }", ctx);
+        EXPECT_TRUE (again.success)
+        << "'" << name << "' is declared absent but the runtime has it - "
+        << "remove it from ABSENT_GLOBALS (" << again.error_message << ")";
+        checked++;
+    }
+
+    EXPECT_GT (checked, 15u)
+    << "no absent globals were probed - the scan found nothing";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
 }
 
 // Documentation is what hover text renders; a `*/` inside it would close the

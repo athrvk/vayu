@@ -74,6 +74,61 @@ constexpr const char* ANY_OBJECT = "{ [key: string]: any }";
  */
 constexpr const char* CHAIN_CONTINUATIONS[] = { "not", "and" };
 
+/**
+ * @brief Host globals a browser or Node would have and this sandbox does not.
+ *
+ * Declared, rather than simply left out, so that using one is an *error the
+ * editor can explain* instead of a bare "Cannot find name". That distinction
+ * matters because the app has to suppress `Cannot find name` wholesale: a
+ * collection-level script part is joined to the request's before the engine
+ * runs it, so a name defined there is genuinely undeclared as far as the
+ * editor's model can see, and flagging it would be a false positive on correct
+ * code. Typing these as `never` keeps the real mistake caught (calling one is
+ * "not callable") while that suppression is in force, and the documentation
+ * below is what hover shows in place of the error text.
+ *
+ * `script_types_test.cpp` executes `typeof <name>` in the real script engine
+ * for every entry, so the list cannot drift from the sandbox: giving the
+ * runtime a `setTimeout` fails the test that says it has none.
+ */
+struct AbsentGlobal {
+    const char* name;
+    const char* reason;
+};
+constexpr AbsentGlobal ABSENT_GLOBALS[] = {
+    { "setTimeout",
+    "The sandbox is synchronous - a script runs to completion "
+    "before the request is sent, so there is no later to defer to." },
+    { "setInterval",
+    "The sandbox is synchronous and a script has a wall-clock "
+    "deadline (scriptTimeout)." },
+    { "clearTimeout", "There is no setTimeout to cancel." },
+    { "clearInterval", "There is no setInterval to cancel." },
+    { "fetch",
+    "Scripts cannot make network calls. The request being built is "
+    "the only one sent; edit it through pm.request." },
+    { "XMLHttpRequest", "Scripts cannot make network calls." },
+    { "require",
+    "No module system - QuickJS here has no loader, and there is "
+    "no filesystem to load from." },
+    { "process", "Not Node. There is no process, no argv and no env." },
+    { "Buffer", "Not Node. Use btoa/atob, or pm.crypto for hashing." },
+    { "URL", "No URL parser in the sandbox. pm.request.url is a plain string." },
+    { "URLSearchParams", "No URL parser in the sandbox." },
+    { "TextEncoder", "Absent. pm.crypto accepts strings directly." },
+    { "TextDecoder", "Absent. pm.crypto accepts strings directly." },
+    { "structuredClone", "Absent. Use JSON.parse(JSON.stringify(value))." },
+    { "localStorage",
+    "No browser storage. Persist through pm.environment or "
+    "pm.globals, which outlive the script." },
+    { "sessionStorage", "No browser storage. Use pm.variables instead." },
+    { "window", "Not a browser." },
+    { "document", "Not a browser." },
+    { "alert",
+    "Not a browser. Use console.log, shown in the response pane's "
+    "Console tab." },
+};
+
 bool is_chain_continuation (const std::string& name) {
     return std::find (std::begin (CHAIN_CONTINUATIONS),
            std::end (CHAIN_CONTINUATIONS), name) != std::end (CHAIN_CONTINUATIONS);
@@ -433,6 +488,20 @@ std::string generate_script_typedefs () {
         } else {
             out += "declare const " + name + ": " + field_type (child.detail) + ";\n";
         }
+    }
+
+    // The globals the sandbox does *not* have - see ABSENT_GLOBALS. Skipped if
+    // the table ever starts offering one for real, so the runtime gaining a
+    // capability can never produce a file that declares it twice.
+    for (const auto& absent : ABSENT_GLOBALS) {
+        if (global_root.children.count (absent.name) != 0) {
+            continue;
+        }
+        out += "\n/**\n * Not available in the Vayu script sandbox.\n *\n * ";
+        out += absent.reason;
+        out += "\n */\ndeclare const ";
+        out += absent.name;
+        out += ": never;\n";
     }
 
     return out;

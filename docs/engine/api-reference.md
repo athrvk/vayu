@@ -1909,6 +1909,15 @@ so a client may cache on `version`.
 | `libUri` | Model URI the app registers the declarations under (`addExtraLib`) |
 | `typeDefinitions` | The `.d.ts` source |
 
+The file also declares the host globals the sandbox **lacks** (`setTimeout`,
+`fetch`, `require`, `URL`, …) as `never`, with the reason as documentation. That
+is not padding: the app must suppress "Cannot find name" wholesale, because a
+collection-level script part is joined to the request's before the engine runs
+it, so a name declared there is undeclared as far as the editor's model can see.
+Declaring the absent globals keeps the real mistake caught ("not callable")
+while that suppression is in force. A test executes `typeof <name>` in the real
+script engine for every entry, so the list cannot drift from the runtime.
+
 Two things the generated file cannot get from the table, both handled in
 `script_types.cpp` and guarded by `script_types_test.cpp`:
 

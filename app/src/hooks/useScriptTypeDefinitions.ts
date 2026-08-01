@@ -34,6 +34,29 @@ import { useScriptTypeDefinitionsQuery } from "@/queries";
  */
 const SCRIPT_LIB = ["es2022"];
 
+/**
+ * The diagnostics a *correct* script in this editor produces, which must
+ * therefore not be shown. Both follow from the editor holding a fragment while
+ * the engine runs something larger.
+ *
+ * - **1108** - "A 'return' statement can only be used within a function body."
+ *   The engine wraps every script in an IIFE before running it, so a top-level
+ *   `return` to bail out early is legal and is a documented pattern.
+ * - **2304** - "Cannot find name 'x'." A collection-level script part is joined
+ *   to the request's (with `\n\n`) before the engine runs the result, so a name
+ *   declared up there is genuinely undeclared as far as this model can see.
+ *
+ * Suppressing 2304 would normally cost the best diagnostic of all - `fetch` and
+ * `setTimeout`, which the sandbox does not have. It does not, because the
+ * engine *declares* those as `never` (see ABSENT_GLOBALS in
+ * `script_types.cpp`), so calling one is "not callable" rather than "cannot
+ * find name", and hover explains why.
+ *
+ * Narrow this list rather than widening it: every code here is a real mistake
+ * going unreported in exchange for not crying wolf on correct code.
+ */
+const SUPPRESSED_DIAGNOSTICS = [1108, 2304];
+
 export function useScriptTypeDefinitions() {
 	const monaco = useMonaco();
 	const { data } = useScriptTypeDefinitionsQuery();
@@ -64,25 +87,41 @@ export function useScriptTypeDefinitions() {
 		});
 
 		/*
-		 * Diagnostics are deliberately off.
+		 * Semantic validation is on, minus exactly the two diagnostics that a
+		 * *correct* script in this editor produces. Both come from the same
+		 * fact: the editor holds a fragment, and the engine runs something
+		 * larger than what is on screen.
 		 *
-		 * A script editor holds a *fragment* - the engine wraps it in an IIFE
-		 * before running it - and the two fragments of one request are separate
-		 * models that cannot see each other's declarations. Turning semantic
-		 * validation on would squiggle correct scripts (a `const` a
-		 * post-request script reads from a pre-request one reads as undefined)
-		 * and there is no model-per-request wiring here to fix that with.
-		 *
-		 * Everything the declarations are actually wanted for - hover text,
-		 * signature help, completion detail - is produced by the worker without
-		 * diagnostics. Flip `noSemanticValidation` once fragments share a model
-		 * per request; the declarations are ready for it (they compile clean
-		 * under --strict, and correctly reject `pm.response.staus`).
+		 * They were found by compiling a realistic script with `tsc --checkJs`
+		 * rather than guessed - see SUPPRESSED below. Everything else the worker
+		 * reports is a real mistake, including the whole `pm.*` surface, so
+		 * `pm.response.staus` now squiggles with a did-you-mean.
 		 */
 		defaults.setDiagnosticsOptions({
-			noSemanticValidation: true,
+			noSemanticValidation: false,
 			noSyntaxValidation: false,
 			noSuggestionDiagnostics: false,
+			diagnosticCodesToIgnore: SUPPRESSED_DIAGNOSTICS,
+		});
+
+		/*
+		 * Every one of these defaults to true in Monaco today, so this call
+		 * changes nothing right now - it pins the intent. Diagnostics are what
+		 * make the rest useful (a quick fix is offered against an error, and
+		 * rename/references need the same analysis), and they arrived together;
+		 * a future default flipping off would remove them silently.
+		 */
+		defaults.setModeConfiguration({
+			...defaults.modeConfiguration,
+			diagnostics: true,
+			hovers: true,
+			codeActions: true, // "Did you mean 'status'?" as an applicable fix
+			definitions: true,
+			references: true,
+			rename: true,
+			documentHighlights: true,
+			signatureHelp: true,
+			completionItems: true,
 		});
 
 		const disposable = defaults.addExtraLib(typeDefinitions, libUri ?? "ts:vayu/pm.d.ts");
