@@ -286,11 +286,39 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |
+| `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://run/{runId}/report` | A run's full report (templated). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
 IDs).
+
+### The script sandbox surface
+
+`preRequestScript` and `postRequestScript` run in the engine's QuickJS sandbox,
+which is the same sandbox the app's editors target - there is no per-client
+capability gate, so an agent can do anything a script in the app can. What an
+agent lacked was any way to *know* that: until issue #233 the entire script
+surface it could see was the two sentences in those fields' descriptions, so
+`pm.expect` chains, `pm.response.to.*`, the variable scopes and `pm.crypto` were
+invisible and simply never attempted.
+
+`vayu://scripting/completions` closes that. It re-serves the engine's own
+`GET /scripting/completions` - the single source of truth that also feeds Monaco,
+generated from one table in `engine/src/http/routes/scripting.cpp` and
+cross-checked against the runtime by `script_completions_test.cpp`. Notably it
+carries `pm.crypto.sha256` / `.hmacSha256` and the `btoa` / `atob` globals, and
+their documentation states they are **synchronous** (the sandbox has no event
+loop, so nothing Promise-based would ever settle).
+
+Each entry is trimmed to `label`, `detail` and `documentation`; Monaco's own
+`insertText`, `insertTextRules`, `sortText`, `filterText` and `kind` are dropped,
+since snippet placeholders and a `CompletionItemKind` enum mean nothing outside
+an editor. The trim is the only transformation - **no list of `pm.*` names is
+maintained app-side**, which is the point: a name the engine adds reaches agents
+with no second edit, and `resources.test.ts` fails if the resource ever answers
+from a local literal instead of the engine. The tool descriptions carry one
+sentence pointing here, for an agent that never lists resources.
 
 ## Prompts
 

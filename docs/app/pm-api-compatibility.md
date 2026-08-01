@@ -356,6 +356,22 @@ entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first 
 Narrow that suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
 
+### The second consumer: MCP agents
+
+The completion set is no longer only an editor concern. An MCP agent writes scripts too -
+`run_request` takes a `preRequestScript` and both it and `start_load_run` take a
+`postRequestScript` - and it reaches the same sandbox, since the sandbox belongs to the
+engine and has no per-client gate.
+
+So the MCP server re-serves this endpoint as the `vayu://scripting/completions` resource
+(`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation` - see
+[`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface). The reason it reads
+the endpoint rather than describing the surface in its own prose is the one this page
+already demonstrates: a hand-written copy drifts, and the app's own pre-request quick
+reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" before
+`pm.crypto` landed. Adding a name to the completion table therefore reaches Monaco, the
+`.d.ts` and every agent at once - do not add a fourth place that lists `pm.*` names.
+
 ---
 
 ## Where it lives
