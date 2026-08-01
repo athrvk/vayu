@@ -884,7 +884,7 @@ const {
   getVariable: (name: string) => ResolvedVariable | null
   getAllVariables: () => Record<string, ResolvedVariable>
   getVariableOrigins: (name: string) => VariableOrigin[]
-} = useVariableResolver({ collectionId?: string, environmentId?: string });
+} = useVariableResolver({ collectionId?: string });
 ```
 
 **Resolution Priority (highest to lowest):**
@@ -896,6 +896,14 @@ Collection scope comes from the `collectionId` option and nowhere else - a
 caller that passes none resolves against globals + environment. See
 `docs/app/variable-resolution.md` for why the session-store fallback was
 removed.
+
+**`collectionId` is the only option.** The environment is *not* passed in: the
+hook reads `useSessionStore().activeEnvironmentId` itself, so every caller
+resolves against the environment the user has actually selected and no caller
+can scope a preview to a different one. This page documented an
+`environmentId` option for a while; nothing has ever accepted one. The two
+scopes are asymmetric on purpose - the active environment is app-wide state,
+while the collection is a property of whatever the caller is rendering.
 
 `ResolvedVariable` carries `sourceId` / `sourceName` - the specific environment
 or collection the winning value came from (absent for `global`).
@@ -1183,7 +1191,7 @@ starts the engine at import time.
 ### Variable Resolution Priority
 
 1. User activates a request in a tab. The environment comes from `useSessionStore().activeEnvironmentId`; the collection comes from the request's own `collectionId` - **not** from the session store, which has held no collection scope since the `vayu.session` v2 migration
-2. Component calls `useVariableResolver({ collectionId, environmentId })`
+2. Component calls `useVariableResolver({ collectionId })` - the environment is not passed, the hook reads it from the session store
 3. Hook fetches globals, collection variables, and environment variables via TanStack Query
 4. When `resolveString("https://{{baseUrl}}/{{path}}")` is called:
    - First, check environment variables for `baseUrl` and `path`
@@ -1213,6 +1221,6 @@ starts the engine at import time.
 
 9. **Live metric retention is a time window, not a point count.** `addMetricsBatch` trims ticks older than `liveWindowSeconds` (the engine's `liveReplayWindowMs`, 5m by default, `null` = full run), with `maxRetainedTicks` (`DEFAULT_MAX_RETAINED_TICKS`, 50,000) as a memory backstop. Both are engine config so the replayed span and the displayed span cannot disagree. The only knob in `config/metrics.ts` is `METRICS_UI_THROTTLE_MS`, the SSE commit throttle; chart cost is bounded by bucketing (`chartBucketSeconds`), not by dropping ticks.
 
-10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId })` to scope a preview to a collection; the active environment comes from the session store and is not a parameter.
 
 11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.

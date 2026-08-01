@@ -157,4 +157,56 @@ describe("renderer state docs name real identifiers", () => {
 			expect(ids.has(name), `${name} is back in app/src - drop it from the list`).toBe(false);
 		}
 	});
+
+	/**
+	 * The identifier scan above cannot see this one.
+	 *
+	 * These docs documented an `environmentId` option on `useVariableResolver`
+	 * that nothing has ever accepted - the hook reads the active environment
+	 * from the session store itself. `environmentId` is a real identifier
+	 * elsewhere in the app, and the drifted call sits inside a fenced block, so
+	 * both of the scan's rules pass it. A wrong *option* is worse than a wrong
+	 * name too: it reads as a knob, so a caller writes one and silently gets
+	 * the session store's environment instead of the one they asked for.
+	 *
+	 * So this reads the option keys out of the interface and holds every
+	 * documented call to them - fenced blocks included, since a code sample is
+	 * exactly where someone copies a call from.
+	 */
+	it("documents only options the resolver hook accepts", () => {
+		const source = readFileSync(join(here, "hooks", "useVariableResolver.ts"), "utf8");
+		const body = source.match(/interface UseVariableResolverOptions \{([^}]*)\}/)?.[1];
+		expect(body, "UseVariableResolverOptions was renamed - update this guard").toBeTruthy();
+
+		const accepted = new Set([...body!.matchAll(/(\w+)\??\s*:/g)].map((m) => m[1]));
+		expect(accepted.size).toBeGreaterThan(0);
+
+		const offences: string[] = [];
+		let calls = 0;
+		for (const path of DOCS) {
+			readFileSync(join(repoRoot, path), "utf8")
+				.split(/\r?\n/)
+				.forEach((line, i) => {
+					for (const call of line.matchAll(/useVariableResolver\(\{([^}]*)\}/g)) {
+						calls++;
+						// One key per comma-separated entry, and only what comes
+						// before `?` or `:` - so `collectionId`,
+						// `collectionId?: string` and `collectionId: id` all
+						// reduce to the key, and a type name is never read as one.
+						for (const entry of call[1].split(",")) {
+							const key = entry.trim().split(/[?:]/)[0].trim();
+							if (!key || accepted.has(key)) continue;
+							offences.push(
+								`${path}:${i + 1}  \`${key}\` is not an option (accepted: ${[...accepted].join(", ")})`
+							);
+						}
+					}
+				});
+		}
+
+		// A guard that matched no call would pass on a doc that had stopped
+		// mentioning the hook at all, which is not the same as being correct.
+		expect(calls, "no documented useVariableResolver call was found").toBeGreaterThan(0);
+		expect(offences).toEqual([]);
+	});
 });
