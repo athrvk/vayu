@@ -84,6 +84,20 @@ struct RunContext {
     // Test script for deferred validation
     std::string test_script;
 
+    // Latency (ms) past which a completion is captured as an outlier, resolved
+    // once from the run config. 0 disables outlier capture - a threshold of
+    // zero would mark every completion an outlier, which is the same as
+    // marking none. Read per completion in handle_result, which runs inline on
+    // an event-loop worker inside the curl completion drain: a `config.value
+    // (...)` there is a string-keyed map lookup on the critical path of that
+    // worker's socket processing, twice per request, to re-read a value fixed
+    // when the run started.
+    //
+    // `save_timing_breakdown` is resolved in the same constructor but lives on
+    // MetricsCollectorConfig::store_success_traces, which is where the sampling
+    // gate reads it; a second copy here would have no reader.
+    int slow_threshold_ms{ constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS };
+
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
     std::unique_ptr<MetricsCollector> metrics_collector;
@@ -268,6 +282,22 @@ struct ScriptValidationTotals {
 };
 
 /**
+ * @brief What each bounded store thinned away, for the run summary.
+ *
+ * Every store the collector keeps is capped, so a long enough run retains a
+ * sample rather than the whole set. The counts say how much was thinned: a
+ * report that shows 1000 sampled traces out of a 3M-request run is telling the
+ * truth only if it can also say that 29,000 candidates were displaced. Zero
+ * everywhere means the stored set is complete.
+ */
+struct SamplingRetention {
+    size_t errors_dropped           = 0;
+    size_t success_traces_dropped   = 0;
+    size_t slow_traces_dropped      = 0;
+    size_t response_samples_dropped = 0;
+};
+
+/**
  * @brief Whole-run results, the inputs to the stored `runs.summary` object.
  *
  * Everything `GET /runs/:id/report` used to re-derive by scanning the run's
@@ -292,6 +322,7 @@ struct RunSummaryInputs {
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
+    SamplingRetention retention;
 };
 
 /**

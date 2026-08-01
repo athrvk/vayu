@@ -1269,6 +1269,9 @@ default, and whose message names the offending field and why the bound exists:
 | `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
 | `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
+| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
+| `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
@@ -1281,6 +1284,24 @@ itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
 The sample rates are additionally clamped to &ge; 1 inside the metrics
 collector, so the modulo cannot divide by zero even for a caller that bypasses
 this route.
+
+**What a run stores, and for how long.** A completed request is recorded in the
+aggregate counters always; whether its *detail* survives is decided by three
+independent budgets:
+
+| Budget | Filled by | Bounded by |
+|--------|-----------|------------|
+| Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
+| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
+| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
+
+Two properties are worth relying on. An outlier **never consumes a sampling
+slot**: a run whose target degrades does not silently stop sampling ordinary
+traffic because everything became slow. And each store is a **reservoir** - past
+its bound a later record displaces a uniformly chosen incumbent instead of being
+refused - so what a long run retains describes the whole run rather than its
+first few seconds, and `sampling` in
+[the report](#get-runsrunidreport) says how many records that thinning cost.
 
 **Shutdown refuses new runs.** Once the daemon has begun draining its run
 workers, `POST /runs` answers `503` with the message `Engine is shutting down` rather
@@ -1812,6 +1833,10 @@ is the same either way** - only where the numbers are read from changed.
     "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "sampling": {
+    "errorsDropped": 0, "successTracesDropped": 29000,
+    "slowTracesDropped": 0, "responseSamplesDropped": 998000
+  },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
   "results": [ { "...": "sampled request/response outcomes" } ]
 }
@@ -1821,6 +1846,12 @@ is the same either way** - only where the numbers are read from changed.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
+
+`sampling` says how much each bounded store thinned away: all zeros means the
+`results[]` array and the tested responses are the complete set, and a non-zero
+count means they are a **uniform sample of the whole run** (reservoir retention)
+rather than a truncated prefix of it. The section is absent on a run recorded
+before it was reported, which is not the same claim as "nothing was dropped".
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,

@@ -43,10 +43,6 @@ const char* error_type_name (vayu::ErrorCode code) {
 void handle_result (std::shared_ptr<RunContext> context,
 vayu::db::Database& /* db - unused, kept for API compat */,
 vayu::Result<vayu::Response> result) {
-    // Get configuration
-    int slow_threshold_ms = context->config.value ("slow_threshold_ms", 1000);
-    bool save_timing_breakdown = context->config.value ("save_timing_breakdown", false);
-
     // A transfer usually completes as a Response carrying error_code, but two
     // paths still produce a real Error: curl-handle creation failure, and the
     // stop(false) cancellation drain. Both raise ErrorCode::InternalError, so
@@ -99,11 +95,26 @@ vayu::Result<vayu::Response> result) {
         const auto& response = result.value ();
         double latency       = response.timing.total_ms;
 
-        // Build trace data if configured
-        std::string trace_data;
-        bool is_slow = latency >= static_cast<double> (slow_threshold_ms);
+        // Two independent reasons to keep a trace, and both are decided before
+        // anything is serialised: the 1-in-N sampler (which advances its period
+        // on every completion, so this call is not optional) and the slow
+        // threshold. Building first and sampling afterwards meant 99 of every
+        // 100 traces were constructed and dumped inline in the completion
+        // drain, then thrown away - work that delays socket processing for
+        // every other transfer on the same worker.
+        const bool is_slow = context->slow_threshold_ms > 0 &&
+        latency >= static_cast<double> (context->slow_threshold_ms);
+        const bool sampled = context->metrics_collector->should_sample_success ();
 
-        if (save_timing_breakdown || is_slow) {
+        std::string trace_data;
+        auto trace_reason = SuccessTraceReason::None;
+
+        if (sampled || is_slow) {
+            // Slow wins when a completion is both: the trace is identical, and
+            // charging it to the slow budget leaves the 1-in-N budget for
+            // ordinary traffic.
+            trace_reason = is_slow ? SuccessTraceReason::Slow : SuccessTraceReason::Sampled;
+
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
                 { "wireMs", response.timing.wire_ms },
                 { "queueWaitMs", response.timing.queue_wait_ms },
@@ -115,7 +126,7 @@ vayu::Result<vayu::Response> result) {
 
             if (is_slow) {
                 timing_json["isSlow"]      = true;
-                timing_json["thresholdMs"] = slow_threshold_ms;
+                timing_json["thresholdMs"] = context->slow_threshold_ms;
             }
 
             trace_data = timing_json.dump ();
@@ -123,7 +134,7 @@ vayu::Result<vayu::Response> result) {
 
         // Record to in-memory collector (high-performance, no DB writes)
         context->metrics_collector->record_success (response.status_code,
-        latency, response.timing.queue_wait_ms, trace_data);
+        latency, response.timing.queue_wait_ms, trace_data, trace_reason);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 

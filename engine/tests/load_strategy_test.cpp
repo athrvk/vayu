@@ -681,3 +681,125 @@ TEST_F (LoadStrategyTest, ZeroIterationsSubmitsNothing) {
     EXPECT_EQ (context->requests_sent.load (), 0u)
     << "a 0-iteration run submitted a seed before checking its own budget";
 }
+
+// ============================================================================
+// Completion handling: what a run keeps, and what it never builds
+// ============================================================================
+
+namespace {
+// A completion as the event loop hands it to handle_result: a Response with a
+// timing breakdown, carried by an ok Result.
+vayu::Result<vayu::Response> completion (double latency_ms) {
+    vayu::Response response;
+    response.status_code          = 200;
+    response.timing.total_ms      = latency_ms;
+    response.timing.wire_ms       = latency_ms;
+    response.timing.first_byte_ms = latency_ms / 2.0;
+    return vayu::Result<vayu::Response> (response);
+}
+} // namespace
+
+// Finding 3, end to end through the path a run actually takes: with the
+// timing-breakdown toggle at its default (off) and a threshold set, an outlier
+// is stored and carries `isSlow` - the empirical repro in the issue returned
+// an empty `results` array.
+TEST_F (LoadStrategyTest, SlowCompletionIsCapturedWithTimingBreakdownOff) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100 },
+        { "save_timing_breakdown", false },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-slow-capture", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    vayu::core::handle_result (context, db, completion (5.0));   // fast
+    vayu::core::handle_result (context, db, completion (500.0)); // outlier
+
+    const auto& slow = context->metrics_collector->slow_results ();
+    ASSERT_EQ (slow.size (), 1u)
+    << "the outlier's trace was built because it crossed the threshold, then "
+       "discarded because storage was gated on save_timing_breakdown";
+    auto trace = nlohmann::json::parse (slow[0].trace_data);
+    EXPECT_TRUE (trace["isSlow"].get<bool> ());
+    EXPECT_EQ (trace["thresholdMs"].get<int> (), 100);
+    // The fast completion built nothing and stored nothing.
+    EXPECT_TRUE (context->metrics_collector->success_results ().empty ());
+    EXPECT_EQ (context->metrics_collector->total_requests (), 2u);
+}
+
+// A threshold of 0 would make every completion an outlier, which is the same
+// as making none - so it disables capture rather than storing the whole run.
+TEST_F (LoadStrategyTest, AZeroThresholdDisablesOutlierCapture) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 0 },
+        { "save_timing_breakdown", false },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-zero-threshold", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    for (int i = 0; i < 50; ++i) {
+        vayu::core::handle_result (context, db, completion (5.0));
+    }
+
+    EXPECT_TRUE (context->metrics_collector->slow_results ().empty ());
+    EXPECT_EQ (context->metrics_collector->slow_results_dropped (), 0u);
+}
+
+// Finding 2: only the sampled completions reach storage, and the period still
+// means one in N of *every* completion. The trace that is not built leaves
+// nothing to assert on directly - what is asserted is that no unsampled
+// completion produced a record, i.e. nothing was built and then dropped.
+TEST_F (LoadStrategyTest, OnlySampledCompletionsAreStored) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100000 }, // nothing here is an outlier
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 10 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-sampled", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    for (int i = 0; i < 500; ++i) {
+        vayu::core::handle_result (context, db, completion (5.0));
+    }
+
+    EXPECT_EQ (context->metrics_collector->success_results ().size (), 50u);
+    EXPECT_EQ (context->metrics_collector->success_results_dropped (), 0u);
+    EXPECT_TRUE (context->metrics_collector->slow_results ().empty ());
+}
+
+// Findings 1 and 4: the per-completion config reads are resolved once, and
+// `max_success_results` - which no route or config key could reach - now
+// arrives from the run config like its four siblings.
+TEST_F (LoadStrategyTest, RunContextResolvesTheSamplingConfigOnce) {
+    nlohmann::json config = {
+        { "slow_threshold_ms", 250 },
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 },
+        { "max_success_results", 4 },
+        { "max_slow_results", 2 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-resolved", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    EXPECT_EQ (context->slow_threshold_ms, 250);
+
+    for (int i = 0; i < 20; ++i) {
+        vayu::core::handle_result (context, db, completion (5.0));
+        vayu::core::handle_result (context, db, completion (900.0));
+    }
+
+    EXPECT_EQ (context->metrics_collector->success_results ().size (), 4u);
+    EXPECT_EQ (context->metrics_collector->slow_results ().size (), 2u);
+    EXPECT_GT (context->metrics_collector->success_results_dropped (), 0u);
+    EXPECT_GT (context->metrics_collector->slow_results_dropped (), 0u);
+
+    // The default holds when the run config says nothing.
+    nlohmann::json bare;
+    auto stock = std::make_shared<vayu::core::RunContext> ("test-stock", bare);
+    EXPECT_EQ (stock->slow_threshold_ms,
+    vayu::core::constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS);
+}

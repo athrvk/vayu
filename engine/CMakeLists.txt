@@ -390,6 +390,7 @@ if(VAYU_BUILD_TESTS)
         tests/execution_http_version_test.cpp
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
+        tests/reservoir_test.cpp
         tests/load_pacing_test.cpp
         tests/run_manager_test.cpp
         tests/run_route_test.cpp

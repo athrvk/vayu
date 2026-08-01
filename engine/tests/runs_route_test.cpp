@@ -370,6 +370,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.latency.p999      = 35.0;
     inputs.latency_avg_ms    = 12.5;
     inputs.tests             = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
+    inputs.retention         = vayu::core::SamplingRetention{ 4, 300, 12, 900 };
     return inputs;
 }
 
@@ -435,6 +436,38 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_EQ (body["testValidation"]["samplesTested"].get<int> (), 10);
     EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
     EXPECT_EQ (body["testValidation"]["testsFailed"].get<int> (), 1);
+}
+
+// Every store a run keeps is bounded, so the report has to say how much each
+// one thinned away - a Samples tab showing 1000 traces from a 3M-request run
+// is honest only if the reader can also see that 29,000 candidates were
+// displaced.
+TEST_F (RunsRouteTest, ReportCarriesWhatTheBoundedStoresDropped) {
+    seed ({ .id = "run_retention", .start_time = 1000 });
+    db_->update_run_summary ("run_retention",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_retention");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("sampling"));
+    EXPECT_EQ (body["sampling"]["errorsDropped"].get<size_t> (), 4u);
+    EXPECT_EQ (body["sampling"]["successTracesDropped"].get<size_t> (), 300u);
+    EXPECT_EQ (body["sampling"]["slowTracesDropped"].get<size_t> (), 12u);
+    EXPECT_EQ (body["sampling"]["responseSamplesDropped"].get<size_t> (), 900u);
+}
+
+// A run recorded before retention was reported has no section - which is not
+// the same claim as "this run dropped nothing".
+TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
+    seed ({ .id = "run_old_summary", .start_time = 1000 });
+    auto summary = vayu::core::build_run_summary_payload (summary_inputs ());
+    summary.erase ("sampling");
+    db_->update_run_summary ("run_old_summary", summary.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_old_summary");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("sampling"));
 }
 
 // A run without script validation keeps the section out entirely, rather than

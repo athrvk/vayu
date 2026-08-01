@@ -476,6 +476,15 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
         { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
         "Each retained sample holds a full response body." },
+        { "max_success_results", 0, limits::MAX_RETAINED_RESULTS,
+        "Each retained record holds a serialised timing breakdown, and the "
+        "store is reserved up front." },
+        { "max_slow_results", 0, limits::MAX_RETAINED_RESULTS,
+        "Each retained record holds a serialised timing breakdown, and the "
+        "store is reserved up front." },
+        { "slow_threshold_ms", 0, limits::MAX_SLOW_THRESHOLD_MS,
+        "0 disables outlier capture; a negative threshold would mark every "
+        "completion an outlier." },
         { "concurrency", 1, limits::MAX_CONCURRENCY,
         "Connections are pre-allocated per worker before any traffic flows." },
         { "timeout", 1, 86400000,
