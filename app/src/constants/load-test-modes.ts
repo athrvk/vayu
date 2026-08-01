@@ -76,3 +76,28 @@ export function loadTestModeLabel(mode: string | undefined | null): string {
 export function loadTestModeDescription(mode: string | undefined | null): string {
 	return (mode && BY_VALUE.get(mode)?.description) || "";
 }
+
+/**
+ * A run's concurrency, in words.
+ *
+ * The same drift as the mode labels above, in the same shape: the history
+ * sidebar row rendered `summary.concurrency` as "256 workers" while the
+ * dashboard header rendered the identical field as "64 VUs", so one run was
+ * described two ways depending on which screen you were on.
+ *
+ * "Workers" was the wrong half of that disagreement rather than merely the
+ * inconsistent one - the engine already owns the name for its libcurl
+ * event-loop thread count (`workers`, a Settings key), an unrelated number
+ * that was 8 while the sidebar was saying 256. A user comparing two runs in
+ * History to see which `workers` value each used read a number wearing that
+ * name and got concurrency.
+ *
+ * Callers pass the number and render the result; nobody appends the unit
+ * themselves, which is what lets the two surfaces stay in step.
+ */
+export function formatConcurrency(concurrency: number): string {
+	return `${concurrency} ${CONCURRENCY_UNIT}`;
+}
+
+/** The unit `formatConcurrency` speaks. Exported for the guards that pin it. */
+export const CONCURRENCY_UNIT = "VUs";

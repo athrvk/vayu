@@ -16,7 +16,7 @@ import { Button, TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
 import type { DashboardHeaderProps } from "../types";
 import { MethodBadge } from "@/components/shared";
-import { loadTestModeLabel } from "@/constants/load-test-modes";
+import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 
 function formatElapsed(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -59,7 +59,8 @@ export default function DashboardHeader({
 
 	// Config summary line
 	const configParts: string[] = [];
-	if (configuration?.concurrency != null) configParts.push(`${configuration.concurrency} VUs`);
+	if (configuration?.concurrency != null)
+		configParts.push(formatConcurrency(configuration.concurrency));
 	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
 	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
