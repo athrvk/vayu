@@ -46,10 +46,17 @@ const runQuery = {
 	refetch: refetchRun,
 };
 
-vi.mock("@/queries", () => ({
-	useRunQuery: () => runQuery,
-	useRunReportQuery: () => reportQuery,
-}));
+// `isRunNotFound` is the real one: the pane's whole job here is to discriminate
+// a deletion from a transport failure, and a stubbed predicate would assert
+// nothing about that.
+vi.mock("@/queries", async () => {
+	const runs = await vi.importActual<typeof import("@/queries/runs")>("@/queries/runs");
+	return {
+		useRunQuery: () => runQuery,
+		useRunReportQuery: () => reportQuery,
+		isRunNotFound: runs.isRunNotFound,
+	};
+});
 
 // The detail routers render heavy chart trees that are irrelevant here; the
 // question is only which of the three panes HistoryDetail chooses.
@@ -100,6 +107,25 @@ describe("HistoryDetail error", () => {
 		const retry = screen.getByRole("button", { name: /try again/i });
 		fireEvent.click(retry);
 		expect(refetchRun).toHaveBeenCalledTimes(1);
+	});
+
+	/*
+	 * A run tab outlives its run: tabs are persisted, so a run deleted in
+	 * another window - or before the last quit - rehydrates into this pane on
+	 * launch. Retrying a 404 can only 404 again, which is what the global
+	 * `retry: 2` had it doing; the way out is closing the tab.
+	 */
+	it("says the run is gone and offers the tab close, with no doomed retry", async () => {
+		const { RunNotFoundError } = await import("@/queries/runs");
+		runQuery.error = new RunNotFoundError("run-1");
+		runQuery.data = undefined;
+		render(<HistoryDetail />);
+
+		expect(screen.getByText(/this run no longer exists/i)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /close tab/i }));
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
 	});
 
 	it("treats a settled-but-empty report as an error, not as content", () => {

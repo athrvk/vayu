@@ -72,6 +72,28 @@ describe("closeTabsForEntities", () => {
 		expect(useTabsStore.getState().openTabs).toEqual(before.openTabs);
 		expect(useTabsStore.getState().activeTabId).toBe(before.activeTabId);
 	});
+
+	it("closes only the named kind of tab when a type is given", () => {
+		// Deleting a run must not reach a request tab that happens to carry the
+		// same id. Ids are engine-generated and do not collide, so this is about
+		// the call site stating what a deletion is allowed to close.
+		useTabsStore.getState().openTab({ type: "run", entityId: "x" });
+		openRequests(["x"]);
+
+		useTabsStore.getState().closeTabsForEntities(["x"], "run");
+
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs.map((t) => t.type)).toEqual(["request"]);
+	});
+
+	it("still closes every kind when no type is given", () => {
+		useTabsStore.getState().openTab({ type: "run", entityId: "x" });
+		openRequests(["x"]);
+
+		useTabsStore.getState().closeTabsForEntities(["x"]);
+
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
 });
 
 /**
