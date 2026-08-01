@@ -741,7 +741,6 @@ const {
   resolveObject: <T>(obj: T) => T
   getVariable: (name: string) => ResolvedVariable | null
   getAllVariables: () => Record<string, ResolvedVariable>
-  hasUnresolvedVariables: (input: string) => boolean
   getVariableOrigins: (name: string) => VariableOrigin[]
 } = useVariableResolver({ collectionId?: string, environmentId?: string });
 ```

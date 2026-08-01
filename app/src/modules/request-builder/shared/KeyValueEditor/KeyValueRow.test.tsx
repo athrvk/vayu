@@ -35,11 +35,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 import KeyValueRow from "./KeyValueRow";
 
 vi.mock("../../context/RequestBuilderContext", () => ({
 	useRequestBuilderContext: () => ({
-		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
+		resolveString: (s: string) => s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		writableScopes: [],

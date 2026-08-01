@@ -27,6 +27,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
@@ -72,9 +73,8 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	const usedVars = useMemo(() => {
 		const envPattern =
 			/pm\.(?:environment|globals|collectionVariables)\.get\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-		const templatePattern = /\{\{([^{}]+)\}\}/g;
 		const fromGet = [...script.matchAll(envPattern)].map((m) => m[1]);
-		const fromTpl = [...script.matchAll(templatePattern)].map((m) => m[1].trim());
+		const fromTpl = [...script.matchAll(VARIABLE_PATTERN)].map((m) => m[1].trim());
 		return [...new Set([...fromGet, ...fromTpl])];
 	}, [script]);
 

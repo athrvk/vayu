@@ -38,6 +38,7 @@ vi.mock("@/stores", () => ({
 }));
 
 import { useVariableResolver } from "./useVariableResolver";
+import { isKnownDynamicVariable } from "@/lib/dynamic-variables";
 
 const v = (value: string) => ({ value, enabled: true });
 
@@ -109,15 +110,23 @@ describe("resolveString with dynamic variables", () => {
 	});
 });
 
-describe("hasUnresolvedVariables", () => {
-	it("does not report a known generator as unresolved", () => {
-		const { hasUnresolvedVariables } = setup();
-		expect(hasUnresolvedVariables("{{$guid}}")).toBe(false);
+describe("what the token painting sees", () => {
+	/*
+	 * `hasUnresolvedVariables` used to answer this and was read by nothing in
+	 * production (issue #227); it is gone. The surviving contract is the one
+	 * `VariableInput` actually uses: a generator is *not* in the variable map -
+	 * it resolves without being defined - so the painting distinguishes the two
+	 * by falling back to the dynamic-variable table, not by asking the hook.
+	 */
+	it("keeps a known generator out of the variable map", () => {
+		const { getVariable } = setup();
+		expect(getVariable("$guid")).toBeNull();
+		expect(isKnownDynamicVariable("$guid")).toBe(true);
 	});
 
-	it("reports an unknown generator and an undefined ordinary name", () => {
-		const { hasUnresolvedVariables } = setup();
-		expect(hasUnresolvedVariables("{{$randomInteger}}")).toBe(true);
-		expect(hasUnresolvedVariables("{{nope}}")).toBe(true);
+	it("leaves an unknown generator unknown to both", () => {
+		const { getVariable } = setup();
+		expect(getVariable("$randomInteger")).toBeNull();
+		expect(isKnownDynamicVariable("$randomInteger")).toBe(false);
 	});
 });

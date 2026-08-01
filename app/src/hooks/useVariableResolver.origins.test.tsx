@@ -141,13 +141,14 @@ describe("which definition wins - unchanged behaviour", () => {
 	});
 
 	it("leaves a name unresolved when every definition is disabled", () => {
-		// Absent, not present-and-empty: the red token and
-		// `hasUnresolvedVariables` both key off absence.
+		// Absent, not present-and-empty: the red token keys off absence, and
+		// `getAllVariables` is what feeds it - a present-and-empty entry would
+		// paint the token as resolved and send "".
 		const r = setup({
 			globalVars: { token: v("x", { enabled: false }) },
 		});
 		expect(r.getVariable("token")).toBeNull();
-		expect(r.hasUnresolvedVariables("{{token}}")).toBe(true);
+		expect(r.getAllVariables()).not.toHaveProperty("token");
 	});
 
 	it("still carries the declared type through to typedValue", () => {

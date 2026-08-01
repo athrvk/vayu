@@ -33,12 +33,10 @@ import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/qu
 import { useSessionStore } from "@/stores";
 import type { VariableValue, ResolvedVariable, VariableOrigin, Collection } from "@/types";
 import { castByType } from "@/lib/variable-cast";
-import { isKnownDynamicVariable } from "@/lib/dynamic-variables";
 import {
 	coerceVariableValue,
 	isEnabledDefinition,
 	resolveTemplate,
-	VARIABLE_PATTERN,
 } from "@/lib/variable-resolution";
 
 interface UseVariableResolverOptions {
@@ -50,7 +48,6 @@ interface UseVariableResolverReturn {
 	resolveObject: <T>(obj: T) => T;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
-	hasUnresolvedVariables: (input: string) => boolean;
 	/**
 	 * Every definition of a name, lowest precedence first, including the disabled
 	 * ones that never resolve. Empty array for a name nothing defines.
@@ -61,11 +58,22 @@ interface UseVariableResolverReturn {
 	getVariableOrigins: (name: string) => VariableOrigin[];
 }
 
-/** Build root-first ancestor chain for a collection (inclusive of the collection itself). */
+/**
+ * Build root-first ancestor chain for a collection (inclusive of the collection itself).
+ *
+ * The `seen` set is a termination guard, not deduplication: a `parentId` cycle
+ * would otherwise walk forever inside a `useMemo`, which is a synchronous hang
+ * of the renderer rather than a wrong preview. The engine rejects cycles on
+ * write (#79), so this only fires on a database that already went bad - but the
+ * cost of surviving it is one `Set`, and the cost of not is a frozen window.
+ */
 function buildCollectionChain(startId: string, collections: Collection[]): Collection[] {
 	const chain: Collection[] = [];
+	const seen = new Set<string>();
 	let currentId: string | undefined = startId;
 	while (currentId) {
+		if (seen.has(currentId)) break;
+		seen.add(currentId);
 		const col = collections.find((c) => c.id === currentId);
 		if (!col) break;
 		chain.unshift(col); // root first
@@ -179,8 +187,10 @@ export function useVariableResolver(
 		for (const [name, origins] of Object.entries(originsByName)) {
 			const won = origins.find((o) => o.winner);
 			// Every definition disabled: the name resolves to nothing, exactly as
-			// before. `hasUnresolvedVariables` and the red token both depend on it
-			// being absent rather than present-and-empty.
+			// before. The unresolved-token painting (`VariableInput`, which looks
+			// each name up in this map and falls back to the dynamic-variable
+			// table) depends on such a name being absent rather than
+			// present-and-empty.
 			if (!won) continue;
 			result[name] = {
 				value: won.value,
@@ -252,27 +262,11 @@ export function useVariableResolver(
 		[resolveString]
 	);
 
-	const hasUnresolvedVariables = useCallback(
-		(input: string): boolean => {
-			if (!input || typeof input !== "string") return false;
-			const matches = input.match(VARIABLE_PATTERN);
-			if (!matches) return false;
-			return matches.some((match) => {
-				const name = match.slice(2, -2).trim();
-				// A generator resolves without being defined anywhere, so a name
-				// the table has is not unresolved. An unknown `$name` still is.
-				return !variableMap[name] && !isKnownDynamicVariable(name);
-			});
-		},
-		[variableMap]
-	);
-
 	return {
 		resolveString,
 		resolveObject,
 		getVariable,
 		getAllVariables,
-		hasUnresolvedVariables,
 		getVariableOrigins,
 	};
 }

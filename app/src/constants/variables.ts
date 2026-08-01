@@ -8,6 +8,12 @@
 /**
  * Variable interpolation syntax: `{{variableName}}`.
  *
+ * **This is the app's only `{{name}}` matcher.** Import it; do not re-declare
+ * it. The app carried four textually identical copies before issue #227, so
+ * `variable-pattern-single-source.test.ts` now fails on a fifth. The engine
+ * holds the one legitimate other copy (C++), and the cross-language
+ * conformance fixture is what keeps that one honest.
+ *
  * Shared regexes are global; only use them with APIs that reset lastIndex
  * (String.replace / split / matchAll). For boolean checks use
  * `isVariableToken` - `.test()` on a shared global regex is stateful.
@@ -24,6 +30,21 @@ export const VARIABLE_SPLIT_PATTERN = /(\{\{[^{}]+\}\})/g;
 /** True when the whole string is a single `{{name}}` token. */
 export function isVariableToken(text: string): boolean {
 	return /^\{\{[^{}]+\}\}$/.test(text);
+}
+
+/**
+ * True when the string contains at least one `{{name}}` token anywhere.
+ *
+ * Unanchored, and its own non-global literal rather than `VARIABLE_PATTERN`,
+ * because `.test()` on a `/g` regex advances `lastIndex` and would make the
+ * shared object answer the next caller from the middle of a string. Callers
+ * ask this to decide whether a value still needs resolving before it is
+ * encoded (`ParamsPanel`) or shown (`BodyPanel`).
+ */
+const CONTAINS_VARIABLE_PATTERN = /\{\{[^{}]+\}\}/;
+
+export function containsVariableToken(text: string | undefined | null): boolean {
+	return !!text && CONTAINS_VARIABLE_PATTERN.test(text);
 }
 
 /**

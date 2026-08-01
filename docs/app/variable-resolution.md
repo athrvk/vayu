@@ -15,6 +15,15 @@ the shared conformance fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`), which the
 engine's gtest suite and the renderer's vitest suite both drive.
 
+**One matcher in the renderer.** `{{name}}` is recognised by
+`VARIABLE_PATTERN` in `app/src/constants/variables.ts` and nowhere else -
+import it (or `containsVariableToken` / `isVariableToken`, which wrap the two
+boolean questions) rather than writing the literal again. The app had four
+identical copies before issue #227, and copies are how a preview drifts from
+what `/compose` will substitute without anything failing. The C++ side is the
+one legitimate other copy, and the conformance fixture is what holds it to
+this one. `constants/variable-pattern-single-source.test.ts` fails on a fifth.
+
 **Malformed stored data (the D17 rules, decided in #226).** A definition whose
 `enabled` is **absent** (or not a boolean) counts as **enabled** - only an
 explicit `enabled: false` disables. A **non-string stored `value`** reads as
@@ -87,7 +96,10 @@ for ([key, val] of env.variables)
 ```
 
 `buildCollectionChain(startId, collections)` walks `parentId` links upward and
-returns the chain with the root at index 0.
+returns the chain with the root at index 0. It keeps a `seen` set and stops on
+a revisit: the engine rejects parent cycles on write (issue #79), so a cycle
+means the database already went bad, and the walk runs inside a `useMemo` -
+an unterminated one is a frozen window, not a wrong preview.
 
 **Collection scope is explicit only.** It comes from the `collectionId` option
 and nothing else; a caller that passes none resolves against globals +
@@ -100,8 +112,8 @@ migration.
 The resolved `Record<string, ResolvedVariable>` is **derived** from that list
 (the origin carrying `winner: true`) rather than built beside it, so the two
 cannot disagree about which definition won. A name whose every definition is
-disabled is absent from the map, not present-and-empty - `hasUnresolvedVariables`
-and the red token both key off absence.
+disabled is absent from the map, not present-and-empty - the red token keys off
+absence, so a present-and-empty entry would paint it resolved and send "".
 
 ### `getVariableOrigins(name)`
 

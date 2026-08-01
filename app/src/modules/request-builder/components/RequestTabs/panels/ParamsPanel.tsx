@@ -15,6 +15,7 @@
  */
 
 import { useCallback } from "react";
+import { containsVariableToken } from "@/constants/variables";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
 import type { KeyValueItem } from "../../../types";
@@ -33,8 +34,8 @@ function buildUrlWithParams(baseUrl: string, params: KeyValueItem[]): string {
 	const queryString = enabledParams
 		.map((p) => {
 			// Don't encode if contains variable placeholder - will be resolved later
-			const hasVarInKey = /\{\{[^{}]+\}\}/.test(p.key);
-			const hasVarInValue = /\{\{[^{}]+\}\}/.test(p.value);
+			const hasVarInKey = containsVariableToken(p.key);
+			const hasVarInValue = containsVariableToken(p.value);
 			const key = hasVarInKey ? p.key : encodeURIComponent(p.key);
 			const value = hasVarInValue ? p.value : encodeURIComponent(p.value);
 			return p.value ? `${key}=${value}` : key;

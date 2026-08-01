@@ -15,13 +15,16 @@
  *
  * Pulled out of the panel so it can be tested as logic. It was inline in both
  * script panels, twice over, with the regexes rebuilt on every render.
+ *
+ * The template matcher is the app's one `VARIABLE_PATTERN`; only `PM_GET` is
+ * local, because nothing else looks for that syntax. Inner braces are excluded
+ * by that pattern, so `{{a}}{{b}}` is two names and not one.
  */
+
+import { VARIABLE_PATTERN } from "@/constants/variables";
 
 /** `pm.environment.get("x")`, and the globals / collectionVariables siblings. */
 const PM_GET = /pm\.(?:environment|globals|collectionVariables)\.get\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-
-/** `{{x}}`. Inner braces excluded, so `{{a}}{{b}}` is two names and not one. */
-const TEMPLATE = /\{\{([^{}]+)\}\}/g;
 
 /**
  * Names, deduplicated: every `pm` reference in source order, then every
@@ -36,7 +39,7 @@ const TEMPLATE = /\{\{([^{}]+)\}\}/g;
 export function referencedVariables(script: string): string[] {
 	const names = [
 		...[...script.matchAll(PM_GET)].map((m) => m[1]),
-		...[...script.matchAll(TEMPLATE)].map((m) => m[1].trim()),
+		...[...script.matchAll(VARIABLE_PATTERN)].map((m) => m[1].trim()),
 	];
 	return [...new Set(names.filter((n) => n.length > 0))];
 }

@@ -48,6 +48,7 @@ import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
+import { containsVariableToken } from "@/constants/variables";
 import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
@@ -280,7 +281,7 @@ export default function BodyPanel() {
 	};
 
 	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
-	const hasVariables = request.body ? /\{\{[^{}]+\}\}/.test(request.body) : false;
+	const hasVariables = containsVariableToken(request.body);
 	const resolvedBody = request.body ? resolveString(request.body) : "";
 	const isCodeMode = request.bodyMode === "json" || request.bodyMode === "text";
 	const isTable =
