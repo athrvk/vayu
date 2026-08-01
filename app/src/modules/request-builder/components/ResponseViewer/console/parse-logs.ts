@@ -6,34 +6,64 @@
  */
 
 /**
- * Which script a console line came from.
+ * Normalising the engine's console output into what the panel renders.
  *
- * The engine runs the pre-request and test scripts in one QuickJS context and
- * returns their `console.log` output as one flat array, prefixing the
- * pre-request ones with `"[pre] "`. Splitting them back apart is a string
- * operation, and it was inline in the component - so the cases below were only
- * reachable by rendering the Console tab and reading its sections.
+ * The engine sends one entry per line carrying the script that wrote it and the
+ * `console.*` method that was called - `{source, level, message}`. Both used to
+ * be missing: the source was a `"[pre] "` text prefix, indistinguishable from a
+ * script logging that string itself, and the level was discarded at the QuickJS
+ * binding, so every line reached this panel looking identical whether the
+ * script called `log` or `error`.
  *
- * The prefix is the engine's, not a user convention, which is what makes this
- * safe to strip: `runtime/` writes it on every pre-request line and nothing
- * else does.
+ * A bare string is still accepted, because a renderer can be talking to an
+ * older engine sidecar. It is decoded the way that engine meant it - the prefix
+ * picks the source, and the level is `log`, which is what the panel drew
+ * everything as anyway.
  */
 
-export type LogSource = "pre" | "test";
+import type { ConsoleLevel, ConsoleLogEntry, ConsoleLogSource } from "@/types";
+
+export type LogSource = ConsoleLogSource;
 
 export interface ParsedLog {
 	source: LogSource;
+	level: ConsoleLevel;
 	message: string;
 }
 
-/** What the engine prefixes a pre-request line with. */
+/** What a pre-structured engine prefixed a pre-request line with. */
 const PRE_PREFIX = "[pre] ";
 
-export function parseConsoleLogs(logs: string[]): ParsedLog[] {
+const LEVELS: ReadonlySet<string> = new Set<ConsoleLevel>(["log", "info", "warn", "error"]);
+
+/**
+ * An unrecognised level reads as `log` rather than being dropped.
+ *
+ * A line the panel refuses to draw is worse than one drawn in the plain tone,
+ * and an unheard-of level is exactly what a *newer* engine would send.
+ */
+function coerceLevel(level: unknown): ConsoleLevel {
+	return typeof level === "string" && LEVELS.has(level) ? (level as ConsoleLevel) : "log";
+}
+
+/** The pre-structured shape: source in a prefix, no level. */
+function fromLegacyString(log: string): ParsedLog {
+	return log.startsWith(PRE_PREFIX)
+		? { source: "pre", level: "log", message: log.slice(PRE_PREFIX.length) }
+		: { source: "test", level: "log", message: log };
+}
+
+export function parseConsoleLogs(logs: Array<ConsoleLogEntry | string>): ParsedLog[] {
 	return logs.map((log) =>
-		log.startsWith(PRE_PREFIX)
-			? { source: "pre", message: log.slice(PRE_PREFIX.length) }
-			: { source: "test", message: log }
+		typeof log === "string"
+			? fromLegacyString(log)
+			: {
+					source: log.source === "pre" ? "pre" : "test",
+					level: coerceLevel(log.level),
+					// `console.log()` with no argument is a real thing a script does,
+					// and a vanished line is worse than a blank one.
+					message: typeof log.message === "string" ? log.message : "",
+				}
 	);
 }
 

@@ -17,6 +17,7 @@
  */
 
 import { create } from "zustand";
+import type { ConsoleLogEntry } from "@/types";
 
 /**
  * A structural *subset* of the request builder's `ResponseState`, not a copy of
@@ -40,7 +41,8 @@ export interface StoredResponse {
 	/** Set when the response was rebuilt from a stored run - see `ResponseState`. */
 	restoredFrom?: { runId?: string; at: string };
 	// Script execution results
-	consoleLogs?: string[];
+	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
+	consoleLogs?: Array<ConsoleLogEntry | string>;
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 	preScriptError?: string;
 	postScriptError?: string;

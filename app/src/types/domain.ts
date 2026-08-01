@@ -565,10 +565,35 @@ export interface TestResult {
 	error?: string;
 }
 
+/** Which `console.*` method a script line came from. Engine spellings. */
+export type ConsoleLevel = "log" | "info" | "warn" | "error";
+
+/** Which of a request's two scripts wrote a line. */
+export type ConsoleLogSource = "pre" | "test";
+
+/**
+ * One line of script console output.
+ *
+ * The engine used to send a bare string and encode the source as a `"[pre] "`
+ * text prefix, which was indistinguishable from a script that logged a line
+ * starting with those characters - and carried no level at all, so the Console
+ * tab drew `console.error` exactly like `console.log`. Both are fields now.
+ */
+export interface ConsoleLogEntry {
+	source: ConsoleLogSource;
+	level: ConsoleLevel;
+	message: string;
+}
+
 export interface SanityResult extends HttpResponse {
 	requestId?: string;
 	testResults?: TestResult[];
-	consoleLogs?: string[];
+	/**
+	 * A `string` is the pre-structured shape, kept in the type so the fallback in
+	 * `parse-logs.ts` is visible rather than a cast. A renderer can meet one when
+	 * it is talking to an older engine sidecar.
+	 */
+	consoleLogs?: Array<ConsoleLogEntry | string>;
 	preScriptError?: string;
 	postScriptError?: string;
 	error?: string;

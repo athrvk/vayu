@@ -67,7 +67,7 @@ namespace {
 // Context data stored in JS runtime
 struct ContextData {
     std::vector<TestResult> tests;
-    std::vector<std::string> console_output;
+    std::vector<ConsoleEntry> console_output;
     const Request* request           = nullptr;
     const Response* response         = nullptr;
     Environment* environment         = nullptr;
@@ -161,7 +161,19 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
 // Console Implementation
 // ============================================================================
 
-JSValue js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+/**
+ * Every `console.*` method, distinguished by QuickJS's `magic` argument.
+ *
+ * One function rather than four near-copies: the formatting below is the whole
+ * body and none of it varies by level. `magic` is how QuickJS passes a small
+ * integer to a shared C function, which is exactly the shape of this problem -
+ * the alternative is four wrappers that each forward to a fifth.
+ */
+JSValue js_console_log (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
     auto* data = get_context_data (ctx);
     std::stringstream ss;
 
@@ -205,7 +217,8 @@ JSValue js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         }
     }
 
-    data->console_output.push_back (ss.str ());
+    data->console_output.push_back (
+    { static_cast<ConsoleLevel> (magic), ss.str () });
     return JS_UNDEFINED;
 }
 
@@ -213,14 +226,31 @@ void setup_console (JSContext* ctx) {
     JSValue global  = JS_GetGlobalObject (ctx);
     JSValue console = JS_NewObject (ctx);
 
-    JS_SetPropertyStr (
-    ctx, console, "log", JS_NewCFunction (ctx, js_console_log, "log", 1));
-    JS_SetPropertyStr (
-    ctx, console, "info", JS_NewCFunction (ctx, js_console_log, "info", 1));
-    JS_SetPropertyStr (
-    ctx, console, "warn", JS_NewCFunction (ctx, js_console_log, "warn", 1));
-    JS_SetPropertyStr (
-    ctx, console, "error", JS_NewCFunction (ctx, js_console_log, "error", 1));
+    // The magic value is the ConsoleLevel, cast back in js_console_log. Keep
+    // this table and the enum in step - a wrong number here is a silently
+    // mislabelled line, not a compile error.
+    struct Method {
+        const char* name;
+        ConsoleLevel level;
+    };
+    static constexpr Method METHODS[] = {
+        { "log", ConsoleLevel::Log },
+        { "info", ConsoleLevel::Info },
+        { "warn", ConsoleLevel::Warn },
+        { "error", ConsoleLevel::Error },
+    };
+
+    for (const auto& method : METHODS) {
+        JS_SetPropertyStr (ctx,
+        console,
+        method.name,
+        JS_NewCFunctionMagic (ctx,
+        js_console_log,
+        method.name,
+        1,
+        JS_CFUNC_generic_magic,
+        static_cast<int> (method.level)));
+    }
 
     JS_SetPropertyStr (ctx, global, "console", console);
     JS_FreeValue (ctx, global);

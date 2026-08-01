@@ -1134,9 +1134,23 @@ run-shaped way of stating the same field, not a second store.
       "passed": true
     }
   ],
-  "consoleLogs": []
+  "consoleLogs": [
+    { "source": "pre", "level": "log", "message": "token refreshed" },
+    { "source": "test", "level": "error", "message": "unexpected shape" }
+  ]
 }
 ```
+
+**`consoleLogs` entries carry their own source and level.** `source` is which of
+the request's two scripts wrote the line (`"pre"` for the pre-request script,
+`"test"` for the post-request one) and `level` is the `console.*` method that was
+called - `"log"`, `"info"`, `"warn"` or `"error"`. Releases before this one sent
+a flat `string[]` with the source encoded as a `"[pre] "` text prefix and no
+level at all, which was indistinguishable from a script logging that string
+itself; a client that may talk to an older engine should read a bare string as
+`{"source": "test", "level": "log"}`, or `"pre"` when the prefix is present. The
+field is omitted entirely when neither script logged anything. See
+[scripting.md](scripting.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated**
 (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -

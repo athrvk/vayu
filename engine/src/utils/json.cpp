@@ -588,7 +588,12 @@ Json serialize (const ScriptResult& result) {
     }
     json["testResults"] = tests;
 
-    json["consoleOutput"] = result.console_output;
+    Json console = Json::array ();
+    for (const auto& entry : result.console_output) {
+        console.push_back ({ { "level", to_string (entry.level) },
+        { "message", entry.message } });
+    }
+    json["consoleOutput"] = console;
 
     if (!result.error_message.empty ()) {
         json["error"] = result.error_message;

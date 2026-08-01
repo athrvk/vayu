@@ -432,6 +432,20 @@ console.warn('Warning message');
 console.error('Error message');
 ```
 
+Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
+rather than `[object Object]`; a value that cannot be serialized (a circular
+reference, say) becomes `[Object: unserializable]`.
+
+**The level travels with the line.** Each entry on the wire is
+`{ "source": "pre" | "test", "level": "log" | "info" | "warn" | "error",
+"message": "..." }` - see
+[`consoleLogs` in the API reference](api-reference.md#post-execute). The four
+methods are bound to one C function distinguished by QuickJS's `magic`
+argument (`setup_console`), so the level is captured at the call; it cannot be
+recovered from the text afterwards, which is why it used to be lost. The app's
+Console tab draws `warn` and `error` in their status tokens and labels every
+non-`log` line in a gutter.
+
 ## Examples
 
 ### Validate JSON Response
