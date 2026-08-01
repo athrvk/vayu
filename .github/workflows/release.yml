@@ -418,6 +418,22 @@ jobs:
           # passing github.ref_name explicitly would NOT strip the `v` and would
           # publish a malformed PackageVersion. `fork-user` is likewise omitted
           # and defaults to the repository owner (athrvk), where the fork lives.
+          # The trailing `$` is load-bearing, not decoration. Every installer is
+          # published alongside a `<name>.sha256`, so an unanchored pattern also
+          # matches `Vayu-x64.exe.sha256` and the action would try to publish a
+          # 65-byte text file as the installer. Anchored, this matches exactly
+          # one of the release's assets.
           installers-regex: 'Vayu-x64\.exe$'
           release-tag: ${{ github.ref_name }}
           token: ${{ env.WINGET_TOKEN }}
+          # Keep the five newest versions in winget-pkgs and drop older ones as
+          # part of each submission. Unbounded, every version Vayu has ever
+          # released stays installable forever at an explicit `--version`, which
+          # matters here because the two oldest are not merely stale: 0.10.0
+          # ships an engine that cannot start without the Visual C++
+          # redistributable. Five keeps a real rollback window - well past the
+          # release cadence that put three versions on winget in three days -
+          # without leaving known-broken builds on offer indefinitely. The
+          # GitHub Releases page is unaffected; this prunes the winget index
+          # only.
+          max-versions-to-keep: 5

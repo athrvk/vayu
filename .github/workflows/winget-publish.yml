@@ -108,12 +108,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Submitting athrvk.Vayu $version from tag $tag"
 
+      # `max-versions-to-keep` is deliberately NOT set here, unlike the
+      # automatic job in release.yml which prunes to the five newest. This
+      # workflow exists partly to publish an older tag on purpose, and pruning
+      # keeps the newest N - so it could delete the very version being
+      # submitted, in the same run, and report success. Leaving it unbounded
+      # means a manual submission always does what was asked. The cap is not
+      # lost: the next tagged release prunes back to five, so the invariant is
+      # restored automatically rather than fought here.
       - name: Submit manifest to winget-pkgs
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: athrvk.Vayu
           version: ${{ steps.resolve.outputs.version }}
           release-tag: ${{ steps.resolve.outputs.tag }}
+          # Anchored for the same reason as release.yml: each installer ships
+          # with a `<name>.sha256` beside it, and an unanchored pattern would
+          # also match `Vayu-x64.exe.sha256`.
           installers-regex: 'Vayu-x64\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}
 
