@@ -29,12 +29,8 @@ interface EngineState {
 	setEngineError: (error: string | null) => void;
 
 	// Restart actions
-	setPendingRestart: (pending: boolean, keys?: string[]) => void;
 	addRestartRequiredKey: (key: string) => void;
 	clearRestartRequired: () => void;
-
-	// Reset
-	reset: () => void;
 }
 
 export const useEngineStore = create<EngineState>()((set) => ({
@@ -49,9 +45,6 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	setEngineError: (error) => set({ engineError: error }),
 
 	// Restart actions
-	setPendingRestart: (pending, keys = []) =>
-		set({ pendingRestart: pending, restartRequiredKeys: keys }),
-
 	addRestartRequiredKey: (key) =>
 		set((state) => ({
 			pendingRestart: true,
@@ -61,13 +54,4 @@ export const useEngineStore = create<EngineState>()((set) => ({
 		})),
 
 	clearRestartRequired: () => set({ pendingRestart: false, restartRequiredKeys: [] }),
-
-	// Reset all
-	reset: () =>
-		set({
-			isEngineConnected: false,
-			engineError: null,
-			pendingRestart: false,
-			restartRequiredKeys: [],
-		}),
 }));

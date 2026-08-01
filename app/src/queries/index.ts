@@ -52,7 +52,6 @@ export { RunNotFoundError } from "./runs";
 // Environments
 export {
 	useEnvironmentsQuery,
-	useEnvironmentQuery,
 	useCreateEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 	useDeleteEnvironmentMutation,

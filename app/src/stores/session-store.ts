@@ -40,6 +40,40 @@ interface SessionState {
 	setLastCollectionId: (id: string | null) => void;
 }
 
+/** The slice of the store that reaches localStorage - see `partialize` below. */
+interface PersistedSession {
+	activeEnvironmentId: string | null;
+	lastCollectionId: string | null;
+}
+
+const asId = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/**
+ * Version translation for the persisted session ids.
+ *
+ * v1 -> v2 drops `activeCollectionId`. It had a reader (the resolver's fallback
+ * scope) and never had a writer, so an id stored by a much older build would
+ * rehydrate forever and scope preview resolution to a collection the user left -
+ * or deleted - versions ago.
+ *
+ * Rebuilt from the fields v2 knows rather than deleting that one key: a
+ * whitelist drops anything an older build stored, including a future field that
+ * reuses the name, and it is where the *next* bump goes too. zustand discards a
+ * payload whose stamped version does not match when no `migrate` is supplied,
+ * so a bump without one silently forgets the user's active environment.
+ *
+ * Normalizing on the way through is part of the same job: a hand-edited or
+ * half-written entry must not hand a non-string id to the switcher, and from
+ * there onto every `/compose` payload.
+ */
+function migrateSession(persisted: unknown): PersistedSession {
+	const stored = (persisted ?? {}) as Partial<PersistedSession>;
+	return {
+		activeEnvironmentId: asId(stored.activeEnvironmentId),
+		lastCollectionId: asId(stored.lastCollectionId),
+	};
+}
+
 export const useSessionStore = create<SessionState>()(
 	persist(
 		(set) => ({
@@ -55,23 +89,7 @@ export const useSessionStore = create<SessionState>()(
 				activeEnvironmentId: state.activeEnvironmentId,
 				lastCollectionId: state.lastCollectionId,
 			}),
-			/**
-			 * v1 -> v2 drops `activeCollectionId`. It had a reader (the resolver's
-			 * fallback scope) and never had a writer, so an id stored by a much
-			 * older build would rehydrate forever and scope preview resolution to a
-			 * collection the user left - or deleted - versions ago. Dropping the key
-			 * here rather than ignoring it keeps it from coming back if the field
-			 * name is ever reused.
-			 */
-			migrate: (persisted, version) => {
-				const state = (persisted ?? {}) as Partial<SessionState> & {
-					activeCollectionId?: string | null;
-				};
-				if (version < 2) {
-					delete state.activeCollectionId;
-				}
-				return state as SessionState;
-			},
+			migrate: migrateSession,
 		}
 	)
 );

@@ -17,6 +17,7 @@ import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
+import { useResponseStore } from "@/stores/response-store";
 import type {
 	Collection,
 	Request,
@@ -359,6 +360,12 @@ export function useDeleteRequestMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.requests.detail(deletedId),
 			});
+			// The response map is keyed by request id and nothing else evicts from
+			// it, so a deleted request would otherwise hold its body (plus the raw
+			// copy) for the rest of the session. Here rather than only at the tab
+			// seam: the delete is what makes the response unreachable, whether or
+			// not a tab was open on it.
+			useResponseStore.getState().clearResponse(deletedId);
 		},
 	});
 }

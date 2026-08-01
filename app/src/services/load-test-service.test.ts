@@ -10,7 +10,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockSetStreaming = vi.fn();
 const mockSetError = vi.fn();
 const mockSetFinalReport = vi.fn();
-const mockReset = vi.fn();
 const mockAddMetricsBatch = vi.fn();
 // Which run the dashboard is showing *right now* - re-read after every await,
 // which is the whole point of the guard under test.
@@ -22,7 +21,6 @@ vi.mock("@/stores", () => ({
 			setStreaming: mockSetStreaming,
 			setError: mockSetError,
 			setFinalReport: mockSetFinalReport,
-			reset: mockReset,
 			addMetricsBatch: mockAddMetricsBatch,
 		}),
 	},
@@ -97,11 +95,16 @@ describe("LoadTestService", () => {
 		expect(mockSetFinalReport).not.toHaveBeenCalled();
 	});
 
-	// Regression guard: the caller invokes store.startRun() first (which registers
-	// currentRunId + clears the series). startMonitoring must NOT call store.reset()
-	// - doing so nulls currentRunId and the dashboard shows "no active tests".
-	it("does not reset the store on start (would wipe the active run registered by startRun)", () => {
+	// The guard this replaces asserted `store.reset()` was not called on start -
+	// doing so nulls the currentRunId that startRun just registered and the
+	// dashboard shows "no active tests". The store no longer has a `reset`, so
+	// that mistake is now a compile error rather than a mock assertion. What is
+	// still worth pinning is the positive form: start only opens the stream.
+	it("only opens the stream on start, touching no run state the caller registered", () => {
 		loadTestService.startMonitoring("run_3");
-		expect(mockReset).not.toHaveBeenCalled();
+		expect(mockSetStreaming).toHaveBeenCalledWith(true);
+		expect(mockSetError).toHaveBeenCalledWith(null);
+		expect(mockSetFinalReport).not.toHaveBeenCalled();
+		expect(mockAddMetricsBatch).not.toHaveBeenCalled();
 	});
 });
