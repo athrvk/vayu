@@ -6,17 +6,40 @@
  */
 
 /**
- * In-memory GraphQL schema cache keyed by resolved endpoint URL. The request
- * builder sets the active URL and triggers ensureSchema; Monaco providers read
- * getActiveSchema(). One editor is visible at a time, so a single active URL is
- * sufficient.
+ * In-memory GraphQL schema cache. The request builder sets the active target
+ * and triggers ensureSchema; Monaco providers read getActiveSchema(). One
+ * editor is visible at a time, so a single active target is sufficient.
+ *
+ * **The key is the endpoint plus the credentials it is reached with**, not the
+ * endpoint alone. Since introspection composes engine-side (#228) it sends the
+ * request's auth, so two environments pointing the same URL at different
+ * credentials are two different results: keyed on the URL alone, the first
+ * environment's schema - or its 401 - would be served to the second. Callers
+ * never build the key; they hand over a target and the store derives it, so a
+ * hand-written key cannot drift from a stored one.
+ *
+ * Headers are deliberately *not* part of the key: a header row is edited
+ * keystroke by keystroke and re-keying on it would re-introspect the endpoint
+ * as the user types. A hand-typed `Authorization` therefore still needs the
+ * Refresh button, exactly as before this cache learned about auth.
  */
 
 import { create } from "zustand";
 import type { GraphQLSchema } from "graphql";
-import { introspectSchema } from "./introspect";
+import { introspectSchema, type IntrospectionTarget } from "./introspect";
 
 export type SchemaStatus = "idle" | "loading" | "ready" | "error";
+
+/**
+ * An endpoint to introspect: what to compose, plus the preview-resolved URL.
+ *
+ * `resolvedUrl` is identity only and is never sent - the wire URL comes back
+ * from compose. It is in the key because it moves when a variable *value* the
+ * URL interpolates changes, which no id in the scope can see.
+ */
+export interface SchemaTarget extends IntrospectionTarget {
+	resolvedUrl: string;
+}
 
 interface SchemaEntry {
 	status: SchemaStatus;
@@ -25,62 +48,78 @@ interface SchemaEntry {
 	fetchedAt: number | null;
 }
 
+/**
+ * The cache identity of a target. In-memory only - the store is never
+ * persisted, which is what makes it safe for the auth block (secrets and all)
+ * to appear here.
+ */
+export function schemaCacheKey(target: SchemaTarget): string {
+	return JSON.stringify([
+		target.resolvedUrl,
+		target.collectionId ?? null,
+		target.environmentId ?? null,
+		target.auth ?? null,
+	]);
+}
+
 interface SchemaCacheState {
-	byUrl: Record<string, SchemaEntry>;
-	activeUrl: string | null;
-	setActiveUrl: (url: string | null) => void;
+	byKey: Record<string, SchemaEntry>;
+	activeKey: string | null;
+	setActiveTarget: (target: SchemaTarget | null) => void;
 	getActiveSchema: () => GraphQLSchema | null;
 	getActiveStatus: () => SchemaStatus;
-	/** Introspect only if this url has not been attempted yet. */
-	ensureSchema: (url: string, headers: Record<string, string>) => Promise<void>;
-	/** Force a re-introspection regardless of any cached result for this url. */
-	refreshSchema: (url: string, headers: Record<string, string>) => Promise<void>;
+	/** Introspect only if this target has not been attempted yet. */
+	ensureSchema: (target: SchemaTarget) => Promise<void>;
+	/** Force a re-introspection regardless of any cached result for this target. */
+	refreshSchema: (target: SchemaTarget) => Promise<void>;
 }
 
 export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
-	byUrl: {},
-	activeUrl: null,
+	byKey: {},
+	activeKey: null,
 
-	setActiveUrl: (url) => set({ activeUrl: url }),
+	setActiveTarget: (target) =>
+		set({ activeKey: target && target.url ? schemaCacheKey(target) : null }),
 
 	getActiveSchema: () => {
-		const { activeUrl, byUrl } = get();
-		return activeUrl ? (byUrl[activeUrl]?.schema ?? null) : null;
+		const { activeKey, byKey } = get();
+		return activeKey ? (byKey[activeKey]?.schema ?? null) : null;
 	},
 
 	getActiveStatus: () => {
-		const { activeUrl, byUrl } = get();
-		return activeUrl ? (byUrl[activeUrl]?.status ?? "idle") : "idle";
+		const { activeKey, byKey } = get();
+		return activeKey ? (byKey[activeKey]?.status ?? "idle") : "idle";
 	},
 
-	ensureSchema: async (url, headers) => {
-		if (!url) return;
-		const existing = get().byUrl[url];
+	ensureSchema: async (target) => {
+		if (!target.url) return;
+		const existing = get().byKey[schemaCacheKey(target)];
 		if (existing && existing.status !== "idle") return;
-		await get().refreshSchema(url, headers);
+		await get().refreshSchema(target);
 	},
 
-	refreshSchema: async (url, headers) => {
-		if (!url) return;
+	refreshSchema: async (target) => {
+		if (!target.url) return;
+		const key = schemaCacheKey(target);
 		set((s) => ({
-			byUrl: {
-				...s.byUrl,
-				[url]: { status: "loading", schema: null, error: null, fetchedAt: null },
+			byKey: {
+				...s.byKey,
+				[key]: { status: "loading", schema: null, error: null, fetchedAt: null },
 			},
 		}));
 		try {
-			const schema = await introspectSchema(url, headers);
+			const schema = await introspectSchema(target);
 			set((s) => ({
-				byUrl: {
-					...s.byUrl,
-					[url]: { status: "ready", schema, error: null, fetchedAt: Date.now() },
+				byKey: {
+					...s.byKey,
+					[key]: { status: "ready", schema, error: null, fetchedAt: Date.now() },
 				},
 			}));
 		} catch (e) {
 			set((s) => ({
-				byUrl: {
-					...s.byUrl,
-					[url]: {
+				byKey: {
+					...s.byKey,
+					[key]: {
 						status: "error",
 						schema: null,
 						error: e instanceof Error ? e.message : String(e),

@@ -10,61 +10,102 @@ import { buildSchema } from "graphql";
 
 vi.mock("./introspect", () => ({ introspectSchema: vi.fn() }));
 import { introspectSchema } from "./introspect";
-import { useSchemaCache } from "./schema-cache";
+import { schemaCacheKey, useSchemaCache, type SchemaTarget } from "./schema-cache";
 
 const schema = buildSchema("type Query { ping: String }");
 const URL = "https://api.test/gql";
+const TARGET: SchemaTarget = { url: URL, resolvedUrl: URL, headers: {} };
+
+const entry = (target: SchemaTarget) => useSchemaCache.getState().byKey[schemaCacheKey(target)];
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useSchemaCache.setState({ byUrl: {}, activeUrl: null });
+	useSchemaCache.setState({ byKey: {}, activeKey: null });
 });
 
 describe("schema cache", () => {
 	it("transitions idle → loading → ready on success", async () => {
 		(introspectSchema as any).mockResolvedValue(schema);
-		const p = useSchemaCache.getState().ensureSchema(URL, {});
-		expect(useSchemaCache.getState().byUrl[URL].status).toBe("loading");
+		const p = useSchemaCache.getState().ensureSchema(TARGET);
+		expect(entry(TARGET).status).toBe("loading");
 		await p;
-		expect(useSchemaCache.getState().byUrl[URL].status).toBe("ready");
-		expect(useSchemaCache.getState().byUrl[URL].schema).toBe(schema);
+		expect(entry(TARGET).status).toBe("ready");
+		expect(entry(TARGET).schema).toBe(schema);
 	});
 
 	it("transitions to error on failure", async () => {
 		(introspectSchema as any).mockRejectedValue(new Error("blocked"));
-		await useSchemaCache.getState().ensureSchema(URL, {});
-		expect(useSchemaCache.getState().byUrl[URL].status).toBe("error");
-		expect(useSchemaCache.getState().byUrl[URL].error).toMatch(/blocked/);
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		expect(entry(TARGET).status).toBe("error");
+		expect(entry(TARGET).error).toMatch(/blocked/);
 	});
 
-	it("does not re-introspect a url already ready", async () => {
+	it("does not re-introspect a target already ready", async () => {
 		(introspectSchema as any).mockResolvedValue(schema);
-		await useSchemaCache.getState().ensureSchema(URL, {});
-		await useSchemaCache.getState().ensureSchema(URL, {});
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not retry a url already in error (until url changes)", async () => {
+	it("does not retry a target already in error (until the target changes)", async () => {
 		(introspectSchema as any).mockRejectedValue(new Error("blocked"));
-		await useSchemaCache.getState().ensureSchema(URL, {});
-		await useSchemaCache.getState().ensureSchema(URL, {});
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(1);
 	});
 
 	it("refreshSchema re-introspects even when already ready", async () => {
 		(introspectSchema as any).mockResolvedValue(schema);
-		await useSchemaCache.getState().ensureSchema(URL, {});
-		await useSchemaCache.getState().refreshSchema(URL, {});
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		await useSchemaCache.getState().refreshSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(2);
-		expect(useSchemaCache.getState().byUrl[URL].status).toBe("ready");
+		expect(entry(TARGET).status).toBe("ready");
 	});
 
-	it("getActiveSchema follows activeUrl", async () => {
+	it("getActiveSchema follows the active target", async () => {
 		(introspectSchema as any).mockResolvedValue(schema);
-		await useSchemaCache.getState().ensureSchema(URL, {});
+		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(useSchemaCache.getState().getActiveSchema()).toBeNull();
-		useSchemaCache.getState().setActiveUrl(URL);
+		useSchemaCache.getState().setActiveTarget(TARGET);
 		expect(useSchemaCache.getState().getActiveSchema()).toBe(schema);
 		expect(useSchemaCache.getState().getActiveStatus()).toBe("ready");
+	});
+});
+
+/*
+ * The endpoint alone is not the identity. Introspection sends the request's
+ * auth now, so a cached schema - or a cached 401 - belongs to the credentials
+ * that fetched it. Each case below is one entry that used to collide.
+ */
+describe("cache identity", () => {
+	const cases: [string, SchemaTarget][] = [
+		["a different environment", { ...TARGET, environmentId: "env_2" }],
+		["a different collection scope", { ...TARGET, collectionId: "col_2" }],
+		["a different auth block", { ...TARGET, auth: { mode: "bearer", token: "b" } }],
+		["a URL whose variables resolved elsewhere", { ...TARGET, resolvedUrl: "https://eu/gql" }],
+	];
+
+	it.each(cases)("re-introspects for %s", async (_label, other) => {
+		(introspectSchema as any).mockResolvedValue(schema);
+		await useSchemaCache.getState().ensureSchema({ ...TARGET, environmentId: "env_1" });
+		await useSchemaCache.getState().ensureSchema(other);
+		expect(introspectSchema).toHaveBeenCalledTimes(2);
+	});
+
+	it("serves the entry of the active target, not of a same-URL neighbour", async () => {
+		const other = { ...TARGET, environmentId: "env_2" };
+		(introspectSchema as any).mockResolvedValue(schema);
+		await useSchemaCache.getState().ensureSchema({ ...TARGET, environmentId: "env_1" });
+
+		useSchemaCache.getState().setActiveTarget(other);
+		expect(useSchemaCache.getState().getActiveSchema()).toBeNull();
+		expect(useSchemaCache.getState().getActiveStatus()).toBe("idle");
+	});
+
+	it("ignores a target with no endpoint", async () => {
+		useSchemaCache.getState().setActiveTarget({ ...TARGET, url: "" });
+		expect(useSchemaCache.getState().activeKey).toBeNull();
+		await useSchemaCache.getState().ensureSchema({ ...TARGET, url: "" });
+		expect(introspectSchema).not.toHaveBeenCalled();
 	});
 });

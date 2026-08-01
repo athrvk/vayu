@@ -8,9 +8,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildSchema, getIntrospectionQuery, graphqlSync } from "graphql";
 
-vi.mock("@/services/api", () => ({ apiService: { executeRequest: vi.fn() } }));
+vi.mock("@/services/api", () => ({
+	apiService: { composeRequest: vi.fn(), executeRequest: vi.fn() },
+}));
 import { apiService } from "@/services/api";
-import { introspectSchema, buildIntrospectionRequest } from "./introspect";
+import {
+	introspectSchema,
+	buildIntrospectionRequest,
+	type IntrospectionTarget,
+} from "./introspect";
 
 function introspectionJSONFor(sdl: string): unknown {
 	const schema = buildSchema(sdl);
@@ -20,49 +26,118 @@ function introspectionJSONFor(sdl: string): unknown {
 
 const SDL = "type Query { user(id: ID!): User }\ntype User { id: ID name: String }";
 
+/** The editor state as typed: `{{vars}}` intact, auth left as `inherit`. */
+const TARGET: IntrospectionTarget = {
+	url: "{{base}}/gql",
+	headers: { "X-Team": "{{team}}" },
+	auth: { mode: "inherit" },
+	collectionId: "col_1",
+	environmentId: "env_1",
+};
+
+/** What the engine hands back: everything resolved, `inherit` walked. */
+const COMPOSED = {
+	method: "POST",
+	url: "https://api.test/gql",
+	headers: { "X-Team": "payments" },
+	auth: { mode: "bearer", token: "sk_live" },
+};
+
+function mockExecute(result: { status: number; bodyRaw: string }) {
+	(apiService.composeRequest as any).mockResolvedValue(COMPOSED);
+	(apiService.executeRequest as any).mockResolvedValue(result);
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("buildIntrospectionRequest", () => {
-	it("builds a POST with the introspection query and JSON content-type", () => {
-		const req = buildIntrospectionRequest("https://api.test/gql", {
-			Authorization: "Bearer x",
-		});
+	it("overlays the introspection query onto a composed payload", () => {
+		const req = buildIntrospectionRequest({
+			...COMPOSED,
+			// Composition returns the whole request; introspection is not sending
+			// the user's body or running their scripts.
+			body: { mode: "json", content: '{"real":"body"}' },
+			preRequestScripts: [{ source: "collection", id: "c1", script: "pm.test()" }],
+		} as any);
 		expect(req.method).toBe("POST");
 		expect(req.url).toBe("https://api.test/gql");
 		expect(req.headers?.["Content-Type"]).toBe("application/json");
-		expect(req.headers?.Authorization).toBe("Bearer x");
+		expect(req.headers?.["X-Team"]).toBe("payments");
+		expect(req.auth).toEqual({ mode: "bearer", token: "sk_live" });
 		const body = req.body as { mode: string; content: string };
 		expect(body.mode).toBe("json");
 		expect(JSON.parse(body.content).query).toContain("IntrospectionQuery");
+		expect(req.preRequestScripts).toBeUndefined();
+	});
+
+	it("omits auth entirely when composition resolved it to nothing", () => {
+		const req = buildIntrospectionRequest({ ...COMPOSED, auth: undefined } as any);
+		expect("auth" in req).toBe(false);
+	});
+
+	it("never puts an unresolved inherit on the wire", () => {
+		const req = buildIntrospectionRequest({ ...COMPOSED, auth: { mode: "inherit" } } as any);
+		expect(req.auth).toBeUndefined();
 	});
 });
 
 describe("introspectSchema", () => {
-	it("builds a GraphQLSchema from a successful introspection response", async () => {
-		const data = introspectionJSONFor(SDL);
-		(apiService.executeRequest as any).mockResolvedValue({
-			status: 200,
-			bodyRaw: JSON.stringify({ data }),
+	it("composes the target unresolved and executes with the resolved auth", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
+		await introspectSchema(TARGET);
+
+		// Compose gets the editor state as typed, plus the scope that resolves it.
+		expect(apiService.composeRequest).toHaveBeenCalledWith({
+			request: {
+				method: "POST",
+				url: "{{base}}/gql",
+				headers: { "X-Team": "{{team}}" },
+				auth: { mode: "inherit" },
+			},
+			collectionId: "col_1",
+			environmentId: "env_1",
 		});
-		const schema = await introspectSchema("https://api.test/gql", {});
+
+		// Execute gets what compose resolved - this is the assertion that goes
+		// red if introspection stops composing and sends the target's own
+		// headers again (the #228 defect).
+		const sent = (apiService.executeRequest as any).mock.calls[0][0];
+		expect(sent.url).toBe("https://api.test/gql");
+		expect(sent.auth).toEqual({ mode: "bearer", token: "sk_live" });
+		expect(sent.headers["X-Team"]).toBe("payments");
+	});
+
+	it("omits auth from the compose body when the request has none", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
+		await introspectSchema({ url: "https://api.test/gql", headers: {} });
+		const composeBody = (apiService.composeRequest as any).mock.calls[0][0];
+		expect("auth" in composeBody.request).toBe(false);
+	});
+
+	it("builds a GraphQLSchema from a successful introspection response", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
+		const schema = await introspectSchema(TARGET);
 		expect(schema.getQueryType()?.getFields().user).toBeDefined();
 	});
 
 	it("throws when the response contains GraphQL errors", async () => {
-		(apiService.executeRequest as any).mockResolvedValue({
-			status: 200,
-			bodyRaw: JSON.stringify({ errors: [{ message: "nope" }] }),
-		});
-		await expect(introspectSchema("https://api.test/gql", {})).rejects.toThrow(/nope/);
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ errors: [{ message: "nope" }] }) });
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/nope/);
 	});
 
 	it("throws on a non-2xx status", async () => {
-		(apiService.executeRequest as any).mockResolvedValue({ status: 500, bodyRaw: "boom" });
-		await expect(introspectSchema("https://api.test/gql", {})).rejects.toThrow();
+		mockExecute({ status: 500, bodyRaw: "boom" });
+		await expect(introspectSchema(TARGET)).rejects.toThrow();
 	});
 
 	it("throws when body is not valid JSON", async () => {
-		(apiService.executeRequest as any).mockResolvedValue({ status: 200, bodyRaw: "<html>" });
-		await expect(introspectSchema("https://api.test/gql", {})).rejects.toThrow();
+		mockExecute({ status: 200, bodyRaw: "<html>" });
+		await expect(introspectSchema(TARGET)).rejects.toThrow();
+	});
+
+	it("surfaces a compose failure instead of sending an unresolved request", async () => {
+		(apiService.composeRequest as any).mockRejectedValue(new Error("collection not found"));
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/collection not found/);
+		expect(apiService.executeRequest).not.toHaveBeenCalled();
 	});
 });
