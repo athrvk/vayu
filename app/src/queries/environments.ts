@@ -13,6 +13,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { useSessionStore } from "@/stores/session-store";
 import { queryKeys } from "./keys";
 import type { Environment, CreateEnvironmentRequest, UpdateEnvironmentRequest } from "@/types";
 
@@ -100,6 +101,18 @@ export function useDeleteEnvironmentMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.environments.detail(deletedId),
 			});
+			/*
+			 * Deleting the active environment has to clear the session id, and it
+			 * belongs here rather than in either delete flow: the switcher only
+			 * *displays* "No Environment" through a defensive `find()`, while the
+			 * id itself keeps riding on every /compose and /runs payload and
+			 * persists to localStorage across restarts. Both delete call sites
+			 * (the editor's danger zone and the sidebar tree) go through this
+			 * mutation, so one cleanup covers both.
+			 */
+			if (useSessionStore.getState().activeEnvironmentId === deletedId) {
+				useSessionStore.getState().setActiveEnvironmentId(null);
+			}
 		},
 	});
 }

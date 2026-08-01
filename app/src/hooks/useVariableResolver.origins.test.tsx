@@ -39,7 +39,6 @@ const collections: Array<Record<string, unknown>> = [];
 const environments: Array<Record<string, unknown>> = [];
 const session = {
 	activeEnvironmentId: null as string | null,
-	activeCollectionId: null as string | null,
 };
 
 vi.mock("@/queries", () => ({
@@ -77,16 +76,21 @@ function setup(opts: {
 	collections.push(...(opts.cols ?? []));
 	environments.length = 0;
 	environments.push(...(opts.envs ?? []));
-	session.activeCollectionId = opts.activeCollectionId ?? null;
 	session.activeEnvironmentId = opts.activeEnvironmentId ?? null;
-	return renderHook(() => useVariableResolver()).result.current;
+	/*
+	 * Collection scope is an explicit option, never a store field: the store
+	 * fallback was removed with `activeCollectionId` (#239), which had a reader
+	 * here and no writer anywhere.
+	 */
+	return renderHook(() =>
+		useVariableResolver({ collectionId: opts.activeCollectionId ?? undefined })
+	).result.current;
 }
 
 beforeEach(() => {
 	globals.variables = {};
 	collections.length = 0;
 	environments.length = 0;
-	session.activeCollectionId = null;
 	session.activeEnvironmentId = null;
 });
 

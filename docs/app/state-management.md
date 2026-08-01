@@ -104,25 +104,46 @@ setDrawerWidth("collections", 300); // Clamp to [220, 480]
 
 **Persistence:** `vayu.layout` (v1)
 
-#### `session-store.ts` - Active Environment & Collection
+#### `session-store.ts` - Active Environment
 
-Tracks the active environment (for variable resolution) and active collection context, persisted across sessions.
+Tracks the active environment (for variable resolution) and the collection the
+user last worked in (a new-request target only), persisted across sessions.
 
 **State:**
 ```typescript
 {
   activeEnvironmentId: string | null
-  activeCollectionId: string | null
+  lastCollectionId: string | null
 }
 ```
 
 **Key Methods:**
 ```typescript
 const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
-setActiveCollectionId(collectionId);
+setLastCollectionId(collectionId);
 ```
 
-**Persistence:** `vayu.session` (v1)
+**Persistence:** `vayu.session` (v2)
+
+**A persisted id must not outlive what it names.** `activeEnvironmentId` rides
+on every composed payload, so a dangling one is not cosmetic - the switcher
+renders "No Environment" through a defensive `find()` while the wire still
+carries a deleted id. It is cleared at both ends:
+`useDeleteEnvironmentMutation` clears it when the active environment is the one
+deleted (in the mutation, so both delete flows are covered), and
+`useActiveEnvironmentGuard()` - mounted once in `App.tsx` - clears an id the
+engine's environment list does not contain. That guard keys on the query's
+`isSuccess`, never on the list being empty: an unreachable engine produces an
+empty list too, and clearing on that would discard a good selection whenever
+the app started before the engine did.
+
+`activeCollectionId` was **removed** in v2. It had a reader (the resolver's
+fallback scope) and no writer, so it was permanently null on a fresh install
+and, on an older one, rehydrated a collection the user had long left and
+silently scoped `{{var}}` previews to it. The persist `migrate` drops the
+stored key. `lastCollectionId` is the field that looks similar and is not: it
+has a real writer and feeds only the welcome screen's new-request target - it
+must never feed the resolver.
 
 #### `engine-store.ts` - Engine Connection & Restart State
 
@@ -573,6 +594,25 @@ export const queryKeys = {
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
 - Some mutations use optimistic updates and cache updates for instant UI feedback
+- **A cascade delete invalidates coarsely, on purpose.** Deleting a collection
+  deletes its descendant collections and all their requests *engine-side*, and
+  which rows those are is engine-side knowledge - a client that re-derives the
+  subtree to patch caches surgically will drift from the engine's definition of
+  "descendant". So `useDeleteCollectionMutation` invalidates
+  `collections.all` + `requests.all` wholesale. `requests.detail` entries carry
+  `staleTime: Infinity`, so without this a deleted request stays fresh forever
+  and keeps feeding restored tabs.
+- **The warm-cache prefetch is a query too.** `usePrefetchCollectionsAndRequests`
+  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
+  creating a collection can invalidate it - it succeeds once at startup and
+  would otherwise never re-run for a collection created mid-session.
+
+**Retry policy:** the shared default is `shouldRetryQuery` (`lib/query-client.ts`),
+not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
+deleted row answers identically every time, so retrying it only delays the error
+the caller is waiting on. 4xx is never retried; everything else (5xx, timeout,
+unreachable engine - which `http-client.ts` throws as a plain `Error`, not an
+`ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
 
 **Stale Time:**
 - Collections/Requests: 30 seconds
@@ -642,6 +682,11 @@ const {
 1. Environment variables
 2. Collection variables
 3. Global variables
+
+Collection scope comes from the `collectionId` option and nowhere else - a
+caller that passes none resolves against globals + environment. See
+`docs/app/variable-resolution.md` for why the session-store fallback was
+removed.
 
 `ResolvedVariable` carries `sourceId` / `sourceName` - the specific environment
 or collection the winning value came from (absent for `global`).
@@ -886,6 +931,7 @@ useDraftSaveContext({
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
 7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
+8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run
 

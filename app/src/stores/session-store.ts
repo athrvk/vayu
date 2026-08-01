@@ -10,7 +10,7 @@
  *
  * Manages persistent application session state:
  * - Active environment (for variable resolution)
- * - Active collection context (for collection variables)
+ * - Last collection worked in (new-request target)
  */
 
 import { create } from "zustand";
@@ -18,20 +18,25 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 interface SessionState {
+	/**
+	 * The environment every send resolves against. Cleared when that
+	 * environment is deleted and when a rehydrated id names an environment the
+	 * engine no longer has (`useActiveEnvironmentGuard`) - a stale id here does
+	 * not just mislead the switcher, it rides on every `/compose` payload.
+	 */
 	activeEnvironmentId: string | null;
-	activeCollectionId: string | null;
 	/**
 	 * The collection the user most recently worked in - updated when a request
 	 * or collection tab becomes the source of truth (RequestBuilder /
 	 * CollectionDetail). Used by the welcome screen to land a new request where
-	 * the user was working. Deliberately distinct from `activeCollectionId`,
-	 * which scopes variable resolution; this is only a new-request target and
-	 * must not feed the resolver.
+	 * the user was working. This is only a new-request target and must never
+	 * feed the resolver: the resolver takes its scope from an explicit
+	 * `collectionId`, so a collection the user has left cannot silently scope a
+	 * `{{var}}` preview.
 	 */
 	lastCollectionId: string | null;
 
 	setActiveEnvironmentId: (id: string | null) => void;
-	setActiveCollectionId: (id: string | null) => void;
 	setLastCollectionId: (id: string | null) => void;
 }
 
@@ -39,20 +44,34 @@ export const useSessionStore = create<SessionState>()(
 	persist(
 		(set) => ({
 			activeEnvironmentId: null,
-			activeCollectionId: null,
 			lastCollectionId: null,
 			setActiveEnvironmentId: (id) => set({ activeEnvironmentId: id }),
-			setActiveCollectionId: (id) => set({ activeCollectionId: id }),
 			setLastCollectionId: (id) => set({ lastCollectionId: id }),
 		}),
 		{
 			name: STORAGE_KEYS.SESSION_STORE,
-			version: 1,
+			version: 2,
 			partialize: (state) => ({
 				activeEnvironmentId: state.activeEnvironmentId,
-				activeCollectionId: state.activeCollectionId,
 				lastCollectionId: state.lastCollectionId,
 			}),
+			/**
+			 * v1 -> v2 drops `activeCollectionId`. It had a reader (the resolver's
+			 * fallback scope) and never had a writer, so an id stored by a much
+			 * older build would rehydrate forever and scope preview resolution to a
+			 * collection the user left - or deleted - versions ago. Dropping the key
+			 * here rather than ignoring it keeps it from coming back if the field
+			 * name is ever reused.
+			 */
+			migrate: (persisted, version) => {
+				const state = (persisted ?? {}) as Partial<SessionState> & {
+					activeCollectionId?: string | null;
+				};
+				if (version < 2) {
+					delete state.activeCollectionId;
+				}
+				return state as SessionState;
+			},
 		}
 	)
 );

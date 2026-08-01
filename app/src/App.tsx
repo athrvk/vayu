@@ -18,6 +18,7 @@ import {
 	useRunsQuery,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
+import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProvider";
@@ -35,6 +36,10 @@ function App() {
 
 	// Initialize health check with automatic polling
 	useHealthQuery();
+
+	// Drop a persisted environment id whose environment the engine no longer has
+	// - it would otherwise keep riding on every composed payload.
+	useActiveEnvironmentGuard();
 
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();

@@ -35,7 +35,6 @@ const collections: Array<Record<string, unknown>> = [];
 const environments: Array<Record<string, unknown>> = [];
 const session = {
 	activeEnvironmentId: null as string | null,
-	activeCollectionId: null as string | null,
 };
 
 const mutateGlobals = vi.fn();
@@ -76,7 +75,6 @@ function setup(opts: {
 	environments.length = 0;
 	environments.push(...(opts.envs ?? []));
 	session.activeEnvironmentId = opts.activeEnvironmentId ?? null;
-	session.activeCollectionId = null;
 
 	return renderHook(() => useRequestBuilderContext(), {
 		wrapper: ({ children }) => (
@@ -93,7 +91,6 @@ beforeEach(() => {
 	collections.length = 0;
 	environments.length = 0;
 	session.activeEnvironmentId = null;
-	session.activeCollectionId = null;
 });
 
 describe("which scopes a variable can be created in", () => {
