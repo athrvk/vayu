@@ -379,6 +379,93 @@ TEST_F (DatabaseTest, DeletesEnvironment) {
     EXPECT_FALSE (deleted.has_value ());
 }
 
+// ==================== Environment Active-Flag Tests ====================
+
+namespace {
+Environment make_environment (const std::string& id, bool is_active) {
+    Environment env;
+    env.id         = id;
+    env.name       = id;
+    env.variables  = "{}";
+    env.is_active  = is_active;
+    env.updated_at = 1000;
+    return env;
+}
+
+// The ids of every environment currently flagged active. The invariant is about
+// the whole table, so the assertions read it as a set rather than row by row.
+std::vector<std::string> active_environment_ids (Database& db) {
+    std::vector<std::string> ids;
+    for (const auto& env : db.get_environments ()) {
+        if (env.is_active) {
+            ids.push_back (env.id);
+        }
+    }
+    return ids;
+}
+} // namespace
+
+TEST_F (DatabaseTest, ActivatingAnEnvironmentDeactivatesThePreviousOne) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    db.save_environment (make_environment ("env_dev", true));
+    db.save_environment (make_environment ("env_prod", true));
+
+    // Not "prod is active" - "prod is the *only* one active". A per-row check
+    // would pass on the pre-fix behaviour, where both stayed set.
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_prod" });
+}
+
+TEST_F (DatabaseTest, SavingAnInactiveEnvironmentLeavesTheActiveOneAlone) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    db.save_environment (make_environment ("env_dev", true));
+    // An unrelated edit (renaming staging, editing its variables) must not
+    // clear the active flag: only storing an *active* row switches it.
+    db.save_environment (make_environment ("env_staging", false));
+
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_dev" });
+}
+
+TEST_F (DatabaseTest, DeactivatingTheActiveEnvironmentLeavesNoneActive) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    db.save_environment (make_environment ("env_dev", true));
+    db.save_environment (make_environment ("env_dev", false));
+
+    EXPECT_TRUE (active_environment_ids (db).empty ());
+}
+
+TEST_F (DatabaseTest, TheActiveEnvironmentSurvivesReopeningTheDatabase) {
+    // The point of storing this engine-side rather than in client-local state:
+    // it is still there after the app is closed and reopened.
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        db.save_environment (make_environment ("env_dev", false));
+        db.save_environment (make_environment ("env_prod", true));
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_prod" });
+}
+
+TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
+    // import_apply writes rows directly inside its own transaction rather than
+    // through save_environment, so the invariant has to be applied there too.
+    Database db (TEST_DB_PATH);
+    db.init ();
+    db.save_environment (make_environment ("env_dev", true));
+
+    db.import_apply ({}, {}, { make_environment ("env_imported", true) });
+
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_imported" });
+}
+
 // ==================== Index Tests ====================
 
 // Every index declared in make_storage(), each backing a hot query path:
@@ -773,6 +860,35 @@ TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
     ASSERT_TRUE (run.has_value ());
     EXPECT_EQ (run->status, vayu::RunStatus::Failed);
     EXPECT_EQ (run->end_time, RECORDED_END);
+}
+
+TEST_F (DatabaseTest, ReconcileLeavesNoIndeterminateEndTimeOnAnUnseededRun) {
+    // The design-mode insert used to set start_time and nothing else. Reconcile
+    // keeps end_time as recorded, so whatever the insert left had to be a value
+    // readers can interpret - hence the field default. Constructed here the way
+    // an insert site that forgets seed_run_times would leave it.
+    const int64_t started = now_ms ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        vayu::db::Run run;
+        run.id              = "unseeded";
+        run.type            = vayu::RunType::Design;
+        run.status          = vayu::RunStatus::Running;
+        run.start_time      = started;
+        run.config_snapshot = "{}";
+        db.create_run (run);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto run = db.get_run ("unseeded");
+    ASSERT_TRUE (run.has_value ());
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+    // 0 is the "no end recorded" sentinel every reader guards on; anything
+    // between 1 and start_time would be garbage posing as a real timestamp.
+    EXPECT_EQ (run->end_time, 0);
 }
 
 TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {

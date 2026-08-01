@@ -799,6 +799,41 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateHonoursIsActive) {
     EXPECT_FALSE (db_->get_environment (id)->is_active);
 }
 
+TEST_F (ResourceWriteRouteTest, ActivatingOverTheRouteDeactivatesThePrevious) {
+    // The wire spelling of "switch environment": one PUT with isActive true.
+    // The client sends no companion write to clear the old one, so if the route
+    // did not go through the DB-layer rule both would come back active.
+    auto [first_status, first] = create_environment_response (
+    *db_, json{ { "name", "Dev" }, { "isActive", true } });
+    ASSERT_EQ (first_status, 200);
+    const std::string dev = first["id"].get<std::string> ();
+
+    auto [second_status, second] =
+    create_environment_response (*db_, json{ { "name", "Prod" } });
+    ASSERT_EQ (second_status, 200);
+    const std::string prod = second["id"].get<std::string> ();
+
+    auto [status, body] =
+    update_environment_response (*db_, prod, json{ { "isActive", true } });
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (body["isActive"].get<bool> ());
+    EXPECT_TRUE (db_->get_environment (prod)->is_active);
+    EXPECT_FALSE (db_->get_environment (dev)->is_active);
+}
+
+TEST_F (ResourceWriteRouteTest, CreatingAnActiveEnvironmentDeactivatesThePrevious) {
+    auto [first_status, first] = create_environment_response (
+    *db_, json{ { "name", "Dev" }, { "isActive", true } });
+    ASSERT_EQ (first_status, 200);
+    const std::string dev = first["id"].get<std::string> ();
+
+    auto [status, body] = create_environment_response (
+    *db_, json{ { "name", "Prod" }, { "isActive", true } });
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (db_->get_environment (body["id"].get<std::string> ())->is_active);
+    EXPECT_FALSE (db_->get_environment (dev)->is_active);
+}
+
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateAbsentKeepsVariables) {
     auto [created_status, created] = create_environment_response (*db_,
     json{ { "name", "Env" },

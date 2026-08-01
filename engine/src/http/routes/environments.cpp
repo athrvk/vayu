@@ -32,7 +32,11 @@ namespace vayu::http::routes {
  * variables at all. `apply_json_field` resets it to `{}` instead.
  *
  * `isActive` used to be honoured only on create, which left an update unable to
- * change it; it now follows the same rule on both verbs.
+ * change it; it now follows the same rule on both verbs. Storing `true` here is
+ * how a client says "make this the active environment": the DB layer clears the
+ * previous one in the same transaction (`deactivate_other_environments_locked`),
+ * so the route needs no deactivate step of its own and there is no verb for
+ * "clear all" beyond writing `isActive: false` to the active one.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every environment in a bulk payload (issue #96).

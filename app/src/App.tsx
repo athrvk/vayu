@@ -18,6 +18,7 @@ import {
 	useRunsQuery,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
+import { useActiveEnvironmentRestore } from "./hooks/useActiveEnvironmentRestore";
 import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
@@ -41,6 +42,13 @@ function App() {
 	// Drop a persisted environment id whose environment the engine no longer has
 	// - it would otherwise keep riding on every composed payload.
 	useActiveEnvironmentGuard();
+
+	// Then restore the environment the engine has marked active - the selection
+	// is stored engine-side, so it survives a restart and a reinstall. Ordered
+	// after the guard deliberately: the guard answers "does this id still
+	// exist", this answers "which id does the engine hold", and a dangling id
+	// should be dropped rather than pushed back at the engine as a selection.
+	useActiveEnvironmentRestore();
 
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();

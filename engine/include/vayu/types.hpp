@@ -774,6 +774,15 @@ struct Environment {
     std::string name;
     std::string description; // TEXT NOT NULL DEFAULT ''
     std::string variables;   // JSON
+    // The environment a client resolves against by default, and the one it
+    // restores on the next launch. At most one row carries it: every write path
+    // goes through Database::deactivate_other_environments_locked, so
+    // activating one environment deactivates the previous one in the same
+    // transaction. Selecting it is still a client action - the engine never
+    // *applies* an active environment to a request, which must name its own
+    // environmentId - but the choice is stored here rather than in client-local
+    // state, so it survives a reinstall and is shared by every client on the
+    // same database. See docs/engine/db-schema.md.
     bool is_active = false;
     int64_t created_at;
     int64_t updated_at;
@@ -787,7 +796,14 @@ struct Run {
     RunStatus status;            // "pending", "running", "completed", "failed"
     std::string config_snapshot; // JSON string (Full copy of request/env)
     int64_t start_time;
-    int64_t end_time;
+    // 0 means "no end recorded"; readers guard on `> 0` (the report route
+    // substitutes now_ms(), the app's dashboard falls back to its own clock).
+    // Defaulted rather than left bare so an insert site that forgets to stamp
+    // it cannot store an indeterminate value - a run orphaned by a daemon
+    // crash is marked Failed with `end_time` as recorded, so garbage here
+    // would survive into the report. Both route inserts seed it to start_time
+    // via seed_run_times (execution.cpp).
+    int64_t end_time = 0;
     // Whole-run results, written once when the run reaches a terminal status.
     // JSON object; `""` means "not written" - the report route then falls back
     // to reconstructing the aggregates from the legacy `metrics` rows. NOT NULL

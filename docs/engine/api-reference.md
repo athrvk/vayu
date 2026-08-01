@@ -736,7 +736,7 @@ the null-vs-absent rule.
 {
   "name": "Production",    // Required, no default (null is a 400)
   "description": "",        // Optional
-  "isActive": false,        // Optional
+  "isActive": false,        // Optional; true deactivates every other environment
   "variables": {            // Optional, null resets to {}
     "baseUrl": {
       "value": "https://api.example.com",
@@ -764,12 +764,22 @@ current map first and sends the merged result (this is what the MCP
 it no longer stores the literal string `null`, which is the bug this verb split
 fixed. `isActive` is honored here too; it used to be read only on create.
 
+**Writing `isActive: true` is how a client switches the active environment**, and
+one request does the whole switch: the engine deactivates whichever environment
+held the flag in the same transaction, so at most one row is ever active and a
+client sends no companion write to clear the old one. Clearing entirely is
+`isActive: false` on the environment that holds it. The engine still never
+*applies* the active environment to a request - every execution names its own
+`environmentId` - but because the choice is stored rather than kept client-side,
+it survives a restart and is shared by every client on the same database. See
+[db-schema.md](db-schema.md#environments).
+
 **Request:**
 ```json
 {
   "name": "Production",    // Optional; null is a 400 (no default)
   "variables": {},          // Optional, null resets to {}
-  "isActive": true          // Optional, null resets to false
+  "isActive": true          // Optional, null resets to false; true is the switch
 }
 ```
 

@@ -20,7 +20,7 @@
 import { useEffect, useState } from "react";
 import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
 import { useSessionStore, useToastStore } from "@/stores";
-import { useEnvironmentsQuery } from "@/queries";
+import { useEnvironmentsQuery, useSetActiveEnvironmentMutation } from "@/queries";
 import {
 	DropdownMenu,
 	DropdownMenuTrigger,
@@ -148,8 +148,9 @@ function AppIcon() {
 }
 
 function EnvSwitcher() {
-	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
+	const { activeEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
+	const setActiveEnvironment = useSetActiveEnvironmentMutation();
 	const showToast = useToastStore((s) => s.showToast);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
 
@@ -166,12 +167,33 @@ function EnvSwitcher() {
 	 */
 	const selectEnvironment = (id: string | null) => {
 		if (id === activeEnvironmentId) return;
-		setActiveEnvironmentId(id);
+		/*
+		 * The switch is persisted engine-side, not just in this window: the
+		 * mutation writes `isActive` and the store optimistically, and rolls the
+		 * store back if the engine refuses. So the toast confirms only what the
+		 * engine accepted - a selection that failed to store would come back on
+		 * the next launch as the old one, and saying "Environment: Staging" for
+		 * it would be a lie the user only discovers tomorrow.
+		 */
 		const name = id ? environments.find((e) => e.id === id)?.name : null;
-		showToast({
-			message: name ? `Environment: ${name}` : "Environment cleared",
-			variant: "info",
-		});
+		setActiveEnvironment.mutate(
+			{ id, previousId: activeEnvironmentId },
+			{
+				onSuccess: () =>
+					showToast({
+						message: name ? `Environment: ${name}` : "Environment cleared",
+						variant: "info",
+					}),
+				onError: (error) =>
+					showToast({
+						message:
+							error instanceof Error
+								? `Could not switch environment: ${error.message}`
+								: "Could not switch environment",
+						variant: "error",
+					}),
+			}
+		);
 	};
 
 	return (

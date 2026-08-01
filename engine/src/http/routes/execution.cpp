@@ -47,6 +47,20 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
+// Stamp a freshly built run row's timestamps. `end_time` is seeded to
+// `start_time` rather than left at its default, because a run killed by a
+// daemon crash never reaches a terminal status: `reconcile_orphaned_runs`
+// marks it Failed and leaves `end_time` as recorded, and the report route
+// reads `end_time > 0 ? end_time : now_ms()` - so an unseeded row would
+// report a duration spanning however long the daemon was down. Seeded, a
+// crashed run reports a zero duration, which is honest about knowing nothing.
+// Both insert sites (design and load) go through here so the invariant has one
+// home; `Run::end_time` still defaults to 0 as the backstop for any future one.
+void seed_run_times (vayu::db::Run& run, int64_t started_at) {
+    run.start_time = started_at;
+    run.end_time   = started_at;
+}
+
 // Validate and normalize the optional "httpVersion" on a POST /runs body.
 // Absent leaves `json` untouched: the request's own httpVersion field, read
 // like any other field by build_request/deserialize_request further down the
@@ -514,8 +528,8 @@ void register_execution_routes (RouteContext& ctx) {
         run.id              = run_id;
         run.type            = vayu::RunType::Design;
         run.status          = vayu::RunStatus::Running;
-        run.start_time      = now_ms ();
         run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+        seed_run_times (run, now_ms ());
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
             run.request_id = json["requestId"].get<std::string> ();
@@ -712,8 +726,7 @@ void register_execution_routes (RouteContext& ctx) {
         run.type            = vayu::RunType::Load;
         run.status          = vayu::RunStatus::Pending;
         run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-        run.start_time      = now_ms ();
-        run.end_time        = run.start_time;
+        seed_run_times (run, now_ms ());
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
             run.request_id = json["requestId"].get<std::string> ();

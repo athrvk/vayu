@@ -188,6 +188,18 @@ class Database {
     void remove_run_cascade_locked (const std::string& id);
 
     /**
+     * @brief Clear `is_active` on every environment except @p keep_id.
+     *
+     * The single definition of "at most one environment is active" - every
+     * write path that can store an active environment calls it, so the
+     * invariant cannot be enforced on one path and forgotten on another. The
+     * caller must already hold the DB mutex and be inside a transaction:
+     * deactivating the previous environment and activating the new one is one
+     * atomic switch, never a window in which two or zero are active.
+     */
+    void deactivate_other_environments_locked (const std::string& keep_id);
+
+    /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
      *
      * On a busy error the mutex is released *before* sleeping (exponential
