@@ -106,7 +106,7 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
-- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
+- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. When the engine is *down* the indicator becomes a focusable tooltip carrying `engineError` - the health poll's reason, which was previously recorded and rendered nowhere, so a refused connection, a timeout and a TLS failure all read as one word. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
 - **Right - toggles:** Context bar toggle (⌘I).
 
 ## Request Builder (`modules/request-builder/`)

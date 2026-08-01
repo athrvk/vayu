@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTabsStore } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
+import { useResponseStore } from "./response-store";
 
 beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
@@ -194,5 +195,68 @@ describe("LRU eviction never takes a dirty tab", () => {
 		// which carries no edits yet. Every tab holding work survives.
 		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
 		for (let i = 0; i < 12; i++) expect(ids).toContain(`req_${i}`);
+	});
+});
+
+/**
+ * Nothing else evicts from the response map.
+ *
+ * `response-store` is keyed by request id, holds a body plus its raw copy per
+ * entry, and had no caller for either of its clearing actions - so a session
+ * that opened many requests kept every response it had ever seen, including for
+ * requests that no longer exist. Both callers of `closeTabsForEntities` reach it
+ * after a delete (one request, or a collection and everything under it), which
+ * makes it the seam where the ids are known to be gone for good.
+ */
+describe("closeTabsForEntities evicts stored responses", () => {
+	const storeResponse = (requestId: string) =>
+		useResponseStore.getState().setResponse(requestId, {
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+			bodyType: "json",
+			size: 2,
+			time: 1,
+		});
+
+	beforeEach(() => useResponseStore.getState().clearAll());
+
+	it("drops the response of a deleted request", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "r1" });
+		storeResponse("r1");
+
+		useTabsStore.getState().closeTabsForEntities(["r1"]);
+
+		expect(useResponseStore.getState().getResponse("r1")).toBeNull();
+	});
+
+	it("drops every response in a collection cascade", () => {
+		storeResponse("r1");
+		storeResponse("r2");
+		storeResponse("survivor");
+
+		// The tree hands over the collection plus every descendant it gathered.
+		useTabsStore.getState().closeTabsForEntities(["col_1", "r1", "r2"]);
+
+		expect(useResponseStore.getState().getResponse("r1")).toBeNull();
+		expect(useResponseStore.getState().getResponse("r2")).toBeNull();
+		expect(useResponseStore.getState().getResponse("survivor")).not.toBeNull();
+	});
+
+	it("drops the response even when no tab was open on the request", () => {
+		// The early return for "nothing matched" sits after the eviction on
+		// purpose: a deleted request with no tab still had a response cached.
+		storeResponse("r_no_tab");
+
+		useTabsStore.getState().closeTabsForEntities(["r_no_tab"]);
+
+		expect(useResponseStore.getState().getResponse("r_no_tab")).toBeNull();
+	});
+
+	it("leaves responses alone when handed nothing", () => {
+		storeResponse("r1");
+		useTabsStore.getState().closeTabsForEntities([]);
+		expect(useResponseStore.getState().getResponse("r1")).not.toBeNull();
 	});
 });

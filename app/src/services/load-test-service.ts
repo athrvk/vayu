@@ -51,11 +51,12 @@ class LoadTestService {
 		this.isConnected = true;
 
 		const store = useDashboardStore.getState();
-		// NOTE: do NOT call store.reset() here - the caller invokes store.startRun()
-		// first to register the run (currentRunId, config, "running" mode) and that
-		// already clears the historical series / currentMetrics / finalReport.
-		// reset() would null out currentRunId and the dashboard would show no active
-		// test (replay-from-0 renders clean off startRun's wipe already).
+		// Nothing here may clear the run: the caller invokes store.startRun() first
+		// to register it (currentRunId, config, "running" mode) and that already
+		// wipes the historical series / currentMetrics / finalReport. Nulling
+		// currentRunId would leave the dashboard showing no active test while one
+		// streams (replay-from-0 renders clean off startRun's wipe already). The
+		// store-wide `reset` this used to warn against no longer exists.
 		store.setStreaming(true);
 		store.setError(null);
 

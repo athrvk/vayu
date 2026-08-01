@@ -28,17 +28,6 @@ export function useEnvironmentsQuery() {
 	});
 }
 
-/**
- * Fetch a single environment by ID
- */
-export function useEnvironmentQuery(environmentId: string | null) {
-	return useQuery({
-		queryKey: queryKeys.environments.detail(environmentId ?? ""),
-		queryFn: () => apiService.getEnvironment(environmentId!),
-		enabled: !!environmentId,
-	});
-}
-
 // ============ Environment Mutations ============
 
 /**

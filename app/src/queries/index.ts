@@ -51,7 +51,6 @@ export {
 // Environments
 export {
 	useEnvironmentsQuery,
-	useEnvironmentQuery,
 	useCreateEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 	useDeleteEnvironmentMutation,

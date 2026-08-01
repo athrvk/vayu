@@ -65,13 +65,19 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   a `Tab` does not record which editor the sidebar has selected - over-matching
   keeps a tab that could have closed, under-matching loses work. Nothing is
   flushed *during* eviction; the predicate already refused the tab
-- Persistence: `vayu.tabs` (v1)
+- Response eviction: `closeTabsForEntities` clears each id's entry in
+  `response-store`. Both callers reach it after a delete, and nothing else
+  evicts from that map
+- Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
+  a payload whose *stamped* version differs from the store's when no `migrate`
+  is supplied, so the stub is where the next bump goes; it also refuses a
+  payload of the wrong shape rather than handing a non-array to every reader
 
 **Key Methods:**
 ```typescript
-const { openTab, closeTab, focusTab, replaceActiveTab, closeAll } = useTabsStore();
+const { openTab, closeTab, focusTab, closeTabsForEntities } = useTabsStore();
 openTab({ type: "request", entityId: "req-123" });
-replaceActiveTab({ type: "request", entityId: "req-456" }); // Replace active in place
+closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
 ```
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
@@ -122,7 +128,9 @@ const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
 setActiveCollectionId(collectionId);
 ```
 
-**Persistence:** `vayu.session` (v1)
+**Persistence:** `vayu.session` (v1), with the same pass-through `migrate` as
+`tabs-store` - and the same shape check, so a corrupt id never reaches the
+variable resolver.
 
 #### `engine-store.ts` - Engine Connection & Restart State
 
@@ -143,12 +151,16 @@ Merged store managing engine connection status and restart-required notification
 const {
   isEngineConnected, setEngineConnected,
   engineError, setEngineError,
-  pendingRestart, setPendingRestart, addRestartRequiredKey, clearRestartRequired,
-  reset
+  pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
 ```
 
-**Non-persisted** (reset on app restart).
+`engineError` is what the failed health poll recorded (`queries/health.ts`), and
+the Dock's connection indicator renders it in a tooltip when the engine is down -
+"Disconnected" alone read the same for a refused connection, a timeout and a TLS
+failure.
+
+**Non-persisted** (cleared on app restart).
 
 #### `save-store.ts` - Centralized Auto-Save
 
@@ -228,6 +240,12 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
 ```
 
+**Eviction:** `clearResponse` runs from `useDeleteRequestMutation` (the delete is
+what makes the response unreachable) and from `tabs-store`'s
+`closeTabsForEntities` (the collection cascade, which knows every descendant id).
+Nothing else drops an entry, so a map with no eviction at all grew for the whole
+session - each entry holds a body plus its raw copy.
+
 **Non-persisted** (responses are reloadable from backend).
 
 #### `client-settings-store.ts` - Renderer Preferences
@@ -242,7 +260,18 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
-**Persisted** to localStorage (via `zustand/persist`); workspace/session state (open tabs, layout, active collection) is deliberately excluded from the reset.
+**Persisted** to localStorage (via `zustand/persist`), `version: 1` with a
+pass-through `migrate`; workspace/session state (open tabs, layout, active
+collection) is deliberately excluded from the reset.
+
+**Nested preferences are completed against their defaults on rehydrate**
+(`mergeWithNestedDefaults`). zustand's merge is a shallow top-level spread, so a
+stored `editor` / `autoSave` / `notifications` / `loadTestCeilings` object
+replaces its defaults whole and a key added after that payload was written
+arrives `undefined` - `notifications.maxVisible` feeds `slice(-maxVisible)` in
+`toast-store`, and `slice(-undefined)` caps nothing. Adding an object-valued
+preference means adding a line to that merge; the store's test enumerates them
+rather than trusting the list.
 
 #### `dashboard-store.ts` - Load Test Metrics & State
 
@@ -281,10 +310,13 @@ const {
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   setFinalReport, setError, setActiveView, setStopping,
   setLiveWindowSeconds,  // Update the live retention window (from useLiveChartWindow)
-  reset,
-  getLatestMetrics, getMetricsWindow
+  setMaxRetainedTicks
 } = useDashboardStore();
 ```
+
+There is deliberately no store-wide `reset`: `startRun` already wipes the series,
+the report and the aggregates, and a reset on top of it nulls `currentRunId` -
+the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
 
@@ -320,7 +352,7 @@ off. There is no `setTimeout` in the store.
 
 **Key Methods:**
 ```typescript
-const { showToast, dismissToast, dismissAll } = useToastStore();
+const { showToast, dismissToast } = useToastStore();
 
 showToast("Run history cleared", "success");   // string form, still supported
 showToast({                                     // returns the toast id
@@ -463,7 +495,6 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 #### Environments & Variables
 
 - **`useEnvironmentsQuery()`** - Fetch all environments
-- **`useEnvironmentQuery(id)`** - Fetch single environment
 - **`useGlobalsQuery()`** - Fetch global variables
 
 **Mutations:**
