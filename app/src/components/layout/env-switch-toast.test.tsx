@@ -20,10 +20,15 @@
  * The no-op case is the one worth pinning. Re-picking the environment already
  * active is the most likely way to use this menu (opening it to check *which*
  * one is active, then closing it), and a toast there would be pure noise.
+ *
+ * The switch is now a write to the engine (`isActive`), which is why the
+ * confirmations are awaited rather than read synchronously: the toast reports
+ * what the engine accepted, so a failed write says so instead of announcing a
+ * switch that will be gone by the next launch.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 /*
@@ -69,6 +74,23 @@ vi.mock("@/queries", async (importOriginal) => ({
 	useEnvironmentsQuery: () => ({ data: environments }),
 }));
 
+/*
+ * The real `useSetActiveEnvironmentMutation` runs against this, so the store
+ * write, the rollback and the toast all follow the same path they do in the
+ * app - only the transport is faked.
+ */
+const updateEnvironment = vi.fn();
+vi.mock("@/services/api", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/services/api")>();
+	return {
+		...actual,
+		apiService: {
+			...actual.apiService,
+			updateEnvironment: (...a: unknown[]) => updateEnvironment(...a),
+		},
+	};
+});
+
 /** TabStrip resolves every tab's label through `useQueries`, so the title bar
  *  needs a client even when the test is about the icon or the env switcher. */
 function renderTitleBar(TitleBar: () => React.ReactNode) {
@@ -84,6 +106,8 @@ beforeEach(() => {
 	cleanup();
 	useToastStore.setState({ toasts: [] });
 	useSessionStore.setState({ activeEnvironmentId: null });
+	updateEnvironment.mockReset();
+	updateEnvironment.mockResolvedValue({ id: "env-1", name: "Staging", isActive: true });
 });
 
 /*
@@ -108,25 +132,48 @@ function openMenu() {
 const messages = () => useToastStore.getState().toasts.map((t) => t.message);
 
 describe("environment switch notification", () => {
-	it("names the environment it switched to", () => {
+	it("names the environment it switched to", async () => {
 		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("Staging"));
 
 		expect(useSessionStore.getState().activeEnvironmentId).toBe("env-1");
 		// The destination, not the act: the toast answers "which one am I on now".
-		expect(messages()).toEqual(["Environment: Staging"]);
+		await waitFor(() => expect(messages()).toEqual(["Environment: Staging"]));
 		expect(useToastStore.getState().toasts[0].variant).toBe("info");
+		// One PUT carries the whole switch - the engine clears the previous one.
+		expect(updateEnvironment).toHaveBeenCalledWith({ id: "env-1", isActive: true });
 	});
 
-	it("says so when the environment is cleared", () => {
+	it("says so when the environment is cleared", async () => {
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
 		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("No Environment"));
 
 		expect(useSessionStore.getState().activeEnvironmentId).toBeNull();
-		expect(messages()).toEqual(["Environment cleared"]);
+		await waitFor(() => expect(messages()).toEqual(["Environment cleared"]));
+		// Clearing is deactivating the row that holds the flag.
+		expect(updateEnvironment).toHaveBeenCalledWith({ id: "env-1", isActive: false });
+	});
+
+	it("reports a switch the engine refused, and keeps the old one", async () => {
+		/*
+		 * The dangerous failure is a confident one: the switcher says Staging,
+		 * every send keeps resolving against Production, and the next launch
+		 * agrees with the engine rather than the label the user was shown.
+		 */
+		updateEnvironment.mockRejectedValue(new Error("engine unreachable"));
+		useSessionStore.setState({ activeEnvironmentId: "env-2" });
+		renderTitleBar(TitleBar);
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("Staging"));
+
+		await waitFor(() =>
+			expect(messages()).toEqual(["Could not switch environment: engine unreachable"])
+		);
+		expect(useToastStore.getState().toasts[0].variant).toBe("error");
+		expect(useSessionStore.getState().activeEnvironmentId).toBe("env-2");
 	});
 
 	it("stays quiet when the chosen environment is already active", () => {

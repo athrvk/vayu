@@ -54,6 +54,7 @@ export {
 	useEnvironmentsQuery,
 	useCreateEnvironmentMutation,
 	useUpdateEnvironmentMutation,
+	useSetActiveEnvironmentMutation,
 	useDeleteEnvironmentMutation,
 } from "./environments";
 

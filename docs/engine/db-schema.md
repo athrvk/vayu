@@ -159,9 +159,33 @@ Stores named variable sets.
 | `name`       | TEXT    |                                       |
 | `description`| TEXT    | Default `""`                          |
 | `variables`  | TEXT    | JSON: `Record<string, VariableValue>` |
-| `is_active`  | INTEGER | Boolean; 0 or 1                       |
+| `is_active`  | INTEGER | Boolean; 0 or 1. At most one row is 1 - see below |
 | `created_at` | INTEGER | Unix ms                               |
 | `updated_at` | INTEGER | Unix ms                               |
+
+**`is_active` marks the environment clients resolve against by default, and at
+most one row carries it.** The invariant is enforced in the DB layer, not the
+routes: every write path that can store an active environment calls
+`Database::deactivate_other_environments_locked` first, inside the same
+transaction, so activating one environment deactivates the previous one
+atomically - no reader can observe two actives, and none can observe an
+intermediate zero. Three paths reach this table (`POST /environments`, `PUT
+/environments/:id`, and `POST /import/apply`); putting the rule in the handlers
+would mean repeating it in each, which is how this column previously ended up
+honoured on create but not on update.
+
+Writing `isActive: true` **is** the switch - there is no separate endpoint and
+no companion request to clear the old one. Clearing entirely is spelled as
+writing `isActive: false` to the environment that holds the flag, since there is
+no "no environment" row to write `true` to.
+
+Selecting is still a client action: the engine never *applies* an active
+environment to a request, which must always name its own `environmentId`. What
+changed is where the choice lives. Storing it here rather than in client-local
+state is what makes it survive a restart and a reinstall, and what lets two
+clients on the same database agree - the app mirrors it into
+`session-store.ts` for synchronous reads and reconciles on launch
+(`useActiveEnvironmentRestore`), treating the engine's value as the truth.
 
 ---
 
@@ -191,8 +215,17 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
 | `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
 | `start_time`      | INTEGER | Unix ms                                                     |
-| `end_time`        | INTEGER | Unix ms                                                     |
+| `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
+
+**`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
+mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
+it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
+killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
+failed and leaves `end_time` as recorded, so an unseeded row would report a duration spanning
+however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
+future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
+(`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
