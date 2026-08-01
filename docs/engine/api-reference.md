@@ -736,7 +736,7 @@ the null-vs-absent rule.
 {
   "name": "Production",    // Required, no default (null is a 400)
   "description": "",        // Optional
-  "isActive": false,        // Optional
+  "isActive": false,        // Optional; stored and echoed back, never acted on
   "variables": {            // Optional, null resets to {}
     "baseUrl": {
       "value": "https://api.example.com",
@@ -762,14 +762,19 @@ exist, never a silent create. Merge-patch body, same rule as collections.
 current map first and sends the merged result (this is what the MCP
 `update_environment` tool does). Sending `variables: null` resets it to `{}` -
 it no longer stores the literal string `null`, which is the bug this verb split
-fixed. `isActive` is honored here too; it used to be read only on create.
+fixed. `isActive` is honored here too; it used to be read only on create. Note
+that "honored" means stored and echoed back: no engine logic reads `isActive`
+and nothing enforces at-most-one active environment - which environment is
+active is client state (the app keeps it in `session-store.ts`), and the engine
+resolves variables against whichever environment a request names. See
+[db-schema.md](db-schema.md#environments).
 
 **Request:**
 ```json
 {
   "name": "Production",    // Optional; null is a 400 (no default)
   "variables": {},          // Optional, null resets to {}
-  "isActive": true          // Optional, null resets to false
+  "isActive": true          // Optional, null resets to false; stored, never acted on
 }
 ```
 

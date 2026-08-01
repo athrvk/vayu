@@ -775,6 +775,35 @@ TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
     EXPECT_EQ (run->end_time, RECORDED_END);
 }
 
+TEST_F (DatabaseTest, ReconcileLeavesNoIndeterminateEndTimeOnAnUnseededRun) {
+    // The design-mode insert used to set start_time and nothing else. Reconcile
+    // keeps end_time as recorded, so whatever the insert left had to be a value
+    // readers can interpret - hence the field default. Constructed here the way
+    // an insert site that forgets seed_run_times would leave it.
+    const int64_t started = now_ms ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        vayu::db::Run run;
+        run.id              = "unseeded";
+        run.type            = vayu::RunType::Design;
+        run.status          = vayu::RunStatus::Running;
+        run.start_time      = started;
+        run.config_snapshot = "{}";
+        db.create_run (run);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto run = db.get_run ("unseeded");
+    ASSERT_TRUE (run.has_value ());
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+    // 0 is the "no end recorded" sentinel every reader guards on; anything
+    // between 1 and start_time would be garbage posing as a real timestamp.
+    EXPECT_EQ (run->end_time, 0);
+}
+
 TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
     Database db (TEST_DB_PATH);
     db.init ();

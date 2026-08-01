@@ -159,9 +159,18 @@ Stores named variable sets.
 | `name`       | TEXT    |                                       |
 | `description`| TEXT    | Default `""`                          |
 | `variables`  | TEXT    | JSON: `Record<string, VariableValue>` |
-| `is_active`  | INTEGER | Boolean; 0 or 1                       |
+| `is_active`  | INTEGER | Boolean; 0 or 1. Accepted and stored, never read - see below |
 | `created_at` | INTEGER | Unix ms                               |
 | `updated_at` | INTEGER | Unix ms                               |
+
+**`is_active` is accepted-but-unused.** It is written by `POST`/`PUT
+/environments` (`apply_environment_fields`) and serialized back, and no engine
+logic reads it: nothing enforces at-most-one active environment, and setting it
+on two environments changes nothing. Which environment is active is renderer
+state (`session-store.ts`); the engine resolves variables against whichever
+environment id a request names. The column is kept so clients that already send
+`isActive` round-trip unchanged - treat it as a stored client field, not an
+engine setting.
 
 ---
 
@@ -191,8 +200,17 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
 | `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
 | `start_time`      | INTEGER | Unix ms                                                     |
-| `end_time`        | INTEGER | Unix ms                                                     |
+| `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
+
+**`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
+mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
+it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
+killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
+failed and leaves `end_time` as recorded, so an unseeded row would report a duration spanning
+however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
+future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
+(`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,

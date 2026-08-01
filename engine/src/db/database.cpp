@@ -985,8 +985,10 @@ size_t Database::reconcile_orphaned_runs () {
 
     // end_time is deliberately left as recorded. When the process died is
     // unknowable now, and stamping the restart time would invent a duration
-    // spanning however long the daemon was down; create_run already seeds
-    // end_time = start_time, and update_run_end_time may have refined it.
+    // spanning however long the daemon was down. What is recorded is never
+    // indeterminate: `Run::end_time` defaults to 0 and both route inserts seed
+    // it to start_time (seed_run_times in execution.cpp), while
+    // update_run_end_time may since have refined it.
     impl_->storage.transaction ([&] {
         for (auto& run : orphans) {
             run.status = RunStatus::Failed;
