@@ -14,7 +14,10 @@
  * a URL or body string.
  *
  * Pulled out of the panel so it can be tested as logic. It was inline in both
- * script panels, twice over, with the regexes rebuilt on every render.
+ * script panels, twice over, with the regexes rebuilt on every render - and a
+ * *third* time in the collection's script tab, which is why this now lives in
+ * `lib/` rather than under `request-builder/`: it is read by two modules, and
+ * a copy under one of them is what let the collection tab keep its own.
  *
  * The template matcher is the app's one `VARIABLE_PATTERN`; only `PM_GET` is
  * local, because nothing else looks for that syntax. Inner braces are excluded

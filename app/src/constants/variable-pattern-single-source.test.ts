@@ -53,10 +53,30 @@ const EXEMPT = new Set(["services/importers/var-normalize.ts"]);
  */
 const DECLARES_BRACE_PATTERN = /\/(?:\^)?\\\{\\\{.*\\\}\\\}/;
 
+/**
+ * `globSync` yields the host's separator - `constants\variables.ts` on Windows,
+ * which is how the first version of this guard passed on Linux and macOS while
+ * reporting the canonical file itself as a stray on Windows.
+ *
+ * Splitting on **both** separators rather than on `path.sep` is what makes that
+ * testable: the normalization no longer depends on the host, so the Windows
+ * input can be exercised from any runner. Every path in this file is
+ * `/`-separated from here on - the allowlists, the `CANONICAL` comparison and
+ * the reported offences - and `absolute()` is the only place that goes back to
+ * the host's shape.
+ */
+function toPosix(path: string): string {
+	return path.split(/[\\/]/).join("/");
+}
+
+function absolute(file: string): string {
+	return join(srcRoot, ...file.split("/"));
+}
+
 function sourceFiles(): string[] {
-	return globSync("**/*.{ts,tsx}", { cwd: srcRoot }).filter(
-		(f) => !EXEMPT.has(f.split("\\").join("/"))
-	);
+	return globSync("**/*.{ts,tsx}", { cwd: srcRoot })
+		.map(toPosix)
+		.filter((f) => !EXEMPT.has(f));
 }
 
 /** Blank comment bodies, keeping newlines so reported line numbers still land. */
@@ -69,7 +89,7 @@ function stripComments(source: string): string {
 function declarations(): string[] {
 	const found: string[] = [];
 	for (const file of sourceFiles()) {
-		const source = readFileSync(join(srcRoot, file), "utf8");
+		const source = readFileSync(absolute(file), "utf8");
 		stripComments(source)
 			.split(/\r?\n/)
 			.forEach((line, i) => {
@@ -84,6 +104,17 @@ describe("VARIABLE_PATTERN is declared once", () => {
 	it("scans a non-empty set of files", () => {
 		// A source scan that reads nothing passes forever and reads as coverage.
 		expect(sourceFiles().length).toBeGreaterThan(100);
+	});
+
+	it("reads the same on a Windows runner as on a POSIX one", () => {
+		// Both branches from either host: the `\` form is what globSync hands
+		// this file on Windows, and comparing it against a `/`-separated
+		// `CANONICAL` is what made the first version of this guard report the
+		// canonical file as a stray there. Asserting `sourceFiles()` alone
+		// would only ever exercise the host's own separator.
+		expect(toPosix("constants\\variables.ts")).toBe(CANONICAL);
+		expect(toPosix("constants/variables.ts")).toBe(CANONICAL);
+		expect(sourceFiles().every((f) => !f.includes("\\"))).toBe(true);
 	});
 
 	it("finds the canonical declaration, so the matcher works", () => {
@@ -101,7 +132,7 @@ describe("VARIABLE_PATTERN is declared once", () => {
 		// An exemption for a deleted file is an exemption nobody notices is
 		// wrong; it would silently cover a future file at the same path.
 		for (const f of EXEMPT) {
-			expect(() => readFileSync(join(srcRoot, f), "utf8")).not.toThrow();
+			expect(() => readFileSync(absolute(f), "utf8")).not.toThrow();
 		}
 	});
 });
@@ -113,7 +144,7 @@ describe("the shared pattern is safe to share", () => {
 		// exports `isVariableToken` for the boolean case for exactly this reason.
 		const offences: string[] = [];
 		for (const file of sourceFiles()) {
-			const source = stripComments(readFileSync(join(srcRoot, file), "utf8"));
+			const source = stripComments(readFileSync(absolute(file), "utf8"));
 			source.split(/\r?\n/).forEach((line, i) => {
 				// The lookbehind keeps the non-global `CONTAINS_VARIABLE_PATTERN`
 				// out: it is safe with `.test()`, which is why it exists.
