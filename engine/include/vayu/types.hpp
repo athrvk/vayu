@@ -774,11 +774,15 @@ struct Environment {
     std::string name;
     std::string description; // TEXT NOT NULL DEFAULT ''
     std::string variables;   // JSON
-    // Accepted on the wire, stored and echoed back - but the engine never acts
-    // on it, and nothing enforces at-most-one active environment. The active
-    // environment is renderer state (`session-store.ts`); the engine resolves
-    // variables against whichever environment a request names. Kept for wire
-    // compatibility with clients that already send it. See docs/engine/db-schema.md.
+    // The environment a client resolves against by default, and the one it
+    // restores on the next launch. At most one row carries it: every write path
+    // goes through Database::deactivate_other_environments_locked, so
+    // activating one environment deactivates the previous one in the same
+    // transaction. Selecting it is still a client action - the engine never
+    // *applies* an active environment to a request, which must name its own
+    // environmentId - but the choice is stored here rather than in client-local
+    // state, so it survives a reinstall and is shared by every client on the
+    // same database. See docs/engine/db-schema.md.
     bool is_active = false;
     int64_t created_at;
     int64_t updated_at;

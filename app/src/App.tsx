@@ -18,6 +18,7 @@ import {
 	useRunsQuery,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
+import { useActiveEnvironmentRestore } from "./hooks/useActiveEnvironmentRestore";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProvider";
@@ -35,6 +36,10 @@ function App() {
 
 	// Initialize health check with automatic polling
 	useHealthQuery();
+
+	// Restore the environment the engine has marked active - the selection is
+	// stored engine-side, so it survives a restart and a reinstall.
+	useActiveEnvironmentRestore();
 
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();

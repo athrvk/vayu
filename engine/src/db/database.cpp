@@ -703,6 +703,13 @@ const std::vector<Environment>& environments) {
                 impl_->storage.replace (r);
             }
             for (const auto& e : environments) {
+                // Same at-most-one-active rule as save_environment, applied per
+                // row: an import that carries an active environment deactivates
+                // the one already stored, and if the payload somehow carries
+                // two the last one wins rather than both surviving.
+                if (e.is_active) {
+                    deactivate_other_environments_locked (e.id);
+                }
                 impl_->storage.replace (e);
             }
             return true; // Commit
@@ -714,10 +721,29 @@ const std::vector<Environment>& environments) {
 // Environments - Named variable sets (dev, staging, prod)
 // ============================================================================
 
+// At most one environment is active, and the switch is atomic. Enforced here
+// rather than in the routes because three write paths reach this table (POST,
+// PUT, and bulk import), and a rule living in the handlers would have to be
+// repeated in each - the shape of bug this table already had, when `is_active`
+// was honoured on create but not update. A caller that stores an active
+// environment gets the previous one deactivated in the same transaction, so no
+// reader can observe two actives, and none can observe zero either.
+void Database::deactivate_other_environments_locked (const std::string& keep_id) {
+    impl_->storage.update_all (set (c (&Environment::is_active) = false),
+    where (c (&Environment::is_active) == true and c (&Environment::id) != keep_id));
+}
+
 void Database::save_environment (const Environment& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving environment: id=" + e.id + ", name=" + e.name);
-    impl_->storage.replace (e);
+    vayu::utils::log_debug ("Saving environment: id=" + e.id +
+    ", name=" + e.name + ", is_active=" + (e.is_active ? "true" : "false"));
+    impl_->storage.transaction ([&] {
+        if (e.is_active) {
+            deactivate_other_environments_locked (e.id);
+        }
+        impl_->storage.replace (e);
+        return true; // Commit
+    });
 }
 
 std::vector<Environment> Database::get_environments () {

@@ -13,6 +13,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { useSessionStore } from "@/stores/session-store";
 import { queryKeys } from "./keys";
 import type { Environment, CreateEnvironmentRequest, UpdateEnvironmentRequest } from "@/types";
 
@@ -78,6 +79,63 @@ export function useUpdateEnvironmentMutation() {
 				queryKeys.environments.detail(updatedEnvironment.id),
 				updatedEnvironment
 			);
+		},
+	});
+}
+
+/**
+ * The mutation key the active-environment switch runs under, so the restore
+ * hook can tell "the engine has not been told yet" from "the engine disagrees"
+ * and stand back while a switch is in flight.
+ */
+export const setActiveEnvironmentMutationKey = ["environments", "set-active"] as const;
+
+/**
+ * Switch the active environment, or clear it (`null`).
+ *
+ * One PUT does the whole switch: the engine deactivates the previous
+ * environment in the same transaction, so there is no second request to write
+ * and no window where two environments are active. That is also why this
+ * invalidates the list instead of patching the response into it - the response
+ * describes the environment that was activated, while the row that was
+ * *de*activated changed server-side without appearing in any response body.
+ * Patching only the response would leave the old one reading active forever.
+ *
+ * The session store is written optimistically because the switcher, the
+ * resolver and every composed payload read it, and rolled back if the engine
+ * refuses - a selection the engine did not accept must not survive in the UI,
+ * or the next launch would silently disagree with the one before it.
+ */
+export function useSetActiveEnvironmentMutation() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationKey: setActiveEnvironmentMutationKey,
+		mutationFn: async ({
+			id,
+			previousId,
+		}: {
+			id: string | null;
+			previousId: string | null;
+		}) => {
+			// Clearing is spelled as deactivating the environment that holds the
+			// flag: there is no "no environment" row to write true to.
+			const target = id ?? previousId;
+			if (!target) return;
+			await apiService.updateEnvironment({ id: target, isActive: id !== null });
+		},
+		onMutate: ({ id }) => {
+			const rolledBackTo = useSessionStore.getState().activeEnvironmentId;
+			useSessionStore.getState().setActiveEnvironmentId(id);
+			return { rolledBackTo };
+		},
+		onError: (_error, _variables, context) => {
+			if (context) {
+				useSessionStore.getState().setActiveEnvironmentId(context.rolledBackTo);
+			}
+		},
+		onSettled: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.environments.list() });
 		},
 	});
 }

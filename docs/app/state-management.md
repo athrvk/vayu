@@ -124,6 +124,32 @@ setActiveCollectionId(collectionId);
 
 **Persistence:** `vayu.session` (v1)
 
+**`activeEnvironmentId` is a cache of engine state, not the source of truth.**
+The engine owns which environment is active (`environments.is_active`, at most
+one row, enforced in its DB layer). The store holds the same id so the
+switcher, the resolver and every composed payload can read it synchronously,
+and two pieces of wiring keep the two in step:
+
+- `useSetActiveEnvironmentMutation` (`queries/environments.ts`) is the only
+  writer. It PUTs `isActive` and updates the store optimistically, rolling the
+  store back if the engine refuses - a selection the engine did not accept must
+  not survive in the UI, or the next launch silently disagrees with this one. It
+  invalidates the environments list rather than patching the response into it,
+  because the *deactivated* row changed server-side without appearing in any
+  response body.
+- `useActiveEnvironmentRestore` (`hooks/`, mounted in `App.tsx`) reconciles on
+  launch: adopt the engine's active environment if it has one, otherwise push a
+  persisted id that names an environment that still exists - once per session,
+  so a write the engine keeps rejecting is a failed write and not a request
+  loop. Both directions wait on `isSuccess`; an unreachable engine returns an
+  empty list that is indistinguishable from "no environments exist", and
+  adopting from that would clear a good selection on every cold start.
+
+Editing an environment's variables deliberately sends no `isActive`
+(absent means "keep" on a PUT): echoing a cached value back would let a
+variable edit re-activate an environment from a stale read, deactivating
+whichever one the engine actually holds.
+
 #### `engine-store.ts` - Engine Connection & Restart State
 
 Merged store managing engine connection status and restart-required notifications (for config changes that need an engine restart).

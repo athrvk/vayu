@@ -159,18 +159,33 @@ Stores named variable sets.
 | `name`       | TEXT    |                                       |
 | `description`| TEXT    | Default `""`                          |
 | `variables`  | TEXT    | JSON: `Record<string, VariableValue>` |
-| `is_active`  | INTEGER | Boolean; 0 or 1. Accepted and stored, never read - see below |
+| `is_active`  | INTEGER | Boolean; 0 or 1. At most one row is 1 - see below |
 | `created_at` | INTEGER | Unix ms                               |
 | `updated_at` | INTEGER | Unix ms                               |
 
-**`is_active` is accepted-but-unused.** It is written by `POST`/`PUT
-/environments` (`apply_environment_fields`) and serialized back, and no engine
-logic reads it: nothing enforces at-most-one active environment, and setting it
-on two environments changes nothing. Which environment is active is renderer
-state (`session-store.ts`); the engine resolves variables against whichever
-environment id a request names. The column is kept so clients that already send
-`isActive` round-trip unchanged - treat it as a stored client field, not an
-engine setting.
+**`is_active` marks the environment clients resolve against by default, and at
+most one row carries it.** The invariant is enforced in the DB layer, not the
+routes: every write path that can store an active environment calls
+`Database::deactivate_other_environments_locked` first, inside the same
+transaction, so activating one environment deactivates the previous one
+atomically - no reader can observe two actives, and none can observe an
+intermediate zero. Three paths reach this table (`POST /environments`, `PUT
+/environments/:id`, and `POST /import/apply`); putting the rule in the handlers
+would mean repeating it in each, which is how this column previously ended up
+honoured on create but not on update.
+
+Writing `isActive: true` **is** the switch - there is no separate endpoint and
+no companion request to clear the old one. Clearing entirely is spelled as
+writing `isActive: false` to the environment that holds the flag, since there is
+no "no environment" row to write `true` to.
+
+Selecting is still a client action: the engine never *applies* an active
+environment to a request, which must always name its own `environmentId`. What
+changed is where the choice lives. Storing it here rather than in client-local
+state is what makes it survive a restart and a reinstall, and what lets two
+clients on the same database agree - the app mirrors it into
+`session-store.ts` for synchronous reads and reconciles on launch
+(`useActiveEnvironmentRestore`), treating the engine's value as the truth.
 
 ---
 

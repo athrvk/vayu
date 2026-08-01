@@ -36,6 +36,7 @@ import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
 	useUpdateEnvironmentMutation,
+	useSetActiveEnvironmentMutation,
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
@@ -155,7 +156,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const updateCollectionMutation = useUpdateCollectionMutation();
 
 	const { setSelectedCategory } = useVariablesStore();
-	const { setActiveEnvironmentId } = useSessionStore();
+	const setActiveEnvironment = useSetActiveEnvironmentMutation();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const {
 		registerContext,
 		unregisterContext,
@@ -284,7 +286,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						id: environment.id,
 						name: environment.name,
 						variables: variablesObj,
-						isActive: environment.isActive,
+						// No `isActive`: absent means "keep" on a PUT, and echoing
+						// the cached value back would let a variable edit re-activate
+						// this environment from a stale read - deactivating whichever
+						// one the engine actually holds. Only the switch writes it.
 					},
 					{
 						onSuccess: () => {
@@ -467,14 +472,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	const handleSetActiveEnvironment = () => {
 		if (type === "environment" && environment) {
-			setActiveEnvironmentId(environment.id);
+			setActiveEnvironment.mutate({ id: environment.id, previousId: activeEnvironmentId });
 		}
 	};
 
+	/*
+	 * Subscribed (`activeEnvironmentId` above), not read through
+	 * `getState()`: a one-shot read during render does not re-render when the
+	 * switch lands, so this button kept offering "Set as active" for the
+	 * environment that had just become active.
+	 */
 	const isActiveEnvironment =
-		type === "environment" &&
-		environment &&
-		useSessionStore.getState().activeEnvironmentId === environment.id;
+		type === "environment" && environment && activeEnvironmentId === environment.id;
 
 	const Icon = editorConfig.icon;
 	const title =
