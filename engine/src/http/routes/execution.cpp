@@ -25,6 +25,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
@@ -169,6 +170,47 @@ const vayu::Response& response) {
     trace["downloadMs"]  = timing.download_ms;
 
     return trace;
+}
+
+// The variable scopes a design run's scripts read. The collection scope is the
+// request's own collection *chain* - the same walk `{{variable}}` composition
+// does (`collection_chain`) - so a name an ancestor collection defines answers
+// the same in a script as it does in the URL (issue #234). Only the leaf is
+// handed over writable; ancestors ride along read-only, which is what keeps a
+// script's `set()` from copying inherited variables down into the leaf on the
+// next persist.
+ScriptVariableScopes
+load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run) {
+    ScriptVariableScopes scopes;
+
+    if (run.environment_id.has_value ()) {
+        if (auto db_env = db.get_environment (*run.environment_id)) {
+            scopes.environment = vayu::json::parse_variables (db_env->variables);
+        }
+    }
+
+    if (auto db_globals = db.get_globals ()) {
+        scopes.globals = vayu::json::parse_variables (db_globals->variables);
+    }
+
+    if (run.request_id.has_value ()) {
+        if (auto db_request = db.get_request (*run.request_id)) {
+            if (!db_request->collection_id.empty ()) {
+                auto chain = vayu::http::collection_chain (db, db_request->collection_id);
+                if (!chain.empty ()) {
+                    scopes.collection =
+                    vayu::json::parse_variables (chain.back ().variables);
+                    scopes.collection_ancestors.reserve (chain.size () - 1);
+                    for (size_t i = 0; i + 1 < chain.size (); ++i) {
+                        scopes.collection_ancestors.push_back (
+                        vayu::json::parse_variables (chain[i].variables));
+                    }
+                }
+            }
+        }
+    }
+
+    return scopes;
 }
 
 // Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
@@ -580,29 +622,10 @@ void register_execution_routes (RouteContext& ctx) {
         vayu::runtime::ScriptEngine script_engine (script_config);
 
         // Load variables
-        vayu::Environment env, globals, collectionVariables;
-
-        if (run.environment_id.has_value ()) {
-            if (auto db_env = ctx.db.get_environment (*run.environment_id)) {
-                env = vayu::json::parse_variables (db_env->variables);
-            }
-        }
-
-        if (auto db_globals = ctx.db.get_globals ()) {
-            globals = vayu::json::parse_variables (db_globals->variables);
-        }
-
-        if (run.request_id.has_value ()) {
-            if (auto db_request = ctx.db.get_request (*run.request_id)) {
-                if (!db_request->collection_id.empty ()) {
-                    if (auto db_collection =
-                        ctx.db.get_collection (db_request->collection_id)) {
-                        collectionVariables =
-                        vayu::json::parse_variables (db_collection->variables);
-                    }
-                }
-            }
-        }
+        auto scopes                = load_script_variable_scopes (ctx.db, run);
+        vayu::Environment& env     = scopes.environment;
+        vayu::Environment& globals = scopes.globals;
+        vayu::Environment& collectionVariables = scopes.collection;
 
         // Take the request built above. Auth is already resolved into its
         // headers/url, so pm.request reflects the real outgoing set - and
@@ -636,6 +659,7 @@ void register_execution_routes (RouteContext& ctx) {
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
+        pre_ctx.collectionAncestors = &scopes.collection_ancestors;
         auto pre_script_result =
         execute_script (script_engine, pre_request_script, pre_ctx, "Pre-request");
 
@@ -655,6 +679,7 @@ void register_execution_routes (RouteContext& ctx) {
         post_ctx.environment         = &env;
         post_ctx.globals             = &globals;
         post_ctx.collectionVariables = &collectionVariables;
+        post_ctx.collectionAncestors = &scopes.collection_ancestors;
         auto post_script_result =
         execute_script (script_engine, post_request_script, post_ctx, "Post-request");
 

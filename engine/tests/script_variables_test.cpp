@@ -1,7 +1,8 @@
 /**
  * @file tests/script_variables_test.cpp
- * @brief Tests for the stored-variables round trip and the design-run persist
- *        of the three variable scopes (issue #135).
+ * @brief Tests for the stored-variables round trip, the design-run persist of
+ *        the three variable scopes (issue #135), and the collection chain
+ *        those scopes are loaded from (issue #234).
  *
  * A variables blob is written by the app and rewritten by the engine after
  * every design run, so the two halves of `parse_variables`/`serialize_variables`
@@ -28,6 +29,9 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/request_composer.hpp"
+#include "vayu/http/routes.hpp"
+#include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -301,6 +305,209 @@ TEST_F (PersistScriptVariablesTest, AClearedScopeIsStoredAsEmptyAndTheOthersAreU
     EXPECT_EQ (stored_environment_variables (), "{}");
     EXPECT_EQ (stored_globals_variables (), APP_BLOB);
     EXPECT_EQ (stored_collection_variables (), APP_BLOB);
+}
+
+// ---------------------------------------------------------------------------
+// load_script_variable_scopes - the collection chain a script reads (issue #234)
+//
+// This is where the D2 asymmetry lived: composition walked the whole ancestor
+// chain for `{{name}}` while the route handed the scripts one `get_collection`
+// of the immediate parent, so an inherited name read as undefined in a script
+// and substituted fine in the URL. The two tests that carry the design are the
+// agreement one (both notations answer the same) and the hazard one (a script
+// write still reaches the leaf collection alone).
+// ---------------------------------------------------------------------------
+
+using vayu::http::routes::load_script_variable_scopes;
+
+class ScriptVariableScopesTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_script_scopes.db";
+
+    void SetUp () override {
+        cleanup ();
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+
+        // API (root, defines `token`) -> Users (leaf, defines `page_size`).
+        add_collection ("col_root", "API", std::nullopt,
+        R"({"token":{"value":"root-token","enabled":true},)"
+        R"("shadowed":{"value":"root-wins","enabled":true}})");
+        add_collection ("col_leaf", "Users", "col_root",
+        R"({"page_size":{"value":"25","enabled":true}})");
+
+        vayu::db::Request request;
+        request.id            = "req_1";
+        request.collection_id = "col_leaf";
+        request.name          = "List users";
+        request.method        = vayu::HttpMethod::GET;
+        request.url           = "https://api.example.com/users?token={{token}}";
+        request.params        = "[]";
+        request.headers       = "[]";
+        request.body          = R"({"mode":"none"})";
+        request.body_type     = "none";
+        request.auth          = R"({"mode":"none"})";
+        request.order         = 0;
+        request.created_at    = 1;
+        request.updated_at    = 1;
+        db_->save_request (request);
+
+        run_.id              = "run_1";
+        run_.request_id      = "req_1";
+        run_.type            = vayu::RunType::Design;
+        run_.status          = vayu::RunStatus::Completed;
+        run_.config_snapshot = "{}";
+        run_.start_time      = 1;
+        run_.end_time        = 1;
+        db_->create_run (run_);
+    }
+
+    void TearDown () override {
+        db_.reset ();
+        cleanup ();
+    }
+
+    static void cleanup () {
+        std::filesystem::remove (DB_PATH);
+        std::filesystem::remove (std::string (DB_PATH) + "-wal");
+        std::filesystem::remove (std::string (DB_PATH) + "-shm");
+    }
+
+    void add_collection (const std::string& id,
+    const std::string& name,
+    std::optional<std::string> parent,
+    const std::string& variables) {
+        vayu::db::Collection collection;
+        collection.id         = id;
+        collection.name       = name;
+        collection.parent_id  = std::move (parent);
+        collection.variables  = variables;
+        collection.auth       = "{}";
+        collection.order      = 0;
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db_->create_collection (collection);
+    }
+
+    std::string stored_variables (const std::string& collection_id) {
+        auto c = db_->get_collection (collection_id);
+        EXPECT_TRUE (c.has_value ());
+        return c ? c->variables : std::string ();
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    vayu::db::Run run_;
+};
+
+// The leaf is the request's own collection and the only writable one; the rest
+// of the chain arrives root-first and separate. Revert the walk to the old
+// single get_collection and `collection_ancestors` is empty here.
+TEST_F (ScriptVariableScopesTest, TheChainArrivesRootFirstWithTheLeafHeldSeparately) {
+    auto scopes = load_script_variable_scopes (*db_, run_);
+
+    ASSERT_EQ (scopes.collection_ancestors.size (), 1U);
+    EXPECT_EQ (scopes.collection_ancestors[0].at ("token").value, "root-token");
+    EXPECT_EQ (scopes.collection.count ("token"), 0U)
+    << "the ancestor's variables were merged into the writable leaf scope";
+    EXPECT_EQ (scopes.collection.at ("page_size").value, "25");
+}
+
+TEST_F (ScriptVariableScopesTest, ARequestOutsideAnyCollectionGetsEmptyCollectionScopes) {
+    vayu::db::Request loose;
+    loose.id         = "req_loose";
+    loose.name       = "Loose";
+    loose.method     = vayu::HttpMethod::GET;
+    loose.url        = "https://api.example.com/ping";
+    loose.params     = "[]";
+    loose.headers    = "[]";
+    loose.body       = R"({"mode":"none"})";
+    loose.body_type  = "none";
+    loose.auth       = R"({"mode":"none"})";
+    loose.order      = 0;
+    loose.created_at = 1;
+    loose.updated_at = 1;
+    db_->save_request (loose);
+
+    vayu::db::Run run = run_;
+    run.id            = "run_loose";
+    run.request_id    = "req_loose";
+
+    auto scopes = load_script_variable_scopes (*db_, run);
+
+    EXPECT_TRUE (scopes.collection.empty ());
+    EXPECT_TRUE (scopes.collection_ancestors.empty ());
+}
+
+// The issue in one assertion: the same `{{token}}`, defined only on an
+// ancestor, must mean the same thing in a request field and in a script.
+TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInTheUrl) {
+    auto [status, composed] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << composed.dump ();
+    const std::string composed_url = composed["url"].get<std::string> ();
+    ASSERT_NE (composed_url.find ("root-token"), std::string::npos) << composed_url;
+
+    auto scopes = load_script_variable_scopes (*db_, run_);
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment         = &scopes.environment;
+    ctx.globals             = &scopes.globals;
+    ctx.collectionVariables = &scopes.collection;
+    ctx.collectionAncestors = &scopes.collection_ancestors;
+
+    vayu::runtime::ScriptEngine engine;
+    auto result = engine.execute (R"JS(
+        pm.globals.set('replaced', pm.variables.replaceIn('{{token}}'));
+        pm.globals.set('scoped', String(pm.collectionVariables.get('token')));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (scopes.globals.at ("replaced").value, "root-token");
+    EXPECT_EQ (scopes.globals.at ("scoped").value, "root-token");
+    EXPECT_NE (composed_url.find (scopes.globals.at ("replaced").value), std::string::npos);
+}
+
+// The hazard #226 declined to risk, end to end: a script reads an inherited
+// name and writes its own, and the persist that follows must touch the leaf
+// collection only. If the chain were merged into one writable map, the diff
+// against the leaf's stored blob would report the ancestor's variables as new
+// and write them into the leaf permanently.
+TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnlyTheLeaf) {
+    const std::string root_before = stored_variables ("col_root");
+
+    auto scopes = load_script_variable_scopes (*db_, run_);
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment         = &scopes.environment;
+    ctx.globals             = &scopes.globals;
+    ctx.collectionVariables = &scopes.collection;
+    ctx.collectionAncestors = &scopes.collection_ancestors;
+
+    vayu::runtime::ScriptEngine engine;
+    auto result = engine.execute (R"JS(
+        pm.collectionVariables.get('token');
+        pm.collectionVariables.get('shadowed');
+        pm.collectionVariables.toObject();
+        pm.collectionVariables.set('cursor', 'abc');
+    )JS",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+
+    persist_script_variables (
+    *db_, run_, scopes.environment, scopes.globals, scopes.collection);
+
+    auto leaf = json::parse (stored_variables ("col_leaf"));
+    EXPECT_EQ (leaf["cursor"]["value"], "abc");
+    EXPECT_EQ (leaf["page_size"]["value"], "25");
+    EXPECT_FALSE (leaf.contains ("token"))
+    << "an ancestor's variable was copied down into the leaf collection: "
+    << leaf.dump ();
+    EXPECT_FALSE (leaf.contains ("shadowed")) << leaf.dump ();
+    // The ancestor is not a write target at all, so its row is untouched -
+    // blob and `updated_at` both.
+    EXPECT_EQ (stored_variables ("col_root"), root_before);
+    auto root = db_->get_collection ("col_root");
+    ASSERT_TRUE (root.has_value ());
+    EXPECT_EQ (root->updated_at, 1);
 }
 
 } // namespace

@@ -20,17 +20,20 @@
  * was fine, because `VariableInput` reads the request builder's context, which
  * does pass the id.
  *
- * Two things are asserted here, and they pull in opposite directions:
+ * Two things are asserted here:
  *
  * - **which collection each provider asks for**, since asking for none was the
  *   whole defect; and
- * - **that the script list narrows the answer back down** to the immediate
- *   collection, because of decision D2 - the engine fills a script's single
- *   collection scope from the request's immediate parent, while the resolver
- *   merges the whole ancestor chain for `{{name}}`. Offering an ancestor's
- *   variable inside `pm.collectionVariables.get()` would offer a name that
- *   returns `undefined`, which is the exact failure the "the accessor picks the
- *   scope" rule exists to prevent.
+ * - **that both lists carry the whole ancestor chain**. They did not always:
+ *   while the engine filled a script's collection scope from the request's
+ *   immediate parent alone (decision D2), the script list narrowed to match,
+ *   because offering an ancestor's variable inside
+ *   `pm.collectionVariables.get()` would have offered a name that returns
+ *   `undefined`. Issue #234 made the engine walk the chain for scripts too, so
+ *   the narrowing came off. The rule underneath is unchanged and is what these
+ *   cases pin: **the list offers exactly what the call can read** - so if the
+ *   engine's walk ever changes again, these fail rather than the user finding
+ *   out from an `undefined`.
  *
  * The lists themselves are covered by
  * `useVariableCompletionProvider.dynamic.test.tsx` and
@@ -133,7 +136,7 @@ describe("the body `{{` list offers the whole ancestor chain", () => {
 	});
 });
 
-describe("the script list narrows collection scope to the immediate collection (D2)", () => {
+describe("the script list offers the ancestor chain the engine now walks (#234)", () => {
 	beforeEach(() => {
 		activeCollectionId.current = "leaf";
 		variables.from_parent = { value: "1", scope: "collection", sourceId: "root" };
@@ -141,7 +144,7 @@ describe("the script list narrows collection scope to the immediate collection (
 		variables.from_env = { value: "3", scope: "environment", sourceId: "e1" };
 	});
 
-	it("drops an ancestor's variable from `pm.collectionVariables.get()`", () => {
+	it("offers an ancestor's variable inside `pm.collectionVariables.get()`", () => {
 		const labels = labelsFor(
 			() => useScriptVariableCompletionProvider(),
 			'pm.collectionVariables.get("'
@@ -149,22 +152,26 @@ describe("the script list narrows collection scope to the immediate collection (
 		expect(labels).toContain("from_leaf");
 		expect(
 			labels,
-			"the engine's script collection scope is the immediate parent only"
-		).not.toContain("from_parent");
+			"the engine walks the collection chain for scripts, so this call does read it"
+		).toContain("from_parent");
+		// The accessor still picks the scope: this one does not read environment.
+		expect(labels).not.toContain("from_env");
 	});
 
-	it("drops it from the merged `pm.variables.get()` too, keeping the other scopes", () => {
+	it("offers it from the merged `pm.variables.get()` too, alongside the other scopes", () => {
 		const labels = labelsFor(() => useScriptVariableCompletionProvider(), 'pm.variables.get("');
 		expect(labels).toContain("from_leaf");
 		expect(labels).toContain("from_env");
-		expect(labels).not.toContain("from_parent");
+		expect(labels).toContain("from_parent");
 	});
 
-	it("leaves the other scopes alone when no collection is in scope", () => {
+	// With the narrowing gone, the resolver is the only thing deciding which
+	// collection variables exist - so what this provider asks it for is the
+	// whole of the scoping, and a second local filter would be a copy that
+	// drifts.
+	it("asks the resolver for nothing when no collection is in scope", () => {
 		activeCollectionId.current = undefined;
-		const labels = labelsFor(() => useScriptVariableCompletionProvider(), 'pm.variables.get("');
-		expect(labels).toContain("from_env");
-		expect(labels).not.toContain("from_leaf");
-		expect(labels).not.toContain("from_parent");
+		labelsFor(() => useScriptVariableCompletionProvider(), 'pm.variables.get("');
+		expect(scopes).toEqual([undefined]);
 	});
 });
