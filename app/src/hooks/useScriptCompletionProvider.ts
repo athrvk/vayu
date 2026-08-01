@@ -22,6 +22,7 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useScriptCompletionsQuery } from "@/queries";
 import { completionReplaceStartColumn } from "@/lib/script-completion-range";
+import { calleeOnlyInsertText } from "@/lib/script-completion-insert";
 import { openStringLiteral } from "@/lib/script-variable-completion";
 
 /** Script editors mount with language="javascript". */
@@ -64,19 +65,37 @@ export function useScriptCompletionProvider() {
 					endColumn: position.column,
 				};
 
-				const suggestions: Monaco.languages.CompletionItem[] = completions.map((c) => ({
-					label: c.label,
-					kind: c.kind as Monaco.languages.CompletionItemKind,
-					insertText: c.insertText,
-					insertTextRules: c.insertTextRules as
-						| Monaco.languages.CompletionItemInsertTextRule
-						| undefined,
-					detail: c.detail,
-					documentation: c.documentation,
-					sortText: c.sortText,
-					filterText: c.filterText,
-					range,
-				}));
+				/*
+				 * Most `pm.*` completions are snippets carrying their own argument
+				 * list, which is the wrong shape when the call is already written:
+				 * completing `pm.variables.rep|("$guid")` left
+				 * `pm.variables.replaceIn("template")("$guid")` behind. Where the
+				 * line already opens a call, insert the callee alone.
+				 */
+				const lineSuffix = model
+					.getLineContent(position.lineNumber)
+					.slice(position.column - 1);
+
+				const suggestions: Monaco.languages.CompletionItem[] = completions.map((c) => {
+					const callee = calleeOnlyInsertText(c.insertText, lineSuffix);
+					return {
+						label: c.label,
+						kind: c.kind as Monaco.languages.CompletionItemKind,
+						insertText: callee ?? c.insertText,
+						// A bare path holds no placeholders, and keeping the snippet
+						// rule would have Monaco read a `$` in one as the start of one.
+						insertTextRules: callee
+							? undefined
+							: (c.insertTextRules as
+									| Monaco.languages.CompletionItemInsertTextRule
+									| undefined),
+						detail: c.detail,
+						documentation: c.documentation,
+						sortText: c.sortText,
+						filterText: c.filterText,
+						range,
+					};
+				});
 
 				return { suggestions };
 			},
