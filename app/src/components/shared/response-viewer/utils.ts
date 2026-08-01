@@ -126,7 +126,7 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 /**
  * Format body for display (pretty print JSON, etc.)
  */
-export function formatBody(body: any, bodyType?: BodyType): string {
+export function formatBody(body: unknown, bodyType?: BodyType): string {
 	if (!body) return "";
 
 	// Handle object types (already parsed)
@@ -139,7 +139,7 @@ export function formatBody(body: any, bodyType?: BodyType): string {
 	}
 
 	// Try to format JSON
-	if (bodyType === "json" || bodyType === undefined) {
+	if (typeof body === "string" && (bodyType === "json" || bodyType === undefined)) {
 		try {
 			const parsed = JSON.parse(body);
 			return JSON.stringify(parsed, null, 2);

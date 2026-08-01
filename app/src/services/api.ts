@@ -14,6 +14,8 @@ import {
 	CollectionTransformer,
 	RunReportTransformer,
 	GlobalsTransformer,
+	type RawCollection,
+	type RawRequest,
 } from "./transformers";
 import type {
 	Collection,
@@ -122,13 +124,16 @@ export const apiService = {
 	// Collections
 	async listCollections(): Promise<Collection[]> {
 		console.log("API: Fetching collections from", API_ENDPOINTS.COLLECTIONS);
-		const response = await httpClient.get<any[]>(API_ENDPOINTS.COLLECTIONS);
+		const response = await httpClient.get<RawCollection[]>(API_ENDPOINTS.COLLECTIONS);
 		console.log("API: Received collections:", response);
 		return response.map(CollectionTransformer.toFrontend);
 	},
 
 	async createCollection(data: CreateCollectionRequest): Promise<Collection> {
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, withoutId(data));
+		const response = await httpClient.post<RawCollection>(
+			API_ENDPOINTS.COLLECTIONS,
+			withoutId(data)
+		);
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -138,7 +143,10 @@ export const apiService = {
 		// the rest of the object is a merge-patch, where an omitted field keeps
 		// its stored value and an explicit null resets it to the default.
 		const { id, ...patch } = data;
-		const response = await httpClient.put<any>(API_ENDPOINTS.COLLECTIONS_UPDATE(id), patch);
+		const response = await httpClient.put<RawCollection>(
+			API_ENDPOINTS.COLLECTIONS_UPDATE(id),
+			patch
+		);
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -152,21 +160,21 @@ export const apiService = {
 			? { collectionId: params.collectionId }
 			: undefined;
 		console.log("API: Fetching requests from", API_ENDPOINTS.REQUESTS, queryParams);
-		const response = await httpClient.get<Request[]>(API_ENDPOINTS.REQUESTS, queryParams);
+		const response = await httpClient.get<RawRequest[]>(API_ENDPOINTS.REQUESTS, queryParams);
 		console.log("API: Received requests:", response);
 		return response.map(RequestTransformer.toFrontend);
 	},
 
 	async getRequest(id: string): Promise<Request> {
 		console.log("API: Fetching request from", API_ENDPOINTS.REQUEST_BY_ID(id));
-		const response = await httpClient.get<Request>(API_ENDPOINTS.REQUEST_BY_ID(id));
+		const response = await httpClient.get<RawRequest>(API_ENDPOINTS.REQUEST_BY_ID(id));
 		console.log("API: Received request:", response);
 		return RequestTransformer.toFrontend(response);
 	},
 
 	async createRequest(data: CreateRequestRequest): Promise<Request> {
 		console.log("Creating request with data:", data);
-		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, withoutId(data));
+		const response = await httpClient.post<RawRequest>(API_ENDPOINTS.REQUESTS, withoutId(data));
 		return RequestTransformer.toFrontend(response);
 	},
 
@@ -174,7 +182,7 @@ export const apiService = {
 		console.log("Updating request with data:", data);
 		// PUT, not POST - see updateCollection above for why.
 		const { id, ...patch } = data;
-		const response = await httpClient.put<Request>(API_ENDPOINTS.REQUESTS_UPDATE(id), patch);
+		const response = await httpClient.put<RawRequest>(API_ENDPOINTS.REQUESTS_UPDATE(id), patch);
 		return RequestTransformer.toFrontend(response);
 	},
 

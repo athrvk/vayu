@@ -13,6 +13,7 @@ import type {
 	ImportResult,
 	RequestDraft,
 } from "./types";
+import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
 import { sampleSchema, schemaFieldNames } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
@@ -28,20 +29,21 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"
 const UNSUPPORTED_METHODS = ["trace"] as const;
 
 /** Map an OpenAPI 3 securityScheme to a concrete collection-level auth (empty secrets). */
-export function schemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
-	if (!scheme || !scheme.type) return { mode: "none" };
-	if (scheme.type === "http" && scheme.scheme === "bearer") return { mode: "bearer", token: "" };
-	if (scheme.type === "http" && scheme.scheme === "basic")
+export function schemeToAuth(scheme: unknown): Exclude<RequestAuth, { mode: "inherit" }> {
+	const node = asRecord(scheme);
+	if (!node || !node.type) return { mode: "none" };
+	if (node.type === "http" && node.scheme === "bearer") return { mode: "bearer", token: "" };
+	if (node.type === "http" && node.scheme === "basic")
 		return { mode: "basic", username: "", password: "" };
-	if (scheme.type === "apiKey") {
+	if (node.type === "apiKey") {
 		return {
 			mode: "apikey",
-			key: scheme.name ?? "",
+			key: asStr(node.name) ?? "",
 			value: "",
-			in: scheme.in === "query" ? "query" : "header",
+			in: node.in === "query" ? "query" : "header",
 		};
 	}
-	if (scheme.type === "oauth2") return mapOpenApiV3OAuth2(scheme);
+	if (node.type === "oauth2") return mapOpenApiV3OAuth2(node);
 	return { mode: "none" };
 }
 
@@ -50,23 +52,23 @@ export class OpenApiV3Parser implements ImportParser {
 	readonly formatKey = "openapi-v3";
 
 	detect(parsed: unknown, _raw: string): boolean {
-		const v = (parsed as any)?.openapi;
-		return typeof v === "string" && v.startsWith("3.");
+		const v = asStr(prop(parsed, "openapi"));
+		return !!v && v.startsWith("3.");
 	}
 
 	parse(parsed: unknown, _raw: string, _opts: ImportOptions): ImportResult {
-		const spec = parsed as any;
+		const spec = asRecord(parsed) ?? {};
 		const resolveRef = (ref: string): unknown => {
 			const path = ref
 				.replace(/^#\//, "")
 				.split("/")
 				.map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
-			let cur: any = spec;
-			for (const seg of path) cur = cur?.[seg];
+			let cur: unknown = spec;
+			for (const seg of path) cur = prop(cur, seg);
 			return cur;
 		};
 
-		const baseUrl = spec.servers?.[0]?.url ?? "";
+		const baseUrl = asStr(prop(asArray(spec.servers)[0], "url")) ?? "";
 		const primaryScheme = pickPrimaryScheme(spec);
 
 		const tagCollections = new Map<string, CollectionDraft>();
@@ -74,7 +76,7 @@ export class OpenApiV3Parser implements ImportParser {
 		const tally = new SkipTally();
 		let requestCount = 0;
 
-		for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
+		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
 			if (!pathItem) {
 				tally.add("malformed_spec");
@@ -86,11 +88,11 @@ export class OpenApiV3Parser implements ImportParser {
 					tally.add("unsupported_method");
 			}
 			for (const method of HTTP_METHODS) {
-				const op = (pathItem as any)[method];
+				const op = asRecord(pathItem[method]);
 				if (!op) continue;
 				requestCount += 1;
 				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
-				const tag = op.tags?.[0];
+				const tag = asStr(asArray(op.tags)[0]);
 				if (tag) {
 					if (!tagCollections.has(tag))
 						tagCollections.set(tag, makeTagCollection(spec, tag));
@@ -102,8 +104,8 @@ export class OpenApiV3Parser implements ImportParser {
 		}
 
 		const root: CollectionDraft = {
-			name: spec.info?.title ?? "Imported API",
-			description: spec.info?.description ?? "",
+			name: asStr(prop(spec.info, "title")) ?? "Imported API",
+			description: asStr(prop(spec.info, "description")) ?? "",
 			variables: baseUrl ? { baseUrl: { value: baseUrl, enabled: true } } : {},
 			auth: schemeToAuth(primaryScheme),
 			preRequestScript: "",
@@ -129,19 +131,19 @@ export class OpenApiV3Parser implements ImportParser {
 	}
 }
 
-function pickPrimaryScheme(spec: any): any {
-	const reqName = spec.security?.[0] ? Object.keys(spec.security[0])[0] : undefined;
-	const schemes = spec.components?.securitySchemes ?? {};
+function pickPrimaryScheme(spec: JsonRecord): unknown {
+	const required = asRecord(asArray(spec.security)[0]);
+	const reqName = required ? Object.keys(required)[0] : undefined;
+	const schemes = asRecord(prop(spec.components, "securitySchemes")) ?? {};
 	if (reqName && schemes[reqName]) return schemes[reqName];
-	const first = Object.values(schemes)[0];
-	return first;
+	return Object.values(schemes)[0];
 }
 
-function makeTagCollection(spec: any, tag: string): CollectionDraft {
-	const def = (spec.tags ?? []).find((t: any) => t.name === tag);
+function makeTagCollection(spec: JsonRecord, tag: string): CollectionDraft {
+	const def = asArray(spec.tags).find((t) => prop(t, "name") === tag);
 	return {
 		name: tag,
-		description: def?.description ?? "",
+		description: asStr(prop(def, "description")) ?? "",
 		variables: {},
 		auth: { mode: "none" },
 		preRequestScript: "",
@@ -154,36 +156,39 @@ function makeTagCollection(spec: any, tag: string): CollectionDraft {
 function buildOperation(
 	method: string,
 	path: string,
-	op: any,
+	op: JsonRecord,
 	resolveRef: (r: string) => unknown,
 	pathParams: unknown[],
 	tally: SkipTally
 ): RequestDraft {
 	const params: KeyValueEntry[] = [];
 	const headers: KeyValueEntry[] = [];
-	const byKey = new Map<string, any>();
-	for (const param of [...pathParams, ...tally.params(op.parameters)] as any[]) {
-		const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
+	const byKey = new Map<string, JsonRecord>();
+	for (const param of [...pathParams, ...tally.params(op.parameters)]) {
+		const ref = asStr(prop(param, "$ref"));
+		const resolved = asRecord(ref ? resolveRef(ref) : param);
 		if (!resolved || !resolved.in || !resolved.name) continue;
-		byKey.set(`${resolved.in}:${resolved.name}`, resolved); // later (operation) wins
+		byKey.set(`${String(resolved.in)}:${String(resolved.name)}`, resolved); // later (operation) wins
 	}
 	for (const resolved of byKey.values()) {
+		const name = String(resolved.name);
+		const description = asStr(resolved.description);
 		if (resolved.in === "query") {
 			params.push({
-				key: resolved.name,
+				key: name,
 				value: "",
 				enabled: true,
-				...(resolved.description ? { description: resolved.description } : {}),
+				...(description ? { description } : {}),
 			});
 		} else if (resolved.in === "header") {
-			const lower = String(resolved.name).toLowerCase();
+			const lower = name.toLowerCase();
 			if (lower === "authorization" || lower === "content-type") continue;
-			headers.push({ key: resolved.name, value: "", enabled: true });
+			headers.push({ key: name, value: "", enabled: true });
 		}
 	}
 	return {
-		name: op.summary ?? op.operationId ?? `${method.toUpperCase()} ${path}`,
-		description: op.description ?? "",
+		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
+		description: asStr(op.description) ?? "",
 		method: method.toUpperCase() as HttpMethod,
 		url: `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}`,
 		params,
@@ -195,17 +200,17 @@ function buildOperation(
 	};
 }
 
-function findJsonMedia(content: Record<string, any>): any {
-	if (content["application/json"]) return content["application/json"];
+function findJsonMedia(content: JsonRecord): JsonRecord | undefined {
+	if (content["application/json"]) return asRecord(content["application/json"]);
 	const key = Object.keys(content).find(
 		(k) => k.startsWith("application/json") || k.endsWith("+json")
 	);
-	return key ? content[key] : undefined;
+	return key ? asRecord(content[key]) : undefined;
 }
 
-function buildBody(requestBody: any, resolveRef: (r: string) => unknown): RequestBody {
-	const content = (requestBody?.$ref ? (resolveRef(requestBody.$ref) as any) : requestBody)
-		?.content;
+function buildBody(requestBody: unknown, resolveRef: (r: string) => unknown): RequestBody {
+	const ref = asStr(prop(requestBody, "$ref"));
+	const content = asRecord(prop(ref ? resolveRef(ref) : requestBody, "content"));
 	if (!content) return { mode: "none" };
 	const jsonMedia = findJsonMedia(content);
 	if (jsonMedia) {
@@ -217,7 +222,7 @@ function buildBody(requestBody: any, resolveRef: (r: string) => unknown): Reques
 	if (content["text/plain"]) return { mode: "text", content: "" };
 	for (const ct of ["application/x-www-form-urlencoded", "multipart/form-data"] as const) {
 		if (content[ct]) {
-			const fields = schemaFieldNames(content[ct].schema, resolveRef).map((k) => ({
+			const fields = schemaFieldNames(prop(content[ct], "schema"), resolveRef).map((k) => ({
 				key: k,
 				value: "",
 				enabled: true,

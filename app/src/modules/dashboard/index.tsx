@@ -112,28 +112,35 @@ export default function LoadTestDashboard() {
 
 	// Detect when streaming stops (test completed naturally) and trigger report fetch
 	useEffect(() => {
-		if (mode === "running" && !isStreaming && currentRunId && !finalReport) {
-			// Streaming stopped but mode is still "running" - the test completed naturally
-			// Fetch the final report to get the actual completion status
-			console.log("Streaming stopped, fetching final report...");
+		if (mode !== "running" || isStreaming || !currentRunId || finalReport) return;
+		// Streaming stopped but mode is still "running" - the test completed naturally
+		// Fetch the final report to get the actual completion status
+		console.log("Streaming stopped, fetching final report...");
+		// The fetch runs from its own async function, not the effect body: the
+		// loading flag and the result then land as callbacks (what the sibling
+		// report-retry effect below already does), and the cancel flag keeps a
+		// late answer from writing state for a run the user has navigated away from.
+		let cancelled = false;
+		const fetchReport = async () => {
 			setIsLoadingReport(true);
-			apiService
-				.getRunReport(currentRunId)
-				.then((report) => {
-					if (report) {
-						setFinalReport(report);
-					}
-				})
-				.catch((err: unknown) => {
-					console.error("Failed to fetch final report:", err);
+			try {
+				const report = await apiService.getRunReport(currentRunId);
+				if (report && !cancelled) setFinalReport(report);
+			} catch (err: unknown) {
+				console.error("Failed to fetch final report:", err);
+				if (!cancelled) {
 					setReportError(
 						err instanceof Error ? err.message : "Could not load the run report"
 					);
-				})
-				.finally(() => {
-					setIsLoadingReport(false);
-				});
-		}
+				}
+			} finally {
+				if (!cancelled) setIsLoadingReport(false);
+			}
+		};
+		void fetchReport();
+		return () => {
+			cancelled = true;
+		};
 	}, [mode, isStreaming, currentRunId, finalReport, setFinalReport]);
 
 	// Load final report when test completes (with delay and retry)
@@ -279,13 +286,14 @@ export default function LoadTestDashboard() {
 
 	// Build configuration from stored config or final report
 	// This ensures config is shown during live streaming, not just after report loads
+	const runConfiguration = runMetadata?.configuration;
 	const displayConfiguration = useMemo(() => {
-		if (runMetadata?.configuration) {
+		if (runConfiguration) {
 			// The final report's config omits the ramp fields, so the ramp_up
 			// Current Concurrency card would read "-s ramp" once complete. Backfill
 			// them from the run's own loadTestConfig (the config we started with).
 			return {
-				...runMetadata.configuration,
+				...runConfiguration,
 				rampUpDuration: loadTestConfig?.rampUpDuration,
 				startConcurrency: loadTestConfig?.startConcurrency,
 			};
@@ -302,7 +310,7 @@ export default function LoadTestDashboard() {
 			};
 		}
 		return undefined;
-	}, [runMetadata?.configuration, loadTestConfig]);
+	}, [runConfiguration, loadTestConfig]);
 
 	// Typed intermediate for ramp-specific fields that only exist on the loadTestConfig branch
 	const rampCfg = displayConfiguration as

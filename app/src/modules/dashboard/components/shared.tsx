@@ -19,8 +19,3 @@
 // the `className` the primitive accepts. Same class string, so nothing looked
 // wrong - but a dashboard caller that needed a margin had to reach past it.
 export { EYEBROW_CLASS, Eyebrow, InfoChip } from "@/components/ui";
-
-/** Format a possibly-undefined number, falling back to a dash. */
-export function fmt(v: number | undefined, digits = 1): string {
-	return v !== undefined ? v.toFixed(digits) : "-";
-}

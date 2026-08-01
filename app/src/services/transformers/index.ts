@@ -14,7 +14,7 @@
  * - Data structure transformation (arrays → objects)
  */
 
-export { RequestTransformer, type BackendRequest } from "./request-transformer";
-export { CollectionTransformer } from "./collection-transformer";
+export { RequestTransformer, type BackendRequest, type RawRequest } from "./request-transformer";
+export { CollectionTransformer, type RawCollection } from "./collection-transformer";
 export { RunReportTransformer } from "./run-report-transformer";
 export { GlobalsTransformer, type BackendGlobals } from "./globals-transformer";

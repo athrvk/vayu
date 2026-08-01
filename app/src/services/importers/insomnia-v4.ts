@@ -15,6 +15,7 @@ import type {
 	RequestDraft,
 	SkippedItem,
 } from "./types";
+import { asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
 import { asString, mapKeyValues } from "./shared";
 import { normalizeVars } from "./var-normalize";
 import { mapInsomniaOAuth2 } from "./oauth2-import";
@@ -52,59 +53,57 @@ function malformed(detail: string): Error {
 }
 
 /** A row array that may be absent but must not be another type. */
-function rowsOrThrow(value: unknown, what: string): any[] {
+function rowsOrThrow(value: unknown, what: string): unknown[] {
 	if (value == null) return [];
 	if (!Array.isArray(value)) throw malformed(`${what} must be an array`);
 	return value;
 }
 
 /** `{name,value,disabled,description}` row → the shape `mapKeyValues` reads. */
-function kvRow(row: any): {
-	key?: string;
-	value?: unknown;
-	disabled?: boolean;
-	description?: string;
-} {
+function kvRow(row: unknown): JsonRecord {
+	const r = asRecord(row);
+	const description = asStr(r?.description);
 	return {
-		key: row?.name,
-		value: row?.value,
-		disabled: row?.disabled,
-		...(typeof row?.description === "string" ? { description: row.description } : {}),
+		key: r?.name,
+		value: r?.value,
+		disabled: r?.disabled,
+		...(description ? { description } : {}),
 	};
 }
 
-function insomniaAuth(auth: any, ctx: Ctx): RequestAuth {
-	if (!auth || !auth.type || auth.disabled === true) {
-		return auth?.disabled === true ? { mode: "none" } : { mode: "inherit" };
+function insomniaAuth(auth: unknown, ctx: Ctx): RequestAuth {
+	const node = asRecord(auth);
+	if (!node || !node.type || node.disabled === true) {
+		return node?.disabled === true ? { mode: "none" } : { mode: "inherit" };
 	}
-	switch (auth.type) {
+	switch (asStr(node.type)) {
 		case "bearer":
-			return insomniaBearer(auth);
+			return insomniaBearer(node);
 		case "basic":
 			return {
 				mode: "basic",
-				username: normalizeVars(asString(auth.username)),
-				password: normalizeVars(asString(auth.password)),
+				username: normalizeVars(asString(node.username)),
+				password: normalizeVars(asString(node.password)),
 			};
 		case "apikey":
 			return {
 				mode: "apikey",
-				key: normalizeVars(asString(auth.key)),
-				value: normalizeVars(asString(auth.value)),
-				in: auth.addTo === "queryParams" ? "query" : "header",
+				key: normalizeVars(asString(node.key)),
+				value: normalizeVars(asString(node.value)),
+				in: node.addTo === "queryParams" ? "query" : "header",
 			};
 		case "oauth2":
-			return mapInsomniaOAuth2(auth);
+			return mapInsomniaOAuth2(node);
 		case "digest":
 		case "ntlm": {
 			ctx.nonExec += 1;
-			const { type: _type, disabled: _disabled, ...config } = auth;
-			return { mode: auth.type, config } as RequestAuth;
+			const { type, disabled: _disabled, ...config } = node;
+			return { mode: type, config } as RequestAuth;
 		}
 		case "iam": {
 			// Insomnia names AWS IAM auth "iam"; Vayu stores it as the "aws" config bag (not executed).
 			ctx.nonExec += 1;
-			const { type: _type, disabled: _disabled, ...config } = auth;
+			const { type: _type, disabled: _disabled, ...config } = node;
 			return { mode: "aws", config } as RequestAuth;
 		}
 		default:
@@ -121,7 +120,7 @@ function insomniaAuth(auth: any, ctx: Ctx): RequestAuth {
  * A prefix that only differs in case is left on the native bearer mode: HTTP
  * auth schemes are case-insensitive (RFC 7235 §2.1).
  */
-function insomniaBearer(auth: any): RequestAuth {
+function insomniaBearer(auth: JsonRecord): RequestAuth {
 	const token = normalizeVars(asString(auth.token));
 	const prefix = normalizeVars(asString(auth.prefix)).trim();
 	if (prefix !== "" && prefix.toLowerCase() !== "bearer") {
@@ -135,35 +134,36 @@ function insomniaBearer(auth: any): RequestAuth {
 	return { mode: "bearer", token };
 }
 
-function insomniaBody(body: any, ctx: Ctx): RequestBody {
+function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 	if (body == null) return { mode: "none" };
-	if (typeof body !== "object") throw malformed("a request `body` must be an object");
-	if (body.mimeType != null && typeof body.mimeType !== "string") {
+	const node = asRecord(body);
+	if (!node) throw malformed("a request `body` must be an object");
+	if (node.mimeType != null && typeof node.mimeType !== "string") {
 		throw malformed("`body.mimeType` must be a string");
 	}
-	const mime = (body.mimeType ?? "").split(";")[0].trim();
+	const mime = (node.mimeType ?? "").split(";")[0].trim();
 	switch (mime) {
 		case "application/json":
-			return { mode: "json", content: normalizeVars(asString(body.text)) };
+			return { mode: "json", content: normalizeVars(asString(node.text)) };
 		case "text/plain":
-			return { mode: "text", content: normalizeVars(asString(body.text)) };
+			return { mode: "text", content: normalizeVars(asString(node.text)) };
 		case "application/graphql":
-			return { mode: "graphql", content: normalizeVars(asString(body.text)) };
+			return { mode: "graphql", content: normalizeVars(asString(node.text)) };
 		case "application/x-www-form-urlencoded":
 			return {
 				mode: "x-www-form-urlencoded",
-				fields: mapKeyValues(rowsOrThrow(body.params, "`body.params`").map(kvRow)),
+				fields: mapKeyValues(rowsOrThrow(node.params, "`body.params`").map(kvRow)),
 			};
 		case "multipart/form-data": {
-			const rows = rowsOrThrow(body.params, "`body.params`");
-			const text = rows.filter((p: any) => p?.type !== "file");
+			const rows = rowsOrThrow(node.params, "`body.params`");
+			const text = rows.filter((p) => prop(p, "type") !== "file");
 			// Vayu has no file part; count the drop so the preview can show it (parity
 			// with the Postman parser's `skippedFileBody`).
 			ctx.fileBody += rows.length - text.length;
 			return { mode: "form-data", fields: mapKeyValues(text.map(kvRow)) };
 		}
 		default:
-			return unlistedBody(body, ctx);
+			return unlistedBody(node, ctx);
 	}
 }
 
@@ -174,7 +174,7 @@ function insomniaBody(body: any, ctx: Ctx): RequestBody {
  * body carries a `fileName` and no text - that one Vayu genuinely cannot store,
  * so it is dropped and counted instead of vanishing.
  */
-function unlistedBody(body: any, ctx: Ctx): RequestBody {
+function unlistedBody(body: JsonRecord, ctx: Ctx): RequestBody {
 	if (typeof body.text === "string" && body.text !== "") {
 		return { mode: "text", content: normalizeVars(body.text) };
 	}
@@ -201,12 +201,12 @@ export class InsomniaV4Parser implements ImportParser {
 	readonly formatKey = "insomnia-v4";
 
 	detect(parsed: unknown, _raw: string): boolean {
-		const p = parsed as any;
+		const p = asRecord(parsed);
 		return p?._type === "export" && p?.__export_format === 4;
 	}
 
 	parse(parsed: unknown, _raw: string, opts: ImportOptions): ImportResult {
-		const rawResources = (parsed as any)?.resources;
+		const rawResources = prop(parsed, "resources");
 		if (rawResources != null && !Array.isArray(rawResources)) {
 			throw malformed("`resources` must be an array");
 		}
@@ -280,9 +280,9 @@ export class InsomniaV4Parser implements ImportParser {
 			return {
 				name: node.name ?? "Imported",
 				description: node.description ?? "",
-				variables: isWorkspace ? toEnvVars((node.environment as any) ?? {}) : {},
+				variables: isWorkspace ? toEnvVars(asRecord(node.environment) ?? {}) : {},
 				auth: ((): Exclude<RequestAuth, { mode: "inherit" }> => {
-					const a = insomniaAuth((node as any).authentication, ctx);
+					const a = insomniaAuth(node.authentication, ctx);
 					return a.mode === "inherit" ? { mode: "none" } : a;
 				})(),
 				// Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
@@ -304,7 +304,7 @@ export class InsomniaV4Parser implements ImportParser {
 			for (const w of workspaces) {
 				const bases = (byParent.get(w._id) ?? []).filter((r) => r._type === "environment");
 				for (const base of bases) {
-					const baseVars = (base.data as Record<string, unknown>) ?? {};
+					const baseVars = asRecord(base.data) ?? {};
 					const subs = (byParent.get(base._id) ?? []).filter(
 						(r) => r._type === "environment"
 					);
@@ -321,7 +321,7 @@ export class InsomniaV4Parser implements ImportParser {
 								description: "",
 								variables: toEnvVars({
 									...baseVars,
-									...((sub.data as Record<string, unknown>) ?? {}),
+									...(asRecord(sub.data) ?? {}),
 								}),
 							});
 						}

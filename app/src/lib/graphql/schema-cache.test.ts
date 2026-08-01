@@ -25,7 +25,7 @@ beforeEach(() => {
 
 describe("schema cache", () => {
 	it("transitions idle → loading → ready on success", async () => {
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		const p = useSchemaCache.getState().ensureSchema(TARGET);
 		expect(entry(TARGET).status).toBe("loading");
 		await p;
@@ -34,28 +34,28 @@ describe("schema cache", () => {
 	});
 
 	it("transitions to error on failure", async () => {
-		(introspectSchema as any).mockRejectedValue(new Error("blocked"));
+		vi.mocked(introspectSchema).mockRejectedValue(new Error("blocked"));
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(entry(TARGET).status).toBe("error");
 		expect(entry(TARGET).error).toMatch(/blocked/);
 	});
 
 	it("does not re-introspect a target already ready", async () => {
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not retry a target already in error (until the target changes)", async () => {
-		(introspectSchema as any).mockRejectedValue(new Error("blocked"));
+		vi.mocked(introspectSchema).mockRejectedValue(new Error("blocked"));
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(1);
 	});
 
 	it("refreshSchema re-introspects even when already ready", async () => {
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		await useSchemaCache.getState().refreshSchema(TARGET);
 		expect(introspectSchema).toHaveBeenCalledTimes(2);
@@ -63,7 +63,7 @@ describe("schema cache", () => {
 	});
 
 	it("getActiveSchema follows the active target", async () => {
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema(TARGET);
 		expect(useSchemaCache.getState().getActiveSchema()).toBeNull();
 		useSchemaCache.getState().setActiveTarget(TARGET);
@@ -86,7 +86,7 @@ describe("cache identity", () => {
 	];
 
 	it.each(cases)("re-introspects for %s", async (_label, other) => {
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema({ ...TARGET, environmentId: "env_1" });
 		await useSchemaCache.getState().ensureSchema(other);
 		expect(introspectSchema).toHaveBeenCalledTimes(2);
@@ -94,7 +94,7 @@ describe("cache identity", () => {
 
 	it("serves the entry of the active target, not of a same-URL neighbour", async () => {
 		const other = { ...TARGET, environmentId: "env_2" };
-		(introspectSchema as any).mockResolvedValue(schema);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema({ ...TARGET, environmentId: "env_1" });
 
 		useSchemaCache.getState().setActiveTarget(other);

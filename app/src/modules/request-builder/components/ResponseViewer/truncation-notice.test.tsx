@@ -70,7 +70,9 @@ describe("response body truncation notice", () => {
 
 		expect(screen.getByText(/Body truncated for storage/i)).toBeInTheDocument();
 		// The "how to recover" instruction is the actionable half of the notice.
-		expect(screen.getByText(/Re-send the request to view the full response/i)).toBeInTheDocument();
+		expect(
+			screen.getByText(/Re-send the request to view the full response/i)
+		).toBeInTheDocument();
 	});
 
 	it("shows no notice for an untruncated response", () => {

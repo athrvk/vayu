@@ -6,7 +6,8 @@
  */
 
 import { cn } from "@/lib/utils";
-import { InfoChip, Eyebrow, fmt } from "../shared";
+import { InfoChip, Eyebrow } from "../shared";
+import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 
 /** constant_rps hero card #2 - twin send/throughput rates from the open model. */

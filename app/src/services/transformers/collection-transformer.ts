@@ -12,35 +12,40 @@
  * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Collection, RequestAuth } from "@/types";
+import type { Collection, RequestAuth, VariableValue } from "@/types";
+import { asRecord, asStr } from "@/lib/json-node";
+
+/**
+ * A collection row as the engine sends it. Typed as a bag of unknowns rather
+ * than as `Collection`: the wire row carries numeric timestamps and may predate
+ * a column, which is exactly what this transformer exists to reconcile.
+ */
+export type RawCollection = Record<string, unknown>;
 
 export class CollectionTransformer {
-	static toFrontend(raw: Record<string, any>): Collection {
-		if (!raw.id) throw new Error("Collection must have an id");
+	static toFrontend(raw: RawCollection): Collection {
+		const id = asStr(raw.id);
+		if (!id) throw new Error("Collection must have an id");
 
 		// Auth: defaults to {mode: "none"} if missing or malformed
 		let auth: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "none" };
-		if (
-			raw.auth &&
-			typeof raw.auth === "object" &&
-			raw.auth.mode &&
-			raw.auth.mode !== "inherit"
-		) {
-			auth = raw.auth as Exclude<RequestAuth, { mode: "inherit" }>;
+		const rawAuth = asRecord(raw.auth);
+		if (rawAuth && rawAuth.mode && rawAuth.mode !== "inherit") {
+			auth = rawAuth as Exclude<RequestAuth, { mode: "inherit" }>;
 		}
 
 		return {
-			id: raw.id,
-			name: raw.name ?? "",
-			description: raw.description ?? "",
-			parentId: raw.parentId ?? undefined,
-			order: raw.order ?? 0,
-			variables: raw.variables ?? {},
+			id,
+			name: asStr(raw.name) ?? "",
+			description: asStr(raw.description) ?? "",
+			parentId: asStr(raw.parentId) ?? undefined,
+			order: typeof raw.order === "number" ? raw.order : 0,
+			variables: (asRecord(raw.variables) ?? {}) as Record<string, VariableValue>,
+			preRequestScript: asStr(raw.preRequestScript) ?? "",
+			postRequestScript: asStr(raw.postRequestScript) ?? "",
 			auth,
-			preRequestScript: raw.preRequestScript ?? "",
-			postRequestScript: raw.postRequestScript ?? "",
-			createdAt: new Date(raw.createdAt).toISOString(),
-			updatedAt: new Date(raw.updatedAt).toISOString(),
+			createdAt: new Date(raw.createdAt as string | number).toISOString(),
+			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),
 		};
 	}
 }

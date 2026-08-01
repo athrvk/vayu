@@ -52,10 +52,17 @@ export default function CollectionTree() {
 	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
 	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
-	const navigateToRequest = (_collectionId: string, requestId: string) =>
-		openTab({ type: "request", entityId: requestId });
-	const navigateToCollection = (collectionId: string) =>
-		openTab({ type: "collection", entityId: collectionId });
+	// Memoised because the callbacks below list them as dependencies: redefined
+	// each render, they would rebuild every handler that opens a tab.
+	const navigateToRequest = useCallback(
+		(_collectionId: string, requestId: string) =>
+			openTab({ type: "request", entityId: requestId }),
+		[openTab]
+	);
+	const navigateToCollection = useCallback(
+		(collectionId: string) => openTab({ type: "collection", entityId: collectionId }),
+		[openTab]
+	);
 
 	// TanStack Query hooks
 	// isError as well as isLoading. The query is destructured with `= []`, so a

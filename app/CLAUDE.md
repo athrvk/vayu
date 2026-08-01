@@ -5,7 +5,10 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
 
 ## Conventions
 
-- Strict TypeScript - no `any`, no `@ts-ignore` without justification
+- Strict TypeScript - no `any`, no `@ts-ignore` without justification. `pnpm lint`
+  runs in CI (zero errors _and_ zero warnings) alongside `pnpm format:check`, so a
+  rule that genuinely cannot be met is suppressed on the one line, with the reason
+  in a comment
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`
 - Feature-organized: `app/src/modules/<feature>/` (request-builder, collections,
   dashboard, history, variables, settings, welcome); shared shell + primitives in

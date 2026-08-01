@@ -262,8 +262,16 @@ export default function SettingsMain() {
 	 * commit's effect bodies, so the ref still holds the *outgoing* category's
 	 * values - which is exactly what needs writing.
 	 */
-	useEffect(() => {
+	const [editedCategory, setEditedCategory] = useState(selectedCategory);
+	if (editedCategory !== selectedCategory) {
+		// Dropping the outgoing category's edits belongs to the category change
+		// itself, so it is adjusted here rather than in the effect below - which
+		// keeps the flush in the cleanup, where the ref still holds those edits.
+		setEditedCategory(selectedCategory);
 		setEditedValues({});
+	}
+
+	useEffect(() => {
 		return () => {
 			const pending = editedValuesRef.current;
 			if (Object.keys(pending).length > 0) void saveEntriesRef.current?.(pending);

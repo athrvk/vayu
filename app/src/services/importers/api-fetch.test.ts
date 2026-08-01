@@ -10,7 +10,7 @@ import { apiService } from "@/services/api";
 describe("apiService.importFetch", () => {
 	beforeEach(() => vi.clearAllMocks());
 	it("POSTs the url to /import/fetch and returns the content envelope", async () => {
-		(httpClient.post as any).mockResolvedValue({
+		vi.mocked(httpClient.post).mockResolvedValue({
 			content: "{}",
 			contentType: "application/json",
 		});

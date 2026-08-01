@@ -11,8 +11,8 @@
 import { create } from "zustand";
 import type { Run } from "@/types";
 
-type FilterType = "all" | "load" | "design";
-type FilterStatus = "all" | "pending" | "running" | "completed" | "stopped" | "failed";
+export type FilterType = "all" | "load" | "design";
+export type FilterStatus = "all" | "pending" | "running" | "completed" | "stopped" | "failed";
 type SortBy = "newest" | "oldest";
 
 interface HistoryUIState {

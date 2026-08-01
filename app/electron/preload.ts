@@ -7,8 +7,10 @@
 
 // Electron preload script
 // This file runs in the renderer process before web content begins loading
-// NOTE: Preload scripts with contextIsolation must use require() syntax
-
+// NOTE: Preload scripts with contextIsolation must use require() syntax - the
+// script is loaded as CommonJS in the isolated world, so an ESM `import` here
+// fails at runtime. That is the boundary the rule below cannot see.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer, webFrame } = require("electron");
 
 // Expose protected methods that allow the renderer process to use

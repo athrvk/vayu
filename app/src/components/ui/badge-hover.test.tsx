@@ -36,7 +36,7 @@ import { readFileSync, globSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cn } from "@/lib/utils";
-import { badgeVariants } from "./badge";
+import { badgeVariants } from "./badge-variants";
 import { ResponseStatusBar } from "@/components/shared/response-viewer";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");

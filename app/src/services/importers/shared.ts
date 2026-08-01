@@ -6,6 +6,7 @@
  */
 
 import type { KeyValueEntry, RequestAuth, RequestBody, VariableValue } from "@/types";
+import { asArray, asRecord, asStr, prop } from "@/lib/json-node";
 import { normalizeVars } from "./var-normalize";
 import { mapPostmanOAuth2 } from "./oauth2-import";
 
@@ -25,22 +26,13 @@ export function asString(v: unknown): string {
  * not store, since every value is a string. The flag is omitted rather than set
  * to `false` so a non-secret variable serialises the same as before.
  */
-export function toVarRecord(
-	vars:
-		| Array<{
-				key: string;
-				value?: unknown;
-				enabled?: boolean;
-				disabled?: boolean;
-				type?: unknown;
-		  }>
-		| undefined
-): Record<string, VariableValue> {
+export function toVarRecord(vars: unknown): Record<string, VariableValue> {
 	const out: Record<string, VariableValue> = {};
-	for (const v of vars ?? []) {
+	for (const entry of asArray(vars)) {
+		const v = asRecord(entry);
 		if (!v || !v.key) continue;
-		const enabled = v.disabled != null ? !v.disabled : v.enabled != null ? v.enabled : true;
-		out[v.key] = {
+		const enabled = v.disabled != null ? !v.disabled : v.enabled != null ? !!v.enabled : true;
+		out[asString(v.key)] = {
 			value: normalizeVars(asString(v.value)),
 			enabled,
 			...(v.type === "secret" ? { secret: true } : {}),
@@ -50,19 +42,19 @@ export function toVarRecord(
 }
 
 /** Postman header/query/urlencoded arrays → KeyValueEntry[]. Preserves disabled + duplicates. */
-export function mapKeyValues(
-	rows:
-		| Array<{ key?: string; value?: unknown; disabled?: boolean; description?: string }>
-		| undefined
-): KeyValueEntry[] {
-	return (rows ?? [])
-		.filter((r) => r && r.key)
-		.map((r) => ({
-			key: r.key as string,
+export function mapKeyValues(rows: unknown): KeyValueEntry[] {
+	const out: KeyValueEntry[] = [];
+	for (const row of asArray(rows)) {
+		const r = asRecord(row);
+		if (!r || !r.key) continue;
+		out.push({
+			key: asString(r.key),
 			value: normalizeVars(asString(r.value)),
 			enabled: r.disabled !== true,
-			...(r.description ? { description: r.description } : {}),
-		}));
+			...(r.description ? { description: asString(r.description) } : {}),
+		});
+	}
+	return out;
 }
 
 /** Read a Postman auth detail array/object into a flat {key:value} map (handles v2.1 + v2.0). */
@@ -81,10 +73,13 @@ function authDetail(node: unknown): Record<string, string> {
 }
 
 /** Map a Postman `auth` object (collection/folder/request) to a Vayu RequestAuth. */
-export function mapPostmanAuth(auth: any): RequestAuth {
-	if (!auth || !auth.type) return { mode: "inherit" };
-	const type = auth.type as string;
-	const d = authDetail(auth[type]);
+export function mapPostmanAuth(auth: unknown): RequestAuth {
+	const node = asRecord(auth);
+	if (!node || !node.type) return { mode: "inherit" };
+	// A `type` that is not a string names no scheme, so nothing can be sent for it.
+	const type = asStr(node.type);
+	if (!type) return { mode: "none" };
+	const d = authDetail(node[type]);
 	switch (type) {
 		case "bearer":
 			return { mode: "bearer", token: normalizeVars(d.token ?? "") };
@@ -135,9 +130,8 @@ export function rawBody(content: string, language: string | undefined): RequestB
 }
 
 /** Postman event entry → joined script string. */
-export function joinExec(event: any): string {
-	const exec = event?.script?.exec;
+export function joinExec(event: unknown): string {
+	const exec = prop(prop(event, "script"), "exec");
 	if (Array.isArray(exec)) return exec.join("\n");
-	if (typeof exec === "string") return exec;
-	return "";
+	return asStr(exec) ?? "";
 }

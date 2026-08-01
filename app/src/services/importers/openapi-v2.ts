@@ -13,6 +13,7 @@ import type {
 	ImportResult,
 	RequestDraft,
 } from "./types";
+import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
 import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
@@ -30,18 +31,19 @@ const isUrlEncodedType = (c: unknown): boolean =>
 	mediaType(c) === "application/x-www-form-urlencoded";
 const isMultipartType = (c: unknown): boolean => mediaType(c) === "multipart/form-data";
 
-export function swaggerSchemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
-	if (!scheme || !scheme.type) return { mode: "none" };
-	if (scheme.type === "basic") return { mode: "basic", username: "", password: "" };
-	if (scheme.type === "apiKey") {
+export function swaggerSchemeToAuth(scheme: unknown): Exclude<RequestAuth, { mode: "inherit" }> {
+	const node = asRecord(scheme);
+	if (!node || !node.type) return { mode: "none" };
+	if (node.type === "basic") return { mode: "basic", username: "", password: "" };
+	if (node.type === "apiKey") {
 		return {
 			mode: "apikey",
-			key: scheme.name ?? "",
+			key: asStr(node.name) ?? "",
 			value: "",
-			in: scheme.in === "query" ? "query" : "header",
+			in: node.in === "query" ? "query" : "header",
 		};
 	}
-	if (scheme.type === "oauth2") return mapSwaggerOAuth2(scheme);
+	if (node.type === "oauth2") return mapSwaggerOAuth2(node);
 	return { mode: "none" };
 }
 
@@ -50,27 +52,30 @@ export class OpenApiV2Parser implements ImportParser {
 	readonly formatKey = "openapi-v2";
 
 	detect(parsed: unknown, _raw: string): boolean {
-		return (parsed as any)?.swagger === "2.0";
+		return prop(parsed, "swagger") === "2.0";
 	}
 
 	parse(parsed: unknown, _raw: string, _opts: ImportOptions): ImportResult {
-		const spec = parsed as any;
+		const spec = asRecord(parsed) ?? {};
 		const resolveRef = (ref: string): unknown => {
 			const path = ref
 				.replace(/^#\//, "")
 				.split("/")
 				.map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
-			let cur: any = spec;
-			for (const seg of path) cur = cur?.[seg];
+			let cur: unknown = spec;
+			for (const seg of path) cur = prop(cur, seg);
 			return cur;
 		};
 
-		const scheme = (spec.schemes?.[0] as string) ?? "https";
-		const basePath = spec.basePath && spec.basePath !== "/" ? spec.basePath : "";
-		const baseUrl = spec.host ? `${scheme}://${spec.host}${basePath}` : "";
+		const scheme = asStr(asArray(spec.schemes)[0]) ?? "https";
+		const basePathValue = asStr(spec.basePath);
+		const basePath = basePathValue && basePathValue !== "/" ? basePathValue : "";
+		const host = asStr(spec.host);
+		const baseUrl = host ? `${scheme}://${host}${basePath}` : "";
 
-		const reqName = spec.security?.[0] ? Object.keys(spec.security[0])[0] : undefined;
-		const defs = spec.securityDefinitions ?? {};
+		const required = asRecord(asArray(spec.security)[0]);
+		const reqName = required ? Object.keys(required)[0] : undefined;
+		const defs = asRecord(spec.securityDefinitions) ?? {};
 		const primaryScheme = (reqName && defs[reqName]) || Object.values(defs)[0];
 
 		const tagCollections = new Map<string, CollectionDraft>();
@@ -78,7 +83,7 @@ export class OpenApiV2Parser implements ImportParser {
 		const tally = new SkipTally();
 		let requestCount = 0;
 
-		for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
+		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
 			if (!pathItem) {
 				tally.add("malformed_spec");
@@ -86,17 +91,17 @@ export class OpenApiV2Parser implements ImportParser {
 			}
 			const pathParams = tally.params(pathItem.parameters);
 			for (const method of HTTP_METHODS) {
-				const op = (pathItem as any)[method];
+				const op = asRecord(pathItem[method]);
 				if (!op) continue;
 				requestCount += 1;
 				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally);
-				const tag = op.tags?.[0];
+				const tag = asStr(asArray(op.tags)[0]);
 				if (tag) {
 					if (!tagCollections.has(tag)) {
-						const def = (spec.tags ?? []).find((t: any) => t.name === tag);
+						const def = asArray(spec.tags).find((t) => prop(t, "name") === tag);
 						tagCollections.set(tag, {
 							name: tag,
-							description: def?.description ?? "",
+							description: asStr(prop(def, "description")) ?? "",
 							variables: {},
 							auth: { mode: "none" },
 							preRequestScript: "",
@@ -113,8 +118,8 @@ export class OpenApiV2Parser implements ImportParser {
 		}
 
 		const root: CollectionDraft = {
-			name: spec.info?.title ?? "Imported API",
-			description: spec.info?.description ?? "",
+			name: asStr(prop(spec.info, "title")) ?? "Imported API",
+			description: asStr(prop(spec.info, "description")) ?? "",
 			variables: baseUrl ? { baseUrl: { value: baseUrl, enabled: true } } : {},
 			auth: swaggerSchemeToAuth(primaryScheme),
 			preRequestScript: "",
@@ -143,8 +148,8 @@ export class OpenApiV2Parser implements ImportParser {
 function buildSwaggerOp(
 	method: string,
 	path: string,
-	op: any,
-	spec: any,
+	op: JsonRecord,
+	spec: JsonRecord,
 	resolveRef: (r: string) => unknown,
 	pathParams: unknown[],
 	tally: SkipTally
@@ -154,7 +159,9 @@ function buildSwaggerOp(
 	let body: RequestBody = { mode: "none" };
 	const formFields: KeyValueEntry[] = [];
 
-	const consumes: string[] = op.consumes ?? spec.consumes ?? [];
+	const consumes = (Array.isArray(op.consumes) ? op.consumes : asArray(spec.consumes)).map(
+		(c) => asStr(c) ?? ""
+	);
 	const isJsonConsume =
 		consumes.length === 0 ||
 		consumes.some(
@@ -171,27 +178,30 @@ function buildSwaggerOp(
 			: "form-data";
 
 	// Resolve $ref params and dedupe by name+in (operation overrides path-item).
-	const byKey = new Map<string, any>();
-	for (const param of [...pathParams, ...tally.params(op.parameters)] as any[]) {
-		const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
+	const byKey = new Map<string, JsonRecord>();
+	for (const param of [...pathParams, ...tally.params(op.parameters)]) {
+		const ref = asStr(prop(param, "$ref"));
+		const resolved = asRecord(ref ? resolveRef(ref) : param);
 		if (!resolved || !resolved.in || !resolved.name) continue;
-		byKey.set(`${resolved.in}:${resolved.name}`, resolved);
+		byKey.set(`${String(resolved.in)}:${String(resolved.name)}`, resolved);
 	}
 
 	for (const param of byKey.values()) {
-		switch (param.in) {
+		const name = String(param.name);
+		const description = asStr(param.description);
+		switch (asStr(param.in)) {
 			case "query":
 				params.push({
-					key: param.name,
+					key: name,
 					value: "",
 					enabled: true,
-					...(param.description ? { description: param.description } : {}),
+					...(description ? { description } : {}),
 				});
 				break;
 			case "header": {
-				const lower = String(param.name).toLowerCase();
+				const lower = name.toLowerCase();
 				if (lower !== "authorization" && lower !== "content-type")
-					headers.push({ key: param.name, value: "", enabled: true });
+					headers.push({ key: name, value: "", enabled: true });
 				break;
 			}
 			case "body": {
@@ -202,15 +212,15 @@ function buildSwaggerOp(
 				break;
 			}
 			case "formData":
-				formFields.push({ key: param.name, value: "", enabled: true });
+				formFields.push({ key: name, value: "", enabled: true });
 				break;
 		}
 	}
 	if (formFields.length > 0) body = { mode: formMode, fields: formFields };
 
 	return {
-		name: op.summary ?? op.operationId ?? `${method.toUpperCase()} ${path}`,
-		description: op.description ?? "",
+		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
+		description: asStr(op.description) ?? "",
 		method: method.toUpperCase() as HttpMethod,
 		url: `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}`,
 		params,
