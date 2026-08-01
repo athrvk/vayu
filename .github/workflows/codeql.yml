@@ -131,7 +131,7 @@ jobs:
           # toolchain and would fail to configure. The build below runs between
           # init and analyze, under the tracer init installs.
           build-mode: manual
-          # The engine vendors quickjs-ng, picosha2 and hdrhistogram under
+          # The engine vendors quickjs-ng and hdrhistogram under
           # engine/vendor. They are third-party and compile into the database
           # regardless, but their alerts are not ours to fix, so drop them from
           # the report.

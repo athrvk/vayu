@@ -124,6 +124,7 @@ endif()
 # ============================================================================
 
 find_package(CURL REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
@@ -251,14 +252,11 @@ target_include_directories(vayu_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Vendored single-header SHA-256 (picosha2, MIT) used for PKCE. SYSTEM so its
-# warnings are suppressed under the engine's strict flags.
-target_include_directories(vayu_core SYSTEM PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/picosha2
-)
-
 target_link_libraries(vayu_core PUBLIC
     CURL::libcurl
+    # PUBLIC because utils/sha256.hpp and utils/encoding.hpp include <sodium.h>
+    # in their interface, so every consumer of vayu_core needs it too.
+    unofficial-sodium::sodium
     nlohmann_json::nlohmann_json
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
