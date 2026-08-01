@@ -42,11 +42,13 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
+import type { ConsoleLogEntry } from "@/types";
 import { parseConsoleLogs, splitBySource } from "./console/parse-logs";
 import { ScriptError, ScriptLogs } from "./console/ScriptSection";
 
 export interface ConsoleOutputProps {
-	logs: string[];
+	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
+	logs: Array<ConsoleLogEntry | string>;
 	errors: {
 		pre?: string;
 		post?: string;

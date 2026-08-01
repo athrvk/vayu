@@ -443,9 +443,18 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   testResults: [
     { name: "Status 200", passed: true }
   ],
-  consoleLogs: ["Pre-request"]
+  consoleLogs: [
+    { source: "pre", level: "log", message: "Pre-request" },
+    { source: "test", level: "warn", message: "slow response" }
+  ]
 }
 ```
+
+`consoleLogs` entries name the script that wrote them and the `console.*` level
+that was called. A bare `string` is the pre-structured shape an older engine
+sidecar sends; `console/parse-logs.ts` decodes both and is the only place that
+knows the difference (see
+[the engine API reference](../engine/api-reference.md#post-execute)).
 
 `httpVersion` here is the **negotiated** protocol (`"HTTP/1.1"` / `"HTTP/2"` /
 `""` when nothing was negotiated) - an outcome, not an echo of the request's

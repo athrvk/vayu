@@ -18,6 +18,7 @@
 import type { BodyDrafts } from "./utils/body-drafts";
 import type {
 	BodyMode,
+	ConsoleLogEntry,
 	HttpMethod,
 	HttpVersion,
 	KeyValueEntry,
@@ -220,7 +221,8 @@ export interface ResponseState {
 	restoredFrom?: RestoredFrom;
 	errorCode?: string;
 	errorMessage?: string;
-	consoleLogs?: string[];
+	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
+	consoleLogs?: Array<ConsoleLogEntry | string>;
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 	preScriptError?: string;
 	postScriptError?: string;

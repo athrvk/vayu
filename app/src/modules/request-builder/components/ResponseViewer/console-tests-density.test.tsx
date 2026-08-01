@@ -248,7 +248,10 @@ describe("a very long console", () => {
 
 	it("marks its rows skippable so the ones off screen cost no layout", () => {
 		const { container } = render(<ConsoleOutput logs={MANY} errors={{}} />);
-		const row = container.querySelector("pre");
+		// The row is the wrapper, not the `<pre>`: a line is a level gutter plus a
+		// message, and `content-visibility` has to skip the pair or it skips half
+		// a row and still lays the other half out.
+		const row = container.querySelector("pre")?.parentElement;
 		expect(row?.className).toContain("skip-offscreen");
 	});
 

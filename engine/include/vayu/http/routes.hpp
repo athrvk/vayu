@@ -21,9 +21,9 @@
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
-// Owns interactive OAuth 2.0 authorization attempts; defined in oauth_authorize.hpp.
-// Forward-declared here so RouteContext can carry a reference without every route
-// TU pulling in the loopback listener machinery.
+// Owns interactive OAuth 2.0 authorization attempts; defined in
+// oauth_authorize.hpp. Forward-declared here so RouteContext can carry a
+// reference without every route TU pulling in the loopback listener machinery.
 class OAuth2AuthorizeManager;
 } // namespace vayu::http
 
@@ -77,8 +77,7 @@ inline nlohmann::json
 error_body (int status, const std::string& message, std::string_view code = {}) {
     const std::string error_code =
     code.empty () ? default_error_code (status) : std::string (code);
-    return nlohmann::json{ { "error",
-    { { "code", error_code }, { "message", message } } } };
+    return nlohmann::json{ { "error", { { "code", error_code }, { "message", message } } } };
 }
 
 /**
@@ -97,7 +96,8 @@ inline std::string error_message_of (const nlohmann::json& body) {
     if (error->is_string ()) {
         return error->get<std::string> ();
     }
-    if (error->is_object () && error->contains ("message") && (*error)["message"].is_string ()) {
+    if (error->is_object () && error->contains ("message") &&
+    (*error)["message"].is_string ()) {
         return (*error)["message"].get<std::string> ();
     }
     return error->dump ();
@@ -127,13 +127,12 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
  *
  * The renamed routes register one shared handler under both the canonical path
  * (first) and the legacy path (second). cpp-httplib handlers are copyable
- * std::functions, so the body is never duplicated; `req.matches[1]` is identical
- * under both patterns. The alias registration wraps the handler with this so the
- * per-request logs carry a ` (deprecated alias)` marker and the actual `req.path`
- * that was hit - the canonical registration logs unchanged.
+ * std::functions, so the body is never duplicated; `req.matches[1]` is
+ * identical under both patterns. The alias registration wraps the handler with
+ * this so the per-request logs carry a ` (deprecated alias)` marker and the
+ * actual `req.path` that was hit - the canonical registration logs unchanged.
  */
-inline httplib::Server::Handler
-deprecated_alias (httplib::Server::Handler handler) {
+inline httplib::Server::Handler deprecated_alias (httplib::Server::Handler handler) {
     return [handler = std::move (handler)] (
            const httplib::Request& req, httplib::Response& res) {
         vayu::utils::log_info (req.method + " " + req.path +
@@ -312,12 +311,14 @@ bool is_create) {
             return std::nullopt;
         }
         return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key + "': '" + candidate +
+        error_body (400,
+        std::string ("Invalid '") + key + "': '" + candidate +
         "' is not a valid HTTP version. Valid values: " + http_version_valid_list ()));
     }
 
     return std::make_pair (400,
-    error_body (400, std::string ("Invalid '") + key +
+    error_body (400,
+    std::string ("Invalid '") + key +
     "': must be a string. Valid values: " + http_version_valid_list ()));
 }
 
@@ -338,8 +339,7 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
     }
     if (json[key].is_null ()) {
         return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key +
-        "': null is not allowed (this field has no default)"));
+        error_body (400, std::string ("Invalid '") + key + "': null is not allowed (this field has no default)"));
     }
     out = json[key].get<std::string> ();
     return std::nullopt;
@@ -364,7 +364,8 @@ const nlohmann::json& json) {
         return std::nullopt;
     }
     return std::make_pair (400,
-    error_body (400, "id is assigned by the engine; omit it "
+    error_body (400,
+    "id is assigned by the engine; omit it "
     "(bulk import: POST /import/apply)"));
 }
 
@@ -393,9 +394,9 @@ reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_i
 /**
  * The per-resource field appliers, shared by the single-resource create/update
  * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
- * what `POST /<resource>` would store, so it calls these rather than re-deriving
- * the null-vs-absent rule or the per-field validation - a second copy would
- * drift the moment a field is added.
+ * what `POST /<resource>` would store, so it calls these rather than
+ * re-deriving the null-vs-absent rule or the per-field validation - a second
+ * copy would drift the moment a field is added.
  *
  * Each returns an error response {http_status, json_body} when a no-default
  * field is missing or null (or, for collections, when the proposed parent would
@@ -403,10 +404,14 @@ reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_i
  * behaviour; see the rule above. Defined in collections.cpp / requests.cpp /
  * environments.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
-vayu::db::Database& db, vayu::db::Collection& c, const nlohmann::json& json, bool is_create);
-std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
-vayu::db::Database& db, vayu::db::Request& r, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (vayu::db::Database& db,
+vayu::db::Collection& c,
+const nlohmann::json& json,
+bool is_create);
+std::optional<std::pair<int, nlohmann::json>> apply_request_fields (vayu::db::Database& db,
+vayu::db::Request& r,
+const nlohmann::json& json,
+bool is_create);
 std::optional<std::pair<int, nlohmann::json>>
 apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
 
@@ -424,7 +429,7 @@ struct RouteContext {
     vayu::db::Database& db;
     vayu::core::RunManager& run_manager;
     bool verbose;
-    ShutdownCallback on_shutdown;                       // Optional graceful-shutdown callback
+    ShutdownCallback on_shutdown; // Optional graceful-shutdown callback
     vayu::http::OAuth2AuthorizeManager& authorize_manager; // Owned by Server; see server.hpp
 };
 
@@ -442,5 +447,14 @@ void register_metrics_routes (RouteContext& ctx);
 void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);
 void register_oauth_routes (RouteContext& ctx);
+
+/**
+ * @brief Generate the TypeScript declarations for the `pm.*` script surface.
+ *
+ * Derived from `get_script_completions ()` so the surface is declared once;
+ * see script_types.cpp for why a hand-written `pm.d.ts` in the app was not the
+ * shape chosen. Deterministic - the same table always yields identical text.
+ */
+std::string generate_script_typedefs ();
 
 } // namespace vayu::http::routes

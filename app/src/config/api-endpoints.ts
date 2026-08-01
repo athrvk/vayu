@@ -46,6 +46,7 @@ export const API_ENDPOINTS = {
 
 	// Scripting
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
+	SCRIPT_TYPES: `/scripting/types`,
 
 	// Execution
 	// Composition first, execution second: POST /compose resolves {{variables}}

@@ -464,12 +464,45 @@ struct TestResult {
 };
 
 /**
+ * @brief Which `console.*` method a script line came from.
+ *
+ * QuickJS binds all four methods to one C function, so the level has to be
+ * captured at the call - it is not recoverable from the text afterwards. It was
+ * dropped entirely until now, which is why every line reached the app's Console
+ * tab looking the same whether the script called `log` or `error`.
+ */
+enum class ConsoleLevel { Log, Info, Warn, Error };
+
+/** Wire spelling of a level. The app matches on these exact strings. */
+[[nodiscard]] constexpr const char* to_string (ConsoleLevel level) noexcept {
+    switch (level) {
+    case ConsoleLevel::Info: return "info";
+    case ConsoleLevel::Warn: return "warn";
+    case ConsoleLevel::Error: return "error";
+    case ConsoleLevel::Log: break;
+    }
+    return "log";
+}
+
+/**
+ * @brief One `console.*` line from a script.
+ *
+ * No `source` field: a `ScriptEngine` run does not know whether it is the
+ * pre-request or the post-request script. Whoever merges the two knows, and
+ * fills it in on the wire (`execution.cpp`).
+ */
+struct ConsoleEntry {
+    ConsoleLevel level = ConsoleLevel::Log;
+    std::string message;
+};
+
+/**
  * @brief Script execution result
  */
 struct ScriptResult {
     bool success = true;
     std::vector<TestResult> tests;
-    std::vector<std::string> console_output;
+    std::vector<ConsoleEntry> console_output;
     std::string error_message;
 };
 

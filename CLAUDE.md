@@ -133,6 +133,27 @@ both after retouching a doc comment reads as diligence and is just latency. Ask
 what a failure would even look like before running anything: if no test could
 possibly go from green to red, do not run tests.
 
+**CI runs the full matrix on every push, so a local full-suite run is for
+*your* confidence, not for coverage.** It is worth paying before committing a
+substantial piece of work - a failure found locally is one you fix in the same
+context, rather than ten minutes later from a job log. It is not worth paying
+for a change that carries no behaviour. Some concrete cases where the answer is
+simply "don't":
+
+- **A release commit** (`python build.py --bump-version …` plus the notes file
+  under `.github/release-notes/`). Every edit is a version string or Markdown.
+  The version stamp is worth one cheap check - `./build/vayu-engine --help`
+  prints it - and nothing else. Do not rebuild the engine or run either suite.
+- **Adding or rewording a doc, a comment, or a commit-adjacent file.**
+  `mkdocs build --strict` if the change is under `docs/`, because a broken
+  relative link is a *build* failure and CI will catch it either way; no suites.
+- **A rename with no behaviour change.** A build, to prove it compiles. Not the
+  suites.
+
+The distinction is whether a test could plausibly change colour, not how large
+the diff looks. A 400-line docs commit is still a docs commit; a two-character
+edit to a comparison operator is not.
+
 ### Type checking
 
 ```bash
