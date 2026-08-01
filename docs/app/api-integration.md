@@ -20,8 +20,8 @@ All communication happens on `localhost:9876` (configurable).
                     │
                     ▼
 ┌─────────────────────────────────────────┐
-│         Custom Hooks                    │
-│  (useEngine, useSSE)                    │
+│  Hooks + singletons                     │
+│  (useEngine, queries/, loadTestService) │
 └─────────────────────────────────────────┘
                     │
                     ▼
@@ -473,7 +473,7 @@ request/status line instead of a hardcoded `HTTP/1.1`.
 4. **API Call**: `apiService.startLoadTest()` → `POST /runs`
 4. **Response**: `{ runId: "run_123", status: "running" }`
 5. **Dashboard Initialization**: `useDashboardStore().startRun(runId)`
-6. **SSE Connection**: `useSSE()` connects to `/runs/:runId/live`
+6. **SSE Connection**: `loadTestService.startMonitoring(runId)` connects to `/runs/:runId/live` (a module singleton, so the stream outlives the view)
 7. **Metrics Streaming**: Real-time metrics update dashboard
 8. **Completion**: When test completes, fetch final report via `GET /runs/:id/report`
 
@@ -565,9 +565,14 @@ if (error.isTimeout) {
 
 ### SSE Errors
 
-SSE client handles errors automatically:
-- Transient errors: Logged, reconnection attempted
-- Fatal errors: `onError` callback called, connection closed
+The SSE client does **not** reconnect. `EventSource` cannot set `Last-Event-ID`
+on a fresh connection, so a manual reconnect would re-request the topic from
+offset 0 and duplicate every tick already plotted.
+
+- Transient errors (`CONNECTING`): left to the browser's own retry, which does
+  carry `Last-Event-ID`
+- Terminal errors (`CLOSED`): connection disposed and the close handler runs,
+  which converges on `GET /runs/:id/report`
 
 ## Connection Management
 
@@ -576,7 +581,7 @@ SSE client handles errors automatically:
 The app polls `/health` endpoint to verify engine connectivity:
 
 ```typescript
-useHealthQuery() // Polls every 5 seconds
+useHealthQuery() // Polls every TIMING.HEALTH_CHECK_INTERVAL_MS (30s)
 ```
 
 **Health Response:**

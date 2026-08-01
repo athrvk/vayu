@@ -138,10 +138,12 @@ The app uses a dual-state management approach:
 1. **Zustand Stores** (`stores/` and `lib/`): UI state, navigation, temporary data
    - `tabs-store.ts`: Active tab state; determines which feature module renders in the main content area
    - `layout-store.ts`: Drawer and sidebar visibility/state
-   - `session-store.ts`: User session, theme preferences
+   - `session-store.ts`: Active environment id (mirrored from the engine) and the last-used collection
    - `engine-store.ts`: Engine health, connectivity status
-   - `dashboard-store.ts`: Load test metrics (limited to 3,000 historical points per run), streaming state
-   - `response-store.ts`: Response viewer state (expand/collapse, scroll position)
+   - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), streaming state
+   - `response-store.ts`: The last response per request id - status, headers, body, script results
+   - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
+   - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress
    - `import-modal-store.ts`: Import dialog visibility and state
    - `lib/graphql/schema-cache.ts`: Introspected GraphQL schema cache keyed by endpoint URL
@@ -170,9 +172,8 @@ The app uses a dual-state management approach:
 
 #### Custom Hooks
 
-- **`useEngine()`**: Execute requests and start load tests
-- **`useSSE()`**: Connect to metrics stream for active load tests
-- **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects
+- **`useEngine()`**: Compose (`POST /compose`), execute, and stop
+- **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects for previews (the engine resolves what is sent)
 - **`useSaveManager()`**: Auto-save orchestration with debouncing
 - **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button
 
@@ -181,20 +182,19 @@ The app uses a dual-state management approach:
 ### Request Execution Flow
 
 1. User clicks "Send" in RequestBuilder
-2. `useEngine().executeRequest()` is called
-3. Variables are resolved via `useVariableResolver()`
-4. Request is transformed to backend format (camelCase)
-5. `apiService.executeRequest()` sends `POST /execute` to engine
-6. Response is transformed back to frontend format (snake_case)
-7. Response is displayed in ResponseViewer
+2. `useEngine().composeRequest()` sends the editor state to `POST /compose`; the engine resolves `{{variables}}` and `inherit` auth and returns an execute-ready payload
+3. Request is transformed to backend format (camelCase)
+4. `apiService.executeRequest()` sends the composed payload to `POST /execute`
+5. Response is transformed back to frontend format (snake_case)
+6. Response is displayed in ResponseViewer
 
 ### Load Test Flow
 
 1. User configures load test and clicks "Start Load Test"
-2. `useEngine().startLoadTest()` sends `POST /runs` to engine
+2. The composed request plus the load config go to `POST /runs` via `apiService.startLoadTest()`
 3. Engine returns `runId`
 4. `useDashboardStore().startRun()` initializes dashboard state
-5. `useSSE()` connects to `/runs/:runId/live` SSE endpoint
+5. `loadTestService.startMonitoring(runId)` connects to the `/runs/:runId/live` SSE endpoint
 6. Metrics stream in real-time and update dashboard
 7. When test completes, final report is fetched via `GET /runs/:id/report`
 
@@ -202,10 +202,15 @@ The app uses a dual-state management approach:
 
 Variables are resolved with priority: **Environment > Collection > Global**
 
+The **engine** owns resolution for anything that is sent (`POST /compose`). The
+renderer's `useVariableResolver()` is a preview of the same rules - tab titles,
+the variable popover, unresolved-token painting - pinned to the engine's by a
+cross-language conformance fixture. See `variable-resolution.md`.
+
 1. `useVariableResolver()` fetches globals, collections, and environments
 2. Builds a flat map with resolution priority
 3. `resolveString()` replaces `{{variableName}}` with resolved values
-4. Used in RequestBuilder before sending requests
+4. Used for previews in RequestBuilder, never as the payload
 
 ## Build System
 
@@ -259,5 +264,6 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Query Caching**: TanStack Query caches server responses
 - **Optimistic Updates**: UI updates immediately, syncs with server
 - **Debounced Saves**: Auto-save waits for user to stop typing
-- **Metrics Limiting**: Dashboard store caps historical metrics to 3,000 points per run (`HISTORICAL_METRICS_CAP` in `config/metrics.ts`)
-- **Metrics Downsampling**: Charts downsample beyond 2,000 points to avoid render thrashing
+- **Metrics Retention**: Dashboard store trims live ticks to the configured window (`liveWindowSeconds`, 5m default) with a `maxRetainedTicks` backstop - a memory bound, not a rendering one
+- **Metrics Bucketing**: Charts collapse ticks into `chartBucketSeconds` buckets (0.5s default) before uPlot sees them, so a full window reaches the canvas as a few thousand points
+- **Throttled SSE commits**: Every tick is buffered; store commits are throttled to `METRICS_UI_THROTTLE_MS`
