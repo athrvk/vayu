@@ -189,13 +189,48 @@ describe("LRU eviction never takes a dirty tab", () => {
 		expect(openTypes()).toContain("variables");
 	});
 
-	it("spares a dirty collection tab", () => {
-		useTabsStore.getState().openTab({ type: "collection", entityId: "col_1" });
+	it("spares a dirty Variables tab editing a collection", () => {
+		useTabsStore.getState().openTab({ type: "variables", entityId: null });
 		markDirty("collection-col_1");
+		openRequestTabs(12);
+
+		expect(openTypes()).toContain("variables");
+	});
+
+	/**
+	 * One case per key family a collection tab's editors can register.
+	 *
+	 * `VariableTableEditor` keys on the bare id; the Info, Auth and the two
+	 * Script panels suffix it (`useDraftSaveContext`). The case used to match
+	 * only the bare key, so every suffixed sibling read as clean - the
+	 * "under-matching discards someone's work" direction the guard's own header
+	 * names. Reverting the prefix match fails all four suffix cases.
+	 */
+	it.each([
+		["the Variables sub-tab", "collection-col_1"],
+		["the Info tab", "collection-col_1-info"],
+		["the Auth tab", "collection-col_1-auth"],
+		["the pre-request Script tab", "collection-col_1-preRequestScript"],
+		["the post-request Script tab", "collection-col_1-postRequestScript"],
+	])("spares a collection tab dirty in %s", (_label, contextId) => {
+		useTabsStore.getState().openTab({ type: "collection", entityId: "col_1" });
+		markDirty(contextId);
 		openRequestTabs(12);
 
 		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
 		expect(ids).toContain("col_1");
+	});
+
+	it("evicts a collection tab when it is a different collection that is dirty", () => {
+		// The discriminating case for the prefix match: matching a bare
+		// `collection-` would spare every collection tab whenever any one of
+		// them held edits.
+		useTabsStore.getState().openTab({ type: "collection", entityId: "col_1" });
+		markDirty("collection-col_2-auth");
+		openRequestTabs(12);
+
+		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
+		expect(ids).not.toContain("col_1");
 	});
 
 	it("evicts a clean Settings tab, so the guard is not just refusing everything", () => {
