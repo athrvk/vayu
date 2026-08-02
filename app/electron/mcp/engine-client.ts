@@ -157,6 +157,19 @@ export class EngineClient {
 		return this.request("GET", "/config", undefined, signal);
 	}
 
+	// --- Script sandbox surface ----------------------------------------------
+
+	/**
+	 * The script sandbox's API surface: every `pm.*` name, global and assertion
+	 * chain the QuickJS runtime installs. Generated engine-side from one table
+	 * and cross-checked against the runtime by `script_completions_test.cpp`,
+	 * which is why both the editor and MCP read it rather than describing the
+	 * sandbox themselves (issue #233).
+	 */
+	getScriptCompletions(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/scripting/completions", undefined, signal);
+	}
+
 	updateConfig(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/config", payload, signal);
 	}
