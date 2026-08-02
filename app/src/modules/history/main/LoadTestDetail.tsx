@@ -12,7 +12,14 @@
  */
 
 import { useState, useMemo, useEffect } from "react";
-import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
+import {
+	CheckCircle,
+	Activity,
+	TrendingUp,
+	BarChart3,
+	Settings2,
+	AlertTriangle,
+} from "lucide-react";
 import {
 	Badge,
 	Tabs,
@@ -43,6 +50,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const protocolLabel = isHttpVersion(requestedHttpVersion)
 		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
 		: undefined;
+	// What actually happened, beside what was asked for. `undefined` (a run
+	// stored before the engine counted this) reads as 0 here on purpose: it means
+	// "nobody looked", and inventing a warning for it would be worse than the
+	// silence it replaces.
+	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
 	// stat cards (breakpoint / saturation, derived below) and the Performance tab
@@ -129,6 +141,25 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Protocol:</span>
 								<span className="text-foreground font-mono">{protocolLabel}</span>
+								{/* The label above is what the run *asked for*, and on its own
+								    it is the mislabelling issue #215 describes: a run whose
+								    every request fell back to HTTP/1.1 still reads "HTTP/2"
+								    here, over latency and throughput measured on HTTP/1.1.
+								    This is the correction, drawn only when the engine counted
+								    a downgrade - see summary.httpVersionDowngraded. */}
+								{downgradedRequests > 0 && (
+									<span
+										className="flex items-center gap-1.5 text-status-warning-text"
+										title={
+											`${formatNumber(downgradedRequests)} of this run's requests asked for ` +
+											`HTTP/2 and negotiated an older protocol.\n` +
+											`The results below were measured over those connections.`
+										}
+									>
+										<AlertTriangle className="w-4 h-4 shrink-0" />
+										not negotiated
+									</span>
+								)}
 							</div>
 						)}
 						{config.duration != null && config.duration !== "" && (

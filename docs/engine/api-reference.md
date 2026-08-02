@@ -1118,6 +1118,7 @@ run-shaped way of stating the same field, not a second store.
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
   "httpVersion": "HTTP/1.1",
+  "httpVersionDowngraded": true,
   "timing": {
     "totalMs": 245.5,
     "wireMs": 245.1,
@@ -1162,6 +1163,24 @@ reached a server) - empty rather than guessing `"HTTP/1.1"` and presenting a
 guess as fact. The same field is stored in a design run's `trace_data.response`
 and reported back unchanged by `GET /runs/:runId` and
 `GET /runs/:runId/report`.
+
+**`httpVersionDowngraded`** is `true` when the request explicitly asked for
+`"http2"` and the connection negotiated something older - the one thing the two
+`httpVersion` fields cannot say on their own, since neither knows about the
+other. It is always present (never omitted), so a client can tell "not
+downgraded" from "an engine too old to say". Only an explicit `http2` counts:
+`"auto"` promises nothing and `"http1.1"` got what it asked for, so neither can
+be downgraded. A transfer that negotiated nothing at all (`httpVersion` `""`)
+is `false` - that is a transport failure, and `errorCode` already reports it.
+
+This exists because the failure it names is invisible otherwise: a `200`, a
+latency and a body look identical whether or not the protocol you asked for was
+granted. Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and
+every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215));
+nothing in the API said so. The same field is stored on a design run's
+`trace_data.response`, and load runs carry the whole-run count as
+`summary.httpVersionDowngraded` in
+[`GET /runs/:runId/report`](#get-runsrunidreport).
 
 **One timing convention.** The `timing` keys above are the same `*Ms` names the
 stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
@@ -1793,7 +1812,8 @@ is the same either way** - only where the numbers are read from changed.
     "avgQueueWaitMs": 0.4,
     "bytesSent": 192000,
     "bytesReceived": 7680000,
-    "throughputBytesPerSec": 128000
+    "throughputBytesPerSec": 128000,
+    "httpVersionDowngraded": 0
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
@@ -1821,6 +1841,15 @@ is the same either way** - only where the numbers are read from changed.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
+
+`summary.httpVersionDowngraded` is the count of this run's transfers that asked
+for HTTP/2 and negotiated something older - see
+[`httpVersionDowngraded` on a response](#post-execute). It is the only figure in
+`summary` that describes the report's *validity* rather than its performance:
+non-zero means the latency and throughput beside it were measured over a
+protocol other than the one `metadata.configuration.httpVersion` names. Written
+by engines from 0.15.0; a run stored by an older one omits the key, and
+`undefined` there means "nobody looked", not "none".
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,

@@ -344,6 +344,12 @@ Result<Response> Client::send (const Request& request) {
     long negotiated_version = 0;
     curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
+    response.http_version_downgraded =
+    vayu::http::http_version_downgraded (request.http_version, response.http_version);
+    if (response.http_version_downgraded) {
+        vayu::utils::log_warning ("HTTP/2 was requested but the connection negotiated " +
+        response.http_version + " - " + request.url);
+    }
 
     // Build raw request string. Only buildable now: the request line names
     // the negotiated protocol, which isn't known until after curl_easy_perform

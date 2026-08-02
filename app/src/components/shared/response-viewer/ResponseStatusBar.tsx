@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clock, FileText, History } from "lucide-react";
+import { AlertTriangle, Clock, FileText, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 import { formatRelativeTime } from "@/utils";
@@ -34,6 +34,25 @@ export interface ResponseStatusBarProps {
 	time?: number;
 	/** Omitted by callers that have no size. */
 	size?: number;
+	/**
+	 * The protocol this exchange negotiated - a display string ("HTTP/1.1"),
+	 * not the request-side `HttpVersion` union. Only read when
+	 * `httpVersionDowngraded` is set; the bar does not show the protocol of a
+	 * response that got the one it asked for.
+	 */
+	httpVersion?: string;
+	/**
+	 * The request named `http2` and the connection negotiated something older.
+	 *
+	 * The engine decides this (`http_version_downgraded`,
+	 * `engine/include/vayu/http/curl_version_map.hpp`); the bar's only job is to
+	 * stop it being invisible. Until this existed a downgrade was
+	 * indistinguishable from success - a 200, a latency, a size, and no hint
+	 * that the protocol on the request was not the protocol on the wire. Three
+	 * releases shipped with every Windows request downgraded this way and
+	 * nothing on this bar changed (issue #215).
+	 */
+	httpVersionDowngraded?: boolean;
 	/** ISO time this response arrived. Live sends only. */
 	receivedAt?: string;
 	/**
@@ -49,6 +68,8 @@ export function ResponseStatusBar({
 	statusText,
 	time,
 	size,
+	httpVersion,
+	httpVersionDowngraded,
 	receivedAt,
 	restoredFrom,
 	className,
@@ -123,6 +144,31 @@ export function ResponseStatusBar({
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
 					<FileText className="w-3.5 h-3.5" />
 					<span className="tabular-nums">{formatSize(size)}</span>
+				</div>
+			)}
+
+			{/*
+			 * Protocol downgrade. Shown only when it happened - a response that
+			 * negotiated what it asked for says nothing here, because a chip
+			 * present on every response is a chip nobody reads.
+			 *
+			 * Text, not a `Badge`: it paints no background, and the
+			 * variant="chip" rule in badge-hover.test.tsx exists precisely for
+			 * the ones that do. It sits among status/time/size rather than at
+			 * the far end with the age, because like them it describes the
+			 * exchange itself.
+			 */}
+			{httpVersionDowngraded && (
+				<div
+					className="flex items-center gap-1.5 text-xs text-status-warning-text"
+					title={
+						`HTTP/2 was requested, but the connection negotiated ` +
+						`${httpVersion || "an older protocol"}.\n` +
+						`Timings and throughput below describe that connection, not HTTP/2.`
+					}
+				>
+					<AlertTriangle className="w-3.5 h-3.5" />
+					<span>{httpVersion || "HTTP/1.1"}, not HTTP/2</span>
 				</div>
 			)}
 

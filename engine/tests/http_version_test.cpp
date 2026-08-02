@@ -94,3 +94,43 @@ TEST (HttpVersionFromCurl, ReturnsEmptyForUnrecognizedValue) {
     EXPECT_EQ (vayu::http::http_version_from_curl (999L), "");
     EXPECT_EQ (vayu::http::http_version_from_curl (-1L), "");
 }
+
+// ============================================================================
+// http_version_downgraded - the silent-fallback detector
+// ============================================================================
+//
+// The two mappings above are each correct on their own, and together they still
+// let a request that named `http2` come back 200 OK on HTTP/1.1 with nothing to
+// distinguish it from success. That was every Windows request for three
+// releases (issue #215). These pin the one rule both drivers read.
+
+TEST (HttpVersionDowngraded, FlagsExplicitHttp2ThatNegotiatedHttp1) {
+    EXPECT_TRUE (vayu::http::http_version_downgraded (HttpVersion::Http2, "HTTP/1.1"));
+    EXPECT_TRUE (vayu::http::http_version_downgraded (HttpVersion::Http2, "HTTP/1.0"));
+}
+
+TEST (HttpVersionDowngraded, IsQuietWhenHttp2WasGranted) {
+    EXPECT_FALSE (vayu::http::http_version_downgraded (HttpVersion::Http2, "HTTP/2"));
+}
+
+TEST (HttpVersionDowngraded, OnlyAnExplicitHttp2CanBeDowngraded) {
+    // Auto promises nothing, so there is nothing to break; Http1_1 got exactly
+    // what it asked for. Flagging either would turn a correct transfer into a
+    // warning the user cannot act on.
+    EXPECT_FALSE (vayu::http::http_version_downgraded (HttpVersion::Auto, "HTTP/1.1"));
+    EXPECT_FALSE (vayu::http::http_version_downgraded (HttpVersion::Http1_1, "HTTP/1.1"));
+}
+
+TEST (HttpVersionDowngraded, NothingNegotiatedIsNotADowngrade) {
+    // "" means the transfer never reached a server (DNS failure, connection
+    // refused). Response::error_code already says so; reporting it a second
+    // time as a protocol complaint would point at the wrong problem.
+    EXPECT_FALSE (vayu::http::http_version_downgraded (HttpVersion::Http2, ""));
+}
+
+TEST (HttpVersionDowngraded, Http3IsNotADowngrade) {
+    // Unreachable from to_curl_http_version today. Excluded anyway so that
+    // adding an h3 mapping later cannot silently start flagging transfers that
+    // got something better than they asked for.
+    EXPECT_FALSE (vayu::http::http_version_downgraded (HttpVersion::Http2, "HTTP/3"));
+}

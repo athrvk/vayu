@@ -163,6 +163,8 @@ export default function ResponseViewer() {
 				statusText={response.statusText}
 				time={response.time}
 				size={response.size}
+				httpVersion={response.httpVersion}
+				httpVersionDowngraded={response.httpVersionDowngraded}
 				receivedAt={response.receivedAt}
 				restoredFrom={response.restoredFrom}
 			/>
