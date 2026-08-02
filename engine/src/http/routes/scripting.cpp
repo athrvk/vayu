@@ -437,7 +437,9 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.collectionVariables.get(name: string): string | undefined" },
     { "documentation",
-    "Get a collection variable value by name.\n\nExample:\nconst baseUrl = "
+    "Get a collection variable value by name. Reads the whole collection chain "
+    "- the nearest enabled definition wins, so a parent collection's variable "
+    "resolves here too.\n\nExample:\nconst baseUrl = "
     "pm.collectionVariables.get('base_url');" },
     { "sortText", "1_pm_collectionVariables_get" } });
 
@@ -445,7 +447,12 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.collectionVariables.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.collectionVariables.set(name: string, value: any): void" },
-    { "documentation", "Set a collection variable. The value will be persisted.\n\nExample:\npm.collectionVariables.set('base_url', 'https://api.example.com');" },
+    { "documentation",
+    "Set a collection variable on the request's own collection - it shadows a "
+    "parent collection's variable of the same name rather than changing it. "
+    "The value will be "
+    "persisted.\n\nExample:\npm.collectionVariables.set('base_url', "
+    "'https://api.example.com');" },
     { "sortText", "1_pm_collectionVariables_set" } });
 
     // ========================================

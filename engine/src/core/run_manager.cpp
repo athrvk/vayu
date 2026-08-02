@@ -677,6 +677,8 @@ RunManager& manager) {
             inputs.status_codes    = context->metrics_collector->status_code_distribution ();
             inputs.latency         = percentiles;
             inputs.latency_avg_ms  = avg_latency;
+            inputs.http_version_downgraded =
+            context->metrics_collector->http_version_downgraded ();
             inputs.tests           = validation;
 
             db.update_run_summary (
@@ -752,6 +754,7 @@ RunManager& manager) {
             inputs.status_codes     = mc.status_code_distribution ();
             inputs.latency          = mc.calculate_percentiles ();
             inputs.latency_avg_ms   = mc.average_latency ();
+            inputs.http_version_downgraded = mc.http_version_downgraded ();
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -829,6 +832,10 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["queue_wait_avg"]   = inputs.queue_wait_avg_ms;
     summary["bytes_sent"]       = inputs.bytes_sent;
     summary["bytes_received"]   = inputs.bytes_received;
+    // Always written, including the 0 case. An absent key means "an engine too
+    // old to have looked", which apply_stored_summary must be able to tell from
+    // "looked, and every request got the protocol it asked for".
+    summary["http_version_downgraded"] = inputs.http_version_downgraded;
     summary["status_codes"]     = codes;
     summary["latency"] = { { "min", inputs.latency.min }, { "max", inputs.latency.max },
         { "avg", inputs.latency_avg_ms }, { "p50", inputs.latency.p50 },

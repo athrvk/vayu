@@ -46,6 +46,24 @@ struct ScriptContext {
     Environment* collectionVariables = nullptr;
 
     /**
+     * @brief The collection scopes above `collectionVariables`, root first.
+     *
+     * The request's collection ancestors - `collection_chain` without its leaf
+     * - so a script reads a name an ancestor collection defines exactly as
+     * `{{name}}` in the URL does (issue #234). Collection reads walk leaf ->
+     * root and take the nearest enabled definition; `set`, `unset` and `clear`
+     * still touch `collectionVariables` alone, so the leaf shadows an ancestor
+     * but can never delete it.
+     *
+     * The `const` is the design rather than politeness:
+     * `persist_script_variables` writes a scope back by diffing it against the
+     * leaf collection's stored blob, so a writable ancestor would let one
+     * `set()` copy every inherited variable down into the leaf collection
+     * permanently. Ancestors that cannot be written cannot be copied down.
+     */
+    const std::vector<Environment>* collectionAncestors = nullptr;
+
+    /**
      * @brief Where the script's `pm.request` edits land, or null to discard them.
      *
      * Set only for pre-request scripts, and only through

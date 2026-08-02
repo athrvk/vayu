@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -414,6 +415,34 @@ const nlohmann::json& json,
 bool is_create);
 std::optional<std::pair<int, nlohmann::json>>
 apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
+
+/**
+ * The variable scopes a design run hands its pre/post-request scripts.
+ *
+ * `collection` is the request's immediate parent - the only collection scope a
+ * script may write, and the one `persist_script_variables` writes back.
+ * `collection_ancestors` is the rest of that collection's chain, root first,
+ * which scripts read through but cannot modify (issue #234).
+ */
+struct ScriptVariableScopes {
+    vayu::Environment environment;
+    vayu::Environment globals;
+    vayu::Environment collection;
+    std::vector<vayu::Environment> collection_ancestors;
+};
+
+/**
+ * Load those scopes for @p run. The collection chain is the same walk
+ * `{{variable}}` composition uses, so a script and a request field resolve an
+ * inherited name identically; a run with no environment, no request or a
+ * request outside any collection simply yields empty scopes.
+ *
+ * Extracted from the `POST /execute` handler (execution.cpp) so
+ * script_variables_test.cpp can drive it against a real database, matching the
+ * suite's other route-core tests.
+ */
+ScriptVariableScopes
+load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run);
 
 /**
  * @brief Callback type for graceful shutdown

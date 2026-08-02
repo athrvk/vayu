@@ -69,6 +69,14 @@ interface TabsState {
  * from a collection tab's Variables sub-tab, so this over-matches - which is
  * the safe direction. Over-matching keeps a tab that could have closed;
  * under-matching discards someone's work.
+ *
+ * A collection tab hosts more than that one editor, and its siblings key
+ * themselves off the same id with a suffix: `collection-<id>-info`, `-auth`,
+ * `-preRequestScript`, `-postRequestScript` (`useDraftSaveContext`). Matching
+ * only the exact key read every one of those as clean, so the case scans for
+ * its own id plus that suffix family. It stays scoped to `tab.entityId` - a
+ * blanket `collection-` prefix would make every collection tab dirty whenever
+ * any one of them was.
  */
 function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 	const isDirty = (key: string) => contexts.get(key)?.hasPendingChanges === true;
@@ -76,8 +84,15 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 	switch (tab.type) {
 		case "request":
 			return tab.entityId !== null && isDirty(`request-${tab.entityId}`);
-		case "collection":
-			return tab.entityId !== null && isDirty(`collection-${tab.entityId}`);
+		case "collection": {
+			if (tab.entityId === null) return false;
+			const own = `collection-${tab.entityId}`;
+			for (const [key, ctx] of contexts) {
+				if (!ctx.hasPendingChanges) continue;
+				if (key === own || key.startsWith(`${own}-`)) return true;
+			}
+			return false;
+		}
 		case "settings":
 			return isDirty("settings");
 		case "variables":

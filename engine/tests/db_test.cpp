@@ -252,6 +252,35 @@ TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
     EXPECT_FALSE (db.get_config_entry ("requestBatchSize").has_value ());
 }
 
+// "contextPoolSize" described "pre-initialized JS contexts" and accepted 1..256,
+// but the script context pool is grown lazily and never read the value (issue
+// #112) - a knob a user could turn with no effect anywhere. Same two guarantees
+// as the entry above: a fresh seed does not create it, and an upgraded database
+// sheds the row it was already carrying.
+TEST_F (DatabaseTest, SeedRemovesRetiredContextPoolSizeEntry) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    EXPECT_FALSE (db.get_config_entry ("contextPoolSize").has_value ())
+    << "a fresh seed must not create the retired key";
+
+    ConfigEntry stale;
+    stale.key           = "contextPoolSize";
+    stale.value         = "128";
+    stale.type          = "integer";
+    stale.label         = "Script Context Pool Size";
+    stale.description   = "left behind by an older version";
+    stale.category      = "scripting_sandbox";
+    stale.default_value = "64";
+    stale.updated_at    = 1;
+    db.save_config_entry (stale);
+    ASSERT_TRUE (db.get_config_entry ("contextPoolSize").has_value ());
+
+    db.seed_default_config ();
+
+    EXPECT_FALSE (db.get_config_entry ("contextPoolSize").has_value ());
+}
+
 // The "options" column is new (Task 4); an existing on-disk database predates
 // it, so sync_schema must add the nullable column without a migration, and
 // re-seeding on an already-upgraded row must both preserve the user's chosen

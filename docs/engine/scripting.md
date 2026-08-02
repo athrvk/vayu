@@ -134,7 +134,6 @@ pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
                               // to >= 0). For single-shot sends this is ~0.
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
-pm.response.body              // Raw body string
 pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
@@ -360,11 +359,18 @@ pm.globals.set('run_id', '42');
 Each `set()` persists to the scope it names, with the same
 keep-the-flags behaviour described for `pm.environment` above.
 
-`pm.collectionVariables` is the request's **immediate parent collection**, not
-the whole collection chain. `{{name}}` resolution merges every ancestor
-root-first before the payload reaches the engine, so a variable defined on a
-parent collection resolves in a URL and is *not* readable from a script. Define
-it on the request's own collection, or in the environment, if a script needs it.
+`pm.collectionVariables` reads the request's **whole collection chain**, the
+same merge `{{name}}` resolution uses: `get`, `has` and `toObject` take the
+nearest enabled definition, walking from the request's own collection up to the
+root. A variable defined on a parent collection therefore reads the same in a
+script as it substitutes in a URL.
+
+**Writes stay on the request's own collection.** `set`, `unset` and `clear`
+never reach an ancestor, so `set` on a descendant *shadows* an inherited name
+and `unset` un-shadows it - the ancestor's value comes back rather than being
+deleted. A disabled row is looked past wherever it sits in the chain. The full
+rule, and why ancestors are read-only, is in
+[Variable Resolution](../app/variable-resolution.md).
 
 ## Variables (`pm.variables`)
 

@@ -269,6 +269,19 @@ struct Response {
      */
     std::string http_version;
 
+    /**
+     * @brief True when the request explicitly asked for HTTP/2 and the
+     * connection negotiated something older.
+     *
+     * Not derivable from `http_version` alone - that is the outcome, and the
+     * outcome only becomes a complaint next to what was asked for, which the
+     * Response does not otherwise carry. Computed once per transfer by
+     * `vayu::http::http_version_downgraded` (curl_version_map.hpp) so both
+     * drivers agree; see that function for why a silent downgrade needed
+     * naming at all.
+     */
+    bool http_version_downgraded = false;
+
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response
     ErrorCode error_code = ErrorCode::None;
