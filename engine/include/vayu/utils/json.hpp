@@ -81,11 +81,6 @@ using Json = nlohmann::json;
 [[nodiscard]] std::string serialize_variables (const vayu::Environment& env);
 
 /**
- * @brief Serialize a Metric to JSON
- */
-[[nodiscard]] Json serialize (const vayu::db::Metric& metric);
-
-/**
  * Attach a design run's single exchange to its serialized run object.
  *
  * A design run is one request and one response, so the exchange belongs with

@@ -83,8 +83,8 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
 }
 
 // Report fields that live outside the DetailedReport struct: whole-run counters
-// the report injects into its `summary` object. Filled from the stored run
-// summary (new runs) or from the legacy metric rows (pre-metric_ticks runs).
+// the report injects into its `summary` object. Filled from the run's stored
+// summary.
 struct ReportExtras {
     double peak_concurrency = 0.0;
     double dropped_total    = 0.0;
@@ -118,29 +118,30 @@ void read_number (const nlohmann::json& obj, const char* key, T& out) {
  * Apply the run's stored `summary` (the whole-run results, written once at
  * terminal status) over the report calculated from the sampled `results`.
  *
- * Returns false when there is no usable summary - the caller then falls back to
- * the legacy `metrics` rows. Keys here are the ones
- * `vayu::core::build_run_summary_payload` writes; runs_route_test.cpp round-trips
- * the pair so the two sides cannot drift apart silently.
+ * An absent or unreadable summary leaves the report exactly as the sampled
+ * results computed it - there is no second source to fall back to. Keys here
+ * are the ones `vayu::core::build_run_summary_payload` writes;
+ * runs_route_test.cpp round-trips the pair so the two sides cannot drift apart
+ * silently.
  */
-bool apply_run_summary (const std::string& summary_json,
+void apply_run_summary (const std::string& summary_json,
 vayu::DetailedReport& report,
 ReportExtras& extras) {
     if (summary_json.empty ()) {
-        return false;
+        return;
     }
     nlohmann::json summary;
     try {
         summary = nlohmann::json::parse (summary_json);
     } catch (...) {
         vayu::utils::log_warning (
-        "Run summary is not valid JSON; falling back to the legacy metrics rows");
-        return false;
+        "Run summary is not valid JSON; reporting from the sampled results alone");
+        return;
     }
     if (!summary.is_object ()) {
         vayu::utils::log_warning (
-        "Run summary is not an object; falling back to the legacy metrics rows");
-        return false;
+        "Run summary is not an object; reporting from the sampled results alone");
+        return;
     }
 
     read_number (summary, "total_requests", report.total_requests);
@@ -190,91 +191,6 @@ ReportExtras& extras) {
         read_number (summary["tests"], "sampled", extras.tests_sampled);
         read_number (summary["tests"], "passed", extras.tests_passed);
         read_number (summary["tests"], "failed", extras.tests_failed);
-    }
-    return true;
-}
-
-/**
- * Legacy path: rebuild the same overrides from the run's EAV `metrics` rows.
- *
- * Only reached for runs recorded before `metric_ticks`/`runs.summary` existed.
- * The `!labels.empty()` guards are what keep the per-tick *windowed* percentile
- * rows from overwriting the cumulative whole-run ones - the trap that made this
- * table worth replacing. Delete this once old histories have aged out past the
- * retention window (see `prune_runs`).
- */
-void apply_legacy_metrics (const std::vector<vayu::db::Metric>& metrics,
-vayu::DetailedReport& report,
-ReportExtras& extras) {
-    for (const auto& m : metrics) {
-        if (m.name == vayu::MetricName::PeakConcurrency) {
-            extras.peak_concurrency = m.value;
-        } else if (m.name == vayu::MetricName::DroppedRequests) {
-            extras.dropped_total = m.value;
-        } else if (m.name == vayu::MetricName::QueueWaitAvg) {
-            extras.queue_wait_avg = m.value;
-        } else if (m.name == vayu::MetricName::BytesSent) {
-            extras.bytes_sent = m.value;
-        } else if (m.name == vayu::MetricName::BytesReceived) {
-            extras.bytes_received = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP50 && !m.labels.empty ()) {
-            // Only the labeled cumulative final-summary row counts here; the
-            // unlabeled per-tick windowed rows (persisted during the run)
-            // must not overwrite the whole-run percentile in the report.
-            report.latency_p50 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP75) {
-            report.latency_p75 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP90) {
-            report.latency_p90 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP95 && !m.labels.empty ()) {
-            report.latency_p95 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP99 && !m.labels.empty ()) {
-            report.latency_p99 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyP999) {
-            report.latency_p999 = m.value;
-        } else if (m.name == vayu::MetricName::LatencyMax) {
-            report.latency_max = m.value;
-        } else if (m.name == vayu::MetricName::LatencyMin) {
-            report.latency_min = m.value;
-        } else if (m.name == vayu::MetricName::LatencyAvg) {
-            report.latency_avg = m.value;
-        } else if (m.name == vayu::MetricName::TotalRequests) {
-            report.total_requests = static_cast<size_t> (m.value);
-        } else if (m.name == vayu::MetricName::Rps) {
-            report.avg_rps    = m.value;
-            report.actual_rps = m.value;
-        } else if (m.name == vayu::MetricName::SendRate) {
-            report.send_rate = m.value;
-        } else if (m.name == vayu::MetricName::Throughput) {
-            report.throughput = m.value;
-        } else if (m.name == vayu::MetricName::TestDuration) {
-            // Use actual test duration (excludes setup/teardown overhead)
-            report.total_duration_s = m.value;
-        } else if (m.name == vayu::MetricName::SetupOverhead) {
-            // Time from run creation to test start
-            report.setup_overhead_s = m.value;
-        } else if (m.name == vayu::MetricName::StatusCodes && !m.labels.empty ()) {
-            // Override status codes with accurate data from metrics
-            try {
-                auto status_json = nlohmann::json::parse (m.labels);
-                report.status_codes.clear ();
-                extras.status_codes_overridden = true;
-                for (auto& [code_str, count] : status_json.items ()) {
-                    int code                  = std::stoi (code_str);
-                    report.status_codes[code] = count.get<size_t> ();
-                }
-            } catch (...) {
-                // Keep calculated values if parsing fails
-            }
-        } else if (m.name == vayu::MetricName::TestsPassed) {
-            extras.tests_passed = static_cast<int> (m.value);
-            extras.has_tests    = true;
-        } else if (m.name == vayu::MetricName::TestsFailed) {
-            extras.tests_failed = static_cast<int> (m.value);
-            extras.has_tests    = true;
-        } else if (m.name == vayu::MetricName::TestsSampled) {
-            extras.tests_sampled = static_cast<int> (m.value);
-        }
     }
 }
 
@@ -417,19 +333,14 @@ int64_t stop_wait_ms) {
  * missing run is a definitive 404 in the shared `{"error": {"code", "message"}}`
  * shape.
  *
- * Two sources feed the whole-run aggregates, in order:
- *   1. `runs.summary` - the values the run itself computed at completion. Used
- *      whenever it is present, which is every run recorded since `metric_ticks`.
- *   2. the legacy EAV `metrics` rows - reconstructed as before, for runs
- *      recorded by an engine that had no summary column. Those rows are only
- *      fetched when the summary is absent, so a normal report is one run row
- *      plus its sampled results.
+ * The whole-run aggregates come from `runs.summary` - the values the run itself
+ * computed at completion - laid over a report calculated from the run's sampled
+ * `results`. A run with no summary never reached a terminal status (the engine
+ * died mid-run), and reports from those sampled results alone rather than
+ * erroring. Either way a report is one run row plus its sampled results.
  *
- * Everything after the source split (target-RPS from the config snapshot, the
- * error-rate recompute, the response shape) is common to both, so the two paths
- * cannot drift in the response they produce. Extracted so both sources are
- * covered without an in-process HTTP server - see runs_route_test.cpp.
- * Exceptions propagate to the route's try/catch (500).
+ * Extracted so the wiring is covered without an in-process HTTP server - see
+ * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id) {
@@ -449,10 +360,12 @@ const std::string& run_id) {
     auto report =
     vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
 
+    // No usable summary now means one thing only: the engine died before this
+    // run reached a terminal status, so it never wrote one. The report then
+    // stands on the sampled `results` alone - `calculate_detailed_report`
+    // above - rather than erroring.
     ReportExtras extras;
-    if (!apply_run_summary (run->summary, report, extras)) {
-        apply_legacy_metrics (db.get_metrics (run_id), report, extras);
-    }
+    apply_run_summary (run->summary, report, extras);
 
     // Recount the success/failure split from whichever distribution won, so
     // transport errors (status code 0) are counted. Runs with no stored

@@ -328,15 +328,8 @@ TEST_F (LoadStrategyTest, StopWakesControllerPromptly) {
     EXPECT_LT (elapsed_ms, 2000) << "controller did not observe should_stop promptly";
 }
 
-TEST (MetricNameLatencyMinMax, RoundTrips) {
-    EXPECT_STREQ (vayu::to_string (vayu::MetricName::LatencyMax), "latency_max");
-    EXPECT_STREQ (vayu::to_string (vayu::MetricName::LatencyMin), "latency_min");
-    EXPECT_EQ (vayu::parse_metric_name ("latency_max"), vayu::MetricName::LatencyMax);
-    EXPECT_EQ (vayu::parse_metric_name ("latency_min"), vayu::MetricName::LatencyMin);
-}
-
 // The collector's percentiles expose non-zero max/min; run_manager persists
-// them (LatencyMax/Min) so /report can surface them instead of 0.
+// them in the run summary so /report can surface them instead of 0.
 TEST_F (LoadStrategyTest, PercentilesExposeNonZeroMax) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "test-max", nlohmann::json{ { "mode", "constant_concurrency" } });
@@ -348,15 +341,6 @@ TEST_F (LoadStrategyTest, PercentilesExposeNonZeroMax) {
     EXPECT_GT (p.max, 0.0);
     EXPECT_GE (p.max, p.p99);
     EXPECT_GT (p.min, 0.0);
-}
-
-TEST (MetricNameBytes, RoundTrips) {
-    EXPECT_STREQ (vayu::to_string (vayu::MetricName::BytesSent), "bytes_sent");
-    EXPECT_STREQ (vayu::to_string (vayu::MetricName::BytesReceived), "bytes_received");
-    EXPECT_EQ (vayu::parse_metric_name ("bytes_sent"), vayu::MetricName::BytesSent);
-    EXPECT_EQ (vayu::parse_metric_name ("bytes_received"), vayu::MetricName::BytesReceived);
-    EXPECT_STREQ (vayu::to_string (vayu::MetricName::PeakConcurrency), "peak_concurrency");
-    EXPECT_EQ (vayu::parse_metric_name ("peak_concurrency"), vayu::MetricName::PeakConcurrency);
 }
 
 // Wire bytes are captured from curl and accumulated. The mock returns a fixed

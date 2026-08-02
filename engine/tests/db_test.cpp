@@ -99,81 +99,6 @@ TEST_F (DatabaseTest, UpdatesRunStatus) {
     EXPECT_EQ (retrieved->status, vayu::RunStatus::Completed);
 }
 
-TEST_F (DatabaseTest, AddsAndRetrievesMetrics) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    vayu::db::Run run;
-    run.id              = "run_1";
-    run.type            = vayu::RunType::Load;
-    run.status          = vayu::RunStatus::Running;
-    run.start_time      = 1000;
-    run.config_snapshot = "{}";
-    db.create_run (run);
-
-    vayu::db::Metric m1;
-    m1.run_id    = "run_1";
-    m1.timestamp = 1001;
-    m1.name      = vayu::MetricName::TotalRequests;
-    m1.value     = 10.0;
-
-    vayu::db::Metric m2;
-    m2.run_id    = "run_1";
-    m2.timestamp = 1002;
-    m2.name      = vayu::MetricName::TotalRequests;
-    m2.value     = 20.0;
-
-    db.add_metric (m1);
-    db.add_metric (m2);
-
-    auto metrics = db.get_metrics ("run_1");
-    ASSERT_EQ (metrics.size (), 2);
-    EXPECT_EQ (metrics[0].value, 10.0);
-    EXPECT_EQ (metrics[1].value, 20.0);
-}
-
-// One tick writes ~18 rows sharing a single timestamp, and there is no index on
-// timestamp - so ordering by timestamp alone leaves the ties in scan order and a
-// page boundary can repeat or drop a row. id (insertion order) is the tiebreaker.
-TEST_F (DatabaseTest, PaginatedMetricsAreStablyOrderedAcrossTimestampTies) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    vayu::db::Run run;
-    run.id              = "run_1";
-    run.type            = vayu::RunType::Load;
-    run.status          = vayu::RunStatus::Running;
-    run.start_time      = 1000;
-    run.config_snapshot = "{}";
-    db.create_run (run);
-
-    // Two ticks of six rows each - every row within a tick shares a timestamp.
-    constexpr int kPerTick = 6;
-    for (int tick = 0; tick < 2; ++tick) {
-        for (int i = 0; i < kPerTick; ++i) {
-            vayu::db::Metric m;
-            m.run_id    = "run_1";
-            m.timestamp = 2000 + tick;
-            m.name      = vayu::MetricName::Rps;
-            m.value     = static_cast<double> (tick * kPerTick + i);
-            db.add_metric (m);
-        }
-    }
-
-    // Page through in 5s; the concatenation must be every row exactly once.
-    std::vector<double> paged;
-    for (int64_t offset = 0; offset < 2 * kPerTick; offset += 5) {
-        for (const auto& m : db.get_metrics_paginated ("run_1", 5, offset)) {
-            paged.push_back (m.value);
-        }
-    }
-
-    ASSERT_EQ (paged.size (), static_cast<size_t> (2 * kPerTick));
-    for (int i = 0; i < 2 * kPerTick; ++i) {
-        EXPECT_DOUBLE_EQ (paged[static_cast<size_t> (i)], static_cast<double> (i));
-    }
-}
-
 TEST_F (DatabaseTest, RetrievesAllRuns) {
     Database db (TEST_DB_PATH);
     db.init ();
@@ -469,12 +394,12 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
 // ==================== Index Tests ====================
 
 // Every index declared in make_storage(), each backing a hot query path:
-// metrics/results by run_id, requests by collection_id, collections by
+// metric_ticks/results by run_id, requests by collection_id, collections by
 // parent_id, runs by start_time. See the comments there for which queries
 // rely on which. Named explicitly rather than counted, because sqlite also
 // creates sqlite_autoindex_* entries of its own.
-const std::vector<std::string> EXPECTED_INDEXES = { "idx_metrics_run_id",
-    "idx_metric_ticks_run_id", "idx_results_run_id", "idx_requests_collection_id",
+const std::vector<std::string> EXPECTED_INDEXES = { "idx_metric_ticks_run_id",
+    "idx_results_run_id", "idx_requests_collection_id",
     "idx_collections_parent_id", "idx_runs_start_time" };
 
 // Reads index names straight out of sqlite_master on a separate connection,
@@ -509,6 +434,35 @@ std::set<std::string> read_index_names (const std::string& path) {
     sqlite3_finalize (stmt);
     sqlite3_close (handle);
     return names;
+}
+
+// Same approach as read_index_names, for a table rather than an index.
+bool table_exists (const std::string& path, const std::string& table_name) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << path << ": " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return false;
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle,
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", -1,
+        &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << "could not query sqlite_master: " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return false;
+    }
+    sqlite3_bind_text (stmt, 1, table_name.c_str (), -1, SQLITE_TRANSIENT);
+
+    bool found = false;
+    if (sqlite3_step (stmt) == SQLITE_ROW) {
+        found = sqlite3_column_int (stmt, 0) > 0;
+    }
+
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return found;
 }
 
 void drop_index (const std::string& path, const std::string& index_name) {
@@ -667,14 +621,86 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
     sqlite3_close (handle);
 }
 
+// A database written by an engine before issue #177 still carries the legacy
+// EAV `metrics` table and its index. sync_schema() only syncs the tables the
+// storage still declares - it never drops the ones removed from it - so
+// Database::init() drops this one explicitly, or every upgraded database keeps
+// paying for ~20 rows/sec of dead history forever. Recreates that table
+// externally, the same way the tests above simulate a pre-migration schema.
+TEST_F (DatabaseTest, DropsTheLegacyMetricsTableFromAPreUpgradeDatabase) {
+    // Recent, so init()'s retention pass (runRetentionDays) does not prune the
+    // run out from under the assertions below.
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+
+        vayu::db::Run run;
+        run.id              = "run_pre_upgrade";
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Completed;
+        run.start_time      = now;
+        run.config_snapshot = "{}";
+        db.create_run (run);
+
+        vayu::db::MetricTick tick;
+        tick.run_id    = "run_pre_upgrade";
+        tick.timestamp = now;
+        tick.payload   = R"({"timestamp":1000,"requests_completed":7})";
+        db.add_metric_tick (tick);
+    }
+
+    // Put the pre-upgrade table back, populated, exactly as the old engine left it.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle,
+                   "CREATE TABLE metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                   "run_id TEXT NOT NULL, timestamp INTEGER NOT NULL, "
+                   "name TEXT NOT NULL, value REAL NOT NULL, labels TEXT NOT NULL);"
+                   "CREATE INDEX idx_metrics_run_id ON metrics (run_id);"
+                   "INSERT INTO metrics (run_id, timestamp, name, value, labels) "
+                   "VALUES ('run_pre_upgrade', 1, 'total_requests', 7.0, '');",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+
+    // Guard the guard: without this the assertions below pass on a database
+    // that never had the table to begin with.
+    ASSERT_TRUE (table_exists (TEST_DB_PATH, "metrics"))
+    << "the pre-upgrade table was not recreated";
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+
+        // Everything the run still owns is served normally after the drop.
+        auto run = db.get_run ("run_pre_upgrade");
+        ASSERT_TRUE (run.has_value ());
+        EXPECT_EQ (run->status, vayu::RunStatus::Completed);
+        EXPECT_EQ (db.count_metric_ticks ("run_pre_upgrade"), 1);
+    }
+
+    EXPECT_FALSE (table_exists (TEST_DB_PATH, "metrics"))
+    << "init() left the legacy metrics table behind";
+    // The index goes with its table - sqlite drops it as part of DROP TABLE.
+    EXPECT_EQ (read_index_names (TEST_DB_PATH).count ("idx_metrics_run_id"), 0u);
+}
+
 // ============================================================================
 // Run retention (prune_runs)
 // ============================================================================
 
 namespace {
 
-// A terminal run with an explicit id/start_time, plus one legacy metric row,
-// one metric tick and one result so prune's cascade delete is observable.
+// A terminal run with an explicit id/start_time, plus one metric tick and one
+// result so prune's cascade delete is observable.
 void seed_run_with_children (Database& db,
 const std::string& id,
 int64_t start_time,
@@ -686,13 +712,6 @@ vayu::RunStatus status = vayu::RunStatus::Completed) {
     run.start_time      = start_time;
     run.config_snapshot = "{}";
     db.create_run (run);
-
-    vayu::db::Metric m;
-    m.run_id    = id;
-    m.timestamp = start_time;
-    m.name      = vayu::MetricName::TotalRequests;
-    m.value     = 1.0;
-    db.add_metric (m);
 
     vayu::db::MetricTick tick;
     tick.run_id    = id;
@@ -737,12 +756,10 @@ TEST_F (DatabaseTest, PruneRunsByCountKeepsMostRecentAndCascades) {
     EXPECT_TRUE (ids.count ("run_5"));
     EXPECT_TRUE (ids.count ("run_4"));
 
-    // The pruned runs took their ticks, metrics and results with them.
-    EXPECT_TRUE (db.get_metrics ("run_1").empty ());
+    // The pruned runs took their ticks and results with them.
     EXPECT_EQ (db.count_metric_ticks ("run_1"), 0);
     EXPECT_TRUE (db.get_results ("run_1").empty ());
     // The survivors kept theirs.
-    EXPECT_EQ (db.get_metrics ("run_5").size (), 1u);
     EXPECT_EQ (db.count_metric_ticks ("run_5"), 1);
     EXPECT_EQ (db.get_results ("run_5").size (), 1u);
 }
@@ -765,7 +782,7 @@ TEST_F (DatabaseTest, PruneRunsByAgeDeletesOldOnly) {
     auto ids = run_ids (db);
     EXPECT_TRUE (ids.count ("fresh"));
     EXPECT_FALSE (ids.count ("stale"));
-    EXPECT_TRUE (db.get_metrics ("stale").empty ());
+    EXPECT_EQ (db.count_metric_ticks ("stale"), 0);
     EXPECT_TRUE (db.get_results ("stale").empty ());
 }
 

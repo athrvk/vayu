@@ -20,7 +20,6 @@
  * EXECUTION ENGINE:
  *   runs         - Test execution records (load tests, design mode)
  *   metric_ticks - One wide row per metrics tick (the time series)
- *   metrics      - Legacy EAV time-series; read-only, pre-metric_ticks runs
  *   results      - Individual request results with timing
  *
  * CONFIGURATION:
@@ -143,34 +142,6 @@ template <> struct row_extractor<vayu::RunStatus> {
     }
 };
 
-// MetricName enum adapter (Rps, Latency, ErrorRate, etc.)
-template <> struct type_printer<vayu::MetricName> {
-    const std::string& print () {
-        static const std::string res = "TEXT";
-        return res;
-    }
-};
-template <> struct statement_binder<vayu::MetricName> {
-    int bind (sqlite3_stmt* stmt, int index, const vayu::MetricName& value) {
-        return sqlite3_bind_text (stmt, index, vayu::to_string (value), -1, SQLITE_TRANSIENT);
-    }
-};
-template <> struct field_printer<vayu::MetricName> {
-    std::string operator() (const vayu::MetricName& t) const {
-        return vayu::to_string (t);
-    }
-};
-template <> struct row_extractor<vayu::MetricName> {
-    vayu::MetricName extract (const char* row_value) const {
-        if (auto val = vayu::parse_metric_name (row_value))
-            return *val;
-        return vayu::MetricName::Rps;
-    }
-    vayu::MetricName extract (sqlite3_stmt* stmt, int columnIndex) const {
-        const char* str = (const char*)sqlite3_column_text (stmt, columnIndex);
-        return this->extract (str ? str : "");
-    }
-};
 } // namespace sqlite_orm
 
 using namespace sqlite_orm;
@@ -190,11 +161,10 @@ inline auto make_storage (const std::string& path) {
     // sync_schema() creates them on fresh and pre-existing databases alike, so
     // this is additive and needs no migration.
     //
-    // metrics/results are the unbounded-growth tables (a load run writes ~20
-    // metric rows/sec), so a run_id scan slows down with every run ever
-    // recorded, not just the current one. get_metrics_since is polled every
-    // 500ms by the legacy SSE loop.
-    make_index ("idx_metrics_run_id", &Metric::run_id),
+    // metric_ticks/results are the unbounded-growth tables (a load run writes
+    // one tick row/sec and samples results), so a run_id scan slows down with
+    // every run ever recorded, not just the current one.
+    // get_metric_ticks_since is polled every 500ms by the legacy SSE loop.
     make_index ("idx_metric_ticks_run_id", &MetricTick::run_id),
     make_index ("idx_results_run_id", &Result::run_id),
     // Sidebar load (get_requests_in_collection) and cascade delete.
@@ -270,22 +240,16 @@ inline auto make_storage (const std::string& path) {
     // Whole-run results written once at terminal status. NOT NULL, so the
     // default_value is what lets sync_schema ALTER TABLE ADD COLUMN it onto an
     // existing, non-empty runs table - pre-existing rows backfill to `""`,
-    // which the report route reads as "fall back to the legacy metrics rows".
+    // which the report route reads as "the engine died before this run
+    // finished; report from the sampled results alone".
     make_column ("summary", &Run::summary, default_value (""))),
 
-    // Metric ticks: one wide row per persisted tick (replaces the EAV rows below)
+    // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",
     make_column ("id", &MetricTick::id, primary_key ().autoincrement ()),
     make_column ("run_id", &MetricTick::run_id),
     make_column ("timestamp", &MetricTick::timestamp),
     make_column ("payload", &MetricTick::payload)), // JSON: the whole tick object
-
-    // Metrics: legacy EAV time-series (one row per name/tick). No longer
-    // written - kept so runs recorded before metric_ticks still render.
-    make_table ("metrics", make_column ("id", &Metric::id, primary_key ().autoincrement ()),
-    make_column ("run_id", &Metric::run_id), make_column ("timestamp", &Metric::timestamp),
-    make_column ("name", &Metric::name), make_column ("value", &Metric::value),
-    make_column ("labels", &Metric::labels)), // JSON: additional dimensions
 
     // Results: Individual request outcomes with timing breakdown
     make_table ("results", make_column ("id", &Result::id, primary_key ().autoincrement ()),
@@ -521,6 +485,17 @@ void Database::init () {
     // Ensure schema is synced (idempotent)
     impl_->storage.sync_schema ();
 
+    // Shed the legacy EAV `metrics` table (issue #177). sync_schema only syncs
+    // the tables the storage still declares - it does not drop the ones that
+    // were removed from it - so a database written by an engine before this
+    // version keeps the table and its rows (~20/sec of load run) forever
+    // otherwise. The pages return to SQLite's freelist for reuse rather than
+    // shrinking the file; a VACUUM to actually shrink it is deliberately not
+    // run here, since it rewrites the whole database while holding a write
+    // lock and startup is the worst possible moment to pay that.
+    // Idempotent, so this stays rather than needing a one-shot migration flag.
+    impl_->storage.drop_table_if_exists ("metrics");
+
     // WAL mode for better concurrent read/write performance
     impl_->storage.pragma.journal_mode (journal_mode::WAL);
 
@@ -636,7 +611,7 @@ void Database::delete_collection (const std::string& id) {
     //    wrapped in a single transaction so a crash mid-cascade cannot leave a
     //    half-deleted subtree. Safe under the recursive mutex already held -
     //    the lambda only calls sqlite_orm on the same storage handle (same
-    //    pattern as add_metrics_batch).
+    //    pattern as add_results_batch).
     impl_->storage.transaction ([&] {
         for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
             impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
@@ -681,7 +656,7 @@ void Database::delete_request (const std::string& id) {
 // ============================================================================
 
 // A payload that fails to write leaves nothing behind (issue #96). Same shape as
-// add_metrics_batch: retry_on_busy holds the recursive mutex while the lambda
+// add_results_batch: retry_on_busy holds the recursive mutex while the lambda
 // runs, and the lambda only touches the same storage handle.
 void Database::import_apply (const std::vector<Collection>& collections,
 const std::vector<Request>& requests,
@@ -906,22 +881,20 @@ int64_t Database::count_runs (const RunFilter& filter) {
 // was added to both by editing only this function). Caller holds the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
-    impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
     impl_->storage.remove<Run> (id);
 }
 
-// Cascade delete: removes ticks, metrics and results first
+// Cascade delete: removes ticks and results first
 void Database::delete_run (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     remove_run_cascade_locked (id);
 }
 
 // Retried like every other write here, and for a sharper reason: this row is
-// now the *only* record of a run's whole-run aggregates. The final metric batch
-// it replaced was written under add_metrics_batch's retry, and a lock lost here
-// is not a lost tick - it is a report that falls back to legacy rows that do
-// not exist and renders the run as empty, permanently. The read-modify-write
+// the *only* record of a run's whole-run aggregates, and a lock lost here is
+// not a lost tick - it is a report that falls back to the sampled results and
+// renders the run's whole-run figures wrong, permanently. The read-modify-write
 // runs inside the retried callback so a retry re-reads the row rather than
 // replaying a stale copy over a status the worker updated in between.
 void Database::update_run_summary (const std::string& id, const std::string& summary) {
@@ -1034,64 +1007,6 @@ void Database::prune_runs_configured () {
     const int max_age_days =
     get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
     prune_runs (max_runs, max_age_days);
-}
-
-// ============================================================================
-// Metrics - Time-series performance data (RPS, latency percentiles, etc.)
-// ============================================================================
-
-void Database::add_metric (const Metric& metric) {
-    retry_on_busy ("add metric", 5, std::chrono::milliseconds (100),
-    [&] { impl_->storage.insert (metric); });
-}
-
-// Batch insert with transaction for better performance and reduced lock
-// contention Includes retry logic to handle database lock contention
-void Database::add_metrics_batch (const std::vector<Metric>& metrics) {
-    if (metrics.empty ())
-        return;
-
-    retry_on_busy ("store metrics batch", 5, std::chrono::milliseconds (100), [&] {
-        impl_->storage.transaction ([&] {
-            for (const auto& metric : metrics) {
-                impl_->storage.insert (metric);
-            }
-            return true; // Commit
-        });
-    });
-}
-
-std::vector<Metric> Database::get_metrics (const std::string& run_id) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Metric> (where (c (&Metric::run_id) == run_id));
-}
-
-// Get metrics added after a specific ID (for incremental updates)
-std::vector<Metric> Database::get_metrics_since (const std::string& run_id, int64_t last_id) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Metric> (
-    where (c (&Metric::run_id) == run_id && c (&Metric::id) > last_id),
-    order_by (&Metric::id));
-}
-
-// Get metrics with pagination for historical data retrieval
-std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // Many rows share one timestamp (a tick inserts ~18 of them), and there is
-    // no index on timestamp - so ordering by timestamp alone leaves ties in
-    // whatever order the scan produced, which makes a page boundary able to
-    // repeat or skip a row. id is the insertion order, so it is the stable
-    // tiebreaker.
-    return impl_->storage.get_all<Metric> (
-    where (c (&Metric::run_id) == run_id),
-    multi_order_by (order_by (&Metric::timestamp), order_by (&Metric::id)),
-    sqlite_orm::limit (offset, limit));
-}
-
-// Count total metrics for a run (for pagination metadata)
-int64_t Database::count_metrics (const std::string& run_id) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.count<Metric> (where (c (&Metric::run_id) == run_id));
 }
 
 // ============================================================================
