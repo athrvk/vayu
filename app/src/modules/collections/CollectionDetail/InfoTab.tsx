@@ -11,7 +11,8 @@ import { Button, Input, MarkdownEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { Field, SaveFailed, Stat, formatRelative } from "./shared";
+import { Field, SaveFailed, Stat } from "./shared";
+import { formatRelative } from "./format";
 
 interface InfoTabProps {
 	collection: Collection;

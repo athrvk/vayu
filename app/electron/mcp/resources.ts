@@ -139,12 +139,11 @@ export const RUN_REPORT_RESOURCE = {
  * array (the legacy no-param shape), so it survives either.
  */
 export function extractRunIds(runs: unknown): string[] {
-	const rows =
-		Array.isArray(runs)
-			? runs
-			: runs && typeof runs === "object" && Array.isArray((runs as { data?: unknown }).data)
-				? (runs as { data: unknown[] }).data
-				: null;
+	const rows = Array.isArray(runs)
+		? runs
+		: runs && typeof runs === "object" && Array.isArray((runs as { data?: unknown }).data)
+			? (runs as { data: unknown[] }).data
+			: null;
 	if (!rows) return [];
 	const ids: string[] = [];
 	for (const r of rows) {

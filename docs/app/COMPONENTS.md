@@ -178,7 +178,7 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 
-`InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain).
+`InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh).
 
 Info, Auth and both Script tabs share one save model: an editable draft with a Save button gated on `isDirty` and a Reset, held by [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model). It is the manual counterpart to the request builder's `useSaveManager()` autosave, and it owns the mutation reset on a collection switch - that part had been hand-rolled per tab and one tab had omitted it.
 
@@ -198,7 +198,7 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 | `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
 | `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests. An expanded validation-failure sample lists each failing test's `trace.failures` message, not just the `ERR` chip and pass/fail counts |
-| `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
+| `shared.tsx`, `tooltips.tsx`, `format.ts` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording + the `fmt()` number formatter (its own module so `shared.tsx` exports only components) |
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
 
@@ -407,6 +407,12 @@ Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-
 Primitives built on Radix UI + cmdk:
 
 `badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+The `cva` definitions for `badge`, `button` and `toast` live in sibling
+`*-variants.ts` modules and are re-exported from `components/ui/index.ts`. A
+module that exports both a component and a value cannot be hot-reloaded, which
+is the only reason for the split - import `badgeVariants` / `buttonVariants` /
+`toastVariants` from `@/components/ui` as before.
 
 ### `info-chip`
 

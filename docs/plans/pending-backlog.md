@@ -2,7 +2,7 @@
 
 Living backlog of deferred / surfaced work. Each item notes **why** it's pending and **what** it needs so it can be picked up as a focused plan.
 
-_Last updated: 2026-07-31. Recently shipped: **A1** (engine-owned request composition) via issue #226. Previously shipped and removed from this list: **W1** (windowed percentiles) via PR #54; **N3** (uPlot chart unification) + the four-category app-settings overhaul via PR #55 (0.8.0); **P2** (`/config` validation message) via PR #50._
+_Last updated: 2026-08-01. Recently shipped: **N2** (app lint sweep, now CI-enforced) via issue #189; **A1** (engine-owned request composition) via issue #226. Previously shipped and removed from this list: **W1** (windowed percentiles) via PR #54; **N3** (uPlot chart unification) + the four-category app-settings overhaul via PR #55 (0.8.0); **P2** (`/config` validation message) via PR #50._
 
 ---
 
@@ -17,14 +17,6 @@ Against `/fast` on loopback, tuned Vayu reaches ~45k req/s (vs `wrk` ~51k), but 
 - `maxInFlight` default (`target × 10`) is effectively unbounded → backlog balloons (390k) instead of shedding load.
 
 **Needs:** lower the default `workers`; make the connection cap a **global budget** (or auto-derive from workers); bound the default `maxInFlight`. (Confirmed PR #10 is NOT the cause; ceiling is long-standing architecture. The branch-only 12-worker collapse was traced to added per-completion CPU and only bites at `workers=ncpu`.) Needs a spec.
-
----
-
-## Janitorial
-
-### N2. Lint sweep
-
-~120 ESLint findings in the app (mostly `@typescript-eslint/no-explicit-any` + misc). Janitorial; no behaviour change.
 
 ---
 

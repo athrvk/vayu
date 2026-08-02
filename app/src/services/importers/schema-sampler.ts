@@ -5,7 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-type Schema = Record<string, any>;
+import { asRecord } from "@/lib/json-node";
+
+type Schema = Record<string, unknown>;
 export type RefResolver = (ref: string) => unknown;
 
 const MAX_DEPTH = 6;
@@ -89,8 +91,8 @@ function walk(
 		case "object":
 		default: {
 			// no/unknown type: fall back to walking properties
-			const props = schema.properties;
-			if (props && typeof props === "object") {
+			const props = asRecord(schema.properties);
+			if (props) {
 				const out: Record<string, unknown> = {};
 				for (const key of Object.keys(props)) {
 					out[key] = walk(props[key], resolveRef, depth + 1, seenRefs);

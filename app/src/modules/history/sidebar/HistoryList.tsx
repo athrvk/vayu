@@ -9,7 +9,12 @@ import { useEffect, useState } from "react";
 import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
 import { ApiError } from "@/services";
-import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
+import {
+	useHistoryStore,
+	filterRuns,
+	type FilterStatus,
+	type FilterType,
+} from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation, flattenRunPages, runsTotal } from "@/queries";
 import {
 	DrawerPanel,
@@ -187,7 +192,10 @@ export default function HistoryList() {
 					</div>
 
 					<div className="flex gap-2 flex-wrap">
-						<Select value={filterType} onValueChange={(v) => setFilterType(v as any)}>
+						<Select
+							value={filterType}
+							onValueChange={(v) => setFilterType(v as FilterType)}
+						>
 							<SelectTrigger className="flex-1 min-w-[120px]">
 								<SelectValue />
 							</SelectTrigger>
@@ -200,7 +208,7 @@ export default function HistoryList() {
 
 						<Select
 							value={filterStatus}
-							onValueChange={(v) => setFilterStatus(v as any)}
+							onValueChange={(v) => setFilterStatus(v as FilterStatus)}
 						>
 							<SelectTrigger className="flex-1 min-w-[120px]">
 								<SelectValue />

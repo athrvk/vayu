@@ -7,63 +7,10 @@
 
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { cva, type VariantProps } from "class-variance-authority";
+import { type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
-
-const buttonVariants = cva(
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-	{
-		variants: {
-			variant: {
-				default: "bg-primary-fill text-primary-foreground shadow hover:bg-primary-fill/90",
-				destructive:
-					"bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-				outline:
-					"border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
-				secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-				ghost: "hover:bg-accent hover:text-accent-foreground",
-				link: "text-primary underline-offset-4 hover:underline",
-				/*
-				 * Row actions - the controls that appear on a row you are already
-				 * hovering (⋯, delete, copy). `ghost` is wrong for these: it hovers
-				 * to bg-accent, which is exactly what the row underneath already
-				 * paints, so the button appears to have no hover state at all.
-				 * These step up to accent-active instead.
-				 */
-				rowAction: "text-muted-foreground hover:bg-accent-active hover:text-foreground",
-				/*
-				 * Same shape as rowAction - only the glyph turns red, and only on
-				 * hover. No red background: the row already carries one fill, a
-				 * second competing tint is noise, and the delete confirmation is
-				 * what actually protects the user.
-				 *
-				 * `destructive-text`, not `destructive`. Measured against
-				 * `--accent-active`, the fill token gives 3.66 light / 1.27 dark -
-				 * the dark figure missing even the 3.0 floor for a glyph.
-				 * `destructive-text` gives 4.12 / 3.96.
-				 *
-				 * Those clear 3.0 but not the 4.5 that *text* would need, and this
-				 * variant is icon-only by design (all three call sites render a
-				 * Trash2 at size="icon"). Put a text label in it and it stops
-				 * passing - use a different variant.
-				 */
-				rowActionDestructive:
-					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",
-			},
-			size: {
-				default: "h-9 px-4 py-2",
-				sm: "h-8 px-3 text-xs",
-				lg: "h-10 px-8",
-				icon: "h-9 w-9",
-			},
-		},
-		defaultVariants: {
-			variant: "default",
-			size: "default",
-		},
-	}
-);
+import { buttonVariants } from "./button-variants";
 
 export interface ButtonProps
 	extends React.ComponentProps<"button">, VariantProps<typeof buttonVariants> {
@@ -81,4 +28,4 @@ function Button({ className, variant, size, asChild = false, ...props }: ButtonP
 	);
 }
 
-export { Button, buttonVariants };
+export { Button };

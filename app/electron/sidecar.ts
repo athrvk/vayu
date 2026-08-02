@@ -91,14 +91,14 @@ function isVayuEngineRunning(pid: number): boolean {
 			// On Unix (macOS, Linux), first check if process exists with signal 0
 			try {
 				process.kill(pid, 0);
-			} catch (err: any) {
+			} catch (err) {
 				// ESRCH means process doesn't exist
-				if (err.code === "ESRCH") {
+				if ((err as NodeJS.ErrnoException).code === "ESRCH") {
 					return false;
 				}
 				// EPERM means process exists but we don't have permission
 				// Continue to verify process name
-				if (err.code !== "EPERM") {
+				if ((err as NodeJS.ErrnoException).code !== "EPERM") {
 					return false;
 				}
 			}
@@ -426,7 +426,7 @@ export class EngineSidecar {
 					console.log(`[Sidecar] Engine is ready`);
 					return;
 				}
-			} catch (err) {
+			} catch {
 				// Engine not ready yet, continue waiting
 			}
 
@@ -457,7 +457,7 @@ export class EngineSidecar {
 			if (response.ok) {
 				console.log("[Sidecar] Shutdown request accepted");
 			}
-		} catch (err) {
+		} catch {
 			console.log("[Sidecar] HTTP shutdown request failed, will use signal");
 		}
 

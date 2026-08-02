@@ -433,6 +433,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// reseeds when the user switches between globals / a specific environment /
 	// collection.
 	const lastSeededSourceRef = useRef<string | null>(null);
+	// The seed is gated on `hasPendingChangesRef`, a flag written synchronously by
+	// the editor and by a save's completion. Deriving the rows while rendering
+	// would mean reading that ref during render, which is the defect the guard
+	// exists to prevent; moving the guard into state would make it one render late
+	// and let a save echo overwrite keystrokes again - so the seed stays here, and
+	// `set-state-in-effect` is suppressed on the two writes below with that reason.
 	useEffect(() => {
 		const isNewDataSource = lastSeededSourceRef.current !== contextId;
 		lastSeededSourceRef.current = contextId;
@@ -463,6 +469,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				type: "string",
 				isNew: true,
 			});
+			// eslint-disable-next-line react-hooks/set-state-in-effect -- see the guard note above
 			setVariables(rows);
 		} else {
 			setVariables([
@@ -477,6 +484,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 		if (newVariables[index].isNew && (newVariables[index].key || newVariables[index].value)) {
 			newVariables[index].isNew = false;
+			// This runs from an input event, not from render: the stamp orders newly
+			// added rows and has to be the real clock, not a render-stable value.
+			// eslint-disable-next-line react-hooks/purity
 			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
 			newVariables[index].type = newVariables[index].type ?? "string";
 			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });

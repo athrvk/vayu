@@ -67,13 +67,17 @@ export function useEngine(): UseEngineReturn {
 				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
 
 				setError(errorMessage);
+				// The engine never answered, so the exchange half of `SanityResult`
+				// (headers, body, timing) does not exist. `status: 0` is what marks
+				// the result as synthesised; the cast says the same thing the shape
+				// does, rather than inventing zeroed timings that read as measured.
 				return {
 					status: 0,
 					statusText: "Error",
 					error: errorMessage,
 					errorCode: errorCode,
 					errorMessage: errorMessage,
-				} as any;
+				} as unknown as SanityResult;
 			} finally {
 				setIsExecuting(false);
 			}

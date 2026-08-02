@@ -8,7 +8,8 @@
 // Vayu UI Components
 // Re-exported from shadcn/ui with Vayu theming
 
-export { Button, buttonVariants } from "./button";
+export { Button } from "./button";
+export { buttonVariants } from "./button-variants";
 export type { ButtonProps } from "./button";
 
 export { CodeEditor } from "./code-editor";
@@ -19,7 +20,8 @@ export { SecretInput } from "./secret-input";
 export { Textarea } from "./textarea";
 export type { TextareaProps } from "./textarea";
 
-export { Badge, badgeVariants } from "./badge";
+export { Badge } from "./badge";
+export { badgeVariants } from "./badge-variants";
 
 export { Kbd } from "./kbd";
 export type { KbdProps } from "./kbd";
@@ -73,7 +75,6 @@ export {
 	ToastDescription,
 	ToastAction,
 	ToastClose,
-	toastVariants,
 } from "./toast";
 export type { ToastVariantName } from "./toast";
 
@@ -144,3 +145,4 @@ export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsib
 export { Skeleton } from "./skeleton";
 
 export { Switch } from "./switch";
+export { toastVariants } from "./toast-variants";

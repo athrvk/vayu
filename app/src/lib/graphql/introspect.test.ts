@@ -17,6 +17,7 @@ import {
 	buildIntrospectionRequest,
 	type IntrospectionTarget,
 } from "./introspect";
+import type { ComposedRequest, SanityResult } from "@/types";
 
 function introspectionJSONFor(sdl: string): unknown {
 	const schema = buildSchema(sdl);
@@ -44,8 +45,8 @@ const COMPOSED = {
 };
 
 function mockExecute(result: { status: number; bodyRaw: string }) {
-	(apiService.composeRequest as any).mockResolvedValue(COMPOSED);
-	(apiService.executeRequest as any).mockResolvedValue(result);
+	vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+	vi.mocked(apiService.executeRequest).mockResolvedValue(result as SanityResult);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -57,8 +58,8 @@ describe("buildIntrospectionRequest", () => {
 			// Composition returns the whole request; introspection is not sending
 			// the user's body or running their scripts.
 			body: { mode: "json", content: '{"real":"body"}' },
-			preRequestScripts: [{ source: "collection", id: "c1", script: "pm.test()" }],
-		} as any);
+			preRequestScripts: [{ origin: "collection", id: "c1", script: "pm.test()" }],
+		} as ComposedRequest);
 		expect(req.method).toBe("POST");
 		expect(req.url).toBe("https://api.test/gql");
 		expect(req.headers?.["Content-Type"]).toBe("application/json");
@@ -71,12 +72,15 @@ describe("buildIntrospectionRequest", () => {
 	});
 
 	it("omits auth entirely when composition resolved it to nothing", () => {
-		const req = buildIntrospectionRequest({ ...COMPOSED, auth: undefined } as any);
+		const req = buildIntrospectionRequest({ ...COMPOSED, auth: undefined } as ComposedRequest);
 		expect("auth" in req).toBe(false);
 	});
 
 	it("never puts an unresolved inherit on the wire", () => {
-		const req = buildIntrospectionRequest({ ...COMPOSED, auth: { mode: "inherit" } } as any);
+		const req = buildIntrospectionRequest({
+			...COMPOSED,
+			auth: { mode: "inherit" },
+		} as ComposedRequest);
 		expect(req.auth).toBeUndefined();
 	});
 });
@@ -101,17 +105,17 @@ describe("introspectSchema", () => {
 		// Execute gets what compose resolved - this is the assertion that goes
 		// red if introspection stops composing and sends the target's own
 		// headers again (the #228 defect).
-		const sent = (apiService.executeRequest as any).mock.calls[0][0];
+		const sent = vi.mocked(apiService.executeRequest).mock.calls[0][0];
 		expect(sent.url).toBe("https://api.test/gql");
 		expect(sent.auth).toEqual({ mode: "bearer", token: "sk_live" });
-		expect(sent.headers["X-Team"]).toBe("payments");
+		expect(sent.headers?.["X-Team"]).toBe("payments");
 	});
 
 	it("omits auth from the compose body when the request has none", async () => {
 		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
 		await introspectSchema({ url: "https://api.test/gql", headers: {} });
-		const composeBody = (apiService.composeRequest as any).mock.calls[0][0];
-		expect("auth" in composeBody.request).toBe(false);
+		const composeBody = vi.mocked(apiService.composeRequest).mock.calls[0][0];
+		expect("auth" in (composeBody.request ?? {})).toBe(false);
 	});
 
 	it("builds a GraphQLSchema from a successful introspection response", async () => {
@@ -136,7 +140,7 @@ describe("introspectSchema", () => {
 	});
 
 	it("surfaces a compose failure instead of sending an unresolved request", async () => {
-		(apiService.composeRequest as any).mockRejectedValue(new Error("collection not found"));
+		vi.mocked(apiService.composeRequest).mockRejectedValue(new Error("collection not found"));
 		await expect(introspectSchema(TARGET)).rejects.toThrow(/collection not found/);
 		expect(apiService.executeRequest).not.toHaveBeenCalled();
 	});

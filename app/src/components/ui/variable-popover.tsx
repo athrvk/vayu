@@ -35,7 +35,7 @@
  * a scope that cannot be written is a Create button that does nothing.
  */
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
@@ -125,31 +125,27 @@ export function VariablePopover({
 	const openValueRef = useRef(varInfo?.value || "");
 	const pendingCancelRef = useRef(false);
 
-	// Reset reveal state when popover closes
-	useEffect(() => {
-		if (!isOpen) {
-			setIsSecretRevealed(false);
-		}
-	}, [isOpen]);
-
-	// Keep editValue in sync with varInfo when popover is closed
-	const varInfoValue = varInfo?.value;
-	useEffect(() => {
-		if (!isOpen && varInfoValue !== undefined) {
-			setEditValue(varInfoValue);
-		}
-	}, [varInfoValue, isOpen]);
-
-	// Initialize ref when opening - varInfo intentionally excluded so external
-	// reference churn (e.g. inline object creation in parent) doesn't reset
-	// editValue while the user is typing.
-	useEffect(() => {
-		if (isOpen && varInfo) {
+	/**
+	 * Opening seeds the edit buffer from the variable, and closing drops the
+	 * reveal so a secret is masked again next time.
+	 *
+	 * Both belong to the open/close *event*, not to a render: seeding from an
+	 * effect keyed on `isOpen` re-ran whenever the parent handed down a fresh
+	 * `varInfo` object, which reset `editValue` under a user mid-type (the
+	 * reason the effect carried an `exhaustive-deps` suppression).
+	 */
+	const openPopover = () => {
+		if (varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isOpen]);
+		setIsOpen(true);
+	};
+
+	const closePopover = () => {
+		setIsSecretRevealed(false);
+		setIsOpen(false);
+	};
 
 	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
 
@@ -168,7 +164,7 @@ export function VariablePopover({
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
-			setIsOpen(true);
+			openPopover();
 		} else {
 			// Closing: auto-save if in auto mode and value changed (unless cancelled)
 			if (!pendingCancelRef.current && saveMode === "auto" && onValueChange && varInfo) {
@@ -177,7 +173,7 @@ export function VariablePopover({
 				}
 			}
 			pendingCancelRef.current = false;
-			setIsOpen(false);
+			closePopover();
 		}
 	};
 
@@ -185,20 +181,20 @@ export function VariablePopover({
 		if (onValueChange && varInfo) {
 			onValueChange(name, editValue, varInfo.scope);
 		}
-		setIsOpen(false);
+		closePopover();
 	};
 
 	const handleCancel = () => {
 		if (varInfo) {
 			setEditValue(varInfo.value);
 		}
-		setIsOpen(false);
+		closePopover();
 	};
 
 	const handleCreate = () => {
 		if (!onValueChange || !activeCreateScope) return;
 		onValueChange(name, editValue, activeCreateScope);
-		setIsOpen(false);
+		closePopover();
 	};
 
 	const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -215,7 +211,7 @@ export function VariablePopover({
 			} else if (e.key === "Escape") {
 				// Mark as cancelled before Radix fires its own onOpenChange for Escape
 				pendingCancelRef.current = true;
-				setIsOpen(false);
+				closePopover();
 			}
 		}
 	};
@@ -251,7 +247,7 @@ export function VariablePopover({
 			onClick={(e) => {
 				if (disabled) return;
 				e.stopPropagation(); // Prevent input blur
-				if (!isOpen) setIsOpen(true);
+				if (!isOpen) openPopover();
 			}}
 			onKeyDown={(e) => {
 				if (disabled) return;
@@ -260,7 +256,7 @@ export function VariablePopover({
 					// where it would otherwise type a space.
 					e.preventDefault();
 					e.stopPropagation();
-					setIsOpen(true);
+					openPopover();
 				}
 			}}
 			style={{ display: "inline" }}

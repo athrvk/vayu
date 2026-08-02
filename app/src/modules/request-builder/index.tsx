@@ -294,6 +294,7 @@ export default function RequestBuilder() {
 			activeEnvironmentId,
 			queryClient,
 			collectionAncestors,
+			showToast,
 		]
 	);
 
@@ -590,6 +591,7 @@ export default function RequestBuilder() {
 	);
 }
 
-// Re-export types and context for external use
-export { useRequestBuilderContext } from "./context";
+// Re-export types for external use. The context hook is not re-exported here:
+// every consumer imports it from `./context` directly, and a value export
+// alongside the component would cost this file its fast refresh.
 export type { RequestState, ResponseState, KeyValueItem } from "./types";

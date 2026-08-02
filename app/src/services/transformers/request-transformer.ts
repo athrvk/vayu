@@ -12,7 +12,15 @@
  * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Request, KeyValueEntry, RequestBody, RequestAuth } from "@/types";
+import type {
+	Request,
+	BodyMode,
+	HttpMethod,
+	KeyValueEntry,
+	RequestBody,
+	RequestAuth,
+} from "@/types";
+import { asRecord, asStr } from "@/lib/json-node";
 import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
@@ -27,6 +35,13 @@ export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
 	createdAt: number | string;
 	updatedAt: number | string;
 };
+
+/**
+ * A request row as the engine sends it. Typed as a bag of unknowns rather than
+ * as `Request`: the wire row carries numeric timestamps and may predate a
+ * column, which is exactly what this transformer exists to reconcile.
+ */
+export type RawRequest = Record<string, unknown>;
 
 /**
  * Coerce a raw `maxRedirects` into the range the Settings tab offers. Anything
@@ -51,41 +66,44 @@ function coerceHttpVersion(raw: unknown): HttpVersion {
 }
 
 export class RequestTransformer {
-	static toFrontend(raw: Record<string, any>): Request {
-		if (!raw.id) throw new Error("Request must have an id");
+	static toFrontend(raw: RawRequest): Request {
+		const id = asStr(raw.id);
+		if (!id) throw new Error("Request must have an id");
 
 		// Params: array of KeyValueEntry (new) or legacy empty object {}
-		const params: KeyValueEntry[] = Array.isArray(raw.params) ? raw.params : [];
+		const params: KeyValueEntry[] = Array.isArray(raw.params)
+			? (raw.params as KeyValueEntry[])
+			: [];
 
 		// Headers: array of KeyValueEntry (new) or legacy empty object {}
-		const headers: KeyValueEntry[] = Array.isArray(raw.headers) ? raw.headers : [];
+		const headers: KeyValueEntry[] = Array.isArray(raw.headers)
+			? (raw.headers as KeyValueEntry[])
+			: [];
 
 		// Body: discriminated union (new) or legacy string
 		let body: RequestBody = { mode: "none" };
-		if (raw.body && typeof raw.body === "object" && raw.body.mode) {
-			body = raw.body as RequestBody;
-		}
+		const rawBody = asRecord(raw.body);
+		if (rawBody?.mode) body = rawBody as RequestBody;
 
 		// Auth: RequestAuth (new) or legacy object
 		let auth: RequestAuth = { mode: "inherit" };
-		if (raw.auth && typeof raw.auth === "object" && raw.auth.mode) {
-			auth = raw.auth as RequestAuth;
-		}
+		const rawAuth = asRecord(raw.auth);
+		if (rawAuth?.mode) auth = rawAuth as RequestAuth;
 
 		return {
-			id: raw.id,
-			collectionId: raw.collectionId ?? "",
-			name: raw.name ?? "",
-			description: raw.description ?? "",
-			method: raw.method ?? "GET",
-			url: raw.url ?? "",
+			id,
+			collectionId: asStr(raw.collectionId) ?? "",
+			name: asStr(raw.name) ?? "",
+			description: asStr(raw.description) ?? "",
+			method: (asStr(raw.method) as HttpMethod) ?? "GET",
+			url: asStr(raw.url) ?? "",
 			params,
 			headers,
 			body,
-			bodyType: raw.bodyType ?? body.mode ?? "none",
+			bodyType: (asStr(raw.bodyType) as BodyMode) ?? body.mode ?? "none",
 			auth,
-			preRequestScript: raw.preRequestScript ?? "",
-			postRequestScript: raw.postRequestScript ?? "",
+			preRequestScript: asStr(raw.preRequestScript) ?? "",
+			postRequestScript: asStr(raw.postRequestScript) ?? "",
 			// Redirect policy: a request stored before these columns existed
 			// comes back without them, and must read as the engine default
 			// rather than as "do not follow" / "zero hops".
@@ -98,9 +116,9 @@ export class RequestTransformer {
 			// carrying a value this build doesn't recognise, reads as the
 			// engine default rather than as an unselectable value.
 			httpVersion: coerceHttpVersion(raw.httpVersion),
-			order: raw.order ?? 0,
-			createdAt: new Date(raw.createdAt).toISOString(),
-			updatedAt: new Date(raw.updatedAt).toISOString(),
+			order: typeof raw.order === "number" ? raw.order : 0,
+			createdAt: new Date(raw.createdAt as string | number).toISOString(),
+			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),
 		};
 	}
 }

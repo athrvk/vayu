@@ -139,40 +139,42 @@ export default function RequestBuilderProvider({
 		report: lastDesignRunReport,
 		isLoading: isLoadingLastRun,
 	} = useLastDesignRunQuery(request.id);
-	const hasLoadedFromBackend = useRef<string | null>(null);
+	/*
+	 * The request the backend restore below has already answered for - null once
+	 * the provider is handed a different request, which is what lets a return to
+	 * an earlier request ask again. State rather than a ref because the restore
+	 * reads it while rendering.
+	 */
+	const [restoredFor, setRestoredFor] = useState<string | null>(null);
+	const [restoredResponse, setRestoredResponse] = useState<ResponseState | null>(null);
 
-	// Load response from backend if we don't have one cached and backend has a previous run
-	useEffect(() => {
-		// Skip if no request ID or already have a response
-		if (!request.id || response) return;
-
-		// Skip if already loaded for this request ID
-		if (hasLoadedFromBackend.current === request.id) return;
-
-		// Skip if still loading
-		if (isLoadingLastRun) return;
-
-		// Try to reconstruct response from last design run
-		const restoredResponse = responseFromRunResult(
+	/*
+	 * Load the response from the backend when nothing is cached locally and the
+	 * last design run has one (the app-reload case).
+	 *
+	 * Derived while rendering rather than in an effect: it reads query state and
+	 * writes component state, so an effect would paint the empty viewer first and
+	 * replace it a frame later. Persisting to the response store is a write to
+	 * something outside React, so that half stays in the effect below.
+	 */
+	if (request.id && !response && !isLoadingLastRun && restoredFor !== request.id) {
+		setRestoredFor(request.id);
+		const restored = responseFromRunResult(
 			lastDesignRunReport?.results?.[0],
 			lastDesignRun?.id
 		);
-		if (restoredResponse) {
-			setLocalResponse(restoredResponse);
-			storeSetResponse(request.id, restoredResponse);
-			hasLoadedFromBackend.current = request.id;
+		if (restored) {
+			setLocalResponse(restored);
+			setRestoredResponse(restored);
 		}
+	}
 
-		// Mark as loaded even if no response found
-		hasLoadedFromBackend.current = request.id;
-	}, [
-		request.id,
-		response,
-		lastDesignRun,
-		lastDesignRunReport,
-		isLoadingLastRun,
-		storeSetResponse,
-	]);
+	const restoredForId = restoredFor;
+	useEffect(() => {
+		if (restoredResponse && restoredForId) {
+			storeSetResponse(restoredForId, restoredResponse);
+		}
+	}, [restoredResponse, restoredForId, storeSetResponse]);
 
 	// UI state
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");
@@ -232,47 +234,60 @@ export default function RequestBuilderProvider({
 	const updateCollectionMutation = useUpdateCollectionMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 
-	// Reset when initial request changes
-	useEffect(() => {
-		if (initialRequest) {
-			setRequestState({
-				...createDefaultRequestState(),
-				...initialRequest,
-				collectionId: collectionId || null,
-			});
-			setHasUnsavedChanges(false);
-			// Clear any executing state carried over from the request we just left.
-			// It belongs to that request's in-flight run, not this one; without this
-			// the switched-to request shows a "Sending" spinner it never triggered.
-			setIsExecuting(false);
+	/*
+	 * Reset when the request the provider was handed changes.
+	 *
+	 * Adjusted during render rather than from an effect: this is state derived
+	 * from props, so an effect would first paint the previous request's state
+	 * and then correct it. The trigger is `id` / `collectionId` /
+	 * `initialResponse` - never the `initialRequest` object itself, which a
+	 * parent re-render replaces by reference and which would discard unsaved
+	 * edits (the reason this carried an `exhaustive-deps` suppression).
+	 *
+	 * The mount pass is covered by the `useState` initialisers above, which set
+	 * exactly what this block would.
+	 */
+	const [lastReset, setLastReset] = useState({
+		id: initialRequest?.id,
+		collectionId,
+		initialResponse,
+	});
+	if (
+		initialRequest &&
+		(lastReset.id !== initialRequest.id ||
+			lastReset.collectionId !== collectionId ||
+			lastReset.initialResponse !== initialResponse)
+	) {
+		setLastReset({ id: initialRequest.id, collectionId, initialResponse });
+		// Let the backend restore run again for whatever request is now on screen.
+		setRestoredFor(null);
+		setRestoredResponse(null);
+		setRequestState({
+			...createDefaultRequestState(),
+			...initialRequest,
+			collectionId: collectionId || null,
+		});
+		setHasUnsavedChanges(false);
+		// Clear any executing state carried over from the request we just left.
+		// It belongs to that request's in-flight run, not this one; without this
+		// the switched-to request shows a "Sending" spinner it never triggered.
+		setIsExecuting(false);
 
-			// Restore response from store for this request
-			const requestId = initialRequest.id;
-			if (requestId) {
-				const stored = getResponse(requestId);
-				if (stored) {
-					setLocalResponse(stored as ResponseState);
-				} else {
-					setLocalResponse(null);
-				}
-				// Reset backend loading flag to allow reloading from backend if needed
-				hasLoadedFromBackend.current = null;
-			} else {
-				/*
-				 * No id, so there is no stored response to restore - fall back to
-				 * the one handed in. This runs on mount as well as on a change of
-				 * request, so clearing it unconditionally (as it used to) threw
-				 * away `initialResponse` immediately after the initialiser above
-				 * had set it, and a detached copy opened showing "No response yet".
-				 */
-				setLocalResponse(initialResponse ?? null);
-			}
+		// Restore response from store for this request
+		const requestId = initialRequest.id;
+		if (requestId) {
+			const stored = getResponse(requestId);
+			setLocalResponse(stored ? (stored as ResponseState) : null);
+		} else {
+			/*
+			 * No id, so there is no stored response to restore - fall back to
+			 * the one handed in. Clearing it unconditionally (as it used to)
+			 * threw away `initialResponse`, and a detached copy opened showing
+			 * "No response yet".
+			 */
+			setLocalResponse(initialResponse ?? null);
 		}
-		// initialRequest intentionally keyed by .id only: depending on the full
-		// object would reset local state (discarding unsaved edits) on every
-		// parent re-render that passes a new object reference.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [initialRequest?.id, collectionId, getResponse, initialResponse]);
+	}
 
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {

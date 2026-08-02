@@ -97,9 +97,6 @@ export function saveWindowState(window: BrowserWindow): void {
 }
 
 export function trackWindowState(window: BrowserWindow): void {
-	// Save state on these events
-	const events: Array<"resize" | "move" | "close"> = ["resize", "move", "close"];
-
 	// Debounce resize/move to avoid excessive writes
 	let saveTimeout: NodeJS.Timeout | null = null;
 	const debouncedSave = () => {

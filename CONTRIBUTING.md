@@ -153,7 +153,8 @@ private:
 
 ### TypeScript/React (App)
 
-- **Style:** ESLint + Prettier (if configured)
+- **Style:** ESLint + Prettier, both **enforced by CI** - the app job fails on a
+  lint error, a warning, or an unformatted file
 - **Framework:** React 19 with hooks
 - **State:** Zustand (UI state) + TanStack Query (server state)
 - **Styling:** Tailwind CSS
@@ -195,9 +196,15 @@ interface RequestConfig {}
 
 ```bash
 cd app
-pnpm lint
+pnpm lint          # ESLint, zero errors *and* zero warnings
+pnpm format:check  # Prettier
 pnpm type-check
 ```
+
+The PR workflow runs `pnpm lint` and `pnpm format:check` on the app job, so a
+new `any`, a `react-hooks` violation or an unformatted file fails CI. Where a
+rule genuinely cannot be satisfied, suppress it on the single line with a
+comment saying why - an unexplained `eslint-disable` is treated as a defect.
 
 ## Testing
 

@@ -14,7 +14,8 @@ import type {
 	RequestDraft,
 	SkippedItem,
 } from "./types";
-import { joinExec, mapKeyValues, mapPostmanAuth, rawBody, toVarRecord } from "./shared";
+import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
+import { asString, joinExec, mapKeyValues, mapPostmanAuth, rawBody, toVarRecord } from "./shared";
 import { normalizeVars } from "./var-normalize";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
@@ -35,8 +36,8 @@ function toMethod(m: unknown): HttpMethod {
  * because the distinction is collection-only: on a request, `none` already means
  * send nothing.
  */
-function collectionAuth(auth: any): Exclude<RequestAuth, { mode: "inherit" }> {
-	if (auth?.type === "noauth") return { mode: "noauth" };
+function collectionAuth(auth: unknown): Exclude<RequestAuth, { mode: "inherit" }> {
+	if (prop(auth, "type") === "noauth") return { mode: "noauth" };
 	const mapped = mapPostmanAuth(auth);
 	return mapped.mode === "inherit" ? { mode: "none" } : mapped;
 }
@@ -62,9 +63,9 @@ interface Ctx {
  * deletes it is worse than one that shows it unparsed. Every other key rides
  * along untouched for the same reason.
  */
-function graphqlContent(graphql: any): string {
+function graphqlContent(graphql: unknown): string {
 	if (!graphql || typeof graphql !== "object") return JSON.stringify({});
-	const out: Record<string, unknown> = { ...graphql };
+	const out: Record<string, unknown> = { ...(graphql as JsonRecord) };
 	const vars = out.variables;
 	if (typeof vars === "string") {
 		if (!vars.trim()) {
@@ -81,21 +82,25 @@ function graphqlContent(graphql: any): string {
 	return JSON.stringify(out);
 }
 
-function pmBody(body: any, ctx: Ctx): RequestBody {
-	if (!body || !body.mode) return { mode: "none" };
-	switch (body.mode) {
+function pmBody(body: unknown, ctx: Ctx): RequestBody {
+	const node = asRecord(body);
+	if (!node || !node.mode) return { mode: "none" };
+	switch (asStr(node.mode)) {
 		case "raw":
-			return rawBody(body.raw ?? "", body.options?.raw?.language);
+			return rawBody(
+				asStr(node.raw) ?? "",
+				asStr(prop(prop(node.options, "raw"), "language"))
+			);
 		case "urlencoded":
-			return { mode: "x-www-form-urlencoded", fields: mapKeyValues(body.urlencoded) };
+			return { mode: "x-www-form-urlencoded", fields: mapKeyValues(node.urlencoded) };
 		case "formdata": {
-			const textFields = (body.formdata ?? []).filter((f: any) => f.type !== "file");
-			const fileCount = (body.formdata ?? []).length - textFields.length;
-			ctx.skippedFileBody += fileCount;
+			const formdata = asArray(node.formdata);
+			const textFields = formdata.filter((f) => prop(f, "type") !== "file");
+			ctx.skippedFileBody += formdata.length - textFields.length;
 			return { mode: "form-data", fields: mapKeyValues(textFields) };
 		}
 		case "graphql":
-			return { mode: "graphql", content: graphqlContent(body.graphql) };
+			return { mode: "graphql", content: graphqlContent(node.graphql) };
 		case "file":
 			ctx.skippedFileBody += 1;
 			return { mode: "none" };
@@ -136,7 +141,7 @@ function queryEntries(query: string): ReturnType<typeof mapKeyValues> {
 		});
 }
 
-function pmUrl(url: any): { url: string; params: ReturnType<typeof mapKeyValues> } {
+function pmUrl(url: unknown): { url: string; params: ReturnType<typeof mapKeyValues> } {
 	if (typeof url === "string") {
 		const qIdx = url.indexOf("?");
 		if (qIdx === -1) return { url: normalizeVars(url), params: [] };
@@ -145,10 +150,10 @@ function pmUrl(url: any): { url: string; params: ReturnType<typeof mapKeyValues>
 			params: queryEntries(url.slice(qIdx + 1)),
 		};
 	}
-	const raw: string = typeof url?.raw === "string" ? url.raw : "";
+	const raw = asStr(prop(url, "raw")) ?? "";
 	const qIdx = raw.indexOf("?");
 	const base = qIdx === -1 ? raw : raw.slice(0, qIdx);
-	const structured = mapKeyValues(Array.isArray(url?.query) ? url.query : undefined);
+	const structured = mapKeyValues(prop(url, "query"));
 	// `query[]` wins when it has anything - it carries disabled state and
 	// descriptions that `raw` cannot. Falling back to `raw` matters for
 	// hand-written or script-generated collections that populate only `raw`: the
@@ -159,10 +164,10 @@ function pmUrl(url: any): { url: string; params: ReturnType<typeof mapKeyValues>
 }
 
 /** `event[]` entries that are objects. A `null` in the array used to throw on `e.listen`. */
-function pmEvents(node: any): any[] {
-	return (Array.isArray(node?.event) ? node.event : []).filter(
-		(e: unknown) => !!e && typeof e === "object"
-	);
+function pmEvents(node: unknown): JsonRecord[] {
+	return asArray(prop(node, "event"))
+		.map(asRecord)
+		.filter((e): e is JsonRecord => !!e);
 }
 
 /**
@@ -176,21 +181,20 @@ function pmEvents(node: any): any[] {
  * coerced `"false"` would be worse than the default: it reads as the user's
  * setting while being the opposite of it.
  */
-function pmRedirects(item: any): Pick<RequestDraft, "followRedirects" | "maxRedirects"> {
-	const behavior = item?.protocolProfileBehavior;
-	if (!behavior || typeof behavior !== "object") return {};
+function pmRedirects(item: unknown): Pick<RequestDraft, "followRedirects" | "maxRedirects"> {
+	const behavior = asRecord(prop(item, "protocolProfileBehavior"));
+	if (!behavior) return {};
+	const { followRedirects, maxRedirects } = behavior;
 	return {
-		...(typeof behavior.followRedirects === "boolean"
-			? { followRedirects: behavior.followRedirects }
-			: {}),
-		...(typeof behavior.maxRedirects === "number" && Number.isFinite(behavior.maxRedirects)
-			? { maxRedirects: behavior.maxRedirects }
+		...(typeof followRedirects === "boolean" ? { followRedirects } : {}),
+		...(typeof maxRedirects === "number" && Number.isFinite(maxRedirects)
+			? { maxRedirects }
 			: {}),
 	};
 }
 
-function pmRequest(item: any, ctx: Ctx): RequestDraft {
-	const rq = item.request ?? {};
+function pmRequest(item: JsonRecord, ctx: Ctx): RequestDraft {
+	const rq = asRecord(item.request) ?? {};
 	const { url, params } = pmUrl(rq.url);
 	const auth = mapPostmanAuth(rq.auth);
 	if (["digest", "aws", "ntlm"].includes(auth.mode)) ctx.nonExecutableAuth += 1;
@@ -199,9 +203,8 @@ function pmRequest(item: any, ctx: Ctx): RequestDraft {
 	const pre = events.find((e) => e.listen === "prerequest");
 	const post = events.find((e) => e.listen === "test");
 	return {
-		name: item.name ?? "Untitled",
-		description:
-			typeof rq.description === "string" ? rq.description : (rq.description?.content ?? ""),
+		name: item.name == null ? "Untitled" : asString(item.name),
+		description: asStr(rq.description) ?? asStr(prop(rq.description, "content")) ?? "",
 		method: toMethod(rq.method),
 		url,
 		params,
@@ -214,8 +217,8 @@ function pmRequest(item: any, ctx: Ctx): RequestDraft {
 	};
 }
 
-function pmFolder(node: any, ctx: Ctx): CollectionDraft {
-	const items: any[] = Array.isArray(node.item) ? node.item : [];
+function pmFolder(node: JsonRecord, ctx: Ctx): CollectionDraft {
+	const items = asArray(node.item);
 	const events = pmEvents(node);
 	const children: CollectionDraft[] = [];
 	const requests: RequestDraft[] = [];
@@ -225,21 +228,24 @@ function pmFolder(node: any, ctx: Ctx): CollectionDraft {
 		// `TypeError: Cannot read properties of null` naming no item and no format,
 		// failing an otherwise well-formed file whole. Count it instead, so the
 		// preview shows the loss.
-		if (!child || typeof child !== "object") {
+		const entry = asRecord(child);
+		if (!entry) {
 			ctx.skippedMalformed += 1;
 			continue;
 		}
-		if (Array.isArray(child.item)) {
+		if (Array.isArray(entry.item)) {
 			ctx.folderCount += 1;
-			children.push(pmFolder(child, ctx));
-		} else if (child.request) {
-			requests.push(pmRequest(child, ctx));
+			children.push(pmFolder(entry, ctx));
+		} else if (entry.request) {
+			requests.push(pmRequest(entry, ctx));
 		}
 	}
-	const descObj = node.info?.description ?? node.description;
+	const info = asRecord(node.info);
+	const descObj = info?.description ?? node.description;
+	const name = info?.name ?? node.name;
 	return {
-		name: node.info?.name ?? node.name ?? "Imported Collection",
-		description: typeof descObj === "string" ? descObj : (descObj?.content ?? ""),
+		name: name == null ? "Imported Collection" : asString(name),
+		description: asStr(descObj) ?? asStr(prop(descObj, "content")) ?? "",
 		variables: toVarRecord(node.variable),
 		auth: collectionAuth(node.auth),
 		preRequestScript: ctx.opts.importScripts
@@ -253,7 +259,7 @@ function pmFolder(node: any, ctx: Ctx): CollectionDraft {
 	};
 }
 
-function parsePostman(parsed: any, opts: ImportOptions, formatName: string): ImportResult {
+function parsePostman(parsed: unknown, opts: ImportOptions, formatName: string): ImportResult {
 	const ctx: Ctx = {
 		opts,
 		requestCount: 0,
@@ -262,7 +268,7 @@ function parsePostman(parsed: any, opts: ImportOptions, formatName: string): Imp
 		skippedFileBody: 0,
 		skippedMalformed: 0,
 	};
-	const root = pmFolder(parsed, ctx);
+	const root = pmFolder(asRecord(parsed) ?? {}, ctx);
 	const skipped: SkippedItem[] = [];
 	if (ctx.skippedFileBody > 0) skipped.push({ kind: "file_body", count: ctx.skippedFileBody });
 	if (ctx.skippedMalformed > 0)
@@ -287,8 +293,8 @@ export class PostmanV21Parser implements ImportParser {
 	readonly formatName = "Postman Collection v2.1";
 	readonly formatKey = "postman-v21";
 	detect(parsed: unknown, _raw: string): boolean {
-		const schema = (parsed as any)?.info?.schema;
-		return typeof schema === "string" && schema.includes("v2.1.0");
+		const schema = asStr(prop(prop(parsed, "info"), "schema"));
+		return !!schema && schema.includes("v2.1.0");
 	}
 	parse(parsed: unknown, _raw: string, opts: ImportOptions): ImportResult {
 		return parsePostman(parsed, opts, this.formatName);
@@ -299,11 +305,11 @@ export class PostmanV20Parser implements ImportParser {
 	readonly formatName = "Postman Collection v2.0";
 	readonly formatKey = "postman-v20";
 	detect(parsed: unknown, _raw: string): boolean {
-		const p = parsed as any;
-		const schema = p?.info?.schema;
+		const info = prop(parsed, "info");
+		const schema = prop(info, "schema");
 		if (typeof schema === "string" && schema.includes("v2.0.0")) return true;
 		// info + item present but no schema field at all → treat as v2.0.
-		return !!p?.info && Array.isArray(p?.item) && schema == null;
+		return !!info && Array.isArray(prop(parsed, "item")) && schema == null;
 	}
 	parse(parsed: unknown, _raw: string, opts: ImportOptions): ImportResult {
 		// v2.0 URLs are always strings; pmUrl already handles the string form.
