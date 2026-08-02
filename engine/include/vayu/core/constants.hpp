@@ -115,6 +115,13 @@ constexpr int64_t MAX_CONCURRENCY = 10 * static_cast<int64_t> (event_loop::MAX_C
 /// Upper bound on `max_response_samples` (each retained sample holds a full
 /// response body, and the vector is reserved up front).
 constexpr int64_t MAX_RESPONSE_SAMPLES = 1000000;
+/// Upper bound on `max_success_results` / `max_slow_results`. Each retained
+/// record holds a serialised timing breakdown (~200 bytes), and both vectors
+/// are reserved up front, so an unbounded value is an eager allocation.
+constexpr int64_t MAX_RETAINED_RESULTS = 1000000;
+/// Upper bound on `slow_threshold_ms` (a day - past that no completion is an
+/// outlier because no completion survives).
+constexpr int64_t MAX_SLOW_THRESHOLD_MS = 86400000;
 } // namespace run_config
 
 /**
@@ -156,8 +163,6 @@ constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
 /// app/src/constants/live-window.ts) and reads this key too, so neither side
 /// promises a window the other cannot hold.
 constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
-/// Size of the context pool for request handling
-constexpr size_t CONTEXT_POOL_SIZE = 64;
 /// How long `RunManager::shutdown` waits for signalled runs to reach a terminal
 /// status before it logs that they have not. The *wait* is bounded; the join
 /// that follows it is not, because abandoning a still-running worker is exactly
@@ -221,8 +226,21 @@ constexpr size_t DEFAULT_EXPECTED_REQUESTS = 100000;
 /// the final report's per-type error breakdown. Raise the key to keep that
 /// breakdown complete on a run with more errors than this.
 constexpr size_t DEFAULT_MAX_ERRORS = 10000;
-/// Maximum success results to store (0 = unlimited)
+/// Maximum sampled success results to store (config key `max_success_results`;
+/// 0 = unlimited). Retained as a reservoir: past the cap a later completion
+/// displaces a uniformly chosen incumbent rather than being dropped, so the
+/// stored set describes the whole run instead of its first
+/// `max_success_results * success_sample_rate` requests.
 constexpr size_t DEFAULT_MAX_SUCCESS_RESULTS = 1000;
+/// Maximum slow-request records to store (config key `max_slow_results`;
+/// 0 = unlimited). A separate budget from the sampled successes: a completion
+/// past `slow_threshold_ms` is stored because the user asked for outliers, so
+/// it must not consume a 1-in-N slot - and under saturation most completions
+/// cross the threshold, so it needs a ceiling of its own.
+constexpr size_t DEFAULT_MAX_SLOW_RESULTS = 1000;
+/// Default latency (ms) past which a completion is captured as an outlier
+/// (config key `slow_threshold_ms`). 0 disables slow-request capture.
+constexpr int DEFAULT_SLOW_THRESHOLD_MS = 1000;
 /// Default sample rate for success traces (1 in N)
 constexpr size_t DEFAULT_SUCCESS_SAMPLE_RATE = 100;
 /// Whether to store success trace data by default

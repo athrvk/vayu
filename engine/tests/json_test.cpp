@@ -277,25 +277,6 @@ TEST (JsonTest, SerializesRun) {
     EXPECT_EQ (json["environmentId"], "env_1");
 }
 
-TEST (JsonTest, SerializesMetric) {
-    vayu::db::Metric metric;
-    metric.id        = 1;
-    metric.run_id    = "run_123";
-    metric.timestamp = 1000;
-    metric.name      = vayu::MetricName::Rps;
-    metric.value     = 50.5;
-    metric.labels    = R"({"region": "us-east-1"})";
-
-    auto json = serialize (metric);
-
-    EXPECT_EQ (json["id"], 1);
-    EXPECT_EQ (json["runId"], "run_123");
-    EXPECT_EQ (json["timestamp"], 1000);
-    EXPECT_EQ (json["name"], "rps");
-    EXPECT_EQ (json["value"], 50.5);
-    EXPECT_EQ (json["labels"]["region"], "us-east-1");
-}
-
 // ============================================================================
 // cap_trace_bodies - body caps + truncation metadata
 //

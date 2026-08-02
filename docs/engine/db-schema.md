@@ -231,8 +231,9 @@ future insert site that forgets to seed - `0` is the "no end recorded" sentinel,
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
 bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
 reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
-`test_duration`) when it fails. `""` means the run predates the column, and the report falls back
-to the legacy `metrics` rows. NOT NULL with a `""` default, so `sync_schema()` can
+`test_duration`) when it fails. `""` means the engine died before the run reached a terminal
+status, and the report then stands on the run's sampled `results` alone. NOT NULL with a `""`
+default, so `sync_schema()` can
 `ALTER TABLE ADD COLUMN` it onto an existing table (same pattern as `requests.follow_redirects`).
 
 ```json
@@ -270,7 +271,7 @@ the history. A run is a victim when it falls **beyond the `maxRunsRetained` most
 (ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
 either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
 toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
-their legacy `metrics` + their `results`), batched inside transactions that release the DB mutex between batches so a large
+their `results`), batched inside transactions that release the DB mutex between batches so a large
 backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
 is wired into both at once. `prune_runs_configured()` reads the two
@@ -337,7 +338,7 @@ Two consequences of the row being the tick:
 
 - **Pagination is tick-aligned.** `GET /runs/:runId/metrics` pages rows, and a row is a whole
   tick, so a page boundary can no longer hand back a half-populated bucket (which row-paginating
-  the EAV table below did every ~277 ticks).
+  the retired EAV `metrics` table did every ~277 ticks).
 - **`elapsed_seconds` is measured from the run's first persisted tick**, at write time, so it
   keeps counting across page boundaries instead of restarting at 0 on each page.
 
@@ -345,46 +346,16 @@ Latency percentiles in a tick are the **windowed** (rolling) values sampled from
 `hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
 [`runs.summary`](#runs), never here.
 
----
-
-### `metrics` (legacy, read-only)
-
-The EAV time series this engine **no longer writes**: one row per (`run_id`, `name`, `timestamp`)
-sample, ~20 rows per second of a run. Kept so runs recorded before `metric_ticks`/`runs.summary`
-existed still render their charts and reports - `GET /runs/:runId/metrics` and
-`/runs/:runId/report` fall back to it when a run has no ticks / no summary. It can be deleted once
-old histories have aged out past the retention window. Struct is `db::Metric`.
-
-| Column      | Type            | Notes                                              |
-|-------------|-----------------|----------------------------------------------------|
-| `id`        | INTEGER PK      | Autoincrement                                      |
-| `run_id`    | TEXT            | FK → `runs.id`                                     |
-| `timestamp` | INTEGER         | Unix ms                                            |
-| `name`      | TEXT            | `MetricName` (see below)                           |
-| `value`     | REAL            | Numeric sample                                     |
-| `labels`    | TEXT            | JSON for extra dimensions (e.g. the per-status map for `status_codes`) |
-
-`name` is one of the `MetricName` enum values (`engine/include/vayu/types.hpp`), serialized via
-`to_string`. Current set includes: `rps`, `latency_avg`, `latency_min`, `latency_max`,
-`latency_p50/p75/p90/p95/p99/p999`, `error_rate`, `total_requests`, `completed`,
-`connections_active`, `requests_sent`, `requests_expected`, `send_rate`, `throughput`,
-`backpressure`, `dropped_requests`, `queue_wait_avg`, `bytes_sent`, `bytes_received`,
-`peak_concurrency`, `status_codes`, `test_duration`, `setup_overhead`, and the
-`tests_validating/passed/failed/sampled` script-validation metrics.
-
-**Latency percentile rows come in two flavors, disambiguated by `labels`** - the trap that made
-this shape worth replacing, since only `p50/p95/p99` were ever label-guarded on the read side:
-
-- **Per-tick windowed rows** (`latency_p50/p95/p99`, empty `labels`): written ~1/s during
-  the run. Each is a **rolling window** sampled from a phaser-based `hdr_interval_recorder`
-  (sample-and-reset per tick), so the value reflects the *recent* interval, not the
-  all-time distribution. These power the live/history "percentiles over time" chart, the
-  response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
-  derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
-- **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
-  `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
-  HdrHistogram - the whole-run numbers the report surfaces. The `/runs/:id/report` reader
-  keys on the non-empty label so the per-tick windowed rows never overwrite these.
+**The EAV `metrics` table this replaced is gone.** It stored one row per
+(`run_id`, `name`, `timestamp`) sample, ~20 rows per second of a run, and was kept read-only
+after the switch so runs recorded by an older engine still rendered. Retention deletes those
+runs within `runRetentionDays`, so the read path outlived its data; it was removed in issue #177,
+along with the `MetricName` enum and `db::Metric`. `sync_schema()` only syncs the tables the
+storage still declares - it never drops one that was removed from it - so `Database::init()`
+issues an explicit `DROP TABLE IF EXISTS metrics`, and an upgraded database sheds the table and
+its rows on first start. The freed pages return to SQLite's freelist for reuse; the file itself
+does not shrink, because a `VACUUM` would rewrite the whole database under a write lock at
+startup.
 
 ---
 
@@ -414,9 +385,9 @@ than assuming all eight are there and flat:
 
 | Writer | What lands in `trace_data` |
 |--------|----------------------------|
-| Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys - and only when `save_timing_breakdown` is on or the sample crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`) |
+| Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys. Written for a completion the 1-in-`success_sample_rate` sampler selects (only while `save_timing_breakdown` is on), **or** one that crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`, and is stored whether or not the breakdown toggle is on). The two have separate retention budgets - `max_success_results` and `max_slow_results` - and an outlier never consumes a sampling slot. |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
-| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body` and `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)); a row written before this field existed simply has no `httpVersion` key, so `restore-response.ts` must default it. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
+| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
@@ -498,7 +469,6 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | Index                        | Column                  | Query paths that rely on it                                                                                                                       |
 |------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `idx_metric_ticks_run_id`    | `metric_ticks.run_id`   | `get_metric_ticks_paginated` / `count_metric_ticks` (every `GET /runs/:id/metrics`), `get_metric_ticks_since` (the legacy SSE poll), and the `remove_all` in the run cascade |
-| `idx_metrics_run_id`         | `metrics.run_id`        | The legacy read path (`get_metrics`, `get_metrics_since`, `get_metrics_paginated`, `count_metrics`) and the `remove_all` in the run cascade |
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
@@ -506,7 +476,7 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 
 `metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per
-second (the legacy `metrics` table cost roughly 20 rows for the same second) - so without `run_id`
+second (the retired EAV `metrics` table cost roughly 20 rows for the same second) - so without `run_id`
 indexes a lookup slows down with every run ever recorded, not just the current one. `collections.parent_id` is a nullable column; `sqlite_orm` indexes it
 without special handling.
 

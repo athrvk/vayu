@@ -45,11 +45,23 @@ jobs:
             ninja-build \
             build-essential \
             pkg-config \
-            ca-certificates
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: command -v ninja || brew install ninja
+        # autoconf-archive and friends are for vcpkg's libsodium, which builds
+        # from source through its autotools path and runs autoreconf first.
+        # brew's libtool provides glibtoolize, which vcpkg accepts in place of
+        # libtoolize.
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

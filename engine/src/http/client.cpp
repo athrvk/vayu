@@ -344,6 +344,21 @@ Result<Response> Client::send (const Request& request) {
     long negotiated_version = 0;
     curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
+    response.http_version_downgraded =
+    vayu::http::http_version_downgraded (request.http_version, response.http_version);
+    if (response.http_version_downgraded) {
+        // A cleartext URL is the one downgrade with an answer, so the line says
+        // it rather than leaving the reader to wonder whether the engine is
+        // broken: CURL_HTTP_VERSION_2TLS offers h2 over TLS only, so an
+        // `http://` request never attempts it. Naming that is why this is one
+        // message with a suffix and not two call sites.
+        const bool cleartext = request.url.rfind ("http://", 0) == 0;
+        vayu::utils::log_warning ("HTTP/2 was requested but the connection negotiated " +
+        response.http_version + " - " + request.url +
+        (cleartext ? " (h2 is not offered over cleartext; use https:// or set the "
+                     "protocol to auto)" :
+                     ""));
+    }
 
     // Build raw request string. Only buildable now: the request line names
     // the negotiated protocol, which isn't known until after curl_easy_perform

@@ -30,6 +30,18 @@ python build.py --test-only
   - MSVC 2022+ (Windows)
 - **vcpkg**: Package manager (auto-detected or install separately)
 - **Ninja**: Build system (optional, but recommended for faster builds)
+- **Autotools** (Linux and macOS only): `autoconf`, `autoconf-archive`,
+  `automake` and `libtool`. vcpkg builds **libsodium** from source through its
+  autotools path and runs `autoreconf` first, so a box without these fails at
+  dependency install with *"libsodium currently requires the following programs
+  from the system package manager"*, before any Vayu source is compiled.
+  `python build.py --setup` installs them. Windows needs nothing extra -
+  the port builds libsodium with MSBuild there.
+
+  ```bash
+  sudo apt install autoconf autoconf-archive automake libtool   # Debian/Ubuntu
+  brew install autoconf autoconf-archive automake libtool       # macOS
+  ```
 
 ## Manual Build
 
@@ -101,6 +113,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | Library | Purpose |
 |---------|---------|
 | curl | HTTP client library |
+| libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | cpp-httplib | HTTP server library |
 | sqlite3 | Embedded database |
@@ -182,6 +195,46 @@ Two consequences worth knowing before you change the build:
   python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
   ```
 
+#### Every Windows executable needs the compatibility manifest
+
+`engine/res/vayu-windows.manifest` is embedded into `vayu-engine`, `vayu-cli`
+and `vayu_tests` by `vayu_embed_windows_manifest()` in
+`engine/CMakeLists.txt`. **Without it, HTTP/2 is impossible on Windows** - not
+slower, not intermittent: never negotiated, with a `200 OK` and a reported
+`HTTP/1.1` for a request that asked for h2.
+
+The chain, because no part of it is guessable from the flag:
+
+1. libcurl on Windows uses the Schannel TLS backend, and HTTP/2 over TLS is
+   only reachable through ALPN.
+2. curl's Schannel backend enables ALPN only when the OS is at least Windows
+   8.1 (`s_win_has_alpn`, `lib/vtls/schannel.c`).
+3. That check prefers ntdll's `RtlVerifyVersionInfo`, which tells the truth -
+   but resolves the pointer to it in `Curl_win32_init()`, which libcurl's
+   `global_init()` runs *after* `Curl_ssl_init()`. The one call that decides
+   ALPN for the whole process therefore falls back to `VerifyVersionInfoW`.
+4. `VerifyVersionInfoW` is version-shimmed: since Windows 8.1 it reports 6.2 to
+   any process whose manifest does not declare support for a later OS. 6.2 <
+   6.3, so ALPN is switched off for the life of the process.
+
+The manifest's `supportedOS` ids turn the shim off. v0.11.0 through v0.14.0
+shipped without it and HTTP/2 was dead on Windows the whole time
+([#215](https://github.com/athrvk/vayu/issues/215)) - the failure is invisible,
+which is why it is guarded twice: `HttpVersionSupport.WindowsOsVersionIsNotShimmed`
+asserts that the test binary is not being version-lied to, and
+`check-windows-deps.py` scans the *shipped* `vayu-engine.exe` for the ids, since
+a gtest can only vouch for the process it runs in.
+
+Add a fourth executable that links libcurl and you must call
+`vayu_embed_windows_manifest()` for it too. Note that the mechanism is a
+`.manifest` **source file**, not linker flags: passing
+`/MANIFEST:EMBED /MANIFESTINPUT:` through `target_link_options` collides with
+the manifest CMake already generates and fails the link with
+`CVT1100: duplicate resource`.
+
+Linux and macOS need none of this - ALPN there is not gated on an OS version
+check.
+
 ## Running Tests
 
 ```bash
@@ -235,7 +288,7 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
   (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails)
 - On Windows, ensure Visual Studio C++ tools are installed
 

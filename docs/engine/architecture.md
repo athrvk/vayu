@@ -170,10 +170,10 @@ JavaScript execution engine for pre-request and test scripts:
 - **Mutable request**: a pre-request script's `pm.request` writes are applied to the
   request before it is sent (see `docs/engine/scripting.md`)
 - **Signing**: `pm.crypto.sha256` / `.hmacSha256` plus the `btoa` / `atob` globals, so
-  a pre-request script can sign the request it just rewrote. Backed by the already
-  vendored picosha2 (`utils/sha256.hpp`, shared with PKCE) and `utils/encoding.hpp` -
-  **no new dependency, and OpenSSL is still not linked**. Synchronous, because the
-  sandbox has no event loop to settle a Promise on
+  a pre-request script can sign the request it just rewrote. Backed by **libsodium**
+  through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
+  hand-maintains no hash, HMAC or alphabet table, and OpenSSL is still not linked.
+  Synchronous, because the sandbox has no event loop to settle a Promise on
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access
@@ -208,7 +208,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
 
-PKCE hashing uses the vendored MIT **picosha2** single-header (no OpenSSL). See
+PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
+URL-safe unpadded variant for the challenge itself; no OpenSSL). See
 the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (engine-owned via POST /compose)
@@ -493,4 +494,4 @@ data/
 - **sqlite3**: Embedded database
 - **sqlite-orm**: C++ ORM for SQLite
 - **QuickJS**: JavaScript engine (vendored)
-- **picosha2**: SHA-256 single-header for PKCE (vendored, MIT)
+- **libsodium**: SHA-256, HMAC-SHA256, base64 and hex (ISC)

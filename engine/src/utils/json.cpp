@@ -369,23 +369,6 @@ std::string serialize_variables (const vayu::Environment& env) {
     return obj.dump ();
 }
 
-Json serialize (const vayu::db::Metric& metric) {
-    Json json;
-    json["id"]        = metric.id;
-    json["runId"]     = metric.run_id;
-    json["timestamp"] = metric.timestamp;
-    json["name"]      = to_string (metric.name);
-    json["value"]     = metric.value;
-    if (!metric.labels.empty ()) {
-        if (auto parsed = try_parse_body (metric.labels)) {
-            json["labels"] = *parsed;
-        } else {
-            json["labels"] = metric.labels;
-        }
-    }
-    return json;
-}
-
 Result<Request> deserialize_request (const Json& json) {
     try {
         Request request;
@@ -519,6 +502,10 @@ Json serialize (const Response& response) {
     // negotiated - not omitted, so a caller reading this field can't confuse
     // "we don't know" with "this key doesn't exist on responses".
     json["httpVersion"] = response.http_version;
+    // Always present, like `httpVersion` above and for the same reason: a
+    // reader must be able to tell "not downgraded" from "this engine is too old
+    // to say". See Response::http_version_downgraded.
+    json["httpVersionDowngraded"] = response.http_version_downgraded;
 
     // Try to parse body as JSON
     if (auto parsed = try_parse_body (response.body)) {

@@ -253,3 +253,44 @@ TEST (MetricsCollectorSampleRateGuard, ZeroSampleRatesDoNotDivideByZero) {
     // Clamped to 1, so "keep 1 in N" keeps every one of them.
     EXPECT_EQ (collector.response_sample_count (), 5U);
 }
+
+// --- 6. Retention limits: reserved up front, so a negative is an eager
+//        allocation of ~1.8e19 records, and the threshold decides what is even
+//        a candidate -------------------------------------------------------
+
+TEST (RunConfigValidation, NegativeRetentionLimitsAreRejected) {
+    for (const char* key : { "max_success_results", "max_slow_results" }) {
+        auto config = valid_config ();
+        config[key] = -1;
+        expect_rejected (config, key);
+    }
+}
+
+TEST (RunConfigValidation, HugeRetentionLimitsAreRejected) {
+    auto config = valid_config ();
+    config["max_success_results"] =
+    vayu::core::constants::run_config::MAX_RETAINED_RESULTS + 1;
+    expect_rejected (config, "max_success_results");
+}
+
+TEST (RunConfigValidation, ZeroRetentionLimitIsAcceptedAsUnlimited) {
+    // 0 is the documented "keep everything" opt-out, not an out-of-range value.
+    auto config                   = valid_config ();
+    config["max_success_results"] = 0;
+    config["max_slow_results"]    = 0;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, NegativeSlowThresholdIsRejected) {
+    // A negative threshold would make every completion an outlier, filling the
+    // slow store with the whole run.
+    auto config                 = valid_config ();
+    config["slow_threshold_ms"] = -1;
+    expect_rejected (config, "slow_threshold_ms");
+}
+
+TEST (RunConfigValidation, ZeroSlowThresholdIsAcceptedAsDisabled) {
+    auto config                 = valid_config ();
+    config["slow_threshold_ms"] = 0;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}

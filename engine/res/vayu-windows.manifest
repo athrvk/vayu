@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Windows application manifest for every Vayu engine executable.
+
+  This file exists for exactly one reason: WITHOUT IT, HTTP/2 IS IMPOSSIBLE ON
+  WINDOWS. Not slower, not occasionally - never negotiated, silently, with a
+  200 OK and an `httpVersion` of "HTTP/1.1" for a request that asked for h2.
+  That was issue #215, and it took a libcurl source read to explain, so the
+  whole chain is written down here rather than in a commit message.
+
+  The chain:
+
+  1. libcurl on Windows uses the Schannel TLS backend (see engine/vcpkg.json -
+     `curl[http2]`, whose `ssl` feature resolves to Schannel on Windows, which
+     is also why check-windows-deps.py allowlists secur32/bcrypt and no
+     OpenSSL). HTTP/2 over TLS is only reachable through ALPN.
+
+  2. curl's Schannel backend gates ALPN on the OS being at least Windows 8.1:
+     `s_win_has_alpn = curlx_verify_windows_version(6, 3, 0, PLATFORM_WINNT,
+     VERSION_GREATER_THAN_EQUAL)` in lib/vtls/schannel.c. With that false,
+     `backend->use_alpn` is false, curl never sends an ALPN extension, and the
+     connection can only ever be HTTP/1.1.
+
+  3. That version check prefers ntdll's `RtlVerifyVersionInfo`, which reports
+     the true OS - but the pointer to it is resolved in `Curl_win32_init()`,
+     which libcurl's `global_init()` (lib/easy.c) calls *after*
+     `Curl_ssl_init()`. So the one call that decides ALPN for the process runs
+     while the pointer is still null and falls back to `VerifyVersionInfoW`.
+
+  4. `VerifyVersionInfoW` is version-shimmed. Since Windows 8.1 it reports 6.2
+     (Windows 8) to any process whose manifest does not declare support for a
+     later OS. 6.2 < 6.3 - so on Windows 10 and 11 the check fails, and ALPN,
+     and with it HTTP/2, is switched off for the life of the process.
+
+  The `supportedOS` ids below are what turns the shim off. With them,
+  VerifyVersionInfoW answers truthfully, step 2 passes, and curl offers
+  `h2,http/1.1`. Verified by A/B: the same probe binary against the same
+  libcurl, with and only with this manifest, goes from no ALPN line at all to
+  "ALPN: server accepted h2".
+
+  Consequences of deleting this file, in order of how likely they are to be
+  noticed: none, none, none, and a user measuring HTTP/2 throughput gets
+  HTTP/1.1 numbers labelled HTTP/2. There is a test - `WindowsOsVersionShim` in
+  engine/tests/http_version_support_test.cpp - and a check on the shipped
+  binary in .github/check-windows-deps.py, because a silent failure needs two.
+
+  Nothing else here is a compatibility knob to tune: no requestedExecutionLevel
+  (the engine is an unprivileged sidecar and must stay one), no dpiAwareness
+  (it has no windows), no activeCodePage. Keep it to the OS ids.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows Vista -->
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+      <!-- Windows 7 -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <!-- Windows 8 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <!-- Windows 8.1 - the id that clears the 6.3 gate above -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <!-- Windows 10 and Windows 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

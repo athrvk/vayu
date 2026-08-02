@@ -780,3 +780,214 @@ TEST (MetricsCollectorReserveGuard, RecordingIsUnaffectedByTheCap) {
     EXPECT_EQ (collector.total_errors (), 50u);
     EXPECT_EQ (collector.errors ().size (), 50u);
 }
+
+// ============================================================================
+// Retention: what a bounded store keeps, and what it says it dropped
+// ============================================================================
+
+namespace {
+// A trace is opaque to the collector - it only has to be non-empty and
+// distinguishable, so the tests can tell which completion a retained record
+// came from.
+std::string trace_for (int n) {
+    return "{\"totalMs\":" + std::to_string (n) + "}";
+}
+
+int trace_ordinal (const std::string& trace_data) {
+    const auto colon = trace_data.find (':');
+    return std::stoi (trace_data.substr (colon + 1));
+}
+
+MetricsCollectorConfig sampling_config (size_t period, size_t cap, bool store_traces) {
+    MetricsCollectorConfig config;
+    config.expected_requests    = 1000;
+    config.success_sample_rate  = period;
+    config.max_success_results  = cap;
+    config.store_success_traces = store_traces;
+    return config;
+}
+} // namespace
+
+// Finding 3: `slow_threshold_ms` had no observable effect. A slow completion's
+// trace was built in handle_result *because* it was slow, then discarded here
+// because storage was gated on the timing-breakdown toggle alone - which is
+// off by default. A user who set a threshold to catch outliers got nothing.
+TEST (MetricsCollectorRetention, SlowTraceIsStoredWithTimingBreakdownOff) {
+    MetricsCollector collector ("run_slow", sampling_config (100, 1000, false));
+
+    collector.record_success (200, 900.0, 0.0, trace_for (1), SuccessTraceReason::Slow);
+
+    ASSERT_EQ (collector.slow_results ().size (), 1u);
+    EXPECT_EQ (collector.slow_results ()[0].trace_data, trace_for (1));
+    EXPECT_EQ (collector.slow_results_dropped (), 0u);
+    // The sampled-success budget is untouched: an outlier is not a sample.
+    EXPECT_TRUE (collector.success_results ().empty ());
+}
+
+// The mirror case, so the fix cannot become "store everything": a completion
+// that is neither sampled nor slow stores nothing, whatever it carries.
+TEST (MetricsCollectorRetention, AnUnsampledCompletionStoresNothing) {
+    MetricsCollector collector ("run_none", sampling_config (100, 1000, true));
+
+    collector.record_success (200, 5.0, 0.0, trace_for (1), SuccessTraceReason::None);
+    collector.record_success (200, 5.0, 0.0, "", SuccessTraceReason::Sampled);
+
+    EXPECT_TRUE (collector.success_results ().empty ());
+    EXPECT_TRUE (collector.slow_results ().empty ());
+    EXPECT_EQ (collector.total_requests (), 2u);
+}
+
+// Finding 4: the cap was a hard stop, so the retained set was the run's first
+// N sampled completions - the least representative part, before connection
+// reuse and DNS caching settle - with nothing from the rest of the run and no
+// signal that anything was dropped.
+TEST (MetricsCollectorRetention, SampledSuccessesAreDrawnFromTheWholeRun) {
+    constexpr int total  = 10000;
+    constexpr size_t cap = 100;
+    MetricsCollector collector ("run_reservoir", sampling_config (1, cap, true));
+
+    for (int i = 0; i < total; ++i) {
+        collector.record_success (200, 1.0, 0.0, trace_for (i), SuccessTraceReason::Sampled);
+    }
+
+    ASSERT_EQ (collector.success_results ().size (), cap);
+    EXPECT_EQ (collector.success_results_dropped (), total - cap);
+
+    // The final decile of a 10k stream: retaining nothing from it has
+    // probability 0.9^100 (~2.6e-5) under a correct reservoir, and is certain
+    // under the old hard stop.
+    int from_final_decile = 0;
+    for (const auto& record : collector.success_results ()) {
+        if (trace_ordinal (record.trace_data) >= total * 9 / 10) {
+            from_final_decile++;
+        }
+    }
+    EXPECT_GT (from_final_decile, 0)
+    << "every retained record came from the opening of the run - the cap is "
+       "still a hard stop rather than a reservoir";
+}
+
+// Slow capture gets its own budget and its own drop count. Under saturation
+// most completions cross the threshold, so "always keep the outliers" has to
+// stay bounded rather than growing for the life of the run.
+TEST (MetricsCollectorRetention, SlowCaptureIsBoundedAndCountsWhatItDropped) {
+    constexpr int total     = 5000;
+    auto config             = sampling_config (1, 1000, false);
+    config.max_slow_results = 200;
+    MetricsCollector collector ("run_slow_bounded", config);
+
+    for (int i = 0; i < total; ++i) {
+        collector.record_success (200, 900.0, 0.0, trace_for (i), SuccessTraceReason::Slow);
+    }
+
+    EXPECT_EQ (collector.slow_results ().size (), 200u);
+    EXPECT_EQ (collector.slow_results_dropped (), total - 200);
+    EXPECT_EQ (collector.success_results_dropped (), 0u);
+}
+
+// The sampling period counts every completion, and selects exactly one in N.
+// The build-then-discard fix is invisible from outside - the trace that is
+// never built leaves no trace - so what is pinned here is the gate the caller
+// consults before building: 1000 completions at a period of 100 authorise 10
+// traces, not 1000.
+TEST (MetricsCollectorRetention, TheSamplingGateSelectsOneInN) {
+    MetricsCollector collector ("run_gate", sampling_config (100, 1000, true));
+
+    int authorised = 0;
+    for (int i = 0; i < 1000; ++i) {
+        if (collector.should_sample_success ()) {
+            authorised++;
+            EXPECT_EQ (i % 100, 0) << "sampled a completion off the period";
+        }
+    }
+    EXPECT_EQ (authorised, 10);
+}
+
+// With traces switched off the gate authorises nothing, so no completion pays
+// for a serialisation that storage would refuse.
+TEST (MetricsCollectorRetention, TheSamplingGateAuthorisesNothingWithTracesOff) {
+    MetricsCollector collector ("run_gate_off", sampling_config (1, 1000, false));
+
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_FALSE (collector.should_sample_success ());
+    }
+}
+
+// 0 stays "unlimited", which the reserve path and existing callers rely on.
+TEST (MetricsCollectorRetention, ZeroCapMeansUnlimited) {
+    MetricsCollector collector ("run_unlimited", sampling_config (1, 0, true));
+
+    for (int i = 0; i < 3000; ++i) {
+        collector.record_success (200, 1.0, 0.0, trace_for (i), SuccessTraceReason::Sampled);
+    }
+
+    EXPECT_EQ (collector.success_results ().size (), 3000u);
+    EXPECT_EQ (collector.success_results_dropped (), 0u);
+}
+
+// Finding 6, the one that decides a pass/fail verdict: the responses handed to
+// the post-run test script were the first `max_response_samples` the run
+// produced. A target that starts failing later was never tested, so a run
+// reported `testsPassed` against a window in which nothing was wrong while its
+// own error rate showed the failures.
+TEST (MetricsCollectorRetention, ValidationSamplesCoverTheWholeRun) {
+    MetricsCollectorConfig config;
+    config.expected_requests    = 1000;
+    config.response_sample_rate = 1;
+    config.max_response_samples = 50;
+    MetricsCollector collector ("run_validation", config);
+
+    // Healthy first, then failing - exactly the shape the old prefix could not
+    // see, because the buffer was full long before the first 500.
+    for (int i = 0; i < 2000; ++i) {
+        vayu::Response response;
+        response.status_code     = i < 1000 ? 200 : 500;
+        response.timing.total_ms = 1.0;
+        collector.record_response_sample (response);
+    }
+
+    ASSERT_EQ (collector.response_samples ().size (), 50u);
+    EXPECT_EQ (collector.response_samples_dropped (), 1950u);
+
+    int failures = 0;
+    for (const auto& sample : collector.response_samples ()) {
+        if (sample.status_code == 500) {
+            failures++;
+        }
+    }
+    EXPECT_GT (failures, 0)
+    << "no failing response was retained, so post-run validation would still "
+       "grade the run on its opening alone";
+}
+
+// The buffer must stay bounded while it keeps admitting: a reservoir that
+// grows is just an unbounded store with extra steps.
+TEST (MetricsCollectorRetention, ResponseSamplesStayBoundedUnderConcurrentWriters) {
+    MetricsCollectorConfig config;
+    config.expected_requests    = 1000;
+    config.response_sample_rate = 1;
+    config.max_response_samples = 100;
+    MetricsCollector collector ("run_concurrent_samples", config);
+
+    std::vector<std::thread> threads;
+    threads.reserve (8);
+    for (int t = 0; t < 8; ++t) {
+        threads.emplace_back ([&collector] () {
+            for (int i = 0; i < 2000; ++i) {
+                vayu::Response response;
+                response.status_code     = 200;
+                response.body            = std::string (256, 'x');
+                response.timing.total_ms = 1.0;
+                collector.record_response_sample (response);
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join ();
+    }
+
+    EXPECT_EQ (collector.response_samples ().size (), 100u);
+    // Every candidate is either retained or counted; nothing vanishes.
+    EXPECT_EQ (collector.response_samples ().size () + collector.response_samples_dropped (),
+    8u * 2000u);
+}

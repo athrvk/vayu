@@ -398,6 +398,13 @@ export interface RunResultTrace {
 		 * `ResponseState.httpVersion`, for the Raw tab's status line).
 		 */
 		httpVersion?: string;
+		/**
+		 * This exchange asked for HTTP/2 and negotiated something older - see
+		 * {@link HttpResponse.httpVersionDowngraded}. Absent on a trace stored
+		 * by an engine older than 0.15.0, which is why it is optional rather
+		 * than defaulted to `false` at the type level.
+		 */
+		httpVersionDowngraded?: boolean;
 	};
 }
 
@@ -557,6 +564,18 @@ export interface HttpResponse {
 	 * not the request-side `HttpVersion` union - do not unify the two.
 	 */
 	httpVersion?: string;
+	/**
+	 * The request asked for `http2` and the connection negotiated something
+	 * older. Computed engine-side (`http_version_downgraded`,
+	 * `engine/include/vayu/http/curl_version_map.hpp`) because only the engine
+	 * holds both halves at once - `httpVersion` above is the outcome, and the
+	 * outcome only becomes a complaint next to what was requested.
+	 *
+	 * Do not re-derive it here from the tab's `httpVersion` setting: a replay
+	 * or a restored response is shown beside request state that may since have
+	 * changed, and the answer belongs to the exchange, not to the editor.
+	 */
+	httpVersionDowngraded?: boolean;
 }
 
 export interface TestResult {
@@ -678,6 +697,23 @@ export interface RunReport {
 		bytesSent?: number;
 		bytesReceived?: number;
 		throughputBytesPerSec?: number;
+		/**
+		 * How many of the run's transfers asked for HTTP/2 and negotiated
+		 * something older. The only figure in `summary` that is about the
+		 * report's validity rather than its performance: non-zero means the
+		 * latency and throughput above were measured over a protocol other than
+		 * the one `metadata.configuration.httpVersion` names, which is exactly
+		 * the mislabelling issue #215 describes.
+		 *
+		 * `0` is "none recorded", not "none happened" - an engine from 0.15.0
+		 * always emits the key, including for a run whose stored summary
+		 * predates the count and for one reported from the legacy metric rows,
+		 * neither of which can produce a figure. `undefined` therefore only
+		 * means the sidecar itself is older than 0.15.0, and reads the same way
+		 * as 0 here: no warning. Weaker than the per-response
+		 * `httpVersionDowngraded` above, which is exact for its exchange.
+		 */
+		httpVersionDowngraded?: number;
 	};
 	latency: {
 		min: number;
@@ -720,6 +756,29 @@ export interface RunReport {
 		testsPassed: number;
 		testsFailed: number;
 		successRate: number;
+	};
+	/**
+	 * How many records each of the run's bounded stores thinned away.
+	 *
+	 * Every store the engine keeps is capped, so a long run retains a *sample*
+	 * rather than the whole set - and past the cap a later record displaces a
+	 * uniformly chosen incumbent (reservoir retention), so what survives
+	 * describes the whole run rather than its opening. These counts are what
+	 * make that visible: all zeros means `results` and the tested responses are
+	 * complete, non-zero means they are a sample of a larger set.
+	 *
+	 * `undefined` is a run whose stored summary predates the counts (or an older
+	 * sidecar), which is *not* the same claim as "nothing was dropped" - so the
+	 * UI stays silent rather than asserting completeness it cannot verify.
+	 */
+	sampling?: {
+		errorsDropped: number;
+		/** Sampled timing traces displaced or dropped (`max_success_results`). */
+		successTracesDropped: number;
+		/** Slow-request traces displaced or dropped (`max_slow_results`). */
+		slowTracesDropped: number;
+		/** Responses displaced or dropped before test validation ran. */
+		responseSamplesDropped: number;
 	};
 	results?: Array<{
 		timestamp: number;

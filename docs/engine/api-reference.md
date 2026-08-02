@@ -1118,6 +1118,7 @@ run-shaped way of stating the same field, not a second store.
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
   "httpVersion": "HTTP/1.1",
+  "httpVersionDowngraded": true,
   "timing": {
     "totalMs": 245.5,
     "wireMs": 245.1,
@@ -1162,6 +1163,32 @@ reached a server) - empty rather than guessing `"HTTP/1.1"` and presenting a
 guess as fact. The same field is stored in a design run's `trace_data.response`
 and reported back unchanged by `GET /runs/:runId` and
 `GET /runs/:runId/report`.
+
+**`httpVersionDowngraded`** is `true` when the request explicitly asked for
+`"http2"` and the connection negotiated something older - the one thing the two
+`httpVersion` fields cannot say on their own, since neither knows about the
+other. It is always present (never omitted), so a client can tell "not
+downgraded" from "an engine too old to say". Only an explicit `http2` counts:
+`"auto"` promises nothing and `"http1.1"` got what it asked for, so neither can
+be downgraded. A transfer that negotiated nothing at all (`httpVersion` `""`)
+is `false` - that is a transport failure, and `errorCode` already reports it.
+
+**A plaintext `http://` URL always reports `true` for an explicit `"http2"`.**
+`CURL_HTTP_VERSION_2TLS` offers h2 over TLS only, so a cleartext request never
+attempts it - the fallback noted above under the request's `httpVersion` is
+exactly the case this field is for, and it is honest rather than a false
+positive: h2 was asked for and HTTP/1.1 was used. A local dev server on
+`http://` with the protocol set to HTTP/2 will show the warning on every
+request; either switch the request to `auto`, or serve over TLS.
+
+This exists because the failure it names is invisible otherwise: a `200`, a
+latency and a body look identical whether or not the protocol you asked for was
+granted. Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and
+every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215));
+nothing in the API said so. The same field is stored on a design run's
+`trace_data.response`, and load runs carry the whole-run count as
+`summary.httpVersionDowngraded` in
+[`GET /runs/:runId/report`](#get-runsrunidreport).
 
 **One timing convention.** The `timing` keys above are the same `*Ms` names the
 stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
@@ -1269,6 +1296,9 @@ default, and whose message names the offending field and why the bound exists:
 | `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
 | `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
+| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
+| `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
@@ -1281,6 +1311,24 @@ itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
 The sample rates are additionally clamped to &ge; 1 inside the metrics
 collector, so the modulo cannot divide by zero even for a caller that bypasses
 this route.
+
+**What a run stores, and for how long.** A completed request is recorded in the
+aggregate counters always; whether its *detail* survives is decided by three
+independent budgets:
+
+| Budget | Filled by | Bounded by |
+|--------|-----------|------------|
+| Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
+| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
+| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
+
+Two properties are worth relying on. An outlier **never consumes a sampling
+slot**: a run whose target degrades does not silently stop sampling ordinary
+traffic because everything became slow. And each store is a **reservoir** - past
+its bound a later record displaces a uniformly chosen incumbent instead of being
+refused - so what a long run retains describes the whole run rather than its
+first few seconds, and `sampling` in
+[the report](#get-runsrunidreport) says how many records that thinning cost.
 
 **Shutdown refuses new runs.** Once the daemon has begun draining its run
 workers, `POST /runs` answers `503` with the message `Engine is shutting down` rather
@@ -1404,30 +1452,24 @@ capacity-breakpoint / saturation stats from stored data.
 }
 ```
 
-`requests_failed` is derived per tick as `error_rate% × requests_completed`,
-rounded to the nearest request, after every row belonging to that timestamp has
-been folded into the bucket. It is therefore independent of the order the rows
-come back in - deriving it while reading the `error_rate` row made it depend on
-the `requests_sent` row having already been seen for the same timestamp, and the
-producer writes `error_rate` first, so it read a completed count of 0 and every
-bucket of every run reported 0 failed requests.
+`requests_failed` is the producer's own error count, written into the tick at
+write time. It is not derived at read time from `error_rate` and
+`requests_completed` any more - that derivation depended on the order the EAV
+rows came back in, and reported 0 failed requests for every bucket of every run.
 
 A missing run returns `404` with the message `Run not found`.
 
-**Storage (response shape unchanged).** Each `data[]` entry is one stored row of
-`metric_ticks` - the engine writes the tick object once, at write time, instead
-of the reader reassembling it from ~20 EAV `metrics` rows per second. Two things
-follow, both improvements the shape gives for free:
+**Storage.** Each `data[]` entry is one stored row of `metric_ticks` - the
+engine writes the tick object once, at write time. Two things follow:
 
 - **Pagination is tick-aligned**: `limit`/`offset` count ticks, so
   `pagination.total` is the number of ticks (not rows), and a page boundary can
   no longer return a tick with half its fields zeroed.
-- **`elapsed_seconds` keeps counting across pages** (it is measured from the
-  run's first stored tick), and `requests_failed` carries the real error count
-  the row-order-dependent legacy derivation always reported as `0`.
+- **`elapsed_seconds` keeps counting across pages**, since it is measured from
+  the run's first stored tick.
 
-Runs recorded before `metric_ticks` existed are still served from their legacy
-rows, with exactly the response they produced before.
+A run with no ticks returns `200` with an empty `data` array - only a run that
+does not exist is a `404`.
 
 ### GET /stats/:runId (deprecated)
 
@@ -1459,8 +1501,8 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 - `activeConnections`: Active concurrent connections
 - `elapsedSeconds`: Elapsed time since test start
 
-For runs recorded since `metric_ticks`, this stream is fed from those rows; every
-field above comes from the stored tick except **`avgLatencyMs`, which stays `0`** -
+This stream is fed from the run's `metric_ticks` rows; every field above comes
+from the stored tick except **`avgLatencyMs`, which stays `0`** -
 the per-tick object has never carried mean latency. `GET /runs/:runId/live` serves
 it (from the in-memory collector) and is the endpoint to use.
 
@@ -1753,9 +1795,9 @@ only when a test script ran).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
-rows for the timing breakdown and the `results[]` array. A run recorded before that column
-existed is reconstructed from its legacy `metrics` rows exactly as before. **The response shape
-is the same either way** - only where the numbers are read from changed.
+rows for the timing breakdown and the `results[]` array. A run with no summary never reached a
+terminal status - the engine died mid-run - and its report is built from those sampled `results`
+alone rather than erroring. **The response shape is the same either way.**
 
 **Response:**
 ```json
@@ -1793,7 +1835,8 @@ is the same either way** - only where the numbers are read from changed.
     "avgQueueWaitMs": 0.4,
     "bytesSent": 192000,
     "bytesReceived": 7680000,
-    "throughputBytesPerSec": 128000
+    "throughputBytesPerSec": 128000,
+    "httpVersionDowngraded": 0
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
@@ -1812,6 +1855,10 @@ is the same either way** - only where the numbers are read from changed.
     "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "sampling": {
+    "errorsDropped": 0, "successTracesDropped": 29000,
+    "slowTracesDropped": 0, "responseSamplesDropped": 998000
+  },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
   "results": [ { "...": "sampled request/response outcomes" } ]
 }
@@ -1821,6 +1868,26 @@ is the same either way** - only where the numbers are read from changed.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
+
+`summary.httpVersionDowngraded` is the count of this run's transfers that asked
+for HTTP/2 and negotiated something older - see
+[`httpVersionDowngraded` on a response](#post-execute). It is the only figure in
+`summary` that describes the report's *validity* rather than its performance:
+non-zero means the latency and throughput beside it were measured over a
+protocol other than the one `metadata.configuration.httpVersion` names.
+
+**`0` is "none recorded", not "none happened".** An engine from 0.15.0 always
+emits the key - including for a run whose stored summary predates the count, and
+for one that fell back to the legacy metric rows, neither of which can produce a
+figure. The key is absent only from an engine older than 0.15.0. That is
+deliberately a weaker guarantee than the per-response
+`httpVersionDowngraded`, which is exact for the exchange it describes.
+
+`sampling` says how much each bounded store thinned away: all zeros means the
+`results[]` array and the tested responses are the complete set, and a non-zero
+count means they are a **uniform sample of the whole run** (reservoir retention)
+rather than a truncated prefix of it. The section is absent on a run recorded
+before it was reported, which is not the same claim as "nothing was dropped".
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,

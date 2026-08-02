@@ -12,7 +12,10 @@
  *        environments, engine config); a templated resource
  *        `vayu://run/{runId}/report` exposes any run's full report, with a list
  *        callback (enumerate recent runs) and a completion callback (autocomplete
- *        run IDs). All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
+ *        run IDs). `vayu://scripting/completions` re-serves the engine's own
+ *        script-sandbox surface so an agent discovers it the way the editor does,
+ *        instead of from a prose copy that drifts (issue #233).
+ *        All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
  */
 
 import type { ToolContext } from "./tools.js";
@@ -56,7 +59,67 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 			"The engine's tunable configuration entries with values, defaults, and ranges.",
 		read: (ctx, signal) => ctx.client.getConfig(signal),
 	},
+	{
+		name: "scripting",
+		uri: "vayu://scripting/completions",
+		title: "Script sandbox API",
+		description:
+			"Every name the pre-request / test script sandbox provides: pm.request and pm.response, " +
+			"the pm.expect assertion chains, the variable scopes, pm.crypto (synchronous SHA-256 / " +
+			"HMAC-SHA256) and the btoa / atob globals. Read this before writing a preRequestScript " +
+			"or postRequestScript.",
+		read: async (ctx, signal) =>
+			projectScriptingSurface(await ctx.client.getScriptCompletions(signal)),
+	},
 ];
+
+/** One sandbox name as an agent sees it - the engine's own keys, minus Monaco's. */
+export interface ScriptingApiEntry {
+	label: string;
+	detail?: string;
+	documentation?: string;
+}
+
+export interface ScriptingSurface {
+	version?: unknown;
+	engine?: unknown;
+	completions: ScriptingApiEntry[];
+}
+
+/**
+ * Reduce `GET /scripting/completions` to the three fields that mean something
+ * outside an editor. `insertText`, `insertTextRules`, `sortText`, `filterText`
+ * and `kind` are Monaco's - snippet placeholders (`${1:secret}`) and a
+ * `CompletionItemKind` enum an agent has no use for.
+ *
+ * Every entry survives, snippets included: dropping them would mean testing
+ * `kind === 28`, which is exactly the copied-constant drift this resource exists
+ * to avoid, and a snippet's label plus documentation still names a capability.
+ *
+ * Throws rather than returning a partial surface - an agent that reads a
+ * silently-truncated API list concludes the sandbox cannot do what it can.
+ */
+export function projectScriptingSurface(payload: unknown): ScriptingSurface {
+	const root =
+		payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+	if (!root || !Array.isArray(root.completions)) {
+		throw new Error(
+			"GET /scripting/completions returned no `completions` array - cannot describe the script sandbox"
+		);
+	}
+	const completions: ScriptingApiEntry[] = [];
+	for (const item of root.completions) {
+		if (!item || typeof item !== "object") continue;
+		const rec = item as Record<string, unknown>;
+		if (typeof rec.label !== "string" || !rec.label) continue;
+		completions.push({
+			label: rec.label,
+			...(typeof rec.detail === "string" ? { detail: rec.detail } : {}),
+			...(typeof rec.documentation === "string" ? { documentation: rec.documentation } : {}),
+		});
+	}
+	return { version: root.version, engine: root.engine, completions };
+}
 
 /** Templated per-run report resource. */
 export const RUN_REPORT_RESOURCE = {

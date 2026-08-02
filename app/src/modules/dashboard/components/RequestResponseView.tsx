@@ -25,6 +25,7 @@ import {
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
+import { SampleRetentionNote } from "@/components/shared";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 // Helper to format timestamp
@@ -237,6 +238,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 								</p>
 							</div>
 						</div>
+						<SampleRetentionNote
+							sampling={report.sampling}
+							shown={report.testValidation.samplesTested}
+							budget="responses"
+							className="mt-3"
+						/>
 					</CardContent>
 				</Card>
 			)}
@@ -248,11 +255,17 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg flex items-center gap-2">
 							Sampled Requests
 							<Badge variant="secondary" className="text-xs">
-								{report.results.length} captured
+								{report.results.length} shown
 							</Badge>
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="p-0">
+						<SampleRetentionNote
+							sampling={report.sampling}
+							shown={report.results.length}
+							budget="traces"
+							className="mx-5 mb-3"
+						/>
 						<ScrollArea className="h-[400px]">
 							<div className="divide-y">
 								{report.results.map((result, index) => {
