@@ -10,7 +10,6 @@
  * @brief Metrics streaming routes (SSE endpoints for real-time stats)
  */
 
-#include <map>
 #include <thread>
 
 #include "vayu/http/routes.hpp"
@@ -81,13 +80,13 @@ int64_t offset) {
  * A missing run is a definitive 404 with the `{"error": {"code", "message"}}`
  * shape `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
  * snake_case `LoadTestMetrics` shape, consumed without a transformer) in the
- * `{data, pagination}` envelope - read straight from `metric_ticks`, or, for a
- * run recorded before that table existed, regrouped from its legacy EAV rows.
+ * `{data, pagination}` envelope, read straight from `metric_ticks`. A run with
+ * no ticks returns an empty `data` array, not a 404 - the run exists.
  *
  * `limit`/`offset` arrive already parsed and clamped by the caller (limit
  * default 5000, capped at 50000; offset floored at 0) - the raw query-param
  * parsing stays in the route. Extracted so the wiring (404 vs 200 + envelope,
- * grouping, pagination) is covered without an in-process HTTP server - see
+ * pagination) is covered without an in-process HTTP server - see
  * stats_route_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
@@ -97,120 +96,10 @@ const std::string& run_id, int64_t limit, int64_t offset) {
         return { 404, error_body (404, "Run not found") };
     }
 
-    // Ticks decide the path: a run has them or it predates the table. Counting
-    // is also the pagination total, so this is not an extra query.
+    // metric_ticks is the only time series; the count doubles as the
+    // pagination total, so this is not an extra query.
     const int64_t tick_count = db.count_metric_ticks (run_id);
-    if (tick_count > 0) {
-        return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
-    }
-
-    // Legacy EAV path, unchanged - kept until pre-metric_ticks runs age out.
-    // Get total count for pagination
-    int64_t total_count = db.count_metrics (run_id);
-
-    // Get paginated metrics
-    auto metrics = db.get_metrics_paginated (run_id, limit, offset);
-
-    // Group metrics by timestamp into LoadTestMetrics-compatible format
-    std::map<int64_t, nlohmann::json> time_buckets;
-    int64_t start_time = 0;
-
-    for (const auto& metric : metrics) {
-        if (start_time == 0) {
-            start_time = metric.timestamp;
-        }
-
-        auto& bucket = time_buckets[metric.timestamp];
-        if (!bucket.contains ("timestamp")) {
-            bucket["timestamp"] = metric.timestamp;
-            bucket["elapsed_seconds"] = static_cast<double> (metric.timestamp - start_time) / 1000.0;
-            // Initialize with defaults (only metrics stored periodically during test)
-            bucket["requests_completed"] = 0;
-            bucket["requests_failed"] = 0;
-            bucket["current_rps"] = 0.0;
-            bucket["current_concurrency"] = 0;
-            bucket["send_rate"] = 0.0;
-            bucket["throughput"] = 0.0;
-            bucket["backpressure"] = 0;
-            bucket["error_rate"] = 0.0;
-            bucket["dropped_requests"] = 0;
-            bucket["bytes_sent"] = 0;
-            bucket["bytes_received"] = 0;
-            bucket["status_codes"] = nlohmann::json::object ();
-            // Windowed per-tick latency percentiles (0 until a tick
-            // carries them). Snake_case keys match the app's
-            // LoadTestMetrics shape (consumed without a transformer).
-            bucket["latency_p50_ms"] = 0.0;
-            bucket["latency_p95_ms"] = 0.0;
-            bucket["latency_p99_ms"] = 0.0;
-        }
-
-        // Map metric values to LoadTestMetrics fields. Latency percentiles
-        // are now persisted per-tick as windowed (rolling) values -
-        // unlabeled rows; the labeled cumulative final-summary rows are
-        // skipped here so the series stays purely windowed.
-        if (metric.name == vayu::MetricName::Rps) {
-            bucket["current_rps"] = metric.value;
-        } else if (metric.name == vayu::MetricName::ErrorRate) {
-            bucket["error_rate"] = metric.value;
-        } else if (metric.name == vayu::MetricName::ConnectionsActive) {
-            bucket["current_concurrency"] = static_cast<int> (metric.value);
-        } else if (metric.name == vayu::MetricName::RequestsSent ||
-        metric.name == vayu::MetricName::TotalRequests) {
-            bucket["requests_completed"] = static_cast<int> (metric.value);
-        } else if (metric.name == vayu::MetricName::SendRate) {
-            bucket["send_rate"] = metric.value;
-        } else if (metric.name == vayu::MetricName::Throughput) {
-            bucket["throughput"] = metric.value;
-        } else if (metric.name == vayu::MetricName::Backpressure) {
-            bucket["backpressure"] = static_cast<int> (metric.value);
-        } else if (metric.name == vayu::MetricName::DroppedRequests) {
-            bucket["dropped_requests"] = static_cast<int> (metric.value);
-        } else if (metric.name == vayu::MetricName::BytesSent) {
-            bucket["bytes_sent"] = static_cast<size_t> (metric.value);
-        } else if (metric.name == vayu::MetricName::BytesReceived) {
-            bucket["bytes_received"] = static_cast<size_t> (metric.value);
-        } else if (metric.name == vayu::MetricName::LatencyP50 &&
-        metric.labels.empty ()) {
-            bucket["latency_p50_ms"] = metric.value;
-        } else if (metric.name == vayu::MetricName::LatencyP95 &&
-        metric.labels.empty ()) {
-            bucket["latency_p95_ms"] = metric.value;
-        } else if (metric.name == vayu::MetricName::LatencyP99 &&
-        metric.labels.empty ()) {
-            bucket["latency_p99_ms"] = metric.value;
-        } else if (metric.name == vayu::MetricName::StatusCodes &&
-        !metric.labels.empty ()) {
-            // Last-write-wins per timestamp (the final StatusCodes row
-            // shares this name and lands in the last bucket).
-            try {
-                bucket["status_codes"] = nlohmann::json::parse (metric.labels);
-            } catch (...) {
-                // leave default {}
-            }
-        }
-    }
-
-    // Derive requests_failed in a second pass, once every row for the tick has
-    // been folded in. Deriving it inside the ErrorRate branch made it depend on
-    // RequestsSent having already been seen for the same timestamp - and the
-    // producer inserts ErrorRate first, so it read requests_completed == 0 and
-    // stored a failed count of 0 for every bucket of every run.
-    for (auto& [ts, bucket] : time_buckets) {
-        double error_rate = bucket.value ("error_rate", 0.0);
-        int completed     = bucket.value ("requests_completed", 0);
-        bucket["requests_failed"] =
-        static_cast<int> ((error_rate / 100.0) * completed + 0.5);
-    }
-
-    // Convert map to sorted array
-    nlohmann::json data_array = nlohmann::json::array ();
-    for (const auto& [ts, bucket] : time_buckets) {
-        data_array.push_back (bucket);
-    }
-
-    return { 200, time_series_envelope (std::move (data_array), total_count, limit,
-                  offset, metrics.size ()) };
+    return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
 }
 
 namespace {
@@ -373,10 +262,8 @@ void register_metrics_routes (RouteContext& ctx) {
 
         res.set_content_provider ("text/event-stream",
         [&ctx, run_id] (size_t offset, httplib::DataSink& sink) {
-            int64_t last_id      = 0; // legacy EAV cursor
             int64_t last_tick_id = 0; // metric_ticks cursor
             bool test_completed  = false;
-            int64_t start_time   = 0;
 
             nlohmann::json aggregated_metrics;
             aggregated_metrics["totalRequests"]     = 0;
@@ -397,9 +284,6 @@ void register_metrics_routes (RouteContext& ctx) {
                 }
 
                 try {
-                    // A current run writes wide ticks; a run recorded before
-                    // that table existed only has EAV rows. Poll ticks first
-                    // and fall back, so this deprecated stream serves both.
                     auto ticks = ctx.db.get_metric_ticks_since (run_id, last_tick_id);
                     if (!ticks.empty ()) {
                         bool tick_updates = false;
@@ -414,85 +298,6 @@ void register_metrics_routes (RouteContext& ctx) {
                             if (!sink.write (payload.data (), payload.size ())) {
                                 return false;
                             }
-                        }
-                        std::this_thread::sleep_for (std::chrono::milliseconds (500));
-                        continue;
-                    }
-
-                    auto metrics = ctx.db.get_metrics_since (run_id, last_id);
-                    bool has_updates = false;
-
-                    if (!metrics.empty ()) {
-                        for (const auto& metric : metrics) {
-                            last_id = metric.id;
-
-                            if (start_time == 0) {
-                                start_time = metric.timestamp;
-                            }
-
-                            if (metric.name == vayu::MetricName::Rps) {
-                                aggregated_metrics["currentRps"] = metric.value;
-                                has_updates                      = true;
-                            } else if (metric.name == vayu::MetricName::ErrorRate) {
-                                aggregated_metrics["errorRate"] = metric.value;
-                                has_updates                     = true;
-                            } else if (metric.name == vayu::MetricName::ConnectionsActive) {
-                                aggregated_metrics["activeConnections"] =
-                                static_cast<int> (metric.value);
-                                has_updates = true;
-                            } else if (metric.name == vayu::MetricName::RequestsSent ||
-                            metric.name == vayu::MetricName::TotalRequests) {
-                                aggregated_metrics["totalRequests"] =
-                                static_cast<int> (metric.value);
-                                has_updates = true;
-                            } else if (metric.name == vayu::MetricName::LatencyAvg) {
-                                aggregated_metrics["avgLatencyMs"] = metric.value;
-                                has_updates = true;
-                            } else if (metric.name == vayu::MetricName::SendRate) {
-                                aggregated_metrics["sendRate"] = metric.value;
-                                has_updates = true;
-                            } else if (metric.name == vayu::MetricName::Throughput) {
-                                aggregated_metrics["throughput"] = metric.value;
-                                has_updates = true;
-                            } else if (metric.name == vayu::MetricName::Backpressure) {
-                                aggregated_metrics["backpressure"] =
-                                static_cast<int> (metric.value);
-                                has_updates = true;
-                            }
-
-                            int total_req = aggregated_metrics["totalRequests"];
-                            double err_rate = aggregated_metrics["errorRate"];
-                            aggregated_metrics["totalErrors"] =
-                            static_cast<int> ((err_rate / 100.0) * total_req);
-                            aggregated_metrics["totalSuccess"] = total_req -
-                            aggregated_metrics["totalErrors"].get<int> ();
-                            aggregated_metrics["elapsedSeconds"] =
-                            static_cast<double> (metric.timestamp - start_time) / 1000.0;
-                            aggregated_metrics["timestamp"] = metric.timestamp;
-                            aggregated_metrics["runId"]     = run_id;
-
-                            if (metric.name == vayu::MetricName::Completed) {
-                                test_completed = true;
-                            }
-                        }
-
-                        if (has_updates || test_completed) {
-                            std::string payload =
-                            "event: metrics\ndata: " + aggregated_metrics.dump () + "\n\n";
-                            if (!sink.write (payload.data (), payload.size ())) {
-                                return false;
-                            }
-                        }
-
-                        if (test_completed) {
-                            nlohmann::json completion_event;
-                            completion_event["event"] = "complete";
-                            completion_event["runId"] = run_id;
-                            std::string completion_payload =
-                            "event: complete\ndata: " + completion_event.dump () + "\n\n";
-                            sink.write (completion_payload.data (),
-                            completion_payload.size ());
-                            break;
                         }
                     } else {
                         auto run = ctx.db.get_run (run_id);

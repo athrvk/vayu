@@ -369,23 +369,6 @@ std::string serialize_variables (const vayu::Environment& env) {
     return obj.dump ();
 }
 
-Json serialize (const vayu::db::Metric& metric) {
-    Json json;
-    json["id"]        = metric.id;
-    json["runId"]     = metric.run_id;
-    json["timestamp"] = metric.timestamp;
-    json["name"]      = to_string (metric.name);
-    json["value"]     = metric.value;
-    if (!metric.labels.empty ()) {
-        if (auto parsed = try_parse_body (metric.labels)) {
-            json["labels"] = *parsed;
-        } else {
-            json["labels"] = metric.labels;
-        }
-    }
-    return json;
-}
-
 Result<Request> deserialize_request (const Json& json) {
     try {
         Request request;
