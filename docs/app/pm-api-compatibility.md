@@ -78,9 +78,10 @@ script explicitly asked to resolve.
 Two timing consequences worth knowing: the map is built **at call time**, so a
 variable the script set a line earlier resolves (unlike `{{}}` in the URL,
 which was composed before the script started); and the collection scope is the
-script context's - the request's immediate parent only, the same asymmetry
-`pm.collectionVariables` has. The argument must be a string; anything else is
-a `TypeError` rather than a silently coerced `"undefined"`.
+script context's - the request's whole collection chain, leaf shadowing
+ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
+be a string; anything else is a `TypeError` rather than a silently coerced
+`"undefined"`.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
