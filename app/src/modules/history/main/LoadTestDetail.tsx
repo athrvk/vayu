@@ -50,10 +50,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const protocolLabel = isHttpVersion(requestedHttpVersion)
 		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
 		: undefined;
-	// What actually happened, beside what was asked for. `undefined` (a run
-	// stored before the engine counted this) reads as 0 here on purpose: it means
-	// "nobody looked", and inventing a warning for it would be worse than the
-	// silence it replaces.
+	// What actually happened, beside what was asked for. A 0 covers both "no
+	// request was downgraded" and "this run predates the count" - the engine does
+	// not distinguish them (see the field's doc in types/domain.ts), and neither
+	// should draw a warning, so `undefined` folding into 0 loses nothing.
 	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview

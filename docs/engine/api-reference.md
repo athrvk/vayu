@@ -1173,6 +1173,14 @@ downgraded" from "an engine too old to say". Only an explicit `http2` counts:
 be downgraded. A transfer that negotiated nothing at all (`httpVersion` `""`)
 is `false` - that is a transport failure, and `errorCode` already reports it.
 
+**A plaintext `http://` URL always reports `true` for an explicit `"http2"`.**
+`CURL_HTTP_VERSION_2TLS` offers h2 over TLS only, so a cleartext request never
+attempts it - the fallback noted above under the request's `httpVersion` is
+exactly the case this field is for, and it is honest rather than a false
+positive: h2 was asked for and HTTP/1.1 was used. A local dev server on
+`http://` with the protocol set to HTTP/2 will show the warning on every
+request; either switch the request to `auto`, or serve over TLS.
+
 This exists because the failure it names is invisible otherwise: a `200`, a
 latency and a body look identical whether or not the protocol you asked for was
 granted. Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and
@@ -1847,9 +1855,14 @@ for HTTP/2 and negotiated something older - see
 [`httpVersionDowngraded` on a response](#post-execute). It is the only figure in
 `summary` that describes the report's *validity* rather than its performance:
 non-zero means the latency and throughput beside it were measured over a
-protocol other than the one `metadata.configuration.httpVersion` names. Written
-by engines from 0.15.0; a run stored by an older one omits the key, and
-`undefined` there means "nobody looked", not "none".
+protocol other than the one `metadata.configuration.httpVersion` names.
+
+**`0` is "none recorded", not "none happened".** An engine from 0.15.0 always
+emits the key - including for a run whose stored summary predates the count, and
+for one that fell back to the legacy metric rows, neither of which can produce a
+figure. The key is absent only from an engine older than 0.15.0. That is
+deliberately a weaker guarantee than the per-response
+`httpVersionDowngraded`, which is exact for the exchange it describes.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,

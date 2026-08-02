@@ -703,9 +703,15 @@ export interface RunReport {
 		 * report's validity rather than its performance: non-zero means the
 		 * latency and throughput above were measured over a protocol other than
 		 * the one `metadata.configuration.httpVersion` names, which is exactly
-		 * the mislabelling issue #215 describes. Absent from a run stored by an
-		 * engine older than 0.15.0 - `undefined` means "nobody looked", not
-		 * "none".
+		 * the mislabelling issue #215 describes.
+		 *
+		 * `0` is "none recorded", not "none happened" - an engine from 0.15.0
+		 * always emits the key, including for a run whose stored summary
+		 * predates the count and for one reported from the legacy metric rows,
+		 * neither of which can produce a figure. `undefined` therefore only
+		 * means the sidecar itself is older than 0.15.0, and reads the same way
+		 * as 0 here: no warning. Weaker than the per-response
+		 * `httpVersionDowngraded` above, which is exact for its exchange.
 		 */
 		httpVersionDowngraded?: number;
 	};

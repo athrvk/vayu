@@ -518,6 +518,14 @@ TEST_F (RunsRouteTest, ReportFallsBackToLegacyMetricRows) {
     EXPECT_EQ (body["summary"]["failedRequests"].get<size_t> (), 10u);
     ASSERT_TRUE (body.contains ("testValidation"));
     EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
+
+    // Present and 0, not omitted. Nothing on the legacy path ever counted a
+    // protocol downgrade, so 0 here means "none recorded", not "none happened" -
+    // the key is emitted anyway because every other summary field on this path
+    // behaves the same way, and a client that had to distinguish an absent key
+    // from a zero would be reading a difference the engine does not make.
+    ASSERT_TRUE (body["summary"].contains ("httpVersionDowngraded"));
+    EXPECT_EQ (body["summary"]["httpVersionDowngraded"].get<size_t> (), 0u);
 }
 
 // A summary that is not a JSON object is treated as absent, not as an empty
