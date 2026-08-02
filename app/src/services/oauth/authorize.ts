@@ -22,8 +22,33 @@ export class InteractiveAuthError extends Error {}
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * The embedded branch's ceiling. The main process owns the real deadline for
+ * that window and closes it with a specific error, so this only covers an IPC
+ * call that never answers at all - hence deliberately longer, so the specific
+ * error wins whenever the main process is alive to send one.
+ */
+const EMBEDDED_TIMEOUT_MS = POLL_TIMEOUT_MS + 10 * 1000;
+
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Reject with `message` if `promise` has not settled within `ms`. */
+function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new InteractiveAuthError(message)), ms);
+		void promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error: unknown) => {
+				clearTimeout(timer);
+				reject(error instanceof Error ? error : new InteractiveAuthError(String(error)));
+			}
+		);
+	});
 }
 
 /**
@@ -46,11 +71,15 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 	});
 
 	if (useEmbedded) {
-		const result = await api.oauthOpenWindow({
-			authorizeUrl: started.authorizeUrl,
-			redirectUri: started.redirectUri,
-			partition: `oauth:${computeOAuth2CacheKey(config)}`,
-		});
+		const result = await withDeadline(
+			api.oauthOpenWindow({
+				authorizeUrl: started.authorizeUrl,
+				redirectUri: started.redirectUri,
+				partition: `oauth:${computeOAuth2CacheKey(config)}`,
+			}),
+			EMBEDDED_TIMEOUT_MS,
+			"Authorization timed out"
+		);
 		if ("error" in result) {
 			throw new InteractiveAuthError(result.error);
 		}
