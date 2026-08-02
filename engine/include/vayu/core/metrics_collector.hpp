@@ -96,8 +96,17 @@ struct MetricsCollectorConfig {
     /// error rates). Errors past the cap are counted by errors_dropped().
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS;
 
-    /// Maximum success results to store (for detailed trace data)
+    /// Maximum sampled success results to store (for detailed trace data),
+    /// 0 = unlimited. Retained as a reservoir, so the set is drawn from the
+    /// whole run rather than its opening; what it displaces is counted by
+    /// success_results_dropped().
     size_t max_success_results = constants::metrics_collector::DEFAULT_MAX_SUCCESS_RESULTS;
+
+    /// Maximum slow-request records to store, 0 = unlimited. Its own budget:
+    /// an outlier is stored because the user asked for outliers, so it must not
+    /// consume a 1-in-N slot - and under saturation most completions cross the
+    /// threshold, so the slow path cannot be unbounded either.
+    size_t max_slow_results = constants::metrics_collector::DEFAULT_MAX_SLOW_RESULTS;
 
     /// Sample rate for success results (1 = all, 100 = 1%, etc.)
     size_t success_sample_rate = constants::metrics_collector::DEFAULT_SUCCESS_SAMPLE_RATE;
@@ -110,6 +119,19 @@ struct MetricsCollectorConfig {
 
     /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
     size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
+};
+
+/**
+ * @brief Why a success trace was built, i.e. which budget retains it.
+ *
+ * A completion that is both sampled and slow is stored as Slow: the trace is
+ * identical either way (it carries `isSlow`), and charging it to the slow
+ * budget leaves the 1-in-N budget for ordinary traffic.
+ */
+enum class SuccessTraceReason {
+    None,    ///< no trace was built for this completion
+    Sampled, ///< the 1-in-N sampler selected it
+    Slow     ///< it crossed slow_threshold_ms
 };
 
 /**
@@ -131,13 +153,35 @@ class MetricsCollector {
     MetricsCollector& operator= (MetricsCollector&&)      = delete;
 
     /**
+     * @brief Advance the success sampling period and report whether this
+     *        completion's trace should be built and stored.
+     *
+     * Call exactly once per successful completion, *before* building a trace.
+     * The counter advances on every call whether or not the answer is true, so
+     * the period keeps meaning "1 in N completions"; the caller then serialises
+     * only for the completions that are actually retained, instead of building
+     * N traces and discarding N-1 of them inside record_success.
+     *
+     * Returns false when success traces are switched off entirely
+     * (save_timing_breakdown) - the slow-request path is separate and does not
+     * go through here.
+     */
+    [[nodiscard]] bool should_sample_success ();
+
+    /**
      * @brief Record a successful request
      * Thread-safe, optimized for high-throughput
+     *
+     * @param trace_data serialised timing breakdown, empty when none was built
+     * @param trace_reason which budget retains @p trace_data. `None` with a
+     *                   non-empty trace stores nothing - the two are decided
+     *                   together by the caller (see should_sample_success).
      */
     void record_success (int status_code,
-                         double latency_ms,
-                         double queue_wait_ms,
-                         const std::string& trace_data = "");
+    double latency_ms,
+    double queue_wait_ms,
+    const std::string& trace_data   = "",
+    SuccessTraceReason trace_reason = SuccessTraceReason::None);
 
     /**
      * @brief Record a response sample for deferred script validation
@@ -162,6 +206,26 @@ class MetricsCollector {
      */
     [[nodiscard]] size_t errors_dropped () const {
         return errors_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Sampled success records dropped or displaced by the reservoir.
+     * Non-zero means the run produced more sampled traces than
+     * max_success_results retains; the retained ones are still drawn from the
+     * whole run, so this bounds what was thinned, not where it came from.
+     */
+    [[nodiscard]] size_t success_results_dropped () const {
+        return success_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /** @brief Slow-request records dropped or displaced by the reservoir. */
+    [[nodiscard]] size_t slow_results_dropped () const {
+        return slow_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /** @brief Response samples dropped or displaced by the reservoir. */
+    [[nodiscard]] size_t response_samples_dropped () const {
+        return response_dropped_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -311,6 +375,22 @@ class MetricsCollector {
     }
 
     /**
+     * @brief Get the retained sampled-success records (a uniform sample of the
+     *        run when success_results_dropped() is non-zero)
+     */
+    [[nodiscard]] const std::vector<ResultRecord>& success_results () const {
+        return success_results_;
+    }
+
+    /**
+     * @brief Get the retained slow-request records (a uniform sample of the
+     *        run's outliers when slow_results_dropped() is non-zero)
+     */
+    [[nodiscard]] const std::vector<ResultRecord>& slow_results () const {
+        return slow_results_;
+    }
+
+    /**
      * @brief Get latency count from histogram
      * @note Raw latencies are no longer stored; use calculate_percentiles() for analysis
      */
@@ -418,14 +498,31 @@ class MetricsCollector {
     std::vector<ResultRecord> errors_;
     std::atomic<size_t> errors_dropped_{ 0 };
 
+    // Sampled successes and slow-request outliers. One mutex for both: each is
+    // written at most once per retained record (the 1-in-N gate and the
+    // threshold have already run), so they never contend the way the raw
+    // completion rate would.
+    //
+    // `*_sample_counter_` is the sampling period and advances once per
+    // completion; `*_seen_` counts only the candidates offered to the
+    // reservoir, which is what Algorithm R needs to keep the retained set
+    // uniform over the run. The two cannot be merged - the period must tick for
+    // completions the sampler skips, and the reservoir must not.
     mutable std::mutex success_mutex_;
     std::vector<ResultRecord> success_results_;
     std::atomic<size_t> success_sample_counter_{ 0 };
+    std::atomic<size_t> success_seen_{ 0 };
+    std::atomic<size_t> success_dropped_{ 0 };
+    std::vector<ResultRecord> slow_results_;
+    std::atomic<size_t> slow_seen_{ 0 };
+    std::atomic<size_t> slow_dropped_{ 0 };
 
     // Response samples for deferred script validation
     mutable std::mutex response_samples_mutex_;
     std::vector<ResponseSample> response_samples_;
     std::atomic<size_t> response_sample_counter_{ 0 };
+    std::atomic<size_t> response_seen_{ 0 };
+    std::atomic<size_t> response_dropped_{ 0 };
 
     // Overflow for non-standard / out-of-range codes (e.g. 999 from misbehaving
     // proxies). Dead path for real traffic; guarded by a mutex it almost never

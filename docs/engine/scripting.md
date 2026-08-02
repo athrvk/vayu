@@ -789,7 +789,15 @@ The **language** is current; what is missing is the **host environment**:
 ### Load Test Scripts
 
 - Test scripts in load tests are executed **deferred** (after test completion)
-- Only a sample of responses are validated (configurable)
+- Only a sample of responses are validated: 1 in `response_sample_rate`
+  completions, retained up to `max_response_samples`. The retained set is a
+  **uniform sample of the whole run**, not its opening - past the bound a later
+  response displaces a uniformly chosen incumbent, so a target that starts
+  failing halfway through is graded on those failures rather than on the healthy
+  window before them
+- `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
+  not the run's request count, and `sampling.responseSamplesDropped` beside it
+  says how many responses the bound thinned away
 - Results are aggregated and reported in the final report
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
   well as the request's own, composed the same way as `POST /execute` (see

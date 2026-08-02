@@ -101,6 +101,15 @@ struct ReportExtras {
     int tests_sampled  = 0;
     int tests_passed   = 0;
     int tests_failed   = 0;
+    // What the run's bounded stores thinned away. `has_sampling` false is a
+    // run recorded before retention was reported, which is not the same as a
+    // run that dropped nothing - so the section is left out rather than shown
+    // as all zeros.
+    bool has_sampling               = false;
+    size_t errors_dropped           = 0;
+    size_t success_traces_dropped   = 0;
+    size_t slow_traces_dropped      = 0;
+    size_t response_samples_dropped = 0;
     // How many of this run's transfers asked for HTTP/2 and negotiated
     // something older. Not a performance number - it is what tells the reader
     // whether the protocol the report is labelled with is the one the numbers
@@ -190,6 +199,15 @@ ReportExtras& extras) {
                 // Skip an unparseable code rather than losing the whole map.
             }
         }
+    }
+
+    if (summary.contains ("sampling") && summary["sampling"].is_object ()) {
+        extras.has_sampling  = true;
+        const auto& sampling = summary["sampling"];
+        read_number (sampling, "errors_dropped", extras.errors_dropped);
+        read_number (sampling, "success_traces_dropped", extras.success_traces_dropped);
+        read_number (sampling, "slow_traces_dropped", extras.slow_traces_dropped);
+        read_number (sampling, "response_samples_dropped", extras.response_samples_dropped);
     }
 
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
@@ -523,6 +541,16 @@ const std::string& run_id) {
             (static_cast<double> (report.slow_requests_count) * 100.0 /
             static_cast<double> (report.total_requests)) :
             0.0 } };
+    }
+
+    // How much each bounded store thinned away. All zeros means the sampled
+    // sets below are complete; non-zero means they are a uniform sample of the
+    // run (reservoir retention), not its opening.
+    if (extras.has_sampling) {
+        json_report["sampling"] = { { "errorsDropped", extras.errors_dropped },
+            { "successTracesDropped", extras.success_traces_dropped },
+            { "slowTracesDropped", extras.slow_traces_dropped },
+            { "responseSamplesDropped", extras.response_samples_dropped } };
     }
 
     if (extras.has_tests) {

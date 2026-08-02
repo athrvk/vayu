@@ -24,6 +24,9 @@ export * from "./AuthFields";
 export * from "./Callout";
 export * from "./callout-severity";
 
+// "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
+export * from "./SampleRetentionNote";
+
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
 

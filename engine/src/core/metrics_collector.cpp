@@ -11,11 +11,13 @@
  */
 
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/core/reservoir.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <random>
 
 namespace vayu::core {
 
@@ -24,6 +26,43 @@ inline int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
     .count ();
+}
+
+/**
+ * Randomness for the reservoir decisions. Thread-local so the recorder path
+ * takes no lock to draw one: the sample only needs each candidate's fate to be
+ * independent, not the stream of draws to be reproducible.
+ */
+uint64_t next_random () {
+    thread_local std::mt19937_64 engine{ std::random_device{}() };
+    return engine ();
+}
+
+/**
+ * Apply a reservoir slot to a bounded store. Requires the store's mutex.
+ *
+ * The slot is claimed outside the lock (that is what keeps the copy off the
+ * critical section), so by the time the insert happens another thread may have
+ * appended ahead of it - hence the size checks here rather than trusting the
+ * slot's own append flag. Anything that lands on an occupied index displaces
+ * the incumbent, which the caller counts as a drop.
+ *
+ * @return true if the insert cost a record - an incumbent displaced, or this
+ *         candidate dropped because the store was full with no slot to take.
+ */
+template <typename T>
+bool insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slot, T&& value) {
+    if (store.size () < capacity) {
+        store.push_back (std::move (value));
+        return false;
+    }
+    if (slot.index < store.size ()) {
+        store[slot.index] = std::move (value);
+        return true;
+    }
+    // Capacity is full and the slot points past the end: nothing to replace
+    // without growing past the bound, so the candidate is dropped.
+    return true;
 }
 } // namespace
 
@@ -91,6 +130,14 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
         success_results_.reserve (std::min (success_reserve, max_reserve));
     }
 
+    // Slow-request records are captured whether or not timing breakdowns are
+    // stored - that is the whole point of a threshold - so this reserve is not
+    // conditional on store_success_traces. Unlimited (0) reserves nothing and
+    // lets the vector grow, as elsewhere.
+    if (config_.max_slow_results > 0) {
+        slow_results_.reserve (std::min (config_.max_slow_results, max_reserve));
+    }
+
     // Reserve response samples for script validation
     response_samples_.reserve (config_.max_response_samples);
 }
@@ -117,7 +164,8 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
 void MetricsCollector::record_success (int status_code,
 double latency_ms,
 double queue_wait_ms,
-const std::string& trace_data) {
+const std::string& trace_data,
+SuccessTraceReason trace_reason) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     atomic_add_double (total_latency_sum_, latency_ms);
@@ -138,19 +186,50 @@ const std::string& trace_data) {
     // Also feed the rolling-window recorder for the live per-tick percentiles.
     hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
 
-    // Store success result if configured (sampled)
-    if (config_.store_success_traces && !trace_data.empty ()) {
-        size_t counter = success_sample_counter_.fetch_add (1, std::memory_order_relaxed);
-        if (counter % config_.success_sample_rate == 0) {
-            std::lock_guard<std::mutex> lock (success_mutex_);
-            if (config_.max_success_results == 0 ||
-            success_results_.size () < config_.max_success_results) {
-                ResultRecord record (now_ms (), status_code, latency_ms);
-                record.trace_data = trace_data;
-                success_results_.push_back (std::move (record));
-            }
-        }
+    // Store the trace the caller built, in whichever budget asked for it. The
+    // sampling decision happened before the trace was serialised (see
+    // should_sample_success), so nothing is built here to be discarded.
+    if (trace_data.empty () || trace_reason == SuccessTraceReason::None) {
+        return;
     }
+
+    ResultRecord record (now_ms (), status_code, latency_ms);
+    record.trace_data = trace_data;
+
+    const bool slow = trace_reason == SuccessTraceReason::Slow;
+    const size_t capacity = slow ? config_.max_slow_results : config_.max_success_results;
+    auto& store        = slow ? slow_results_ : success_results_;
+    auto& seen_counter = slow ? slow_seen_ : success_seen_;
+    auto& dropped      = slow ? slow_dropped_ : success_dropped_;
+
+    if (capacity == 0) { // unlimited
+        std::lock_guard<std::mutex> lock (success_mutex_);
+        store.push_back (std::move (record));
+        return;
+    }
+
+    const size_t seen = seen_counter.fetch_add (1, std::memory_order_relaxed);
+    const ReservoirSlot slot = reservoir_slot (seen, capacity, next_random ());
+    if (!slot.accepted) {
+        dropped.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
+    bool displaced = false;
+    {
+        std::lock_guard<std::mutex> lock (success_mutex_);
+        displaced = insert_at_slot (store, capacity, slot, std::move (record));
+    }
+    if (displaced) {
+        dropped.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+bool MetricsCollector::should_sample_success () {
+    // The counter advances for every completion, sampled or not - it is what
+    // gives the period its meaning. Only the answer depends on the toggle.
+    const size_t counter = success_sample_counter_.fetch_add (1, std::memory_order_relaxed);
+    return config_.store_success_traces && counter % config_.success_sample_rate == 0;
 }
 
 void MetricsCollector::record_response_sample (const Response& response) {
@@ -160,9 +239,33 @@ void MetricsCollector::record_response_sample (const Response& response) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock (response_samples_mutex_);
-    if (response_samples_.size () < config_.max_response_samples) {
-        response_samples_.emplace_back (response, now_ms ());
+    const size_t capacity = config_.max_response_samples;
+    if (capacity == 0) { // configured to retain nothing
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
+    // Claim a slot before copying anything. Past capacity most candidates are
+    // refused, and a refusal costs neither the body-sized copy below nor the
+    // mutex - which the old hard stop took on every sampled completion for the
+    // rest of the run, purely to find the buffer full.
+    const size_t seen = response_seen_.fetch_add (1, std::memory_order_relaxed);
+    const ReservoirSlot slot = reservoir_slot (seen, capacity, next_random ());
+    if (!slot.accepted) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
+    ResponseSample sample (response, now_ms ());
+
+    bool displaced = false;
+    {
+        std::lock_guard<std::mutex> lock (response_samples_mutex_);
+        displaced =
+        insert_at_slot (response_samples_, capacity, slot, std::move (sample));
+    }
+    if (displaced) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
     }
 }
 
@@ -318,21 +421,25 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         }
     }
 
-    // Collect sampled success records
+    // Collect sampled success records and the slow-request outliers. Two
+    // budgets in memory, one table on disk: a stored row is a stored row, and
+    // the report tells them apart by the trace's `isSlow` marker.
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
-        for (const auto& success : success_results_) {
-            db::Result db_result;
-            db_result.run_id      = run_id_;
-            db_result.timestamp   = success.timestamp;
-            db_result.status_code = success.status_code;
-            // ResultRecord doesn't carry the wire reason phrase; derive
-            // from code via the shared helper. The single-request design
-            // path (execution.cpp) preserves the wire phrase directly.
-            db_result.status_text = vayu::http::status_text (success.status_code);
-            db_result.latency_ms  = success.latency_ms;
-            db_result.trace_data  = success.trace_data;
-            batch.push_back (std::move (db_result));
+        for (const auto* store : { &success_results_, &slow_results_ }) {
+            for (const auto& success : *store) {
+                db::Result db_result;
+                db_result.run_id      = run_id_;
+                db_result.timestamp   = success.timestamp;
+                db_result.status_code = success.status_code;
+                // ResultRecord doesn't carry the wire reason phrase; derive
+                // from code via the shared helper. The single-request design
+                // path (execution.cpp) preserves the wire phrase directly.
+                db_result.status_text = vayu::http::status_text (success.status_code);
+                db_result.latency_ms = success.latency_ms;
+                db_result.trace_data = success.trace_data;
+                batch.push_back (std::move (db_result));
+            }
         }
     }
 
@@ -368,12 +475,14 @@ size_t MetricsCollector::memory_usage_bytes () const {
         }
     }
 
-    // Success results vector
+    // Success and slow-request result vectors
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
-        bytes += success_results_.capacity () * sizeof (ResultRecord);
-        for (const auto& s : success_results_) {
-            bytes += s.trace_data.capacity ();
+        for (const auto* store : { &success_results_, &slow_results_ }) {
+            bytes += store->capacity () * sizeof (ResultRecord);
+            for (const auto& s : *store) {
+                bytes += s.trace_data.capacity ();
+            }
         }
     }
 

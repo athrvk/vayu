@@ -757,6 +757,29 @@ export interface RunReport {
 		testsFailed: number;
 		successRate: number;
 	};
+	/**
+	 * How many records each of the run's bounded stores thinned away.
+	 *
+	 * Every store the engine keeps is capped, so a long run retains a *sample*
+	 * rather than the whole set - and past the cap a later record displaces a
+	 * uniformly chosen incumbent (reservoir retention), so what survives
+	 * describes the whole run rather than its opening. These counts are what
+	 * make that visible: all zeros means `results` and the tested responses are
+	 * complete, non-zero means they are a sample of a larger set.
+	 *
+	 * `undefined` is a run whose stored summary predates the counts (or an older
+	 * sidecar), which is *not* the same claim as "nothing was dropped" - so the
+	 * UI stays silent rather than asserting completeness it cannot verify.
+	 */
+	sampling?: {
+		errorsDropped: number;
+		/** Sampled timing traces displaced or dropped (`max_success_results`). */
+		successTracesDropped: number;
+		/** Slow-request traces displaced or dropped (`max_slow_results`). */
+		slowTracesDropped: number;
+		/** Responses displaced or dropped before test validation ran. */
+		responseSamplesDropped: number;
+	};
 	results?: Array<{
 		timestamp: number;
 		statusCode: number;

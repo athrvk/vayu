@@ -28,6 +28,18 @@ inline int64_t now_ms () {
     .count ();
 }
 
+/// Snapshot what each bounded store thinned away, for the run summary. One
+/// copy so the completed-run and crashed-run summaries cannot report retention
+/// differently.
+SamplingRetention read_retention (const MetricsCollector& mc) {
+    SamplingRetention retention;
+    retention.errors_dropped           = mc.errors_dropped ();
+    retention.success_traces_dropped   = mc.success_results_dropped ();
+    retention.slow_traces_dropped      = mc.slow_results_dropped ();
+    retention.response_samples_dropped = mc.response_samples_dropped ();
+    return retention;
+}
+
 /**
  * @brief Validate sampled responses using test scripts (deferred validation)
  * This runs after the load test completes to avoid impacting throughput.
@@ -187,6 +199,16 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     mc_config.success_sample_rate =
     static_cast<size_t> (config.value ("success_sample_rate", 100));
     mc_config.store_success_traces = config.value ("save_timing_breakdown", false);
+    mc_config.max_success_results =
+    static_cast<size_t> (config.value ("max_success_results",
+    static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_SUCCESS_RESULTS)));
+    mc_config.max_slow_results =
+    static_cast<size_t> (config.value ("max_slow_results",
+    static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_SLOW_RESULTS)));
+
+    // Outlier capture threshold, read once here rather than per completion.
+    slow_threshold_ms = config.value ("slow_threshold_ms",
+    constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS);
 
     // Configure response sampling for script validation
     mc_config.max_response_samples =
@@ -680,6 +702,7 @@ RunManager& manager) {
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests           = validation;
+            inputs.retention = read_retention (*context->metrics_collector);
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -754,6 +777,7 @@ RunManager& manager) {
             inputs.status_codes     = mc.status_code_distribution ();
             inputs.latency          = mc.calculate_percentiles ();
             inputs.latency_avg_ms   = mc.average_latency ();
+            inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
 
             db.update_run_summary (
@@ -842,6 +866,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         { "p75", inputs.latency.p75 }, { "p90", inputs.latency.p90 },
         { "p95", inputs.latency.p95 }, { "p99", inputs.latency.p99 },
         { "p999", inputs.latency.p999 } };
+    // What each bounded store thinned away. Always written: a reader that sees
+    // the section and all zeros knows the stored set is complete, which a
+    // missing section cannot say.
+    summary["sampling"] = { { "errors_dropped", inputs.retention.errors_dropped },
+        { "success_traces_dropped", inputs.retention.success_traces_dropped },
+        { "slow_traces_dropped", inputs.retention.slow_traces_dropped },
+        { "response_samples_dropped", inputs.retention.response_samples_dropped } };
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {

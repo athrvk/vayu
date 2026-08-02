@@ -475,6 +475,20 @@ the requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
 ([#215](https://github.com/athrvk/vayu/issues/215)).
 
+`report.sampling` carries what each of the run's bounded stores thinned away -
+`successTracesDropped` / `slowTracesDropped` for the trace records behind
+`report.results`, and `responseSamplesDropped` for the buffer post-run test
+scripts are graded on. The renderer treats a non-zero count as "this list is a
+*sample* of a larger set": `SampleRetentionNote` (shared) renders under the
+dashboard's Sampled Requests, the history Samples tab and the Test Validation
+card, and the sample-count badges say **shown** rather than *captured*, since
+`results` is capped at 100 by the report route irrespective of retention.
+
+An **absent** `sampling` is a run whose stored summary predates the counts, not
+a run that dropped nothing, so the note stays out rather than asserting a
+completeness it cannot verify - the same absent-vs-zero rule
+`httpVersionDowngraded` follows above.
+
 ### Load Test Execution
 
 1. **User Action**: Configures and starts load test
