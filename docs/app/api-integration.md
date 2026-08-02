@@ -439,6 +439,7 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   body: { users: [...] },
   bodyRaw: '{"users":[...]}',
   httpVersion: "HTTP/1.1",
+  httpVersionDowngraded: false,
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Status 200", passed: true }
@@ -460,6 +461,19 @@ knows the difference (see
 `""` when nothing was negotiated) - an outcome, not an echo of the request's
 own `httpVersion`. The Raw tab in the response viewer prints it on the
 request/status line instead of a hardcoded `HTTP/1.1`.
+
+`httpVersionDowngraded` says the request asked for `http2` and the connection
+negotiated something older - the one thing neither `httpVersion` can say alone,
+since neither knows about the other. The engine computes it, and the renderer
+carries it as-is rather than comparing the negotiated protocol against the
+tab's current setting: a restored or replayed response sits beside request
+state that may have changed since, and the answer belongs to the exchange.
+`ResponseStatusBar` draws it as a warning beside the status chip, and only when
+it is true. Load runs carry the whole-run count as
+`report.summary.httpVersionDowngraded`, which `LoadTestDetail` shows next to
+the requested protocol - without it a run measured entirely over HTTP/1.1 still
+read "HTTP/2" there
+([#215](https://github.com/athrvk/vayu/issues/215)).
 
 ### Load Test Execution
 

@@ -25,12 +25,14 @@
  * resolves to `undefined`. `scriptVariableCompletionContext` decides which set
  * applies; this hook only renders it.
  *
- * **And collection scope is narrower here than in a body.** Decision D2: the
- * engine fills a script's single collection scope from the request's immediate
- * parent collection, while the resolver merges the whole ancestor chain (which
- * is right for `{{name}}`, resolved at compose time). So an ancestor's variable
- * is dropped from this list - offering it would be the same `undefined` the
- * rule above exists to prevent. See docs/app/variable-resolution.md.
+ * **Collection scope is the whole chain, the same as in a body.** The engine
+ * fills a script's collection scope from the request's collection *chain*
+ * (issue #234, leaf shadowing ancestor), so an ancestor's variable resolves
+ * inside `pm.collectionVariables.get()` exactly as it does inside `{{name}}` -
+ * and it belongs in this list for the same reason every other offered name
+ * does. This list narrowed to the immediate collection while the engine did;
+ * the two move together, or one of them offers names the other cannot read.
+ * See docs/app/variable-resolution.md.
  *
  * Call once (in App). A completion provider is global per language, so a single
  * registration covers every script editor instance. The same shape as
@@ -61,8 +63,8 @@ export function useScriptVariableCompletionProvider() {
 	/*
 	 * The active tab's collection, since a provider registered per language has
 	 * no request builder context to take one from and the resolver offers no
-	 * collection variables without it. It is also the *immediate* collection,
-	 * which is what the D2 narrowing below needs.
+	 * collection variables without it. The resolver walks up from here, which is
+	 * the same chain the engine hands the script.
 	 */
 	const collectionId = useActiveCollectionId();
 	const { getAllVariables } = useVariableResolver({ collectionId });
@@ -102,11 +104,6 @@ export function useScriptVariableCompletionProvider() {
 					// `pm.environment.get` reads one scope; only the merged
 					// `pm.variables` sees them all.
 					.filter(([, info]) => context.scope === "all" || info.scope === context.scope)
-					// D2: a script's collection scope is the immediate collection, not
-					// the merged chain the resolver returns.
-					.filter(
-						([, info]) => info.scope !== "collection" || info.sourceId === collectionId
-					)
 					.map(([name, info]) => ({
 						label: name,
 						kind: monaco.languages.CompletionItemKind.Variable,

@@ -369,6 +369,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.latency.p99       = 30.0;
     inputs.latency.p999      = 35.0;
     inputs.latency_avg_ms    = 12.5;
+    inputs.http_version_downgraded = 4;
     inputs.tests             = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
     return inputs;
 }
@@ -402,6 +403,11 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_DOUBLE_EQ (summary["avgQueueWaitMs"].get<double> (), 1.5);
     EXPECT_EQ (summary["bytesSent"].get<size_t> (), 1024u);
     EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 8192u);
+    // The one summary figure that is about the report's validity rather than
+    // its performance: how many transfers asked for HTTP/2 and did not get it.
+    // It has to survive the store -> report round trip, or a run measured over
+    // HTTP/1.1 keeps being labelled with the protocol that was requested.
+    EXPECT_EQ (summary["httpVersionDowngraded"].get<size_t> (), 4u);
 
     // successful/failed are recounted from the stored distribution, so the 3
     // transport errors (code 0) land on the failed side.
@@ -512,6 +518,14 @@ TEST_F (RunsRouteTest, ReportFallsBackToLegacyMetricRows) {
     EXPECT_EQ (body["summary"]["failedRequests"].get<size_t> (), 10u);
     ASSERT_TRUE (body.contains ("testValidation"));
     EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
+
+    // Present and 0, not omitted. Nothing on the legacy path ever counted a
+    // protocol downgrade, so 0 here means "none recorded", not "none happened" -
+    // the key is emitted anyway because every other summary field on this path
+    // behaves the same way, and a client that had to distinguish an absent key
+    // from a zero would be reading a difference the engine does not make.
+    ASSERT_TRUE (body["summary"].contains ("httpVersionDowngraded"));
+    EXPECT_EQ (body["summary"]["httpVersionDowngraded"].get<size_t> (), 0u);
 }
 
 // A summary that is not a JSON object is treated as absent, not as an empty

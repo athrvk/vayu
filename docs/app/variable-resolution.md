@@ -302,18 +302,32 @@ A script reads a scope by name (`pm.environment.get`,
 at the first scope that has the name enabled - this page's priority order, read
 from the top down.
 
-One difference to know about, kept deliberately in #226 (decision D2): the
-script side has a single collection scope, and the engine fills it from the
-request's **immediate parent collection only** (`execution.cpp`, where
-`collectionVariables` is loaded). The chain merge described above applies to
-`{{name}}` (at compose time), so a variable defined on an ancestor collection
-is visible to `{{name}}` and *not* to `pm.collectionVariables.get` /
-`pm.variables.get`. Closing the gap was considered and rejected for now:
-scripts write `collectionVariables` back to the immediate parent
-(`persist_script_variables`), so merging the chain into that scope would copy
-ancestor variables down into the leaf collection on the next script write.
-Read such a value from the environment or globals, or define it on the
-request's own collection. See
+The collection scope a script reads is the **whole chain**, the same one
+`{{name}}` merges (issue #234; `load_script_variable_scopes` in
+`execution.cpp` builds it from `collection_chain`). A variable defined on an
+ancestor collection therefore reads the same in `pm.collectionVariables.get`,
+`pm.variables.get` and `pm.variables.replaceIn("{{name}}")` as it substitutes
+in the URL.
+
+**Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
+only ever touch the request's own collection - the one
+`persist_script_variables` writes back. So the rule for an inherited name is
+CSS-like:
+
+- `pm.collectionVariables.set("token", x)` on a descendant **shadows** the
+  ancestor's `token`; the ancestor's stored value is untouched.
+- `pm.collectionVariables.unset("token")` removes the descendant's copy, and
+  `get("token")` then finds the ancestor's value again.
+- `pm.collectionVariables.clear()` empties the request's own collection only.
+
+Inheritance can be shadowed from below, never deleted from below. That
+asymmetry is the point rather than an oversight: #226 (decision D2) originally
+kept the whole chain out of scripts precisely because a single merged,
+writable map would have let one `set()` copy every ancestor's variables down
+into the leaf collection on the next persist. Read-only ancestors make that
+impossible while still answering the read. A disabled row is looked past
+wherever it sits, so unticking an inherited name in a descendant falls through
+to the ancestor's value rather than hiding it. See
 [pm API compatibility](./pm-api-compatibility.md) and
 [scripting.md](../engine/scripting.md#variables-pmvariables).
 
@@ -340,13 +354,12 @@ Three rules make the offered set match what the call can actually read:
   collection, or a collection tab itself - so the list is globals + the
   collection chain + the active environment, the same set every other surface
   offers.
-- **The script list narrows that chain back down.** Decision D2 applies here:
-  the engine fills a script's collection scope from the immediate parent
-  collection, so an ancestor's variable is dropped from
-  `pm.collectionVariables.get()` and from the merged `pm.variables.get()`.
-  Offering it would offer a name that returns `undefined`, which is the same
-  failure the rule above prevents. The `{{name}}` list keeps the whole chain,
-  because that is what compose-time resolution actually reads.
+- **The script list carries the same chain.** The engine walks the collection
+  chain for scripts too (#234), so an ancestor's variable is offered inside
+  `pm.collectionVariables.get()` and the merged `pm.variables.get()` - it is a
+  name the call can read. This list narrowed to the immediate collection while
+  the engine did; the rule underneath is unchanged, which is that the list
+  offers exactly what the call resolves.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
