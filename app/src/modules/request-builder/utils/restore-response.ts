@@ -162,6 +162,7 @@ export function responseFromRunResult(
 		headers: trace.response.headers || {},
 		...sentSide(trace),
 		httpVersion: trace.response.httpVersion,
+		httpVersionDowngraded: trace.response.httpVersionDowngraded,
 		body,
 		bodyRaw,
 		bodyType: detectBodyType(body),

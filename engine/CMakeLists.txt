@@ -211,6 +211,35 @@ else()
 endif()
 
 # ============================================================================
+# Windows application manifest
+# ============================================================================
+
+# Embed engine/res/vayu-windows.manifest into an executable.
+#
+# Every executable that links libcurl needs this, and the reason is not
+# discoverable from the flag: without the manifest's `supportedOS` ids,
+# `VerifyVersionInfoW` reports Windows 8 to the process, curl's Schannel
+# backend concludes the OS is too old for ALPN, and HTTP/2 can never be
+# negotiated - silently, with a 200 and an `httpVersion` of "HTTP/1.1"
+# (issue #215). The full chain is written out in the manifest file itself;
+# read that before removing any of this.
+#
+# The mechanism is a plain `.manifest` source, not a linker flag. CMake feeds
+# any `.manifest` source through `mt` and merges it into the one manifest it
+# already generates for the target. Passing `/MANIFEST:EMBED /MANIFESTINPUT:`
+# through target_link_options instead *looks* equivalent and does not link:
+# CMake's vs_link_exe wrapper still appends its own `/MANIFEST` and
+# `manifest.res`, and the two collide with
+# `CVT1100: duplicate resource. type:MANIFEST, name:1`. So do not "simplify"
+# this into linker flags.
+function(vayu_embed_windows_manifest target)
+    if(NOT MSVC)
+        return()
+    endif()
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/res/vayu-windows.manifest")
+endfunction()
+
+# ============================================================================
 # Core Library
 # ============================================================================
 
@@ -317,7 +346,10 @@ if(VAYU_BUILD_CLI)
         vayu_warnings
         vayu_sanitizers
     )
-    
+
+    # Not optional on Windows - see vayu_embed_windows_manifest above.
+    vayu_embed_windows_manifest(vayu-cli)
+
     install(TARGETS vayu-cli RUNTIME DESTINATION bin)
 endif()
 
@@ -352,7 +384,12 @@ if(VAYU_BUILD_ENGINE)
         vayu_warnings
         vayu_sanitizers
     )
-    
+
+    # Not optional on Windows - see vayu_embed_windows_manifest above. This is
+    # the binary the installer ships, so .github/check-windows-deps.py verifies
+    # the manifest actually survived into the artifact.
+    vayu_embed_windows_manifest(vayu-engine)
+
     install(TARGETS vayu-engine RUNTIME DESTINATION bin)
 endif()
 
@@ -445,6 +482,13 @@ if(VAYU_BUILD_TESTS)
         vayu_warnings
         vayu_sanitizers
     )
+
+    # The test binary needs the manifest for two reasons: any test that opens a
+    # TLS connection would otherwise run without ALPN, and `WindowsOsVersionShim`
+    # in http_version_support_test.cpp asserts on *this* process's view of the OS
+    # version - which is only meaningful if this process is manifested the same
+    # way vayu-engine is.
+    vayu_embed_windows_manifest(vayu_tests)
 
     # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
     # deadlock (e.g. a thread-pool teardown hang) is reported as a failure

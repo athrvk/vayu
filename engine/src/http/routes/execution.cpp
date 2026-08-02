@@ -152,7 +152,8 @@ const vayu::Response& response) {
         // serialize(Response) in json.cpp, so restore-response.ts can't
         // confuse "empty" with "this key doesn't exist on a stored trace".
         trace["response"] = { { "headers", response.headers },
-            { "body", response.body }, { "httpVersion", response.http_version } };
+            { "body", response.body }, { "httpVersion", response.http_version },
+            { "httpVersionDowngraded", response.http_version_downgraded } };
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;

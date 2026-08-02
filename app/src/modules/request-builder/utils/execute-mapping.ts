@@ -134,6 +134,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
 		httpVersion: result.httpVersion,
+		httpVersionDowngraded: result.httpVersionDowngraded,
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),
