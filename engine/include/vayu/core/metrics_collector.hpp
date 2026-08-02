@@ -253,6 +253,25 @@ class MetricsCollector {
         return total_bytes_recv_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count one transfer that asked for HTTP/2 and got something older.
+     *
+     * Every other number this collector holds describes how the run performed;
+     * this one describes whether the run measured what it claims to. A load
+     * test whose requests all quietly fell back to HTTP/1.1 produces a complete,
+     * plausible report labelled with the protocol that was requested and never
+     * used - which is the failure mode of issue #215, and the reason a single
+     * counter is worth carrying through the summary. Lock-free, called once per
+     * completed transfer.
+     */
+    void record_http_version_downgrade () {
+        http_version_downgraded_.fetch_add (1, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t http_version_downgraded () const {
+        return http_version_downgraded_.load (std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -447,6 +466,7 @@ class MetricsCollector {
     std::atomic<double> total_queue_wait_sum_{ 0.0 };
     std::atomic<size_t> total_bytes_sent_{ 0 };
     std::atomic<size_t> total_bytes_recv_{ 0 };
+    std::atomic<size_t> http_version_downgraded_{ 0 };
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).

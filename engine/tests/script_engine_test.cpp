@@ -2273,6 +2273,230 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesScopesLikeTheRequestFieldsDo) {
     EXPECT_EQ (globals["singlePass"].value, "{{everywhere}}");
 }
 
+// ============================================================================
+// The collection chain in a script (issue #234)
+//
+// `{{name}}` has always walked the whole collection ancestor chain, while the
+// script scopes saw the request's immediate parent alone - so the same name,
+// and after replaceIn the same *notation*, answered differently in a URL and
+// in a script. These pin the walk: reads see the chain, writes stay on the
+// leaf.
+// ============================================================================
+
+TEST_F (ScriptEngineTest, CollectionReadsWalkTheAncestorChain) {
+    // Collections API (root) -> Users (leaf); the request lives in Users.
+    std::vector<Environment> ancestors (1);
+    ancestors[0]["token"]     = Variable{ "from-root", false, true };
+    ancestors[0]["root_only"] = Variable{ "root-value", false, true };
+    Environment leaf;
+    leaf["leaf_only"] = Variable{ "leaf-value", false, true };
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('inherited', String(pm.collectionVariables.get('token')));
+        pm.globals.set('hasInherited', String(pm.collectionVariables.has('token')));
+        pm.globals.set('ownKey', String(pm.collectionVariables.get('leaf_only')));
+        var snapshot = pm.collectionVariables.toObject();
+        pm.globals.set('snapshotInherited', String(snapshot['token']));
+        pm.globals.set('snapshotOwn', String(snapshot['leaf_only']));
+        // The merged accessor and {{}} resolution ride on the same walk.
+        pm.globals.set('merged', String(pm.variables.get('root_only')));
+        pm.globals.set('replaced', pm.variables.replaceIn('{{token}}'));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["inherited"].value, "from-root");
+    EXPECT_EQ (globals["hasInherited"].value, "true");
+    EXPECT_EQ (globals["ownKey"].value, "leaf-value");
+    EXPECT_EQ (globals["snapshotInherited"].value, "from-root");
+    EXPECT_EQ (globals["snapshotOwn"].value, "leaf-value");
+    EXPECT_EQ (globals["merged"].value, "root-value");
+    // The whole point of the issue: {{token}} in the URL and replaceIn in the
+    // script must not answer one name two ways.
+    EXPECT_EQ (globals["replaced"].value, "from-root");
+}
+
+// Inheritance can be shadowed from below but not deleted from below. `set` on
+// the leaf hides the ancestor's value; `unset` removes the leaf's copy and the
+// ancestor's shows through again.
+TEST_F (ScriptEngineTest, TheLeafShadowsAnAncestorAndUnsetUnShadowsIt) {
+    std::vector<Environment> ancestors (1);
+    ancestors[0]["token"] = Variable{ "from-root", false, true };
+    Environment leaf;
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('before', String(pm.collectionVariables.get('token')));
+        pm.collectionVariables.set('token', 'from-leaf');
+        pm.globals.set('shadowed', String(pm.collectionVariables.get('token')));
+        pm.collectionVariables.unset('token');
+        pm.globals.set('after', String(pm.collectionVariables.get('token')));
+        pm.globals.set('stillThere', String(pm.collectionVariables.has('token')));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["before"].value, "from-root");
+    EXPECT_EQ (globals["shadowed"].value, "from-leaf");
+    EXPECT_EQ (globals["after"].value, "from-root");
+    EXPECT_EQ (globals["stillThere"].value, "true");
+    // The write landed on the leaf and the unset took it away again; the
+    // ancestor was never a write target.
+    EXPECT_EQ (leaf.count ("token"), 0U);
+    EXPECT_EQ (ancestors[0]["token"].value, "from-root");
+}
+
+// The copy-down hazard #226 kept D2 open for, at the map level: a script that
+// reads an inherited name and then writes must leave the leaf map holding its
+// own variables only. persist_script_variables diffs that map against the leaf
+// collection's stored blob, so anything the walk leaked into it would be
+// written into the leaf collection permanently.
+TEST_F (ScriptEngineTest, WritingTheCollectionScopeNeverCopiesAnAncestorIntoTheLeaf) {
+    std::vector<Environment> ancestors (1);
+    ancestors[0]["inherited"] = Variable{ "from-root", false, true };
+    Environment leaf;
+    leaf["own"] = Variable{ "leaf-value", false, true };
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('read', String(pm.collectionVariables.get('inherited')));
+        pm.collectionVariables.set('fresh', 'written');
+        pm.collectionVariables.unset('missing');
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["read"].value, "from-root");
+    EXPECT_EQ (leaf.count ("inherited"), 0U)
+    << "an ancestor's variable was copied down into the leaf collection";
+    EXPECT_EQ (leaf.size (), 2U); // own + fresh, nothing inherited
+    EXPECT_EQ (ancestors[0].size (), 1U);
+}
+
+// clear() is the destructive twin of the copy-down: emptying the leaf must not
+// reach up the chain, and the inherited names it was hiding come back.
+TEST_F (ScriptEngineTest, ClearEmptiesTheLeafAndLeavesAncestorsIntact) {
+    std::vector<Environment> ancestors (1);
+    ancestors[0]["token"] = Variable{ "from-root", false, true };
+    Environment leaf;
+    leaf["token"] = Variable{ "from-leaf", false, true };
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.collectionVariables.clear();
+        pm.globals.set('after', String(pm.collectionVariables.get('token')));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (leaf.empty ());
+    EXPECT_EQ (ancestors[0].size (), 1U) << "clear() reached up the chain";
+    EXPECT_EQ (globals["after"].value, "from-root");
+}
+
+// Precedence across the whole stack: environment beats any collection, and
+// within the collections the nearest definition wins. A disabled row is looked
+// past wherever it sits, so unticking a name in the leaf falls through to the
+// ancestor rather than hiding it.
+TEST_F (ScriptEngineTest, PrecedenceRunsEnvironmentThenLeafThenAncestorThenGlobals) {
+    std::vector<Environment> ancestors (2);
+    ancestors[0]["depth"]     = Variable{ "root", false, true }; // root
+    ancestors[0]["only_root"] = Variable{ "root-only", false, true };
+    ancestors[0]["unticked"]  = Variable{ "root-value", false, true };
+    ancestors[1]["depth"]     = Variable{ "middle", false, true }; // middle
+    Environment leaf;
+    leaf["unticked"] = Variable{ "leaf-value", false, false }; // disabled
+    Environment globals;
+    globals["depth"] = Variable{ "globals", false, true };
+    Environment environment;
+    environment["everywhere"] = Variable{ "environment", false, true };
+    leaf["everywhere"]        = Variable{ "leaf", false, true };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &environment;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('nearest', String(pm.collectionVariables.get('depth')));
+        pm.globals.set('farthest', String(pm.collectionVariables.get('only_root')));
+        pm.globals.set('acrossScopes', String(pm.variables.get('everywhere')));
+        // The leaf's row is unticked, so the read keeps walking.
+        pm.globals.set('unticked', String(pm.collectionVariables.get('unticked')));
+        var merged = pm.variables.toObject();
+        pm.globals.set('mergedNearest', String(merged['depth']));
+        pm.globals.set('mergedAcross', String(merged['everywhere']));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["nearest"].value, "middle");
+    EXPECT_EQ (globals["farthest"].value, "root-only");
+    EXPECT_EQ (globals["acrossScopes"].value, "environment");
+    EXPECT_EQ (globals["unticked"].value, "root-value");
+    // The snapshot must agree with get() name for name, or it is a second
+    // answer to the same question.
+    EXPECT_EQ (globals["mergedNearest"].value, "middle");
+    EXPECT_EQ (globals["mergedAcross"].value, "environment");
+}
+
+// A run that carries no chain at all - every request outside a nested
+// collection - must behave exactly as it did before the walk existed.
+TEST_F (ScriptEngineTest, ANullAncestorListReadsAsNoChainRatherThanThrowing) {
+    Environment leaf;
+    leaf["token"] = Variable{ "from-leaf", false, true };
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf; // collectionAncestors stays null
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('own', String(pm.collectionVariables.get('token')));
+        pm.globals.set('missing', String(pm.collectionVariables.get('nowhere')));
+        pm.globals.set('snapshotKeys', String(Object.keys(pm.collectionVariables.toObject()).length));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["own"].value, "from-leaf");
+    EXPECT_EQ (globals["missing"].value, "undefined");
+    EXPECT_EQ (globals["snapshotKeys"].value, "1");
+}
+
 TEST_F (ScriptEngineTest, ReplaceInGeneratesDynamicVariablesPerOccurrence) {
     auto result = engine.execute_prerequest (R"JS(
         var pair = pm.variables.replaceIn('{{$guid}}|{{$guid}}').split('|');

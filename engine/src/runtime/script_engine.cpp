@@ -73,7 +73,8 @@ struct ContextData {
     Environment* environment         = nullptr;
     Environment* globals             = nullptr;
     Environment* collectionVariables = nullptr;
-    bool has_error                   = false;
+    const std::vector<Environment>* collectionAncestors = nullptr;
+    bool has_error                                      = false;
     std::string error_message;
 };
 
@@ -3056,6 +3057,62 @@ Environment* scope_variables (JSContext* ctx, int magic) {
     }
 }
 
+// Every map a *read* of `magic` may see, weakest first. Only the collection
+// scope has more than one: its ancestor collections stack underneath it, root
+// weakest, so an inherited name resolves for a script the way `{{name}}`
+// already resolves it in the URL (issue #234). A write never consults this -
+// `scope_variables` alone is the write target, which is what keeps ancestors
+// read-only and the copy-down hazard impossible.
+//
+// One order for the whole file: the lookups below reverse it to stop at the
+// nearest definition and the snapshots fold along it so a nearer definition
+// overwrites a farther one. Deriving both from one list is what stops `get`
+// and `toObject` answering the same name two ways.
+std::vector<const Environment*> scope_maps (JSContext* ctx, int magic) {
+    std::vector<const Environment*> maps;
+    auto* data = get_context_data (ctx);
+    if (data && magic == SCOPE_COLLECTION_VARIABLES && data->collectionAncestors) {
+        maps.reserve (data->collectionAncestors->size () + 1);
+        for (const Environment& ancestor : *data->collectionAncestors) {
+            maps.push_back (&ancestor);
+        }
+    }
+    if (const Environment* own = scope_variables (ctx, magic)) {
+        maps.push_back (own);
+    }
+    return maps;
+}
+
+// The definition of `key` a read of `magic` finds, or null when the walk ends
+// without one. A disabled row is looked *past* rather than stopped at, so a
+// leaf collection that unticks an inherited name falls through to the
+// ancestor's value - the same rule that already makes a disabled variable
+// invisible within a single scope.
+const Variable* lookup_variable (JSContext* ctx, int magic, const std::string& key) {
+    const auto maps = scope_maps (ctx, magic);
+    for (auto it = maps.rbegin (); it != maps.rend (); ++it) {
+        auto found = (*it)->find (key);
+        if (found != (*it)->end () && found->second.enabled) {
+            return &found->second;
+        }
+    }
+    return nullptr;
+}
+
+// Hand every enabled variable a read of `magic` can see to `emit`, weakest
+// scope first, so a caller merging them lands on the same value
+// `lookup_variable` would have answered for that name.
+template <typename Emit>
+void merge_visible_variables (JSContext* ctx, int magic, Emit&& emit) {
+    for (const Environment* map : scope_maps (ctx, magic)) {
+        for (const auto& [key, variable] : *map) {
+            if (variable.enabled) {
+                emit (key, variable);
+            }
+        }
+    }
+}
+
 // A disabled variable is a row the user unticked in the variables editor, so
 // `get`, `has` and `toObject` all look straight past it - reading it would
 // resurrect a value that was switched off. `unset` and `clear` still remove it:
@@ -3067,14 +3124,9 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_UNDEFINED;
     }
 
-    Environment* variables = scope_variables (ctx, magic);
-    if (!variables) {
-        return JS_UNDEFINED;
-    }
-
-    auto it = variables->find (js_to_string (ctx, argv[0]));
-    if (it != variables->end () && it->second.enabled) {
-        return cast_variable_to_jsvalue (ctx, it->second);
+    if (const Variable* found =
+        lookup_variable (ctx, magic, js_to_string (ctx, argv[0]))) {
+        return cast_variable_to_jsvalue (ctx, *found);
     }
 
     return JS_UNDEFINED;
@@ -3130,13 +3182,8 @@ js_pm_scope_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_NewBool (ctx, 0);
     }
 
-    Environment* variables = scope_variables (ctx, magic);
-    if (!variables) {
-        return JS_NewBool (ctx, 0);
-    }
-
-    auto it = variables->find (js_to_string (ctx, argv[0]));
-    return JS_NewBool (ctx, it != variables->end () && it->second.enabled ? 1 : 0);
+    return JS_NewBool (ctx,
+    lookup_variable (ctx, magic, js_to_string (ctx, argv[0])) != nullptr ? 1 : 0);
 }
 
 // The method with no workaround: setting a variable to "" leaves an enabled
@@ -3144,6 +3191,12 @@ js_pm_scope_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 // resolution as the variable being gone. The removal reaches disk through
 // persist_script_variables, which rewrites a scope whenever the map it ends
 // with differs from the one on disk.
+//
+// Like `set` and `clear`, this erases from the scope's own map only. On the
+// collection scope that is the request's immediate parent: unsetting a name
+// the leaf shadowed makes an ancestor's definition visible again rather than
+// deleting it. Inheritance can be shadowed from below, never deleted from
+// below (issue #234).
 JSValue
 js_pm_scope_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -3185,14 +3238,10 @@ js_pm_scope_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         return snapshot;
     }
 
-    if (Environment* variables = scope_variables (ctx, magic)) {
-        for (const auto& [key, variable] : *variables) {
-            if (variable.enabled) {
-                JS_SetPropertyStr (ctx, snapshot, key.c_str (),
-                cast_variable_to_jsvalue (ctx, variable));
-            }
-        }
-    }
+    merge_visible_variables (ctx, magic, [&] (const std::string& key, const Variable& variable) {
+        JS_SetPropertyStr (
+        ctx, snapshot, key.c_str (), cast_variable_to_jsvalue (ctx, variable));
+    });
 
     return snapshot;
 }
@@ -3230,13 +3279,8 @@ JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JS
 
     const std::string key = js_to_string (ctx, argv[0]);
     for (const VariableScope scope : variables_precedence) {
-        Environment* variables = scope_variables (ctx, scope);
-        if (!variables) {
-            continue;
-        }
-        auto it = variables->find (key);
-        if (it != variables->end () && it->second.enabled) {
-            return cast_variable_to_jsvalue (ctx, it->second);
+        if (const Variable* found = lookup_variable (ctx, scope, key)) {
+            return cast_variable_to_jsvalue (ctx, *found);
         }
     }
 
@@ -3251,12 +3295,7 @@ JSValue js_pm_variables_has (JSContext* ctx, JSValueConst this_val, int argc, JS
 
     const std::string key = js_to_string (ctx, argv[0]);
     for (const VariableScope scope : variables_precedence) {
-        Environment* variables = scope_variables (ctx, scope);
-        if (!variables) {
-            continue;
-        }
-        auto it = variables->find (key);
-        if (it != variables->end () && it->second.enabled) {
+        if (lookup_variable (ctx, scope, key)) {
             return JS_NewBool (ctx, 1);
         }
     }
@@ -3278,16 +3317,11 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     // agrees with what get() would have answered for every key in it.
     for (auto it = std::rbegin (variables_precedence);
          it != std::rend (variables_precedence); ++it) {
-        Environment* variables = scope_variables (ctx, *it);
-        if (!variables) {
-            continue;
-        }
-        for (const auto& [key, variable] : *variables) {
-            if (variable.enabled) {
-                JS_SetPropertyStr (ctx, snapshot, key.c_str (),
-                cast_variable_to_jsvalue (ctx, variable));
-            }
-        }
+        merge_visible_variables (
+        ctx, *it, [&] (const std::string& key, const Variable& variable) {
+            JS_SetPropertyStr (ctx, snapshot, key.c_str (),
+            cast_variable_to_jsvalue (ctx, variable));
+        });
     }
 
     return snapshot;
@@ -3309,10 +3343,11 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 //  - The map is built at call time from the script's scopes, so a variable
 //    set earlier in the same script resolves - unlike `{{}}` in the URL,
 //    which was composed before the script started (D1).
-//  - The collection scope is the script context's: the request's immediate
-//    parent only (the D2 asymmetry), with pm.variables' own precedence
-//    (environment > collection > globals). The raw stored string substitutes,
-//    never the typed value - matching `{{}}`, not pm.variables.get.
+//  - The collection scope is the script context's - the request's collection
+//    chain, leaf shadowing ancestor (issue #234) - with pm.variables' own
+//    precedence (environment > collection > globals). The raw stored string
+//    substitutes, never the typed value - matching `{{}}`, not
+//    pm.variables.get.
 //
 // Strict about its argument: a non-string is a TypeError rather than a
 // coerced "undefined" - the caller almost certainly holds a bug.
@@ -3330,15 +3365,10 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
     // toObject() does, and the same answer get() would give per name.
     for (auto it = std::rbegin (variables_precedence);
          it != std::rend (variables_precedence); ++it) {
-        Environment* variables = scope_variables (ctx, *it);
-        if (!variables) {
-            continue;
-        }
-        for (const auto& [key, variable] : *variables) {
-            if (variable.enabled) {
-                values[key] = variable.value;
-            }
-        }
+        merge_visible_variables (
+        ctx, *it, [&] (const std::string& key, const Variable& variable) {
+            values[key] = variable.value;
+        });
     }
 
     return JS_NewString (ctx, vayu::http::resolve_template (input, values).c_str ());
@@ -3561,6 +3591,7 @@ class ScriptEngine::Impl {
         ctx_data.environment         = ctx.environment;
         ctx_data.globals             = ctx.globals;
         ctx_data.collectionVariables = ctx.collectionVariables;
+        ctx_data.collectionAncestors = ctx.collectionAncestors;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request and pm.response with new data

@@ -78,9 +78,10 @@ script explicitly asked to resolve.
 Two timing consequences worth knowing: the map is built **at call time**, so a
 variable the script set a line earlier resolves (unlike `{{}}` in the URL,
 which was composed before the script started); and the collection scope is the
-script context's - the request's immediate parent only, the same asymmetry
-`pm.collectionVariables` has. The argument must be a string; anything else is
-a `TypeError` rather than a silently coerced `"undefined"`.
+script context's - the request's whole collection chain, leaf shadowing
+ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
+be a string; anything else is a `TypeError` rather than a silently coerced
+`"undefined"`.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
@@ -355,6 +356,22 @@ entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first 
 
 Narrow that suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
+
+### The second consumer: MCP agents
+
+The completion set is no longer only an editor concern. An MCP agent writes scripts too -
+`run_request` takes a `preRequestScript` and both it and `start_load_run` take a
+`postRequestScript` - and it reaches the same sandbox, since the sandbox belongs to the
+engine and has no per-client gate.
+
+So the MCP server re-serves this endpoint as the `vayu://scripting/completions` resource
+(`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation` - see
+[`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface). The reason it reads
+the endpoint rather than describing the surface in its own prose is the one this page
+already demonstrates: a hand-written copy drifts, and the app's own pre-request quick
+reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" before
+`pm.crypto` landed. Adding a name to the completion table therefore reaches Monaco, the
+`.d.ts` and every agent at once - do not add a fourth place that lists `pm.*` names.
 
 ---
 

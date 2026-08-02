@@ -64,6 +64,16 @@ vayu::Result<vayu::Response> result) {
         return;
     }
 
+    // Counted for both branches below, before either splits: a transfer that
+    // connected, negotiated HTTP/1.1 against an explicit `http2`, and then
+    // failed still tells the truth about the protocol the run is measuring.
+    // Reading it off the Response (rather than off the request's httpVersion
+    // and a string compare here) keeps the one definition in
+    // http_version_downgraded - see curl_version_map.hpp.
+    if (result.value ().http_version_downgraded) {
+        context->metrics_collector->record_http_version_downgrade ();
+    }
+
     if (result.value ().has_error ()) {
         // Response carrying a client-side error
         const auto& response = result.value ();

@@ -32,7 +32,7 @@ function renderWithClient(ui: ReactElement) {
 	);
 }
 
-function report(httpVersion: string | undefined): RunReport {
+function report(httpVersion: string | undefined, httpVersionDowngraded?: number): RunReport {
 	return {
 		metadata: {
 			runId: "r",
@@ -51,6 +51,7 @@ function report(httpVersion: string | undefined): RunReport {
 			errorRate: 0,
 			totalDurationSeconds: 3,
 			avgRps: 195,
+			httpVersionDowngraded,
 		},
 		latency: {
 			min: 100,
@@ -102,5 +103,32 @@ describe("LoadTestDetail protocol chip", () => {
 
 		expect(screen.getByText("Protocol:")).toBeInTheDocument();
 		expect(screen.getByText("HTTP/2")).toBeInTheDocument();
+	});
+
+	/**
+	 * The chip above is what the run *asked for*. On its own that is the exact
+	 * mislabelling issue #215 describes: a run whose every request fell back to
+	 * HTTP/1.1 still reads "HTTP/2" here, over latency and throughput measured on
+	 * HTTP/1.1. The correction has to appear beside it, and only when it applies.
+	 */
+	it("marks the protocol as not negotiated when the run counted downgrades", () => {
+		renderWithClient(<LoadTestDetail report={report("http2", 600)} runId="r" />);
+
+		expect(screen.getByText("HTTP/2")).toBeInTheDocument();
+		expect(screen.getByText(/not negotiated/i)).toBeInTheDocument();
+	});
+
+	it("stays quiet when every request got the protocol it asked for", () => {
+		renderWithClient(<LoadTestDetail report={report("http2", 0)} runId="r" />);
+
+		expect(screen.queryByText(/not negotiated/i)).not.toBeInTheDocument();
+	});
+
+	it("stays quiet for a run stored before the engine counted downgrades", () => {
+		// `undefined` means nobody looked, not "none" - a warning invented for it
+		// would be worse than the silence it replaces.
+		renderWithClient(<LoadTestDetail report={report("http2", undefined)} runId="r" />);
+
+		expect(screen.queryByText(/not negotiated/i)).not.toBeInTheDocument();
 	});
 });

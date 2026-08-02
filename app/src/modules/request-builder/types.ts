@@ -200,6 +200,15 @@ export interface ResponseState {
 	 */
 	httpVersion?: string;
 	/**
+	 * This exchange asked for HTTP/2 and negotiated something older. Carried
+	 * from the engine rather than compared here against the tab's `httpVersion`
+	 * setting - see `HttpResponse.httpVersionDowngraded` in
+	 * `app/src/types/domain.ts` for why. Read by the
+	 * response status bar, which is the only place a user finds out; before
+	 * this, a downgrade was indistinguishable from success.
+	 */
+	httpVersionDowngraded?: boolean;
+	/**
 	 * When this response arrived, ISO. Set on a live send only.
 	 *
 	 * The pane's status bar reads it as an age - "just now", "4m ago" - which

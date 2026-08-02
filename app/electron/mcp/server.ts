@@ -57,7 +57,10 @@ const INSTRUCTIONS =
 	"Vayu data is also available as resources (vayu://runs, vayu://collections, " +
 	"vayu://environments, vayu://config, and vayu://run/{runId}/report) to attach as " +
 	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +
-	"suggest_load_profile) provide ready-made starting points.";
+	"suggest_load_profile) provide ready-made starting points. Before writing a " +
+	"preRequestScript or postRequestScript, read vayu://scripting/completions - it is " +
+	"the engine's own list of every pm.* name the script sandbox provides, including " +
+	"synchronous pm.crypto hashing and btoa/atob for signing a request.";
 
 /**
  * Create an MCP server exposing the Vayu tools. `contextProvider` is invoked

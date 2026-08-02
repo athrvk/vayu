@@ -319,6 +319,10 @@ struct RunSummaryInputs {
     std::map<int, size_t> status_codes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Transfers that asked for HTTP/2 and negotiated something older. The one
+    // figure here that is about the report's own validity rather than about
+    // performance - see MetricsCollector::record_http_version_downgrade.
+    size_t http_version_downgraded = 0;
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;

@@ -45,6 +45,23 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		listCollections: async () => [{ id: "col_1", name: "API" }],
 		listEnvironments: async () => [],
+		// The engine's completions shape, Monaco fields included - the resource is
+		// expected to hand the agent the names and drop the editor scaffolding.
+		getScriptCompletions: async () => ({
+			version: "1.0.0",
+			engine: "quickjs",
+			completions: [
+				{
+					label: "pm.crypto.hmacSha256",
+					kind: 1,
+					insertText: "pm.crypto.hmacSha256(${1:key}, ${2:data})",
+					insertTextRules: 4,
+					sortText: "1_pm_crypto_hmacSha256",
+					detail: "pm.crypto.hmacSha256(key, data, encoding?): string | Uint8Array",
+					documentation: "HMAC-SHA256, hex by default. Synchronous.",
+				},
+			],
+		}),
 		// Identity composition: the request echoed back, as the engine's
 		// POST /compose returns for an inline request with nothing to resolve.
 		composeRequest: async (body: { request?: object; environmentId?: string }) => ({
@@ -211,6 +228,20 @@ describe("resources", () => {
 		expect(uris).toContain("vayu://collections");
 		expect(uris).toContain("vayu://environments");
 		expect(uris).toContain("vayu://config");
+		expect(uris).toContain("vayu://scripting/completions");
+		await server.close();
+	});
+
+	// Issue #233: an agent's only view of the sandbox used to be two sentences in
+	// tool descriptions, so anything not named there was undiscoverable.
+	it("serves the script sandbox surface from the engine, without Monaco's fields", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.readResource({ uri: "vayu://scripting/completions" });
+		const text = String((res.contents[0] as { text?: string }).text);
+		expect(text).toContain("pm.crypto.hmacSha256");
+		expect(text).toContain("Synchronous");
+		expect(text).not.toContain("insertText");
+		expect(text).not.toContain("sortText");
 		await server.close();
 	});
 

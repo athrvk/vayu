@@ -436,6 +436,14 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
+    // Same question the single-request driver asks, through the same helper -
+    // the load path is where an unnoticed downgrade does the most damage, since
+    // its whole output is numbers attributed to a protocol. No log line here,
+    // unlike client.cpp: this runs once per transfer, and a run that downgrades
+    // downgrades every one of them. The flag rides out on each trace instead.
+    response.http_version_downgraded =
+    vayu::http::http_version_downgraded (data->request.http_version, response.http_version);
+
     // Get curl timing info - these are wire-only (libcurl's view)
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.

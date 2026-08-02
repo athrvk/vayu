@@ -110,6 +110,11 @@ struct ReportExtras {
     size_t success_traces_dropped   = 0;
     size_t slow_traces_dropped      = 0;
     size_t response_samples_dropped = 0;
+    // How many of this run's transfers asked for HTTP/2 and negotiated
+    // something older. Not a performance number - it is what tells the reader
+    // whether the protocol the report is labelled with is the one the numbers
+    // were measured over (issue #215).
+    double http_version_downgraded = 0.0;
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -167,6 +172,7 @@ ReportExtras& extras) {
     read_number (summary, "queue_wait_avg", extras.queue_wait_avg);
     read_number (summary, "bytes_sent", extras.bytes_sent);
     read_number (summary, "bytes_received", extras.bytes_received);
+    read_number (summary, "http_version_downgraded", extras.http_version_downgraded);
 
     if (summary.contains ("latency") && summary["latency"].is_object ()) {
         const auto& latency = summary["latency"];
@@ -575,6 +581,11 @@ const std::string& run_id) {
         { "avgQueueWaitMs", extras.queue_wait_avg },
         { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
         { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
+        // Sits in `summary` rather than `metadata.configuration` on purpose:
+        // configuration is what was asked for, and this is what happened.
+        // LoadTestDetail reads both and only trusts the requested-protocol
+        // label when this is 0.
+        { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
         { "throughputBytesPerSec", report.total_duration_s > 0 ?
         extras.bytes_received / report.total_duration_s :
         0.0 } };

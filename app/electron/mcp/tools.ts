@@ -381,7 +381,7 @@ const validationScriptInput = z
 	.string()
 	.optional()
 	.describe(
-		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one."
+		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one. Read the `vayu://scripting/completions` resource for the sandbox's full surface (pm.expect chains, pm.response.to.*, the variable scopes) rather than assuming what exists."
 	);
 
 const validationScriptAliasInput = z
@@ -644,7 +644,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth."
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Read the `vayu://scripting/completions` resource for the full surface."
 				),
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,

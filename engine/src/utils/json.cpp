@@ -519,6 +519,10 @@ Json serialize (const Response& response) {
     // negotiated - not omitted, so a caller reading this field can't confuse
     // "we don't know" with "this key doesn't exist on responses".
     json["httpVersion"] = response.http_version;
+    // Always present, like `httpVersion` above and for the same reason: a
+    // reader must be able to tell "not downgraded" from "this engine is too old
+    // to say". See Response::http_version_downgraded.
+    json["httpVersionDowngraded"] = response.http_version_downgraded;
 
     // Try to parse body as JSON
     if (auto parsed = try_parse_body (response.body)) {
