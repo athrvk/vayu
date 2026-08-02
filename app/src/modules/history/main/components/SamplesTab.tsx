@@ -14,7 +14,7 @@
 import { useState } from "react";
 import { Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
-import { EmptyState } from "@/components/shared";
+import { EmptyState, SampleRetentionNote } from "@/components/shared";
 import SampleRequestCard from "./SampleRequestCard";
 import type { TabProps, SampleResult } from "../../types";
 
@@ -43,11 +43,16 @@ export default function SamplesTab({ report }: TabProps) {
 				<div className="flex items-center justify-between">
 					<CardTitle className="text-base">Sampled Request Details</CardTitle>
 					<Badge variant="secondary" className="text-xs">
-						{report.results.length} samples captured
+						{report.results.length} samples shown
 					</Badge>
 				</div>
 			</CardHeader>
 			<CardContent className="space-y-2">
+				<SampleRetentionNote
+					sampling={report.sampling}
+					shown={report.results.length}
+					budget="traces"
+				/>
 				{report.results.map((sample: SampleResult, idx: number) => (
 					<SampleRequestCard
 						key={idx}

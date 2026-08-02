@@ -545,7 +545,12 @@ export default function LoadTestConfigDialog({
 								onChange={num(setSlowThreshold)}
 								min={limits.SLOW_THRESHOLD_MS.MIN}
 								max={limits.SLOW_THRESHOLD_MS.MAX}
-								hint="Requests slower than this are flagged and always saved, whatever the sample rate."
+								// Outlier capture has its own budget, so it neither spends
+								// nor is spent by the sample rate above - but it is still
+								// bounded (max_slow_results, 1000), because under
+								// saturation nearly every request crosses the threshold.
+								// 0 disables the capture rather than flagging everything.
+								hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
 							/>
 
 							{mode === "constant_rps" && (
