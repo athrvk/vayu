@@ -3669,7 +3669,10 @@ bool ScriptEngine::is_available () {
 }
 
 std::string ScriptEngine::version () {
-    return "QuickJS 2024-01-13";
+    // Derived from the vendored runtime, never written down here: a literal
+    // goes stale at the next vendor bump with nothing to catch it. This one
+    // reported "QuickJS 2024-01-13" while the tree carried quickjs-ng 0.16.0.
+    return std::string ("QuickJS-ng ") + JS_GetVersion ();
 }
 
 #else // !VAYU_HAS_QUICKJS

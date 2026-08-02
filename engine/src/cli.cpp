@@ -23,9 +23,6 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
-#ifdef VAYU_HAS_QUICKJS
-#include "vayu/runtime/script_engine.hpp"
-#endif
 
 #include <chrono>
 #include <fstream>
