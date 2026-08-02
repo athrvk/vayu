@@ -15,7 +15,11 @@
  * nobody connects to the rename that caused it.
  *
  * So the duplication is guarded rather than trusted. This reads the shell
- * definitions and asserts the TypeScript computes the same paths from them.
+ * definitions - including `LINUX_DATA_HOME`, the root the rest hang off - and
+ * asserts the TypeScript computes the same paths from them. Nothing here may
+ * hardcode a path segment the shell also spells: a constant the test invents is
+ * a hole in the guard, since both sides of the assertion would keep using it
+ * after `install.sh` moved on.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,40 +38,131 @@ function shellValue(name: string): string {
 	return match[1];
 }
 
-/** Expand the handful of shell variables these definitions actually use. */
+/**
+ * Expand the shell syntax these definitions actually use: `$NAME`, `${NAME}`
+ * and `${NAME:-default}`, the last nestable because `LINUX_DATA_HOME` nests it
+ * (`${XDG_DATA_HOME:-${HOME:-}/.local/share}`). An unset name expands empty, as
+ * the shell does - a definition that leans on a variable this test does not
+ * supply collapses to a path `resolveStampPath` cannot match, which fails.
+ */
 function expand(value: string, vars: Record<string, string>): string {
-	return value.replace(/\$\{?(\w+)\}?/g, (whole, name: string) =>
-		name in vars ? vars[name] : whole
-	);
+	let out = "";
+	let i = 0;
+	while (i < value.length) {
+		const dollar = value.indexOf("$", i);
+		if (dollar === -1) return out + value.slice(i);
+		out += value.slice(i, dollar);
+
+		if (value[dollar + 1] === "{") {
+			const close = closingBrace(value, dollar + 1);
+			out += expandBraced(value.slice(dollar + 2, close), vars);
+			i = close + 1;
+			continue;
+		}
+
+		const bare = /^\w+/.exec(value.slice(dollar + 1));
+		if (!bare) throw new Error(`install.sh uses shell syntax this test cannot read: ${value}`);
+		out += vars[bare[0]] ?? "";
+		i = dollar + 1 + bare[0].length;
+	}
+	return out;
 }
 
-describe("the Linux layout, as install.sh defines it", () => {
-	const home = "/home/tester";
-	const vars: Record<string, string> = { APP_NAME: "Vayu" };
-	vars.LINUX_DATA_HOME = `${home}/.local/share`;
-	vars.LINUX_APP_DIR = expand(shellValue("LINUX_APP_DIR"), vars);
-	vars.LINUX_APP_BIN = expand(shellValue("LINUX_APP_BIN"), vars);
+/** The index of the `}` closing the `{` at `open`, counting nested braces. */
+function closingBrace(value: string, open: number): number {
+	let depth = 0;
+	for (let i = open; i < value.length; i++) {
+		if (value[i] === "{") depth++;
+		else if (value[i] === "}" && --depth === 0) return i;
+	}
+	throw new Error(`unbalanced \${...} in install.sh: ${value}`);
+}
 
-	it("scans a definition rather than nothing", () => {
-		// Without this the regexes above could quietly match an empty string and
+/** The inside of a `${...}`, which is either a name or `name:-default`. */
+function expandBraced(body: string, vars: Record<string, string>): string {
+	let depth = 0;
+	for (let i = 0; i < body.length; i++) {
+		if (body[i] === "{") depth++;
+		else if (body[i] === "}") depth--;
+		else if (depth === 0 && body[i] === ":" && body[i + 1] === "-") {
+			const set = vars[body.slice(0, i)];
+			// `:-` takes the default when unset *or* empty, which is why
+			// `${HOME:-}` in install.sh yields "" rather than an unexpanded name.
+			return set ? set : expand(body.slice(i + 2), vars);
+		}
+	}
+	return vars[body] ?? "";
+}
+
+/** Every path in the Linux layout, as install.sh computes it for one shell env. */
+function layoutFor(shellEnv: Record<string, string>) {
+	const vars: Record<string, string> = { ...shellEnv };
+	for (const name of [
+		"LINUX_DATA_HOME",
+		"LINUX_APP_DIR",
+		"LINUX_APP_BIN",
+		"LINUX_VERSION_FILE",
+	]) {
+		vars[name] = expand(shellValue(name), vars);
+	}
+	return vars;
+}
+
+const home = "/home/tester";
+const xdg = "/home/tester/xdg-data";
+
+/**
+ * Both halves of `LINUX_DATA_HOME`'s `${XDG_DATA_HOME:-...}`. Each case names
+ * the shell environment and the `resolveStampPath` environment together, so a
+ * scenario cannot describe one side of the duplication and not the other.
+ */
+const cases = [
+	{
+		what: "with XDG_DATA_HOME unset, so the layout falls back to $HOME",
+		shell: { APP_NAME: "Vayu", HOME: home },
+		app: { platform: "linux", home },
+		expectedDataHome: `${home}/.local/share`,
+	},
+	{
+		what: "with XDG_DATA_HOME set, which the installer honours",
+		shell: { APP_NAME: "Vayu", HOME: home, XDG_DATA_HOME: xdg },
+		app: { platform: "linux", home, xdgDataHome: xdg },
+		expectedDataHome: xdg,
+	},
+] as const;
+
+describe("the Linux layout, as install.sh defines it", () => {
+	it("scans definitions rather than nothing", () => {
+		// Without this the regexes above could quietly match empty strings and
 		// every assertion below would compare "" to "" and pass.
 		expect(installer.length).toBeGreaterThan(1000);
-		expect(vars.LINUX_APP_DIR).toContain("/vayu");
-		expect(vars.LINUX_APP_BIN).toContain("Vayu.AppImage");
+		expect(shellValue("LINUX_DATA_HOME")).toContain("XDG_DATA_HOME");
+		const linux = layoutFor(cases[0].shell);
+		expect(linux.LINUX_DATA_HOME).toBe(`${home}/.local/share`);
+		expect(linux.LINUX_APP_DIR).toContain("/vayu");
+		expect(linux.LINUX_APP_BIN).toContain("Vayu.AppImage");
+		expect(linux.LINUX_VERSION_FILE).toContain("/vayu/");
 	});
 
-	it("puts the AppImage where the app expects to find itself", () => {
-		// resolveStampPath only answers for the managed install, so agreeing on
-		// this path is what makes the stamp get written at all.
-		expect(
-			resolveStampPath({ platform: "linux", appImagePath: vars.LINUX_APP_BIN, home })
-		).not.toBeNull();
-	});
+	describe.each(cases)("$what", ({ shell, app, expectedDataHome }) => {
+		const linux = layoutFor(shell);
 
-	it("puts the version stamp where the app writes it", () => {
-		const stamp = expand(shellValue("LINUX_VERSION_FILE"), vars);
-		expect(
-			resolveStampPath({ platform: "linux", appImagePath: vars.LINUX_APP_BIN, home })
-		).toBe(stamp);
+		it("roots the layout where the app roots it", () => {
+			// The one path the test used to invent. Scanning it is what makes the
+			// two assertions below able to fail when install.sh moves alone.
+			expect(linux.LINUX_DATA_HOME).toBe(expectedDataHome);
+		});
+
+		it("puts the AppImage where the app expects to find itself", () => {
+			// resolveStampPath only answers for the managed install, so agreeing on
+			// this path is what makes the stamp get written at all.
+			expect(resolveStampPath({ ...app, appImagePath: linux.LINUX_APP_BIN })).not.toBeNull();
+		});
+
+		it("puts the version stamp where the app writes it", () => {
+			expect(resolveStampPath({ ...app, appImagePath: linux.LINUX_APP_BIN })).toBe(
+				linux.LINUX_VERSION_FILE
+			);
+		});
 	});
 });
