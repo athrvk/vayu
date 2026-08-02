@@ -1289,12 +1289,19 @@ std::string http_version_options_json () {
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-    // Retired settings: "requestBatchSize" drove the removed batched request
-    // iteration and is no longer read anywhere. Delete any row left behind by
-    // an older version so the Settings UI (which renders engine entries
+    // Retired settings: keys nothing reads any more. Delete any row left behind
+    // by an older version so the Settings UI (which renders engine entries
     // dynamically from GET /config) stops offering a dead knob.
-    impl_->storage.remove_all<ConfigEntry> (
-    where (c (&ConfigEntry::key) == "requestBatchSize"));
+    //
+    //   requestBatchSize - drove the removed batched request iteration.
+    //   contextPoolSize  - promised "pre-initialized JS contexts", but the
+    //                      script context pool is grown lazily and never read a
+    //                      bound (issue #112). A user could set it 1..256 and
+    //                      change nothing.
+    for (const char* retired : { "requestBatchSize", "contextPoolSize" }) {
+        impl_->storage.remove_all<ConfigEntry> (
+        where (c (&ConfigEntry::key) == std::string (retired)));
+    }
 
     // Get existing config entries (if any) to preserve user-modified values
     auto existing = impl_->storage.get_all<ConfigEntry> ();
@@ -1534,14 +1541,6 @@ void Database::seed_default_config () {
     "debugging.",
     "scripting_sandbox", vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "contextPoolSize",
-    std::to_string (vayu::core::constants::server::CONTEXT_POOL_SIZE), "integer", "Script Context Pool Size",
-    "Number of pre-initialized JS contexts. Increase for high-concurrency "
-    "script workloads. "
-    "Each context uses ~2-5MB of memory.",
-    "scripting_sandbox", std::to_string (vayu::core::constants::server::CONTEXT_POOL_SIZE),
-    "1", "256", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "scriptMemoryLimit",
     std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script Memory Limit",

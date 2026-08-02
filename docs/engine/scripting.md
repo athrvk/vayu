@@ -134,7 +134,6 @@ pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
                               // to >= 0). For single-shot sends this is ~0.
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
-pm.response.body              // Raw body string
 pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')

@@ -156,8 +156,6 @@ constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
 /// app/src/constants/live-window.ts) and reads this key too, so neither side
 /// promises a window the other cannot hold.
 constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
-/// Size of the context pool for request handling
-constexpr size_t CONTEXT_POOL_SIZE = 64;
 /// How long `RunManager::shutdown` waits for signalled runs to reach a terminal
 /// status before it logs that they have not. The *wait* is bounded; the join
 /// that follows it is not, because abandoning a still-running worker is exactly

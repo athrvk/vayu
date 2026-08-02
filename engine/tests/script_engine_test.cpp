@@ -60,6 +60,24 @@ TEST_F (ScriptEngineTest, IsAvailable) {
 #endif
 }
 
+#ifdef VAYU_HAS_QUICKJS
+// version() reported a hardcoded "QuickJS 2024-01-13" while the tree carried
+// quickjs-ng 0.16.0 (issue #112), and the assertion above - non-empty - could
+// not tell the difference. Pin it to what the vendored runtime reports instead,
+// so the string tracks a vendor bump rather than needing to be remembered.
+TEST_F (ScriptEngineTest, VersionReportsTheVendoredRuntime) {
+    const std::string reported = ScriptEngine::version ();
+
+    // A version, not a release date. Deliberately not pinned to the current
+    // 0.16.0: the point is that the string comes from the vendored runtime, so
+    // a vendor bump should keep this green while a hardcoded literal cannot.
+    EXPECT_TRUE (std::regex_search (reported, std::regex (R"(QuickJS-ng \d+\.\d+\.\d+)")))
+    << "version() must report the vendored quickjs-ng version, got: " << reported;
+    EXPECT_EQ (reported.find ("2024-01-13"), std::string::npos)
+    << "version() is carrying a hardcoded date again: " << reported;
+}
+#endif
+
 TEST_F (ScriptEngineTest, ExecuteEmptyScript) {
     ScriptContext ctx;
     ctx.response = &response;
@@ -2586,6 +2604,29 @@ TEST_F (ScriptEngineTest, AScopeTheRunDoesNotCarryBehavesAsEmptyRatherThanThrowi
     EXPECT_EQ (env["absentHas"].value, "false");
     EXPECT_EQ (env["absentKeys"].value, "");
     EXPECT_EQ (env["mergedStillReads"].value, "https://api.example.com");
+}
+
+// `pm.response.body` never existed - `setup_pm_response` binds json(), text(),
+// reason(), size() and headers, and no `body` property - but scripting.md
+// documented it as "Raw body string" for long enough that someone would write
+// it and read `undefined` (issue #112). The doc line is gone; this pins the
+// contract so a future `body` binding has to be a deliberate change that
+// updates the docs with it, rather than quietly making the old line true again.
+TEST_F (ScriptEngineTest, ResponseExposesTextNotABodyProperty) {
+    response.body = R"({"n":1})";
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('bodyType', typeof pm.response.body);
+        pm.test("text() is how a script reads the body", function() {
+            pm.expect(pm.response.text()).to.equal('{"n":1}');
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (env["bodyType"].value, "undefined");
 }
 
 // ============================================================================
