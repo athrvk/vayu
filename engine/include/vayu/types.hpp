@@ -629,147 +629,6 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
     return std::nullopt;
 }
 
-enum class MetricName {
-    Rps,
-    LatencyAvg,
-    LatencyP50,
-    LatencyP75,
-    LatencyP90,
-    LatencyP95,
-    LatencyP99,
-    LatencyP999,
-    LatencyMax,
-    LatencyMin,
-    ErrorRate,
-    TotalRequests,
-    Completed,
-    ConnectionsActive,
-    RequestsSent,
-    RequestsExpected,
-    // Rate metrics (Open Model)
-    SendRate,     // Rate at which requests are dispatched to the server
-    Throughput,   // Rate at which responses are received from the server
-    Backpressure, // Queue depth: requests sent but not yet responded
-    // Script validation metrics
-    TestsValidating,
-    TestsPassed,
-    TestsFailed,
-    TestsSampled,
-    // Status code distribution
-    StatusCodes,
-    // Duration metrics
-    TestDuration,    // Actual test execution time in seconds
-    SetupOverhead,   // Time spent on setup/teardown in seconds
-    DroppedRequests, // Requests discarded due to generator backpressure (never reached server)
-    QueueWaitAvg,    // Average time requests spent queued inside the generator
-    BytesSent,        // Cumulative wire bytes uploaded (request headers + body)
-    BytesReceived,    // Cumulative wire bytes downloaded (response headers + body)
-    PeakConcurrency   // High-water mark of in-flight requests over the run
-};
-
-inline const char* to_string (MetricName name) {
-    switch (name) {
-    case MetricName::Rps: return "rps";
-    case MetricName::LatencyAvg: return "latency_avg";
-    case MetricName::LatencyP50: return "latency_p50";
-    case MetricName::LatencyP75: return "latency_p75";
-    case MetricName::LatencyP90: return "latency_p90";
-    case MetricName::LatencyP95: return "latency_p95";
-    case MetricName::LatencyP99: return "latency_p99";
-    case MetricName::LatencyP999: return "latency_p999";
-    case MetricName::LatencyMax: return "latency_max";
-    case MetricName::LatencyMin: return "latency_min";
-    case MetricName::ErrorRate: return "error_rate";
-    case MetricName::TotalRequests: return "total_requests";
-    case MetricName::Completed: return "completed";
-    case MetricName::ConnectionsActive: return "connections_active";
-    case MetricName::RequestsSent: return "requests_sent";
-    case MetricName::RequestsExpected: return "requests_expected";
-    case MetricName::SendRate: return "send_rate";
-    case MetricName::Throughput: return "throughput";
-    case MetricName::Backpressure: return "backpressure";
-    case MetricName::TestsValidating: return "tests_validating";
-    case MetricName::TestsPassed: return "tests_passed";
-    case MetricName::TestsFailed: return "tests_failed";
-    case MetricName::TestsSampled: return "tests_sampled";
-    case MetricName::StatusCodes: return "status_codes";
-    case MetricName::TestDuration: return "test_duration";
-    case MetricName::SetupOverhead: return "setup_overhead";
-    case MetricName::DroppedRequests: return "dropped_requests";
-    case MetricName::QueueWaitAvg: return "queue_wait_avg";
-    case MetricName::BytesSent: return "bytes_sent";
-    case MetricName::BytesReceived: return "bytes_received";
-    case MetricName::PeakConcurrency: return "peak_concurrency";
-    }
-    return "unknown";
-}
-
-inline std::optional<MetricName> parse_metric_name (const std::string& str) {
-    if (str == "rps")
-        return MetricName::Rps;
-    if (str == "latency_avg")
-        return MetricName::LatencyAvg;
-    if (str == "latency_p50")
-        return MetricName::LatencyP50;
-    if (str == "latency_p75")
-        return MetricName::LatencyP75;
-    if (str == "latency_p90")
-        return MetricName::LatencyP90;
-    if (str == "latency_p95")
-        return MetricName::LatencyP95;
-    if (str == "latency_p99")
-        return MetricName::LatencyP99;
-    if (str == "latency_p999")
-        return MetricName::LatencyP999;
-    if (str == "latency_max")
-        return MetricName::LatencyMax;
-    if (str == "latency_min")
-        return MetricName::LatencyMin;
-    if (str == "error_rate")
-        return MetricName::ErrorRate;
-    if (str == "total_requests")
-        return MetricName::TotalRequests;
-    if (str == "completed")
-        return MetricName::Completed;
-    if (str == "connections_active")
-        return MetricName::ConnectionsActive;
-    if (str == "requests_sent")
-        return MetricName::RequestsSent;
-    if (str == "requests_expected")
-        return MetricName::RequestsExpected;
-    if (str == "send_rate")
-        return MetricName::SendRate;
-    if (str == "throughput")
-        return MetricName::Throughput;
-    if (str == "backpressure")
-        return MetricName::Backpressure;
-    if (str == "tests_validating")
-        return MetricName::TestsValidating;
-    if (str == "tests_passed")
-        return MetricName::TestsPassed;
-    if (str == "tests_failed")
-        return MetricName::TestsFailed;
-    if (str == "tests_sampled")
-        return MetricName::TestsSampled;
-    if (str == "status_codes")
-        return MetricName::StatusCodes;
-    if (str == "test_duration")
-        return MetricName::TestDuration;
-    if (str == "setup_overhead")
-        return MetricName::SetupOverhead;
-    if (str == "dropped_requests")
-        return MetricName::DroppedRequests;
-    if (str == "queue_wait_avg")
-        return MetricName::QueueWaitAvg;
-    if (str == "bytes_sent")
-        return MetricName::BytesSent;
-    if (str == "bytes_received")
-        return MetricName::BytesReceived;
-    if (str == "peak_concurrency")
-        return MetricName::PeakConcurrency;
-    return std::nullopt;
-}
-
 // ============================================================================
 // Database Types
 // ============================================================================
@@ -851,20 +710,12 @@ struct Run {
     // via seed_run_times (execution.cpp).
     int64_t end_time = 0;
     // Whole-run results, written once when the run reaches a terminal status.
-    // JSON object; `""` means "not written" - the report route then falls back
-    // to reconstructing the aggregates from the legacy `metrics` rows. NOT NULL
-    // with a `""` default so sync_schema can ALTER TABLE ADD COLUMN it onto an
-    // existing runs table (same pattern as requests.follow_redirects).
+    // JSON object; `""` means "not written", which now means only one thing -
+    // the engine died before the run reached a terminal status - so the report
+    // route reports from the sampled `results` alone. NOT NULL with a `""`
+    // default so sync_schema can ALTER TABLE ADD COLUMN it onto an existing
+    // runs table (same pattern as requests.follow_redirects).
     std::string summary; // TEXT NOT NULL DEFAULT ''
-};
-
-struct Metric {
-    int id;
-    std::string run_id;
-    int64_t timestamp;
-    MetricName name; // "rps", "latency", "error_rate"
-    double value;
-    std::string labels; // JSON string
 };
 
 /**

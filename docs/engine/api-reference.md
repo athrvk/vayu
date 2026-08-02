@@ -1452,30 +1452,24 @@ capacity-breakpoint / saturation stats from stored data.
 }
 ```
 
-`requests_failed` is derived per tick as `error_rate% × requests_completed`,
-rounded to the nearest request, after every row belonging to that timestamp has
-been folded into the bucket. It is therefore independent of the order the rows
-come back in - deriving it while reading the `error_rate` row made it depend on
-the `requests_sent` row having already been seen for the same timestamp, and the
-producer writes `error_rate` first, so it read a completed count of 0 and every
-bucket of every run reported 0 failed requests.
+`requests_failed` is the producer's own error count, written into the tick at
+write time. It is not derived at read time from `error_rate` and
+`requests_completed` any more - that derivation depended on the order the EAV
+rows came back in, and reported 0 failed requests for every bucket of every run.
 
 A missing run returns `404` with the message `Run not found`.
 
-**Storage (response shape unchanged).** Each `data[]` entry is one stored row of
-`metric_ticks` - the engine writes the tick object once, at write time, instead
-of the reader reassembling it from ~20 EAV `metrics` rows per second. Two things
-follow, both improvements the shape gives for free:
+**Storage.** Each `data[]` entry is one stored row of `metric_ticks` - the
+engine writes the tick object once, at write time. Two things follow:
 
 - **Pagination is tick-aligned**: `limit`/`offset` count ticks, so
   `pagination.total` is the number of ticks (not rows), and a page boundary can
   no longer return a tick with half its fields zeroed.
-- **`elapsed_seconds` keeps counting across pages** (it is measured from the
-  run's first stored tick), and `requests_failed` carries the real error count
-  the row-order-dependent legacy derivation always reported as `0`.
+- **`elapsed_seconds` keeps counting across pages**, since it is measured from
+  the run's first stored tick.
 
-Runs recorded before `metric_ticks` existed are still served from their legacy
-rows, with exactly the response they produced before.
+A run with no ticks returns `200` with an empty `data` array - only a run that
+does not exist is a `404`.
 
 ### GET /stats/:runId (deprecated)
 
@@ -1507,8 +1501,8 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 - `activeConnections`: Active concurrent connections
 - `elapsedSeconds`: Elapsed time since test start
 
-For runs recorded since `metric_ticks`, this stream is fed from those rows; every
-field above comes from the stored tick except **`avgLatencyMs`, which stays `0`** -
+This stream is fed from the run's `metric_ticks` rows; every field above comes
+from the stored tick except **`avgLatencyMs`, which stays `0`** -
 the per-tick object has never carried mean latency. `GET /runs/:runId/live` serves
 it (from the in-memory collector) and is the endpoint to use.
 
@@ -1801,9 +1795,9 @@ only when a test script ran).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
-rows for the timing breakdown and the `results[]` array. A run recorded before that column
-existed is reconstructed from its legacy `metrics` rows exactly as before. **The response shape
-is the same either way** - only where the numbers are read from changed.
+rows for the timing breakdown and the `results[]` array. A run with no summary never reached a
+terminal status - the engine died mid-run - and its report is built from those sampled `results`
+alone rather than erroring. **The response shape is the same either way.**
 
 **Response:**
 ```json

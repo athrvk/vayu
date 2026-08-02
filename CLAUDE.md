@@ -45,7 +45,10 @@ cd app && pnpm run electron:dev   # Run the app
 
 Prerequisites: CMake >= 3.25, Ninja, a C++20 compiler, Node.js >= 20.19 (22 LTS
 recommended, see `app/.nvmrc`), pnpm >= 10, and vcpkg with `$VCPKG_ROOT` set on
-Linux/macOS.
+Linux/macOS. On Linux and macOS also `autoconf`, `autoconf-archive`, `automake`
+and `libtool` - vcpkg builds libsodium from source there and runs `autoreconf`
+first. `python build.py --setup` installs them; without them the *dependency*
+install fails, which does not look like a missing build tool.
 
 **On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
 `build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,

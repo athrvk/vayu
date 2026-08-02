@@ -30,6 +30,18 @@ python build.py --test-only
   - MSVC 2022+ (Windows)
 - **vcpkg**: Package manager (auto-detected or install separately)
 - **Ninja**: Build system (optional, but recommended for faster builds)
+- **Autotools** (Linux and macOS only): `autoconf`, `autoconf-archive`,
+  `automake` and `libtool`. vcpkg builds **libsodium** from source through its
+  autotools path and runs `autoreconf` first, so a box without these fails at
+  dependency install with *"libsodium currently requires the following programs
+  from the system package manager"*, before any Vayu source is compiled.
+  `python build.py --setup` installs them. Windows needs nothing extra -
+  the port builds libsodium with MSBuild there.
+
+  ```bash
+  sudo apt install autoconf autoconf-archive automake libtool   # Debian/Ubuntu
+  brew install autoconf autoconf-archive automake libtool       # macOS
+  ```
 
 ## Manual Build
 
@@ -101,6 +113,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | Library | Purpose |
 |---------|---------|
 | curl | HTTP client library |
+| libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | cpp-httplib | HTTP server library |
 | sqlite3 | Embedded database |
@@ -275,7 +288,7 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
   (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails)
 - On Windows, ensure Visual Studio C++ tools are installed
 

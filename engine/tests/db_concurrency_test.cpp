@@ -4,8 +4,10 @@
  *
  * Guards the lock-scope change in issue #88: the shared retry_on_busy helper
  * serializes writes on the DB mutex but must release it before sleeping, and
- * the four write paths (add_metrics_batch here) must interleave safely with
- * concurrent readers (get_metrics / get_run) on the *same* Database instance.
+ * the write paths must interleave safely with concurrent readers on the *same*
+ * Database instance. Both retry shapes are exercised - add_metric_tick (a bare
+ * retried insert) and add_results_batch (a transaction inside the retry), which
+ * is the shape the retired EAV metric batch writer used to stand for here.
  *
  * This is a smoke test, not a busy-path test: injecting SQLITE_BUSY reliably
  * needs fault injection we deliberately do not build (see the issue). The value
@@ -56,13 +58,14 @@ class DatabaseConcurrencyTest : public ::testing::Test {
     std::unique_ptr<Database> db_;
 };
 
-// N writers batch-insert metrics while M readers poll get_metrics / get_run on
-// the same Database. Passing means: no deadlock (the per-test ctest TIMEOUT is
-// the deadlock backstop), no lost writes, and readers never crash mid-write.
+// N writers write ticks and batched results while M readers poll
+// get_metric_ticks_since / get_run on the same Database. Passing means: no
+// deadlock (the per-test ctest TIMEOUT is the deadlock backstop), no lost
+// writes, and readers never crash mid-write.
 TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
     constexpr int kWriters          = 4;
     constexpr int kBatchesPerWriter = 25;
-    constexpr int kMetricsPerBatch  = 10;
+    constexpr int kRowsPerBatch     = 10;
     constexpr int kReaders          = 3;
 
     std::atomic<bool> writers_done{ false };
@@ -74,18 +77,28 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
     for (int w = 0; w < kWriters; ++w) {
         threads.emplace_back ([this, w] {
             for (int b = 0; b < kBatchesPerWriter; ++b) {
-                std::vector<Metric> batch;
-                batch.reserve (kMetricsPerBatch);
-                for (int i = 0; i < kMetricsPerBatch; ++i) {
-                    vayu::db::Metric m;
-                    m.run_id = "run_1";
-                    m.timestamp =
-                    1000 + (w * kBatchesPerWriter + b) * kMetricsPerBatch + i;
-                    m.name  = vayu::MetricName::TotalRequests;
-                    m.value = static_cast<double> (i);
-                    batch.push_back (m);
+                // Retried single insert.
+                for (int i = 0; i < kRowsPerBatch; ++i) {
+                    vayu::db::MetricTick tick;
+                    tick.run_id = "run_1";
+                    tick.timestamp =
+                    1000 + (w * kBatchesPerWriter + b) * kRowsPerBatch + i;
+                    tick.payload = R"({"requests_completed":)" + std::to_string (i) + "}";
+                    db_->add_metric_tick (tick);
                 }
-                db_->add_metrics_batch (batch);
+
+                // Transaction inside the retry - the other shape #88 covers.
+                std::vector<Result> batch;
+                batch.reserve (kRowsPerBatch);
+                for (int i = 0; i < kRowsPerBatch; ++i) {
+                    vayu::db::Result r;
+                    r.run_id = "run_1";
+                    r.timestamp = 1000 + (w * kBatchesPerWriter + b) * kRowsPerBatch + i;
+                    r.status_code = 200;
+                    r.latency_ms  = static_cast<double> (i);
+                    batch.push_back (r);
+                }
+                db_->add_results_batch (batch);
             }
         });
     }
@@ -95,11 +108,11 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
             while (!writers_done.load (std::memory_order_relaxed)) {
                 // Both reader paths share the same mutex the writers hold; a
                 // retry that slept under the lock would stall these.
-                auto metrics = db_->get_metrics ("run_1");
-                auto run     = db_->get_run ("run_1");
+                auto ticks = db_->get_metric_ticks_since ("run_1", 0);
+                auto run   = db_->get_run ("run_1");
                 if (run.has_value () &&
-                metrics.size () <=
-                static_cast<size_t> (kWriters * kBatchesPerWriter * kMetricsPerBatch)) {
+                ticks.size () <=
+                static_cast<size_t> (kWriters * kBatchesPerWriter * kRowsPerBatch)) {
                     reads_ok.fetch_add (1, std::memory_order_relaxed);
                 }
             }
@@ -114,11 +127,11 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
         threads[static_cast<size_t> (r)].join ();
     }
 
-    // Every batched row landed exactly once - no write lost to the interleaving.
-    const auto expected =
-    static_cast<size_t> (kWriters * kBatchesPerWriter * kMetricsPerBatch);
-    EXPECT_EQ (db_->get_metrics ("run_1").size (), expected);
-    EXPECT_EQ (db_->count_metrics ("run_1"), static_cast<int64_t> (expected));
+    // Every row landed exactly once - no write lost to the interleaving.
+    const auto expected = static_cast<size_t> (kWriters * kBatchesPerWriter * kRowsPerBatch);
+    EXPECT_EQ (db_->get_metric_ticks_since ("run_1", 0).size (), expected);
+    EXPECT_EQ (db_->count_metric_ticks ("run_1"), static_cast<int64_t> (expected));
+    EXPECT_EQ (db_->get_results ("run_1").size (), expected);
     // Readers ran throughout and observed only consistent snapshots.
     EXPECT_GT (reads_ok.load (), 0);
 }

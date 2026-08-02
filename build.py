@@ -708,11 +708,19 @@ def setup_environment(project_root: Path):
         apt_missing("unzip")
         apt_missing("tar")
 
-        # Check header packages via dpkg
-        for hdr_pkg in ("libssl-dev", "libcurl4-openssl-dev"):
-            result = subprocess.run(["dpkg", "-s", hdr_pkg], capture_output=True)
+        # vcpkg builds libsodium from source through its autotools path, which
+        # runs autoreconf before configure - so the generators must be present
+        # or the dependency install fails outright.
+        apt_missing("autoconf")
+        apt_missing("automake")
+        apt_missing("libtool", "libtoolize")
+
+        # Packages that install no binary of their own (headers, m4 macros), so
+        # shutil.which cannot see them - ask dpkg instead.
+        for pkg in ("libssl-dev", "libcurl4-openssl-dev", "autoconf-archive"):
+            result = subprocess.run(["dpkg", "-s", pkg], capture_output=True)
             if result.returncode != 0:
-                missing.append(hdr_pkg)
+                missing.append(pkg)
 
         if missing:
             log_dim(f'Installing: {", ".join(missing)}')
@@ -753,7 +761,15 @@ def setup_environment(project_root: Path):
         log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking Homebrew packages...')
         if not shutil.which("brew"):
             print_error("Homebrew not found. Install it from https://brew.sh then re-run --setup.")
-        brew_missing = [pkg for pkg, cmd in [("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config"), ("openssl", None)] if cmd and not shutil.which(cmd)]
+        # autoconf/automake/libtool are for vcpkg's libsodium, which builds from
+        # source through its autotools path. brew's libtool installs
+        # glibtoolize rather than libtoolize; vcpkg accepts either.
+        brew_missing = [pkg for pkg, cmd in [("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config"), ("openssl", None), ("autoconf", "autoconf"), ("automake", "automake"), ("libtool", "glibtoolize")] if cmd and not shutil.which(cmd)]
+
+        # autoconf-archive is m4 macros with no binary of its own, so ask brew.
+        if subprocess.run(["brew", "list", "--formula", "autoconf-archive"], capture_output=True).returncode != 0:
+            brew_missing.append("autoconf-archive")
+
         if brew_missing:
             log_dim(f'brew install {" ".join(brew_missing)}')
             subprocess.run(["brew", "install"] + brew_missing, check=True)
