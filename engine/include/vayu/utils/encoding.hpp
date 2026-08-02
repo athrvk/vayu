@@ -7,7 +7,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "vayu/utils/sodium_init.hpp"
+
+#include <sodium.h>
+
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,49 +21,40 @@
 
 namespace vayu::utils {
 
+namespace detail {
+
+/**
+ * @brief Shared body of the two base64 encoders, parameterised by alphabet.
+ *
+ * sodium_base64_ENCODED_LEN is an upper bound that includes the terminating
+ * NUL, and sodium_bin2base64 always NUL-terminates, so the written length is
+ * read back rather than assumed - a variant whose bound is generous still
+ * yields an exactly-sized string.
+ *
+ * The macro mixes its variant argument into unsigned arithmetic, so it is
+ * handed an unsigned copy: passing the plain int constant warns under the
+ * engine's -Wsign-conversion, which is an error on the MSVC (/W4 /WX) build.
+ */
+inline std::string sodium_base64_encode (std::string_view in, int variant) {
+    ensure_sodium_initialized ();
+
+    const auto variant_bits = static_cast<unsigned int> (variant);
+    std::string out (sodium_base64_ENCODED_LEN (in.size (), variant_bits), '\0');
+    sodium_bin2base64 (out.data (), out.size (), sodium_bytes (in), in.size (), variant);
+    out.resize (std::strlen (out.c_str ()));
+    return out;
+}
+
+} // namespace detail
+
 /**
  * @brief Base64-encode arbitrary bytes (RFC 4648, standard alphabet, padded).
  *
  * Used for HTTP Basic credentials and OAuth 2.0 client authentication
- * (RFC 6749 §2.3.1). The engine intentionally does not depend on cpp-httplib's
- * detail::base64 because vayu_core does not link httplib.
+ * (RFC 6749 §2.3.1).
  */
 inline std::string base64_encode (std::string_view in) {
-    static constexpr char table[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    std::string out;
-    out.reserve (((in.size () + 2) / 3) * 4);
-
-    size_t i = 0;
-    while (i + 3 <= in.size ()) {
-        const uint32_t n = (static_cast<uint8_t> (in[i]) << 16) |
-        (static_cast<uint8_t> (in[i + 1]) << 8) |
-        static_cast<uint8_t> (in[i + 2]);
-        out.push_back (table[(n >> 18) & 0x3F]);
-        out.push_back (table[(n >> 12) & 0x3F]);
-        out.push_back (table[(n >> 6) & 0x3F]);
-        out.push_back (table[n & 0x3F]);
-        i += 3;
-    }
-
-    const size_t rem = in.size () - i;
-    if (rem == 1) {
-        const uint32_t n = static_cast<uint8_t> (in[i]) << 16;
-        out.push_back (table[(n >> 18) & 0x3F]);
-        out.push_back (table[(n >> 12) & 0x3F]);
-        out.push_back ('=');
-        out.push_back ('=');
-    } else if (rem == 2) {
-        const uint32_t n = (static_cast<uint8_t> (in[i]) << 16) |
-        (static_cast<uint8_t> (in[i + 1]) << 8);
-        out.push_back (table[(n >> 18) & 0x3F]);
-        out.push_back (table[(n >> 12) & 0x3F]);
-        out.push_back (table[(n >> 6) & 0x3F]);
-        out.push_back ('=');
-    }
-
-    return out;
+    return detail::sodium_base64_encode (in, sodium_base64_VARIANT_ORIGINAL);
 }
 
 /**
@@ -73,63 +69,40 @@ inline std::string base64_encode (std::string_view in) {
  * length that is not a multiple of 4 after padding are errors.
  */
 inline std::optional<std::string> base64_decode (std::string_view in) {
-    const auto sextet = [] (char c) -> int {
-        if (c >= 'A' && c <= 'Z')
-            return c - 'A';
-        if (c >= 'a' && c <= 'z')
-            return c - 'a' + 26;
-        if (c >= '0' && c <= '9')
-            return c - '0' + 52;
-        if (c == '+')
-            return 62;
-        if (c == '/')
-            return 63;
-        return -1;
+    ensure_sodium_initialized ();
+
+    // ASCII whitespace is skipped wherever it appears, so wrapped base64 (a
+    // PEM-ish blob, a value pasted out of a config file) decodes.
+    static constexpr char ignore[] = " \t\n\r\f";
+
+    const auto attempt = [&in] (int variant) -> std::optional<std::string> {
+        // Base64 never shrinks by less than a quarter, so the input length is
+        // always a sufficient output bound; the +1 also keeps data() non-null
+        // for empty input.
+        std::string out (in.size () + 1, '\0');
+        size_t decoded_len = 0;
+
+        // A null b64_end makes libsodium reject input it did not consume in
+        // full, so trailing junk after a valid prefix is an error rather than a
+        // short decode.
+        if (sodium_base642bin (reinterpret_cast<unsigned char*> (out.data ()),
+            out.size (), in.empty () ? "" : in.data (), in.size (), ignore,
+            &decoded_len, nullptr, variant) != 0) {
+            return std::nullopt;
+        }
+
+        out.resize (decoded_len);
+        return out;
     };
 
-    std::string packed;
-    packed.reserve (in.size ());
-    for (const char c : in) {
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f')
-            continue;
-        packed.push_back (c);
+    // VARIANT_ORIGINAL requires the '=' padding, but `atob` accepts an unpadded
+    // tail, so a padded decode that fails is retried without it. The fallback
+    // cannot launder a malformed group: '=' is outside the no-padding alphabet,
+    // so anything carrying padding that ORIGINAL rejected fails the retry too.
+    if (auto padded = attempt (sodium_base64_VARIANT_ORIGINAL)) {
+        return padded;
     }
-
-    // Padding is only legal as the last one or two characters of the whole
-    // string; '=' anywhere else is a malformed group, not a short one.
-    size_t pad = 0;
-    while (pad < 2 && !packed.empty () && packed.back () == '=') {
-        packed.pop_back ();
-        ++pad;
-    }
-    if (packed.size () % 4 == 1)
-        return std::nullopt;
-    if (pad != 0 && (packed.size () + pad) % 4 != 0)
-        return std::nullopt;
-
-    std::string out;
-    out.reserve (packed.size () / 4 * 3 + 2);
-
-    uint32_t accum = 0;
-    int bits       = 0;
-    for (const char c : packed) {
-        const int value = sextet (c);
-        if (value < 0)
-            return std::nullopt;
-        accum = (accum << 6) | static_cast<uint32_t> (value);
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out.push_back (static_cast<char> ((accum >> bits) & 0xFF));
-        }
-    }
-
-    // Leftover bits belong to a sextet that encodes no whole byte; they must be
-    // zero, or the input carried data that decoding would drop.
-    if (bits != 0 && (accum & ((1U << bits) - 1)) != 0)
-        return std::nullopt;
-
-    return out;
+    return attempt (sodium_base64_VARIANT_ORIGINAL_NO_PADDING);
 }
 
 /**
@@ -139,15 +112,12 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
  * one every webhook-signature scheme (Stripe, GitHub, Slack) compares against.
  */
 inline std::string hex_encode (std::string_view in) {
-    static constexpr char hex[] = "0123456789abcdef";
+    ensure_sodium_initialized ();
 
-    std::string out;
-    out.reserve (in.size () * 2);
-    for (const char ch : in) {
-        const auto c = static_cast<uint8_t> (ch);
-        out.push_back (hex[c >> 4]);
-        out.push_back (hex[c & 0x0F]);
-    }
+    // sodium_bin2hex needs room for the terminating NUL and aborts without it.
+    std::string out (in.size () * 2 + 1, '\0');
+    sodium_bin2hex (out.data (), out.size (), detail::sodium_bytes (in), in.size ());
+    out.resize (in.size () * 2);
     return out;
 }
 
@@ -158,17 +128,7 @@ inline std::string hex_encode (std::string_view in) {
  * are both base64url without padding.
  */
 inline std::string base64url_encode (std::string_view in) {
-    std::string out = base64_encode (in);
-    for (char& c : out) {
-        if (c == '+')
-            c = '-';
-        else if (c == '/')
-            c = '_';
-    }
-    while (!out.empty () && out.back () == '=') {
-        out.pop_back ();
-    }
-    return out;
+    return detail::sodium_base64_encode (in, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
 }
 
 /**

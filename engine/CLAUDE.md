@@ -11,7 +11,7 @@ engine/
 ├── src/runtime/   # QuickJS scripting engine
 ├── include/vayu/  # Public headers
 ├── tests/         # Google Test suite
-└── vendor/        # quickjs-ng, picosha2 (PKCE/SHA-256), hdrhistogram
+└── vendor/        # quickjs-ng, hdrhistogram
 ```
 
 ## Conventions
