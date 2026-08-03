@@ -112,6 +112,18 @@ const home = "/home/tester";
 const xdg = "/home/tester/xdg-data";
 
 /**
+ * Scanned rather than supplied, because `LINUX_APP_BIN` is
+ * `$LINUX_APP_DIR/${APP_NAME}.AppImage`: a test-invented `APP_NAME` would keep
+ * expanding to today's name after install.sh renamed it, still match the
+ * `Vayu.AppImage` that `appimage-stamp.ts` hardcodes, and leave this guard green
+ * while the installer wrote a differently named binary.
+ *
+ * HOME and XDG_DATA_HOME stay invented - they are the shell's environment, not
+ * install.sh's definitions, and each case exists to pick one of their branches.
+ */
+const appName = shellValue("APP_NAME");
+
+/**
  * Both halves of `LINUX_DATA_HOME`'s `${XDG_DATA_HOME:-...}`. Each case names
  * the shell environment and the `resolveStampPath` environment together, so a
  * scenario cannot describe one side of the duplication and not the other.
@@ -119,13 +131,13 @@ const xdg = "/home/tester/xdg-data";
 const cases = [
 	{
 		what: "with XDG_DATA_HOME unset, so the layout falls back to $HOME",
-		shell: { APP_NAME: "Vayu", HOME: home },
+		shell: { APP_NAME: appName, HOME: home },
 		app: { platform: "linux", home },
 		expectedDataHome: `${home}/.local/share`,
 	},
 	{
 		what: "with XDG_DATA_HOME set, which the installer honours",
-		shell: { APP_NAME: "Vayu", HOME: home, XDG_DATA_HOME: xdg },
+		shell: { APP_NAME: appName, HOME: home, XDG_DATA_HOME: xdg },
 		app: { platform: "linux", home, xdgDataHome: xdg },
 		expectedDataHome: xdg,
 	},
@@ -137,9 +149,13 @@ describe("the Linux layout, as install.sh defines it", () => {
 		// every assertion below would compare "" to "" and pass.
 		expect(installer.length).toBeGreaterThan(1000);
 		expect(shellValue("LINUX_DATA_HOME")).toContain("XDG_DATA_HOME");
+		expect(appName).not.toBe("");
 		const linux = layoutFor(cases[0].shell);
 		expect(linux.LINUX_DATA_HOME).toBe(`${home}/.local/share`);
 		expect(linux.LINUX_APP_DIR).toContain("/vayu");
+		// A pin, not an invented constant: only one side of this comparison is
+		// scanned, so it fails when install.sh renames APP_NAME - which is the
+		// point, since `appimage-stamp.ts` spells the same name in source.
 		expect(linux.LINUX_APP_BIN).toContain("Vayu.AppImage");
 		expect(linux.LINUX_VERSION_FILE).toContain("/vayu/");
 	});
