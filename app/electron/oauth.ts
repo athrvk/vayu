@@ -18,7 +18,7 @@
  */
 
 import { ipcMain, shell, BrowserWindow } from "electron";
-import { createAuthWindowFlow, type AuthWindowResult } from "./oauth-window";
+import { createAuthWindowFlow, type AuthWindowResult } from "./oauth-window.js";
 
 export interface OpenAuthWindowParams {
 	authorizeUrl: string;
