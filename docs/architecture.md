@@ -153,6 +153,29 @@ The Engine runs as a separate process managed by the Electron main process:
 2. **Health Monitoring**: Manager polls `/health` endpoint to verify connectivity
 3. **Graceful Shutdown**: Engine is stopped when Electron app quits
 
+### Ownership model
+
+The engine binds one fixed port (9876) and owns one SQLite database, so exactly
+one app instance may drive it:
+
+- **One instance.** The app takes `app.requestSingleInstanceLock()` before it
+  starts anything. A second launch focuses the running window and exits - it
+  never gets its own engine, and never attaches to the first instance's.
+- **Spawned or adopted, the running instance owns the engine.** Normally the app
+  spawns it. If an engine is already answering on the port at startup - an
+  orphan left by a crashed session, or in development one started by hand - the
+  app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
+  data directory), reported as running, restarted for real when Settings asks,
+  and shut down on quit like any engine the app spawned itself.
+- **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a
+  wait for the process to go, then a name-verified kill by PID if it outstays
+  the grace period. The name check is what keeps a recycled PID from being
+  killed in the engine's place.
+- **A quit during a restart wins.** Once the app is quitting, the sidecar
+  refuses to start an engine, and a restart already in flight is waited out
+  rather than raced - otherwise a freshly spawned engine outlives the process
+  that was supposed to kill it.
+
 **Development vs Production:**
 - **Development**: Engine binary at `engine/build/vayu-engine`
 - **Production**: Engine binary packaged in `Vayu.app/Contents/Resources/bin/vayu-engine`

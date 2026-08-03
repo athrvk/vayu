@@ -14,6 +14,7 @@ import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createSaveFlusher } from "./save-flush.js";
+import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
 import {
 	VayuMcpService,
@@ -422,7 +423,10 @@ async function stopMcp() {
 async function stopEngine() {
 	if (engineSidecar) {
 		try {
-			await engineSidecar.stop();
+			// `shutdown()`, not `stop()`: the app is going away, so a restart in
+			// flight has to be waited out and no further one allowed - otherwise
+			// the engine it spawns outlives the process that would kill it.
+			await engineSidecar.shutdown();
 			console.log("[Main] Engine stopped successfully");
 		} catch (error) {
 			console.error("[Main] Error stopping engine:", error);
@@ -678,7 +682,38 @@ function setupIpcHandlers() {
 	});
 }
 
+/**
+ * Vayu is a single-instance app, and the engine is why.
+ *
+ * The engine binds one fixed port and owns one SQLite database, so a second
+ * launch does not get a second backend - it adopts the first one's. Both UIs
+ * then share one engine with nothing to say so, and the first to quit POSTs
+ * `/shutdown`, which the engine obeys unconditionally: the survivor's backend
+ * dies under it mid-session, its pending saves go into a dead port, and its
+ * only surface is the dock dot turning grey.
+ *
+ * Losing the lock means another instance is already up, so hand the user over
+ * to it and leave. `second-instance` fires in the instance that holds the lock.
+ */
+const isPrimaryInstance = app.requestSingleInstanceLock();
+
+if (!isPrimaryInstance) {
+	console.log("[Main] Another Vayu instance is already running; focusing it and exiting.");
+	app.quit();
+} else {
+	app.on("second-instance", () => {
+		if (!mainWindow) return;
+		if (mainWindow.isMinimized()) mainWindow.restore();
+		mainWindow.show();
+		mainWindow.focus();
+	});
+}
+
 app.whenReady().then(async () => {
+	// A losing second instance is on its way out; do not start an engine, a
+	// server or a window on top of the instance that owns them.
+	if (!isPrimaryInstance) return;
+
 	// Setup IPC handlers first
 	setupIpcHandlers();
 
@@ -748,6 +783,22 @@ app.on("window-all-closed", () => {
 // second pass once rather than starting two engine shutdowns.
 const resumeQuit = () => app.quit();
 
+// Second pass of the quit: stop the children exactly once. See quit-shutdown.ts
+// for why "has a shutdown started" is the guard rather than "is the engine
+// still running" - the latter only clears after the awaits, so a quit landing
+// mid-shutdown started a second one on top of it.
+const quitShutdown = createQuitShutdown({
+	hasWork: () => Boolean((engineSidecar && engineSidecar.isRunning()) || mcpService),
+	stop: async () => {
+		await stopMcp();
+		await stopEngine();
+	},
+	quit: () => app.quit(),
+	defer: (run) => {
+		setImmediate(run);
+	},
+});
+
 // Ensure saves are flushed and engine is stopped when the app quits
 app.on("before-quit", (event) => {
 	// First pass: ask the renderer to flush pending saves. Quit resumes as
@@ -761,16 +812,7 @@ app.on("before-quit", (event) => {
 		return;
 	}
 
-	// Second pass: stop the MCP server and engine before actually quitting
-	if ((engineSidecar && engineSidecar.isRunning()) || mcpService) {
-		event.preventDefault();
-		(async () => {
-			await stopMcp();
-			await stopEngine();
-			// Continue with quit process
-			setImmediate(() => app.quit());
-		})();
-	}
+	quitShutdown.handleQuit(event);
 });
 
 // A signal is how anything outside the UI asks Vayu to stop, and Node's default
