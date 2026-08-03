@@ -19,7 +19,15 @@ export default defineConfig({
 		include: ["src/**/*.test.{ts,tsx}", "electron/**/*.test.ts"],
 		server: {
 			deps: {
-				inline: ["graphql-language-service"],
+				/*
+				 * `electron-store` is inlined so that `vi.mock("electron")` reaches it.
+				 * An externalised dependency imports `electron` through Node directly,
+				 * missing the mock registry entirely - and the real package throws
+				 * "Electron failed to install correctly" outside an Electron runtime.
+				 * window-state.test.ts drives the real store against a temp directory,
+				 * which is the only way to test what the library does with a corrupt file.
+				 */
+				inline: ["graphql-language-service", "electron-store"],
 			},
 		},
 	},
