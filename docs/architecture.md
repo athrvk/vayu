@@ -175,6 +175,12 @@ one app instance may drive it:
   refuses to start an engine, and a restart already in flight is waited out
   rather than raced - otherwise a freshly spawned engine outlives the process
   that was supposed to kill it.
+- **A startup that cannot succeed fails immediately.** The readiness poll allows
+  45 seconds, but it watches the spawned child as well as the port: an engine
+  that exits first - a missing shared library, a lock it could not acquire -
+  fails the launch at once, naming the exit code or signal and the engine's last
+  stderr lines. The window is created after startup, so the ceiling would
+  otherwise be 45 seconds of an empty screen.
 
 **Development vs Production:**
 - **Development**: Engine binary at `engine/build/vayu-engine`

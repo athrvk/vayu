@@ -27,6 +27,7 @@ import {
 	ENGINE_RESTART_MAX_RETRIES,
 	ENGINE_RESTART_BASE_DELAY_MS,
 	ENGINE_PORT_RELEASE_DELAY_MS,
+	ENGINE_STDERR_TAIL_LINES,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -267,6 +268,39 @@ type Ownership =
 	/** `pid` is null when the engine answered health but wrote no readable lock. */
 	| { kind: "adopted"; pid: number | null };
 
+/**
+ * Why a spawned engine is never going to answer.
+ *
+ * Recorded by the child's `exit` and `error` handlers so `waitForEngine` can
+ * stop polling a port nothing is listening on. The loop used to consult only
+ * the health probe, so an engine that died at spawn - a missing shared library,
+ * a corrupt binary, a lock it could not take - still cost the full 45-second
+ * ceiling, and with no window on screen yet the user watched nothing happen for
+ * all of it.
+ */
+type SpawnFailure =
+	| { kind: "exit"; code: number | null; signal: NodeJS.Signals | null; stderr: string[] }
+	| { kind: "error"; message: string };
+
+/** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
+function describeSpawnFailure(failure: SpawnFailure): string {
+	if (failure.kind === "error") {
+		return `The engine process could not be started: ${failure.message}`;
+	}
+
+	// A signal means something killed it; a code means it decided to leave. Only
+	// one of the two is ever set, and naming the wrong one reads as a crash that
+	// did not happen.
+	const cause =
+		failure.signal !== null
+			? `killed by signal ${failure.signal}`
+			: `exit code ${failure.code}`;
+	const tail =
+		failure.stderr.length > 0 ? `\n\nLast engine output:\n${failure.stderr.join("\n")}` : "";
+
+	return `The engine exited before it was ready (${cause}).${tail}`;
+}
+
 export class EngineSidecar {
 	private process: ChildProcess | null = null;
 	private ownership: Ownership = { kind: "none" };
@@ -430,21 +464,17 @@ export class EngineSidecar {
 			);
 		}
 
-		// Check if binary exists
+		// Check if binary exists. The remediation names `build.py` because that is
+		// the repo's single build entry point - the per-platform shell scripts this
+		// message used to name have never existed, and the raw cmake line it
+		// offered skips the vcpkg toolchain wiring build.py does for you.
 		if (!fs.existsSync(this.binaryPath)) {
-			const platform = process.platform;
-			let buildScript = "./scripts/build/build-macos.sh";
-			if (platform === "win32") {
-				buildScript = "./scripts/build/build-windows.ps1";
-			} else if (platform === "linux") {
-				buildScript = "./scripts/build/build-linux.sh";
-			}
-
 			throw new Error(
-				`Engine binary not found at: ${this.binaryPath}\n` +
-					`Please build the engine first:\n` +
-					`  Development: cd engine && cmake -B build && cmake --build build\n` +
-					`  Production: ${buildScript}`
+				`Engine binary not found at: ${this.binaryPath}\n\n` +
+					`From a source checkout, build it with:\n` +
+					`  python build.py -e\n\n` +
+					`If this is an installed copy of Vayu, the installation is incomplete - ` +
+					`reinstall it. Prerequisites and platform notes are in docs/building.md.`
 			);
 		}
 
@@ -487,6 +517,11 @@ export class EngineSidecar {
 			this.process.stdout.resume();
 		}
 
+		// Kept for the failure message: an engine that dies at spawn has usually
+		// said why on stderr, and that line is the difference between "exit code 127"
+		// and "cannot open shared object file".
+		const stderrTail: string[] = [];
+
 		// Handle stderr - set up listeners immediately to prevent buffering issues
 		if (this.process.stderr) {
 			this.process.stderr.setEncoding("utf8");
@@ -497,6 +532,8 @@ export class EngineSidecar {
 					.filter((line: string) => line.trim());
 				for (const line of lines) {
 					console.error(`[Engine] ${line}`);
+					stderrTail.push(line);
+					if (stderrTail.length > ENGINE_STDERR_TAIL_LINES) stderrTail.shift();
 				}
 			});
 			// Resume reading to prevent backpressure
@@ -515,44 +552,61 @@ export class EngineSidecar {
 			}
 		};
 
+		// Scoped to this spawn rather than to the instance: a restart's replacement
+		// is a different child, and its wait must not inherit the reason the
+		// previous one died.
+		let failure: SpawnFailure | null = null;
+
 		// Handle process exit
 		child.on("exit", (code, signal) => {
 			console.log(`[Sidecar] Engine exited with code ${code} signal ${signal}`);
+			failure = { kind: "exit", code, signal, stderr: [...stderrTail] };
 			forget();
 		});
 
 		// Handle errors
 		child.on("error", (err) => {
 			console.error(`[Sidecar] Engine error:`, err);
+			failure = { kind: "error", message: err.message };
 			forget();
 		});
 
 		// Wait for the engine to be ready
-		await this.waitForEngine();
+		await this.waitForEngine(() => failure);
 	}
 
 	/**
-	 * Wait for the engine to be ready by polling the health endpoint
+	 * Wait for the engine to be ready by polling the health endpoint.
+	 *
+	 * `spawnFailure` reports what the child we just spawned did instead of coming
+	 * up, and is the loop's early exit: polling out the remaining attempts against
+	 * a process that has already gone only delays the error the user needs.
 	 */
-	private async waitForEngine(
-		maxAttempts: number = ENGINE_HEALTH_MAX_ATTEMPTS,
-		delay: number = ENGINE_HEALTH_POLL_INTERVAL_MS
-	): Promise<void> {
-		for (let i = 0; i < maxAttempts; i++) {
+	private async waitForEngine(spawnFailure: () => SpawnFailure | null): Promise<void> {
+		for (let i = 0; i < ENGINE_HEALTH_MAX_ATTEMPTS; i++) {
 			// A quit arriving mid-startup must not be held for the rest of the
 			// ceiling: the child is already tracked, so the quit path kills it and
 			// this loop's only remaining job is to stop waiting.
 			this.assertNotStopping();
+
+			// Before the probe, not after: by the time control is back here the
+			// child's exit handler has already run, and one more health request to a
+			// closed port would answer no faster than the record already has.
+			const died = spawnFailure();
+			if (died) {
+				throw new Error(describeSpawnFailure(died));
+			}
 
 			if (await this.system.probeHealth(this.port)) {
 				console.log(`[Sidecar] Engine is ready`);
 				return;
 			}
 
-			await this.system.sleep(delay);
+			await this.system.sleep(ENGINE_HEALTH_POLL_INTERVAL_MS);
 		}
 
-		throw new Error(`Engine failed to start within ${(maxAttempts * delay) / 1000} seconds`);
+		const ceilingSeconds = (ENGINE_HEALTH_MAX_ATTEMPTS * ENGINE_HEALTH_POLL_INTERVAL_MS) / 1000;
+		throw new Error(`Engine failed to start within ${ceilingSeconds} seconds`);
 	}
 
 	/** Throw if the app is shutting down, so no caller spawns into a quit. */

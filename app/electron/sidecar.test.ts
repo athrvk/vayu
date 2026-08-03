@@ -23,13 +23,27 @@
  * health ceiling per assertion. The lock file, the data directory and the
  * binary lookup are real, against a temp directory - those are the parts a mock
  * would have "passed" against.
+ *
+ * The same harness covers the other end of `start()`: an engine that dies at
+ * spawn. That path used to poll a dead port for the full 45-second ceiling with
+ * no window on screen, so the assertions there are about *when* the failure
+ * arrives and what it says, not only that it arrives.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+	existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ChildProcess } from "node:child_process";
 
 /** Mutable because the mock is hoisted above the temp directory each test makes. */
@@ -49,10 +63,16 @@ import { ENGINE_LOCK_FILE, ENGINE_PORT_RELEASE_DELAY_MS } from "./constants";
 const TEST_PORT = 39876;
 const ADOPTED_PID = 4242;
 
+/** Just enough of a piped stdio stream for the sidecar's drain to attach to. */
+class FakeStream extends EventEmitter {
+	setEncoding() {}
+	resume() {}
+}
+
 /** A spawned engine: enough of a ChildProcess for the sidecar to drive. */
 class FakeChild extends EventEmitter {
-	readonly stdout = null;
-	readonly stderr = null;
+	readonly stdout = new FakeStream();
+	readonly stderr = new FakeStream();
 	readonly signals: string[] = [];
 
 	/** A wedged engine: only SIGKILL gets it, which is what the grace period is for. */
@@ -66,8 +86,17 @@ class FakeChild extends EventEmitter {
 		return true;
 	}
 
-	exit() {
-		queueMicrotask(() => this.emit("exit", null, null));
+	/**
+	 * Deferred, because the sidecar attaches its handlers only after `spawnEngine`
+	 * has returned - anything emitted synchronously inside the mock is emitted at
+	 * nobody. A microtask lands after that and still before the first `await`.
+	 */
+	say(line: string) {
+		queueMicrotask(() => this.stderr.emit("data", `${line}\n`));
+	}
+
+	exit(code: number | null = null, signal: string | null = null) {
+		queueMicrotask(() => this.emit("exit", code, signal));
 	}
 }
 
@@ -302,6 +331,114 @@ describe("EngineSidecar - spawned engine", () => {
 
 		expect(state.spawned[0].signals).toEqual(["SIGTERM", "SIGKILL"]);
 		expect(sidecar.isRunning()).toBe(false);
+	});
+});
+
+describe("EngineSidecar - an engine that dies at spawn", () => {
+	/** Spawns a child that leaves the way `die` says, instead of coming up. */
+	function spawnsAndDies(
+		state: { spawned: FakeChild[] },
+		system: SidecarSystem,
+		die: (child: FakeChild) => void
+	) {
+		(system.spawnEngine as ReturnType<typeof vi.fn>).mockImplementation(() => {
+			const child = new FakeChild();
+			state.spawned.push(child);
+			die(child);
+			return child as unknown as ChildProcess;
+		});
+	}
+
+	it("fails at the exit instead of polling out the 45-second ceiling", async () => {
+		const { system, state } = fakeSystem();
+		// The outcome sidecar.ts calls expected: the engine could not take its own
+		// lock, so it is gone milliseconds after the spawn.
+		spawnsAndDies(state, system, (child) => child.exit(3, null));
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await expect(sidecar.start()).rejects.toThrow(/exit code 3/);
+
+		// The point of the fix, and what a revert breaks: without consulting the
+		// child, the loop runs all 90 attempts before saying anything - 45 real
+		// seconds with no window on screen. Two probes are the pre-spawn adoption
+		// check and the loop's first pass.
+		expect(vi.mocked(system.probeHealth).mock.calls.length).toBeLessThanOrEqual(3);
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("names the signal and the engine's last words", async () => {
+		const { system, state } = fakeSystem();
+		spawnsAndDies(state, system, (child) => {
+			child.say("error while loading shared libraries: libssl.so.3");
+			child.exit(null, "SIGABRT");
+		});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		// The stderr line is the whole diagnosis; an exit status alone sends the
+		// user to the logs for it.
+		await expect(sidecar.start()).rejects.toThrow(/libssl\.so\.3/);
+		await expect(sidecar.start()).rejects.toThrow(/signal SIGABRT/);
+	});
+
+	it("reports a spawn that never produced a process at all", async () => {
+		const { system, state } = fakeSystem();
+		spawnsAndDies(state, system, (child) => {
+			queueMicrotask(() => child.emit("error", new Error("spawn EACCES")));
+		});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await expect(sidecar.start()).rejects.toThrow(/EACCES/);
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("still waits out the ceiling for an engine that is merely slow", async () => {
+		const { system, state } = fakeSystem();
+		// Spawns, stays alive, never answers: the loop has nothing to shortcut on
+		// and must not mistake "not ready yet" for "dead".
+		spawnsAndDies(state, system, () => {});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await expect(sidecar.start()).rejects.toThrow(/failed to start within 45 seconds/);
+		// The early exit must not have shortened the wait for a live engine.
+		expect(vi.mocked(system.probeHealth).mock.calls.length).toBeGreaterThan(50);
+	});
+});
+
+describe("EngineSidecar - the missing-binary message", () => {
+	function removeBinaries() {
+		for (const name of ["vayu-engine", "vayu-engine.exe"]) {
+			rmSync(join(fake.userData, "bin", name), { force: true });
+		}
+	}
+
+	it("points at the build entry point that exists", async () => {
+		const { system } = fakeSystem();
+		removeBinaries();
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		// Read exactly once by a user, at the moment nothing works, so every line
+		// of it has to lead somewhere real.
+		await expect(sidecar.start()).rejects.toThrow(/python build\.py -e/);
+		await expect(sidecar.start()).rejects.toThrow(/docs\/building\.md/);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+	});
+
+	it("leaves no reference to the build-script directory the repo does not have", () => {
+		const here = dirname(fileURLToPath(import.meta.url));
+		const sources = readdirSync(here, { recursive: true, withFileTypes: true })
+			.filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
+			// This file spells the dead path in the assertion below, so scanning it
+			// would flag the guard itself.
+			.filter((entry) => entry.name !== "sidecar.test.ts")
+			.map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8"));
+
+		// Without this the scan below passes on an empty list - the failure mode
+		// CLAUDE.md records a source guard sitting in for weeks.
+		expect(sources.length).toBeGreaterThan(10);
+		expect(sources.join("").length).toBeGreaterThan(10_000);
+
+		const deadPath = ["scripts", "build", ""].join("/");
+		expect(sources.filter((source) => source.includes(deadPath))).toEqual([]);
 	});
 });
 
