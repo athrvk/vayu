@@ -1138,13 +1138,29 @@ def setup_icons(project_root: Path):
 
     spinner.stop()
 
-def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path) -> bool:
+def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path, clean: bool = False) -> bool:
     """Build Electron app."""
     app_dir = project_root / "app"
 
     if not app_dir.exists():
         print_error(f"App directory not found: {app_dir}")
         return False
+
+    # Clean
+    if clean:
+        # tsc's incremental cache (tsconfig.node.tsbuildinfo) can fall out of
+        # sync with dist-electron - a file gains a new import but the compiler
+        # decides the imported module itself doesn't need re-emitting, leaving
+        # dist-electron with a reference to a file that was never written.
+        dist_electron = app_dir / "dist-electron"
+        tsbuildinfo = app_dir / "tsconfig.node.tsbuildinfo"
+        if dist_electron.exists() or tsbuildinfo.exists():
+            spinner = Spinner("Cleaning app build artifacts")
+            spinner.start()
+            shutil.rmtree(dist_electron, ignore_errors=True)
+            tsbuildinfo.unlink(missing_ok=True)
+            spinner.stop()
+            print()
 
     # Install dependencies
     if not (app_dir / "node_modules").exists():
@@ -1612,7 +1628,7 @@ def _run():
             current_step += 1
             print_step(current_step, total_steps, "Application")
             phase_start = time.time()
-            if not build_app(dev_mode, engine_binary, project_root):
+            if not build_app(dev_mode, engine_binary, project_root, args.clean):
                 sys.exit(1)
             phase_times.append(("Application", time.time() - phase_start))
 
