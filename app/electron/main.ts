@@ -192,9 +192,14 @@ function createWindow() {
 	// anything (and on macOS it never quits at all), so the flush has to happen
 	// here. Bound to this window rather than to `mainWindow`, which may point at
 	// a replacement by the time the flush lands.
+	//
+	// Gated on settled, not on requested: an X click landing while a quit's
+	// flush is still in flight must not destroy the renderer mid-write. In that
+	// state the flush below joins the round trip already out and closes the
+	// window when it settles.
 	const closingWindow = mainWindow;
 	closingWindow.on("close", (event) => {
-		if (saveFlusher.hasFlushed()) return;
+		if (saveFlusher.hasSettled()) return;
 		event.preventDefault();
 		saveFlusher.flush(() => {
 			if (!closingWindow.isDestroyed()) closingWindow.close();
@@ -738,14 +743,21 @@ app.on("window-all-closed", () => {
 	}
 });
 
+// One stable callback, not a fresh closure per quit: every quit gesture that
+// lands during the flush resumes the same quit, so a double Cmd-Q takes the
+// second pass once rather than starting two engine shutdowns.
+const resumeQuit = () => app.quit();
+
 // Ensure saves are flushed and engine is stopped when the app quits
 app.on("before-quit", (event) => {
 	// First pass: ask the renderer to flush pending saves. Quit resumes as
-	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. A close
-	// that already flushed falls straight through to the second pass.
-	if (!saveFlusher.hasFlushed()) {
+	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. Only a
+	// flush that has *settled* falls through to the second pass - a second quit
+	// gesture arriving mid-flush joins the flush in flight instead, so the
+	// engine is never stopped out from under saves still being written.
+	if (!saveFlusher.hasSettled()) {
 		event.preventDefault();
-		saveFlusher.flush(() => app.quit());
+		saveFlusher.flush(resumeQuit);
 		return;
 	}
 

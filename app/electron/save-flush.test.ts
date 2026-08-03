@@ -52,6 +52,15 @@ function fakeTransport(options: { hasRenderer?: boolean } = {}) {
 		ack: () => [...listeners].forEach((l) => l()),
 		/** The fallback timer expired. */
 		expire: () => timer?.fire(),
+		/**
+		 * Hold on to the ceiling armed right now, to fire after a later flush has
+		 * armed its own - real `setTimeout` timers are not cancelled by the next
+		 * flush either.
+		 */
+		expireLater: () => {
+			const armed = timer;
+			return () => armed?.fire();
+		},
 		timeoutMs: () => timer?.ms,
 		listenerCount: () => listeners.size,
 	};
@@ -126,7 +135,7 @@ describe("the quit path and the close path share one flush", () => {
 		// X button: flush, then let the close through.
 		flusher.flush(vi.fn());
 		t.ack();
-		expect(flusher.hasFlushed()).toBe(true);
+		expect(flusher.hasSettled()).toBe(true);
 
 		// `window-all-closed` -> app.quit() -> before-quit, arriving second.
 		const quit = vi.fn();
@@ -145,7 +154,7 @@ describe("the quit path and the close path share one flush", () => {
 
 		// main.ts's close handler is a no-op in this state, which is what keeps
 		// the window from being held open by a second round trip.
-		expect(flusher.hasFlushed()).toBe(true);
+		expect(flusher.hasSettled()).toBe(true);
 	});
 
 	it("flushes again for a new window, which has its own unsaved work", () => {
@@ -161,6 +170,107 @@ describe("the quit path and the close path share one flush", () => {
 
 		expect(t.transport.requestFlush).toHaveBeenCalledTimes(2);
 		expect(close).not.toHaveBeenCalled();
+	});
+});
+
+describe("a second gesture inside the flush window", () => {
+	it("joins the flush in flight rather than settling on top of it", () => {
+		// The data loss: `hasFlushed()` meant "requested", so the second Cmd-Q of an
+		// impatient double ran its callback immediately - stopping the engine while
+		// the renderer's saves were still on the wire.
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+		const first = vi.fn();
+		const second = vi.fn();
+
+		flusher.flush(first);
+		flusher.flush(second);
+
+		// One round trip, and nobody proceeds until the renderer answers it.
+		expect(t.transport.requestFlush).toHaveBeenCalledTimes(1);
+		expect(first).not.toHaveBeenCalled();
+		expect(second).not.toHaveBeenCalled();
+
+		t.ack();
+		expect(first).toHaveBeenCalledTimes(1);
+		expect(second).toHaveBeenCalledTimes(1);
+	});
+
+	it("releases the joiners on the ceiling too, when the renderer never ACKs", () => {
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+		const first = vi.fn();
+		const second = vi.fn();
+
+		flusher.flush(first);
+		flusher.flush(second);
+		t.expire();
+
+		expect(first).toHaveBeenCalledTimes(1);
+		expect(second).toHaveBeenCalledTimes(1);
+	});
+
+	it("runs a repeated callback once - a double Cmd-Q is one quit to resume", () => {
+		// main.ts passes one stable `resumeQuit`, so the second gesture joins the
+		// pending settle without queueing a second engine shutdown behind it.
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+		const resumeQuit = vi.fn();
+
+		flusher.flush(resumeQuit);
+		flusher.flush(resumeQuit);
+		t.ack();
+
+		expect(resumeQuit).toHaveBeenCalledTimes(1);
+	});
+
+	it("a joiner that flushes again from its callback is not made to wait", () => {
+		// `resumeQuit` re-enters before-quit, which calls flush() a second time.
+		// By then the flush has settled, so the second pass proceeds immediately
+		// instead of deadlocking on a round trip that is already over.
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+		const secondPass = vi.fn();
+
+		flusher.flush(() => flusher.flush(secondPass));
+		t.ack();
+
+		expect(secondPass).toHaveBeenCalledTimes(1);
+		expect(t.transport.requestFlush).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not report settled while the flush is still in flight", () => {
+		// Both main.ts consumers gate the renderer's destruction on this, so a
+		// requested-but-unanswered flush reading as settled is the whole defect.
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+
+		flusher.flush(vi.fn());
+		expect(flusher.hasSettled()).toBe(false);
+
+		t.ack();
+		expect(flusher.hasSettled()).toBe(true);
+	});
+
+	it("a new window's flush cannot be settled early by the old window's ceiling", () => {
+		// The 2s timer of window 1 is still armed when window 2 starts flushing.
+		const t = fakeTransport();
+		const flusher = createSaveFlusher(t.transport);
+
+		flusher.flush(vi.fn());
+		const staleCeiling = t.expireLater();
+		t.ack();
+		flusher.reset(); // createWindow()
+
+		const close = vi.fn();
+		flusher.flush(close);
+		staleCeiling();
+
+		expect(close).not.toHaveBeenCalled();
+		expect(flusher.hasSettled()).toBe(false);
+
+		t.ack();
+		expect(close).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -180,10 +290,25 @@ describe("main.ts wiring", () => {
 		expect(closeHandler).toContain("saveFlusher.flush");
 	});
 
-	it("routes the quit path through the same flusher", () => {
+	it("routes the quit path through the same flusher, gated on settled", () => {
 		const quitHandler = main.slice(main.indexOf('app.on("before-quit"'));
-		expect(quitHandler).toContain("saveFlusher.hasFlushed()");
-		expect(quitHandler).toContain("saveFlusher.flush(() => app.quit())");
+		expect(quitHandler).toContain("saveFlusher.hasSettled()");
+		expect(quitHandler).toContain("saveFlusher.flush(resumeQuit)");
+	});
+
+	it("gates both consumers on settled, never on requested", () => {
+		// `hasFlushed()` reported a flush that was still in flight as done, which
+		// let a second quit gesture stop the engine mid-save. Nothing may read
+		// that meaning back into main.ts.
+		expect(main).not.toContain("hasFlushed");
+		const closeHandler = main.slice(main.indexOf('.on("close"'));
+		expect(closeHandler).toContain("saveFlusher.hasSettled()");
+	});
+
+	it("resumes a quit through one stable callback", () => {
+		// A fresh closure per gesture would queue one engine shutdown per
+		// impatient Cmd-Q behind the same flush.
+		expect(main).toContain("const resumeQuit = () => app.quit();");
 	});
 
 	it("clears the flush for a newly created window", () => {

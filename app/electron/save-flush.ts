@@ -23,6 +23,14 @@
  * and an X that flushed must not make the quit that follows it wait a second
  * time.
  *
+ * "Already flushed" is three states, not two. The round trip takes up to
+ * FLUSH_TIMEOUT_MS, and a second gesture inside that window - an impatient
+ * double Cmd-Q, or an X click on top of a quit - used to read "flush requested"
+ * as "flush finished" and tear the renderer and the engine down while its saves
+ * were still in flight, which is the very data loss the flusher exists to
+ * prevent. So a caller arriving mid-flush joins the round trip already out and
+ * runs when it settles; only a settled flush lets anyone straight through.
+ *
  * Kept out of main.ts so it can be tested - main.ts creates windows and starts
  * the engine at import time, which no unit test can do.
  */
@@ -45,48 +53,84 @@ export interface FlushTransport {
 
 export interface SaveFlusher {
 	/**
-	 * Flush once, then run `done`. If a flush already happened for this window,
-	 * `done` runs immediately - the renderer has nothing left to write.
+	 * Flush once, then run `done`.
+	 *
+	 * - Nothing flushed yet: ask the renderer, and run `done` on its ACK or on
+	 *   the ceiling, whichever lands first.
+	 * - A flush in flight: join it. `done` runs when that one settles, not now -
+	 *   the renderer's saves are still being written. Joining twice with the
+	 *   same callback still runs it once: a repeated gesture (the second Cmd-Q
+	 *   of an impatient double) is one thing to resume, not two.
+	 * - Already settled: `done` runs immediately, the renderer has nothing left
+	 *   to write.
 	 */
 	flush: (done: () => void) => void;
-	/** Whether this window's renderer has already been asked to flush. */
-	hasFlushed: () => boolean;
+	/**
+	 * Whether this window's flush has finished - the renderer ACKed, or the
+	 * ceiling expired. False both before a flush and during one, so a caller
+	 * that gates the renderer's destruction on this cannot mistake a flush that
+	 * is still in flight for one that is done.
+	 */
+	hasSettled: () => boolean;
 	/** Forget the flush, for a freshly created window. */
 	reset: () => void;
 }
 
 export function createSaveFlusher(transport: FlushTransport): SaveFlusher {
-	let flushed = false;
+	let state: "idle" | "in-flight" | "settled" = "idle";
+	/** Callbacks waiting on the flush in flight, in the order they joined. */
+	let waiting: Array<() => void> = [];
+	/**
+	 * Bumped by every flush and every reset. The ceiling timer of a previous
+	 * window's flush outlives that flush - without this it could settle the
+	 * flush of the window that replaced it, seconds early.
+	 */
+	let generation = 0;
+
+	const startFlush = () => {
+		const startedAt = generation;
+		let unsubscribe: (() => void) | null = null;
+
+		const settle = () => {
+			// The ACK and the ceiling race each other, and a superseded run's
+			// timer may still fire: only the current run, still in flight, settles.
+			if (startedAt !== generation || state !== "in-flight") return;
+			state = "settled";
+			unsubscribe?.();
+			const joined = waiting;
+			waiting = [];
+			for (const done of joined) done();
+		};
+
+		// Subscribe before asking, so an ACK that arrives synchronously (a
+		// fake transport in a test, or a renderer with nothing to save) is
+		// not missed.
+		unsubscribe = transport.onFlushed(settle);
+		transport.schedule(settle, FLUSH_TIMEOUT_MS);
+		if (!transport.requestFlush()) settle();
+	};
 
 	return {
-		hasFlushed: () => flushed,
+		hasSettled: () => state === "settled",
 
 		reset: () => {
-			flushed = false;
+			generation++;
+			state = "idle";
+			// A new window's renderer cannot answer for the old one's saves, so
+			// anything still waiting on the old flush is dropped with it.
+			waiting = [];
 		},
 
 		flush: (done) => {
-			if (flushed) {
+			if (state === "settled") {
 				done();
 				return;
 			}
-			flushed = true;
-
-			let settled = false;
-			let unsubscribe: (() => void) | null = null;
-			const settle = () => {
-				if (settled) return;
-				settled = true;
-				unsubscribe?.();
-				done();
-			};
-
-			// Subscribe before asking, so an ACK that arrives synchronously (a
-			// fake transport in a test, or a renderer with nothing to save) is
-			// not missed.
-			unsubscribe = transport.onFlushed(settle);
-			transport.schedule(settle, FLUSH_TIMEOUT_MS);
-			if (!transport.requestFlush()) settle();
+			if (!waiting.includes(done)) waiting.push(done);
+			if (state === "in-flight") return;
+			state = "in-flight";
+			generation++;
+			startFlush();
 		},
 	};
 }
