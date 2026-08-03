@@ -96,8 +96,14 @@ vayu::Result<vayu::Response> result) {
                 { "downloadMs", response.timing.download_ms } };
         }
 
-        context->metrics_collector->record_error (
-        response.error_code, response.error_message, error_json.dump ());
+        // Every error is a capture candidate: a failure is exactly the sample a
+        // user opens the Samples tab for, and errors are already bounded by
+        // `maxStoredErrors`. Passing the response rather than a copy keeps the
+        // body-sized work inside the collector, after it has decided to keep
+        // the record (see MetricsCollector::record_error).
+        context->metrics_collector->record_error (response.error_code,
+        response.error_message, error_json.dump (),
+        context->capture_response_bodies ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
     } else {
@@ -115,15 +121,25 @@ vayu::Result<vayu::Response> result) {
         const bool is_slow = context->slow_threshold_ms > 0 &&
         latency >= static_cast<double> (context->slow_threshold_ms);
         const bool sampled = context->metrics_collector->should_sample_success ();
+        // Third reason, and the cheapest: one relaxed fetch_add deciding
+        // whether this completion is among the first few of its status code. A
+        // uniform slice of a 30M-request run is a thousand identical 200s;
+        // three of each code is what answers "what does this target's 503
+        // look like".
+        const bool exemplar =
+        context->metrics_collector->claim_status_exemplar (response.status_code);
 
         std::string trace_data;
         auto trace_reason = SuccessTraceReason::None;
 
-        if (sampled || is_slow) {
-            // Slow wins when a completion is both: the trace is identical, and
-            // charging it to the slow budget leaves the 1-in-N budget for
-            // ordinary traffic.
-            trace_reason = is_slow ? SuccessTraceReason::Slow : SuccessTraceReason::Sampled;
+        if (sampled || is_slow || exemplar) {
+            // Exemplar outranks both: the other two stores are reservoirs and
+            // can displace what they hold, and an exemplar that gets displaced
+            // is not an exemplar. Between the remaining two, slow wins - the
+            // trace is identical, and charging it to the slow budget leaves the
+            // 1-in-N budget for ordinary traffic.
+            trace_reason = exemplar ? SuccessTraceReason::Exemplar :
+            (is_slow ? SuccessTraceReason::Slow : SuccessTraceReason::Sampled);
 
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
                 { "wireMs", response.timing.wire_ms },
@@ -142,9 +158,13 @@ vayu::Result<vayu::Response> result) {
             trace_data = timing_json.dump ();
         }
 
-        // Record to in-memory collector (high-performance, no DB writes)
-        context->metrics_collector->record_success (response.status_code,
-        latency, response.timing.queue_wait_ms, trace_data, trace_reason);
+        // Record to in-memory collector (high-performance, no DB writes). The
+        // collector ignores the capture source for a plain `Sampled` record -
+        // that budget is a uniform slice, and capture is deliberately
+        // failure-and-outlier-shaped.
+        context->metrics_collector->record_success (response.status_code, latency,
+        response.timing.queue_wait_ms, trace_data, trace_reason,
+        context->capture_response_bodies ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 

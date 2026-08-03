@@ -20,12 +20,14 @@ import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import {
 	CompactHeadersViewer,
+	CapturedResponseNotice,
 	ResponseBody,
 	SampledExchange,
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
-import { SampleRetentionNote } from "@/components/shared";
+import { SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
+import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 // Helper to format timestamp
@@ -44,6 +46,14 @@ function formatTime(timestamp: number): string {
 
 export default function RequestResponseView({ report }: RequestResponseViewProps) {
 	const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
+
+	// Fetched only once a row is open. The captured bodies are deliberately not
+	// part of the report payload - that response is polled, and this one is not.
+	// The hook runs before the early return below, as hooks must.
+	const { data: capturedSamples } = useRunSamplesQuery(
+		report?.metadata?.runId ?? null,
+		expandedResults.size > 0
+	);
 
 	if (!report) {
 		return (
@@ -266,10 +276,15 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							budget="traces"
 							className="mx-5 mb-3"
 						/>
+						<CapturedDataWarning sampling={report.sampling} className="mx-5 mb-3" />
 						<ScrollArea className="h-[400px]">
 							<div className="divide-y">
 								{report.results.map((result, index) => {
 									const trace = result.trace;
+									const captured =
+										result.id === undefined
+											? undefined
+											: capturedSamples?.get(result.id);
 
 									// The phases this sample actually reported, in wire order, from the
 									// shared descriptor. Absent ones are dropped: a trace with no TLS is
@@ -359,34 +374,43 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 												</div>
 											)}
 
-											{/* Response Headers - the shared compact viewer. It declares its
-											    own `surface-sunken`, so its row rules resolve correctly on the
-											    shell's `bg-muted/30` panel where a bare `border-rule` would
-											    fall back to invisible. */}
-											{trace?.headers && (
-												<CompactHeadersViewer
-													headers={trace.headers}
-													title="Response Headers"
-													className="max-h-40 overflow-auto"
-												/>
-											)}
-
-											{/* Response Body - the shared viewer (pretty/raw/preview with
-											    body-type detection), not a raw `<pre>`. */}
-											{trace?.body && (
-												<div className="space-y-1">
-													<p className="text-xs font-medium text-muted-foreground">
-														Response Body
-													</p>
-													<div className="h-48 overflow-hidden rounded-md border border-rule">
-														<ResponseBody
-															body={trace.body}
-															headers={trace.headers || {}}
-															height="100%"
-															compact
+											{/* The captured exchange (issue #174). These two blocks used
+											    to read flat `trace.headers` / `trace.body`, a shape no
+											    engine writer emits at that nesting, so both were dead and
+											    this panel showed timing and nothing else. The bodies now
+											    come from GET /runs/:id/samples, fetched only once a row is
+											    expanded. */}
+											{captured && (
+												<>
+													<CapturedResponseNotice
+														response={captured.response}
+													/>
+													{Object.keys(captured.response.headers).length >
+														0 && (
+														<CompactHeadersViewer
+															headers={captured.response.headers}
+															title="Response Headers"
+															className="max-h-40 overflow-auto"
 														/>
-													</div>
-												</div>
+													)}
+													{captured.response.body && (
+														<div className="space-y-1">
+															<p className="text-xs font-medium text-muted-foreground">
+																Response Body
+															</p>
+															<div className="h-48 overflow-hidden rounded-md border border-rule">
+																<ResponseBody
+																	body={captured.response.body}
+																	headers={
+																		captured.response.headers
+																	}
+																	height="100%"
+																	compact
+																/>
+															</div>
+														</div>
+													)}
+												</>
 											)}
 										</SampledExchange>
 									);

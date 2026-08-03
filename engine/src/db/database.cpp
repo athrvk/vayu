@@ -39,6 +39,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -167,6 +168,10 @@ inline auto make_storage (const std::string& path) {
     // get_metric_ticks_since is polled every 500ms by the legacy SSE loop.
     make_index ("idx_metric_ticks_run_id", &MetricTick::run_id),
     make_index ("idx_results_run_id", &Result::run_id),
+    // GET /runs/:id/samples pages result_bodies by run, and the run cascade
+    // deletes both new tables by run_id.
+    make_index ("idx_result_bodies_run_id", &ResultBody::run_id),
+    make_index ("idx_body_blobs_run_id", &BodyBlob::run_id),
     // Sidebar load (get_requests_in_collection) and cascade delete.
     make_index ("idx_requests_collection_id", &Request::collection_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
@@ -257,7 +262,29 @@ inline auto make_storage (const std::string& path) {
     make_column ("status_code", &Result::status_code),
     make_column ("status_text", &Result::status_text), // Wire reason phrase
     make_column ("latency_ms", &Result::latency_ms), make_column ("error", &Result::error),
-    make_column ("trace_data", &Result::trace_data)), // JSON: headers/body for errors
+    make_column ("trace_data", &Result::trace_data)), // JSON: timing, or a design-mode exchange
+
+    // Body blobs: one row per *distinct* captured response body in a run.
+    // Content-addressed within the run so N identical load-test responses cost
+    // one copy. sync_schema() creates new tables outright, so this and the
+    // table below need no migration.
+    make_table ("body_blobs", make_column ("id", &BodyBlob::id, primary_key ().autoincrement ()),
+    make_column ("run_id", &BodyBlob::run_id), make_column ("hash", &BodyBlob::hash),
+    make_column ("content", &BodyBlob::content)),
+
+    // Result bodies: the captured exchange for one sampled result, one-to-one
+    // with a `results` row. Separate from `results` on purpose - the report
+    // path loads every result row for a run and JSON-parses each trace_data, so
+    // a body stored there would be read (and parsed) on every dashboard poll.
+    make_table ("result_bodies",
+    make_column ("result_id", &ResultBody::result_id, primary_key ()),
+    make_column ("run_id", &ResultBody::run_id),
+    make_column ("headers", &ResultBody::headers), // JSON object
+    make_column ("blob_id", &ResultBody::blob_id), // 0 = no stored body
+    make_column ("body_bytes", &ResultBody::body_bytes),
+    make_column ("truncated", &ResultBody::truncated),
+    make_column ("is_binary", &ResultBody::is_binary),
+    make_column ("content_type", &ResultBody::content_type)),
 
     // ─────────────── CONFIGURATION TABLES ───────────────
 
@@ -881,6 +908,13 @@ int64_t Database::count_runs (const RunFilter& filter) {
 // was added to both by editing only this function). Caller holds the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
+    // Captured bodies before the results they hang off, so a delete interrupted
+    // between the two leaves results without bodies rather than body rows
+    // pointing at nothing. `maxRunsRetained` doubles as the expiry for anything
+    // credential-shaped a capture picked up, which is what makes this cascade
+    // load-bearing rather than housekeeping.
+    impl_->storage.remove_all<ResultBody> (where (c (&ResultBody::run_id) == id));
+    impl_->storage.remove_all<BodyBlob> (where (c (&BodyBlob::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
     impl_->storage.remove<Run> (id);
 }
@@ -1055,14 +1089,56 @@ void Database::add_result (const Result& result) {
 
 // Batch insert with transaction for better performance
 // Includes retry logic to handle database lock contention
-void Database::add_results_batch (const std::vector<Result>& results) {
+void Database::add_results_batch (const std::vector<Result>& results,
+const std::vector<PendingResultBody>& bodies) {
     if (results.empty ())
         return;
 
     retry_on_busy ("flush results batch", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
+            // Row ids only exist after the insert, so keep them alongside the
+            // batch positions the pending bodies refer to.
+            std::vector<int> result_ids;
+            result_ids.reserve (results.size ());
             for (const auto& result : results) {
-                impl_->storage.insert (result);
+                result_ids.push_back (
+                static_cast<int> (impl_->storage.insert (result)));
+            }
+
+            // Dedup within the run: identical bodies (the norm for a load test)
+            // share one blob row. The map is rebuilt per attempt on purpose -
+            // a retried transaction re-inserts the blobs it rolled back.
+            std::map<std::string, int> blob_ids;
+            for (const auto& pending : bodies) {
+                if (pending.result_index >= result_ids.size ()) {
+                    continue; // Defensive: an index with no result cannot be attached.
+                }
+
+                int blob_id = 0;
+                if (!pending.body_hash.empty ()) {
+                    auto it = blob_ids.find (pending.body_hash);
+                    if (it != blob_ids.end ()) {
+                        blob_id = it->second;
+                    } else {
+                        BodyBlob blob;
+                        blob.run_id  = results[pending.result_index].run_id;
+                        blob.hash    = pending.body_hash;
+                        blob.content = pending.body;
+                        blob_id = static_cast<int> (impl_->storage.insert (blob));
+                        blob_ids.emplace (pending.body_hash, blob_id);
+                    }
+                }
+
+                ResultBody row;
+                row.result_id    = result_ids[pending.result_index];
+                row.run_id       = results[pending.result_index].run_id;
+                row.headers      = pending.headers;
+                row.blob_id      = blob_id;
+                row.body_bytes   = pending.body_bytes;
+                row.truncated    = pending.truncated;
+                row.is_binary    = pending.binary;
+                row.content_type = pending.content_type;
+                impl_->storage.replace (row);
             }
             return true; // Commit
         });
@@ -1072,6 +1148,31 @@ void Database::add_results_batch (const std::vector<Result>& results) {
 std::vector<Result> Database::get_results (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Result> (where (c (&Result::run_id) == run_id));
+}
+
+// ============================================================================
+// Captured response bodies - read only by GET /runs/:id/samples
+// ============================================================================
+
+std::vector<ResultBody>
+Database::get_result_bodies_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<ResultBody> (where (c (&ResultBody::run_id) == run_id),
+    order_by (&ResultBody::result_id), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_result_bodies (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<ResultBody> (where (c (&ResultBody::run_id) == run_id));
+}
+
+std::string Database::get_body_blob_content (int blob_id) {
+    if (blob_id == 0) {
+        return {}; // No stored body: binary, absent, or dropped for budget.
+    }
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto blob = impl_->storage.get_pointer<BodyBlob> (blob_id);
+    return blob ? blob->content : std::string{};
 }
 
 // ============================================================================
@@ -1579,6 +1680,33 @@ void Database::seed_default_config () {
     "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
     "1024",       // 1KB
     "104857600",  // 100MB
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxSampleBodyBytes",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
+    "integer", "Maximum Captured Sample Body",
+    "Largest response body kept for a single captured load-run sample. "
+    "Deliberately far smaller than the design-run trace limit, because a load "
+    "run captures tens of exchanges nobody asked for individually. Bodies over "
+    "this size are stored truncated and marked as such. Default 32KB.",
+    "observability",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
+    "0",         // 0 disables body capture while keeping headers and metadata
+    "104857600", // 100MB
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxSampleBytes",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
+    "integer", "Load-Run Capture Budget",
+    "Total captured response-body bytes one load run may store. Once spent, "
+    "samples keep their headers and metadata and only their bodies are "
+    "dropped, and the report reports how many. Captured data is stored "
+    "verbatim and can contain credentials; it is deleted with the run. "
+    "Default 2MB.",
+    "observability",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
+    "0",          // 0 disables body capture while keeping headers and metadata
+    "1073741824", // 1GB
     std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxResponseBodyBytes",

@@ -67,6 +67,19 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
     return ticks > max_ticks ? max_ticks : ticks;
 }
 
+/**
+ * @brief Engine-config-backed defaults a run needs at construction time.
+ *
+ * RunContext is built from the run's JSON alone - it holds no Database - so
+ * anything whose default lives in `config_entries` is resolved by the caller
+ * and handed in, the way `maxStoredErrors` always has been. A run's own config
+ * still overrides these; they are only what it falls back to.
+ */
+struct CaptureDefaults {
+    size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
+    size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+};
+
 struct RunContext {
     std::string run_id;
     std::unique_ptr<vayu::http::EventLoop> event_loop;
@@ -97,6 +110,15 @@ struct RunContext {
     // MetricsCollectorConfig::store_success_traces, which is where the sampling
     // gate reads it; a second copy here would have no reader.
     int slow_threshold_ms{ constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS };
+
+    // Whether retained samples carry their response headers and body, resolved
+    // once here for the same reason as `slow_threshold_ms` above: handle_result
+    // reads it per completion inside the curl completion drain, where a
+    // string-keyed `config.value(...)` is on the critical path of that worker's
+    // socket processing. The collector holds its own copy (it decides what to
+    // copy); this one exists so a capture-off run never even reaches the
+    // exemplar gate.
+    bool capture_response_bodies{ constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES };
 
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
@@ -230,7 +252,8 @@ struct RunContext {
     // caller without a database to hand) on the stock cap.
     RunContext (const std::string& id,
     nlohmann::json cfg,
-    size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS);
+    size_t max_errors                = constants::metrics_collector::DEFAULT_MAX_ERRORS,
+    CaptureDefaults capture_defaults = {});
     ~RunContext ();
 };
 
@@ -295,6 +318,15 @@ struct SamplingRetention {
     size_t success_traces_dropped   = 0;
     size_t slow_traces_dropped      = 0;
     size_t response_samples_dropped = 0;
+    size_t exemplars_dropped        = 0;
+    /// Samples whose body was dropped once the run's capture budget was spent.
+    size_t sample_bodies_dropped = 0;
+    /// Captured exchanges persisted for this run. Doubles as the run's marker
+    /// that it holds response data stored verbatim - headers and bodies are
+    /// captured without redaction, so a non-zero count is what lets the Samples
+    /// tab warn that the stored set may contain credentials. Deleted with the
+    /// run, which makes `maxRunsRetained` the expiry for that data too.
+    size_t response_bodies_captured = 0;
 };
 
 /**

@@ -177,6 +177,30 @@ export function useRunReportQuery(runId: string | null) {
 }
 
 /**
+ * Fetch a run's captured response exchanges, indexed by result id.
+ *
+ * `enabled` is the point of this hook: the bodies are not part of the report
+ * and must not be fetched with it - a surface passes `true` only once a reader
+ * has expanded a sample. Returns a Map so a card can look its own exchange up
+ * in constant time instead of scanning the page.
+ *
+ * Captured data never changes after a run finishes, so it is cached like the
+ * time series rather than the polled report.
+ */
+export function useRunSamplesQuery(runId: string | null, enabled: boolean) {
+	return useQuery({
+		queryKey: queryKeys.runs.samples(runId ?? ""),
+		queryFn: async () => {
+			const page = await apiService.getRunSamples(runId!);
+			return new Map(page.data.map((sample) => [sample.resultId, sample]));
+		},
+		enabled: !!runId && enabled,
+		staleTime: Infinity,
+		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
+	});
+}
+
+/**
  * Fetch time-series metrics for a run (paginated, auto-fetches all pages)
  * Used for rendering historical charts in load test detail view.
  */

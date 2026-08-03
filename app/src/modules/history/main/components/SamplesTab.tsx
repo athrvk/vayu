@@ -14,12 +14,20 @@
 import { useState } from "react";
 import { Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
-import { EmptyState, SampleRetentionNote } from "@/components/shared";
+import { EmptyState, SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
+import { useRunSamplesQuery } from "@/queries/runs";
 import SampleRequestCard from "./SampleRequestCard";
 import type { TabProps, SampleResult } from "../../types";
 
 export default function SamplesTab({ report }: TabProps) {
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+	// Fetched only once a row is open, which is the whole reason the captured
+	// bodies are not part of the report payload.
+	const { data: captured } = useRunSamplesQuery(
+		report.metadata?.runId ?? null,
+		expandedIndex !== null
+	);
 
 	if (!report.results || report.results.length === 0) {
 		return (
@@ -53,6 +61,7 @@ export default function SamplesTab({ report }: TabProps) {
 					shown={report.results.length}
 					budget="traces"
 				/>
+				<CapturedDataWarning sampling={report.sampling} />
 				{report.results.map((sample: SampleResult, idx: number) => (
 					<SampleRequestCard
 						key={idx}
@@ -60,6 +69,7 @@ export default function SamplesTab({ report }: TabProps) {
 						index={idx}
 						isExpanded={expandedIndex === idx}
 						onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}
+						captured={sample.id === undefined ? undefined : captured?.get(sample.id)}
 					/>
 				))}
 			</CardContent>

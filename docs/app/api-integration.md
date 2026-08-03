@@ -221,6 +221,9 @@ apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
 apiService.listAllRuns(params?): Promise<Run[]>
 apiService.getRun(id): Promise<Run>            // full configSnapshot
 apiService.getRunReport(id): Promise<RunReport>
+// Response headers/bodies captured for a run's samples. Its own request, not
+// fields on the report - see below.
+apiService.getRunSamples(id, { limit?, offset? }): Promise<RunSamplesResponse>
 apiService.stopRun(id): Promise<StopRunResponse>
 apiService.deleteRun(id): Promise<void>
 ```
@@ -234,6 +237,23 @@ retry, and Settings' *Clear run history* already counts per-run failures through
 `statusCode`, rather than the engine's message - which is a caller's choice now
 that `httpClient` reads the message on every error shape (issue #173), not a
 constraint.
+
+**Captured response bodies are fetched separately, and lazily.** A load run
+stores the response headers and body for its failures, its slow outliers and a
+few exemplars of each status code; `GET /runs/:id/report` deliberately does not
+carry them, because that endpoint loads and JSON-parses every result row for the
+run on each fetch and the dashboard polls it. `useRunSamplesQuery(runId, enabled)`
+(`queries/runs.ts`) wraps `getRunSamples` and is enabled **only once a reader
+expands a sample** - passing `true` unconditionally would reintroduce exactly the
+cost the split exists to avoid. It returns a `Map` keyed by `resultId`, joined
+against `report.results[].id`.
+
+Two surfaces consume it - the dashboard's Sampled Requests
+(`RequestResponseView`) and the history Samples tab - and both render
+`CapturedResponseNotice` (truncated / dropped for budget / binary) and
+`CapturedDataWarning` (the run stored responses verbatim, including anything
+credential-shaped). Both notices live in `components/shared`, so the wording
+exists once rather than twice.
 
 #### Scripting
 
@@ -338,6 +358,9 @@ export const API_ENDPOINTS = {
   RUN_BY_ID: (id: string) => `/runs/${id}`,
   RUN_REPORT: (id: string) => `/runs/${id}/report`,
   RUN_STOP: (id: string) => `/runs/${id}/stop`,
+  // Captured response headers/bodies, fetched only when a sample is expanded
+  RUN_SAMPLES: (id: string, limit: number, offset: number) =>
+    `/runs/${id}/samples?limit=${limit}&offset=${offset}`,
   
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,

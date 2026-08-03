@@ -758,6 +758,7 @@ runs: {
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
   timeSeries: (id) => ["runs", "timeSeries", id],
+  samples: (id) => ["runs", "samples", id],               // captured response bodies, fetched lazily
 },
 // environments mirrors collections; globals / health / config /
 // scriptCompletions / scriptTypes / oauth / prefetch each own a root.

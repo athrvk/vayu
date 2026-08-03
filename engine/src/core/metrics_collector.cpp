@@ -12,6 +12,7 @@
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/reservoir.hpp"
+#include "vayu/core/sample_capture.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -138,6 +139,13 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
         slow_results_.reserve (std::min (config_.max_slow_results, max_reserve));
     }
 
+    // Exemplars are bounded by EXEMPLARS_PER_STATUS x distinct status codes,
+    // which is single digits on any real target, so the reserve is the store's
+    // own ceiling rather than anything derived from the request count.
+    if (config_.capture_response_bodies && config_.max_exemplar_results > 0) {
+        exemplar_results_.reserve (std::min (config_.max_exemplar_results, max_reserve));
+    }
+
     // Reserve response samples for script validation
     response_samples_.reserve (config_.max_response_samples);
 }
@@ -161,11 +169,67 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
     }
 }
 
+bool MetricsCollector::claim_status_exemplar (int status_code) {
+    if (!config_.capture_response_bodies) {
+        return false;
+    }
+    // Out-of-range codes share the last slot rather than taking a lock: a
+    // misbehaving proxy answering 999 still gets exemplars, they are just not
+    // per-code. Keeping this branch lock-free is the point - it runs on every
+    // completion, retained or not.
+    const int slot = (status_code >= 0 && status_code < STATUS_CODE_SLOTS - 1) ?
+    status_code :
+    STATUS_CODE_SLOTS - 1;
+    const size_t claimed = exemplar_claims_[slot].fetch_add (1, std::memory_order_relaxed);
+    return claimed < constants::metrics_collector::EXEMPLARS_PER_STATUS;
+}
+
+CapturedExchange MetricsCollector::capture_exchange (const Response& response) {
+    CapturedExchange captured;
+    captured.headers    = response.headers;
+    captured.body_bytes = static_cast<int64_t> (response.body.size ());
+
+    // Headers compares case-insensitively, so one lookup covers every spelling
+    // an origin might send.
+    const auto content_type = response.headers.find ("content-type");
+    if (content_type != response.headers.end ()) {
+        captured.content_type = content_type->second;
+    }
+
+    if (response.body.empty ()) {
+        return captured;
+    }
+
+    const size_t want = std::min (response.body.size (), config_.max_sample_body_bytes);
+    if (want == 0) {
+        // max_sample_body_bytes of 0 keeps headers and metadata and no body.
+        captured.body_dropped = true;
+        sample_bodies_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return captured;
+    }
+
+    // Charge the run budget before copying. fetch_add-then-refund rather than a
+    // CAS loop: the overshoot is bounded by one body per concurrent writer, and
+    // the budget is a memory guard, not an accounting figure.
+    const size_t before = captured_bytes_.fetch_add (want, std::memory_order_relaxed);
+    if (before + want > config_.max_sample_bytes) {
+        captured_bytes_.fetch_sub (want, std::memory_order_relaxed);
+        captured.body_dropped = true;
+        sample_bodies_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return captured;
+    }
+
+    captured.body      = response.body.substr (0, want);
+    captured.truncated = want < response.body.size ();
+    return captured;
+}
+
 void MetricsCollector::record_success (int status_code,
 double latency_ms,
 double queue_wait_ms,
 const std::string& trace_data,
-SuccessTraceReason trace_reason) {
+SuccessTraceReason trace_reason,
+const Response* capture_source) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     atomic_add_double (total_latency_sum_, latency_ms);
@@ -196,13 +260,46 @@ SuccessTraceReason trace_reason) {
     ResultRecord record (now_ms (), status_code, latency_ms);
     record.trace_data = trace_data;
 
+    // Exemplars take the straight path: a fixed number per status code, kept
+    // until the store is full and then refused. No reservoir, because being
+    // retained is the only thing an exemplar is for.
+    //
+    // A refusal here leaves its captured bytes charged to the run budget with
+    // no record to show for them. Left unrefunded deliberately: the budget is a
+    // memory ceiling rather than an accounting figure, over-counting it only
+    // makes capture stop sooner, and the alternative is holding the store's
+    // mutex across a body-sized copy. The gate above already bounds this to
+    // EXEMPLARS_PER_STATUS per status code, so it needs a target answering with
+    // more distinct codes than `max_exemplar_results` to happen at all.
+    if (trace_reason == SuccessTraceReason::Exemplar) {
+        if (capture_source != nullptr) {
+            record.capture = capture_exchange (*capture_source);
+        }
+        std::lock_guard<std::mutex> lock (success_mutex_);
+        if (config_.max_exemplar_results > 0 &&
+        exemplar_results_.size () >= config_.max_exemplar_results) {
+            exemplar_dropped_.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+        exemplar_results_.push_back (std::move (record));
+        return;
+    }
+
     const bool slow = trace_reason == SuccessTraceReason::Slow;
     const size_t capacity = slow ? config_.max_slow_results : config_.max_success_results;
     auto& store        = slow ? slow_results_ : success_results_;
     auto& seen_counter = slow ? slow_seen_ : success_seen_;
     auto& dropped      = slow ? slow_dropped_ : success_dropped_;
 
+    // Only the slow store captures bodies here. A `Sampled` record is a uniform
+    // slice of ordinary traffic, and a thousand identical 200s are not worth a
+    // thousand bodies - that is the decision the three-bucket policy rests on.
+    const Response* capture = slow ? capture_source : nullptr;
+
     if (capacity == 0) { // unlimited
+        if (capture != nullptr) {
+            record.capture = capture_exchange (*capture);
+        }
         std::lock_guard<std::mutex> lock (success_mutex_);
         store.push_back (std::move (record));
         return;
@@ -213,6 +310,12 @@ SuccessTraceReason trace_reason) {
     if (!slot.accepted) {
         dropped.fetch_add (1, std::memory_order_relaxed);
         return;
+    }
+
+    // The slot is claimed, so this record is being kept: copying the body now
+    // is the point of deferring it past the reservoir refusal above.
+    if (capture != nullptr) {
+        record.capture = capture_exchange (*capture);
     }
 
     bool displaced = false;
@@ -271,10 +374,11 @@ void MetricsCollector::record_response_sample (const Response& response) {
 
 void MetricsCollector::record_error (ErrorCode code,
 const std::string& message,
-const std::string& trace_data) {
+const std::string& trace_data,
+const Response* capture_source) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
-    total_errors_.fetch_add (1, std::memory_order_relaxed);
+    const size_t error_index = total_errors_.fetch_add (1, std::memory_order_relaxed);
 
     // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
     // bucket them under code 0. This keeps the status-code distribution summing
@@ -288,12 +392,24 @@ const std::string& trace_data) {
     // above stay exact, so only the per-error detail is lost. Without the cap a
     // fully-failing target grows this vector for the life of the run and then
     // flushes it as one enormous transaction.
+    // Copy the exchange before taking the store's mutex, so a body-sized copy
+    // never lengthens a critical section every failing completion queues on.
+    // `error_index` is this call's position in the error sequence, and the
+    // store admits the first `max_errors` of exactly that sequence, so this
+    // predicate and the one under the lock agree without a second counter.
+    std::optional<CapturedExchange> captured;
+    if (capture_source != nullptr &&
+    (config_.max_errors == 0 || error_index < config_.max_errors)) {
+        captured = capture_exchange (*capture_source);
+    }
+
     bool first_drop = false;
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         if (config_.max_errors == 0 || errors_.size () < config_.max_errors) {
             ResultRecord record (now_ms (), code, message);
             record.trace_data = trace_data;
+            record.capture    = std::move (captured);
             errors_.push_back (std::move (record));
         } else {
             first_drop =
@@ -402,6 +518,38 @@ std::map<int, size_t> MetricsCollector::status_code_distribution () const {
 
 size_t MetricsCollector::flush_to_database (db::Database& db) {
     std::vector<db::Result> batch;
+    std::vector<db::PendingResultBody> bodies;
+
+    // Turn a record's captured exchange into a row for `result_bodies`. This is
+    // where the expensive half of capture lives - JSON, binary detection and
+    // hashing - deliberately after load generation has stopped rather than
+    // inline in the completion drain (see CapturedExchange).
+    auto collect_capture = [&] (const ResultRecord& record) {
+        if (!record.capture.has_value ()) {
+            return;
+        }
+        const CapturedExchange& exchange = *record.capture;
+
+        db::PendingResultBody pending;
+        pending.result_index = batch.size () - 1;
+        pending.headers = nlohmann::json (exchange.headers)
+                          .dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        pending.body_bytes   = exchange.body_bytes;
+        pending.truncated    = exchange.truncated;
+        pending.content_type = exchange.content_type;
+
+        if (!exchange.body_dropped && !exchange.body.empty ()) {
+            // A binary body is stored as its size and content type, never as
+            // text: `error_handler_t::replace` would keep dump() from throwing
+            // and hand the reader a mojibake that looks like a real response.
+            pending.binary = looks_binary (exchange.body, exchange.content_type);
+            if (!pending.binary) {
+                pending.body      = exchange.body;
+                pending.body_hash = body_digest (pending.body);
+            }
+        }
+        bodies.push_back (std::move (pending));
+    };
 
     // Collect all error records
     {
@@ -418,15 +566,17 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
             db_result.error       = error.error_message;
             db_result.trace_data  = error.trace_data;
             batch.push_back (std::move (db_result));
+            collect_capture (error);
         }
     }
 
-    // Collect sampled success records and the slow-request outliers. Two
-    // budgets in memory, one table on disk: a stored row is a stored row, and
-    // the report tells them apart by the trace's `isSlow` marker.
+    // Collect sampled success records, the slow-request outliers and the
+    // per-status exemplars. Three budgets in memory, one table on disk: a
+    // stored row is a stored row, and the report tells them apart by the
+    // trace's `isSlow` marker.
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
-        for (const auto* store : { &success_results_, &slow_results_ }) {
+        for (const auto* store : { &success_results_, &slow_results_, &exemplar_results_ }) {
             for (const auto& success : *store) {
                 db::Result db_result;
                 db_result.run_id      = run_id_;
@@ -439,14 +589,17 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
                 db_result.latency_ms = success.latency_ms;
                 db_result.trace_data = success.trace_data;
                 batch.push_back (std::move (db_result));
+                collect_capture (success);
             }
         }
     }
 
-    // Batch insert with transaction (prevents WAL growth and OOM)
+    // Batch insert with transaction (prevents WAL growth and OOM). Results and
+    // their captured bodies land together, so a failure leaves neither.
     if (!batch.empty ()) {
-        db.add_results_batch (batch);
+        db.add_results_batch (batch, bodies);
     }
+    response_bodies_captured_.store (bodies.size (), std::memory_order_relaxed);
 
     return batch.size ();
 }
@@ -466,22 +619,37 @@ size_t MetricsCollector::memory_usage_bytes () const {
         bytes += hdr_get_memory_size (latency_histogram_);
     }
 
+    // A record's captured exchange, when it has one. Counted here rather than
+    // assumed small: bodies are what make a retained record expensive, and the
+    // whole-run budget is only a ceiling, not a measurement.
+    auto capture_bytes = [] (const ResultRecord& record) -> size_t {
+        if (!record.capture.has_value ()) {
+            return 0;
+        }
+        size_t bytes = record.capture->body.capacity () +
+        record.capture->content_type.capacity ();
+        for (const auto& [name, value] : record.capture->headers) {
+            bytes += name.capacity () + value.capacity ();
+        }
+        return bytes;
+    };
+
     // Errors vector
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         bytes += errors_.capacity () * sizeof (ResultRecord);
         for (const auto& e : errors_) {
-            bytes += e.error_message.capacity () + e.trace_data.capacity ();
+            bytes += e.error_message.capacity () + e.trace_data.capacity () + capture_bytes (e);
         }
     }
 
-    // Success and slow-request result vectors
+    // Success, slow-request and exemplar result vectors
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
-        for (const auto* store : { &success_results_, &slow_results_ }) {
+        for (const auto* store : { &success_results_, &slow_results_, &exemplar_results_ }) {
             bytes += store->capacity () * sizeof (ResultRecord);
             for (const auto& s : *store) {
-                bytes += s.trace_data.capacity ();
+                bytes += s.trace_data.capacity () + capture_bytes (s);
             }
         }
     }

@@ -15,15 +15,22 @@
  * receive the primitive's fixes.
  *
  * These are mutation-check tests. Revert the status chip to the local `? "ERR"`
- * Badge and the class assertion fails; revert the request headers to the
- * `<pre>{JSON.stringify(...)}</pre>` dump and the "renders a <table>, not a
- * <pre>" assertion fails.
+ * Badge and the class assertion fails; render the captured response with a
+ * hand-rolled header list instead of `UnifiedResponseViewer` and the
+ * `surface-sunken` assertion fails.
+ *
+ * The headers assertion used to be fed `trace.request.headers` - the
+ * design-mode nesting, on a load-run-only surface, which no writer produces.
+ * It exercised a dead branch. Since issue #174 the exchange arrives from
+ * `GET /runs/:id/samples` as the `captured` prop, so the same guard now runs
+ * over data a real run actually stores.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import SampleRequestCard from "./SampleRequestCard";
 import type { SampleResult } from "../../types";
+import type { RunSample } from "@/types/domain";
 
 // The response body path mounts Monaco via CodeEditor; stub it so these tests
 // stay in jsdom. None of the samples below carry a response, so it never
@@ -39,6 +46,13 @@ function makeSample(overrides: Partial<SampleResult> = {}): SampleResult {
 		statusCode: 200,
 		latencyMs: 5,
 		...overrides,
+	};
+}
+
+function makeCaptured(response: Partial<RunSample["response"]> = {}): RunSample {
+	return {
+		resultId: 1,
+		response: { headers: {}, bodyBytes: 0, ...response },
 	};
 }
 
@@ -60,23 +74,99 @@ describe("SampleRequestCard shared-primitive adoption (#60)", () => {
 		expect(chip.className).toContain("bg-status-no-response-fill");
 	});
 
-	it("renders request headers through HeadersViewer (a table), not a raw JSON <pre>", () => {
+	it("renders captured response headers through the shared viewer, not a hand-rolled list", () => {
 		const { container } = render(
 			<SampleRequestCard
-				sample={makeSample({
-					trace: { request: { headers: { "x-trace-id": "abc123" } } },
-				})}
+				sample={makeSample()}
 				index={0}
 				isExpanded
 				onToggle={() => {}}
+				captured={makeCaptured({
+					headers: { "x-trace-id": "abc123" },
+					body: "",
+					bodyBytes: 0,
+				})}
 			/>
 		);
-		const table = container.querySelector("table");
-		expect(table).not.toBeNull();
-		expect(table?.textContent).toContain("x-trace-id");
-		expect(table?.textContent).toContain("abc123");
+		// Headers live behind UnifiedResponseViewer's Headers tab - which is the
+		// point of routing them through the shared viewer rather than printing
+		// a second, differently-styled table beside it.
+		// Radix Tabs activate on pointer-down, not click.
+		fireEvent.mouseDown(screen.getByRole("tab", { name: /Headers/ }));
+		// CompactHeadersViewer renders each name as `key:` on a sunken slab;
+		// pin that surface, since a hand-rolled div map would render the same
+		// text without it.
+		const name = screen.getByText("x-trace-id:");
+		expect(name.closest(".surface-sunken")).not.toBeNull();
+		expect(screen.getByText("abc123")).toBeTruthy();
 		// The reverted implementation dumped the headers as pretty-printed JSON in
 		// a <pre>. There is none now.
 		expect(container.querySelector("pre")).toBeNull();
+	});
+});
+
+describe("SampleRequestCard captured exchange (#174)", () => {
+	it("renders nothing about the response when the run captured none", () => {
+		const { container } = render(
+			<SampleRequestCard sample={makeSample()} index={0} isExpanded onToggle={() => {}} />
+		);
+		// No empty "Response" heading, no headers table: most samples in a
+		// healthy run carry no body, and a heading over nothing reads as a bug
+		// in the engine rather than as "this sample has none".
+		expect(container.querySelector("table")).toBeNull();
+	});
+
+	it("says a body was truncated rather than showing a slice as the whole response", () => {
+		render(
+			<SampleRequestCard
+				sample={makeSample()}
+				index={0}
+				isExpanded
+				onToggle={() => {}}
+				captured={makeCaptured({
+					headers: {},
+					body: "{".repeat(8),
+					bodyBytes: 500_000,
+					bodyTruncated: true,
+				})}
+			/>
+		);
+		expect(screen.getByText("Body truncated")).toBeTruthy();
+	});
+
+	it("reports a binary body by size and type instead of rendering its bytes", () => {
+		render(
+			<SampleRequestCard
+				sample={makeSample()}
+				index={0}
+				isExpanded
+				onToggle={() => {}}
+				captured={makeCaptured({
+					headers: {},
+					bodyBytes: 2048,
+					binary: true,
+					contentType: "image/png",
+				})}
+			/>
+		);
+		expect(screen.getByText("Binary response")).toBeTruthy();
+		expect(screen.getByText(/image\/png/)).toBeTruthy();
+	});
+
+	it("distinguishes a body dropped for budget from an empty response", () => {
+		render(
+			<SampleRequestCard
+				sample={makeSample()}
+				index={0}
+				isExpanded
+				onToggle={() => {}}
+				captured={makeCaptured({
+					headers: { "content-type": "application/json" },
+					bodyBytes: 4096,
+					bodyDropped: true,
+				})}
+			/>
+		);
+		expect(screen.getByText("Body not captured")).toBeTruthy();
 	});
 });

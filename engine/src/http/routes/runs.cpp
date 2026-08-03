@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <thread>
 #include <utility>
 
@@ -110,6 +111,12 @@ struct ReportExtras {
     size_t success_traces_dropped   = 0;
     size_t slow_traces_dropped      = 0;
     size_t response_samples_dropped = 0;
+    size_t exemplars_dropped        = 0;
+    size_t sample_bodies_dropped    = 0;
+    // Non-zero means this run stored response headers and bodies verbatim.
+    // Capture does not redact, by decision, so the Samples tab reads this to
+    // warn rather than leaving the reader to infer it.
+    size_t response_bodies_captured = 0;
     // How many of this run's transfers asked for HTTP/2 and negotiated
     // something older. Not a performance number - it is what tells the reader
     // whether the protocol the report is labelled with is the one the numbers
@@ -208,6 +215,9 @@ ReportExtras& extras) {
         read_number (sampling, "success_traces_dropped", extras.success_traces_dropped);
         read_number (sampling, "slow_traces_dropped", extras.slow_traces_dropped);
         read_number (sampling, "response_samples_dropped", extras.response_samples_dropped);
+        read_number (sampling, "exemplars_dropped", extras.exemplars_dropped);
+        read_number (sampling, "sample_bodies_dropped", extras.sample_bodies_dropped);
+        read_number (sampling, "response_bodies_captured", extras.response_bodies_captured);
     }
 
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
@@ -271,6 +281,92 @@ const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
     response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (runs.size ())) < total;
     response["pagination"]["returned"] = runs.size ();
     return { 200, response };
+}
+
+/**
+ * Testable core of GET /runs/:id/samples, returning {http_status, json_body}.
+ * A missing run is a 404 in the shared error shape; a run that captured
+ * nothing is an empty page, not an error.
+ *
+ * Deliberately **not** an extension of the report's `results[]` array. That
+ * path loads every result row for a run and JSON-parses each `trace_data` to
+ * accumulate aggregates that never look at a body, and the dashboard polls it;
+ * bodies travelling on it would turn a ~200-byte-per-row read into a megabytes
+ * one on every poll. So the exchanges live in their own tables and are fetched
+ * here, per page, only when a reader actually expands a sample.
+ *
+ * `limit`/`offset` arrive already parsed and clamped by the caller. The
+ * envelope is the `{data, pagination}` shape GET /runs and GET /runs/:id/metrics
+ * already use.
+ */
+std::pair<int, nlohmann::json>
+run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t limit, int64_t offset) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, error_body (404, "Run not found") };
+    }
+
+    const int64_t total = db.count_result_bodies (run_id);
+    auto rows           = db.get_result_bodies_paginated (run_id, limit, offset);
+
+    // Bodies are deduplicated in storage, so a page of 50 samples of the same
+    // response points at one blob. Read it once rather than 50 times.
+    std::map<int, std::string> blob_cache;
+
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& row : rows) {
+        nlohmann::json sample;
+        // The `results.id` this exchange belongs to. Clients join it against
+        // the report's `results[].id` rather than re-deriving an order.
+        sample["resultId"] = row.result_id;
+
+        nlohmann::json response = nlohmann::json::object ();
+        try {
+            response["headers"] = nlohmann::json::parse (row.headers);
+        } catch (...) {
+            response["headers"] = nlohmann::json::object ();
+        }
+        response["bodyBytes"] = row.body_bytes;
+        if (!row.content_type.empty ()) {
+            response["contentType"] = row.content_type;
+        }
+
+        if (row.is_binary) {
+            // A binary body is reported as its shape, never as text: the
+            // alternative is a mojibake that reads like a real response.
+            response["binary"] = true;
+        } else {
+            auto cached = blob_cache.find (row.blob_id);
+            if (cached == blob_cache.end ()) {
+                cached =
+                blob_cache.emplace (row.blob_id, db.get_body_blob_content (row.blob_id)).first;
+            }
+            response["body"] = cached->second;
+            if (row.truncated) {
+                // Same convention design-mode traces use (cap_trace_bodies), so
+                // a reader has one rule for "this is a slice".
+                response["bodyTruncated"] = true;
+            }
+            // No blob and not binary means the run's capture budget was spent
+            // before this sample: headers were kept, the body was not. Said
+            // explicitly so the UI does not render "empty response body".
+            if (row.blob_id == 0 && row.body_bytes > 0) {
+                response["bodyDropped"] = true;
+            }
+        }
+
+        sample["response"] = std::move (response);
+        data.push_back (std::move (sample));
+    }
+
+    nlohmann::json body;
+    body["data"]                   = std::move (data);
+    body["pagination"]["total"]    = total;
+    body["pagination"]["limit"]    = limit;
+    body["pagination"]["offset"]   = offset;
+    body["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (rows.size ())) < total;
+    body["pagination"]["returned"] = rows.size ();
+    return { 200, body };
 }
 
 /**
@@ -550,7 +646,10 @@ const std::string& run_id) {
         json_report["sampling"] = { { "errorsDropped", extras.errors_dropped },
             { "successTracesDropped", extras.success_traces_dropped },
             { "slowTracesDropped", extras.slow_traces_dropped },
-            { "responseSamplesDropped", extras.response_samples_dropped } };
+            { "responseSamplesDropped", extras.response_samples_dropped },
+            { "exemplarsDropped", extras.exemplars_dropped },
+            { "sampleBodiesDropped", extras.sample_bodies_dropped },
+            { "responseBodiesCaptured", extras.response_bodies_captured } };
     }
 
     if (extras.has_tests) {
@@ -572,6 +671,10 @@ const std::string& run_id) {
         if (count >= max_results)
             break;
         nlohmann::json result_obj;
+        // The row id, and the only way a client can ask GET /runs/:id/samples
+        // for this sample's captured exchange - the bodies deliberately do not
+        // travel on this payload (see run_samples_response).
+        result_obj["id"]         = result.id;
         result_obj["timestamp"]  = result.timestamp;
         result_obj["statusCode"] = result.status_code;
         result_obj["statusText"] = result.status_text;
@@ -845,6 +948,60 @@ void register_run_routes (RouteContext& ctx) {
     };
     ctx.server.Get (R"(/runs/([^/]+)/report)", get_run_report);
     ctx.server.Get (R"(/run/([^/]+)/report)", deprecated_alias (get_run_report));
+
+    /**
+     * GET /runs/:runId/samples?limit=&offset=
+     * The response headers and body captured for this run's retained samples -
+     * every error, the slow outliers, and the first few of each status code.
+     *
+     * Its own endpoint rather than more fields on the report: the report loads
+     * and parses every result row for a run on each fetch, and the dashboard
+     * polls it. This is fetched only when a reader expands a sample.
+     *
+     * No deprecated `/run/...` alias - the endpoint is new, so there is no
+     * pre-consolidation spelling for it to keep working.
+     */
+    ctx.server.Get (R"(/runs/([^/]+)/samples)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string run_id = req.matches[1];
+        vayu::utils::log_info ("GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
+
+        int64_t limit = 50;
+        if (req.has_param ("limit")) {
+            try {
+                limit = std::stoll (req.get_param_value ("limit"));
+            } catch (...) {
+                limit = 50;
+            }
+            if (limit <= 0)
+                limit = 50;
+            limit = std::min<int64_t> (limit, 500); // Cap page size, as GET /runs does.
+        }
+        int64_t offset = 0;
+        if (req.has_param ("offset")) {
+            try {
+                offset = std::stoll (req.get_param_value ("offset"));
+            } catch (...) {
+                offset = 0;
+            }
+            if (offset < 0)
+                offset = 0;
+        }
+
+        try {
+            auto [status, body] = run_samples_response (ctx.db, run_id, limit, offset);
+            if (status == 404) {
+                vayu::utils::log_warning (
+                "GET /runs/:id/samples - Run not found: " + run_id);
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /runs/:id/samples - Error for run " + run_id + ": " + e.what ());
+            send_error (res, 500, e.what ());
+        }
+    });
 }
 
 } // namespace vayu::http::routes

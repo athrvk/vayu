@@ -291,12 +291,32 @@ reported no counts at all (an older summary): "nothing was dropped" and "we
 cannot tell" are both worse as prose than as absence. Built on `Callout`
 (`severity="info"`) rather than a hand-rolled muted row.
 
+## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
+
+Wherever a run's captured response exchanges are on screen: the run stored those
+responses **verbatim**, headers included, so anything credential-shaped the
+server sent is stored with them, and it is deleted when the run is
+(`maxRunsRetained` is its expiry).
+
+Capture deliberately does not redact - consistently with design-mode traces,
+which already store request headers as sent, and because a redaction guess is
+wrong in both directions and gives false confidence when it is wrong the
+reassuring way. This notice plus the run's own persisted marker
+(`sampling.responseBodiesCaptured`) is the mitigation for that decision, which
+makes a silent version of it the same as not having made the decision.
+
+Renders nothing when the run captured nothing, and nothing on a run recorded
+before capture existed (the field is absent, not zero) - the same rule
+`SampleRetentionNote` follows. Both surfaces that list captured samples render
+it: the dashboard's Sampled Requests and the history Samples tab.
+
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
 - `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
+- `CapturedResponseNotice.tsx` - what a captured load-run response is *not*: truncated at `maxSampleBodyBytes`, dropped once the run's `maxSampleBytes` budget was spent, or binary and therefore stored by size and type. All three are invisible in the bytes - a truncated body looks malformed, a dropped one looks empty - so the difference is stated rather than left to be inferred
 - `HeadersViewer.tsx` - the headers family, three variants in one file: the collapsible table, `CompactHeadersViewer` (same content on a sunken slab, for panes with no room for a table), and `ResponseHeadersPanel` (the Headers *tab* - request collapsed above response open, with the empty state `HeadersViewer` alone cannot give)
 - `StatusCodeBadge.tsx` - the status chip
 - `ResponseStatusBar.tsx` - status chip + elapsed time + payload size

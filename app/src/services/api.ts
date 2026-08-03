@@ -27,6 +27,7 @@ import type {
 	RunListResponse,
 	RunListParams,
 	RunReport,
+	RunSamplesResponse,
 	EngineHealth,
 	SanityResult,
 	ScriptCompletionsResponse,
@@ -66,6 +67,7 @@ import {
 	PROXIED_TIMEOUT_GRACE_MS,
 	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	STATS_PAGE_LIMIT,
+	RUN_SAMPLES_PAGE_LIMIT,
 	RUNS_PAGE_LIMIT,
 } from "@/config/network";
 
@@ -289,6 +291,24 @@ export const apiService = {
 	async getRunReport(id: string): Promise<RunReport> {
 		const response = await httpClient.get<GetRunReportResponse>(API_ENDPOINTS.RUN_REPORT(id));
 		return RunReportTransformer.toFrontend(response);
+	},
+
+	/**
+	 * The response headers and body captured for a run's retained samples -
+	 * every error, the slow outliers, and the first few of each status code.
+	 *
+	 * Its own request rather than fields on the report: the report path loads
+	 * and parses every result row for a run on each fetch, and the dashboard
+	 * polls it. Join a page's `resultId` against `report.results[].id`.
+	 */
+	async getRunSamples(
+		id: string,
+		options: { limit?: number; offset?: number } = {}
+	): Promise<RunSamplesResponse> {
+		const { limit = RUN_SAMPLES_PAGE_LIMIT, offset = 0 } = options;
+		return await httpClient.get<RunSamplesResponse>(
+			API_ENDPOINTS.RUN_SAMPLES(id, limit, offset)
+		);
 	},
 
 	async stopRun(id: string): Promise<StopRunResponse> {

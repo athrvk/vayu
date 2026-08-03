@@ -30,6 +30,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import type { RunReport } from "@/types";
+import { withQueryClient } from "@/test/query-wrapper";
 
 vi.mock("@/components/shared/response-viewer/SampledExchange", () => ({
 	SampledExchange: (props: Record<string, unknown>) => (
@@ -80,7 +81,7 @@ describe("both sampled views render through SampledExchange (#76)", () => {
 			],
 		} as unknown as RunReport;
 
-		render(<RequestResponseView report={report} />);
+		render(withQueryClient(<RequestResponseView report={report} />));
 
 		const row = screen.getByTestId("sampled-exchange");
 		expect(row).toHaveAttribute("data-status", "503");
