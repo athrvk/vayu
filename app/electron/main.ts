@@ -11,7 +11,7 @@ import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
-import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
+import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -760,10 +760,11 @@ app.whenReady().then(async () => {
 	// Then create the window
 	createWindow();
 
-	// Start checking for updates once the window exists to receive events
-	if (mainWindow) {
-		initAutoUpdater(mainWindow);
-	}
+	// Start checking for updates once a window exists to receive events. The
+	// updater reads `mainWindow` at send time rather than being handed the window
+	// now: on macOS the app outlives its window, and a dock-activate builds a
+	// replacement that a captured reference would never reach.
+	initAutoUpdater(() => mainWindow);
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -813,6 +814,12 @@ app.on("before-quit", (event) => {
 	}
 
 	quitShutdown.handleQuit(event);
+});
+
+// The quit is settled by now, so stop the periodic update check and answer a
+// check the user is still waiting on - its events will never arrive.
+app.on("will-quit", () => {
+	disposeAutoUpdater();
 });
 
 // A signal is how anything outside the UI asks Vayu to stop, and Node's default
