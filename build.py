@@ -1146,27 +1146,31 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path,
         print_error(f"App directory not found: {app_dir}")
         return False
 
-    # Clean
-    if clean:
-        # tsc's incremental cache (tsconfig.node.tsbuildinfo) can fall out of
-        # sync with dist-electron - a file gains a new import but the compiler
-        # decides the imported module itself doesn't need re-emitting, leaving
-        # dist-electron with a reference to a file that was never written.
-        dist_electron = app_dir / "dist-electron"
-        tsbuildinfo = app_dir / "tsconfig.node.tsbuildinfo"
-        if dist_electron.exists() or tsbuildinfo.exists():
-            spinner = Spinner("Cleaning app build artifacts")
-            spinner.start()
-            shutil.rmtree(dist_electron, ignore_errors=True)
-            tsbuildinfo.unlink(missing_ok=True)
-            spinner.stop()
-            print()
-
     # Install dependencies
     if not (app_dir / "node_modules").exists():
         spinner = Spinner("Installing dependencies")
         spinner.start()
         success, _ = run_command(["pnpm", "install"], cwd=app_dir, description="pnpm install")
+        if success:
+            spinner.stop()
+        else:
+            spinner.stop(Style.CROSS, Style.RED)
+            return False
+        print()
+
+    # Clean - the app's counterpart to wiping the engine's build directory.
+    #
+    # Delegated to the app's own `clean:app` script rather than listing the
+    # artifacts again here, so the two cannot drift. It deliberately is not
+    # `clean`, which also wipes engine/build - the engine was built one step
+    # ago and calling it would delete the binary we are about to copy in.
+    #
+    # This runs after the install (rimraf lives in node_modules) and before
+    # setup_icons, which writes build/icon.png and build/icons back.
+    if clean:
+        spinner = Spinner("Cleaning app build artifacts")
+        spinner.start()
+        success, _ = run_command(["pnpm", "run", "clean:app"], cwd=app_dir, description="app clean")
         if success:
             spinner.stop()
         else:
