@@ -33,6 +33,30 @@ import {
 const isDev = process.env.NODE_ENV === "development";
 
 /**
+ * The directory the engine keeps its state in - logs, database and lock file.
+ *
+ * Production:
+ *   - macOS: ~/Library/Application Support/vayu-client
+ *   - Windows: %APPDATA%/vayu-client
+ *   - Linux: ~/.config/vayu-client
+ * Development: <repo>/engine/data
+ *
+ * Module-level rather than a method because callers outside the sidecar need it
+ * when there is no sidecar instance to ask: `app:getPaths` answers Settings
+ * whether or not the engine came up. It used to re-derive this inline, so a
+ * change here silently showed the user the old directory.
+ */
+export function engineDataDirectory(): string {
+	if (isDev) {
+		// In development, use a local directory in the engine folder
+		return path.join(app.getAppPath(), "..", "engine", "data");
+	}
+	// In production, use the app's userData directory
+	// app.getPath("userData") returns platform-specific paths
+	return app.getPath("userData");
+}
+
+/**
  * Check if a port is available
  */
 function isPortAvailable(port: number): Promise<boolean> {
@@ -320,28 +344,13 @@ export class EngineSidecar {
 	constructor(port: number = ENGINE_PORT, system: SidecarSystem = defaultSidecarSystem) {
 		this.port = port;
 		this.system = system;
-		this.dataDir = this.getDataDirectory();
+		this.dataDir = engineDataDirectory();
 		this.binaryPath = this.getEngineBinaryPath();
 	}
 
-	/**
-	 * Get the user data directory for the engine
-	 * Production:
-	 *   - macOS: ~/Library/Application Support/vayu-client
-	 *   - Windows: %APPDATA%/vayu-client
-	 *   - Linux: ~/.config/vayu-client
-	 * Development: <repo>/engine/data
-	 */
-	private getDataDirectory(): string {
-		if (isDev) {
-			// In development, use a local directory in the engine folder
-			const devDataDir = path.join(app.getAppPath(), "..", "engine", "data");
-			return devDataDir;
-		} else {
-			// In production, use the app's userData directory
-			// app.getPath("userData") returns platform-specific paths
-			return app.getPath("userData");
-		}
+	/** Where this engine keeps its state. See `engineDataDirectory()`. */
+	getDataDirectory(): string {
+		return this.dataDir;
 	}
 
 	/**

@@ -19,8 +19,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Engine management
 	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
-	getEngineStatus: (): Promise<{ running: boolean; url: string | null }> =>
-		ipcRenderer.invoke("engine:status"),
 
 	// MCP server (exposes Vayu to agents like Claude Code). See electron/mcp/.
 	getMcpStatus: (): Promise<{ running: boolean; url: string; enabled: boolean }> =>
@@ -115,7 +113,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	// Interface scale - real page zoom (reflows the viewport).
 	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
-	getZoomFactor: (): number => webFrame.getZoomFactor(),
 
 	// Platform info
 	platform: process.platform,

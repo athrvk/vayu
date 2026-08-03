@@ -256,7 +256,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 
 The preload script (`electron/preload.ts`) exposes a minimal, context-isolated API bridge via `window.electronAPI`:
 
-- **Engine Management**: `restartEngine()`, `getEngineStatus()` for engine lifecycle control
+- **Engine Management**: `restartEngine()` for engine lifecycle control. Engine liveness is *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`), so there is one answer rather than two
 - **Theme Management**: `getTheme()`, `setTheme()`, `onThemeChanged()` for OS theme synchronization
 - **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
 - **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, plus `restartToInstallUpdate()`, `openReleasePage()`
