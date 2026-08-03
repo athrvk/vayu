@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { app, BrowserWindow, ipcMain, nativeTheme, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Menu, shell } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
@@ -14,6 +14,7 @@ import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createSaveFlusher } from "./save-flush.js";
+import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
 import {
@@ -78,11 +79,30 @@ let engineSidecar: EngineSidecar | null = null;
 let mcpService: VayuMcpService | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+/** The window as it is right now, or null if there isn't a usable one. */
+function liveWindow(): BrowserWindow | null {
+	return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+/** Show a recovery dialog on the window, and answer with the button index. */
+async function askOnWindow(options: Electron.MessageBoxOptions): Promise<number> {
+	const win = liveWindow();
+	const { response } = await (win
+		? dialog.showMessageBox(win, options)
+		: dialog.showMessageBox(options));
+	return response;
+}
+
 // Shared by the quit path and the window-close path - see save-flush.ts for why
 // there is only one of these.
 const saveFlusher = createSaveFlusher({
 	requestFlush: () => {
 		if (!mainWindow || mainWindow.webContents.isDestroyed()) return false;
+		// A dead renderer's WebContents object outlives the process it drove, so
+		// `isDestroyed()` above stays false and this would ask for an ACK that
+		// can never come - the whole 2s ceiling, on a window whose unsaved work
+		// died with the process. See renderer-recovery.ts.
+		if (rendererRecovery.isRendererGone()) return false;
 		mainWindow.webContents.send("before-quit");
 		return true;
 	},
@@ -95,8 +115,57 @@ const saveFlusher = createSaveFlusher({
 	},
 });
 
+// Reloading the window when its renderer dies, and asking when reloading is not
+// working. Module-level and reading `mainWindow` at use time for the reason the
+// updater does: on macOS the app outlives its window and a dock-activate builds
+// a replacement, which a captured reference would never reach. The crash
+// history is deliberately kept across that, so a crash loop that takes the
+// window with it is still a loop.
+const rendererRecovery = createRendererRecovery({
+	now: () => Date.now(),
+	reload: () => liveWindow()?.webContents.reload(),
+	promptCrashLoop: async (details) => {
+		const choice = await askOnWindow({
+			type: "error",
+			message: "Vayu keeps crashing",
+			detail:
+				`The window stopped working repeatedly (${details.reason}, exit code ` +
+				`${details.exitCode}) and reloading has not helped. Relaunching Vayu ` +
+				`may clear it. Unsaved changes in the window are already lost.`,
+			buttons: ["Relaunch", "Quit"],
+			defaultId: 0,
+			cancelId: 1,
+		});
+		return choice === 0 ? "relaunch" : "quit";
+	},
+	promptUnresponsive: async () => {
+		const choice = await askOnWindow({
+			type: "warning",
+			message: "Vayu is not responding",
+			detail:
+				"The window has stopped responding. Waiting may let it catch up; " +
+				"reloading discards anything it has not saved yet.",
+			buttons: ["Wait", "Reload"],
+			defaultId: 0,
+			cancelId: 0,
+		});
+		return choice === 1 ? "reload" : "wait";
+	},
+	relaunch: () => {
+		app.relaunch();
+		app.quit();
+	},
+	quit: () => app.quit(),
+	// The dead renderer's flush settled against nobody; the live one that
+	// replaced it has its own unsaved work and must be asked.
+	onRecovered: () => saveFlusher.reset(),
+});
+
 function createWindow() {
-	// A new window means a new renderer with its own unsaved work.
+	// A new window means a new renderer with its own unsaved work. Told to the
+	// recovery first, so a crash flag left over from the window this one
+	// replaces cannot make the new renderer look unreachable.
+	rendererRecovery.noteRendererAlive();
 	saveFlusher.reset();
 
 	// Load persisted window state
@@ -170,6 +239,22 @@ function createWindow() {
 
 	mainWindow.on("page-title-updated", (event) => {
 		event.preventDefault();
+	});
+
+	// Nothing recovers a gone renderer on its own: the window stays up, blank
+	// and frozen, and the close path waits out the flush ceiling asking a
+	// process that no longer exists. See renderer-recovery.ts.
+	mainWindow.webContents.on("render-process-gone", (_event, details) => {
+		rendererRecovery.handleRenderProcessGone(details);
+	});
+	mainWindow.webContents.on("did-finish-load", () => {
+		rendererRecovery.noteRendererAlive();
+	});
+	mainWindow.on("unresponsive", () => {
+		rendererRecovery.handleUnresponsive();
+	});
+	mainWindow.on("responsive", () => {
+		rendererRecovery.handleResponsive();
 	});
 
 	// Send theme to renderer when it changes
