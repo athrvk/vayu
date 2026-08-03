@@ -133,13 +133,21 @@ vayu::Result<vayu::Response> result) {
         auto trace_reason = SuccessTraceReason::None;
 
         if (sampled || is_slow || exemplar) {
-            // Exemplar outranks both: the other two stores are reservoirs and
-            // can displace what they hold, and an exemplar that gets displaced
-            // is not an exemplar. Between the remaining two, slow wins - the
-            // trace is identical, and charging it to the slow budget leaves the
-            // 1-in-N budget for ordinary traffic.
-            trace_reason = exemplar ? SuccessTraceReason::Exemplar :
-            (is_slow ? SuccessTraceReason::Slow : SuccessTraceReason::Sampled);
+            // Slow still wins, then sampled: the trace is identical either way,
+            // and charging an outlier to the slow budget leaves the 1-in-N
+            // budget for ordinary traffic.
+            //
+            // Exemplar is *last*, and only decides the store for a completion
+            // no other budget wanted. Ranking it first stole outliers from the
+            // slow store - the first few completions of a status code are
+            // usually where a run's outliers are - which is a behaviour change
+            // nobody asked for, on the store whose whole purpose is to hold
+            // what the user asked for. Being retained is still guaranteed:
+            // whichever budget claims it, the record is stored, and the
+            // exemplar's real job (capturing a body for it) is decided
+            // separately below.
+            trace_reason = is_slow ? SuccessTraceReason::Slow :
+            (sampled ? SuccessTraceReason::Sampled : SuccessTraceReason::Exemplar);
 
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
                 { "wireMs", response.timing.wire_ms },
@@ -158,13 +166,17 @@ vayu::Result<vayu::Response> result) {
             trace_data = timing_json.dump ();
         }
 
-        // Record to in-memory collector (high-performance, no DB writes). The
-        // collector ignores the capture source for a plain `Sampled` record -
-        // that budget is a uniform slice, and capture is deliberately
-        // failure-and-outlier-shaped.
+        // Whether a body is captured is decided here, not by which store won
+        // above. Capture is failure-and-outlier-shaped: an outlier or a claimed
+        // exemplar gets one, a plain 1-in-N sample does not - a thousand
+        // identical 200s are not worth a thousand bodies. A completion that is
+        // both sampled and an exemplar is stored in the sampled budget *and*
+        // keeps its body, which is the case the old precedence-based version
+        // could only express by moving the record.
+        const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
         context->metrics_collector->record_success (response.status_code, latency,
         response.timing.queue_wait_ms, trace_data, trace_reason,
-        context->capture_response_bodies ? &response : nullptr);
+        capture_body ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 

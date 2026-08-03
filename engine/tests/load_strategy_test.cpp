@@ -787,3 +787,80 @@ TEST_F (LoadStrategyTest, RunContextResolvesTheSamplingConfigOnce) {
     EXPECT_EQ (stock->slow_threshold_ms,
     vayu::core::constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS);
 }
+
+// Issue #174: which completions get their response body captured is decided
+// here, in the completion path, not by whichever retention budget the record
+// lands in. The three buckets are errors, outliers and per-status exemplars; a
+// plain 1-in-N sample is deliberately body-less, because a uniform slice of a
+// long run is a thousand identical 200s.
+//
+// Mutation check: rank `Exemplar` above `Slow` again (the shape this replaced)
+// and the outlier below stops reaching the slow store at all.
+TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100 },
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 }, // every completion is sampled
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-capture", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const size_t quota = vayu::core::constants::metrics_collector::EXEMPLARS_PER_STATUS;
+
+    // Spend this status code's exemplar quota on fast completions, then send
+    // one more fast completion and one outlier.
+    for (size_t i = 0; i < quota; ++i) {
+        vayu::core::handle_result (context, db, completion (5.0));
+    }
+    vayu::core::handle_result (context, db, completion (5.0));   // past the quota
+    vayu::core::handle_result (context, db, completion (500.0)); // outlier
+
+    // The outlier is charged to the slow budget, exactly as it was before
+    // capture existed - being an early completion of its status code must not
+    // move it out of the store that exists to hold outliers.
+    const auto& slow = context->metrics_collector->slow_results ();
+    ASSERT_EQ (slow.size (), 1u)
+    << "the outlier was rerouted out of the slow store by the exemplar bucket";
+    ASSERT_TRUE (slow[0].capture.has_value ()) << "an outlier must carry its body";
+
+    // Every sampled fast completion is stored; the first `quota` of them
+    // claimed an exemplar and kept a body, the one past the quota did not.
+    const auto& sampled = context->metrics_collector->success_results ();
+    ASSERT_EQ (sampled.size (), quota + 1);
+    size_t with_body = 0;
+    for (const auto& record : sampled) {
+        if (record.capture.has_value ())
+            with_body++;
+    }
+    EXPECT_EQ (with_body, quota)
+    << "a plain 1-in-N sample must not carry a body, and an exemplar must";
+}
+
+// Capture off restores the completion path exactly: no exemplar is claimed, so
+// nothing is rerouted, and no record carries a body.
+TEST_F (LoadStrategyTest, CaptureOffLeavesTheCompletionPathUnchanged) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100 },
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 },
+        { "capture_response_bodies", false },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-capture-off", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    for (int i = 0; i < 5; ++i) {
+        vayu::core::handle_result (context, db, completion (5.0));
+    }
+    vayu::core::handle_result (context, db, completion (500.0));
+
+    EXPECT_TRUE (context->metrics_collector->exemplar_results ().empty ());
+    EXPECT_EQ (context->metrics_collector->success_results ().size (), 5u);
+    EXPECT_EQ (context->metrics_collector->slow_results ().size (), 1u);
+    for (const auto& record : context->metrics_collector->success_results ()) {
+        EXPECT_FALSE (record.capture.has_value ());
+    }
+    EXPECT_FALSE (context->metrics_collector->slow_results ()[0].capture.has_value ());
+    EXPECT_EQ (context->metrics_collector->captured_body_bytes (), 0u);
+}

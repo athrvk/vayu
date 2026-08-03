@@ -1326,7 +1326,7 @@ independent budgets:
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
 | Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
 | Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
-| Per-status exemplars (captured responses) | the first three completions of each distinct status code | `max_exemplar_results` |
+| Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
 Two properties are worth relying on. An outlier **never consumes a sampling
 slot**: a run whose target degrades does not silently stop sampling ordinary
@@ -1339,6 +1339,15 @@ first few seconds, and `sampling` in
 The exemplar budget is the one exception to the reservoir rule, and deliberately
 so: an exemplar that gets displaced is not an exemplar, so past its bound a
 later candidate is refused and counted rather than evicting an incumbent.
+
+It is also the **last** budget consulted, not the first. A completion that is
+already an outlier stays charged to the slow budget and a sampled one stays
+charged to the sampling budget - claiming an exemplar never moves a record out
+of the store that wanted it, because the first few completions of a status code
+are often exactly where a run's outliers are. What the exemplar claim decides is
+whether the response **body** is captured, which is independent of which budget
+pays: a completion that is both sampled and a claimed exemplar is stored in the
+sampling budget *and* keeps its body.
 
 **Response capture.** `capture_response_bodies` (boolean, default `true`) decides
 whether the retained samples carry their response headers and body. On by default

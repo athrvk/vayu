@@ -165,23 +165,28 @@ TEST_F (ResponseCaptureTest, ExemplarStoreKeepsOnePerStatusUpToTheLimit) {
     EXPECT_EQ (statuses, (std::set<int>{ 200, 500 }));
 }
 
-// A uniformly sampled success is deliberately body-less: that budget is a
-// slice of ordinary traffic, and a thousand identical 200s are not worth a
-// thousand bodies. Slow outliers, on the same store family, are.
-TEST_F (ResponseCaptureTest, SampledSuccessesCarryNoBodyButSlowOnesDo) {
+// The collector captures exactly when the caller hands it a source, whatever
+// budget the record is charged to. Deciding it from `trace_reason` instead
+// would tie "which store pays" to "does this deserve a body", and a record can
+// sit in the sampled budget and still deserve one (a completion that is both
+// sampled and a claimed exemplar). The *policy* - which completions get a
+// source at all - is `handle_result`'s, and load_strategy_test.cpp pins it.
+TEST_F (ResponseCaptureTest, CaptureFollowsTheCallerNotTheStore) {
     MetricsCollectorConfig config = capture_config ();
     config.store_success_traces   = true;
     MetricsCollector collector ("run_sampled", config);
 
     auto response = make_response (200, "hello");
+    // Sampled with a source: stored in the sampled budget, body kept.
     collector.record_success (200, 1.0, 0.0, "{}", SuccessTraceReason::Sampled, &response);
-    collector.record_success (200, 9000.0, 0.0, "{}", SuccessTraceReason::Slow, &response);
+    // Slow without one: stored in the slow budget, no body.
+    collector.record_success (200, 9000.0, 0.0, "{}", SuccessTraceReason::Slow, nullptr);
 
     ASSERT_EQ (collector.success_results ().size (), 1u);
-    EXPECT_FALSE (collector.success_results ()[0].capture.has_value ());
+    ASSERT_TRUE (collector.success_results ()[0].capture.has_value ());
+    EXPECT_EQ (collector.success_results ()[0].capture->body, "hello");
     ASSERT_EQ (collector.slow_results ().size (), 1u);
-    ASSERT_TRUE (collector.slow_results ()[0].capture.has_value ());
-    EXPECT_EQ (collector.slow_results ()[0].capture->body, "hello");
+    EXPECT_FALSE (collector.slow_results ()[0].capture.has_value ());
 }
 
 // A refused reservoir slot must not have cost a body-sized copy. Observable

@@ -448,6 +448,14 @@ a thousand identical 200s. Three buckets, all decided before anything is copied:
 | Slow outliers | `max_slow_results`, the existing slow-request reservoir |
 | The first `EXEMPLARS_PER_STATUS` (3) of each distinct status code | `max_exemplar_results` (64), and unlike its neighbours **not** a reservoir - an exemplar that gets displaced is not an exemplar |
 
+The buckets overlap, and the overlap resolves toward the *other* store: an
+outlier that is also one of its status code's first three stays charged to the
+slow budget, and a sampled completion stays charged to the sampling budget. The
+exemplar store holds only what no other budget wanted. Claiming an exemplar is
+what decides that a **body** is captured, separately from which budget pays - so
+a completion that is both sampled and an exemplar is stored as a sample and
+still keeps its body.
+
 A uniformly sampled success (`success_sample_rate`) is deliberately body-less.
 
 **Budgets.** `maxSampleBodyBytes` (config, `observability`, default 32 KiB) caps a single body;

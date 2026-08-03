@@ -169,11 +169,16 @@ struct MetricsCollectorConfig {
  * identical either way (it carries `isSlow`), and charging it to the slow
  * budget leaves the 1-in-N budget for ordinary traffic.
  *
- * Exemplar outranks both. The other two stores are reservoirs, so a record in
- * them can be displaced later; an exemplar's entire value is that the run
- * *kept* one response per status code, which a reservoir cannot promise. The
- * trace is the same object in every case, so the only thing precedence decides
- * is which budget pays.
+ * `Exemplar` ranks **last** - it names the store for a completion no other
+ * budget wanted. Ranking it first was tried and was wrong: the first few
+ * completions of a status code are often exactly where a run's outliers are,
+ * so it quietly emptied the slow store, which exists to hold what the user
+ * asked for.
+ *
+ * This enum therefore says only *which budget pays*. Whether the record also
+ * carries a captured body is a separate decision, made by the caller and
+ * passed to record_success - a record can sit in the sampled budget and still
+ * deserve a body, which no ordering of these three could express.
  */
 enum class SuccessTraceReason {
     None,     ///< no trace was built for this completion
@@ -244,8 +249,10 @@ class MetricsCollector {
      *                   Passed as a pointer rather than copied by the caller
      *                   so the headers and body are copied *after* the store
      *                   has accepted the record - a reservoir refusal costs no
-     *                   body-sized copy. Ignored for `Sampled` records, which
-     *                   are a uniform slice and deliberately body-less.
+     *                   body-sized copy. Honoured whatever @p trace_reason is:
+     *                   the caller decides what deserves a body (see
+     *                   handle_result), because the store a record lands in is
+     *                   not what makes its body worth keeping.
      */
     void record_success (int status_code,
     double latency_ms,

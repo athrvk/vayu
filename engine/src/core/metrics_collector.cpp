@@ -291,10 +291,12 @@ const Response* capture_source) {
     auto& seen_counter = slow ? slow_seen_ : success_seen_;
     auto& dropped      = slow ? slow_dropped_ : success_dropped_;
 
-    // Only the slow store captures bodies here. A `Sampled` record is a uniform
-    // slice of ordinary traffic, and a thousand identical 200s are not worth a
-    // thousand bodies - that is the decision the three-bucket policy rests on.
-    const Response* capture = slow ? capture_source : nullptr;
+    // Whether to capture is the caller's call, not this store's: handle_result
+    // knows whether the completion was an outlier or a claimed exemplar, and a
+    // record can land in the sampled budget while still deserving a body.
+    // Deciding it from `trace_reason` here would make the two inseparable, and
+    // the store a record lands in is not what makes its body worth keeping.
+    const Response* capture = capture_source;
 
     if (capacity == 0) { // unlimited
         if (capture != nullptr) {
