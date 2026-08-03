@@ -81,7 +81,24 @@ let intervalTimer: NodeJS.Timeout | null = null;
 /** True once initAutoUpdater has configured the updater (not in dev). */
 let updaterReady = false;
 let pendingCheck: PendingCheck | null = null;
-let mainWindowRef: BrowserWindow | null = null;
+let resolveWindow: WindowAccessor | null = null;
+
+/**
+ * How the updater finds the window to talk to, asked fresh every time.
+ *
+ * Not a captured `BrowserWindow`: on macOS the app outlives its window, and a
+ * dock-activate builds a new one. A reference taken at startup would point at
+ * the closed window for the rest of the session, so every periodic update event
+ * would hit the `isDestroyed()` guard and be dropped - and on macOS that banner
+ * is the whole passive update path.
+ */
+export type WindowAccessor = () => BrowserWindow | null;
+
+/** The window as it is right now, or null if there isn't a usable one. */
+function liveWindow(): BrowserWindow | null {
+	const win = resolveWindow?.() ?? null;
+	return win && !win.isDestroyed() ? win : null;
+}
 
 /**
  * Wire up auto-update for the current platform.
@@ -92,7 +109,7 @@ let mainWindowRef: BrowserWindow | null = null;
  *     newer release in the UI; the user updates out-of-band.
  *   - disabled (development): no-op.
  */
-export function initAutoUpdater(win: BrowserWindow): void {
+export function initAutoUpdater(getWindow: WindowAccessor): void {
 	const isDev = process.env.NODE_ENV === "development";
 	const isAppImage = Boolean(process.env.APPIMAGE);
 	const strategy = resolveUpdateStrategy({
@@ -101,7 +118,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
 		isAppImage,
 	});
 
-	mainWindowRef = win;
+	resolveWindow = getWindow;
 
 	// Registered before the `disabled` bail-out. The renderer calls these
 	// unconditionally, and an unregistered channel rejects with "No handler
@@ -142,9 +159,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
 	autoUpdater.allowPrerelease = false;
 
 	const send = (channel: string, payload: unknown) => {
-		if (!win.isDestroyed()) {
-			win.webContents.send(channel, payload);
-		}
+		liveWindow()?.webContents.send(channel, payload);
 	};
 
 	autoUpdater.on("update-available", (info) => {
@@ -185,30 +200,50 @@ export function initAutoUpdater(win: BrowserWindow): void {
 }
 
 /**
- * Deliver the outcome of the check the user is waiting on, if any.
+ * Show a dialog parented to the window the user is actually looking at.
  *
- * Events fire for the periodic check too, so a result with nothing waiting is
- * dropped - that is the silent path doing its job, not a missed answer.
+ * Parenting matters (a sheet on macOS, a modal owned by the window elsewhere),
+ * but a missing window must not swallow the message: with no live window the
+ * dialog is shown unparented rather than not at all, which is the macOS
+ * all-windows-closed case for the menu's "Check for Updates…".
  */
-function settleCheck(result: UpdateCheckResult): void {
+function showUpdateDialog(options: Electron.MessageBoxOptions): void {
+	const win = liveWindow();
+	void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
+}
+
+/**
+ * Claim the check the user is waiting on, if any, so it can be answered exactly
+ * once. Events fire for the periodic check too, so nothing waiting means there
+ * is nothing to answer - that is the silent path doing its job, not a missed
+ * result.
+ */
+function takePendingCheck(): PendingCheck | null {
 	const pending = pendingCheck;
-	if (!pending) return;
+	if (!pending) return null;
 	pendingCheck = null;
 	clearTimeout(pending.timer);
+	return pending;
+}
+
+/** Deliver the outcome of the check the user is waiting on, if any. */
+function settleCheck(result: UpdateCheckResult): void {
+	const pending = takePendingCheck();
+	if (!pending) return;
 
 	// The menu item has no UI of its own, so it reports through a native
 	// dialog. The settings panel renders the same result in place, and a modal
 	// on top of it would be redundant.
-	if (pending.source === "menu" && mainWindowRef) {
+	if (pending.source === "menu") {
 		if (result.status === "up-to-date") {
-			void dialog.showMessageBox(mainWindowRef, {
+			showUpdateDialog({
 				type: "info",
 				message: "You're up to date",
 				detail: `Vayu ${result.version} is the latest version.`,
 				buttons: ["OK"],
 			});
 		} else if (result.status === "error") {
-			void dialog.showMessageBox(mainWindowRef, {
+			showUpdateDialog({
 				type: "error",
 				message: "Couldn't check for updates",
 				detail: result.message,
@@ -232,8 +267,8 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 			status: "unavailable",
 			detail: "Update checks only run in packaged builds of Vayu.",
 		};
-		if (source === "menu" && mainWindowRef) {
-			void dialog.showMessageBox(mainWindowRef, {
+		if (source === "menu") {
+			showUpdateDialog({
 				type: "info",
 				message: "Updates unavailable",
 				detail: result.detail,
@@ -269,13 +304,18 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 	return promise;
 }
 
-/** Stop the periodic check (used on app teardown / tests). */
+/**
+ * Stop the periodic check. Called from `will-quit` in main.ts, and by tests.
+ *
+ * The waiting check is settled without a dialog: the app is on its way out, and
+ * a modal raised during teardown either flashes past unread or holds up the
+ * quit. The caller still gets its answer, so no promise is left hanging.
+ */
 export function disposeAutoUpdater(): void {
 	if (intervalTimer) {
 		clearInterval(intervalTimer);
 		intervalTimer = null;
 	}
-	// A check waiting on an event that will never arrive now the app is going
-	// away: settle it so nothing is left hanging on the promise.
-	settleCheck({ status: "error", message: "The update check was cancelled." });
+	takePendingCheck()?.settle({ status: "error", message: "The update check was cancelled." });
+	resolveWindow = null;
 }

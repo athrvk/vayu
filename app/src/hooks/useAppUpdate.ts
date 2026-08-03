@@ -41,11 +41,13 @@ export function useAppUpdate(): AppUpdateState {
 
 		const offAvailable = api.onUpdateAvailable((info) => {
 			setUpdate(info);
-			// Silent path downloads in the background; wait for update-downloaded.
-			// Notify path surfaces immediately.
-			if (info.strategy === "notify") {
-				setReadyToInstall(false);
-			}
+			// A newly announced version is by definition not the downloaded one, on
+			// either path. Leaving this true across an announcement let the silent
+			// path offer "restart to install" for a version still downloading, and
+			// the restart then installs whatever is staged - the previous version on
+			// Windows, or a file electron-updater has already deleted on AppImage.
+			// `update-downloaded` sets it again for the version the banner names.
+			setReadyToInstall(false);
 		});
 
 		const offDownloaded = api.onUpdateDownloaded((info) => {
