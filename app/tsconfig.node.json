@@ -2,8 +2,18 @@
 	"compilerOptions": {
 		"composite": true,
 		"skipLibCheck": true,
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
+		/*
+		 * NOT NodeNext, however much the main process looks like it wants it.
+		 * The package is `"type": "module"`, so NodeNext classifies preload.ts -
+		 * a script with no imports, only `require()` - as ESM and stamps
+		 * `export {}` onto the emit. Electron loads a sandboxed preload as
+		 * CommonJS, so that marker makes the preload fail to load outright:
+		 * `electronAPI` is never exposed, and the renderer silently loses the
+		 * title bar (TitleBar returns null without it) and the platform stamp.
+		 * Adopting NodeNext means renaming preload.ts to preload.cts first.
+		 */
+		"module": "ESNext",
+		"moduleResolution": "bundler",
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
 		"target": "ES2020",
