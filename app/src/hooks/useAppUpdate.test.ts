@@ -72,6 +72,36 @@ describe("useAppUpdate", () => {
 		expect(result.current.readyToInstall).toBe(true);
 	});
 
+	test("a newly announced version is not installable until it has downloaded", () => {
+		// The silent path's nastiest edge: v1 is downloaded and the banner offers
+		// "restart to install", then the 6h check announces v2. The banner's
+		// version updates, so leaving readyToInstall true offers to install a
+		// version that is still downloading - and what quitAndInstall then finds
+		// staged is v1 on Windows, or on AppImage a file electron-updater has
+		// already deleted, taking the running AppImage with it.
+		const { result } = renderHook(() => useAppUpdate());
+		act(() => {
+			availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+		});
+		act(() => {
+			downloadedCb?.({ version: "1.2.3" });
+		});
+		expect(result.current.readyToInstall).toBe(true);
+
+		act(() => {
+			availableCb?.({ version: "1.3.0", strategy: "silent", releaseUrl: "u" });
+		});
+		expect(result.current.readyToInstall).toBe(false);
+		// Nothing actionable to show while it downloads, either.
+		expect(result.current.update).toBeNull();
+
+		act(() => {
+			downloadedCb?.({ version: "1.3.0" });
+		});
+		expect(result.current.readyToInstall).toBe(true);
+		expect(result.current.update?.version).toBe("1.3.0");
+	});
+
 	test("dismiss hides the banner", () => {
 		const { result } = renderHook(() => useAppUpdate());
 		act(() => {

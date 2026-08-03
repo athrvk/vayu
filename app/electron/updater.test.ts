@@ -62,10 +62,30 @@ vi.mock("electron-updater", () => ({
 	},
 }));
 
-const win = {
-	isDestroyed: () => false,
-	webContents: { send: vi.fn() },
-} as unknown as Parameters<typeof import("./updater.js").initAutoUpdater>[0];
+interface FakeWindow {
+	destroyed: boolean;
+	isDestroyed: () => boolean;
+	webContents: { send: ReturnType<typeof vi.fn> };
+}
+
+function makeWindow(): FakeWindow {
+	const win: FakeWindow = {
+		destroyed: false,
+		isDestroyed: () => win.destroyed,
+		webContents: { send: vi.fn() },
+	};
+	return win;
+}
+
+/**
+ * The window as main.ts owns it: one variable the updater reads through, not a
+ * reference it is handed once. Tests move it the way the app does - closed on
+ * the X, rebuilt on a macOS dock-activate.
+ */
+let currentWindow: FakeWindow | null = null;
+const getWindow = (() => currentWindow) as unknown as Parameters<
+	typeof import("./updater.js").initAutoUpdater
+>[0];
 
 /** Re-import with fresh module state - the updater keeps module-level state. */
 async function loadUpdater(platform: NodeJS.Platform = "win32") {
@@ -81,6 +101,7 @@ const realPlatform = process.platform;
 beforeEach(() => {
 	showMessageBox.mockClear();
 	checkForUpdates.mockClear().mockResolvedValue(null);
+	currentWindow = makeWindow();
 	vi.stubEnv("NODE_ENV", "production");
 });
 
@@ -93,7 +114,7 @@ afterEach(() => {
 describe("checkForUpdatesNow", () => {
 	it("resolves up-to-date without claiming a version it does not have", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		listeners.get("update-not-available")?.({});
 		await expect(pending).resolves.toEqual({ status: "up-to-date", version: "0.9.0" });
@@ -101,7 +122,7 @@ describe("checkForUpdatesNow", () => {
 
 	it("resolves with the available release and its notes URL", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		listeners.get("update-available")?.({ version: "1.0.0" });
 		await expect(pending).resolves.toMatchObject({
@@ -113,7 +134,7 @@ describe("checkForUpdatesNow", () => {
 
 	it("resolves with the error rather than hanging", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		listeners.get("error")?.(new Error("ENOTFOUND"));
 		await expect(pending).resolves.toEqual({ status: "error", message: "ENOTFOUND" });
@@ -123,7 +144,7 @@ describe("checkForUpdatesNow", () => {
 		// Two clicks - the menu item and the settings button, or an impatient
 		// double-click - must not race two checks whose events interleave.
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		checkForUpdates.mockClear();
 
 		const first = checkForUpdatesNow("renderer");
@@ -137,7 +158,7 @@ describe("checkForUpdatesNow", () => {
 	it("gives up rather than waiting forever for an event that never comes", async () => {
 		vi.useFakeTimers();
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		await vi.advanceTimersByTimeAsync(30_000);
 		await expect(pending).resolves.toEqual({
@@ -148,7 +169,7 @@ describe("checkForUpdatesNow", () => {
 
 	it("settles a check left waiting at teardown", async () => {
 		const { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		disposeAutoUpdater();
 		await expect(pending).resolves.toMatchObject({ status: "error" });
@@ -159,7 +180,7 @@ describe("checkForUpdatesNow", () => {
 		// would read as something being broken.
 		vi.stubEnv("NODE_ENV", "development");
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		await expect(checkForUpdatesNow("renderer")).resolves.toMatchObject({
 			status: "unavailable",
 		});
@@ -171,7 +192,7 @@ describe("checkForUpdatesNow", () => {
 		// like a bug rather than "this is a dev build".
 		vi.stubEnv("NODE_ENV", "development");
 		const { initAutoUpdater } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		expect([...ipcHandlers.keys()]).toEqual(
 			expect.arrayContaining([
 				"update:check",
@@ -210,14 +231,14 @@ describe("the macOS update instruction", () => {
 		// and stops the engine first.
 		quit.mockClear();
 		const { initAutoUpdater } = await loadUpdater("darwin");
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		await ipcHandlers.get("update:quitForUpdate")?.(null);
 		expect(quit).toHaveBeenCalled();
 	});
 
 	it("hands macOS users exactly the command the README publishes", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		listeners.get("update-available")?.({ version: "1.0.0" });
 		await expect(pending).resolves.toMatchObject({
@@ -230,7 +251,7 @@ describe("the macOS update instruction", () => {
 describe("where the result is delivered", () => {
 	it("shows a native dialog for the menu, which has no UI of its own", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("menu");
 		listeners.get("update-not-available")?.({});
 		await pending;
@@ -239,20 +260,106 @@ describe("where the result is delivered", () => {
 
 	it("shows no dialog for the settings panel, which renders the result itself", async () => {
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
 		listeners.get("update-not-available")?.({});
 		await pending;
 		expect(showMessageBox).not.toHaveBeenCalled();
 	});
 
+	it("parents the dialog to the window that is open now", async () => {
+		// The first window is gone and a dock-activate built a replacement. A
+		// dialog parented to the dead one is unowned; parented to the live one it
+		// is the sheet the user expects.
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		const firstWindow = currentWindow;
+
+		firstWindow!.destroyed = true;
+		const reopened = makeWindow();
+		currentWindow = reopened;
+
+		const pending = checkForUpdatesNow("menu");
+		listeners.get("update-not-available")?.({});
+		await pending;
+
+		expect(showMessageBox).toHaveBeenCalledWith(reopened, expect.anything());
+	});
+
+	it("still answers the menu when no window is open at all", async () => {
+		// macOS keeps the app running with every window closed, and the menu's
+		// "Check for Updates…" is still there to click. Dropping the answer
+		// because there is nothing to parent to would leave that click silent.
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		currentWindow = null;
+
+		const pending = checkForUpdatesNow("menu");
+		listeners.get("update-not-available")?.({});
+		await pending;
+
+		expect(showMessageBox).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "You're up to date" })
+		);
+	});
+
 	it("stays silent for the periodic check, which nobody is waiting on", async () => {
 		const { initAutoUpdater } = await loadUpdater();
-		initAutoUpdater(win);
+		initAutoUpdater(getWindow);
 		// No manual check in flight - the interval's events must not pop a
 		// dialog over whatever the user is doing.
 		listeners.get("update-not-available")?.({});
 		listeners.get("error")?.(new Error("offline"));
 		expect(showMessageBox).not.toHaveBeenCalled();
+	});
+
+	it("cancels a menu check at teardown without raising a dialog", async () => {
+		// `will-quit` settles the waiting check so nothing hangs, but the app is
+		// already going: a modal raised here either flashes past unread or holds
+		// up the quit.
+		const { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("menu");
+
+		disposeAutoUpdater();
+
+		await expect(pending).resolves.toMatchObject({ status: "error" });
+		expect(showMessageBox).not.toHaveBeenCalled();
+	});
+});
+
+describe("which window the update events reach", () => {
+	it("sends to the window that exists now, not the one open at startup", async () => {
+		// macOS keeps the app alive when its window closes, and a dock-activate
+		// builds a new one. Holding the startup window would drop every periodic
+		// event from then on - and on the notify path that pushed banner is the
+		// entire passive update path, so update discovery would stop for the rest
+		// of the session.
+		const { initAutoUpdater } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		const firstWindow = currentWindow!;
+
+		firstWindow.destroyed = true;
+		const reopened = makeWindow();
+		currentWindow = reopened;
+
+		listeners.get("update-available")?.({ version: "1.0.0" });
+
+		expect(reopened.webContents.send).toHaveBeenCalledWith(
+			"update:available",
+			expect.objectContaining({ version: "1.0.0" })
+		);
+		expect(firstWindow.webContents.send).not.toHaveBeenCalled();
+	});
+
+	it("drops the event rather than sending into a destroyed window", async () => {
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const win = currentWindow!;
+		win.destroyed = true;
+
+		listeners.get("update-downloaded")?.({ version: "1.0.0" });
+
+		expect(win.webContents.send).not.toHaveBeenCalled();
 	});
 });
