@@ -44,6 +44,15 @@ export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
  * follows a stuck engine still happens inside the same quit.
  */
 export const ENGINE_EXIT_POLL_INTERVAL_MS = 100;
+/**
+ * How many stderr lines to keep from a spawned engine, so the message shown
+ * when it dies before answering `/health` can quote its last words.
+ *
+ * Bounded because the drain runs for the engine's whole life, not just for
+ * startup - and the reason an engine died at spawn (a missing shared library, a
+ * lock it could not acquire) is always in the final few lines.
+ */
+export const ENGINE_STDERR_TAIL_LINES = 10;
 export const ENGINE_RESTART_MAX_RETRIES = 3;
 export const ENGINE_RESTART_BASE_DELAY_MS = 1000;
 /** Pause between stop and start during restart so the port is released. */

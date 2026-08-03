@@ -84,7 +84,12 @@ The `EngineSidecar` class manages the C++ engine process:
 
 - **Binary Resolution**: Locates the engine binary (dev vs production paths)
 - **Process Management**: Spawns, monitors, and terminates the engine process
-- **Health Checking**: Polls `/health` endpoint to verify engine readiness
+- **Health Checking**: Polls `/health` endpoint to verify engine readiness, and
+  gives up the moment the spawned child exits rather than polling out the
+  45-second ceiling against a dead port. The failure carries the exit
+  code/signal and the engine's last stderr lines
+- **Build guidance**: A missing binary names `python build.py -e` and
+  `docs/building.md` - the single build entry point, not per-platform scripts
 - **Port Management**: Checks if port 9876 is available or if engine is already running
 - **Ownership**: Tracks whether the engine was *spawned* or *adopted* (already
   running at startup). An adopted engine is owned just as fully - `isRunning()`
