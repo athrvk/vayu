@@ -26,10 +26,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
+import type { Tab } from "@/stores/tabs-store";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -124,5 +125,93 @@ describe("revealing the active tab in the tree", () => {
 		});
 		renderTree();
 		expect(expanded()).toEqual([]);
+	});
+});
+
+/**
+ * The reveal has to be once per *selection*, not once per render.
+ *
+ * The mock above returns a new `Map` on every call, which is what
+ * `useMultipleCollectionRequests` used to do for real - and the tree re-renders
+ * on any expand-state change, so the reveal effect re-ran and re-expanded the
+ * chain a frame after the chevron collapsed it. Every ancestor of the active
+ * tab's entity was pinned open and the chevron looked dead.
+ */
+describe("collapsing a collection on the selected tab's ancestor path", () => {
+	const collapse = (container: HTMLElement, collectionId: string) => {
+		const toggle = container.querySelector(
+			`[data-collection-id="${collectionId}"] [data-tree-toggle]`
+		);
+		expect(toggle).not.toBeNull();
+		fireEvent.click(toggle!);
+	};
+
+	const selectTab = (tab: Tab) =>
+		act(() => {
+			useTabsStore.setState({ openTabs: [tab], activeTabId: tab.id });
+		});
+
+	it("stays collapsed while the selected request is unchanged", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		const { container } = renderTree();
+		expect(expanded()).toContain("grand");
+
+		collapse(container, "grand");
+
+		// Before the ref guard this re-expanded in the same frame.
+		expect(expanded()).not.toContain("grand");
+		// The rest of the chain is untouched - collapsing one folder is not a
+		// reason to close its parents.
+		expect(expanded()).toContain("root");
+		expect(expanded()).toContain("child");
+	});
+
+	it("stays collapsed while the selected collection is unchanged", () => {
+		// The ancestor case: `child` holds the selected collection `grand`.
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "grand" }],
+			activeTabId: "t1",
+		});
+		const { container } = renderTree();
+		expect(expanded()).toContain("child");
+
+		collapse(container, "child");
+
+		expect(expanded()).not.toContain("child");
+	});
+
+	it("re-reveals after the selection moves away and back", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		const { container } = renderTree();
+		collapse(container, "grand");
+		expect(expanded()).not.toContain("grand");
+
+		// Once per selection means once per selection *change*: a tab that points
+		// at nothing in the tree, then back to the request, is a new selection.
+		selectTab({ id: "t2", type: "settings", entityId: null });
+		selectTab({ id: "t1", type: "request", entityId: "r1" });
+
+		expect(expanded()).toContain("grand");
+	});
+
+	it("re-reveals when the selection moves to a different entity", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		const { container } = renderTree();
+		collapse(container, "child");
+		expect(expanded()).not.toContain("child");
+
+		selectTab({ id: "t2", type: "collection", entityId: "grand" });
+
+		expect(expanded()).toContain("child");
+		expect(expanded()).toContain("grand");
 	});
 });

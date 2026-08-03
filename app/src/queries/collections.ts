@@ -12,7 +12,8 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import type { UseQueryResult } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
@@ -85,38 +86,69 @@ export function useRequestsQuery(collectionId: string | null) {
 	});
 }
 
+/** Requests within a collection are ordered by `order`, then by creation time. */
+function compareRequestOrder(a: Request, b: Request): number {
+	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+	if (orderDiff !== 0) return orderDiff;
+	const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+	const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+	return aTime - bTime;
+}
+
 /**
  * Fetch requests for multiple collections (e.g., all expanded ones)
- * Uses TanStack Query's useQueries for parallel fetching
+ * Uses TanStack Query's useQueries for parallel fetching.
+ *
+ * The returned `requestsByCollection` is **referentially stable** while the
+ * underlying query results are unchanged, and callers depend on that: an effect
+ * that lists it in its dependency array must fire when the requests change and
+ * not merely because the tree re-rendered. This used to build the map inline on
+ * every call, which is what pinned a collection open in the sidebar - the
+ * reveal effect in `CollectionTree` re-ran after every render and undid the
+ * chevron click that had just collapsed it.
  */
 export function useMultipleCollectionRequests(collectionIds: string[]) {
+	// Callers build this array inline from the collections query, so it is a new
+	// array on every render. Pin it to its contents: it is what `combine` closes
+	// over, and `combine` has to keep a stable identity (see below).
+	const idsKey = collectionIds.join(",");
+	// eslint-disable-next-line react-hooks/exhaustive-deps -- `idsKey` is the contents of `collectionIds`
+	const stableCollectionIds = useMemo(() => collectionIds, [idsKey]);
+
+	/*
+	 * `combine` is memoised by TanStack: it re-runs only when the query results
+	 * or the query hashes change - *and* only if the function itself is the same
+	 * reference as last render (`QueriesObserver` compares `combine` by
+	 * identity). An inline arrow would therefore rebuild the map every render
+	 * and defeat the whole point, so this is a `useCallback`.
+	 */
+	const combine = useCallback(
+		(results: Array<UseQueryResult<Request[]>>) => {
+			// Map of collectionId -> requests, sorted by order then createdAt.
+			const requestsByCollection = new Map<string, Request[]>();
+			results.forEach((query, index) => {
+				const requests = query.data ?? [];
+				requestsByCollection.set(
+					stableCollectionIds[index],
+					[...requests].sort(compareRequestOrder)
+				);
+			});
+			return {
+				requestsByCollection,
+				isLoading: results.some((q) => q.isLoading),
+			};
+		},
+		[stableCollectionIds]
+	);
+
 	// Create a query for each collection
-	const queries = useQueries({
-		queries: collectionIds.map((collectionId) => ({
+	return useQueries({
+		queries: stableCollectionIds.map((collectionId) => ({
 			queryKey: queryKeys.requests.listByCollection(collectionId),
 			queryFn: () => apiService.listRequests({ collectionId: collectionId }),
 		})),
+		combine,
 	});
-
-	// Build a map of collectionId -> requests, sorted by order then createdAt
-	const requestsByCollection = new Map<string, Request[]>();
-	queries.forEach((query, index) => {
-		const collectionId = collectionIds[index];
-		const requests = query.data ?? [];
-		const sortedRequests = [...requests].sort((a, b) => {
-			const orderDiff = (a.order ?? 0) - (b.order ?? 0);
-			if (orderDiff !== 0) return orderDiff;
-			const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-			const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-			return aTime - bTime;
-		});
-		requestsByCollection.set(collectionId, sortedRequests);
-	});
-
-	return {
-		requestsByCollection,
-		isLoading: queries.some((q) => q.isLoading),
-	};
 }
 
 /**

@@ -603,7 +603,13 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   single-collection query: a collection is read out of this list)
 - **`useRequestsQuery(collectionId)`** - Fetch requests in a collection
 - **`useMultipleCollectionRequests(collectionIds)`** - The same list for several
-  collections at once, as parallel queries
+  collections at once, as parallel queries. Its `requestsByCollection` map is
+  **referentially stable** while the underlying results are unchanged (built in
+  `useQueries`' `combine`, which TanStack memoises only for a `combine` of
+  stable identity - hence the `useCallback`). Callers list it in effect
+  dependencies; when it was rebuilt on every call, `CollectionTree`'s reveal
+  effect re-ran on every render and re-expanded a collection the user had just
+  collapsed
 - **`useRequestQuery(requestId)`** / **`requestDetailOptions(requestId)`** - One
   request by id (`GET /requests/:id`), used by a restored request tab and by a
   design-run copy on cold start. Only an `ApiError` with `statusCode === 404`
