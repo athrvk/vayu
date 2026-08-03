@@ -55,11 +55,29 @@ class FakeChild extends EventEmitter {
 	readonly stderr = null;
 	readonly signals: string[] = [];
 
+	/** A wedged engine: only SIGKILL gets it, which is what the grace period is for. */
+	ignoresSigterm = false;
+
 	kill(signal?: string) {
-		this.signals.push(signal ?? "SIGTERM");
-		queueMicrotask(() => this.emit("exit", null, signal ?? "SIGTERM"));
+		const sent = signal ?? "SIGTERM";
+		this.signals.push(sent);
+		if (sent !== "SIGKILL" && this.ignoresSigterm) return true;
+		this.exit();
 		return true;
 	}
+
+	exit() {
+		queueMicrotask(() => this.emit("exit", null, null));
+	}
+}
+
+/**
+ * The stop path forks on the host platform - Windows has no SIGTERM to send, so
+ * the HTTP shutdown is its only graceful route there. Both branches are driven
+ * by stubbing the input rather than by trusting whichever CI runner shows up.
+ */
+function stubPlatform(platform: NodeJS.Platform) {
+	Object.defineProperty(process, "platform", { value: platform, configurable: true });
 }
 
 /**
@@ -226,8 +244,11 @@ describe("EngineSidecar - adoption", () => {
 });
 
 describe("EngineSidecar - spawned engine", () => {
-	it("spawns when nothing is on the port, and stops what it spawned", async () => {
-		const { system, state } = fakeSystem();
+	const realPlatform = process.platform;
+	afterEach(() => stubPlatform(realPlatform));
+
+	it("spawns when nothing is on the port", async () => {
+		const { system } = fakeSystem();
 		const sidecar = new EngineSidecar(TEST_PORT, system);
 
 		await sidecar.start();
@@ -235,10 +256,51 @@ describe("EngineSidecar - spawned engine", () => {
 		expect(system.spawnEngine).toHaveBeenCalledOnce();
 		expect(vi.mocked(system.spawnEngine).mock.calls[0][1]).toContain(String(TEST_PORT));
 		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	it("stops what it spawned with SIGTERM off Windows", async () => {
+		stubPlatform("linux");
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+		await sidecar.start();
 
 		await sidecar.stop();
 
-		expect(state.spawned[0].signals.length).toBeGreaterThan(0);
+		expect(state.spawned[0].signals).toContain("SIGTERM");
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("stops what it spawned on Windows, where the HTTP shutdown is the only graceful path", async () => {
+		stubPlatform("win32");
+		const { system, state } = fakeSystem();
+		// A real engine exits once it has accepted POST /shutdown.
+		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			state.spawned[0]?.exit();
+			state.healthy = false;
+			return true;
+		});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+		await sidecar.start();
+
+		await sidecar.stop();
+
+		// SIGTERM is not a request on Windows, it is an immediate kill - so the
+		// stop path must not reach for one, and must not sit out the grace period
+		// waiting for an engine that already left.
+		expect(state.spawned[0].signals).toEqual([]);
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("force-kills a spawned engine that ignores the graceful shutdown", async () => {
+		stubPlatform("linux");
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+		await sidecar.start();
+		state.spawned[0].ignoresSigterm = true;
+
+		await sidecar.stop();
+
+		expect(state.spawned[0].signals).toEqual(["SIGTERM", "SIGKILL"]);
 		expect(sidecar.isRunning()).toBe(false);
 	});
 });

@@ -596,37 +596,40 @@ export class EngineSidecar {
 	}
 
 	/** Wait out (and if necessary kill) the child this instance spawned. */
-	private stopSpawned(): Promise<void> {
-		return new Promise((resolve) => {
-			const child = this.process;
-			if (!child) {
-				this.ownership = { kind: "none" };
-				resolve();
-				return;
-			}
+	private async stopSpawned(): Promise<void> {
+		const child = this.process;
+		if (!child) {
+			this.ownership = { kind: "none" };
+			return;
+		}
 
-			// Give the process a grace period to exit before force-killing
-			const timeout = setTimeout(() => {
-				if (this.process) {
-					console.log("[Sidecar] Engine did not exit gracefully, killing...");
-					this.process.kill("SIGKILL");
-				}
-			}, ENGINE_GRACEFUL_EXIT_TIMEOUT_MS);
-
-			child.on("exit", () => {
-				clearTimeout(timeout);
-				this.process = null;
-				this.ownership = { kind: "none" };
-				console.log("[Sidecar] Engine stopped");
-				resolve();
-			});
-
-			// Send SIGTERM as fallback (works on Unix, immediate termination on Windows)
-			// On Windows, the HTTP shutdown should have already initiated graceful shutdown
-			if (process.platform !== "win32") {
-				child.kill("SIGTERM");
-			}
+		const exited = new Promise<void>((resolve) => {
+			child.once("exit", () => resolve());
 		});
+
+		// Send SIGTERM as fallback (works on Unix, immediate termination on Windows)
+		// On Windows, the HTTP shutdown should have already initiated graceful shutdown
+		if (process.platform !== "win32") {
+			child.kill("SIGTERM");
+		}
+
+		// Give the process a grace period to exit before force-killing. Through
+		// the system seam, so this is one wait a test can make instant rather than
+		// a real five seconds - on Windows there is no SIGTERM to shortcut it.
+		const exitedInTime = await Promise.race([
+			exited.then(() => true),
+			this.system.sleep(ENGINE_GRACEFUL_EXIT_TIMEOUT_MS).then(() => false),
+		]);
+
+		if (!exitedInTime) {
+			console.log("[Sidecar] Engine did not exit gracefully, killing...");
+			child.kill("SIGKILL");
+			await exited;
+		}
+
+		if (this.process === child) this.process = null;
+		this.ownership = { kind: "none" };
+		console.log("[Sidecar] Engine stopped");
 	}
 
 	/**
