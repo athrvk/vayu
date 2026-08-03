@@ -19,6 +19,14 @@ export const ENGINE_HOST = "127.0.0.1";
 export const ENGINE_PORT = 9876;
 /** Lock file written by the engine inside its data dir. */
 export const ENGINE_LOCK_FILE = "vayu.lock";
+/**
+ * Subdirectories the engine creates inside its data dir, named here because the
+ * app shows both paths in Settings - General and the engine is what defines
+ * them (`engine/src/daemon.cpp:113-114`). Renaming one there without changing
+ * it here shows the user a directory that does not exist.
+ */
+export const ENGINE_LOGS_DIR = "logs";
+export const ENGINE_DB_DIR = "db";
 
 // MCP server (Model Context Protocol) - a TypeScript sidecar hosted in this
 // main process that exposes the engine's capabilities to agents (Claude Code,

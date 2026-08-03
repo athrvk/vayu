@@ -9,6 +9,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Menu, shell } from "e
 import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
+import { resolveAppPaths } from "./app-paths.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
@@ -161,6 +162,35 @@ const rendererRecovery = createRendererRecovery({
 	onRecovered: () => saveFlusher.reset(),
 });
 
+/**
+ * Forward OS theme changes to whichever window is up.
+ *
+ * Installed once for the process, not per window: `nativeTheme` is a
+ * process-wide emitter and `createWindow()` runs again on every macOS
+ * dock-reopen, so registering there left one listener per reopen - Node warns
+ * at eleven, and every theme flip sent the renderer N copies of the same event.
+ * Reading the window through `liveWindow()` at send time is what makes one
+ * registration enough for every window that follows.
+ */
+function installThemeBridge() {
+	nativeTheme.on("updated", () => {
+		const win = liveWindow();
+		win?.webContents.send("theme:changed", {
+			shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+			themeSource: nativeTheme.themeSource,
+		});
+
+		// Update titlebar overlay color - Windows only
+		if (process.platform === "win32" && win) {
+			win.setTitleBarOverlay({
+				color: nativeTheme.shouldUseDarkColors ? TITLEBAR_BG_DARK : TITLEBAR_BG_LIGHT,
+				symbolColor: nativeTheme.shouldUseDarkColors ? TITLEBAR_FG_DARK : TITLEBAR_FG_LIGHT,
+				height: TITLEBAR_HEIGHT,
+			});
+		}
+	});
+}
+
 function createWindow() {
 	// A new window means a new renderer with its own unsaved work. Told to the
 	// recovery first, so a crash flag left over from the window this one
@@ -255,23 +285,6 @@ function createWindow() {
 	});
 	mainWindow.on("responsive", () => {
 		rendererRecovery.handleResponsive();
-	});
-
-	// Send theme to renderer when it changes
-	nativeTheme.on("updated", () => {
-		mainWindow?.webContents.send("theme:changed", {
-			shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
-			themeSource: nativeTheme.themeSource,
-		});
-
-		// Update titlebar overlay color - Windows only
-		if (process.platform === "win32" && mainWindow) {
-			mainWindow.setTitleBarOverlay({
-				color: nativeTheme.shouldUseDarkColors ? TITLEBAR_BG_DARK : TITLEBAR_BG_LIGHT,
-				symbolColor: nativeTheme.shouldUseDarkColors ? TITLEBAR_FG_DARK : TITLEBAR_FG_LIGHT,
-				height: TITLEBAR_HEIGHT,
-			});
-		}
 	});
 
 	// The X button destroys the renderer before `before-quit` can ask it for
@@ -455,7 +468,7 @@ function createMenu() {
 
 async function startEngine() {
 	try {
-		engineSidecar = new EngineSidecar(9876);
+		engineSidecar = new EngineSidecar();
 		await engineSidecar.start();
 		console.log("[Main] Engine started successfully at", engineSidecar.getApiUrl());
 	} catch (error) {
@@ -558,14 +571,6 @@ function setupIpcHandlers() {
 	// Handle engine restart request from renderer
 	ipcMain.handle("engine:restart", async () => {
 		return await restartEngine();
-	});
-
-	// Handle engine status check
-	ipcMain.handle("engine:status", () => {
-		return {
-			running: engineSidecar?.isRunning() ?? false,
-			url: engineSidecar?.getApiUrl() ?? null,
-		};
 	});
 
 	// MCP server status - used by Settings to show the connect URL and state.
@@ -742,29 +747,9 @@ function setupIpcHandlers() {
 		});
 	});
 
-	// Get app paths (app dir, logs path, db path)
-	ipcMain.handle("app:getPaths", () => {
-		const appDir = app.getAppPath();
-
-		// Get data directory using the same logic as EngineSidecar
-		const isDev = process.env.NODE_ENV === "development";
-		let dataDir: string;
-		if (isDev) {
-			dataDir = path.join(appDir, "..", "engine", "data");
-		} else {
-			dataDir = app.getPath("userData");
-		}
-
-		const logsPath = path.join(dataDir, "logs");
-		const dbPath = path.join(dataDir, "db");
-
-		return {
-			appDir,
-			dataDir,
-			logsPath,
-			dbPath,
-		};
-	});
+	// Get app paths (app dir, logs path, db path). Derived in app-paths.ts so
+	// this handler cannot drift from the sidecar's own data directory.
+	ipcMain.handle("app:getPaths", () => resolveAppPaths());
 }
 
 /**
@@ -835,6 +820,9 @@ app.whenReady().then(async () => {
 
 	// Create application menu
 	createMenu();
+
+	// One registration for the process, ahead of any window - see the function.
+	installThemeBridge();
 
 	// Start the engine
 	await startEngine();
