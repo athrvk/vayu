@@ -35,6 +35,15 @@ export const ENGINE_HEALTH_POLL_INTERVAL_MS = 500;
 export const ENGINE_HEALTH_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
+/**
+ * Poll interval while waiting for an *adopted* engine to exit.
+ *
+ * A spawned engine reports its own exit through the child's `exit` event; an
+ * adopted one is not our child, so the only way to learn it is gone is to keep
+ * asking the OS. Kept well under the graceful ceiling so the verified kill that
+ * follows a stuck engine still happens inside the same quit.
+ */
+export const ENGINE_EXIT_POLL_INTERVAL_MS = 100;
 export const ENGINE_RESTART_MAX_RETRIES = 3;
 export const ENGINE_RESTART_BASE_DELAY_MS = 1000;
 /** Pause between stop and start during restart so the port is released. */

@@ -86,6 +86,14 @@ The `EngineSidecar` class manages the C++ engine process:
 - **Process Management**: Spawns, monitors, and terminates the engine process
 - **Health Checking**: Polls `/health` endpoint to verify engine readiness
 - **Port Management**: Checks if port 9876 is available or if engine is already running
+- **Ownership**: Tracks whether the engine was *spawned* or *adopted* (already
+  running at startup). An adopted engine is owned just as fully - `isRunning()`
+  reports it, `restart()` really replaces it, and quit shuts it down by PID.
+  See [Ownership model](../architecture.md#ownership-model)
+- **System seam**: The process/port/clock calls sit behind a `SidecarSystem`
+  interface (`defaultSidecarSystem` in production), so `sidecar.test.ts` can
+  drive adoption, shutdown and the restart-versus-quit race without real
+  engines or 45-second health waits
 
 **Development vs Production:**
 - **Development**: Binary at `../engine/build/vayu-engine` (or `Debug/vayu-engine.exe` on Windows)
