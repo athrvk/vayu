@@ -18,13 +18,20 @@
  * to raw `.toFixed(1)` for the per-sample phase cards, so a 0.04ms cached DNS
  * lookup rendered as `0.0ms` - the only signal there is, rounded away. Revert
  * the cards to `.toFixed(1)` and the `0.04ms` assertion below fails.
+ *
+ * The fixture used to hand-author `trace.headers` / `trace.body` - a flat shape
+ * no engine writer emits, so this file exercised a dead branch in CI for as
+ * long as it existed (issue #174). Headers and bodies now arrive from
+ * `GET /runs/:id/samples`, which is what the mocked `getRunSamples` below
+ * stands in for.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { withQueryClient } from "@/test/query-wrapper";
 import RequestResponseView from "./RequestResponseView";
-import type { RunReport } from "@/types";
+import type { RunReport, RunSamplesResponse } from "@/types";
 
 // ResponseBody mounts Monaco via CodeEditor; stub it so the expanded sample
 // renders in jsdom.
@@ -33,8 +40,22 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	CodeEditor: () => <div data-testid="code-editor" />,
 }));
 
+const getRunSamples = vi.fn();
+vi.mock("@/services/api", () => ({
+	apiService: {
+		getRunSamples: (...a: unknown[]) => getRunSamples(...a),
+	},
+}));
+
 function makeReport(): RunReport {
 	return {
+		metadata: {
+			runId: "run_1",
+			runType: "load",
+			status: "completed",
+			startTime: 0,
+			endTime: 1,
+		},
 		summary: {
 			totalRequests: 1,
 			successfulRequests: 1,
@@ -48,29 +69,48 @@ function makeReport(): RunReport {
 		errors: { total: 0, withDetails: 0, types: {} },
 		results: [
 			{
+				id: 7,
 				timestamp: 1_700_000_000_000,
 				statusCode: 200,
 				statusText: "OK",
 				latencyMs: 5,
-				trace: {
-					dnsMs: 0.04,
-					connectMs: 12.5,
-					headers: { "content-type": "application/json" },
-					body: '{"ok":true}',
-				},
+				trace: { dnsMs: 0.04, connectMs: 12.5 },
 			},
 		],
 	};
 }
 
-// Components here use `InfoChip`, which no longer brings its own
-// `TooltipProvider` - the delay is set once at the app root (main.tsx).
+function samplesPage(): RunSamplesResponse {
+	return {
+		data: [
+			{
+				resultId: 7,
+				response: {
+					headers: { "content-type": "application/json" },
+					body: '{"ok":true}',
+					bodyBytes: 11,
+				},
+			},
+		],
+		pagination: { total: 1, limit: 100, offset: 0, hasMore: false, returned: 1 },
+	};
+}
+
 const renderView = () =>
 	render(
-		<TooltipProvider>
-			<RequestResponseView report={makeReport()} />
-		</TooltipProvider>
+		// InfoChip no longer brings its own TooltipProvider - the delay is set
+		// once at the app root (main.tsx).
+		withQueryClient(
+			<TooltipProvider>
+				<RequestResponseView report={makeReport()} />
+			</TooltipProvider>
+		)
 	);
+
+beforeEach(() => {
+	getRunSamples.mockReset();
+	getRunSamples.mockResolvedValue(samplesPage());
+});
 
 describe("RequestResponseView shared-primitive adoption (#60)", () => {
 	it("renders the sample status through StatusCodeBadge", () => {
@@ -90,13 +130,46 @@ describe("RequestResponseView shared-primitive adoption (#60)", () => {
 		expect(screen.queryByText(/0\.0ms/)).toBeNull();
 	});
 
-	it("renders response headers through the shared CompactHeadersViewer", () => {
+	it("renders captured response headers through the shared CompactHeadersViewer", async () => {
 		renderView();
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
 
 		// CompactHeadersViewer renders each name as `key:`; the reverted
 		// hand-rolled div map did too, so pin the shared surface it declares.
-		const header = screen.getByText("content-type:");
+		const header = await screen.findByText("content-type:");
 		expect(header.closest(".surface-sunken")).not.toBeNull();
+	});
+});
+
+describe("RequestResponseView captured samples (#174)", () => {
+	it("does not fetch captured bodies until a sample is expanded", async () => {
+		renderView();
+		expect(getRunSamples).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
+		await waitFor(() => expect(getRunSamples).toHaveBeenCalledWith("run_1"));
+	});
+
+	it("renders the captured body, joined to the row by result id", async () => {
+		renderView();
+		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
+		expect(await screen.findByText("Response Body")).toBeTruthy();
+	});
+
+	it("shows nothing when the run captured no exchange for this row", async () => {
+		// A sample whose result id is absent from the captured page - the normal
+		// case for a uniformly sampled success, which is deliberately body-less.
+		getRunSamples.mockResolvedValue({
+			data: [],
+			pagination: { total: 0, limit: 100, offset: 0, hasMore: false, returned: 0 },
+		});
+		renderView();
+		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
+
+		await waitFor(() => expect(getRunSamples).toHaveBeenCalled());
+		// Not an empty "Response Body" heading: a heading over nothing reads as
+		// a bug in the engine rather than as "this sample has no body".
+		expect(screen.queryByText("Response Body")).toBeNull();
+		expect(screen.queryByText("Response Headers")).toBeNull();
 	});
 });

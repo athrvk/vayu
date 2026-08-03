@@ -274,6 +274,7 @@ add_library(vayu_core STATIC
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
+    src/core/sample_capture.cpp
     ${PLATFORM_SOURCES}
 )
 
@@ -426,6 +427,7 @@ if(VAYU_BUILD_TESTS)
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
         tests/reservoir_test.cpp
+        tests/sample_capture_test.cpp
         tests/load_pacing_test.cpp
         tests/run_manager_test.cpp
         tests/run_route_test.cpp

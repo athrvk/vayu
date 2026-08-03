@@ -149,8 +149,32 @@ class Database {
 
     // Results
     void add_result (const Result& result);
-    void add_results_batch (const std::vector<Result>& results); // Transactional batch insert
+    /**
+     * @brief Transactional batch insert of a run's sampled results, optionally
+     *        with the response bodies captured alongside them.
+     *
+     * `bodies` refer to results by index (`PendingResultBody::result_index`),
+     * because the row ids only exist once the insert has run. Results, the
+     * deduplicated blobs and the per-result body rows all land in one
+     * transaction, so a crash mid-flush cannot leave a body row pointing at a
+     * result that was rolled back.
+     *
+     * Bodies are deduplicated by `body_hash` within this call: identical
+     * responses - the norm for a load test - share one `body_blobs` row.
+     */
+    void add_results_batch (const std::vector<Result>& results,
+    const std::vector<PendingResultBody>& bodies = {});
     std::vector<Result> get_results (const std::string& run_id);
+
+    // Captured response bodies for a run's sampled results. Deliberately not
+    // reachable from get_results: the report path loads and parses every
+    // result row for a run, and this is exactly the data it must not pay for.
+    std::vector<ResultBody> get_result_bodies_paginated (const std::string& run_id,
+    int64_t limit,
+    int64_t offset);
+    int64_t count_result_bodies (const std::string& run_id);
+    /// The stored bytes of a blob, or `""` when the id is 0 or unknown.
+    std::string get_body_blob_content (int blob_id);
 
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);

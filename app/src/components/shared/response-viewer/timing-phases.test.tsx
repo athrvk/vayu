@@ -38,6 +38,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
 import type { RunReport } from "@/types";
+import { withQueryClient } from "@/test/query-wrapper";
 
 /** The synthetic sixth phase. Nothing in the app declares it. */
 const PROBE = {
@@ -156,7 +157,7 @@ describe("every timing renderer reads TIMING_PHASES (#76)", () => {
 			await import("@/modules/dashboard/components/RequestResponseView")
 		).default;
 
-		withTooltips(<RequestResponseView report={reportWithSample()} />);
+		withTooltips(withQueryClient(<RequestResponseView report={reportWithSample()} />));
 
 		expect(screen.getByText(PROBE.longLabel)).toBeInTheDocument();
 	});
@@ -166,7 +167,7 @@ describe("every timing renderer reads TIMING_PHASES (#76)", () => {
 			await import("@/modules/dashboard/components/RequestResponseView")
 		).default;
 
-		withTooltips(<RequestResponseView report={reportWithSample()} />);
+		withTooltips(withQueryClient(<RequestResponseView report={reportWithSample()} />));
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
 
 		// The averages card prints `longLabel`, the tiles print `label` - so a

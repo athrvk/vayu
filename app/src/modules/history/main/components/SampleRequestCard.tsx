@@ -12,24 +12,34 @@
  * the error block and the timing tiles are the shared `SampledExchange` - the
  * dashboard's live sample list renders the same shell (#76). What is left here
  * is what is genuinely history's: the outcome-tinted card border, a stored
- * run's date formatting, and the two sections this side shows (request headers,
- * then the response through `UnifiedResponseViewer`).
+ * run's date formatting, and the response section.
+ *
+ * The response comes from `GET /runs/:id/samples` (issue #174), not from the
+ * trace. This card used to read `sample.trace.request.headers` and
+ * `sample.trace.response.body` - the design-mode nesting - on a surface that
+ * only ever shows load-run rows, which no writer produces. Both branches were
+ * dead, so the card rendered nothing but its timing tiles. There is also no
+ * per-sample request to show any more: a load run's request is constant across
+ * iterations and lives once in `runs.config_snapshot`.
  */
 
 import { cn } from "@/lib/utils";
 import {
 	UnifiedResponseViewer,
-	HeadersViewer,
 	SampledExchange,
+	CapturedResponseNotice,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
 import type { SampleResult } from "../../types";
+import type { RunSample } from "@/types/domain";
 
 interface SampleRequestCardProps {
 	sample: SampleResult;
 	index: number;
 	isExpanded: boolean;
 	onToggle: () => void;
+	/** The captured exchange for this row, once the samples query has it. */
+	captured?: RunSample;
 }
 
 export default function SampleRequestCard({
@@ -37,6 +47,7 @@ export default function SampleRequestCard({
 	index,
 	isExpanded,
 	onToggle,
+	captured,
 }: SampleRequestCardProps) {
 	const isError = !!sample.error || sample.statusCode === 0;
 	const isSuccess = sample.statusCode >= 200 && sample.statusCode < 300;
@@ -70,28 +81,22 @@ export default function SampleRequestCard({
 				isSuccess && "border-status-success/20"
 			)}
 		>
-			{/* Request Headers - the shared collapsible table, not a raw JSON
-			    dump. It sat directly above a UnifiedResponseViewer that already
-			    renders headers properly; the two treatments no longer differ. */}
-			{sample.trace?.request?.headers && (
-				<HeadersViewer headers={sample.trace.request.headers} variant="request" />
-			)}
-
-			{/* Response using UnifiedResponseViewer */}
-			{(sample.trace?.response?.body || sample.trace?.response?.headers) && (
-				<UnifiedResponseViewer
-					response={{
-						body:
-							typeof sample.trace.response.body === "string"
-								? sample.trace.response.body
-								: sample.trace.response.body == null
-									? ""
-									: JSON.stringify(sample.trace.response.body, null, 2),
-						headers: sample.trace.response.headers || {},
-						status: sample.statusCode,
-					}}
-					className="max-h-[400px]"
-				/>
+			{/* The captured exchange, when this run stored one for this row.
+			    Rendering nothing (not an empty heading) when it did not is
+			    deliberate: most samples in a healthy run carry no body, and a
+			    "Response" heading over nothing reads as a bug in the engine. */}
+			{captured && (
+				<div className="space-y-2">
+					<CapturedResponseNotice response={captured.response} />
+					<UnifiedResponseViewer
+						response={{
+							body: captured.response.body ?? "",
+							headers: captured.response.headers,
+							status: sample.statusCode,
+						}}
+						className="max-h-[400px]"
+					/>
+				</div>
 			)}
 		</SampledExchange>
 	);

@@ -122,6 +122,16 @@ constexpr int64_t MAX_RETAINED_RESULTS = 1000000;
 /// Upper bound on `slow_threshold_ms` (a day - past that no completion is an
 /// outlier because no completion survives).
 constexpr int64_t MAX_SLOW_THRESHOLD_MS = 86400000;
+/// Upper bound on `max_sample_body_bytes`. A captured body is copied on the
+/// completion callback, so an unbounded per-body cap turns one huge response
+/// into a hot-path memcpy the whole worker waits on.
+constexpr int64_t MAX_SAMPLE_BODY_BYTES = 104857600; // 100MB
+/// Upper bound on `max_sample_bytes` (the whole-run capture budget). Every
+/// byte under it is held in memory until the run flushes.
+constexpr int64_t MAX_SAMPLE_BYTES = 1073741824; // 1GB
+/// Upper bound on `max_exemplar_results`. Each retained exemplar holds a
+/// captured exchange, bounded in turn by the two budgets above.
+constexpr int64_t MAX_EXEMPLAR_RESULTS = 100000;
 } // namespace run_config
 
 /**
@@ -263,6 +273,35 @@ constexpr size_t DEFAULT_RESPONSE_SAMPLE_RATE = 100;
 /// optimisation, so capping it costs a few reallocations on a run that large
 /// and nothing at all otherwise. 1M records is ~90 MB, still generous.
 constexpr size_t MAX_RESERVE_RECORDS = 1000000;
+/// Whether a load run captures response headers/bodies for its retained
+/// samples by default (config key `capture_response_bodies`). On by default is
+/// only defensible because capture is failure-and-outlier-shaped rather than
+/// uniform: a healthy run captures roughly `EXEMPLARS_PER_STATUS` bodies per
+/// distinct status code and nothing else, so the common case costs kilobytes.
+constexpr bool DEFAULT_CAPTURE_RESPONSE_BODIES = true;
+/// Largest single captured response body kept, in bytes (config key
+/// `maxSampleBodyBytes`). Deliberately far below design mode's
+/// `maxTraceBodyBytes` (5 MiB): a design run stores one exchange the user asked
+/// for, a load run stores tens of them nobody asked for individually.
+constexpr size_t DEFAULT_MAX_SAMPLE_BODY_BYTES = 32768;
+/// Whole-run budget for captured body bytes (config key `maxSampleBytes`).
+/// Once spent, samples keep being recorded with their headers and metadata and
+/// only the bodies are dropped - counted by
+/// MetricsCollector::sample_bodies_dropped so the UI can say the set is
+/// incomplete rather than showing a silently biased subset.
+constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = 2 * 1024 * 1024;
+/// How many exemplars of each distinct status code a run guarantees to retain.
+/// Small on purpose: exemplars answer "what does a 503 from this target look
+/// like", which the first few answer as well as the first few hundred.
+constexpr size_t EXEMPLARS_PER_STATUS = 3;
+/// Ceiling on the exemplar store (config key `max_exemplar_results`; 0 =
+/// unlimited). The per-status gate already bounds a normal run to
+/// `EXEMPLARS_PER_STATUS x distinct status codes`, which is single digits;
+/// this is the guard for a target that answers with hundreds of distinct
+/// codes. Exemplars past it are dropped and counted, never displaced - an
+/// exemplar's whole value is that it was retained, so a reservoir would defeat
+/// the bucket.
+constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 /// HdrHistogram significant figures (3 = ~0.1% precision)
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
 /// HdrHistogram max trackable latency in microseconds (1 hour)

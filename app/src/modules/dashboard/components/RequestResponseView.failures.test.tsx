@@ -23,6 +23,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import RequestResponseView from "./RequestResponseView";
+import { withQueryClient } from "@/test/query-wrapper";
 import type { RunReport } from "@/types";
 
 // ResponseBody mounts Monaco via CodeEditor; stub it so an expanded sample
@@ -66,7 +67,7 @@ function makeReportWithFailures(): RunReport {
 
 describe("RequestResponseView renders per-test validation failures (#111)", () => {
 	it("lists each failing test's message when a validation-failure row is expanded", () => {
-		render(<RequestResponseView report={makeReportWithFailures()} />);
+		render(withQueryClient(<RequestResponseView report={makeReportWithFailures()} />));
 
 		// The row's error preview carries the summary text; expand it.
 		fireEvent.click(screen.getByRole("button", { name: /Script validation failures/ }));
@@ -81,7 +82,7 @@ describe("RequestResponseView renders per-test validation failures (#111)", () =
 		const report = makeReportWithFailures();
 		report.results![0].trace = { error_type: "ConnectionError" };
 		report.results![0].error = "connection refused";
-		render(<RequestResponseView report={report} />);
+		render(withQueryClient(<RequestResponseView report={report} />));
 
 		fireEvent.click(screen.getByRole("button", { name: /connection refused/ }));
 

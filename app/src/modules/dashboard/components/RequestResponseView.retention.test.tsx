@@ -25,6 +25,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import RequestResponseView from "./RequestResponseView";
+import { withQueryClient } from "@/test/query-wrapper";
 import type { RunReport } from "@/types";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -60,9 +61,11 @@ function makeReport(sampling?: RunReport["sampling"]): RunReport {
 
 const renderReport = (sampling?: RunReport["sampling"]) =>
 	render(
-		<TooltipProvider>
-			<RequestResponseView report={makeReport(sampling)} />
-		</TooltipProvider>
+		withQueryClient(
+			<TooltipProvider>
+				<RequestResponseView report={makeReport(sampling)} />
+			</TooltipProvider>
+		)
 	);
 
 describe("RequestResponseView retention", () => {

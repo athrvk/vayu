@@ -27,6 +27,9 @@ export * from "./callout-severity";
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 
+// "These responses were stored verbatim" - wherever captured samples are shown
+export * from "./CapturedDataWarning";
+
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
 

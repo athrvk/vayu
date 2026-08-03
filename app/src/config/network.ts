@@ -40,6 +40,13 @@ export const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 export const STATS_PAGE_LIMIT = 5000;
 
 /**
+ * Page size for `GET /runs/:id/samples`. The report itself serialises at most
+ * 100 result rows, so one page covers every sample a surface can show; the
+ * engine caps a page at 500 either way.
+ */
+export const RUN_SAMPLES_PAGE_LIMIT = 100;
+
+/**
  * Page size for the paginated `GET /runs` history list. The engine caps a page
  * at 500; the history sidebar polls only the first page (newest runs land on
  * page 1 under start_time DESC) and pages older runs in on demand.

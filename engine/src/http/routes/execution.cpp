@@ -528,6 +528,14 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         { "slow_threshold_ms", 0, limits::MAX_SLOW_THRESHOLD_MS,
         "0 disables outlier capture; a negative threshold would mark every "
         "completion an outlier." },
+        { "max_sample_body_bytes", 0, limits::MAX_SAMPLE_BODY_BYTES,
+        "A captured body is copied on the completion callback, so the cap "
+        "bounds hot-path work; 0 keeps headers and metadata and no body." },
+        { "max_sample_bytes", 0, limits::MAX_SAMPLE_BYTES,
+        "It is the whole-run capture budget, and every byte under it is held "
+        "in memory until the run flushes." },
+        { "max_exemplar_results", 0, limits::MAX_EXEMPLAR_RESULTS,
+        "Each retained exemplar holds a captured exchange." },
         { "concurrency", 1, limits::MAX_CONCURRENCY,
         "Connections are pre-allocated per worker before any traffic flows." },
         { "timeout", 1, 86400000,

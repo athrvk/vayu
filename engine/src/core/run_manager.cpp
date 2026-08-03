@@ -37,6 +37,9 @@ SamplingRetention read_retention (const MetricsCollector& mc) {
     retention.success_traces_dropped   = mc.success_results_dropped ();
     retention.slow_traces_dropped      = mc.slow_results_dropped ();
     retention.response_samples_dropped = mc.response_samples_dropped ();
+    retention.exemplars_dropped        = mc.exemplar_results_dropped ();
+    retention.sample_bodies_dropped    = mc.sample_bodies_dropped ();
+    retention.response_bodies_captured = mc.response_bodies_captured ();
     return retention;
 }
 
@@ -169,7 +172,10 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
 }
 } // namespace
 
-RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_errors)
+RunContext::RunContext (const std::string& id,
+nlohmann::json cfg,
+size_t max_errors,
+CaptureDefaults capture_defaults)
 : run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
@@ -209,6 +215,22 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     // Outlier capture threshold, read once here rather than per completion.
     slow_threshold_ms = config.value ("slow_threshold_ms",
     constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS);
+
+    // Response capture for the retained samples. On by default because the
+    // policy is failure-and-outlier-shaped rather than uniform - a healthy run
+    // captures a handful of exemplars and nothing else. The per-body cap and
+    // the whole-run budget default from engine config (both `observability`
+    // keys) and can be overridden per run, the same way the retention caps are.
+    mc_config.capture_response_bodies = config.value ("capture_response_bodies",
+    constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES);
+    mc_config.max_sample_body_bytes = static_cast<size_t> (config.value (
+    "max_sample_body_bytes", static_cast<int64_t> (capture_defaults.max_sample_body_bytes)));
+    mc_config.max_sample_bytes = static_cast<size_t> (
+    config.value ("max_sample_bytes", static_cast<int64_t> (capture_defaults.max_sample_bytes)));
+    mc_config.max_exemplar_results =
+    static_cast<size_t> (config.value ("max_exemplar_results",
+    static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
+    capture_response_bodies = mc_config.capture_response_bodies;
 
     // Configure response sampling for script validation
     mc_config.max_response_samples =
@@ -476,9 +498,20 @@ bool verbose) {
         // workers themselves because a thread cannot join itself.
         finished = take_finished_workers ();
 
+        // The config-backed defaults RunContext cannot read for itself - it
+        // holds no Database - resolved here, the way `maxStoredErrors` always
+        // has been. A run's own config still overrides each of them.
+        CaptureDefaults capture_defaults;
+        capture_defaults.max_sample_body_bytes =
+        static_cast<size_t> (db.get_config_int ("maxSampleBodyBytes",
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES)));
+        capture_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
+
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
-        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))));
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))),
+        capture_defaults);
         register_run (run_id, context);
 
         // Sweep stale retained runs on each new registration so that headless /
@@ -872,7 +905,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["sampling"] = { { "errors_dropped", inputs.retention.errors_dropped },
         { "success_traces_dropped", inputs.retention.success_traces_dropped },
         { "slow_traces_dropped", inputs.retention.slow_traces_dropped },
-        { "response_samples_dropped", inputs.retention.response_samples_dropped } };
+        { "response_samples_dropped", inputs.retention.response_samples_dropped },
+        { "exemplars_dropped", inputs.retention.exemplars_dropped },
+        { "sample_bodies_dropped", inputs.retention.sample_bodies_dropped },
+        // The run's own record that it captured response data verbatim. Read
+        // by the Samples tab to warn about credentials, so it has to be
+        // persisted rather than re-derived - the tab renders from the report
+        // long after the collector is gone.
+        { "response_bodies_captured", inputs.retention.response_bodies_captured } };
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {

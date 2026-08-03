@@ -779,8 +779,34 @@ export interface RunReport {
 		slowTracesDropped: number;
 		/** Responses displaced or dropped before test validation ran. */
 		responseSamplesDropped: number;
+		/**
+		 * Per-status exemplars refused because the exemplar store was full
+		 * (`max_exemplar_results`). Only a target answering with more distinct
+		 * status codes than that limit can produce a non-zero figure.
+		 */
+		exemplarsDropped?: number;
+		/**
+		 * Samples whose response body was dropped once the run's capture budget
+		 * (`maxSampleBytes`) was spent. Their headers and metadata were still
+		 * captured, so the sample exists and only its body is missing.
+		 */
+		sampleBodiesDropped?: number;
+		/**
+		 * Captured exchanges this run stored. Non-zero is the run's own record
+		 * that it holds response headers and bodies **verbatim** - capture does
+		 * not redact, by design - which is what the Samples tab warns on rather
+		 * than leaving the reader to infer it. Absent on runs recorded before
+		 * capture existed.
+		 */
+		responseBodiesCaptured?: number;
 	};
 	results?: Array<{
+		/**
+		 * The `results` row id, and the join key against
+		 * {@link RunSample.resultId} from `GET /runs/:id/samples`. Absent on
+		 * reports from engines older than 0.15.0.
+		 */
+		id?: number;
 		timestamp: number;
 		statusCode: number;
 		statusText?: string;
@@ -788,6 +814,49 @@ export interface RunReport {
 		error?: string;
 		trace?: RunResultTrace;
 	}>;
+}
+
+/**
+ * One sampled load-run result's captured response, from
+ * `GET /runs/:id/samples`.
+ *
+ * Deliberately not part of {@link RunReport}: the report path loads and parses
+ * every result row for a run on each fetch and the dashboard polls it, so
+ * bodies travel on their own endpoint and are fetched only when a reader
+ * expands a sample. Join to a report row by `resultId`.
+ */
+export interface RunSample {
+	resultId: number;
+	response: {
+		headers: Record<string, string>;
+		/**
+		 * The stored body. Absent when {@link RunSample.response.binary} is set -
+		 * a body that is not text is reported as its shape, never as a string
+		 * that reads like a response and is not one.
+		 */
+		body?: string;
+		/** Size of the body as received, before any truncation. */
+		bodyBytes: number;
+		/** `body` is a prefix; the response was larger than `maxSampleBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The run's capture budget was spent before this sample, so only its
+		 * headers were kept. Distinct from an empty response body. */
+		bodyDropped?: boolean;
+		/** Stored as a descriptor: size and content type, no bytes. */
+		binary?: boolean;
+		contentType?: string;
+	};
+}
+
+export interface RunSamplesResponse {
+	data: RunSample[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
 }
 
 export interface EngineHealth {

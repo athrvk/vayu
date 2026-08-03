@@ -96,8 +96,14 @@ vayu::Result<vayu::Response> result) {
                 { "downloadMs", response.timing.download_ms } };
         }
 
-        context->metrics_collector->record_error (
-        response.error_code, response.error_message, error_json.dump ());
+        // Every error is a capture candidate: a failure is exactly the sample a
+        // user opens the Samples tab for, and errors are already bounded by
+        // `maxStoredErrors`. Passing the response rather than a copy keeps the
+        // body-sized work inside the collector, after it has decided to keep
+        // the record (see MetricsCollector::record_error).
+        context->metrics_collector->record_error (response.error_code,
+        response.error_message, error_json.dump (),
+        context->capture_response_bodies ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
     } else {
@@ -115,15 +121,33 @@ vayu::Result<vayu::Response> result) {
         const bool is_slow = context->slow_threshold_ms > 0 &&
         latency >= static_cast<double> (context->slow_threshold_ms);
         const bool sampled = context->metrics_collector->should_sample_success ();
+        // Third reason, and the cheapest: one relaxed fetch_add deciding
+        // whether this completion is among the first few of its status code. A
+        // uniform slice of a 30M-request run is a thousand identical 200s;
+        // three of each code is what answers "what does this target's 503
+        // look like".
+        const bool exemplar =
+        context->metrics_collector->claim_status_exemplar (response.status_code);
 
         std::string trace_data;
         auto trace_reason = SuccessTraceReason::None;
 
-        if (sampled || is_slow) {
-            // Slow wins when a completion is both: the trace is identical, and
-            // charging it to the slow budget leaves the 1-in-N budget for
-            // ordinary traffic.
-            trace_reason = is_slow ? SuccessTraceReason::Slow : SuccessTraceReason::Sampled;
+        if (sampled || is_slow || exemplar) {
+            // Slow still wins, then sampled: the trace is identical either way,
+            // and charging an outlier to the slow budget leaves the 1-in-N
+            // budget for ordinary traffic.
+            //
+            // Exemplar is *last*, and only decides the store for a completion
+            // no other budget wanted. Ranking it first stole outliers from the
+            // slow store - the first few completions of a status code are
+            // usually where a run's outliers are - which is a behaviour change
+            // nobody asked for, on the store whose whole purpose is to hold
+            // what the user asked for. Being retained is still guaranteed:
+            // whichever budget claims it, the record is stored, and the
+            // exemplar's real job (capturing a body for it) is decided
+            // separately below.
+            trace_reason = is_slow ? SuccessTraceReason::Slow :
+            (sampled ? SuccessTraceReason::Sampled : SuccessTraceReason::Exemplar);
 
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
                 { "wireMs", response.timing.wire_ms },
@@ -142,9 +166,17 @@ vayu::Result<vayu::Response> result) {
             trace_data = timing_json.dump ();
         }
 
-        // Record to in-memory collector (high-performance, no DB writes)
-        context->metrics_collector->record_success (response.status_code,
-        latency, response.timing.queue_wait_ms, trace_data, trace_reason);
+        // Whether a body is captured is decided here, not by which store won
+        // above. Capture is failure-and-outlier-shaped: an outlier or a claimed
+        // exemplar gets one, a plain 1-in-N sample does not - a thousand
+        // identical 200s are not worth a thousand bodies. A completion that is
+        // both sampled and an exemplar is stored in the sampled budget *and*
+        // keeps its body, which is the case the old precedence-based version
+        // could only express by moving the record.
+        const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
+        context->metrics_collector->record_success (response.status_code, latency,
+        response.timing.queue_wait_ms, trace_data, trace_reason,
+        capture_body ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 

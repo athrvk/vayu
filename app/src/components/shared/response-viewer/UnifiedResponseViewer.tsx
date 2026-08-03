@@ -39,8 +39,12 @@ export default function UnifiedResponseViewer({
 }: UnifiedResponseViewerProps) {
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
 
-	// Empty state
-	if (!response?.body && !request) {
+	// Empty state. Headers count as content, not just a body: a load-run sample
+	// whose body was binary or dropped for the run's capture budget (#174) has
+	// real headers and no body, and calling that "no response captured" would
+	// hide the only thing the run did keep.
+	const hasHeaders = !!response?.headers && Object.keys(response.headers).length > 0;
+	if (!response?.body && !hasHeaders && !request) {
 		return (
 			<div className={cn("flex-1 flex surface-card", className)}>
 				<EmptyState

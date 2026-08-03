@@ -27,6 +27,7 @@
 #include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,27 @@ struct ResponseSample {
 };
 
 /**
+ * @brief A retained sample's response headers and body, copied on the hot path.
+ *
+ * Only the copy happens inline in the completion drain; everything expensive -
+ * binary detection, hashing, dedup, JSON - waits for the flush (see
+ * MetricsCollector::flush_to_database). The bytes here are already truncated
+ * to `max_sample_body_bytes`, because copying a 30 MB body to throw 29.97 MB
+ * of it away at flush would be paying the hot-path cost for nothing;
+ * `body_bytes` remembers the size as received so a reader can tell a slice
+ * from the whole.
+ */
+struct CapturedExchange {
+    Headers headers;
+    std::string body;
+    std::string content_type;
+    int64_t body_bytes = 0; ///< size as received, before truncation
+    bool truncated     = false;
+    /// The run's byte budget was already spent, so only headers were kept.
+    bool body_dropped = false;
+};
+
+/**
  * @brief Record for a single request result (lighter than db::Result)
  */
 struct ResultRecord {
@@ -68,6 +90,10 @@ struct ResultRecord {
     ErrorCode error_code;
     std::string error_message;
     std::string trace_data;
+    /// Present only for the three captured buckets (errors, slow outliers,
+    /// per-status exemplars). A uniformly sampled success carries none: a
+    /// thousand identical 200s are not worth a thousand bodies.
+    std::optional<CapturedExchange> capture;
 
     ResultRecord () = default;
     ResultRecord (int64_t ts, int status, double latency)
@@ -119,6 +145,21 @@ struct MetricsCollectorConfig {
 
     /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
     size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
+
+    /// Whether retained samples carry the response headers and body. Off makes
+    /// the collector byte-for-byte what it was before capture existed: no gate
+    /// is consulted, no exemplar is claimed, nothing is copied.
+    bool capture_response_bodies = constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES;
+
+    /// Largest captured body per sample; the copy is truncated to it.
+    size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
+
+    /// Whole-run budget for captured body bytes. Past it, samples keep their
+    /// headers and metadata and lose only their bodies (sample_bodies_dropped).
+    size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+
+    /// Ceiling on the per-status exemplar store, 0 = unlimited.
+    size_t max_exemplar_results = constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS;
 };
 
 /**
@@ -127,11 +168,23 @@ struct MetricsCollectorConfig {
  * A completion that is both sampled and slow is stored as Slow: the trace is
  * identical either way (it carries `isSlow`), and charging it to the slow
  * budget leaves the 1-in-N budget for ordinary traffic.
+ *
+ * `Exemplar` ranks **last** - it names the store for a completion no other
+ * budget wanted. Ranking it first was tried and was wrong: the first few
+ * completions of a status code are often exactly where a run's outliers are,
+ * so it quietly emptied the slow store, which exists to hold what the user
+ * asked for.
+ *
+ * This enum therefore says only *which budget pays*. Whether the record also
+ * carries a captured body is a separate decision, made by the caller and
+ * passed to record_success - a record can sit in the sampled budget and still
+ * deserve a body, which no ordering of these three could express.
  */
 enum class SuccessTraceReason {
-    None,    ///< no trace was built for this completion
-    Sampled, ///< the 1-in-N sampler selected it
-    Slow     ///< it crossed slow_threshold_ms
+    None,     ///< no trace was built for this completion
+    Sampled,  ///< the 1-in-N sampler selected it
+    Slow,     ///< it crossed slow_threshold_ms
+    Exemplar  ///< it is one of the first EXEMPLARS_PER_STATUS of its status code
 };
 
 /**
@@ -169,6 +222,22 @@ class MetricsCollector {
     [[nodiscard]] bool should_sample_success ();
 
     /**
+     * @brief Claim one of this status code's exemplar slots, if any are left.
+     *
+     * Phase 1 of capture, and the whole of what capture costs a completion
+     * that is not retained: a single relaxed fetch_add on a fixed array,
+     * decided before anything is built or copied. Returns true at most
+     * `EXEMPLARS_PER_STATUS` times per distinct status code per run.
+     *
+     * "First K of each status code" rather than a uniform slice, because a
+     * uniform slice of 30M requests is a thousand identical 200s, while three
+     * of each code answers what the user is actually asking - what does this
+     * target's 503 look like. Returns false when capture is off, so the caller
+     * needs no second toggle check.
+     */
+    [[nodiscard]] bool claim_status_exemplar (int status_code);
+
+    /**
      * @brief Record a successful request
      * Thread-safe, optimized for high-throughput
      *
@@ -176,12 +245,21 @@ class MetricsCollector {
      * @param trace_reason which budget retains @p trace_data. `None` with a
      *                   non-empty trace stores nothing - the two are decided
      *                   together by the caller (see should_sample_success).
+     * @param capture_source the live response, or nullptr to capture nothing.
+     *                   Passed as a pointer rather than copied by the caller
+     *                   so the headers and body are copied *after* the store
+     *                   has accepted the record - a reservoir refusal costs no
+     *                   body-sized copy. Honoured whatever @p trace_reason is:
+     *                   the caller decides what deserves a body (see
+     *                   handle_result), because the store a record lands in is
+     *                   not what makes its body worth keeping.
      */
     void record_success (int status_code,
     double latency_ms,
     double queue_wait_ms,
-    const std::string& trace_data   = "",
-    SuccessTraceReason trace_reason = SuccessTraceReason::None);
+    const std::string& trace_data     = "",
+    SuccessTraceReason trace_reason   = SuccessTraceReason::None,
+    const Response* capture_source    = nullptr);
 
     /**
      * @brief Record a response sample for deferred script validation
@@ -197,7 +275,8 @@ class MetricsCollector {
      */
     void record_error (ErrorCode code,
     const std::string& message,
-    const std::string& trace_data = "");
+    const std::string& trace_data  = "",
+    const Response* capture_source = nullptr);
 
     /**
      * @brief Number of error records discarded because the store was full.
@@ -226,6 +305,46 @@ class MetricsCollector {
     /** @brief Response samples dropped or displaced by the reservoir. */
     [[nodiscard]] size_t response_samples_dropped () const {
         return response_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Exemplar records dropped because the exemplar store was full.
+     * Only a target answering with more distinct status codes than
+     * max_exemplar_results can reach this.
+     */
+    [[nodiscard]] size_t exemplar_results_dropped () const {
+        return exemplar_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Samples whose body was dropped because the run's capture budget
+     *        was spent. Their headers and metadata were still captured.
+     *
+     * Surfaced so the Samples tab can say the captured set is incomplete
+     * rather than presenting a silently biased subset as the whole story.
+     */
+    [[nodiscard]] size_t sample_bodies_dropped () const {
+        return sample_bodies_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Captured body bytes held for this run, after truncation.
+     * The figure the budget is spent against.
+     */
+    [[nodiscard]] size_t captured_body_bytes () const {
+        return captured_bytes_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Captured exchanges written by the last flush_to_database.
+     *
+     * Zero until the run flushes. Non-zero is the run's marker that it holds
+     * response headers and bodies stored verbatim - capture does not redact,
+     * by decision, so this is what lets a reader be warned rather than left to
+     * infer it.
+     */
+    [[nodiscard]] size_t response_bodies_captured () const {
+        return response_bodies_captured_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -391,6 +510,14 @@ class MetricsCollector {
     }
 
     /**
+     * @brief Get the retained per-status exemplar records - the first
+     *        EXEMPLARS_PER_STATUS completions of each distinct status code.
+     */
+    [[nodiscard]] const std::vector<ResultRecord>& exemplar_results () const {
+        return exemplar_results_;
+    }
+
+    /**
      * @brief Get latency count from histogram
      * @note Raw latencies are no longer stored; use calculate_percentiles() for analysis
      */
@@ -516,6 +643,19 @@ class MetricsCollector {
     std::vector<ResultRecord> slow_results_;
     std::atomic<size_t> slow_seen_{ 0 };
     std::atomic<size_t> slow_dropped_{ 0 };
+    // Per-status exemplars. Shares success_mutex_ with the two stores above:
+    // the gate that fills it fires at most EXEMPLARS_PER_STATUS times per
+    // status code for the whole run, so it contends with nothing.
+    //
+    // Not a reservoir, unlike its neighbours - a displaced exemplar is not an
+    // exemplar. Past max_exemplar_results a later candidate is refused and
+    // counted rather than evicting an incumbent.
+    std::vector<ResultRecord> exemplar_results_;
+    std::atomic<size_t> exemplar_dropped_{ 0 };
+    // How many exemplar slots each status code has spent. Indexed the same way
+    // as status_code_counts_, with the overflow codes sharing the last slot -
+    // a target answering 999 gets exemplars, just not per-code ones.
+    std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> exemplar_claims_{};
 
     // Response samples for deferred script validation
     mutable std::mutex response_samples_mutex_;
@@ -529,6 +669,25 @@ class MetricsCollector {
     // takes, so it adds no contention to the hot path.
     mutable std::mutex status_overflow_mutex_;
     std::map<int, size_t> status_overflow_;
+
+    // Whole-run capture budget, spent in `max_sample_body_bytes`-bounded
+    // chunks by the copies below.
+    std::atomic<size_t> captured_bytes_{ 0 };
+    std::atomic<size_t> sample_bodies_dropped_{ 0 };
+    std::atomic<size_t> response_bodies_captured_{ 0 };
+
+    /**
+     * @brief Phase 2 of capture: copy the exchange into a record the store has
+     *        already accepted.
+     *
+     * Never called before a slot is claimed, so a refused candidate costs no
+     * body-sized copy. Charges the run budget atomically; when it is spent the
+     * headers and metadata are still captured and only the body is dropped
+     * (counted by sample_bodies_dropped) - metadata is what tells the reader
+     * the set is incomplete, so dropping that too would hide the truncation
+     * being reported.
+     */
+    [[nodiscard]] CapturedExchange capture_exchange (const Response& response);
 
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);

@@ -429,7 +429,8 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
 // creates sqlite_autoindex_* entries of its own.
 const std::vector<std::string> EXPECTED_INDEXES = { "idx_metric_ticks_run_id",
     "idx_results_run_id", "idx_requests_collection_id",
-    "idx_collections_parent_id", "idx_runs_start_time" };
+    "idx_collections_parent_id", "idx_runs_start_time",
+    "idx_result_bodies_run_id", "idx_body_blobs_run_id" };
 
 // Reads index names straight out of sqlite_master on a separate connection,
 // so the assertion does not rest on anything sqlite_orm reports about itself.

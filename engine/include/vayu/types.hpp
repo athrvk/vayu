@@ -742,7 +742,66 @@ struct Result {
     std::string status_text; // Wire reason phrase, or canonical IANA text
     double latency_ms;
     std::string error;
-    std::string trace_data; // JSON (Headers/Body - only for Design Mode or Errors)
+    // JSON. Design mode stores the whole exchange here (request + response,
+    // nested). A load run stores only the timing breakdown - never a body -
+    // because `calculate_detailed_report` parses every row of this column on
+    // every report fetch, and the dashboard polls that. Load-run bodies live in
+    // `result_bodies`/`body_blobs` instead, read only by GET /runs/:id/samples.
+    std::string trace_data;
+};
+
+/**
+ * @brief One captured response body, content-addressed and shared within a run.
+ *
+ * Load-test responses are overwhelmingly identical, so the sample rows below
+ * point at these rather than each carrying its own copy: 1000 samples of one
+ * 2 KiB body store 2 KiB. Scoped per run (`run_id` + `hash` is unique) so
+ * deleting a run deletes its blobs without any cross-run refcount to maintain.
+ */
+struct BodyBlob {
+    int id;
+    std::string run_id;
+    std::string hash;    // lowercase hex SHA-256 of `content` (vayu::core::body_digest)
+    std::string content; // the stored bytes, already truncated to the per-body cap
+};
+
+/**
+ * @brief The captured exchange for one sampled load-run result.
+ *
+ * Keyed by the `results` row it belongs to, one-to-one. Its own table so the
+ * report path - which loads every `results` row for a run and JSON-parses each
+ * `trace_data` - never reads a body it does not use.
+ */
+struct ResultBody {
+    int result_id; // PK, and the `results.id` this exchange belongs to
+    std::string run_id;
+    std::string headers;   // JSON object of response headers
+    // 0 when no body was stored: the response had none, it was binary, or the
+    // run's capture budget was spent. `body_bytes` and the flags say which.
+    int blob_id;
+    int64_t body_bytes;    // size of the body as received, before truncation
+    bool truncated;        // stored bytes are a prefix of `body_bytes`
+    bool is_binary;        // stored as a descriptor; `blob_id` is 0
+    std::string content_type;
+};
+
+/**
+ * @brief A captured exchange on its way to `result_bodies`, still unattached.
+ *
+ * `results.id` is assigned by the insert, so the pairing between a result and
+ * its exchange has to travel as the result's index within the batch. Both are
+ * written in one transaction (Database::add_results_batch), so a run never
+ * persists a body row pointing at a result that did not land.
+ */
+struct PendingResultBody {
+    size_t result_index = 0;
+    std::string headers;   // JSON object
+    std::string body;      // stored bytes; "" when binary, absent or dropped
+    std::string body_hash; // digest of `body`; "" when nothing is stored
+    int64_t body_bytes = 0;
+    bool truncated     = false;
+    bool binary        = false;
+    std::string content_type;
 };
 
 /**

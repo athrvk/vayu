@@ -22,6 +22,10 @@ export {
 	ResponseHeadersPanel,
 } from "./HeadersViewer";
 export type { ResponseHeadersPanelProps } from "./HeadersViewer";
+// Says what a captured load-run response is *not* - truncated, dropped for
+// budget, or binary. Rendered by both surfaces that show captured samples.
+export { CapturedResponseNotice } from "./CapturedResponseNotice";
+export type { CapturedResponseNoticeProps } from "./CapturedResponseNotice";
 export { StatusCodeBadge } from "./StatusCodeBadge";
 export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 

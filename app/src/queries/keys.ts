@@ -53,6 +53,10 @@ export const queryKeys = {
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
 		report: (id: string) => [...queryKeys.runs.all, "report", id] as const,
 		timeSeries: (id: string) => [...queryKeys.runs.all, "timeSeries", id] as const,
+		// Captured response headers/bodies for a run's samples. Its own family,
+		// not part of `report`, because it is fetched lazily - only once a
+		// reader expands a sample - and must not ride on the report's cache.
+		samples: (id: string) => [...queryKeys.runs.all, "samples", id] as const,
 	},
 
 	// Warm-cache pass over every collection's requests (see

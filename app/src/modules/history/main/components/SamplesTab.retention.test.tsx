@@ -17,9 +17,10 @@
  * CLAUDE.md warns about.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import SamplesTab from "./SamplesTab";
+import { withQueryClient } from "@/test/query-wrapper";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import type { RunReport } from "@/types";
 
@@ -51,9 +52,17 @@ function makeReport(sampling?: RunReport["sampling"]): RunReport {
 	};
 }
 
+// The tab fetches captured exchanges lazily; nothing here expands a row, so
+// the mock only exists to keep the query from reaching a real client.
+vi.mock("@/services/api", () => ({
+	apiService: { getRunSamples: vi.fn() },
+}));
+
 const renderTab = (sampling?: RunReport["sampling"]) => {
 	const report = makeReport(sampling);
-	return render(<SamplesTab report={report} derived={reportToDerived(report)} />);
+	return render(
+		withQueryClient(<SamplesTab report={report} derived={reportToDerived(report)} />)
+	);
 };
 
 describe("SamplesTab retention", () => {
@@ -82,5 +91,31 @@ describe("SamplesTab retention", () => {
 	it("counts what it shows rather than claiming a capture total", () => {
 		renderTab();
 		expect(screen.getByText("1 samples shown")).toBeInTheDocument();
+	});
+
+	// Issue #174: capture stores responses verbatim, so the tab that displays
+	// them is where the reader has to be told.
+	it("warns that a run's captured responses are stored verbatim", () => {
+		renderTab({
+			errorsDropped: 0,
+			successTracesDropped: 0,
+			slowTracesDropped: 0,
+			responseSamplesDropped: 0,
+			responseBodiesCaptured: 7,
+		});
+
+		expect(screen.getByText("Captured response data")).toBeInTheDocument();
+	});
+
+	it("stays quiet about capture on a run that captured nothing", () => {
+		renderTab({
+			errorsDropped: 0,
+			successTracesDropped: 0,
+			slowTracesDropped: 0,
+			responseSamplesDropped: 0,
+			responseBodiesCaptured: 0,
+		});
+
+		expect(screen.queryByText("Captured response data")).not.toBeInTheDocument();
 	});
 });

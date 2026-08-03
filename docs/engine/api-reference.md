@@ -276,14 +276,16 @@ It is a write-time seed only - changing it never alters a request that already
 exists, and it is never consulted at execution time.
 
 The Settings panel renders entries dynamically, so new keys appear without app
-changes. These `observability` keys govern how much a run keeps - three of them
+changes. These `observability` keys govern how much a run keeps - most of them
 on disk, one in memory:
 
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
-| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results) are pruned at startup and after each run finishes. `0` = unlimited. |
+| `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
+| `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
+| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 
 In-progress (`running`/`pending`) runs are never pruned.
@@ -1299,6 +1301,9 @@ default, and whose message names the offending field and why the bound exists:
 | `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
 | `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
 | `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
+| `max_sample_body_bytes` | `0`-`104857600` | A captured body is copied on the completion callback, so the cap bounds hot-path work. `0` keeps headers and metadata and no body. Defaults to the `maxSampleBodyBytes` setting. |
+| `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
+| `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
@@ -1321,6 +1326,7 @@ independent budgets:
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
 | Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
 | Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
+| Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
 Two properties are worth relying on. An outlier **never consumes a sampling
 slot**: a run whose target degrades does not silently stop sampling ordinary
@@ -1329,6 +1335,30 @@ its bound a later record displaces a uniformly chosen incumbent instead of being
 refused - so what a long run retains describes the whole run rather than its
 first few seconds, and `sampling` in
 [the report](#get-runsrunidreport) says how many records that thinning cost.
+
+The exemplar budget is the one exception to the reservoir rule, and deliberately
+so: an exemplar that gets displaced is not an exemplar, so past its bound a
+later candidate is refused and counted rather than evicting an incumbent.
+
+It is also the **last** budget consulted, not the first. A completion that is
+already an outlier stays charged to the slow budget and a sampled one stays
+charged to the sampling budget - claiming an exemplar never moves a record out
+of the store that wanted it, because the first few completions of a status code
+are often exactly where a run's outliers are. What the exemplar claim decides is
+whether the response **body** is captured, which is independent of which budget
+pays: a completion that is both sampled and a claimed exemplar is stored in the
+sampling budget *and* keeps its body.
+
+**Response capture.** `capture_response_bodies` (boolean, default `true`) decides
+whether the retained samples carry their response headers and body. On by default
+is only defensible because capture is failure-and-outlier-shaped rather than
+uniform - errors, slow outliers and the per-status exemplars, never the 1-in-N
+slice - so a healthy run captures a handful of exchanges. Set it to `false` and
+the collector is byte-for-byte what it was before capture existed: no gate is
+consulted, no exemplar is claimed, nothing is copied, and no rows are written.
+What is captured is read back with
+[GET /runs/:runId/samples](#get-runsrunidsamples) and described in
+[`result_bodies`](db-schema.md#result_bodies).
 
 **Shutdown refuses new runs.** Once the daemon has begun draining its run
 workers, `POST /runs` answers `503` with the message `Engine is shutting down` rather
@@ -1857,10 +1887,12 @@ alone rather than erroring. **The response shape is the same either way.**
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
   "sampling": {
     "errorsDropped": 0, "successTracesDropped": 29000,
-    "slowTracesDropped": 0, "responseSamplesDropped": 998000
+    "slowTracesDropped": 0, "responseSamplesDropped": 998000,
+    "exemplarsDropped": 0, "sampleBodiesDropped": 12,
+    "responseBodiesCaptured": 23
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
-  "results": [ { "...": "sampled request/response outcomes" } ]
+  "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
 
@@ -1889,12 +1921,108 @@ count means they are a **uniform sample of the whole run** (reservoir retention)
 rather than a truncated prefix of it. The section is absent on a run recorded
 before it was reported, which is not the same claim as "nothing was dropped".
 
+Three of its keys are about captured responses rather than retention:
+`responseBodiesCaptured` is how many exchanges the run stored (see
+[GET /runs/:runId/samples](#get-runsrunidsamples)), and is also the run's own
+marker that it holds response data **stored verbatim** - non-zero is what the
+Samples tab warns on. `sampleBodiesDropped` counts samples whose headers were
+kept but whose body was dropped once the run's `maxSampleBytes` budget was
+spent. `exemplarsDropped` counts per-status exemplars refused because
+`max_exemplar_results` was full, which only a target answering with more
+distinct status codes than that limit can reach. All three are absent on runs
+recorded before 0.15.0.
+
+`results[].id` is the `results` row id, and the join key against
+`GET /runs/:runId/samples`. It is absent on reports served by an engine older
+than 0.15.0.
+
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
 `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
 each omitted when absent) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
 above). `rps` in the raw snapshot is renamed to `targetRps` here.
+
+### GET /runs/:runId/samples
+
+Get the response headers and body a load run captured for its retained samples.
+Paginated; **no deprecated alias** - the endpoint is new in 0.15.0, so there is
+no pre-consolidation spelling for it to keep working.
+
+Deliberately **not** part of `GET /runs/:runId/report`. That path loads every
+`results` row for the run and JSON-parses each `trace_data` to accumulate
+aggregates that never look at a body, and the dashboard polls it; at 1000
+samples carrying 32 KiB bodies, folding them in would turn every poll into ~32 MB
+read from SQLite and parsed. So the bodies live in their own tables and are
+fetched here, per page, only when a reader actually expands a sample.
+
+**Query params:**
+
+| Param    | Default | Notes                                     |
+|----------|---------|-------------------------------------------|
+| `limit`  | `50`    | Capped at 500; a non-numeric value falls back to the default |
+| `offset` | `0`     | Floored at 0                              |
+
+**What a run captures** - and does not - is described under
+[`result_bodies`](db-schema.md#result_bodies): every error, the slow outliers,
+and the first three of each distinct status code, within `maxSampleBodyBytes`
+per body and `maxSampleBytes` for the run. A uniformly sampled success carries
+no body by design.
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "resultId": 41,
+      "response": {
+        "headers": { "content-type": "application/json", "server": "nginx" },
+        "body": "{\"error\":\"upstream timeout\"}",
+        "bodyBytes": 28,
+        "contentType": "application/json"
+      }
+    },
+    {
+      "resultId": 42,
+      "response": {
+        "headers": { "content-type": "image/png" },
+        "bodyBytes": 20480,
+        "contentType": "image/png",
+        "binary": true
+      }
+    }
+  ],
+  "pagination": { "total": 23, "limit": 50, "offset": 0, "hasMore": false, "returned": 23 }
+}
+```
+
+`resultId` is the `results` row this exchange belongs to - join it against
+`results[].id` on the report rather than re-deriving an order.
+
+The `response` node always carries `headers` and `bodyBytes` (the size **as
+received**, before any truncation). The rest is conditional, and each key means
+something the bytes alone cannot say:
+
+| Key             | When present | Meaning                                                                 |
+|-----------------|--------------|-------------------------------------------------------------------------|
+| `body`          | Not binary   | The stored bytes. `""` when the response had none, or when the body was dropped |
+| `bodyTruncated` | `true` only  | `body` is a prefix; the response was larger than `maxSampleBodyBytes`. Same convention design-mode traces use |
+| `bodyDropped`   | `true` only  | The run's `maxSampleBytes` budget was spent before this sample: headers kept, body not. **Distinct from an empty response body** |
+| `binary`        | `true` only  | Stored as a descriptor - `bodyBytes` and `contentType`, no bytes. See [`result_bodies`](db-schema.md#result_bodies) for why a binary body is never stored as text |
+| `contentType`   | Non-empty    | The response's `Content-Type`                                           |
+
+**Captured data is stored verbatim** - no redaction, consistently with
+design-mode traces, which already store request headers as sent. A response
+`Set-Cookie` is captured along with everything else. It is deleted with the run,
+so `maxRunsRetained` is its expiry.
+
+A run that captured nothing is an empty page, not an error; an unknown run id is
+a **404** in the shared error shape.
+
+**Response (404):**
+```json
+{ "error": { "code": 404, "message": "Run not found" } }
+```
 
 ### DELETE /runs/:runId
 

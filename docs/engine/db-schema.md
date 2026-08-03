@@ -375,6 +375,13 @@ Individual request outcomes - all errors plus sampled successes (sampling is con
 | `error`       | TEXT       | Error message for failures; empty on success                 |
 | `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
+A load run's captured response headers and bodies are **not** here - they live in
+[`result_bodies`](#result_bodies) / [`body_blobs`](#body_blobs). That split is load-bearing:
+`Database::get_results` loads every row for a run with no limit and
+`calculate_detailed_report` JSON-parses each `trace_data` on every report fetch, which the
+dashboard polls. At ~200 bytes per trace that is free; with bodies inline it would be megabytes
+read and parsed per poll, to compute aggregates that never look at a body.
+
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
 latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
@@ -412,6 +419,97 @@ after a restart - see `app/src/modules/request-builder/utils/restore-response.ts
 A design run has exactly one `results` row. `GET /runs/:runId` serves it (as `result`)
 alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the
 same row, read by two routes for two different callers.
+
+---
+
+### `result_bodies`
+
+The response captured for one sampled **load-run** result, one-to-one with a `results` row.
+Struct is `db::ResultBody`. Read only by [`GET /runs/:runId/samples`](api-reference.md#get-runsrunidsamples);
+nothing on the report path touches it.
+
+| Column         | Type       | Notes                                                              |
+|----------------|------------|--------------------------------------------------------------------|
+| `result_id`    | INTEGER PK | The `results.id` this exchange belongs to (not autoincrement)      |
+| `run_id`       | TEXT       | FK → `runs.id`; what the run cascade and the endpoint filter on    |
+| `headers`      | TEXT       | JSON object of the response headers, as received                   |
+| `blob_id`      | INTEGER    | FK → `body_blobs.id`, or **0** when no body was stored             |
+| `body_bytes`   | INTEGER    | Size of the body **as received**, before any truncation            |
+| `truncated`    | INTEGER    | 1 when the stored bytes are a prefix (`maxSampleBodyBytes`)        |
+| `binary`       | INTEGER    | 1 when the body was stored as a descriptor rather than as text     |
+| `content_type` | TEXT       | The response's `Content-Type`, `""` when it sent none              |
+
+**Which completions get a row.** Not a uniform sample - a uniform slice of a 30M-request run is
+a thousand identical 200s. Three buckets, all decided before anything is copied:
+
+| Bucket | Bound |
+|--------|-------|
+| Every error | `maxStoredErrors` (the error store's own cap) |
+| Slow outliers | `max_slow_results`, the existing slow-request reservoir |
+| The first `EXEMPLARS_PER_STATUS` (3) of each distinct status code | `max_exemplar_results` (64), and unlike its neighbours **not** a reservoir - an exemplar that gets displaced is not an exemplar |
+
+The buckets overlap, and the overlap resolves toward the *other* store: an
+outlier that is also one of its status code's first three stays charged to the
+slow budget, and a sampled completion stays charged to the sampling budget. The
+exemplar store holds only what no other budget wanted. Claiming an exemplar is
+what decides that a **body** is captured, separately from which budget pays - so
+a completion that is both sampled and an exemplar is stored as a sample and
+still keeps its body.
+
+A uniformly sampled success (`success_sample_rate`) is deliberately body-less.
+
+**Budgets.** `maxSampleBodyBytes` (config, `observability`, default 32 KiB) caps a single body;
+`maxSampleBytes` (default 2 MiB) is the whole-run budget. Once the run budget is spent, samples
+keep their headers and metadata and lose only their bodies - the row then has `blob_id = 0` with
+`body_bytes > 0`, and `runs.summary`'s `sampling.sample_bodies_dropped` counts them, so the UI
+can say the set is incomplete rather than presenting a biased subset as the whole story. Both
+defaults are far below design mode's `maxTraceBodyBytes` (5 MiB): a design run stores one
+exchange the user asked for, a load run stores tens nobody asked for individually.
+
+**Binary bodies.** The engine never sets `CURLOPT_ACCEPT_ENCODING`, so a request that asks for
+`gzip` gets the compressed bytes in the response body; images and protobuf arrive the same way.
+Those are stored as a descriptor (`binary = 1`, `blob_id = 0`, with `body_bytes` and
+`content_type`), never as text - `error_handler_t::replace` would keep `dump()` from throwing and
+hand the reader a mojibake that reads like a real response. The rule is
+`vayu::core::looks_binary` (`core/sample_capture.cpp`): a content type that is not text-shaped,
+or a bounded prefix that is not valid UTF-8 / contains a NUL.
+
+**No redaction.** Captured data is stored verbatim, consistently with design-mode traces, which
+already store request headers as sent. A response `Set-Cookie` is captured along with everything
+else. The mitigation is the run's own marker - `sampling.response_bodies_captured` in
+`runs.summary` - which the Samples tab reads to warn, plus the run cascade below, which makes
+`maxRunsRetained` the expiry for anything credential-shaped a capture picked up.
+
+**Per-run request.** There is deliberately no per-sample request copy: a load run's request is
+constant across iterations and already lives in `runs.config_snapshot`, and the event-loop path
+never populates `Response::request_headers` at all (only the synchronous `client.cpp` does).
+
+---
+
+### `body_blobs`
+
+One row per **distinct** captured body within a run - the dedup table. Struct is `db::BodyBlob`.
+
+| Column    | Type       | Notes                                                            |
+|-----------|------------|------------------------------------------------------------------|
+| `id`      | INTEGER PK | Autoincrement; `result_bodies.blob_id` points here               |
+| `run_id`  | TEXT       | FK → `runs.id`; scopes dedup to one run                          |
+| `hash`    | TEXT       | Lowercase hex SHA-256 of `content` (`vayu::core::body_digest`)   |
+| `content` | TEXT       | The stored bytes, already truncated to `maxSampleBodyBytes`      |
+
+Load-test responses are overwhelmingly identical, so 1000 samples of one 2 KiB body store 2 KiB,
+not 2 MB. The digest is taken over the **stored** (already truncated) bytes: two bodies that
+differ only past the truncation point are byte-identical as stored, and storing them twice would
+be storing the same row twice.
+
+Dedup is scoped per run rather than globally so that deleting a run deletes its blobs with no
+cross-run refcount to maintain. Both tables are removed by `remove_run_cascade_locked` - bodies
+before the results they hang off, so a delete interrupted between the two leaves results without
+bodies rather than body rows pointing at nothing.
+
+Both tables are new in 0.15.0. `sync_schema()` creates new tables outright, so there is no
+migration: an existing database picks them up on the next startup and older runs simply have no
+rows in them.
 
 ---
 
@@ -470,6 +568,8 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 |------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `idx_metric_ticks_run_id`    | `metric_ticks.run_id`   | `get_metric_ticks_paginated` / `count_metric_ticks` (every `GET /runs/:id/metrics`), `get_metric_ticks_since` (the legacy SSE poll), and the `remove_all` in the run cascade |
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
+| `idx_result_bodies_run_id`   | `result_bodies.run_id`  | `get_result_bodies_paginated` / `count_result_bodies` (every `GET /runs/:id/samples`) and the `remove_all` in the run cascade                     |
+| `idx_body_blobs_run_id`      | `body_blobs.run_id`     | The `remove_all` in the run cascade                                                                                                               |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
 | `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |

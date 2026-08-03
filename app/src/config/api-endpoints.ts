@@ -82,6 +82,12 @@ export const API_ENDPOINTS = {
 	RUN_BY_ID: (id: string) => `/runs/${id}`,
 	RUN_REPORT: (id: string) => `/runs/${id}/report`,
 	RUN_STOP: (id: string) => `/runs/${id}/stop`,
+	// The response headers and body captured for a run's retained samples.
+	// Separate from the report on purpose: the report path loads and parses
+	// every result row for a run on each fetch and the dashboard polls it, so
+	// bodies are fetched here instead, only when a sample is expanded.
+	RUN_SAMPLES: (id: string, limit: number, offset: number) =>
+		`/runs/${id}/samples?limit=${limit}&offset=${offset}`,
 
 	// Real-time stats (SSE, memory-based, faster)
 	METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
