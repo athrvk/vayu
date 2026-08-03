@@ -1171,8 +1171,11 @@ std::string Database::get_body_blob_content (int blob_id) {
         return {}; // No stored body: binary, absent, or dropped for budget.
     }
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto blob = impl_->storage.get_pointer<BodyBlob> (blob_id);
-    return blob ? blob->content : std::string{};
+    // get_all + where rather than a by-primary-key lookup, matching every other
+    // single-row read in this file (get_run, get_request, ...) - one idiom, and
+    // a missing row is an empty vector rather than a throw or a null to handle.
+    auto blobs = impl_->storage.get_all<BodyBlob> (where (c (&BodyBlob::id) == blob_id));
+    return blobs.empty () ? std::string{} : blobs.front ().content;
 }
 
 // ============================================================================
