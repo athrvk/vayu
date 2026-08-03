@@ -88,7 +88,7 @@ python build.py
 | `--prod` | Production build (Release mode, default) |
 | `-e, --engine-only` | Build only the C++ engine |
 | `-a, --app-only` | Build only the Electron app |
-| `-c, --clean` | Clean build directories before building |
+| `-c, --clean` | Remove every generated directory before building, for whichever side is in scope: `engine/build`, `build-release`, `build-test`, `out`, and `app/dist`, `dist-electron`, `release`, `build`, plus the Vite cache and `.tsbuildinfo`. Dependencies (`node_modules`) and engine runtime data (`engine/data`) are left alone |
 | `-t, --tests` | Build and run unit tests |
 | `--test-only` | Run tests without rebuilding |
 | `-v, --verbose` | Show detailed build output |
