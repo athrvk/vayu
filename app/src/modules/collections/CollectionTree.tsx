@@ -45,7 +45,12 @@ export default function CollectionTree() {
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
-	const scrolledRequestRef = useRef<string | null>(null);
+	// Both reveal and scroll are once-per-selection, and each records the
+	// selection it last acted on. They cannot share one ref: the scroll can only
+	// run a render *after* the reveal, once the expanded ancestors have put the
+	// row in the DOM.
+	const revealedSelectionRef = useRef<string | null>(null);
+	const scrolledSelectionRef = useRef<string | null>(null);
 
 	// Get selected collection and request IDs from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -113,15 +118,32 @@ export default function CollectionTree() {
 	 * Settings and Variables never had the problem because they own a whole
 	 * drawer view; a request did not because of this effect. A collection fell
 	 * between the two.
+	 *
+	 * Guarded by a ref so it fires once per selection - the same discipline the
+	 * scroll effect below has always had. Unguarded, it re-ran after *every*
+	 * render of the tree (it lists `requestsByCollection` and `collections`, and
+	 * the tree re-renders on any expand-state change), so collapsing a
+	 * collection that held the selected request re-expanded it in the same
+	 * frame: the chevron looked dead and every ancestor of the active tab was
+	 * pinned open. Once per selection *change* means switching tabs away and
+	 * back reveals again, which is the behaviour that was wanted all along.
 	 */
 	useEffect(() => {
-		if (!selectedRequestId) scrolledRequestRef.current = null;
+		const selectionId = selectedCollectionId ?? selectedRequestId;
+		if (!selectionId) {
+			// Settings, Variables, no tab at all: re-selecting the entity later is a
+			// fresh selection and must reveal again.
+			revealedSelectionRef.current = null;
+			scrolledSelectionRef.current = null;
+			return;
+		}
+		if (revealedSelectionRef.current === selectionId) return;
 
 		// A collection reveals itself; a request reveals the collection holding it.
 		let target: string | undefined;
 		if (selectedCollectionId) {
 			target = selectedCollectionId;
-		} else if (selectedRequestId) {
+		} else {
 			for (const [collectionId, reqs] of requestsByCollection) {
 				if (reqs.some((r) => r.id === selectedRequestId)) {
 					target = collectionId;
@@ -129,6 +151,8 @@ export default function CollectionTree() {
 				}
 			}
 		}
+		// The owning collection's requests may not have arrived yet. Leave the ref
+		// unset so this reveals once they do, rather than counting as done.
 		if (!target) return;
 
 		const ancestorChain: string[] = [];
@@ -137,6 +161,7 @@ export default function CollectionTree() {
 			ancestorChain.push(cursor);
 			cursor = collections.find((c) => c.id === cursor)?.parentId ?? undefined;
 		}
+		revealedSelectionRef.current = selectionId;
 		expandCollections(ancestorChain);
 	}, [
 		selectedRequestId,
@@ -153,12 +178,12 @@ export default function CollectionTree() {
 	 */
 	useEffect(() => {
 		const id = selectedCollectionId ?? selectedRequestId;
-		if (!id || scrolledRequestRef.current === id) return;
+		if (!id || scrolledSelectionRef.current === id) return;
 		const attr = selectedCollectionId ? "data-collection-id" : "data-request-id";
 		const row = treeRef.current?.querySelector(`[${attr}="${CSS.escape(id)}"]`);
 		if (row) {
 			row.scrollIntoView({ block: "nearest" });
-			scrolledRequestRef.current = id;
+			scrolledSelectionRef.current = id;
 		}
 	}, [selectedRequestId, selectedCollectionId, expandedCollectionIds, requestsByCollection]);
 
