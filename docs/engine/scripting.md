@@ -497,6 +497,84 @@ payload holds the generated *value* and no scope has ever heard of the name.
 `pm.variables.get("$guid")` reads as any other undefined name does - reach the
 generators through `replaceIn`.
 
+## Sending a request from a script (`pm.sendRequest`)
+
+The one part of the sandbox that touches the network. Its reason for existing is
+the token fetch: a pre-request script that needs a credential the request itself
+cannot supply.
+
+```javascript
+pm.sendRequest(
+  {
+    url: "https://auth.example.com/token",
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    body: { mode: "raw", raw: JSON.stringify({ client_id: "abc" }) },
+  },
+  function (err, res) {
+    if (err) {
+      console.error("token fetch failed: " + err.message);
+      return;
+    }
+    pm.environment.set("token", res.json().access_token);
+  }
+);
+```
+
+The first argument is a URL string or an options object; the second is required
+and must be a function.
+
+| Option | Shape |
+| ------ | ----- |
+| `url` | string, required. Postman's URL-object form is not accepted |
+| `method` | string, default `GET`; case-insensitive, an unknown verb throws |
+| `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
+| `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw |
+| `timeout` | milliseconds, clamped to the script's remaining budget (below) |
+
+**Synchronous, and callback-shaped for that reason.** The send blocks and the
+callback runs inline, before `pm.sendRequest` returns. There is no promise
+overload: `Promise` exists in the sandbox but nothing drains its job queue, so
+one could only never resolve - the same reason hashing is `pm.crypto` rather
+than `crypto.subtle`.
+
+**Which failures throw and which reach the callback.** Transport failures are
+the network's answer, so they arrive as the callback's `err` - an `Error` with
+a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
+script's own mistakes throw out of the call instead: an unusable argument, an
+unsupported body mode, exceeding the request cap, and the capability being off.
+
+`res` carries `code`, `status` (the numeric code, as on `pm.response`),
+`responseTime`, `headers` with `get()`/`has()`, `json()` and `text()`. It is a
+subset of `pm.response` and has no `to.*` assertion chain.
+
+**Two bounds, both hard.**
+
+- *The script's deadline.* The wall-clock limit is enforced by a QuickJS
+  interrupt handler, and QuickJS only calls it **between bytecode operations** -
+  a blocking C function never yields to it. So the request's timeout is clamped
+  to whatever is left of the script's budget; without that, a 5s script calling
+  `pm.sendRequest` at the default 30s request timeout would hold its thread for
+  30s with no error and no way to interrupt it. When `scriptTimeout` is `0`
+  there is no budget and nothing to clamp to.
+- *A request cap.* One script execution may issue at most **10** requests, then
+  throws. A load run's `tests` script runs once per *sampled* response, serially,
+  on the run's worker thread, so an uncapped loop would turn post-run validation
+  into minutes of apparent hang.
+
+**Not available to agents.** Vayu's MCP target allowlist is checked in the MCP
+server, against the composed URL, before it calls the engine - so a script-issued
+request never passes that gate. The engine therefore refuses script-issued
+requests unless the caller explicitly asks for them (`allowScriptRequests` on
+`POST /execute` / `POST /runs`); Vayu's own Send and load runs ask, and the MCP
+server never does. Calling it from an agent-started run throws a message saying
+so. See [MCP](mcp.md#the-script-sandbox-surface).
+
+**No `{{variable}}` resolution.** A script-supplied URL is sent as written.
+Interpolation happens strictly before the pre-request script and a payload is
+resolved exactly once; a second pass here would break that invariant. Use
+`pm.variables.replaceIn(template)`.
+
 ## Console Output
 
 Log messages that appear in test results:
@@ -787,6 +865,7 @@ and the rest of the ES2020 built-ins, plus:
 | ---- | ----- |
 | `pm.crypto.sha256(data, encoding?)` | SHA-256; `data` is a string (UTF-8) or `Uint8Array` |
 | `pm.crypto.hmacSha256(key, data, encoding?)` | HMAC-SHA256; key and data take the same types |
+| `pm.sendRequest(urlOrOptions, callback)` | Send an auxiliary request, synchronously - see [above](#sending-a-request-from-a-script-pmsendrequest) |
 | `btoa(binaryString)` | base64-encode one byte per code unit |
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 
@@ -800,7 +879,9 @@ consequences: no URL parsing helper - which is why `pm.request.url` has no
 `.query` / `.path` accessors either, see
 [URL parts are not exposed](#url-parts-are-not-exposed-deferred) - no hash
 other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and nothing
-asynchronous.
+asynchronous. There is no `fetch`, but there **is**
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
+synchronous and bounded rather than a Promise-returning stand-in.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based. `Promise` exists here, but nothing drains the job queue - there
@@ -830,12 +911,17 @@ The **language** is current; what is missing is the **host environment**:
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
   the ones that have a replacement.
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
-- **Sandboxed**: No filesystem or network access
+- **Sandboxed**: No filesystem access. The only network access is
+  [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
+  10 requests per script, bounded by the script's own deadline, and refused
+  outright for agent-started runs.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
   infinite-loop script is aborted and reported as an error rather than hanging the
   engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
-  the limit.
+  the limit. The deadline is checked *between bytecode operations*, so it cannot
+  interrupt a blocking call - which is why `pm.sendRequest` clamps its own
+  timeout to the budget that is left rather than relying on it.
 
 ## Script Execution Context
 

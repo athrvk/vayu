@@ -83,6 +83,13 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
     "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
     script_config.enable_console = db.get_config_bool (
     "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    // Read off the run's own payload, through the same reader `POST /execute`
+    // uses. The `tests` script here is the same script a Send runs, so it must
+    // not have pm.sendRequest in one and not the other - and a run's script
+    // runs once per *sampled* response, which is what the per-script request
+    // cap is there to bound.
+    script_config.allow_send_request =
+    vayu::http::read_allow_script_requests (context->config);
 
     vayu::runtime::ScriptEngine engine (script_config);
     vayu::Environment env;

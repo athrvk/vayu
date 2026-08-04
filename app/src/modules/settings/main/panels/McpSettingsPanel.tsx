@@ -553,7 +553,10 @@ export default function McpSettingsPanel() {
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
 						requests are allowed - a safe default. Add a host (no scheme or port), e.g.{" "}
-						<code className="font-mono">api.example.com</code>.
+						<code className="font-mono">api.example.com</code>. The list is checked
+						before Vayu sends anything, so a script an agent writes cannot reach around
+						it: <code className="font-mono">pm.sendRequest</code> is refused entirely
+						for requests an agent starts, and works normally when you Send from Vayu.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-3">

@@ -638,6 +638,36 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_variables_replaceIn" } });
 
     // ========================================
+    // pm.sendRequest - the one thing in the sandbox that touches the network
+    // ========================================
+    completions.push_back ({ { "label", "pm.sendRequest" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.sendRequest(${1:url}, function (err, res) {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.sendRequest(urlOrOptions: string | { url: string; method?: string; "
+    "header?: object; body?: string | { mode: 'raw'; raw: string }; timeout?: "
+    "number }, callback: (err: Error | null, res: any) => void): void" },
+    { "documentation",
+    "Send an auxiliary request - fetching a token in a pre-request script is "
+    "what it is for.\n\nSynchronous despite the callback: the sandbox has no "
+    "event loop, so the send blocks and the callback runs inline before "
+    "sendRequest returns. Postman's promise-returning overload is deliberately "
+    "absent - it could only never resolve.\n\nThe callback gets (err, res). "
+    "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
+    "res is null then. res carries code, status, responseTime, headers.get() "
+    "and json()/text() - a subset of pm.response, not the assertion "
+    "chain.\n\nBounded on purpose: the request's timeout is capped "
+    "at whatever is left of the script's own time budget, and one script may "
+    "issue at most 10 requests. Both throw when exceeded.\n\n**Not available "
+    "to agents.** Vayu's MCP target allowlist is checked before the engine is "
+    "called, so a request sent from inside a script would bypass it. When a "
+    "run comes from the MCP server this throws instead of "
+    "sending.\n\nExample:\npm.sendRequest('https://auth.example.com/token', "
+    "function (err, res) {\n  if (err) { return; }\n  "
+    "pm.environment.set('token', res.json().access_token);\n});" },
+    { "sortText", "0_pm_sendRequest" } });
+
+    // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it
     // ========================================
     completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },

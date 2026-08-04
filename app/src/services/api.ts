@@ -240,14 +240,35 @@ export const apiService = {
 		return await httpClient.post<ComposedRequest>(API_ENDPOINTS.COMPOSE_REQUEST, data);
 	},
 
+	/**
+	 * `allowScriptRequests` opts this execution's scripts into `pm.sendRequest`
+	 * (issue #302). The engine denies it unless asked, because Vayu's MCP target
+	 * allowlist is checked in the MCP server *before* it calls the engine - a
+	 * request issued from inside a script never passes that gate. The renderer
+	 * is the surface whose scripts the user wrote, so it asks; the MCP server
+	 * never does, and an agent cannot smuggle the field in because every MCP
+	 * tool builds its request from named arguments.
+	 *
+	 * Set here rather than at each call site, so a new caller cannot forget it
+	 * and quietly lose the feature - the same single-choke-point reason
+	 * `httpVersion` and the redirect policy are sent on every execute rather
+	 * than elided when they match a default.
+	 */
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
-		return await httpClient.post<SanityResult>(API_ENDPOINTS.EXECUTE_REQUEST, data, {
-			timeout: proxiedRequestTimeoutMs(),
-		});
+		return await httpClient.post<SanityResult>(
+			API_ENDPOINTS.EXECUTE_REQUEST,
+			{ ...data, allowScriptRequests: true },
+			{ timeout: proxiedRequestTimeoutMs() }
+		);
 	},
 
+	/** A run's `tests` script is the same script Send runs - see executeRequest. */
+
 	async startLoadTest(data: StartLoadTestRequest): Promise<StartLoadTestResponse> {
-		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, data);
+		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
+			...data,
+			allowScriptRequests: true,
+		});
 	},
 
 	// Run Management

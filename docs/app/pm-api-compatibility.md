@@ -29,6 +29,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName` - each optional, see below     |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
+| Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -109,6 +110,75 @@ test's Tests script runs **once per sampled response, after the run
 finishes**, and samples are a reservoir rather than the first N iterations, so
 any number reported there would not be an iteration count. They return when
 there is a runner to count (issue #303).
+
+### `pm.sendRequest` is synchronous, callback-only, and not available to agents
+
+Three divergences from Postman, each for a reason the sandbox forces.
+
+**No promise form.** Postman offers both a callback and a promise-returning
+overload. Vayu ships only the callback, for the same reason `pm.crypto` is not
+`crypto.subtle`: nothing drains the job queue, so the promise could only never
+resolve. The callback is honoured **synchronously** - the send blocks and the
+callback runs inline, before `pm.sendRequest` returns - so the call shape a
+Postman user writes is unchanged and the semantics are honest.
+
+```javascript
+// Pre-request: fetch a token and put it where the request will find it.
+pm.sendRequest(
+	{
+		url: "https://auth.example.com/token",
+		method: "POST",
+		header: { "Content-Type": "application/json" },
+		body: { mode: "raw", raw: JSON.stringify({ client_id: "abc" }) },
+	},
+	function (err, res) {
+		if (err) {
+			return; // refused, DNS, or timeout - res is null
+		}
+		pm.environment.set("token", res.json().access_token);
+	}
+);
+```
+
+The callback receives `(err, res)`. A transport failure - connection refused, a
+host that does not resolve, a timeout - is the network's answer rather than the
+script's mistake, so it arrives as `err` (an `Error` carrying `.code`, e.g.
+`TIMEOUT`) with `res` null. The script's own mistakes throw instead: an
+unreadable argument, an unsupported body mode, the request cap, and the
+capability being off. `res` carries `code`, `status`, `responseTime`,
+`headers.get()/has()`, `json()` and `text()` - a subset of `pm.response`, with
+no assertion chain. `status` is the numeric code there too, so the two objects
+called a response do not disagree inside one sandbox.
+
+**It is bounded, and both bounds throw.** The request's timeout is clamped to
+whatever is left of the script's own time budget (`scriptTimeout`, 5s by
+default), because QuickJS only checks its deadline *between* bytecode
+operations - a blocking call never yields to it, so without the clamp a 5s
+script would hold its thread for the request's 30s timeout. One script may
+issue at most **10** requests; a load run's Tests script runs once per sampled
+response, so an uncapped loop would turn post-run validation into minutes of
+apparent hang.
+
+**Agents cannot use it.** Vayu's MCP target allowlist is enforced in the MCP
+server, against the composed URL, *before* it calls the engine - so a request
+issued from inside a script never passes that gate. Rather than leave a hole in
+a control the user configured in Settings, the engine refuses script-issued
+requests unless the caller explicitly asks for them: Vayu's own Send and load
+runs ask, and the MCP server never does. See
+[`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface).
+
+Only `raw` bodies are supported. Postman's `formdata` / `urlencoded` modes are
+refused by name rather than sent as an empty body - serialise the payload
+yourself and set the `Content-Type` header, which is the header that goes out
+either way since no content type is inferred from the mode. Headers may be
+Postman's `header` array of `{ key, value }` or a plain object under either
+`header` or `headers`; sending both spellings at once is refused rather than
+resolved by precedence.
+
+`{{variables}}` in a script-supplied URL are **not** resolved. Interpolation
+happens strictly before the pre-request script and a payload is resolved exactly
+once; a second pass inside the script would break that. Use
+`pm.variables.replaceIn(template)`.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
@@ -238,7 +308,6 @@ way on screen and another in a script.
 
 These Postman APIs are **not** implemented - scripts that rely on them will fail:
 
-- `pm.sendRequest(...)` - sending auxiliary requests from a script
 - `pm.variables.set(...)` - throws; Vayu has no local scope to write to, so name
   one of the three scoped setters instead. The read half (`get`/`has`/`toObject`)
   is supported - see above

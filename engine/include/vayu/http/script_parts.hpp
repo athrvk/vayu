@@ -56,4 +56,21 @@ std::string read_pre_request_script (const nlohmann::json& json);
  */
 std::string read_post_request_script (const nlohmann::json& json);
 
+/**
+ * Whether this payload's scripts may issue requests through `pm.sendRequest`.
+ *
+ * Read under `allowScriptRequests`. **Absent, null or non-boolean all mean
+ * false**, which is the point: the MCP target allowlist is enforced in the MCP
+ * server, before it calls the engine, so a request issued from inside a script
+ * never passes that gate. Denying unless a caller explicitly asks puts the
+ * failure on the safe side - a client that forgets gets a script that cannot
+ * send rather than unchecked egress (issue #302).
+ *
+ * Lives here, beside the script readers, because `POST /execute` and the load
+ * path's deferred `tests` validation both read it and must agree: the same
+ * Tests script runs on a Send and on a run, so it cannot have the network in
+ * one and not the other.
+ */
+bool read_allow_script_requests (const nlohmann::json& json);
+
 } // namespace vayu::http

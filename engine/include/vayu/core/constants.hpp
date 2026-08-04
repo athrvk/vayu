@@ -205,6 +205,18 @@ constexpr uint64_t TIMEOUT_MS = 5000;
 constexpr size_t STACK_SIZE = 256 * 1024;
 /// Whether to enable console output from scripts
 constexpr bool ENABLE_CONSOLE = true;
+/**
+ * @brief How many requests one script execution may issue via
+ *        `pm.sendRequest`.
+ *
+ * A cap rather than a knob because the failure it bounds is not the single
+ * script a user is watching: a load run's `tests` script runs once per
+ * *sampled* response, serially, on the run's worker thread, so an uncapped
+ * loop turns post-run validation into minutes of apparent hang. Ten is well
+ * above the token-fetch case the feature exists for and far below the point
+ * where a sampled run stops looking finished.
+ */
+constexpr int SEND_REQUEST_LIMIT = 10;
 } // namespace script_engine
 
 /**

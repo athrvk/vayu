@@ -1044,6 +1044,7 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "environmentId": "env_1234567890",  // Optional, uses environment variables
   "preRequestScript": "",              // Optional
   "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+  "allowScriptRequests": false,        // Optional, default false - see below
   "followRedirects": true,             // Optional, default true
   "maxRedirects": 10,                  // Optional, default 10
   "verifySSL": true,                   // Optional, default true
@@ -1060,6 +1061,17 @@ an id is enough. An empty string is treated as absent - a script reads
 `undefined` rather than `""` - and a non-string is a **400**
 (`'requestName' must be a string`). See
 [scripting.md](scripting.md#script-identity-pminfo).
+
+**`allowScriptRequests` lets this payload's scripts use `pm.sendRequest`.**
+Absent, `null` or non-boolean all mean `false`, and that default is a security
+control rather than a convenience (issue #302): Vayu's MCP target allowlist is
+checked in the MCP server, before it calls this endpoint, so a request issued
+from inside a script never passes that gate. Denying unless a caller asks means
+a client that forgets gets a script that cannot send rather than unchecked
+egress. The app's Send and load runs send `true`; the MCP server never does.
+`POST /runs` reads the same field for its deferred `tests` validation, so one
+script behaves the same on both. See
+[scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Script parts.** `preRequestScript` / `postRequestScript` above are the legacy
 single-string form and still work. The engine also accepts `preRequestScripts`
