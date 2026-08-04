@@ -48,6 +48,55 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
+// Resolve what a script reads as `pm.info.requestName` for a POST /execute
+// payload (issue #300). Two sources, in order:
+//
+// 1. The payload's own `requestName`. This is the inline path: the renderer
+//    sends editor state, which may be unsaved or a detached replay copy, and
+//    therefore carries a name no stored row has. `POST /compose` puts the
+//    stored name here too on its by-id path, so a composed payload arrives
+//    already carrying it.
+// 2. The row named by `requestId`, for a caller that linked a saved request
+//    without sending its name (MCP's run_request does exactly this).
+//
+// An empty name is not a name: it resolves to absent, so a script's
+// `typeof pm.info.requestName === "undefined"` answers truthfully rather than
+// seeing "". An unknown `requestId` is not an error here - the run row already
+// tolerates one - it just yields no name.
+RequestNameResolution resolve_script_request_name (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::optional<std::string>& request_id) {
+    RequestNameResolution resolved;
+
+    if (auto it = json.find ("requestName"); it != json.end () && !it->is_null ()) {
+        if (!it->is_string ()) {
+            resolved.ok    = false;
+            resolved.error = "'requestName' must be a string";
+            return resolved;
+        }
+        auto name = it->get<std::string> ();
+        if (!name.empty ()) {
+            resolved.name = std::move (name);
+            return resolved;
+        }
+    }
+
+    if (request_id && !request_id->empty ()) {
+        try {
+            if (auto stored = db.get_request (*request_id);
+                stored && !stored->name.empty ()) {
+                resolved.name = stored->name;
+            }
+        } catch (const std::exception& e) {
+            // A lookup failure costs the script a name, never the request.
+            vayu::utils::log_warning (
+            "pm.info.requestName lookup failed: " + std::string (e.what ()));
+        }
+    }
+
+    return resolved;
+}
+
 // Stamp a freshly built run row's timestamps. `end_time` is seeded to
 // `start_time` rather than left at its default, because a run killed by a
 // daemon crash never reaches a terminal status: `reconcile_orphaned_runs`
@@ -609,6 +658,17 @@ void register_execution_routes (RouteContext& ctx) {
             run.environment_id = json["environmentId"].get<std::string> ();
         }
 
+        // What the scripts below read as `pm.info.requestName`. Resolved here,
+        // with the rest of the payload validation, so a malformed field is a
+        // 400 before any run row exists.
+        auto resolved_name = resolve_script_request_name (ctx.db, json, run.request_id);
+        if (!resolved_name.ok) {
+            vayu::utils::log_warning ("POST /execute - " + resolved_name.error);
+            send_error (res, 400, resolved_name.error);
+            return;
+        }
+        const std::optional<std::string> script_request_name = std::move (resolved_name.name);
+
         // Log request details
         vayu::utils::log_info ("POST /execute - Design Mode: run_id=" + run_id +
         ", method=" + json.value ("method", "UNKNOWN") +
@@ -668,16 +728,17 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Execute pre-request script. `make_request_mutable` is what makes its
+        // Execute pre-request script. `for_prerequest` is what makes its
         // pm.request edits reach the wire; everything below this line - the
         // send, the stored trace, the raw request the app shows - reads the
         // post-script request.
-        vayu::runtime::ScriptContext pre_ctx;
-        pre_ctx.make_request_mutable (request);
+        auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
         pre_ctx.collectionAncestors = &scopes.collection_ancestors;
+        pre_ctx.request_id          = run.request_id;
+        pre_ctx.request_name        = script_request_name;
         auto pre_script_result =
         execute_script (script_engine, pre_request_script, pre_ctx, "Pre-request");
 
@@ -691,13 +752,13 @@ void register_execution_routes (RouteContext& ctx) {
         store_result (ctx.db, run_id, request, response);
 
         // Execute post-request script
-        vayu::runtime::ScriptContext post_ctx;
-        post_ctx.request             = &request;
-        post_ctx.response            = &response;
+        auto post_ctx = vayu::runtime::ScriptContext::for_test (request, response);
         post_ctx.environment         = &env;
         post_ctx.globals             = &globals;
         post_ctx.collectionVariables = &collectionVariables;
         post_ctx.collectionAncestors = &scopes.collection_ancestors;
+        post_ctx.request_id          = run.request_id;
+        post_ctx.request_name        = script_request_name;
         auto post_script_result =
         execute_script (script_engine, post_request_script, post_ctx, "Post-request");
 

@@ -75,7 +75,10 @@ struct ContextData {
     Environment* globals             = nullptr;
     Environment* collectionVariables = nullptr;
     const std::vector<Environment>* collectionAncestors = nullptr;
-    bool has_error                                      = false;
+    std::optional<std::string> request_id;
+    std::optional<std::string> request_name;
+    std::optional<ScriptEvent> event;
+    bool has_error = false;
     std::string error_message;
 };
 
@@ -3003,6 +3006,47 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "request", request);
 }
 
+/**
+ * `pm.info` - what request this script is attached to, and which hook it is.
+ *
+ * Rebuilt per execution alongside pm.request / pm.response, because contexts
+ * are pooled: an object left over from the previous script would report the
+ * previous request's name. A field with no value is left off the object
+ * entirely, so a script reads `undefined` rather than an empty string that
+ * looks like an answer.
+ *
+ * `iteration` / `iterationCount` are deliberately absent - see ScriptContext.
+ */
+void setup_pm_info (JSContext* ctx, JSValue pm) {
+    auto* data = get_context_data (ctx);
+
+    // Free the previous execution's object before replacing it, as the
+    // request/response setups above do.
+    JSValue old_info = JS_GetPropertyStr (ctx, pm, "info");
+    if (!JS_IsUndefined (old_info)) {
+        JS_FreeValue (ctx, old_info);
+    }
+
+    JSValue info = JS_NewObject (ctx);
+
+    if (data) {
+        if (data->request_id && !data->request_id->empty ()) {
+            JS_SetPropertyStr (
+            ctx, info, "requestId", JS_NewString (ctx, data->request_id->c_str ()));
+        }
+        if (data->request_name && !data->request_name->empty ()) {
+            JS_SetPropertyStr (
+            ctx, info, "requestName", JS_NewString (ctx, data->request_name->c_str ()));
+        }
+        if (data->event) {
+            JS_SetPropertyStr (ctx, info, "eventName",
+            JS_NewString (ctx, *data->event == ScriptEvent::PreRequest ? "prerequest" : "test"));
+        }
+    }
+
+    JS_SetPropertyStr (ctx, pm, "info", info);
+}
+
 // ============================================================================
 // pm.request write-back (pre-request scripts)
 // ============================================================================
@@ -3608,6 +3652,9 @@ void setup_pm_object (JSContext* ctx) {
     // pm.request
     setup_pm_request (ctx, pm);
 
+    // pm.info
+    setup_pm_info (ctx, pm);
+
     // pm.environment, pm.globals, pm.collectionVariables
     for (const auto& binding : variable_scope_bindings) {
         setup_pm_variable_scope (ctx, pm, binding);
@@ -3767,14 +3814,18 @@ class ScriptEngine::Impl {
         ctx_data.globals             = ctx.globals;
         ctx_data.collectionVariables = ctx.collectionVariables;
         ctx_data.collectionAncestors = ctx.collectionAncestors;
+        ctx_data.request_id          = ctx.request_id;
+        ctx_data.request_name        = ctx.request_name;
+        ctx_data.event               = ctx.event;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
-        // Refresh pm.request and pm.response with new data
+        // Refresh pm.request, pm.response and pm.info with new data
         JSValue global = JS_GetGlobalObject (js_ctx);
         JSValue pm     = JS_GetPropertyStr (js_ctx, global, "pm");
         if (!JS_IsUndefined (pm)) {
             setup_pm_response (js_ctx, pm);
             setup_pm_request (js_ctx, pm);
+            setup_pm_info (js_ctx, pm);
         }
         JS_FreeValue (js_ctx, pm);
         JS_FreeValue (js_ctx, global);
@@ -3853,9 +3904,8 @@ ScriptResult ScriptEngine::execute (const std::string& script, const ScriptConte
 ScriptResult ScriptEngine::execute_prerequest (const std::string& script,
 Request& request,
 Environment& env) {
-    ScriptContext ctx;
-    ctx.make_request_mutable (request);
-    ctx.environment = &env;
+    ScriptContext ctx = ScriptContext::for_prerequest (request);
+    ctx.environment   = &env;
     return execute (script, ctx);
 }
 
@@ -3863,10 +3913,8 @@ ScriptResult ScriptEngine::execute_test (const std::string& script,
 const Request& request,
 const Response& response,
 Environment& env) {
-    ScriptContext ctx;
-    ctx.request     = &request;
-    ctx.response    = &response;
-    ctx.environment = &env;
+    ScriptContext ctx = ScriptContext::for_test (request, response);
+    ctx.environment   = &env;
     return execute (script, ctx);
 }
 

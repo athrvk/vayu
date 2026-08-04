@@ -422,6 +422,7 @@ if(VAYU_BUILD_TESTS)
         tests/error_shape_route_test.cpp
         tests/globals_route_test.cpp
         tests/script_variables_test.cpp
+        tests/script_info_test.cpp
         tests/set_cookie_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp

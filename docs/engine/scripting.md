@@ -332,6 +332,39 @@ has to be a separate member (something like `pm.request.getUrlParts()`) rather
 than `url.*`; that shape has not been decided, so parsing the URL remains string
 work - see [Add or replace a query parameter](#add-or-replace-a-query-parameter).
 
+## Script Identity (`pm.info`)
+
+What the script is attached to, and which hook is running it. Three fields,
+each **optional** - `pm.info` is always an object, but a field with no truthful
+value is absent rather than `""`, so `typeof` is how a script tests for one:
+
+```javascript
+pm.info.requestId    // string | undefined - the saved request this send is filed under
+pm.info.requestName  // string | undefined - its name, as the client sent it
+pm.info.eventName    // 'prerequest' in a pre-request script, 'test' in a test script
+```
+
+`eventName` is stamped by the engine at each hook (`ScriptContext::for_prerequest`
+/ `for_test`), never by the caller, so it cannot disagree with the hook that is
+actually running. The other two are supplied per send:
+
+- `requestId` is the payload's `requestId`, which is also what files the run in
+  History. Absent for an ad-hoc send (MCP's `run_request` without one, a load
+  run started from a URL).
+- `requestName` comes from the payload's `requestName`, falling back to the
+  stored row's name when only an id was sent. The client sends it because Send
+  executes *editor state*: an unsaved request has a name and no row to read it
+  from, and a name edited but not yet saved should read as what the user sees.
+  `POST /compose` fills it in on its by-id path, so a composed payload arrives
+  carrying it.
+
+**`iteration` and `iterationCount` are deliberately absent.** Vayu has no
+collection runner: a load test's test script runs once per *sampled* response
+after the run has finished, and the sample is a reservoir over the whole run
+rather than the first N iterations, so an index reported there would not be an
+iteration number. A binding that cannot fail is worse than a missing one - they
+arrive with the runner (issue #303).
+
 ## Environment Variables (`pm.environment`)
 
 Access and modify environment variables:
@@ -814,6 +847,7 @@ The **language** is current; what is missing is the **host environment**:
   ([rules](#mutating-the-request-pre-request-scripts))
 - Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
 - Cannot access `pm.response` (request hasn't been sent yet)
+- `pm.info.eventName` is `"prerequest"` here
 - Run in Design Mode / Send only, not in load tests
 
 ### Test Scripts (Post-request)
@@ -821,6 +855,7 @@ The **language** is current; what is missing is the **host environment**:
 - Execute after receiving the HTTP response
 - Can access `pm.request` (read-only here - it has already been sent) and `pm.response`
 - Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
+- `pm.info.eventName` is `"test"` here
 - Test results are included in the response
 
 ### Load Test Scripts
@@ -836,6 +871,9 @@ The **language** is current; what is missing is the **host environment**:
   not the run's request count, and `sampling.responseSamplesDropped` beside it
   says how many responses the bound thinned away
 - Results are aggregated and reported in the final report
+- `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
+  `requestId` / `requestName` are the run's linked request when it has one. There
+  is no `iteration` - the script runs per sampled response, not per iteration
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now

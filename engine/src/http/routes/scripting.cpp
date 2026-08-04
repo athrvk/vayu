@@ -409,6 +409,45 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_pm_request_body_rewrite" } });
 
     // ========================================
+    // pm.info - Which request, which hook
+    // ========================================
+    completions.push_back ({ { "label", "pm.info" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.info" }, { "detail", "Script identity" },
+    { "documentation",
+    "What this script is attached to and which hook it is running in. Every "
+    "field is optional - an ad-hoc request has no id, and an unsaved one has a "
+    "name no stored request carries - so test with typeof rather than assuming "
+    "a value.\n\niteration / iterationCount are deliberately absent: Vayu runs "
+    "a load test's Tests script once per sampled response, not once per "
+    "iteration, so there is no iteration number to report." },
+    { "sortText", "0_pm_info" } });
+
+    completions.push_back ({ { "label", "pm.info.requestId" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.requestId" }, { "detail", "string | undefined" },
+    { "documentation",
+    "The saved request's id, when the send was linked to one. undefined for an "
+    "ad-hoc request." },
+    { "sortText", "1_pm_info_requestId" } });
+
+    completions.push_back ({ { "label", "pm.info.requestName" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.requestName" }, { "detail", "string | undefined" },
+    { "documentation",
+    "The request's name as the client sent it - the name in the editor, which "
+    "may differ from the saved row for unsaved edits. undefined when the "
+    "request has no name.\n\nExample:\nconsole.log('running ' + "
+    "(pm.info.requestName || 'an unnamed request'));" },
+    { "sortText", "1_pm_info_requestName" } });
+
+    completions.push_back ({ { "label", "pm.info.eventName" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.eventName" }, { "detail", "'prerequest' | 'test'" },
+    { "documentation",
+    "Which hook is running: 'prerequest' in the Pre-request tab, 'test' in the "
+    "Tests tab. Lets one shared script branch on where it was invoked "
+    "from.\n\nExample:\nif (pm.info.eventName === 'prerequest') { /* sign the "
+    "request */ }" },
+    { "sortText", "1_pm_info_eventName" } });
+
+    // ========================================
     // pm.environment - Environment variables
     // ========================================
     completions.push_back ({ { "label", "pm.environment" }, { "kind", KIND_VARIABLE },

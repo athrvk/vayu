@@ -3093,3 +3093,150 @@ TEST_F (ScriptEngineTest, HeaderNamesDifferingOnlyInCaseAreRejected) {
     // Nothing applied: the original engine-applied header still stands.
     EXPECT_EQ (request.headers.at ("Authorization"), "Bearer token123");
 }
+
+// ============================================================================
+// pm.info (issue #300)
+// ============================================================================
+
+// Identity, not data: what the script is attached to and which hook it is.
+// Every field is optional, and "absent" has to mean `undefined` rather than
+// an empty string - a script's `typeof` check is the whole point of the
+// distinction.
+TEST_F (ScriptEngineTest, PmInfoExposesTheFieldsThatWereSet) {
+    auto ctx          = ScriptContext::for_test (request, response);
+    ctx.environment   = &env;
+    ctx.request_id    = "req_42";
+    ctx.request_name  = "Fetch users";
+
+    auto result = engine.execute (R"JS(
+        pm.test("identity", function() {
+            pm.expect(pm.info.requestId).to.equal("req_42");
+            pm.expect(pm.info.requestName).to.equal("Fetch users");
+            pm.expect(pm.info.eventName).to.equal("test");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Asserted per field, not on the object: a single `pm.info === undefined`
+// check would pass on an implementation that binds one field and forgets the
+// other two.
+TEST_F (ScriptEngineTest, PmInfoFieldsAreAbsentRatherThanEmpty) {
+    ScriptContext ctx;
+    ctx.response = &response;
+
+    auto result = engine.execute (R"JS(
+        pm.test("requestId absent", function() {
+            pm.expect(typeof pm.info.requestId).to.equal("undefined");
+        });
+        pm.test("requestName absent", function() {
+            pm.expect(typeof pm.info.requestName).to.equal("undefined");
+        });
+        pm.test("eventName absent", function() {
+            pm.expect(typeof pm.info.eventName).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 3);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// An empty name is not a name. Reporting "" would satisfy a `typeof` check
+// while telling the script nothing, which is the binding-that-cannot-fail the
+// whole field set is designed to avoid.
+TEST_F (ScriptEngineTest, PmInfoTreatsAnEmptyNameAsAbsent) {
+    auto ctx         = ScriptContext::for_test (request, response);
+    ctx.request_id   = "";
+    ctx.request_name = "";
+
+    auto result = engine.execute (R"JS(
+        pm.test("empty is absent", function() {
+            pm.expect(typeof pm.info.requestId).to.equal("undefined");
+            pm.expect(typeof pm.info.requestName).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// One test per hook: a single test would pass against an implementation that
+// hard-codes either string.
+TEST_F (ScriptEngineTest, PmInfoEventNameIsPrerequestUnderExecutePrerequest) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.test("hook", function() {
+            pm.expect(pm.info.eventName).to.equal("prerequest");
+        });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, PmInfoEventNameIsTestUnderExecuteTest) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("hook", function() {
+            pm.expect(pm.info.eventName).to.equal("test");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// QuickJS contexts are pooled and reused, so pm.info has to be rebuilt per
+// execution exactly as pm.request and pm.response are. Bind it once at context
+// setup instead and this fails: the second script reads the first script's
+// request name.
+TEST_F (ScriptEngineTest, PmInfoDoesNotSurviveIntoTheNextExecution) {
+    auto first         = ScriptContext::for_test (request, response);
+    first.request_id   = "req_first";
+    first.request_name = "First";
+    auto first_result  = engine.execute ("pm.info.requestName;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second = ScriptContext::for_test (request, response);
+    auto result = engine.execute (R"JS(
+        pm.test("no leak", function() {
+            pm.expect(typeof pm.info.requestId).to.equal("undefined");
+            pm.expect(typeof pm.info.requestName).to.equal("undefined");
+        });
+    )JS",
+    second);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Deliberately unbound, and pinned so it stays that way until a collection
+// runner exists (#303). Vayu runs a load test's `tests` script once per
+// *sampled* response after the run has finished - a reservoir index reported
+// as `iteration` would be a plausible-looking lie.
+TEST_F (ScriptEngineTest, PmInfoOmitsTheIterationPair) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("no iteration", function() {
+            pm.expect(typeof pm.info.iteration).to.equal("undefined");
+            pm.expect(typeof pm.info.iterationCount).to.equal("undefined");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}

@@ -445,6 +445,31 @@ ScriptVariableScopes
 load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run);
 
 /**
+ * The outcome of resolving `pm.info.requestName` for a `POST /execute` payload.
+ *
+ * `name` absent is a normal answer, not a failure: an ad-hoc request has no
+ * name, and a script must read `undefined` rather than `""`. `ok == false` is
+ * the loud path - the payload carried a `requestName` of the wrong type, which
+ * is a client bug and answers `400` instead of being silently dropped.
+ */
+struct RequestNameResolution {
+    bool ok = true;
+    std::string error;
+    std::optional<std::string> name;
+};
+
+/**
+ * Resolve the name for @p request_id / @p json's `requestName` field.
+ *
+ * Extracted from the `POST /execute` handler (execution.cpp) so
+ * script_info_test.cpp can drive it against a real database, matching the
+ * suite's other route-core tests.
+ */
+RequestNameResolution resolve_script_request_name (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::optional<std::string>& request_id);
+
+/**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */

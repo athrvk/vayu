@@ -17,6 +17,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,14 @@ struct ScriptConfig {
     uint64_t timeout_ms = vayu::core::constants::script_engine::TIMEOUT_MS;
     size_t stack_size   = vayu::core::constants::script_engine::STACK_SIZE;
     bool enable_console = vayu::core::constants::script_engine::ENABLE_CONSOLE;
+};
+
+/**
+ * @brief Which hook a script is running as, reported to it as `pm.info.eventName`.
+ */
+enum class ScriptEvent {
+    PreRequest,
+    Test,
 };
 
 /**
@@ -75,14 +84,62 @@ struct ScriptContext {
     Request* mutable_request = nullptr;
 
     /**
+     * @brief What the script reads as `pm.info` - identity, not data.
+     *
+     * All three are optional because absence is the honest answer for each:
+     * an ad-hoc request has no id, an unsaved one may have a name no row
+     * carries, and a context built by hand (a test, a future caller) has
+     * declared no hook. A field with no value must reach the script as
+     * `undefined` rather than `""`, so `typeof pm.info.requestName` answers
+     * what a Postman user expects.
+     *
+     * `event` is never assigned by a caller: it is set by the two factories
+     * below, so `pm.info.eventName` cannot disagree with the hook that is
+     * actually running.
+     *
+     * There is deliberately no `iteration` / `iterationCount` here. Vayu runs
+     * a load test's `tests` script once per *sampled* response after the run
+     * has finished, not once per iteration, and a reservoir sample index
+     * reported as an iteration number would be a binding that cannot fail -
+     * worse than a missing one (issue #300).
+     */
+    std::optional<std::string> request_id;
+    std::optional<std::string> request_name;
+    std::optional<ScriptEvent> event;
+
+    /**
      * @brief Expose @p req to the script as a mutable `pm.request`.
      *
      * The one supported way to opt into write-back, so the read snapshot and
-     * the write target cannot drift apart.
+     * the write target cannot drift apart. Write-back is a pre-request-only
+     * affordance, so this is also what stamps the hook.
      */
     void make_request_mutable (Request& req) {
         request         = &req;
         mutable_request = &req;
+        event           = ScriptEvent::PreRequest;
+    }
+
+    /**
+     * @brief A pre-request context: @p req is both what the script reads and
+     *        where its `pm.request` edits land.
+     */
+    [[nodiscard]] static ScriptContext for_prerequest (Request& req) {
+        ScriptContext ctx;
+        ctx.make_request_mutable (req);
+        return ctx;
+    }
+
+    /**
+     * @brief A test context: @p req has already gone out, so nothing is
+     *        written back - a mutation here could only misreport what was sent.
+     */
+    [[nodiscard]] static ScriptContext for_test (const Request& req, const Response& res) {
+        ScriptContext ctx;
+        ctx.request  = &req;
+        ctx.response = &res;
+        ctx.event    = ScriptEvent::Test;
+        return ctx;
     }
 };
 
