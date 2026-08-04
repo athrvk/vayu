@@ -696,6 +696,10 @@ void register_execution_routes (RouteContext& ctx) {
         "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
         script_config.enable_console = ctx.db.get_config_bool (
         "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+        // Payload-level, not config-level: whether a script may send is a
+        // property of *who asked for this execution*, not of the installation.
+        // Absent means no - see ScriptConfig::allow_send_request.
+        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
         vayu::runtime::ScriptEngine script_engine (script_config);
 

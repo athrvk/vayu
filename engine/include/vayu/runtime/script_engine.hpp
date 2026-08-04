@@ -34,6 +34,28 @@ struct ScriptConfig {
     uint64_t timeout_ms = vayu::core::constants::script_engine::TIMEOUT_MS;
     size_t stack_size   = vayu::core::constants::script_engine::STACK_SIZE;
     bool enable_console = vayu::core::constants::script_engine::ENABLE_CONSOLE;
+
+    /**
+     * @brief Whether scripts may issue requests through `pm.sendRequest`.
+     *
+     * **Defaults to false, and that default is the security control** (issue
+     * #302). The MCP target allowlist is enforced client-side, in the MCP
+     * server, against the composed URL before it calls `POST /execute` - a
+     * request issued from inside a script never passes that gate, because it
+     * never goes through the MCP server at all. So an agent that can write a
+     * script would otherwise reach any host, defeating a control the user
+     * configured in Settings.
+     *
+     * Denying by default puts the failure on the safe side: a client that
+     * forgets to ask - a new MCP tool, a future caller, a bare `curl` against
+     * the daemon - gets a script that cannot send, not silent egress. The
+     * app's own execute/run paths ask for it explicitly, exactly the way they
+     * send `followRedirects` rather than leaning on an engine default.
+     *
+     * `pm.sendRequest` is bound either way: when this is false it throws a
+     * message that names why, which is a better answer than a missing global.
+     */
+    bool allow_send_request = false;
 };
 
 /**

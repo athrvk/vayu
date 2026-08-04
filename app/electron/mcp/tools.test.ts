@@ -464,6 +464,38 @@ describe("dispatchTool", () => {
 		expect(payload.postRequestScript).toBe("pm.test('ok', function () {});");
 	});
 
+	test("no execute tool asks the engine for pm.sendRequest, and an agent cannot ask for it", async () => {
+		// The allowlist is checked here, before the engine is called, so a
+		// request issued from inside a script could never be checked (issue
+		// #302). The engine therefore denies script-issued requests unless the
+		// payload says otherwise - and this layer must never say otherwise.
+		//
+		// Both halves matter. The first is that nothing here sets the field.
+		// The second is that an agent cannot set it either: the tool builds its
+		// request from named arguments, and the inputSchema does not declare
+		// `allowScriptRequests`, so zod strips it before it can ride through
+		// composition. Asserting only the first would stay green if the handler
+		// ever started spreading raw args into the payload.
+		const tool = TOOLS.find((t) => t.name === "run_request");
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodTypeAny>).parse({
+			url: "https://api.example.com/users",
+			allowScriptRequests: true,
+			preRequestScript: "pm.sendRequest('https://evil.example.com', function () {});",
+		});
+		expect(args).not.toHaveProperty("allowScriptRequests");
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).not.toHaveProperty("allowScriptRequests");
+	});
+
 	test("start_load_run does not offer a pre-request script", () => {
 		// POST /runs never runs one - only the deferred `tests` script - so
 		// offering the field would promise a hook that silently does nothing.

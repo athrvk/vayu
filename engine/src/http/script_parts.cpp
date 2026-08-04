@@ -83,4 +83,9 @@ std::string read_post_request_script (const nlohmann::json& json) {
     { "tests", "tests" } });
 }
 
+bool read_allow_script_requests (const nlohmann::json& json) {
+    auto field = json.find ("allowScriptRequests");
+    return field != json.end () && field->is_boolean () && field->get<bool> ();
+}
+
 } // namespace vayu::http

@@ -84,6 +84,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'delete pm.request.headers["Authorization"]',
 			'pm.request.url = pm.request.url + "?trace=1"',
 			"pm.request.body = JSON.stringify({ n: 2 })",
+			"pm.sendRequest(url, (err, res) => { ... })",
 			"pm.info.requestName",
 		],
 		notes: [
@@ -118,6 +119,14 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				<code className={CODE_CLASS}>btoa</code> / <code className={CODE_CLASS}>atob</code>{" "}
 				are there too. No <code className={CODE_CLASS}>URL</code> parser in the sandbox, and
 				load tests do not run pre-request scripts at all.
+			</>,
+			<>
+				<code className={CODE_CLASS}>pm.sendRequest</code> fetches a token before the
+				request goes out. It is synchronous - the callback runs before it returns, and there
+				is no promise form - and bounded: its timeout is capped at whatever is left of the
+				script&apos;s time budget, and one script may send at most 10 requests. Connection,
+				DNS and timeout failures arrive as the callback&apos;s first argument rather than
+				throwing.
 			</>,
 			<>
 				<code className={CODE_CLASS}>pm.info</code> says where the script is running:{" "}

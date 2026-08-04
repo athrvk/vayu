@@ -296,12 +296,52 @@ IDs).
 ### The script sandbox surface
 
 `preRequestScript` and `postRequestScript` run in the engine's QuickJS sandbox,
-which is the same sandbox the app's editors target - there is no per-client
-capability gate, so an agent can do anything a script in the app can. What an
-agent lacked was any way to *know* that: until issue #233 the entire script
-surface it could see was the two sentences in those fields' descriptions, so
-`pm.expect` chains, `pm.response.to.*`, the variable scopes and `pm.crypto` were
-invisible and simply never attempted.
+which is the same sandbox the app's editors target. There is exactly one
+per-client capability gate - `pm.sendRequest`, below - and an agent can do
+anything else a script in the app can. What an agent lacked was any way to
+*know* that: until issue #233 the entire script surface it could see was the two
+sentences in those fields' descriptions, so `pm.expect` chains,
+`pm.response.to.*`, the variable scopes and `pm.crypto` were invisible and
+simply never attempted.
+
+#### `pm.sendRequest` is refused for MCP-started runs
+
+The sandbox can send an auxiliary request (issue #302). That would be a hole in
+the allowlist if it applied here, and the reason is structural rather than an
+oversight: **the allowlist is checked in this server, against the composed URL,
+before it calls the engine.** A request issued from inside a script never goes
+through the MCP server at all, so it could never be checked - an agent that can
+write a script would otherwise reach any host, defeating a control the user set
+in Settings.
+
+Three ways to close that were available, and this is which one and why:
+
+- *Move the allowlist engine-side for script-issued requests.* Rejected. The
+  allowlist lives in the app's config, and the engine has no channel to it; the
+  engine would need a second implementation of host matching alongside
+  `safety.ts`'s - two copies of a security check, which drift. It would also
+  leave the engine enforcing an allowlist for one kind of request and not the
+  others, which is harder to reason about than either extreme.
+- *Gate the feature off by default behind a setting.* Rejected. It adds a knob
+  whose safe position is the only correct one for MCP, and the hole reopens the
+  moment anyone flips it for an unrelated reason.
+- **Refuse script-issued requests unless the caller explicitly asks.** Chosen.
+  The engine denies `pm.sendRequest` unless the execute/run payload carries
+  `allowScriptRequests: true`. The app's own Send and load runs ask for it, in
+  one place each (`apiService.executeRequest` / `startLoadTest`); this server
+  never does. The allowlist stays exactly where the user configured it, and the
+  engine gains a capability bit rather than a policy copy.
+
+Denying by **default** is the load-bearing half: a new tool here, or any future
+engine client, gets a script that cannot send rather than unchecked egress.
+An agent cannot set the field either - every tool builds its request from named
+arguments, so an `allowScriptRequests` in the arguments is dropped before
+composition, and Zod strips what a tool does not declare.
+
+A script that calls `pm.sendRequest` under MCP throws a message saying why, so
+an agent is told rather than left with a silently missing global. The
+completion entry states the same thing, so the surface an agent reads and the
+surface it gets agree.
 
 `vayu://scripting/completions` closes that. It re-serves the engine's own
 `GET /scripting/completions` - the single source of truth that also feeds Monaco,
@@ -333,12 +373,18 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 ## Safety model
 
-Enforced entirely in the MCP layer (`safety.ts`, `config.ts`); the engine is
-never modified. All configurable in **Settings → MCP** and persisted.
+Enforced in the MCP layer (`safety.ts`, `config.ts`), with one exception noted
+below: script-issued requests are refused engine-side, because this layer cannot
+see them. Nothing here changes engine *behaviour* for other clients. All
+configurable in **Settings → MCP** and persisted.
 
 - **Target allowlist** (default empty ⇒ deny all). Network-touching tools refuse
   off-list hosts with an actionable error. An **"Allow all hosts"** opt-in
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
+  Because the check happens here, before the engine is called, a request sent
+  from inside a script could not be checked at all - so `pm.sendRequest` is
+  refused outright for runs this server starts. See
+  [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
 - **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
   requests are rejected. With the allowlist, these are the real limits on load.
   The caps bound values from above; `concurrency` is additionally constrained to

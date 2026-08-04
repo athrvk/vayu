@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/http/client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
@@ -60,6 +61,22 @@ namespace vayu::runtime {
 
 #ifdef VAYU_HAS_QUICKJS
 
+// Per-runtime deadline state for the interrupt handler. One instance is owned by
+// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
+// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
+// used by one thread at a time, so no synchronization is needed here.
+//
+// Declared up here rather than beside the interrupt handler below because
+// `pm.sendRequest` reads the same deadline to bound a blocking call: QuickJS
+// only calls the interrupt handler *between bytecode operations*, so a C
+// function that blocks never yields to it and the deadline has to be consulted
+// by hand. One struct, so the budget the handler enforces and the budget the
+// clamp reads cannot drift.
+struct RuntimeState {
+    bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
+    std::chrono::steady_clock::time_point deadline{};
+};
+
 // ============================================================================
 // QuickJS Helper Functions
 // ============================================================================
@@ -80,11 +97,38 @@ struct ContextData {
     std::optional<ScriptEvent> event;
     bool has_error = false;
     std::string error_message;
+
+    /**
+     * Whether `pm.sendRequest` may send - see
+     * `ScriptConfig::allow_send_request` for why the default is deny.
+     */
+    bool allow_send_request = false;
+
+    /**
+     * How many requests this execution has already issued. Per-execution
+     * state, not per-context: contexts are pooled and reused, so a counter
+     * living on the context would let the first script spend the second
+     * script's budget.
+     */
+    int send_request_count = 0;
 };
 
 // Get context data from JS context
 ContextData* get_context_data (JSContext* ctx) {
     return static_cast<ContextData*> (JS_GetContextOpaque (ctx));
+}
+
+// Milliseconds left of this execution's wall-clock budget, or nullopt when the
+// engine was configured without one (timeout_ms == 0). May be negative: the
+// caller decides whether an already-blown budget is an error or a clamp.
+std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
+    auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    if (!state || !state->enabled) {
+        return std::nullopt;
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    state->deadline - std::chrono::steady_clock::now ())
+    .count ();
 }
 
 // Convert JS string to C++ string
@@ -1965,28 +2009,62 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return create_expectation (ctx, argv[0]);
 }
 
-JSValue js_response_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
-    }
+// json() and text() read the body bound to the function at build time rather
+// than the response hanging off the context, so `pm.response` and the response
+// a pm.sendRequest callback receives are served by one implementation instead
+// of two that can drift. Both are installed by `install_response_body_readers`.
+JSValue js_response_json (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
 
-    JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
-    data->response->body.size (), "<response>");
+    size_t length    = 0;
+    const char* body = JS_ToCStringLen (ctx, &length, func_data[0]);
+    if (!body) {
+        return JS_EXCEPTION;
+    }
+    JSValue json = JS_ParseJSON (ctx, body, length, "<response>");
+    JS_FreeCString (ctx, body);
     if (JS_IsException (json)) {
+        // Replaces QuickJS's parse error, which names an offset into a string
+        // the script never sees.
+        JS_FreeValue (ctx, JS_GetException (ctx));
         return JS_ThrowTypeError (ctx, "Response body is not valid JSON");
     }
 
     return json;
 }
 
-JSValue js_response_text (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
-    }
+JSValue js_response_text (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
 
-    return JS_NewString (ctx, data->response->body.c_str ());
+    return JS_DupValue (ctx, func_data[0]);
+}
+
+// Install json()/text() on @p response, bound to @p body.
+void install_response_body_readers (JSContext* ctx, JSValue response, const std::string& body) {
+    JSValue bound = JS_NewStringLen (ctx, body.data (), body.size ());
+
+    JS_SetPropertyStr (ctx, response, "json",
+    JS_NewCFunctionData (ctx, js_response_json, 0, 0, 1, &bound));
+    JS_SetPropertyStr (ctx, response, "text",
+    JS_NewCFunctionData (ctx, js_response_text, 0, 0, 1, &bound));
+
+    JS_FreeValue (ctx, bound);
 }
 
 // ============================================================================
@@ -2922,13 +3000,8 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
             JS_NewString (ctx, data->response->error_message.c_str ()));
         }
 
-        // pm.response.json()
-        JS_SetPropertyStr (ctx, response, "json",
-        JS_NewCFunction (ctx, js_response_json, "json", 0));
-
-        // pm.response.text()
-        JS_SetPropertyStr (ctx, response, "text",
-        JS_NewCFunction (ctx, js_response_text, "text", 0));
+        // pm.response.json() and pm.response.text()
+        install_response_body_readers (ctx, response, data->response->body);
 
         // pm.response.reason()
         JS_SetPropertyStr (ctx, response, "reason",
@@ -3071,13 +3144,21 @@ class ScopedValue {
     JSValue value_;
 };
 
-// Read the header object the script left behind into `out`.
+// Read a header object into `out`, naming it @p label in every message it can
+// reject with. Two callers - the pm.request write-back and pm.sendRequest's
+// object header form - because the rules below (empty name, non-primitive
+// value, a case-insensitive clash) are properties of HTTP headers rather than
+// of either surface. @p suggest_delete adds the removal hint that only means
+// something for a live pm.request.headers object.
 // @return why the headers were rejected, or nullopt when `out` is filled.
-std::optional<std::string>
-read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) {
+std::optional<std::string> read_header_object (JSContext* ctx,
+JSValueConst js_headers,
+const char* label,
+bool suggest_delete,
+Headers& out) {
     if (!JS_IsObject (js_headers) || JS_IsArray (js_headers) ||
     JS_IsFunction (ctx, js_headers)) {
-        return "pm.request.headers must be an object, got " +
+        return std::string (label) + " must be an object, got " +
         std::string (js_type_name (ctx, js_headers));
     }
 
@@ -3085,7 +3166,7 @@ read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) 
     uint32_t count        = 0;
     if (JS_GetOwnPropertyNames (ctx, &props, &count, js_headers,
         JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
-        return std::string ("pm.request.headers could not be enumerated");
+        return std::string (label) + " could not be enumerated";
     }
 
     std::optional<std::string> error;
@@ -3102,7 +3183,7 @@ read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) 
         // than dropped, because a silently missing header is the very defect
         // this write-back exists to fix.
         if (key.empty ()) {
-            error = "pm.request.headers has an empty header name";
+            error = std::string (label) + " has an empty header name";
         } else if (JS_IsString (value.get ()) || JS_IsNumber (value.get ()) ||
         JS_IsBool (value.get ())) {
             // JS object keys are case-sensitive; HTTP header names are not. So
@@ -3111,7 +3192,8 @@ read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) 
             // silently win. Which one the script meant is unknowable, and one
             // of them is an Authorization header - refuse instead of guessing.
             if (auto clash = out.find (key); clash != out.end () && clash->first != key) {
-                error = "pm.request.headers has both '" + clash->first + "' and '" + key +
+                error = std::string (label) + " has both '" + clash->first +
+                "' and '" + key +
                 "' - HTTP header names are case-insensitive, so these are one "
                 "header. "
                 "Keep one.";
@@ -3119,9 +3201,11 @@ read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) 
                 out[key] = js_to_string (ctx, value.get ());
             }
         } else {
-            error = "pm.request.headers['" + key + "'] must be a string, got " +
-            std::string (js_type_name (ctx, value.get ())) +
-            " (use delete pm.request.headers['" + key + "'] to remove it)";
+            error = std::string (label) + "['" + key + "'] must be a string, got " +
+            std::string (js_type_name (ctx, value.get ()));
+            if (suggest_delete) {
+                error = *error + " (use delete " + label + "['" + key + "'] to remove it)";
+            }
         }
     }
 
@@ -3200,7 +3284,8 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
 
     ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, js_request.get (), "headers"));
     staged.headers.clear ();
-    if (auto reason = read_pm_request_headers (ctx, js_headers.get (), staged.headers)) {
+    if (auto reason = read_header_object (ctx, js_headers.get (), "pm.request.headers",
+        /*suggest_delete=*/true, staged.headers)) {
         return reason;
     }
 
@@ -3627,6 +3712,346 @@ void setup_pm_variables (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "variables", variables);
 }
 
+// ============================================================================
+// pm.sendRequest
+// ============================================================================
+
+// One entry of Postman's array header form: { key, value }.
+std::optional<std::string>
+read_header_pair (JSContext* ctx, JSValueConst entry, Headers& out) {
+    if (!JS_IsObject (entry) || JS_IsArray (entry) || JS_IsFunction (ctx, entry)) {
+        return "pm.sendRequest header entries must be { key, value } objects, "
+               "got " +
+        std::string (js_type_name (ctx, entry));
+    }
+    ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry, "key"));
+    ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry, "value"));
+    if (!JS_IsString (key.get ())) {
+        return "pm.sendRequest header entries need a string 'key', got " +
+        std::string (js_type_name (ctx, key.get ()));
+    }
+    if (!JS_IsString (value.get ()) && !JS_IsNumber (value.get ()) &&
+    !JS_IsBool (value.get ())) {
+        return "pm.sendRequest header '" + js_to_string (ctx, key.get ()) +
+        "' needs a string value, got " + std::string (js_type_name (ctx, value.get ()));
+    }
+    std::string name = js_to_string (ctx, key.get ());
+    if (name.empty ()) {
+        return std::string ("pm.sendRequest has a header with an empty name");
+    }
+    out[name] = js_to_string (ctx, value.get ());
+    return std::nullopt;
+}
+
+// pm.sendRequest's headers, in either shape Postman accepts: an array of
+// { key, value } or a plain object. Both, because the array is what a Postman
+// script carries over and the object is what `pm.request.headers` reads as in
+// this same sandbox - a user copying from one to the other should not have a
+// header silently vanish.
+std::optional<std::string>
+read_send_request_headers (JSContext* ctx, JSValueConst value, Headers& out) {
+    if (JS_IsArray (value)) {
+        int64_t length = 0;
+        if (JS_GetLength (ctx, value, &length) < 0) {
+            return std::string (
+            "pm.sendRequest headers could not be enumerated");
+        }
+        for (int64_t i = 0; i < length; i++) {
+            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, value, i));
+            if (auto reason = read_header_pair (ctx, entry.get (), out)) {
+                return reason;
+            }
+        }
+        return std::nullopt;
+    }
+    return read_header_object (
+    ctx, value, "pm.sendRequest headers", /*suggest_delete=*/false, out);
+}
+
+// pm.sendRequest's body: a raw string, or Postman's { mode: 'raw', raw }.
+//
+// No Content-Type is inferred from the mode - the engine's send path derives
+// none either, so the header the script sets is the header that goes out. An
+// inferred one would silently disagree with an explicit one.
+std::optional<std::string>
+read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
+    if (JS_IsUndefined (value) || JS_IsNull (value)) {
+        return std::nullopt;
+    }
+    if (JS_IsString (value)) {
+        out.mode    = BodyMode::Text;
+        out.content = js_to_string (ctx, value);
+        return std::nullopt;
+    }
+    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
+        return "pm.sendRequest options.body must be a string or "
+               "{ mode: 'raw', raw: '...' }, got " +
+        std::string (js_type_name (ctx, value));
+    }
+
+    ScopedValue mode (ctx, JS_GetPropertyStr (ctx, value, "mode"));
+    const std::string mode_text =
+    JS_IsString (mode.get ()) ? js_to_string (ctx, mode.get ()) : "";
+    // Postman's formdata / urlencoded / file modes are refused by name rather
+    // than sent as an empty body: a request that goes out without the payload
+    // the script wrote is worse than one that does not go out.
+    if (mode_text != "raw") {
+        return "pm.sendRequest supports only options.body.mode 'raw' (got " +
+        (mode_text.empty () ? std::string ("none") : "\"" + mode_text + "\"") +
+        "). Serialise the body yourself and set the Content-Type header.";
+    }
+
+    ScopedValue raw (ctx, JS_GetPropertyStr (ctx, value, "raw"));
+    if (!JS_IsString (raw.get ())) {
+        return "pm.sendRequest options.body.raw must be a string, got " +
+        std::string (js_type_name (ctx, raw.get ()));
+    }
+    out.mode    = BodyMode::Text;
+    out.content = js_to_string (ctx, raw.get ());
+    return std::nullopt;
+}
+
+// Translate pm.sendRequest's first argument into a Request.
+// @return why it was rejected, or nullopt when `out` is filled.
+std::optional<std::string>
+build_send_request (JSContext* ctx, JSValueConst arg, Request& out) {
+    if (JS_IsString (arg)) {
+        out.url = js_to_string (ctx, arg);
+        if (out.url.empty ()) {
+            return std::string ("pm.sendRequest was given an empty URL");
+        }
+        return std::nullopt;
+    }
+
+    if (!JS_IsObject (arg) || JS_IsArray (arg) || JS_IsFunction (ctx, arg)) {
+        return "pm.sendRequest expects a URL string or an options object, "
+               "got " +
+        std::string (js_type_name (ctx, arg));
+    }
+
+    ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, arg, "url"));
+    if (!JS_IsString (js_url.get ())) {
+        return "pm.sendRequest options.url must be a string, got " +
+        std::string (js_type_name (ctx, js_url.get ())) +
+        " (Postman's URL-object form is not supported)";
+    }
+    out.url = js_to_string (ctx, js_url.get ());
+    if (out.url.empty ()) {
+        return std::string ("pm.sendRequest options.url is empty");
+    }
+
+    ScopedValue js_method (ctx, JS_GetPropertyStr (ctx, arg, "method"));
+    if (!JS_IsUndefined (js_method.get ()) && !JS_IsNull (js_method.get ())) {
+        if (!JS_IsString (js_method.get ())) {
+            return "pm.sendRequest options.method must be a string, got " +
+            std::string (js_type_name (ctx, js_method.get ()));
+        }
+        std::string method_text = js_to_string (ctx, js_method.get ());
+        // Same normalisation pm.request's write-back applies: 'post' clearly
+        // means POST, while an unrecognised verb below still fails loudly.
+        std::transform (method_text.begin (), method_text.end (), method_text.begin (),
+        [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+        if (auto parsed = parse_method (method_text)) {
+            out.method = *parsed;
+        } else {
+            return "pm.sendRequest options.method must be one of GET, POST, "
+                   "PUT, "
+                   "DELETE, PATCH, HEAD, OPTIONS (got \"" +
+            js_to_string (ctx, js_method.get ()) + "\")";
+        }
+    }
+
+    // `header` is Postman's spelling, `headers` is the one pm.request uses.
+    // Both are read, neither is preferred: given both there is no way to know
+    // which the script meant, and dropping either would send a request missing
+    // headers the script wrote.
+    ScopedValue js_header (ctx, JS_GetPropertyStr (ctx, arg, "header"));
+    ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, arg, "headers"));
+    const auto present = [] (JSValueConst v) {
+        return !JS_IsUndefined (v) && !JS_IsNull (v);
+    };
+    if (present (js_header.get ()) && present (js_headers.get ())) {
+        return std::string (
+        "pm.sendRequest was given both options.header and "
+        "options.headers - they are one slot under two names. Keep one.");
+    }
+    if (present (js_header.get ()) || present (js_headers.get ())) {
+        JSValueConst chosen =
+        present (js_header.get ()) ? js_header.get () : js_headers.get ();
+        if (auto reason = read_send_request_headers (ctx, chosen, out.headers)) {
+            return reason;
+        }
+    }
+
+    ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, arg, "body"));
+    if (auto reason = read_send_request_body (ctx, js_body.get (), out.body)) {
+        return reason;
+    }
+
+    ScopedValue js_timeout (ctx, JS_GetPropertyStr (ctx, arg, "timeout"));
+    if (present (js_timeout.get ())) {
+        if (!JS_IsNumber (js_timeout.get ())) {
+            return "pm.sendRequest options.timeout must be a number of "
+                   "milliseconds, got " +
+            std::string (js_type_name (ctx, js_timeout.get ()));
+        }
+        double ms = 0.0;
+        JS_ToFloat64 (ctx, &ms, js_timeout.get ());
+        if (!std::isfinite (ms) || ms <= 0.0) {
+            return "pm.sendRequest options.timeout must be a positive number "
+                   "of "
+                   "milliseconds (got " +
+            js_to_string (ctx, js_timeout.get ()) + ")";
+        }
+        out.timeout_ms = static_cast<int> (
+        std::min (ms, static_cast<double> (std::numeric_limits<int>::max ())));
+    }
+
+    return std::nullopt;
+}
+
+// The response a pm.sendRequest callback receives.
+//
+// A deliberate subset of pm.response: code, status, responseTime, headers,
+// json() and text(). `status` is the numeric code, as it is on pm.response -
+// Postman spells the reason phrase there instead, but two objects called a
+// response inside one sandbox disagreeing about what `status` means is the
+// worse divergence. The body readers are the same two functions pm.response
+// installs, so the two cannot drift.
+JSValue build_send_response (JSContext* ctx, const Response& response) {
+    JSValue result = JS_NewObject (ctx);
+
+    JS_SetPropertyStr (ctx, result, "code", JS_NewInt32 (ctx, response.status_code));
+    JS_SetPropertyStr (ctx, result, "status", JS_NewInt32 (ctx, response.status_code));
+    JS_SetPropertyStr (
+    ctx, result, "responseTime", JS_NewFloat64 (ctx, response.timing.total_ms));
+
+    JSValue headers = JS_NewObject (ctx);
+    install_header_methods (ctx, headers, /*mutators=*/false);
+    for (const auto& [key, value] : response.headers) {
+        define_header_entry (ctx, headers, key, value);
+    }
+    JS_SetPropertyStr (ctx, result, "headers", headers);
+
+    install_response_body_readers (ctx, result, response.body);
+
+    return result;
+}
+
+// The error a pm.sendRequest callback receives: a real Error, carrying the
+// engine's own error code so a script can tell a timeout from a refusal
+// without matching on message text.
+JSValue build_send_error (JSContext* ctx, ErrorCode code, const std::string& message) {
+    JSValue error = JS_NewError (ctx);
+    JS_SetPropertyStr (ctx, error, "message", JS_NewString (ctx, message.c_str ()));
+    JS_SetPropertyStr (ctx, error, "code", JS_NewString (ctx, vayu::to_string (code)));
+    return error;
+}
+
+/**
+ * pm.sendRequest(urlOrOptions, callback)
+ *
+ * Synchronous by construction, and callback-shaped rather than promise-shaped.
+ * The sandbox has a Promise but nothing drains its job queue - no event loop,
+ * no setTimeout - so an awaited value never resumes and the script reports a
+ * timeout instead of a result. Postman's own signature is callback-based, and
+ * a callback can be honoured honestly: block on the send, then invoke
+ * callback(err, res) inline. The promise-returning overload Postman also
+ * offers is deliberately absent; it could only never resolve.
+ *
+ * Three things are refused by throwing rather than by calling the callback,
+ * because they are the script's mistakes and not the network's: the feature
+ * being off, the per-script request cap, and an unusable argument. Transport
+ * failures - refused, DNS, timeout - are the network's answer and reach the
+ * callback as an error, which is where a Postman script looks for them.
+ */
+JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+
+    auto* data = get_context_data (ctx);
+    if (!data) {
+        return JS_ThrowInternalError (ctx, "No script context available");
+    }
+
+    if (!data->allow_send_request) {
+        return JS_ThrowPlainError (ctx,
+        "pm.sendRequest is not available here. Vayu's MCP target allowlist is "
+        "checked by the MCP server before it calls the engine, so a request "
+        "issued from inside a script would bypass a control you configured in "
+        "Settings; script-issued requests are refused unless the caller asks "
+        "for them, and the MCP server never does. See docs/engine/mcp.md.");
+    }
+
+    if (argc < 2) {
+        return JS_ThrowTypeError (
+        ctx, "pm.sendRequest requires a URL (or options object) and a callback");
+    }
+    if (!JS_IsFunction (ctx, argv[1])) {
+        return JS_ThrowTypeError (ctx,
+        "pm.sendRequest requires a callback function as its second argument - "
+        "it has no promise form, because this sandbox never resolves one");
+    }
+
+    constexpr int limit = vayu::core::constants::script_engine::SEND_REQUEST_LIMIT;
+    if (data->send_request_count >= limit) {
+        return JS_ThrowPlainError (ctx,
+        "pm.sendRequest may issue at most %d requests per script; this is "
+        "request %d",
+        limit, data->send_request_count + 1);
+    }
+
+    Request request;
+    if (auto reason = build_send_request (ctx, argv[0], request)) {
+        return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
+    }
+
+    // The script's wall-clock budget is enforced by a QuickJS interrupt handler
+    // that only runs *between bytecode operations*, so a blocking C function
+    // never yields to it: without this clamp a 5s script could hold its thread
+    // for the request's 30s timeout, six times the budget the user set, with
+    // no error and no way to interrupt it.
+    if (auto remaining = remaining_script_budget_ms (ctx)) {
+        if (*remaining <= 0) {
+            return JS_ThrowPlainError (ctx,
+            "pm.sendRequest was called with none of the script's time budget "
+            "left");
+        }
+        request.timeout_ms = static_cast<int> (
+        std::min (static_cast<int64_t> (request.timeout_ms), *remaining));
+    }
+
+    // Counted before the send, so a request that fails still spends budget -
+    // otherwise a loop against a refusing host would never reach the cap.
+    data->send_request_count++;
+
+    vayu::http::Client client;
+    auto sent = client.send (request);
+
+    JSValue err = JS_NULL;
+    JSValue res = JS_NULL;
+    if (sent.is_error ()) {
+        err = build_send_error (ctx, sent.error ().code, sent.error ().message);
+    } else if (const Response& response = sent.value (); response.has_error ()) {
+        err = build_send_error (ctx, response.error_code, response.error_message);
+    } else {
+        res = build_send_response (ctx, sent.value ());
+    }
+
+    JSValue args[2] = { err, res };
+    JSValue ret     = JS_Call (ctx, argv[1], JS_UNDEFINED, 2, args);
+    JS_FreeValue (ctx, err);
+    JS_FreeValue (ctx, res);
+
+    // A callback that threw - a failed pm.expect inside it, most likely - must
+    // surface as the script's error rather than be swallowed here.
+    if (JS_IsException (ret)) {
+        return JS_EXCEPTION;
+    }
+    JS_FreeValue (ctx, ret);
+
+    return JS_UNDEFINED;
+}
+
 void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
@@ -3666,6 +4091,12 @@ void setup_pm_object (JSContext* ctx) {
     // pm.crypto
     setup_pm_crypto (ctx, pm);
 
+    // pm.sendRequest - always bound, even when the capability is off, so a
+    // script that calls it gets a sentence explaining why rather than
+    // "not a function".
+    JS_SetPropertyStr (ctx, pm, "sendRequest",
+    JS_NewCFunction (ctx, js_pm_send_request, "sendRequest", 2));
+
     JS_SetPropertyStr (ctx, global, "pm", pm);
     JS_FreeValue (ctx, global);
 }
@@ -3675,15 +4106,6 @@ void setup_pm_object (JSContext* ctx) {
 // ============================================================================
 // ScriptEngine Implementation
 // ============================================================================
-
-// Per-runtime deadline state for the interrupt handler. One instance is owned by
-// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
-// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
-// used by one thread at a time, so no synchronization is needed here.
-struct RuntimeState {
-    bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
-    std::chrono::steady_clock::time_point deadline{};
-};
 
 // QuickJS calls this periodically during evaluation. Returning non-zero aborts
 // the current JS_Eval with an InternalError, which the execute() exception path
@@ -3817,6 +4239,11 @@ class ScriptEngine::Impl {
         ctx_data.request_id          = ctx.request_id;
         ctx_data.request_name        = ctx.request_name;
         ctx_data.event               = ctx.event;
+        // Both per-execution: the capability is this caller's, and the request
+        // budget starts full for every script rather than carrying over
+        // through a pooled context.
+        ctx_data.allow_send_request = config.allow_send_request;
+        ctx_data.send_request_count = 0;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response and pm.info with new data
