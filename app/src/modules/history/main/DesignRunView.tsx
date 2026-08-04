@@ -49,6 +49,7 @@ import type { RequestState, ResponseState } from "@/modules/request-builder/type
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
+	execIdentity,
 	responseFromExecuteResult,
 	scriptsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
@@ -206,6 +207,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// actually used (seeded by design-run-seed.ts), not
 						// whatever the engine would default to.
 						httpVersion: request.httpVersion,
+						// Identity for the script sandbox (pm.info), not an HTTP
+						// field. A replay copy is detached, so its name is the
+						// only one the engine can be told about.
+						...execIdentity(request),
 					},
 					// Scopes the inherit walk and the variable chain; undefined for
 					// an orphaned run, which resolves against environment + globals.

@@ -94,6 +94,33 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
         dummy_request = request_result.value ();
     }
 
+    // Identity for `pm.info`. A load run's `tests` script is the same script a
+    // Send runs, so it must not read `pm.info.requestId` as undefined here and
+    // as a value there. Both fields ride in on the composed payload for a run
+    // started from a saved request; resolved once, not per sample.
+    std::optional<std::string> script_request_id;
+    std::optional<std::string> script_request_name;
+    if (auto id = context->config.find ("requestId");
+        id != context->config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
+        script_request_id = id->get<std::string> ();
+    }
+    if (auto name = context->config.find ("requestName");
+        name != context->config.end () && name->is_string () &&
+        !name->get<std::string> ().empty ()) {
+        script_request_name = name->get<std::string> ();
+    } else if (script_request_id) {
+        try {
+            if (auto stored = db.get_request (*script_request_id);
+                stored && !stored->name.empty ()) {
+                script_request_name = stored->name;
+            }
+        } catch (const std::exception& e) {
+            // A lookup failure costs the script a name, never the validation.
+            vayu::utils::log_warning (
+            "pm.info.requestName lookup failed: " + std::string (e.what ()));
+        }
+    }
+
     size_t passed = 0;
     size_t failed = 0;
     std::vector<std::string> failure_messages;
@@ -108,8 +135,12 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
         response.timing.total_ms = sample.latency_ms;
 
         try {
-            auto result =
-            engine.execute_test (context->test_script, dummy_request, response, env);
+            auto script_ctx =
+            vayu::runtime::ScriptContext::for_test (dummy_request, response);
+            script_ctx.environment  = &env;
+            script_ctx.request_id   = script_request_id;
+            script_ctx.request_name = script_request_name;
+            auto result = engine.execute (context->test_script, script_ctx);
 
             if (result.success) {
                 // Check individual test results

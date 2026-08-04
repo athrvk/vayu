@@ -77,6 +77,25 @@ export function buildExecBody(
 	return undefined;
 }
 
+/**
+ * The identity fields the engine hands the script sandbox as `pm.info`, for
+ * the inline half of the compose payload (issue #300).
+ *
+ * Only the name lives here: `requestId` is attached at execute time by each
+ * caller, because the two disagree about where it comes from - the builder
+ * sends the saved row's id, the run view sends the id the run was filed under -
+ * while both mean the same thing by "the name in the editor right now".
+ *
+ * It has to come from the client at all because Send executes editor state: an
+ * unsaved request has a name and no row to look it up in, and a detached
+ * replay copy has a name that is not the stored one. An empty name is omitted
+ * rather than sent as `""`, so a script reads `undefined` and its `typeof`
+ * check answers truthfully.
+ */
+export function execIdentity(request: RequestState): { requestName?: string } {
+	return request.name ? { requestName: request.name } : {};
+}
+
 /** Sniff the render mode from the response's content type. */
 function bodyTypeFromContentType(headers: Record<string, string> | undefined) {
 	const contentType = (headers?.["content-type"] || "").toLowerCase();

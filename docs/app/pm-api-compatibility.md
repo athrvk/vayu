@@ -26,6 +26,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
+| Script identity     | `pm.info.requestId`, `.requestName`, `.eventName` - each optional, see below     |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
@@ -82,6 +83,31 @@ script context's - the request's whole collection chain, leaf shadowing
 ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
 `"undefined"`.
+
+### Script identity (`pm.info`) - three fields, all optional
+
+`pm.info` is always an object; each field is present only when there is a
+truthful value for it, so a script tests with `typeof` rather than assuming:
+
+| Field | What it is | When it is `undefined` |
+|---|---|---|
+| `requestId` | The saved request the send is filed under | An ad-hoc request (MCP's `run_request` with no `requestId`, a load run started from a URL) |
+| `requestName` | The request's name **as the client sent it** - the name in the editor, which for an unsaved edit differs from the stored row | A request with no name, and an ad-hoc one |
+| `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
+
+```javascript
+if (pm.info.eventName === "prerequest") {
+    // one shared collection-level script, branching on where it runs
+}
+console.log("running " + (pm.info.requestName || "an unnamed request"));
+```
+
+`iteration` and `iterationCount` are **not** exposed, and that is a decision
+rather than an omission (issue #300). Vayu has no collection runner: a load
+test's Tests script runs **once per sampled response, after the run
+finishes**, and samples are a reservoir rather than the first N iterations, so
+any number reported there would not be an iteration count. They return when
+there is a runner to count (issue #303).
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
@@ -195,7 +221,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   wanting a generated value uses `pm.variables.replaceIn("{{$guid}}")` (see
   below) or writes the JavaScript for it. The supported set and the reasoning
   are in [variable resolution](./variable-resolution.md#dynamic-variables)
-- `pm.iterationData.*` - data-file driven runs
+- `pm.iterationData.*` - data-file driven runs, and with them
+  `pm.info.iteration` / `pm.info.iterationCount` (see
+  [above](#script-identity-pminfo---three-fields-all-optional))
 - `pm.cookies.*`, and `pm.response.cookies`
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
   `pm.request.url` is a writable **string** that the write-back requires to still
@@ -204,7 +232,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   could work, but that shape has not been decided, so URL parsing is string work
   today. Deferred deliberately - see
   [scripting.md](../engine/scripting.md#url-parts-are-not-exposed-deferred).
-- `pm.info`, `pm.execution`, `pm.visualizer`
+- `pm.execution` (flow control), `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,

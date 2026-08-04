@@ -981,10 +981,12 @@ payload that skips composition is sent byte-for-byte as supplied.
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
   `inherit`), the ordered script-part lists (collection chain root→leaf, then
-  the request's own), and the stored execution options (`followRedirects` /
-  `maxRedirects` / `httpVersion`, always emitted). The request's own collection
-  scopes resolution; `collectionId` is only a fallback for a request without
-  one. An unknown id is a definitive **404**.
+  the request's own), the stored execution options (`followRedirects` /
+  `maxRedirects` / `httpVersion`, always emitted) and its `requestName` (the
+  script sandbox reads it as `pm.info.requestName`; omitted when the row's name
+  is empty). The request's own collection scopes resolution; `collectionId` is
+  only a fallback for a request without one. An unknown id is a definitive
+  **404**.
 - **`request`** is an inline unresolved request in the `POST /execute` body
   shape. Given *alongside* `requestId`, its fields lay over the stored ones
   before resolution - how an override like "retarget this saved request at
@@ -1038,6 +1040,7 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
     "content": "{\"name\":\"John\"}"
   },
   "requestId": "req_1234567890",      // Optional, links to saved request
+  "requestName": "Create user",       // Optional, read by scripts as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, uses environment variables
   "preRequestScript": "",              // Optional
   "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
@@ -1047,6 +1050,16 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "httpVersion": "auto"                // Optional: "auto" | "http1.1" | "http2", default "auto"
 }
 ```
+
+**`requestName` is script identity, not an HTTP field** - it never reaches the
+wire. The scripts read it as `pm.info.requestName` (with `requestId` as
+`pm.info.requestId`); a client sends it because Send executes editor state,
+which may be unsaved and therefore have a name no stored row carries. Absent,
+the engine falls back to the name of the row named by `requestId`, so linking
+an id is enough. An empty string is treated as absent - a script reads
+`undefined` rather than `""` - and a non-string is a **400**
+(`'requestName' must be a string`). See
+[scripting.md](scripting.md#script-identity-pminfo).
 
 **Script parts.** `preRequestScript` / `postRequestScript` above are the legacy
 single-string form and still work. The engine also accepts `preRequestScripts`
@@ -1237,6 +1250,7 @@ Start a load test run (Vayu Mode).
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
+  "requestName": "Create user",       // Optional, read by the tests script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
   "followRedirects": true,   // Optional, default true - see POST /execute

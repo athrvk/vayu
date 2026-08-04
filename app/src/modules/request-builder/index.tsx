@@ -46,6 +46,7 @@ import { scriptParts } from "./utils/script-parts";
 import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
 import {
 	buildExecBody,
+	execIdentity,
 	responseFromExecuteResult,
 	scriptsMayWriteVariables,
 } from "./utils/execute-mapping";
@@ -229,6 +230,9 @@ export default function RequestBuilder() {
 						// engine's own default win silently, which is not a
 						// decision this client should hand over.
 						httpVersion: request.httpVersion,
+						// Identity for the script sandbox (pm.info), not an HTTP
+						// field - it rides through composition to /execute.
+						...execIdentity(request),
 					},
 					collectionId: fetchedRequest.collectionId,
 					environmentId: activeEnvironmentId || undefined,
