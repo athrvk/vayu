@@ -19,6 +19,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value)`                                    |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
+| Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
@@ -40,9 +41,9 @@ case-insensitive the way HTTP header names are. Indexing is not, so
 A header name the server sent **twice** reads as a single value with the two
 folded together by `", "` (RFC 7230 §3.2.2) - Postman's `HeaderList` would give
 you two entries. That matters most for `Set-Cookie`, which servers routinely
-send once per cookie: both cookies are there, in one string, and a caller that
-splits it must split on a comma followed by `name=` rather than on every comma,
-since an `Expires=` value contains one.
+send once per cookie: both cookies are there, in one string. Do not split that
+string yourself - an `Expires=` value contains a comma of its own. Read
+`pm.response.cookies`, which is the same header already parsed.
 
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
@@ -207,6 +208,37 @@ chain - a misspelling, or an idiom Vayu does not implement such as the negated
 expression statement, so a name that merely evaluated to `undefined` would
 report PASS against a broken API.
 
+### Response cookies (`pm.response.cookies`)
+
+```javascript
+pm.response.cookies.get('session');   // value, or undefined
+pm.response.cookies.has('session');   // boolean
+pm.response.cookies.toObject();       // { session: 'abc' }
+pm.response.cookies[0].attrs;         // ['Path=/', 'HttpOnly'] - raw chunks
+```
+
+An array of `{ name, value, attrs }` in wire order, parsed from that one
+response's `Set-Cookie`. It is **not** Postman's `CookieList` and its entries
+are not `postman-collection` `Cookie` objects: there is no `key`, no `path`,
+no `secure`, no `expires`, because the engine keeps no cookie jar and those
+fields would be a restatement of the attribute string rather than state
+anything holds. `attrs` is that string, split on `;` and untouched otherwise.
+
+Three divergences worth knowing before porting a script:
+
+- **No jar.** A cookie a response sets is not sent on the next request
+  (`pm.cookies.*` is absent for the same reason). Reuse a session by reading
+  the value here and setting the header yourself.
+- **Names are case-sensitive**, unlike header names - `get('SESSION')` does not
+  find the `session` cookie. RFC 6265 says they differ, and answering anyway
+  would be a wrong value dressed as a right one.
+- **A repeated name answers with its last value** from `get()` / `toObject()`,
+  which is the one a browser's jar would keep, while the array still lists both.
+
+The parse is shared with the response Cookies tab in the UI through
+`engine/tests/fixtures/set-cookie-conformance.json`, so a cookie cannot read one
+way on screen and another in a script.
+
 ---
 
 ## Not (yet) supported
@@ -231,7 +263,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.iterationData.*` - data-file driven runs, and with them
   `pm.info.iteration` / `pm.info.iterationCount` (see
   [above](#script-identity-pminfo---three-fields-all-optional))
-- `pm.cookies.*`, and `pm.response.cookies`
+- `pm.cookies.*` - the cookie jar. Vayu keeps none, so there is nothing to read
+  or set, and a cookie a response sets is not carried into the next request.
+  `pm.response.cookies` **is** supported (see above); it reads that one
+  response's `Set-Cookie` and nothing more
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
   `pm.request.url` is a writable **string** that the write-back requires to still
   be one, and a JS string primitive cannot carry properties; boxing it would

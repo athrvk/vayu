@@ -11,13 +11,16 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/set_cookie.hpp"
 
 namespace {
 
@@ -236,6 +239,32 @@ TEST_F (CurlTransferTest, ClientKeepsEveryValueOfARepeatedHeaderName) {
     ASSERT_TRUE (result.is_ok ());
     ASSERT_EQ (result.value ().status_code, 200);
     expect_both_repeated_values (result.value ().headers, "client");
+}
+
+// The seam between the two halves of the fix: what the callback folds is what
+// `parse_set_cookie` (and, through the shared fixture, the app's Cookies tab)
+// splits back apart. Each half is pinned on its own - the fold above, the
+// boundary rule in set_cookie_test.cpp - so only this asserts they agree, which
+// is the wiring the acceptance criterion of #307 is actually about.
+TEST_F (CurlTransferTest, TwoSetCookieHeadersReachTheCookieParserAsTwoCookies) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/repeated-headers");
+
+    auto result = run_once (request);
+    ASSERT_TRUE (result.is_ok ());
+    const auto& headers = result.value ().headers;
+    auto folded         = headers.find ("set-cookie");
+    ASSERT_NE (folded, headers.end ());
+
+    auto cookies = vayu::http::parse_set_cookie (folded->second);
+    ASSERT_EQ (cookies.size (), 2u)
+    << "both cookies must survive the fold *and* the parse - got " << folded->second;
+
+    std::vector<std::string> names{ cookies[0].name, cookies[1].name };
+    std::sort (names.begin (), names.end ());
+    EXPECT_EQ (names[0], "csrf");
+    EXPECT_EQ (names[1], "session");
 }
 
 // The folding format itself, on input with a known arrival order. ", " is what

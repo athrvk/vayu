@@ -138,6 +138,7 @@ pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
+pm.response.cookies           // Set-Cookie, parsed - see below
 ```
 
 `reason()` reports the reason phrase from the status line. Where none was
@@ -174,9 +175,45 @@ already arrived, so a mutator there would only appear to change something.
 string - there is no list form, because `headers` is a plain object. Folding is
 the RFC 7230 §3.2.2 equivalence for comma-list headers; before it, only the
 **last** value of a repeated name survived at all. If you need the parts, split
-on `", "` - except for `Set-Cookie`, whose values may contain commas of their
-own (`Expires=Wed, 21 Oct ...`), so split on a comma that is followed by
-`name=`.
+on `", "` - but not for `Set-Cookie`, whose values contain commas of their own
+(`Expires=Wed, 21 Oct ...`). Read `pm.response.cookies` instead: it is that
+header already parsed, boundaries and all.
+
+### Reading response cookies
+
+```javascript
+pm.response.cookies.get('session');    // value, or undefined if unset
+pm.response.cookies.has('session');    // boolean
+pm.response.cookies.toObject();        // { session: 'abc', tracker: 't1' }
+pm.response.cookies.length;            // it is an array, in wire order
+pm.response.cookies[0].name;           // 'session'
+pm.response.cookies[0].value;          // 'abc'
+pm.response.cookies[0].attrs;          // ['Path=/', 'HttpOnly'] - raw chunks
+```
+
+`cookies` is what the response's `Set-Cookie` header carried, parsed - an array
+of `{ name, value, attrs }` with `get()` / `has()` / `toObject()` over it.
+Attributes are the raw `;`-separated chunks in wire order; there are no
+`path` / `secure` / `expires` fields, because the engine keeps no cookie jar
+and would only be re-stating the string.
+
+Three things follow from that, and they are the ones worth knowing:
+
+- **Nothing here is sent.** Vayu has no cookie jar (issue #301 step 2), so a
+  cookie a response sets is not carried into the next request. Reading it and
+  setting a header yourself is the way to reuse a session today.
+- **Cookie names are case-sensitive**, unlike header names: `get('SESSION')`
+  does not answer the `session` cookie. That is what RFC 6265 says, and
+  answering otherwise would be a wrong value dressed as a right one.
+- **A name set twice answers with the last value** from `get()` and
+  `toObject()` - the one a browser's jar would keep - while the array still
+  lists both, because that is what came off the wire.
+
+The parse is shared with the app's response Cookies tab through a conformance
+fixture (`engine/tests/fixtures/set-cookie-conformance.json`), so the value a
+script asserts on and the value shown in the UI cannot drift. It handles the two
+cases a naive split corrupts: a comma inside `Expires=Wed, 21 Oct ...` is not a
+cookie boundary, and the `=` padding on a base64 value stays in the value.
 
 ### Response Assertions
 

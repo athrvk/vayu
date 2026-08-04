@@ -214,6 +214,40 @@ TEST (ScriptCompletions, EveryOfferedHeaderMemberIsCallableInTheRuntime) {
     EXPECT_GE (offered, 7) << "the header accessors are missing from the completion list";
 }
 
+// Same guard for the cookie list (#301). It is offered one level down
+// (`pm.response.cookies.get`), so a member the runtime lacks would only show up
+// when a user accepts the suggestion and the script throws.
+TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.headers     = { { "set-cookie", "session=abc; Path=/" } };
+    response.body        = R"({"ok": true})";
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("pm.response.cookies.", 0) != 0) {
+            continue;
+        }
+        offered++;
+
+        const std::string script = "pm.environment.set('t', typeof " + label + ");";
+        auto result              = engine.execute_test (script, request, response, env);
+        ASSERT_TRUE (result.success) << label << ": " << result.error_message;
+        EXPECT_EQ (env["t"].value, "function")
+        << label << " is offered as a call but the runtime does not implement it";
+    }
+
+    EXPECT_GE (offered, 3) << "the cookie accessors are missing from the completion list";
+}
+
 // The same drift, on the variable scopes: `pm.variables` was offered by
 // `scripting.md` for months while the runtime had no such object, and every
 // scope method added in #184 is invisible in the editor until it is listed

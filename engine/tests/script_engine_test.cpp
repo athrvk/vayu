@@ -2630,6 +2630,134 @@ TEST_F (ScriptEngineTest, ResponseExposesTextNotABodyProperty) {
 }
 
 // ============================================================================
+// pm.response.cookies (issue #301)
+// ============================================================================
+//
+// Parsing lives in `vayu::http::parse_set_cookie` and is pinned case-by-case
+// against the renderer's copy by `set_cookie_test.cpp` and the shared fixture.
+// What these tests own is the *script surface*: that the header reaches the
+// sandbox at all, in the shape the docs teach, and that a bad call fails loudly
+// rather than reading as "no such cookie".
+
+TEST_F (ScriptEngineTest, ResponseCookiesExposeNameValueAndAttributes) {
+    response.headers["set-cookie"] =
+    "session=dGhpcyBpcyBhIHRlc3Q=; Path=/; HttpOnly, "
+    "tracker=t1; Expires=Wed, 21 Oct 2015 07:28:00 GMT";
+
+    auto result = engine.execute_test (R"JS(
+        var cookies = pm.response.cookies;
+        pm.environment.set('count', String(cookies.length));
+        pm.environment.set('names', cookies.map(function (c) { return c.name; }).join(','));
+        // The base64 padding survives - a split('=') would have cut it off.
+        pm.environment.set('session', String(cookies.get('session')));
+        pm.environment.set('attrs', cookies[0].attrs.join('|'));
+        // The expiry comma is not a cookie boundary, so tracker keeps its date.
+        pm.environment.set('trackerAttrs', cookies[1].attrs.join('|'));
+        pm.environment.set('has', String(cookies.has('tracker')));
+        pm.environment.set('missing', String(cookies.has('nope')));
+        pm.environment.set('absent', String(cookies.get('nope')));
+        pm.environment.set('flat', JSON.stringify(cookies.toObject()));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["names"].value, "session,tracker");
+    EXPECT_EQ (env["session"].value, "dGhpcyBpcyBhIHRlc3Q=");
+    EXPECT_EQ (env["attrs"].value, "Path=/|HttpOnly");
+    EXPECT_EQ (env["trackerAttrs"].value, "Expires=Wed, 21 Oct 2015 07:28:00 GMT");
+    EXPECT_EQ (env["has"].value, "true");
+    EXPECT_EQ (env["missing"].value, "false");
+    EXPECT_EQ (env["absent"].value, "undefined");
+    EXPECT_EQ (env["flat"].value, R"({"session":"dGhpcyBpcyBhIHRlc3Q=","tracker":"t1"})");
+}
+
+// A response that set nothing still has to answer `.length` and `.get()` -
+// `if (pm.response.cookies.has('session'))` is the first line anyone writes,
+// and it cannot throw on the common case.
+TEST_F (ScriptEngineTest, ResponseCookiesAreAnEmptyListWithoutASetCookieHeader) {
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('isArray', String(Array.isArray(pm.response.cookies)));
+        pm.environment.set('count', String(pm.response.cookies.length));
+        pm.environment.set('has', String(pm.response.cookies.has('session')));
+        pm.environment.set('keys', Object.keys(pm.response.cookies.toObject()).join(','));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["isArray"].value, "true");
+    EXPECT_EQ (env["count"].value, "0");
+    EXPECT_EQ (env["has"].value, "false");
+    EXPECT_EQ (env["keys"].value, "");
+}
+
+// A response may set the same name twice; a browser keeps the last one, so a
+// script asking "what is the session cookie now" has to be told the same.
+TEST_F (ScriptEngineTest, ResponseCookiesAnswerTheLastDefinitionOfARepeatedName) {
+    response.headers["set-cookie"] = "sid=old; Path=/, sid=new; Path=/";
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('get', String(pm.response.cookies.get('sid')));
+        pm.environment.set('count', String(pm.response.cookies.length));
+        pm.environment.set('flat', JSON.stringify(pm.response.cookies.toObject()));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["get"].value, "new");
+    // Both are still listed - the list is what the wire carried.
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["flat"].value, R"({"sid":"new"})");
+}
+
+// Cookie names, unlike header names, are case-sensitive. Answering `SESSION`
+// with the `session` cookie would be a wrong value dressed as a right one.
+TEST_F (ScriptEngineTest, ResponseCookieNamesAreCaseSensitive) {
+    response.headers["set-cookie"] = "session=lower";
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('exact', String(pm.response.cookies.get('session')));
+        pm.environment.set('shouted', String(pm.response.cookies.get('SESSION')));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["exact"].value, "lower");
+    EXPECT_EQ (env["shouted"].value, "undefined");
+}
+
+// An unusable argument throws instead of reading as "no such cookie" - the
+// silent-false-answer defect the pm.* sweep (#180) exists to keep out.
+TEST_F (ScriptEngineTest, ResponseCookieLookupRejectsANonStringName) {
+    response.headers["set-cookie"] = "session=abc";
+
+    for (const char* call : { "pm.response.cookies.get(1)",
+         "pm.response.cookies.has()", "pm.response.cookies.get('')" }) {
+        auto result =
+        engine.execute_test (std::string (call) + ";", request, response, env);
+        EXPECT_FALSE (result.success) << call << " was accepted";
+        EXPECT_NE (result.error_message.find ("cookie name"), std::string::npos)
+        << call << " threw, but not about the name: " << result.error_message;
+    }
+}
+
+// The property is a getter that caches, so that a load run's per-request test
+// script does not parse a header it never reads. Identity is the observable
+// half of that: a fresh array per access would make this false and would
+// quietly discard anything a script stashed on the list.
+TEST_F (ScriptEngineTest, ResponseCookiesAreTheSameListThroughoutAScript) {
+    response.headers["set-cookie"] = "session=abc";
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('same', String(pm.response.cookies === pm.response.cookies));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["same"].value, "true");
+}
+
+// ============================================================================
 // Header accessors (pm.response.headers / pm.request.headers)
 // ============================================================================
 //

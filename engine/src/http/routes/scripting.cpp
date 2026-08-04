@@ -141,6 +141,41 @@ nlohmann::json get_script_completions () {
     { "documentation", "Whether the response carries a header of that name, case-insensitively." },
     { "sortText", "1_pm_response_headers_has" } });
 
+    completions.push_back ({ { "label", "pm.response.cookies" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.cookies" }, { "detail", "object" },
+    { "documentation",
+    "The response's Set-Cookie header, parsed: an array of { name, value, "
+    "attrs } in wire order, with get()/has()/toObject() over it. `attrs` "
+    "holds the raw attribute chunks ('Path=/', 'HttpOnly'). Read-only - vayu "
+    "keeps no cookie jar, so nothing here is sent on a later request." },
+    { "sortText", "1_pm_response_cookies" } });
+
+    completions.push_back ({ { "label", "pm.response.cookies.get" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.cookies.get(\"${1:session}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.cookies.get(name: string): string | undefined" },
+    { "documentation",
+    "The value of a cookie the response set, or undefined when it set none of "
+    "that name. Cookie names are case-sensitive. A name set twice answers with "
+    "the last value, which is the one a browser would keep.\n\nExample:\nconst "
+    "session = pm.response.cookies.get('session');" },
+    { "sortText", "1_pm_response_cookies_get" } });
+
+    completions.push_back ({ { "label", "pm.response.cookies.has" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.cookies.has(\"${1:session}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.cookies.has(name: string): boolean" },
+    { "documentation", "Whether the response set a cookie of that name (case-sensitive)." },
+    { "sortText", "1_pm_response_cookies_has" } });
+
+    completions.push_back ({ { "label", "pm.response.cookies.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.cookies.toObject()" },
+    { "detail", "pm.response.cookies.toObject(): object" },
+    { "documentation",
+    "Every cookie the response set, as a name-to-value object. Attributes are "
+    "not included - read them off the array entries' `attrs`." },
+    { "sortText", "1_pm_response_cookies_to_object" } });
+
     completions.push_back ({ { "label", "pm.response.reason" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.reason()" }, { "detail", "pm.response.reason(): string" },
     { "documentation",
