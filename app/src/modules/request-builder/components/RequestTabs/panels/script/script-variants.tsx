@@ -84,6 +84,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'delete pm.request.headers["Authorization"]',
 			'pm.request.url = pm.request.url + "?trace=1"',
 			"pm.request.body = JSON.stringify({ n: 2 })",
+			"pm.info.requestName",
 		],
 		notes: [
 			<>
@@ -118,6 +119,16 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				are there too. No <code className={CODE_CLASS}>URL</code> parser in the sandbox, and
 				load tests do not run pre-request scripts at all.
 			</>,
+			<>
+				<code className={CODE_CLASS}>pm.info</code> says where the script is running:{" "}
+				<code className={CODE_CLASS}>eventName</code> is{" "}
+				<code className={CODE_CLASS}>&quot;prerequest&quot;</code> here and{" "}
+				<code className={CODE_CLASS}>&quot;test&quot;</code> in the <strong>Tests</strong>{" "}
+				tab, alongside <code className={CODE_CLASS}>requestId</code> and{" "}
+				<code className={CODE_CLASS}>requestName</code>. Those two are{" "}
+				<code className={CODE_CLASS}>undefined</code> for an unsaved or unnamed request, so
+				check before using them.
+			</>,
 		],
 	},
 	post: {
@@ -139,6 +150,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.response.headers.get("Content-Type")',
 			"pm.response.reason()",
 			"pm.response.size().total",
+			"pm.info.requestName",
 		],
 		notes: [
 			<>
@@ -155,6 +167,17 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				it in the <strong>Pre-request</strong> tab instead.
 			</>,
 			<>Under load this runs against sampled responses, not every one.</>,
+			<>
+				<code className={CODE_CLASS}>pm.info</code> says where the script is running:{" "}
+				<code className={CODE_CLASS}>eventName</code> is{" "}
+				<code className={CODE_CLASS}>&quot;test&quot;</code> here and{" "}
+				<code className={CODE_CLASS}>&quot;prerequest&quot;</code> in the{" "}
+				<strong>Pre-request</strong> tab, alongside{" "}
+				<code className={CODE_CLASS}>requestId</code> and{" "}
+				<code className={CODE_CLASS}>requestName</code>. Those two are{" "}
+				<code className={CODE_CLASS}>undefined</code> for an unsaved or unnamed request, so
+				check before using them.
+			</>,
 		],
 	},
 };

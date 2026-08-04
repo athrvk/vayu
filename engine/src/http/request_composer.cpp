@@ -437,6 +437,14 @@ const std::vector<vayu::db::Collection>& chain) {
     payload["maxRedirects"]    = request.max_redirects;
     payload["httpVersion"]     = request.http_version;
     payload["requestId"]       = request.id;
+
+    // Identity for the script sandbox (`pm.info.requestName`), not an HTTP
+    // field. Only the by-id path has a row to read it from; the inline path's
+    // client sends its own, because editor state may be unsaved. Omitted when
+    // empty so a script reads `undefined` rather than "".
+    if (!request.name.empty ()) {
+        payload["requestName"] = request.name;
+    }
     return payload;
 }
 

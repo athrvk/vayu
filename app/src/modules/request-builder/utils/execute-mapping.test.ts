@@ -16,7 +16,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { responseFromExecuteResult } from "./execute-mapping";
+import { execIdentity, responseFromExecuteResult } from "./execute-mapping";
+import { createDefaultRequestState } from "./request-state";
 import type { SanityResult } from "@/types";
 
 function result(overrides: Partial<SanityResult> = {}): SanityResult {
@@ -52,5 +53,31 @@ describe("responseFromExecuteResult", () => {
 		const mapped = responseFromExecuteResult(result({ httpVersion: "" }));
 
 		expect(mapped.httpVersion).toBe("");
+	});
+});
+
+/**
+ * `pm.info.requestName` (issue #300) has a client-side half: Send composes and
+ * executes *editor state*, so an unsaved request - which has a name and no
+ * stored row to look one up in - would leave the field permanently undefined
+ * if the renderer did not send it. The engine's own fallback only fires for a
+ * payload that names a saved `requestId`.
+ */
+describe("execIdentity", () => {
+	it("sends the name for an unsaved request", () => {
+		// id null is what "unsaved" is: no row exists for the engine to read.
+		const request = createDefaultRequestState();
+		expect(request.id).toBeNull();
+
+		expect(execIdentity(request)).toEqual({ requestName: "Untitled Request" });
+	});
+
+	it("omits the field entirely for an unnamed request", () => {
+		// Absent, not "": a script's `typeof pm.info.requestName` check has to
+		// be able to tell "no name" from a name that happens to be empty.
+		const request = { ...createDefaultRequestState(), name: "" };
+
+		expect(execIdentity(request)).toEqual({});
+		expect("requestName" in execIdentity(request)).toBe(false);
 	});
 });

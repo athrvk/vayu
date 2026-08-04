@@ -226,6 +226,18 @@ export interface ExecuteRequestRequest {
 	 */
 	httpVersion?: HttpVersion;
 	requestId?: string;
+	/**
+	 * The request's name, for the script sandbox to read as `pm.info.requestName`
+	 * (issue #300). Not an HTTP field - it never reaches the wire.
+	 *
+	 * Sent by the client because Send executes *editor state*, which may be
+	 * unsaved or a detached replay copy and therefore carries a name no stored
+	 * row has. `POST /compose` fills it in on its by-id path (MCP's route), and
+	 * `POST /execute` falls back to the row named by `requestId`, so a caller
+	 * that only links an id still gets a name. Omitted rather than sent empty:
+	 * a script must read `undefined`, not `""`.
+	 */
+	requestName?: string;
 	environmentId?: string;
 }
 
