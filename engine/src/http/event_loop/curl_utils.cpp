@@ -217,6 +217,29 @@ void apply_method_and_body (CURL* curl, const Request& request) {
     }
 }
 
+void ingest_header_line (std::string_view line, Headers& headers) {
+    const auto colon_pos = line.find (':');
+    if (colon_pos == std::string_view::npos) {
+        return;
+    }
+
+    std::string key (line.substr (0, colon_pos));
+    for (auto& c : key) {
+        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+    }
+
+    auto value = line.substr (colon_pos + 1);
+    while (!value.empty () && value.front () == ' ') {
+        value.remove_prefix (1);
+    }
+
+    auto [it, inserted] = headers.try_emplace (std::move (key), value);
+    if (!inserted) {
+        it->second += ", ";
+        it->second.append (value);
+    }
+}
+
 CurlPhaseTimes read_phase_times (CURL* curl) {
     CurlPhaseTimes times;
     curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &times.total);

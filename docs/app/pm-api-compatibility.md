@@ -38,6 +38,13 @@ case-insensitive the way HTTP header names are. Indexing is not, so
 `headers['Content-Type']` reads back `undefined` while
 `headers.get('Content-Type')` works (see [Header methods](#header-methods)).
 
+A header name the server sent **twice** reads as a single value with the two
+folded together by `", "` (RFC 7230 §3.2.2) - Postman's `HeaderList` would give
+you two entries. That matters most for `Set-Cookie`, which servers routinely
+send once per cookie: both cookies are there, in one string. Do not split that
+string yourself - an `Expires=` value contains a comma of its own. Read
+`pm.response.cookies`, which is the same header already parsed.
+
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
 on a variable that already exists updates only its value - the existing `secret` flag,

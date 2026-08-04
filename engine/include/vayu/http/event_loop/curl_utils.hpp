@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
@@ -103,6 +104,26 @@ Response error_response (const Error& error);
  * Requires `validate_transferable(request)` to have passed.
  */
 void apply_method_and_body (CURL* curl, const Request& request);
+
+/**
+ * @brief Record one "Key: Value" response header line into `headers`.
+ *
+ * The key is lower-cased so every consumer can index one spelling, and the
+ * value keeps everything past the first colon with its leading spaces trimmed.
+ * A line carrying no colon is not a header field and is ignored.
+ *
+ * **A name that arrives twice keeps both values, folded with ", "** - the
+ * RFC 7230 §3.2.2 equivalence for comma-list headers. Both callbacks used to
+ * assign into the map, so the second `Set-Cookie` of a login response (the
+ * normal way servers set two cookies, since `Set-Cookie` is the one header
+ * §3.2.2 exempts from folding) silently replaced the first. Folding is what
+ * both `Set-Cookie` parsers - the renderer's `parse-set-cookie.ts` and the
+ * engine's - already recover cookie boundaries from, so it hands them the
+ * shape they were written for instead of half the data.
+ *
+ * Shared by both clients so the two cannot drift apart again.
+ */
+void ingest_header_line (std::string_view line, Headers& headers);
 
 /**
  * @brief libcurl's cumulative phase timers, in seconds, for one transfer.

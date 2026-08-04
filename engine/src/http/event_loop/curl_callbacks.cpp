@@ -11,6 +11,7 @@
 #include <string>
 
 #include "vayu/http/debug_redact.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -102,24 +103,9 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         return total_size;
     }
 
-    // Parse header: "Key: Value"
-    auto colon_pos = line.find (':');
-    if (colon_pos != std::string::npos) {
-        std::string key   = line.substr (0, colon_pos);
-        std::string value = line.substr (colon_pos + 1);
-
-        // Trim leading whitespace from value
-        while (!value.empty () && value.front () == ' ') {
-            value.erase (0, 1);
-        }
-
-        // Convert key to lowercase for consistency
-        for (auto& c : key) {
-            c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
-        }
-
-        data->response.headers[key] = value;
-    }
+    // Parse header: "Key: Value". A repeated name folds rather than replaces -
+    // see ingest_header_line.
+    ingest_header_line (line, data->response.headers);
 
     return total_size;
 }
