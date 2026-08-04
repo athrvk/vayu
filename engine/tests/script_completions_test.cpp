@@ -15,6 +15,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <set>
 #include <string>
 
@@ -500,6 +502,81 @@ TEST (ScriptCompletions, EveryOfferedCryptoMemberIsCallableInTheRuntime) {
 
     EXPECT_EQ (offered, 4)
     << "the signing surface changed - update this test and the docs it backs";
+}
+
+// A different drift from the ones above: the member exists, the spelling of the
+// key does not. Response header names are lower-cased by the HTTP client and
+// indexing `pm.response.headers` is a plain property read, so an offered
+// example spelled `["Content-Type"]` reads back `undefined` (#310). `get()` and
+// `has()` are case-insensitive and unaffected - only the index form can be
+// wrong this way.
+TEST (ScriptCompletions, NoOfferedResponseHeaderIndexUsesAMixedCaseKey) {
+    const auto completions = get_script_completions ();
+
+    const std::string index_prefix = "pm.response.headers[";
+    int indexed                    = 0;
+    for (const auto& item : completions) {
+        for (const char* field : { "insertText", "documentation", "detail" }) {
+            const std::string text = item.value (field, std::string{});
+            for (size_t at = text.find (index_prefix); at != std::string::npos;
+                 at        = text.find (index_prefix, at + 1)) {
+                const size_t open = at + index_prefix.size ();
+                ASSERT_LT (open, text.size ()) << text;
+                const char quote = text[open];
+                ASSERT_TRUE (quote == '"' || quote == '\'')
+                << "index example with no quoted key: " << text;
+                const size_t close = text.find (quote, open + 1);
+                ASSERT_NE (close, std::string::npos) << text;
+
+                const std::string key = text.substr (open + 1, close - open - 1);
+                indexed++;
+
+                std::string lowered = key;
+                std::transform (lowered.begin (), lowered.end (), lowered.begin (),
+                [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+                EXPECT_EQ (key, lowered)
+                << item.value ("label", std::string{})
+                << " indexes pm.response.headers with '" << key
+                << "', which never matches - the HTTP client lower-cases "
+                   "response header names";
+            }
+        }
+    }
+
+    ASSERT_GT (indexed, 0)
+    << "nothing offered indexes pm.response.headers at all, so this scan proved nothing";
+}
+
+// The executable half of the same guard, and the one that would have caught
+// #310: the snippet Monaco inserts is run against a JSON response and has to
+// pass. A shape check could not catch it - the broken form was valid JS that
+// failed as an *assertion*, so it read as "the server sent the wrong
+// Content-Type" rather than "the example is wrong".
+TEST (ScriptCompletions, TheContentTypeSnippetPassesAgainstAJsonResponse) {
+    const auto completions = get_script_completions ();
+    const auto* snippet    = find_by_label (completions, "Test: Content-Type JSON");
+    ASSERT_NE (snippet, nullptr) << "the Content-Type snippet is no longer offered";
+
+    const std::string insert = snippet->value ("insertText", std::string{});
+    ASSERT_EQ (insert.find ("${"), std::string::npos)
+    << "the snippet gained a placeholder, so it is no longer runnable as written";
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    // Spelled the way the HTTP client stores it, which is the whole point.
+    response.headers = { { "content-type", "application/json; charset=utf-8" } };
+    response.body    = R"({"ok": true})";
+
+    auto result = engine.execute_test (insert, request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
+    EXPECT_TRUE (result.tests[0].passed)
+    << "the offered Content-Type snippet fails against a JSON response: "
+    << result.tests[0].error_message;
 }
 
 } // namespace
