@@ -266,6 +266,7 @@ add_library(vayu_core STATIC
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
     src/http/script_parts.cpp
+    src/http/set_cookie.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
@@ -421,6 +422,7 @@ if(VAYU_BUILD_TESTS)
         tests/error_shape_route_test.cpp
         tests/globals_route_test.cpp
         tests/script_variables_test.cpp
+        tests/set_cookie_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/execution_http_version_test.cpp

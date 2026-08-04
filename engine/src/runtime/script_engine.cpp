@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
@@ -2718,6 +2719,168 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return size;
 }
 
+// ============================================================================
+// pm.response.cookies
+// ============================================================================
+
+// Methods hang off the list without being enumerable, so Object.keys() and a
+// spread over it see cookies and nothing else.
+constexpr int COOKIE_METHOD_FLAGS = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+
+// Cookie names are case-sensitive (RFC 6265 §4.1.1) - unlike header names, so
+// this is an exact match and not `header_names_equal`.
+//
+// The last definition wins: a response that sets the same name twice leaves the
+// later value in a browser's jar, so that is the one a script asking "what is
+// the session cookie now" has to be told.
+const vayu::http::SetCookie*
+find_cookie (const std::vector<vayu::http::SetCookie>& cookies, const std::string& name) {
+    for (auto it = cookies.rbegin (); it != cookies.rend (); ++it) {
+        if (it->name == name) {
+            return &*it;
+        }
+    }
+    return nullptr;
+}
+
+// The list methods read the response rather than the array they were reached
+// through, so editing the array cannot make get() disagree with the wire. The
+// re-parse is bounded by one header and only happens when a script calls one.
+std::optional<std::vector<vayu::http::SetCookie>> cookies_from_context (JSContext* ctx) {
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        JS_ThrowInternalError (ctx, "No response available");
+        return std::nullopt;
+    }
+    auto it = data->response->headers.find ("set-cookie");
+    if (it == data->response->headers.end ()) {
+        return std::vector<vayu::http::SetCookie>{};
+    }
+    return vayu::http::parse_set_cookie (it->second);
+}
+
+// A cookie name is a non-empty string or nothing - the same rule the header
+// methods apply, for the same reason: coercing a number would invent a name.
+std::optional<std::string>
+read_cookie_name_arg (JSContext* ctx, const char* member, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        JS_ThrowTypeError (ctx, "cookies.%s(name) needs a cookie name string, got %s",
+        member, argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+        return std::nullopt;
+    }
+    std::string name = js_to_string (ctx, argv[0]);
+    if (name.empty ()) {
+        JS_ThrowTypeError (ctx, "cookies.%s(name) needs a non-empty cookie name", member);
+        return std::nullopt;
+    }
+    return name;
+}
+
+JSValue js_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto name = read_cookie_name_arg (ctx, "get", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto cookies = cookies_from_context (ctx);
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    const auto* cookie = find_cookie (*cookies, *name);
+    // Postman answers undefined for an absent cookie; a throw would make the
+    // common `if (cookies.get(x))` guard unwritable.
+    return cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED;
+}
+
+JSValue js_cookies_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto name = read_cookie_name_arg (ctx, "has", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto cookies = cookies_from_context (ctx);
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewBool (ctx, find_cookie (*cookies, *name) != nullptr);
+}
+
+JSValue js_cookies_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto cookies = cookies_from_context (ctx);
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    // Plain assignment, so a name set twice ends on its last value - the same
+    // answer get() gives.
+    JSValue obj = JS_NewObject (ctx);
+    for (const auto& cookie : *cookies) {
+        JS_SetPropertyStr (ctx, obj, cookie.name.c_str (),
+        JS_NewString (ctx, cookie.value.c_str ()));
+    }
+    return obj;
+}
+
+JSValue create_cookie_list (JSContext* ctx, const std::vector<vayu::http::SetCookie>& cookies) {
+    JSValue list = JS_NewArray (ctx);
+    if (JS_IsException (list)) {
+        return list;
+    }
+
+    uint32_t index = 0;
+    for (const auto& cookie : cookies) {
+        JSValue entry = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, cookie.name.c_str ()));
+        JS_SetPropertyStr (ctx, entry, "value", JS_NewString (ctx, cookie.value.c_str ()));
+        JSValue attrs = JS_NewArray (ctx);
+        uint32_t attr_index = 0;
+        for (const auto& attr : cookie.attrs) {
+            JS_SetPropertyUint32 (ctx, attrs, attr_index++, JS_NewString (ctx, attr.c_str ()));
+        }
+        JS_SetPropertyStr (ctx, entry, "attrs", attrs);
+        JS_SetPropertyUint32 (ctx, list, index++, entry);
+    }
+
+    JS_DefinePropertyValueStr (ctx, list, "get",
+    JS_NewCFunction (ctx, js_cookies_get, "get", 1), COOKIE_METHOD_FLAGS);
+    JS_DefinePropertyValueStr (ctx, list, "has",
+    JS_NewCFunction (ctx, js_cookies_has, "has", 1), COOKIE_METHOD_FLAGS);
+    JS_DefinePropertyValueStr (ctx, list, "toObject",
+    JS_NewCFunction (ctx, js_cookies_to_object, "toObject", 0), COOKIE_METHOD_FLAGS);
+    return list;
+}
+
+// pm.response.cookies - the response's Set-Cookie header, parsed.
+//
+// Registered as a getter that replaces itself with the parsed list on first
+// read. A load run executes a test script per completed request, and eager
+// parsing would charge every one of them for a header no script asked about;
+// caching the result keeps `pm.response.cookies[0] === pm.response.cookies[0]`
+// true within a script, which a fresh array per access would not.
+JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto cookies = cookies_from_context (ctx);
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    JSValue list = create_cookie_list (ctx, *cookies);
+    if (JS_IsException (list)) {
+        return list;
+    }
+    if (JS_IsObject (this_val)) {
+        if (JS_DefinePropertyValueStr (ctx, this_val, "cookies", JS_DupValue (ctx, list),
+            JS_PROP_C_W_E) < 0) {
+            // Caching is an optimisation - a rejected redefinition must not
+            // fail the read the script actually asked for.
+            JS_FreeValue (ctx, JS_GetException (ctx));
+        }
+    }
+    return list;
+}
+
 void setup_pm_response (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -2781,6 +2944,18 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
             define_header_entry (ctx, headers, key, value);
         }
         JS_SetPropertyStr (ctx, response, "headers", headers);
+
+        // pm.response.cookies - a getter, so a script that never mentions
+        // cookies never pays for the parse. Configurable because the getter
+        // replaces itself with the list it built.
+        JSAtom cookies_atom = JS_NewAtom (ctx, "cookies");
+        // Enumerable like every other member of pm.response, so
+        // console.log(pm.response) and JSON.stringify show it rather than
+        // hiding a documented property behind its own laziness.
+        JS_DefinePropertyGetSet (ctx, response, cookies_atom,
+        JS_NewCFunction (ctx, js_response_cookies, "cookies", 0), JS_UNDEFINED,
+        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom (ctx, cookies_atom);
 
         // pm.response.to.have chain for Postman-compatible assertions
         JS_SetPropertyStr (ctx, response, "to", create_response_to_object (ctx));
