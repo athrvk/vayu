@@ -1,0 +1,113 @@
+{
+  "$comment": "Cross-language conformance fixture for Set-Cookie parsing (issue #301). Read by BOTH the engine gtest suite (set_cookie_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts). The engine parses for pm.response.cookies, the renderer for the response Cookies tab; both read the same header off the same response, so a case answered two ways is a user seeing one thing in the UI and asserting another in a script. Every case is a raw header value exactly as it reaches a client - the two documented corruptions (a comma inside Expires, `=` padding inside a base64 value) are the reason this parser is not a split.",
+  "cases": [
+    {
+      "name": "a single cookie with attributes",
+      "header": "session=abc123; Path=/; HttpOnly",
+      "expected": [{ "name": "session", "value": "abc123", "attrs": ["Path=/", "HttpOnly"] }]
+    },
+    {
+      "name": "the comma inside Expires is not a cookie boundary",
+      "header": "id=a3fWa; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly",
+      "expected": [
+        {
+          "name": "id",
+          "value": "a3fWa",
+          "attrs": ["Expires=Wed, 21 Oct 2015 07:28:00 GMT", "Secure", "HttpOnly"]
+        }
+      ]
+    },
+    {
+      "name": "a base64 value keeps its = padding",
+      "header": "session=dGhpcyBpcyBhIHRlc3Q=; Path=/",
+      "expected": [
+        { "name": "session", "value": "dGhpcyBpcyBhIHRlc3Q=", "attrs": ["Path=/"] }
+      ]
+    },
+    {
+      "name": "a base64 value keeps both = of its padding",
+      "header": "token=YWJjZA==; Secure",
+      "expected": [{ "name": "token", "value": "YWJjZA==", "attrs": ["Secure"] }]
+    },
+    {
+      "name": "multiple Set-Cookie headers arrive joined by a comma",
+      "header": "a=1; Path=/, b=2; Path=/api",
+      "expected": [
+        { "name": "a", "value": "1", "attrs": ["Path=/"] },
+        { "name": "b", "value": "2", "attrs": ["Path=/api"] }
+      ]
+    },
+    {
+      "name": "joined cookies where the first carries an expiry comma",
+      "header": "a=1; Expires=Wed, 21 Oct 2015 07:28:00 GMT, b=2; HttpOnly",
+      "expected": [
+        { "name": "a", "value": "1", "attrs": ["Expires=Wed, 21 Oct 2015 07:28:00 GMT"] },
+        { "name": "b", "value": "2", "attrs": ["HttpOnly"] }
+      ]
+    },
+    {
+      "name": "joined cookies with no space after the comma",
+      "header": "a=1,b=2",
+      "expected": [
+        { "name": "a", "value": "1", "attrs": [] },
+        { "name": "b", "value": "2", "attrs": [] }
+      ]
+    },
+    {
+      "name": "a comma inside a value is kept when no name= follows it",
+      "header": "pref=dark,compact; Path=/",
+      "expected": [{ "name": "pref", "value": "dark,compact", "attrs": ["Path=/"] }]
+    },
+    {
+      "name": "a cookie cleared by the server has an empty value",
+      "header": "logged_out=; Path=/; Max-Age=0",
+      "expected": [{ "name": "logged_out", "value": "", "attrs": ["Path=/", "Max-Age=0"] }]
+    },
+    {
+      "name": "surrounding whitespace belongs to neither name nor value",
+      "header": "  a = 1 ;  Path=/  ",
+      "expected": [{ "name": "a", "value": "1", "attrs": ["Path=/"] }]
+    },
+    {
+      "name": "empty attribute chunks are dropped",
+      "header": "a=1;;Path=/;",
+      "expected": [{ "name": "a", "value": "1", "attrs": ["Path=/"] }]
+    },
+    {
+      "name": "an attribute-only header names no cookie",
+      "header": "HttpOnly; Secure",
+      "expected": []
+    },
+    {
+      "name": "a header with no = at all names no cookie",
+      "header": "garbage",
+      "expected": []
+    },
+    {
+      "name": "an unnamed cookie is not a cookie",
+      "header": "=orphan; Path=/",
+      "expected": []
+    },
+    {
+      "name": "an empty header",
+      "header": "",
+      "expected": []
+    },
+    {
+      "name": "a nameless chunk is no boundary, so it stays inside the value before it",
+      "header": "a=1, =orphan, b=2",
+      "expected": [
+        { "name": "a", "value": "1, =orphan", "attrs": [] },
+        { "name": "b", "value": "2", "attrs": [] }
+      ]
+    },
+    {
+      "name": "the same name set twice - both are reported, in wire order",
+      "header": "sid=old; Path=/, sid=new; Path=/",
+      "expected": [
+        { "name": "sid", "value": "old", "attrs": ["Path=/"] },
+        { "name": "sid", "value": "new", "attrs": ["Path=/"] }
+      ]
+    }
+  ]
+}
