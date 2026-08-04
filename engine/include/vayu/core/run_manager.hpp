@@ -291,9 +291,12 @@ struct MetricTickSample {
 /**
  * @brief Serialize a tick sample into the stored `metric_ticks.payload` object.
  *
- * Key set and value types are the contract `GET /runs/:id/metrics` returns; the
- * legacy EAV reader in `http/routes/metrics.cpp` builds the same object from
- * ~18 rows, and stats_route_test.cpp pins the two against each other.
+ * Key set and value types are the contract `GET /runs/:id/metrics` returns:
+ * `http/routes/metrics.cpp` serves each stored row as one `data[]` entry, so
+ * whatever this writes is what the app reads. Since issue #177 there is no
+ * second implementation of the object to cross-check against, so
+ * stats_route_test.cpp pins this payload directly against the shape the app's
+ * `LoadTestMetrics` expects - see its comment above the pinning test.
  */
 [[nodiscard]] nlohmann::json build_metric_tick_payload (const MetricTickSample& sample);
 
