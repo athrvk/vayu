@@ -1075,10 +1075,15 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "Test: Content-Type JSON" }, { "kind", KIND_SNIPPET },
     { "insertText",
+    // get() rather than an index: response header keys are lower-cased by the
+    // HTTP client, so headers["Content-Type"] reads back undefined and this
+    // fails as an assertion, which reads as a server fault rather than a bad
+    // example. get() is case-insensitive, so the name stays spelled the way the
+    // to.have.header line above spells it.
     "pm.test(\"Content-Type is JSON\", function() "
     "{\n\tpm.response.to.have.header(\"Content-Type\");\n\tpm.expect(pm."
-    "response.headers["
-    "\"Content-Type\"]).to.include(\"application/json\");\n});" },
+    "response.headers.get("
+    "\"Content-Type\")).to.include(\"application/json\");\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
     { "documentation", "Quick template for Content-Type header test." },
     { "sortText", "3_snippet_content_type" } });
