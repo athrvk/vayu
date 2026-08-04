@@ -42,6 +42,17 @@ class MethodEchoServer {
             std::this_thread::sleep_for (std::chrono::seconds (2));
             res.set_content ("late", "text/plain");
         });
+        // Two cookies the way a login response actually sets them - one
+        // Set-Cookie line each, not comma-folded, which RFC 7230 3.2.2 forbids
+        // for this header. Plus an ordinary header repeated, so the rule is
+        // shown to be about repeats rather than about cookies.
+        svr.Get ("/repeated-headers", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "session=abc; Path=/; HttpOnly");
+            res.set_header ("Set-Cookie", "csrf=xyz; Path=/");
+            res.set_header ("X-Trace", "first");
+            res.set_header ("X-Trace", "second");
+            res.set_content ("ok", "text/plain");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -168,6 +179,95 @@ TEST_F (CurlTransferTest, HeadWithABodyIsRefusedByBothPaths) {
     EXPECT_EQ (client_result.value ().status_code, 0);
     EXPECT_EQ (client_result.value ().error_code, vayu::ErrorCode::InvalidMethod);
     EXPECT_NE (client_result.value ().error_message.find ("HEAD"), std::string::npos);
+}
+
+// ============================================================================
+// Repeated response header names
+// ============================================================================
+
+namespace {
+
+/// Both values of each repeated name, whichever order the two lines went out
+/// in. httplib keeps a response's headers in an unordered_multimap, so the
+/// wire order of two same-name lines is the container's and not this test's;
+/// `IngestHeaderLineFoldsInArrivalOrder` pins the format and the order on
+/// input the test does control.
+void expect_both_repeated_values (const vayu::Headers& headers, const char* path) {
+    auto cookie = headers.find ("set-cookie");
+    ASSERT_NE (cookie, headers.end ()) << path << ": no Set-Cookie survived at all";
+    EXPECT_TRUE (cookie->second == "session=abc; Path=/; HttpOnly, csrf=xyz; Path=/" ||
+    cookie->second == "csrf=xyz; Path=/, session=abc; Path=/; HttpOnly")
+    << path << ": both cookies must survive, folded - got " << cookie->second;
+
+    auto trace = headers.find ("x-trace");
+    ASSERT_NE (trace, headers.end ()) << path << ": no X-Trace survived at all";
+    EXPECT_TRUE (trace->second == "first, second" || trace->second == "second, first")
+    << path << ": an ordinary repeated header folds too - got " << trace->second;
+}
+
+} // namespace
+
+// `Headers` is a map and both callbacks assigned into it, so a response
+// sending the same name twice kept only the last value. For Set-Cookie that is
+// a login response - the normal way a server sets a session and a CSRF cookie,
+// since Set-Cookie is the one header RFC 7230 3.2.2 forbids comma-folding -
+// reaching the app and the script with one of them gone.
+//
+// Mutation-check: restore `headers[key] = value` in either callback and that
+// path's case below reports a single value.
+TEST_F (CurlTransferTest, EventLoopKeepsEveryValueOfARepeatedHeaderName) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/repeated-headers");
+
+    auto result = run_once (request);
+    ASSERT_TRUE (result.is_ok ());
+    ASSERT_EQ (result.value ().status_code, 200);
+    expect_both_repeated_values (result.value ().headers, "event loop");
+}
+
+TEST_F (CurlTransferTest, ClientKeepsEveryValueOfARepeatedHeaderName) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/repeated-headers");
+
+    vayu::http::Client client;
+    auto result = client.send (request);
+    ASSERT_TRUE (result.is_ok ());
+    ASSERT_EQ (result.value ().status_code, 200);
+    expect_both_repeated_values (result.value ().headers, "client");
+}
+
+// The folding format itself, on input with a known arrival order. ", " is what
+// both Set-Cookie parsers split cookie boundaries on, so the separator is a
+// contract with them, not a cosmetic choice.
+TEST (IngestHeaderLine, FoldsInArrivalOrder) {
+    vayu::Headers headers;
+    vayu::http::detail::ingest_header_line ("Set-Cookie: a=1", headers);
+    vayu::http::detail::ingest_header_line ("set-cookie: b=2", headers);
+    vayu::http::detail::ingest_header_line ("SET-COOKIE: c=3", headers);
+
+    EXPECT_EQ (headers.at ("set-cookie"), "a=1, b=2, c=3")
+    << "every value, in the order it arrived, joined the way both parsers "
+       "split on";
+}
+
+TEST (IngestHeaderLine, SingleOccurrenceIsStoredVerbatimUnderALowerCasedName) {
+    vayu::Headers headers;
+    // Leading spaces are trimmed; everything past the *first* colon is value,
+    // so a Date or a URL keeps its own colons.
+    vayu::http::detail::ingest_header_line (
+    "Location:   https://example.com:8443/a", headers);
+
+    ASSERT_EQ (headers.size (), 1u);
+    EXPECT_EQ (headers.at ("location"), "https://example.com:8443/a");
+}
+
+TEST (IngestHeaderLine, ALineThatIsNotAHeaderFieldIsIgnored) {
+    vayu::Headers headers;
+    vayu::http::detail::ingest_header_line ("this line carries no colon", headers);
+
+    EXPECT_TRUE (headers.empty ());
 }
 
 // ============================================================================

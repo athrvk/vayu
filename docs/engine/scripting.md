@@ -168,6 +168,16 @@ works. Prefer the methods unless you know the exact key.
 The response object has **no** `add`/`upsert`/`remove` - the response has
 already arrived, so a mutator there would only appear to change something.
 
+**A name the server sent twice reads as one value, folded with `", "`.** Two
+`Set-Cookie` lines arrive as
+`"session=abc; Path=/, csrf=xyz; Path=/"`, and `get()` returns that whole
+string - there is no list form, because `headers` is a plain object. Folding is
+the RFC 7230 §3.2.2 equivalence for comma-list headers; before it, only the
+**last** value of a repeated name survived at all. If you need the parts, split
+on `", "` - except for `Set-Cookie`, whose values may contain commas of their
+own (`Expires=Wed, 21 Oct ...`), so split on a comma that is followed by
+`name=`.
+
 ### Response Assertions
 
 ```javascript

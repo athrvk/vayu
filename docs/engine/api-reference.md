@@ -1157,6 +1157,15 @@ run-shaped way of stating the same field, not a second store.
 }
 ```
 
+**`headers` is keyed by the lower-cased header name, and a name the response
+sent more than once holds every value folded with `", "`** - the RFC 7230 §3.2.2
+equivalence for comma-list headers. So two `Set-Cookie` lines read back as one
+`"session=abc; Path=/, csrf=xyz; Path=/"` entry rather than the last one alone.
+A client splitting a folded `Set-Cookie` must split on a comma followed by
+`name=`, since an `Expires=` value contains a comma of its own. The same holds
+for the response headers stored on a design run's `trace_data.response` and on
+captured load-run samples, which come off the same parse.
+
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
 `"test"` for the post-request one) and `level` is the `console.*` method that was
