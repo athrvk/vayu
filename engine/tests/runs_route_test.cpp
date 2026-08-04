@@ -342,7 +342,8 @@ TEST (RunReportConfigTest, OmitsFollowRedirectsAndMaxRedirectsWhenAbsent) {
 }
 
 // ============================================================================
-// GET /runs/:id/report - the stored summary vs the legacy metric rows
+// GET /runs/:id/report - the stored whole-run summary, and the sampled-results
+// fallback when it is malformed or absent
 // ============================================================================
 
 // The whole-run results a completed load run stores on its row.
