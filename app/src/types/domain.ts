@@ -707,11 +707,12 @@ export interface RunReport {
 		 *
 		 * `0` is "none recorded", not "none happened" - an engine from 0.15.0
 		 * always emits the key, including for a run whose stored summary
-		 * predates the count and for one reported from the legacy metric rows,
-		 * neither of which can produce a figure. `undefined` therefore only
-		 * means the sidecar itself is older than 0.15.0, and reads the same way
-		 * as 0 here: no warning. Weaker than the per-response
-		 * `httpVersionDowngraded` above, which is exact for its exchange.
+		 * predates the count and for one reported from its sampled results
+		 * because that summary was malformed or never written, neither of which
+		 * can produce a figure. `undefined` therefore only means the sidecar
+		 * itself is older than 0.15.0, and reads the same way as 0 here: no
+		 * warning. Weaker than the per-response `httpVersionDowngraded` above,
+		 * which is exact for its exchange.
 		 */
 		httpVersionDowngraded?: number;
 	};

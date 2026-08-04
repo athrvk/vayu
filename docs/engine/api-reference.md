@@ -1910,10 +1910,11 @@ protocol other than the one `metadata.configuration.httpVersion` names.
 
 **`0` is "none recorded", not "none happened".** An engine from 0.15.0 always
 emits the key - including for a run whose stored summary predates the count, and
-for one that fell back to the legacy metric rows, neither of which can produce a
-figure. The key is absent only from an engine older than 0.15.0. That is
-deliberately a weaker guarantee than the per-response
-`httpVersionDowngraded`, which is exact for the exchange it describes.
+for one reported from its sampled results because that summary was malformed or
+never written, neither of which can produce a figure. The key is absent only
+from an engine older than 0.15.0. That is deliberately a weaker guarantee than
+the per-response `httpVersionDowngraded`, which is exact for the exchange it
+describes.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 `results[]` array and the tested responses are the complete set, and a non-zero
