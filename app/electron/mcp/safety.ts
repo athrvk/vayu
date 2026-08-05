@@ -78,15 +78,17 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 }
 
 /**
- * Parse an engine duration string ("60s", "5m", "1h", or a bare number of
- * seconds) into seconds. Returns null for unparseable input.
+ * The duration *grammar* only: "60s", "5m", "1h", "500ms", or a bare number of
+ * seconds, into seconds. Null when the text is not a duration at all.
  *
- * The accepted grammar mirrors the engine's `parse_duration_ms`
+ * Mirrors the engine's `parse_duration_ms`
  * (`engine/include/vayu/core/load_pacing.hpp`): the same units, the same
- * bare-number-is-seconds rule. They must agree, or a duration this cap reads as
- * 5 minutes runs for some other length.
+ * bare-number-is-seconds rule, and the same acceptance of zero. They must
+ * agree, or a duration this cap reads as 5 minutes runs for some other length.
+ * Zero belongs here because `rampUpDuration: "0"` is a legal instant ramp - the
+ * range rule that rejects a zero *run* is `parseDurationSeconds` below.
  */
-export function parseDurationSeconds(value: string | number | undefined): number | null {
+function parseDurationGrammar(value: string | number | undefined): number | null {
 	if (value === undefined || value === null) return null;
 	if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
 	const trimmed = value.trim().toLowerCase();
@@ -106,6 +108,17 @@ export function parseDurationSeconds(value: string | number | undefined): number
 		default:
 			return n;
 	}
+}
+
+/**
+ * A run `duration` in seconds, or null when the engine would refuse it: the
+ * grammar above plus the engine's own range rule, which requires a positive
+ * magnitude (`validate_run_config`, `execution.cpp`). Zero is therefore not a
+ * duration here, the same way `POST /runs` 400s it.
+ */
+export function parseDurationSeconds(value: string | number | undefined): number | null {
+	const seconds = parseDurationGrammar(value);
+	return seconds === null || seconds <= 0 ? null : seconds;
 }
 
 /** Parameters extracted from a `start_load_run` request, for cap checking. */
@@ -197,19 +210,20 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	// becoming 60s, so say so here instead of starting a run that dies.
 	for (const field of ["duration", "rampUpDuration"] as const) {
 		const value = params[field];
-		if (value !== undefined && parseDurationSeconds(value) === null) {
+		if (value !== undefined && parseDurationGrammar(value) === null) {
 			return {
 				ok: false,
 				error: `${field} ${JSON.stringify(value)} is not a duration. Use a non-negative number with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h".`,
 			};
 		}
 	}
+	// Past the grammar, `duration` still has a range rule `rampUpDuration` does
+	// not: the engine 400s a zero-length run (`validate_run_config`) while a
+	// zero ramp is an instant one it accepts (`ramp_target_concurrency` returns
+	// the target for `ramp_ms <= 0`). So only this field goes through the
+	// stricter parse, and a null here can only mean zero.
 	const durationSeconds = parseDurationSeconds(params.duration);
-	// The engine rejects a zero-length run with a 400 (`validate_run_config`),
-	// so name the field here instead of surfacing that error. `rampUpDuration`
-	// is deliberately exempt: zero there is an instant ramp, which the engine
-	// accepts (`ramp_target_concurrency` returns the target for `ramp_ms <= 0`).
-	if (durationSeconds !== null && durationSeconds <= 0) {
+	if (params.duration !== undefined && durationSeconds === null) {
 		return {
 			ok: false,
 			error: `duration ${JSON.stringify(params.duration)} must be greater than zero - the engine refuses a run with no time to run in.`,

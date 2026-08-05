@@ -77,6 +77,14 @@ describe("parseDurationSeconds", () => {
 		expect(parseDurationSeconds("soon")).toBeNull();
 		expect(parseDurationSeconds(undefined)).toBeNull();
 	});
+	// It reads a run's `duration`, which the engine requires to be positive
+	// (`validate_run_config`), so zero is not a duration it can return.
+	test("rejects zero, which the engine 400s", () => {
+		expect(parseDurationSeconds("0")).toBeNull();
+		expect(parseDurationSeconds("0s")).toBeNull();
+		expect(parseDurationSeconds("0ms")).toBeNull();
+		expect(parseDurationSeconds(0)).toBeNull();
+	});
 });
 
 describe("checkLoadCaps", () => {
