@@ -27,7 +27,21 @@ let store: Store<McpStoreShape> | null = null;
 // Lazily created so the store is only touched once Electron's `app` is ready and
 // `userData` resolves - mirrors how window-state is persisted.
 function getStore(): Store<McpStoreShape> {
-	if (!store) store = new Store<McpStoreShape>({ name: "mcp-config" });
+	if (!store)
+		store = new Store<McpStoreShape>({
+			name: "mcp-config",
+			/*
+			 * conf reads and parses the file inside its constructor and rethrows the
+			 * SyntaxError when this flag is off - and this store is first touched
+			 * during startup, before the window exists (main.ts's startMcp). A corrupt
+			 * mcp-config.json would therefore leave the user with an engine running
+			 * headless and no window at all, on every launch until they found and
+			 * deleted a hidden file. Same fix, same reason as window-state.ts: an
+			 * empty store is the right failure mode here, because both readers below
+			 * resolve safe defaults from one (locked-down safety config, server on).
+			 */
+			clearInvalidConfig: true,
+		});
 	return store;
 }
 
