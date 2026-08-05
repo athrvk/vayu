@@ -20,11 +20,11 @@ import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
 import {
 	VayuMcpService,
-	DEFAULT_MCP_SAFETY_CONFIG,
 	resolveSafetyConfig,
 	sanitizeSafetyInput,
 	loadPersistedSafety,
 	savePersistedSafety,
+	effectiveSafety,
 	loadMcpEnabled,
 	saveMcpEnabled,
 	connectClient,
@@ -613,8 +613,9 @@ function setupIpcHandlers() {
 	});
 
 	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.
+	// Falls back to the persisted config, never the defaults - see effectiveSafety.
 	ipcMain.handle("mcp:getSafety", (): McpSafetyConfig => {
-		return mcpService?.getSafety() ?? DEFAULT_MCP_SAFETY_CONFIG;
+		return effectiveSafety(mcpService);
 	});
 
 	// The tool catalog (name/description/category) for the Settings tool list.

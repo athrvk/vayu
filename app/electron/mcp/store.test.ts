@@ -155,6 +155,53 @@ describe("a readable mcp-config.json", () => {
 });
 
 /*
+ * What Settings is shown when the server is not running. Reverting the fallback
+ * to DEFAULT_MCP_SAFETY_CONFIG turns the first two of these red, which is the
+ * whole point: the panel commits whole fields computed from what it displays,
+ * so defaults shown here become defaults persisted on the next edit.
+ */
+describe("effectiveSafety", () => {
+	const persisted = {
+		...DEFAULT_MCP_SAFETY_CONFIG,
+		allowlist: ["api.example.com", "internal.test"],
+		maxRps: 25,
+		disabledTools: ["start_load_run"],
+	};
+
+	it.each([
+		["null", null],
+		["undefined", undefined],
+	])(
+		"returns the persisted config, not the defaults, when the service is %s",
+		async (_l, svc) => {
+			seedStore(JSON.stringify({ safety: persisted }));
+
+			const { effectiveSafety } = await importStore();
+
+			expect(effectiveSafety(svc)).toEqual(persisted);
+			expect(effectiveSafety(svc)).not.toEqual(DEFAULT_MCP_SAFETY_CONFIG);
+		}
+	);
+
+	it("prefers the running server's live config over the persisted one", async () => {
+		seedStore(JSON.stringify({ safety: persisted }));
+		const live = { ...DEFAULT_MCP_SAFETY_CONFIG, allowlist: ["live.example.com"] };
+
+		const { effectiveSafety } = await importStore();
+
+		expect(effectiveSafety({ getSafety: () => live })).toEqual(live);
+	});
+
+	it("still resolves the defaults when nothing has been persisted", async () => {
+		seedStore();
+
+		const { effectiveSafety } = await importStore();
+
+		expect(effectiveSafety(null)).toEqual(DEFAULT_MCP_SAFETY_CONFIG);
+	});
+});
+
+/*
  * main.ts creates windows and starts the engine at import time, so the startup
  * ordering it encodes can only be read - the same constraint (and the same
  * remedy) as renderer-recovery.test.ts.
@@ -201,5 +248,21 @@ describe("main.ts startup ordering", () => {
 		expect(guard).toBeGreaterThan(-1);
 		expect(read).toBeGreaterThan(-1);
 		expect(guard).toBeLessThan(read);
+	});
+
+	/*
+	 * The helper above only matters if the handler calls it, and nothing else can
+	 * observe that: main.ts cannot be imported. Scanned rather than executed, so
+	 * the slice is asserted non-empty first.
+	 */
+	it("answers mcp:getSafety through effectiveSafety, not the bare defaults", () => {
+		const start = main.indexOf('ipcMain.handle("mcp:getSafety"');
+		const end = main.indexOf('ipcMain.handle("mcp:getTools"', start);
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		const body = main.slice(start, end);
+
+		expect(body).toContain("effectiveSafety(mcpService)");
+		expect(body).not.toContain("DEFAULT_MCP_SAFETY_CONFIG");
 	});
 });

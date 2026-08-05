@@ -483,7 +483,7 @@ on quit, and exposes IPC the Settings panel uses:
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
 | `mcp:status`        | `{ running, url, enabled }`.                                |
-| `mcp:getSafety`     | Current `McpSafetyConfig`.                                  |
+| `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference.              |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category/readOnly). |
@@ -492,6 +492,14 @@ on quit, and exposes IPC the Settings panel uses:
 The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is a
 registered app-settings panel; it talks to `window.electronAPI` directly since
 MCP config is app-level, not engine-level.
+
+`mcp:getSafety` answers from the persisted config whenever the server is not
+running (switched off, or a failed port bind) rather than from the defaults, and
+the panel shows an error with a Retry instead of substituting defaults when a
+call fails. Both exist for the same reason: each control commits a whole field
+computed from what is displayed - adding a host persists the displayed allowlist
+plus the new entry - so a placeholder shown here would be written over the real
+config by the very next edit.
 
 ## Configuration
 
