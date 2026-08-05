@@ -1340,6 +1340,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
 | `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
+| `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 

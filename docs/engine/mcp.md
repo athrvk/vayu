@@ -385,17 +385,32 @@ configurable in **Settings → MCP** and persisted.
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
-- **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
-  requests are rejected. With the allowlist, these are the real limits on load.
-  The caps bound values from above; `concurrency` is additionally constrained to
-  a positive integer by the tool's own schema, because "unlimited" is an obvious
-  guess to spell `-1` or `0` and the engine reads it as an eager per-worker
-  pre-allocation count (see the accepted ranges under
-  [POST /runs](api-reference.md#post-runs)).
+- **Hard caps** - max RPS / concurrency / duration / iterations on
+  `start_load_run`; over-cap requests are rejected. With the allowlist, these are
+  the real limits on load, and they cover **every** field the tool forwards:
+    - `concurrency` **and** `startConcurrency` are both held to the concurrency
+      cap. A ramp is seeded with `startConcurrency` before its first duration
+      check, so capping only the target would bound where a run ends and not
+      where it starts.
+    - An **iterations** run stops on a request count and never reads `duration`,
+      so no duration cap can bound it. **Max iterations** is its own setting for
+      that reason (10000 by default). An omitted `iterations` is compared as the
+      engine's own default of 1000, and an unrecognised `mode` carrying an
+      `iterations` field is capped the same way, because the engine runs that as
+      an iterations run too.
+    - An **omitted** `duration` is 60s engine-side, not "unbounded" and not
+      "capped". When `maxDurationSeconds` is under 60, the tool sends the cap as
+      an explicit duration so the run is actually bounded by it.
+  `concurrency`, `startConcurrency` and `iterations` are additionally constrained
+  to positive integers by the tool's own schema, because "unlimited" is an
+  obvious guess to spell `-1` or `0` and the engine reads them as an eager
+  per-worker pre-allocation count, a ramp seed, and a request budget (see the
+  accepted ranges under [POST /runs](api-reference.md#post-runs)).
   `duration` / `rampUpDuration` are also rejected when they are not durations at
   all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
   engine parses), since the engine now fails such a run rather than quietly
-  substituting 60s.
+  substituting 60s; a zero `duration` is rejected here for the same reason the
+  engine `400`s it, while a zero `rampUpDuration` stays legal (an instant ramp).
 - **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.
@@ -424,8 +439,9 @@ process did not already have.
 | `allowlist`          | `[]`    | Permitted hostnames (empty = deny all).       |
 | `allowAll`           | `false` | Bypass the allowlist for any resolvable host. |
 | `maxRps`             | `1000`  | Cap on `targetRps`.                           |
-| `maxConcurrency`     | `200`   | Cap on `concurrency`.                         |
+| `maxConcurrency`     | `200`   | Cap on `concurrency` and `startConcurrency`.  |
 | `maxDurationSeconds` | `300`   | Cap on load-run duration.                     |
+| `maxIterations`      | `10000` | Cap on `iterations` (iterations mode).        |
 | `allowWrites`        | `false` | Enable the data-mutating tools.               |
 | `disabledTools`      | `[]`    | Tool names to hide/reject.                    |
 

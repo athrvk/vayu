@@ -21,7 +21,8 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { EngineClient } from "./engine-client.js";
 import { EngineRequestError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
-import { checkAllowlist, checkLoadCaps } from "./safety.js";
+import type { LoadRunParams } from "./safety.js";
+import { checkAllowlist, checkLoadCaps, defaultDurationUnderCap } from "./safety.js";
 import { compareReports } from "./compare.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
@@ -355,6 +356,12 @@ async function composeLoadRunRequest(
 
 	return { payload, droppedPreRequestScripts };
 }
+
+/**
+ * Mode `start_load_run` sends when the agent names none. Closed-loop and
+ * duration-bounded, so an unspecified run is one the duration cap can hold.
+ */
+const DEFAULT_LOAD_MODE = "constant_concurrency";
 
 // --- Shared input schema fragments ------------------------------------------
 
@@ -1026,8 +1033,13 @@ export const TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe("Target in-flight requests."),
+			// Positive for the same reason `concurrency` is: the ramp is seeded
+			// with this count, so a negative casts to ~1.8e19 engine-side and a
+			// zero start is a ramp that begins with no traffic at all.
 			startConcurrency: z
 				.number()
+				.int()
+				.positive()
 				.optional()
 				.describe("Ramp start concurrency (ramp_up). Above `concurrency` ramps down."),
 			duration: z
@@ -1040,7 +1052,14 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe("Ramp time (ramp_up), same units as `duration`."),
-			iterations: z.number().optional().describe("Iteration count (iterations mode)."),
+			// An iterations run stops on this count and reads no duration, so it
+			// is the only thing bounding the run; `-1` would cast to ~1.8e19.
+			iterations: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("Iteration count (iterations mode)."),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			maxInFlight: z.number().optional().describe("In-flight cap (constant_rps only)."),
 			requestId: z
@@ -1077,10 +1096,17 @@ export const TOOLS: McpTool[] = [
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 
-			const loadParams = {
-				mode: str(args, "mode"),
+			// One mode string for both the guard and the payload: which strategy
+			// the engine picks decides which cap applies, so a guard reading a
+			// different mode than the run uses is a guard reading the wrong run.
+			const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
+			const loadParams: LoadRunParams = {
+				mode,
 				targetRps: typeof args.targetRps === "number" ? args.targetRps : undefined,
 				concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
+				startConcurrency:
+					typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
+				iterations: typeof args.iterations === "number" ? args.iterations : undefined,
 				duration: (args.duration as string | number | undefined) ?? undefined,
 				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
 			};
@@ -1089,7 +1115,7 @@ export const TOOLS: McpTool[] = [
 
 			const payload: Record<string, unknown> = {
 				...composed.payload,
-				mode: str(args, "mode") ?? "constant_concurrency",
+				mode,
 			};
 			for (const key of [
 				"concurrency",
@@ -1104,6 +1130,11 @@ export const TOOLS: McpTool[] = [
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
 			}
+			// An omitted duration is 60s engine-side, not "unbounded" and not
+			// "capped" - so a cap under 60s has to be sent as an explicit field
+			// or it never reaches the run.
+			const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
+			if (cappedDuration !== null) payload.duration = cappedDuration;
 
 			// A saved request's pre-request script cannot run under load - the
 			// engine has no such hook on POST /runs. Say so rather than let an agent

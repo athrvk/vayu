@@ -154,7 +154,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 }
 
 interface CapField {
-	key: "maxRps" | "maxConcurrency" | "maxDurationSeconds";
+	key: "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
 	label: string;
 	description: string;
 }
@@ -174,6 +174,12 @@ const CAP_FIELDS: CapField[] = [
 		key: "maxDurationSeconds",
 		label: "Max duration (seconds)",
 		description: "Ceiling on how long a load run may last.",
+	},
+	{
+		key: "maxIterations",
+		label: "Max iterations",
+		description:
+			"Ceiling on requests for an iterations run, which stops on a count rather than a duration.",
 	},
 ];
 
