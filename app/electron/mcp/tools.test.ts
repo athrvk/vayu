@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { dispatchTool, toolCatalog, TOOLS, type ToolContext } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import { EngineRequestError, type EngineClient } from "./engine-client.js";
+import { EngineRequestError, EngineTimeoutError, type EngineClient } from "./engine-client.js";
 
 /**
  * Default `composeRequest` fake: the engine's identity composition for an
@@ -47,8 +47,6 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
-		getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
-		getRequest: vi.fn().mockResolvedValue(null),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
@@ -1231,5 +1229,52 @@ describe("start_load_run rejects an unusable concurrency at the schema", () => {
 	test("accepts an ordinary concurrency, and its absence", () => {
 		expect(concurrencySchema().safeParse(50).success).toBe(true);
 		expect(concurrencySchema().safeParse(undefined).success).toBe(true);
+	});
+});
+
+/**
+ * An abort is the one transport failure that means the engine *was* reachable
+ * and busy: it may already have sent the request and written the run row. The
+ * old handling matched `/abort/i` alongside ECONNREFUSED and answered "engine
+ * not running, retry", which is wrong twice over and talks an agent into
+ * re-firing a request that already ran.
+ */
+describe("engine transport failures are told apart", () => {
+	async function runRequestFailingWith(err: unknown) {
+		const client = fakeClient({ executeRequest: vi.fn().mockRejectedValue(err) });
+		return dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/slow" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+	}
+
+	test("a client-budget timeout names the budget and sends the agent to run history", async () => {
+		const res = await runRequestFailingWith(
+			new EngineTimeoutError("POST", "/execute", 130_000)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/130s budget/);
+		expect(firstText(res)).toMatch(/may still have completed/i);
+		expect(firstText(res)).toMatch(/list_runs/);
+		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
+	});
+
+	test("a cancelled call is not reported as an unreachable engine either", async () => {
+		const res = await runRequestFailingWith(
+			new DOMException("The operation was aborted.", "AbortError")
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/cancelled/i);
+		expect(firstText(res)).toMatch(/list_runs/);
+		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
+	});
+
+	test("a genuinely unreachable engine still says so", async () => {
+		const res = await runRequestFailingWith(
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876")
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/Make sure the Vayu app is running/);
 	});
 });
