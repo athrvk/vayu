@@ -59,6 +59,28 @@ export function savePersistedSafety(config: McpSafetyConfig): void {
 	getStore().set("safety", config);
 }
 
+/** The slice of `VayuMcpService` this module needs - structural, so the store
+ *  stays importable without pulling in the server. */
+interface SafetyHolder {
+	getSafety(): McpSafetyConfig;
+}
+
+/**
+ * The safety config Settings must display: the running server's when there is
+ * one, the persisted config when there is not.
+ *
+ * The fallback cannot be `DEFAULT_MCP_SAFETY_CONFIG`. Settings adopts whatever
+ * this returns as its source of truth and then commits *whole* fields computed
+ * from it - adding a host commits `[...displayed, host]`. So handing a user with
+ * MCP switched off (or a failed port bind) an empty allowlist means their next
+ * edit persists a list of one and silently drops the rest. Both `updateSafety`
+ * branches persist what they apply, so the persisted config is what the server
+ * would be running.
+ */
+export function effectiveSafety(service: SafetyHolder | null | undefined): McpSafetyConfig {
+	return service?.getSafety() ?? loadPersistedSafety();
+}
+
 /** Whether the MCP server is enabled (defaults to true when never set). */
 export function loadMcpEnabled(): boolean {
 	const value = getStore().get("enabled");

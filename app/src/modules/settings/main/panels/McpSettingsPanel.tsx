@@ -17,10 +17,16 @@
  * immediately; cap inputs commit on blur. The main process sanitizes every
  * change before applying it.
  *
+ * Because each edit commits a whole field computed from what is on screen
+ * (adding a host commits the displayed allowlist plus the new one), the panel
+ * never substitutes defaults for config it could not read: an IPC failure
+ * surfaces as a toast and a Retry, with the editors disabled, rather than an
+ * empty allowlist the next click would persist over the real one.
+ *
  * See docs/engine/mcp.md and SECURITY.md.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	Plug,
 	ShieldCheck,
@@ -102,7 +108,14 @@ const CLIENT_CLI: Record<McpConnectClient, string> = {
 	vscode: "code",
 };
 
-/** Tool categories, in display order, with their sidebar copy. */
+/**
+ * Display copy for the categories this panel knows about, in display order.
+ *
+ * Decoration only - the rendered list is derived from the tools the main process
+ * actually reports (see `groupToolsByCategory`). This panel is the only place
+ * `disabledTools` is editable, so a tool whose category is missing here would
+ * serve over MCP with no way to switch it off.
+ */
 const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string }[] = [
 	{ id: "read", label: "Read", description: "Inspect collections, runs, config, and metrics." },
 	{
@@ -121,6 +134,47 @@ const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string
 		description: "Start and stop load runs.",
 	},
 ];
+
+/** One rendered group of tools: the category's copy plus its members. */
+interface ToolGroup {
+	id: string;
+	label: string;
+	description: string;
+	tools: McpToolInfo[];
+}
+
+/**
+ * Group the reported tools for display, ordered by `TOOL_CATEGORIES` and with
+ * any category that table does not describe appended under its own id. The
+ * category is a plain string across the IPC boundary, so an id added on the
+ * main-process side reaches here before the copy above catches up; rendering it
+ * unlabelled beats dropping the tools it holds.
+ */
+function groupToolsByCategory(tools: McpToolInfo[]): ToolGroup[] {
+	const byCategory = new Map<string, McpToolInfo[]>();
+	for (const tool of tools) {
+		const existing = byCategory.get(tool.category);
+		if (existing) existing.push(tool);
+		else byCategory.set(tool.category, [tool]);
+	}
+
+	const groups: ToolGroup[] = [];
+	for (const cat of TOOL_CATEGORIES) {
+		const catTools = byCategory.get(cat.id);
+		if (!catTools) continue;
+		groups.push({ ...cat, tools: catTools });
+		byCategory.delete(cat.id);
+	}
+	for (const [id, catTools] of byCategory) {
+		groups.push({
+			id,
+			label: id,
+			description: "Tools in a group this version of Settings does not describe yet.",
+			tools: catTools,
+		});
+	}
+	return groups;
+}
 
 /** A small copy-to-clipboard button that flips to a check for a moment. */
 function CopyButton({ text, className }: { text: string; className?: string }) {
@@ -193,36 +247,67 @@ export default function McpSettingsPanel() {
 	const [tools, setTools] = useState<McpToolInfo[]>([]);
 	const [newHost, setNewHost] = useState("");
 	const [capDrafts, setCapDrafts] = useState<Partial<Record<CapField["key"], string>>>({});
-	const [isLoading, setIsLoading] = useState(true);
+	// Nothing to wait for outside Electron, where there is no IPC to call.
+	const [isLoading, setIsLoading] = useState(hasElectron);
 	const [connecting, setConnecting] = useState<McpConnectClient | null>(null);
+	const [loadFailed, setLoadFailed] = useState(false);
 
-	// Load status + current safety config on mount.
+	// Guards the state writes below, since Retry can re-run `load` at any time
+	// and the fetch it awaits may land after the panel is gone.
+	const mounted = useRef(true);
 	useEffect(() => {
-		let cancelled = false;
-		async function load() {
-			if (!window.electronAPI) {
-				setIsLoading(false);
-				return;
-			}
-			try {
-				const [s, c, t] = await Promise.all([
-					window.electronAPI.getMcpStatus(),
-					window.electronAPI.getMcpSafety(),
-					window.electronAPI.getMcpTools(),
-				]);
-				if (cancelled) return;
-				setStatus(s);
-				setConfig(c);
-				setTools(t);
-			} finally {
-				if (!cancelled) setIsLoading(false);
-			}
-		}
-		void load();
+		mounted.current = true;
 		return () => {
-			cancelled = true;
+			mounted.current = false;
 		};
 	}, []);
+
+	// Load status + current safety config. Also the Retry handler, so a failed
+	// load is recoverable without reopening Settings. Sets no state before its
+	// first await - the mount effect below calls it, and a synchronous setState
+	// there is a cascading render (react-hooks/set-state-in-effect).
+	const load = useCallback(async () => {
+		if (!window.electronAPI) return;
+		try {
+			const [s, c, t] = await Promise.all([
+				window.electronAPI.getMcpStatus(),
+				window.electronAPI.getMcpSafety(),
+				window.electronAPI.getMcpTools(),
+			]);
+			if (!mounted.current) return;
+			setStatus(s);
+			setConfig(c);
+			setTools(t);
+			setLoadFailed(false);
+		} catch (err) {
+			if (!mounted.current) return;
+			/*
+			 * `config` deliberately stays null rather than falling back to the
+			 * defaults: every edit here commits a whole field computed from what
+			 * is displayed, so a stand-in empty allowlist is one click away from
+			 * being persisted over the real one.
+			 */
+			setLoadFailed(true);
+			showToast(
+				err instanceof Error
+					? `Couldn't load MCP settings: ${err.message}`
+					: "Couldn't load MCP settings.",
+				"error"
+			);
+		} finally {
+			if (mounted.current) setIsLoading(false);
+		}
+	}, [showToast]);
+
+	/*
+	 * `load` writes no state before its first await, so this cannot cascade a
+	 * render. The rule flags it because the callback is declared outside the
+	 * effect - which is the point: Retry re-runs the same load.
+	 */
+	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+		void load();
+	}, [load]);
 
 	// Re-check status when the user returns to the window - the server may have
 	// died or been toggled elsewhere while the panel sat open.
@@ -244,19 +329,54 @@ export default function McpSettingsPanel() {
 
 	// Apply a change: main sanitizes + persists and returns the resolved config,
 	// which we adopt as the new source of truth.
-	const persist = useCallback(async (partial: Partial<McpSafetyConfig>) => {
-		if (!window.electronAPI) return;
-		const resolved = await window.electronAPI.updateMcpSafety(partial);
-		setConfig(resolved);
-	}, []);
+	const persist = useCallback(
+		async (partial: Partial<McpSafetyConfig>) => {
+			if (!window.electronAPI) return;
+			try {
+				const resolved = await window.electronAPI.updateMcpSafety(partial);
+				setConfig(resolved);
+			} catch (err) {
+				showToast(
+					err instanceof Error
+						? `Couldn't save MCP settings: ${err.message}`
+						: "Couldn't save MCP settings.",
+					"error"
+				);
+				/*
+				 * Main applies the change to the live server before writing it to
+				 * disk, so a failed write leaves live and persisted diverged. Re-read
+				 * rather than keep rendering the value we tried to set.
+				 */
+				const current = await window.electronAPI.getMcpSafety().catch(() => null);
+				if (current && mounted.current) setConfig(current);
+			}
+		},
+		[showToast]
+	);
 
 	// Turn the MCP server on/off; main persists the preference and starts/stops
 	// the server, returning the new status.
-	const toggleEnabled = useCallback(async (next: boolean) => {
-		if (!window.electronAPI) return;
-		const s = await window.electronAPI.setMcpEnabled(next);
-		setStatus(s);
-	}, []);
+	const toggleEnabled = useCallback(
+		async (next: boolean) => {
+			if (!window.electronAPI) return;
+			try {
+				const s = await window.electronAPI.setMcpEnabled(next);
+				setStatus(s);
+			} catch (err) {
+				showToast(
+					err instanceof Error
+						? `Couldn't ${next ? "start" : "stop"} the MCP server: ${err.message}`
+						: `Couldn't ${next ? "start" : "stop"} the MCP server.`,
+					"error"
+				);
+				// The preference may have been saved before the start/stop threw -
+				// show what the main process ended up with, not the switch position.
+				const current = await window.electronAPI.getMcpStatus().catch(() => null);
+				if (current && mounted.current) setStatus(current);
+			}
+		},
+		[showToast]
+	);
 
 	// One-click connect: shell out to the client's own CLI. Falls back to the
 	// copy snippet (already shown) when the CLI isn't installed.
@@ -317,6 +437,8 @@ export default function McpSettingsPanel() {
 		[config, persist]
 	);
 
+	const toolGroups = useMemo(() => groupToolsByCategory(tools), [tools]);
+
 	// Enable/disable a set of tools by name (persists the resulting disabled list).
 	const setToolsEnabled = useCallback(
 		(names: string[], enabled: boolean) => {
@@ -340,6 +462,32 @@ export default function McpSettingsPanel() {
 				</Callout>
 			)}
 
+			{/* A failed load leaves nothing to edit: the controls below stay disabled
+			    rather than offering defaults that would overwrite the real config. */}
+			{loadFailed && (
+				<Callout
+					severity="blocking"
+					title="Couldn't load MCP settings"
+					action={
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								setIsLoading(true);
+								void load();
+							}}
+							disabled={isLoading}
+							className="h-7 px-2 text-xs shrink-0"
+						>
+							Retry
+						</Button>
+					}
+				>
+					your saved allowlist, caps and tool switches are unchanged - editing is disabled
+					until they can be read.
+				</Callout>
+			)}
+
 			{/* Connection status + onboarding */}
 			<Card>
 				<CardHeader className="pb-3">
@@ -348,6 +496,12 @@ export default function McpSettingsPanel() {
 						<CardTitle className="text-base">Connection</CardTitle>
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
+						) : !status ? (
+							// No status read at all - "Disabled" here would be a guess.
+							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
+								<CircleSlash className="w-3 h-3 mr-1" />
+								Unknown
+							</Badge>
 						) : !enabled ? (
 							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
 								<CircleSlash className="w-3 h-3 mr-1" />
@@ -389,7 +543,7 @@ export default function McpSettingsPanel() {
 						<Switch
 							checked={enabled}
 							onCheckedChange={(checked) => void toggleEnabled(checked)}
-							disabled={isLoading || !hasElectron}
+							disabled={isLoading || !hasElectron || !status}
 							aria-label="Enable MCP server"
 						/>
 					</div>
@@ -479,9 +633,8 @@ export default function McpSettingsPanel() {
 					{isLoading ? (
 						<Skeleton className="h-24 w-full" />
 					) : (
-						TOOL_CATEGORIES.map((cat) => {
-							const catTools = tools.filter((t) => t.category === cat.id);
-							if (catTools.length === 0) return null;
+						toolGroups.map((cat) => {
+							const catTools = cat.tools;
 							const names = catTools.map((t) => t.name);
 							const enabledCount = catTools.filter(
 								(t) => !(config?.disabledTools ?? []).includes(t.name)
@@ -622,6 +775,9 @@ export default function McpSettingsPanel() {
 							</Button>
 						</div>
 
+						{/* With no config there is no list to describe, so neither branch
+						    below renders: "no hosts allowed yet" would be a claim about
+						    data we never read. */}
 						{isLoading ? (
 							<Skeleton className="h-8 w-full" />
 						) : config && config.allowlist.length > 0 ? (
@@ -642,11 +798,11 @@ export default function McpSettingsPanel() {
 									</span>
 								))}
 							</div>
-						) : (
+						) : config ? (
 							<p className="text-xs text-muted-foreground italic">
 								No hosts allowed yet. Agents cannot send requests until you add one.
 							</p>
-						)}
+						) : null}
 					</div>
 				</CardContent>
 			</Card>

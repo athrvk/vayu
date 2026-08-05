@@ -73,6 +73,7 @@ export type { McpSafetyConfig } from "./config.js";
 export {
 	loadPersistedSafety,
 	savePersistedSafety,
+	effectiveSafety,
 	loadMcpEnabled,
 	saveMcpEnabled,
 } from "./store.js";
