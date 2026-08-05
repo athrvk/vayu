@@ -19,7 +19,7 @@
 import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { EngineClient } from "./engine-client.js";
-import { EngineRequestError } from "./engine-client.js";
+import { EngineRequestError, EngineTimeoutError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
 import { checkAllowlist, checkLoadCaps, defaultDurationUnderCap } from "./safety.js";
@@ -143,7 +143,24 @@ function engineErrorResult(err: unknown): ToolResult {
 		return errorResult(`Engine error (${err.status}): ${err.body || err.message}`);
 	}
 	const msg = err instanceof Error ? err.message : String(err);
-	if (/ECONNREFUSED|fetch failed|abort/i.test(msg)) {
+	// An abort means the engine was reachable and working - the opposite of the
+	// "not running, retry" advice below. Whatever was in flight may well have
+	// completed engine-side, so say so instead of inviting a second send.
+	if (err instanceof EngineTimeoutError) {
+		return errorResult(
+			`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget. ` +
+				`It may still have completed the call - check run history (list_runs) before retrying. ` +
+				`For a target that is legitimately this slow, raise the engine's "defaultTimeout" ` +
+				`with update_engine_config.`
+		);
+	}
+	if (err instanceof Error && (err.name === "AbortError" || /abort/i.test(msg))) {
+		return errorResult(
+			`The call was cancelled before the engine answered. It may still have completed - ` +
+				`check run history (list_runs) before retrying. (${msg})`
+		);
+	}
+	if (/ECONNREFUSED|fetch failed/i.test(msg)) {
 		return errorResult(
 			`Could not reach the Vayu engine. Make sure the Vayu app is running, then retry. (${msg})`
 		);

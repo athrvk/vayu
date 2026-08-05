@@ -139,12 +139,12 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
-| `run_request`          | execute  | `POST /execute`                              | allowlist                  |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /execute` (×N)     | allowlist per host         |
+| `run_request`          | execute  | `POST /compose` + `POST /execute`            | allowlist                  |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
-| `update_environment`   | write    | `GET`+`PUT /environments/:id` (fetch-merge)  | write toggle               |
+| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /runs` (+ `GET /requests/:id` with `requestId`) | allowlist + caps + confirm |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
@@ -176,6 +176,15 @@ Notes:
   did not resolve and allow-all is off) are skipped, not sent.
 - **Cancellation:** each tool call's `AbortSignal` is threaded into the engine
   `fetch`, so a client cancelling an in-flight call actually aborts it.
+- **Timeouts:** engine-local calls are bounded at 35s, but `POST /execute` waits
+  on a third-party server, so its budget is derived from the engine's own
+  `defaultTimeout` setting (read per call from `GET /config`, up to its 300s
+  ceiling) plus 10s of grace - the same rule the renderer uses for its proxied
+  calls. That way the engine's own `TIMEOUT` error, with its error code and its
+  run row, arrives before this client gives up. If the budget does expire, the
+  tool says the call may still have completed and points at `list_runs`; it is
+  never reported as an unreachable engine, because a retry could re-send a
+  request that already went out.
 
 ### Request composition
 

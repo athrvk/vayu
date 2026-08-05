@@ -26,6 +26,25 @@ export class EngineRequestError extends Error {
 	}
 }
 
+/**
+ * Raised when *this client's* abort budget expired before the engine answered -
+ * distinct from the caller cancelling and from an unreachable engine. The
+ * engine is still working on the call when this throws, so a caller must not
+ * report it as "engine not running" or advise a blind retry: the request may
+ * already have been sent and recorded. Carries the budget so the message can
+ * name it.
+ */
+export class EngineTimeoutError extends Error {
+	constructor(
+		method: string,
+		path: string,
+		readonly timeoutMs: number
+	) {
+		super(`No response from the engine within ${timeoutMs}ms for ${method} ${path}`);
+		this.name = "EngineTimeoutError";
+	}
+}
+
 export interface EngineClientOptions {
 	/** Base URL of the engine, e.g. `http://127.0.0.1:9876`. */
 	baseUrl: string;
@@ -35,7 +54,37 @@ export interface EngineClientOptions {
 	fetchImpl?: typeof fetch;
 }
 
+/**
+ * Budget for engine-local calls - reads, writes, composition, run bookkeeping.
+ * These never wait on a third-party server, so a stall here is a stuck engine.
+ */
 const DEFAULT_TIMEOUT_MS = 35_000;
+
+/**
+ * The three values below mirror `app/src/config/network.ts` (the renderer
+ * derives the same budget for its proxied calls); the main process cannot
+ * import renderer modules, so they are duplicated here. Keep them in sync.
+ *
+ * Grace on top of the engine's own timeout, so the engine's TIMEOUT error -
+ * which carries a proper error code and a recorded run - always arrives before
+ * this client gives up.
+ */
+const PROXIED_TIMEOUT_GRACE_MS = 10_000;
+
+/**
+ * Ceiling of the engine's `defaultTimeout` setting (`seed_default_config` in
+ * engine/src/db/database.cpp caps it at 300000). Used when the setting cannot
+ * be read, so an unreadable config never shortens the budget below what the
+ * engine may legitimately take.
+ */
+const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
+
+/**
+ * Budget for the `GET /config` probe that derives the one above. Deliberately
+ * short: it reads a local SQLite-backed row, and a slow answer must not delay
+ * the call it is sizing - a failed probe falls back to the ceiling.
+ */
+const CONFIG_PROBE_TIMEOUT_MS = 2_000;
 
 /** A single decoded live-metrics tick (shape mirrors the engine SSE payload). */
 export type MetricsTick = Record<string, unknown>;
@@ -59,10 +108,15 @@ export class EngineClient {
 		method: string,
 		path: string,
 		body?: unknown,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		timeoutMs = this.timeoutMs
 	): Promise<T> {
 		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+		let expired = false;
+		const timer = setTimeout(() => {
+			expired = true;
+			controller.abort();
+		}, timeoutMs);
 		// Abort on either our timeout or the caller's signal (MCP tool cancellation).
 		const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 		try {
@@ -81,9 +135,49 @@ export class EngineClient {
 				);
 			}
 			return (text ? JSON.parse(text) : null) as T;
+		} catch (err) {
+			// Only *our* timer expiring is a timeout; the caller's cancellation
+			// aborts the same fetch and must stay distinguishable from it.
+			if (expired && isAbortError(err)) throw new EngineTimeoutError(method, path, timeoutMs);
+			throw err;
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+
+	/**
+	 * Abort budget for a call that proxies a third-party server. Such a call is
+	 * bounded engine-side by the payload's own `timeout` or, absent one, the
+	 * user-configurable `defaultTimeout` setting (`resolve_request_timeout_ms`,
+	 * engine/src/http/routes/execution.cpp) - which reaches 300s, far past the
+	 * engine-local default. Sizing the client budget off that setting is what
+	 * keeps a legitimately slow request from being aborted here while the engine
+	 * completes it there, with the side effects and the run row already real.
+	 *
+	 * MCP-composed payloads carry no `timeout` of their own (`payload_from_stored`
+	 * emits none), so the config read - not the payload - is what does the work;
+	 * the `max` covers an inline payload that does carry a larger one.
+	 */
+	private async proxiedTimeoutMs(payload: unknown, signal?: AbortSignal): Promise<number> {
+		let configured = 0;
+		try {
+			const cfg = await this.request<unknown>(
+				"GET",
+				"/config",
+				undefined,
+				signal,
+				CONFIG_PROBE_TIMEOUT_MS
+			);
+			configured = readDefaultTimeoutMs(cfg);
+		} catch {
+			// Unreachable, slow or malformed config: fall back to the ceiling
+			// rather than to a budget shorter than the engine may take.
+		}
+		const base = Math.max(
+			readPayloadTimeoutMs(payload),
+			configured > 0 ? configured : ENGINE_MAX_DEFAULT_TIMEOUT_MS
+		);
+		return base + PROXIED_TIMEOUT_GRACE_MS;
 	}
 
 	// --- Health & metadata ---------------------------------------------------
@@ -107,23 +201,8 @@ export class EngineClient {
 		);
 	}
 
-	/**
-	 * Fetch a single saved request. Unlike environments, the engine does have a
-	 * `GET /requests/:id` route, so this is one round trip rather than a scan of
-	 * every collection's list. A `404` surfaces as an `EngineRequestError`, which
-	 * is what distinguishes "that request was deleted" from an unreachable engine.
-	 */
-	getRequest(id: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", `/requests/${encodeURIComponent(id)}`, undefined, signal);
-	}
-
 	listEnvironments(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/environments", undefined, signal);
-	}
-
-	/** Global variables (the lowest-precedence layer of variable resolution). */
-	getGlobals(signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", "/globals", undefined, signal);
 	}
 
 	/**
@@ -204,8 +283,15 @@ export class EngineClient {
 		return this.request("POST", "/compose", payload, signal);
 	}
 
-	executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/execute", payload, signal);
+	/**
+	 * Send a composed request. This is the one call that waits on a third-party
+	 * server, so it gets the derived budget (see {@link proxiedTimeoutMs}) rather
+	 * than the engine-local default. `/compose` and `POST /runs` stay on the
+	 * default: both return as soon as the engine has done local work.
+	 */
+	async executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		const timeoutMs = await this.proxiedTimeoutMs(payload, signal);
+		return this.request("POST", "/execute", payload, signal, timeoutMs);
 	}
 
 	startRun(payload: unknown, signal?: AbortSignal): Promise<unknown> {
@@ -289,6 +375,34 @@ export class EngineClient {
 		}
 		return ticks.slice(-limit);
 	}
+}
+
+/** True for the rejection a fetch produces when its signal aborts. */
+function isAbortError(err: unknown): boolean {
+	return err instanceof Error && err.name === "AbortError";
+}
+
+/**
+ * Read the engine's `defaultTimeout` (milliseconds) out of a `GET /config`
+ * body. Values arrive as strings. Returns 0 when the entry is absent or not a
+ * positive number, which the caller reads as "unknown".
+ */
+function readDefaultTimeoutMs(config: unknown): number {
+	const raw =
+		config && typeof config === "object" ? (config as Record<string, unknown>).entries : null;
+	const entries = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
+	const entry = entries.find((e) => e && typeof e === "object" && e.key === "defaultTimeout");
+	const value = Number(entry?.value);
+	return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** A payload's own `timeout` override in milliseconds, or 0 when it carries none. */
+function readPayloadTimeoutMs(payload: unknown): number {
+	const value =
+		payload && typeof payload === "object"
+			? (payload as Record<string, unknown>).timeout
+			: undefined;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 /** Parse one SSE event block ("event: x\ndata: y") into its fields. */
