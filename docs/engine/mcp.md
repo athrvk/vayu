@@ -91,6 +91,10 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 `POST /mcp` gets a fresh SDK server + transport (`sessionIdGenerator: undefined`,
 `enableJsonResponse: true`); `GET`/`DELETE` return `405`; non-`/mcp` paths `404`.
 DNS-rebinding protection is on (Host must be `127.0.0.1:9877` / `localhost:9877`).
+A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
+error), and one over the 4 MB cap `413` with `-32600` - the body is read before
+the transport sees it, so these are answered directly rather than by the SDK.
+`-32603` ("Internal error") is left to mean a genuine handler failure.
 The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping.
 
@@ -137,7 +141,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
-| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
 | `run_request`          | execute  | `POST /compose` + `POST /execute`            | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
@@ -174,6 +178,13 @@ Notes:
   composed exactly as the app's **Send** would (see *Request composition* below).
   Requests whose host still can't be verified after resolution (e.g. a variable
   did not resolve and allow-all is off) are skipped, not sent.
+  It **does not recurse**: `GET /requests?collectionId=` serves a collection's
+  direct requests, while collections nest via `parentId`, so a run on a parent
+  folder tests none of its descendants. The result appends a note naming the
+  sub-collections it left out (and says so explicitly if the collection list
+  could not be read), because a matrix whose `total` silently excludes nested
+  folders reads as a whole-collection pass. Requests run serially, so a large
+  collection takes as long as its requests do added together.
 - **Cancellation:** each tool call's `AbortSignal` is threaded into the engine
   `fetch`, so a client cancelling an in-flight call actually aborts it.
 - **Timeouts:** engine-local calls are bounded at 35s, but `POST /execute` waits
@@ -303,7 +314,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
-| `vayu://runs`               | Recent runs (first page, 100), newest first. |
+| `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. |
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |
