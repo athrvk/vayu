@@ -883,8 +883,10 @@ describe("dispatchTool", () => {
 
 	test("the schema refuses load counts the engine reads as enormous", () => {
 		// `-1` is the natural "unlimited" guess and casts to ~1.8e19 engine-side,
-		// where it is a request count and a ramp seed, not an error.
-		for (const field of ["startConcurrency", "iterations"]) {
+		// where it is a request count, a ramp seed and an in-flight ceiling, not
+		// an error. `maxInFlight` bounds in-flight *downward*, so the enormous
+		// value is the one that removes the backpressure it was asked for.
+		for (const field of ["startConcurrency", "iterations", "maxInFlight"]) {
 			expect(() =>
 				parseArgs("start_load_run", { url: "https://api.example.com", [field]: -1 })
 			).toThrow();

@@ -164,6 +164,34 @@ TEST (RunConfigValidation, StartConcurrencyBoundsAreInclusive) {
     expect_rejected (config, "startConcurrency");
 }
 
+// `maxInFlight` is the only field here that bounds work *downward*: the harm of
+// a bad value is not an allocation, it is the ceiling silently disappearing, so
+// an open-loop run against a hanging target accumulates in-flight requests for
+// its whole duration.
+TEST (RunConfigValidation, NegativeMaxInFlightIsRejected) {
+    auto config           = valid_config ();
+    config["maxInFlight"] = -1;
+    expect_rejected (config, "maxInFlight");
+}
+
+TEST (RunConfigValidation, ZeroMaxInFlightIsRejected) {
+    // 0 would be "drop everything", not "no cap" - either reading is a run that
+    // does not do what the caller asked, so it is rejected rather than guessed.
+    auto config           = valid_config ();
+    config["maxInFlight"] = 0;
+    expect_rejected (config, "maxInFlight");
+}
+
+TEST (RunConfigValidation, MaxInFlightBoundsAreInclusive) {
+    auto config           = valid_config ();
+    config["maxInFlight"] = 1;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["maxInFlight"] = vayu::core::constants::run_config::MAX_CONCURRENCY;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["maxInFlight"] = vayu::core::constants::run_config::MAX_CONCURRENCY + 1;
+    expect_rejected (config, "maxInFlight");
+}
+
 // --- 3. Timeout: <= 0 left transfers that never expire ---------------------
 
 TEST (RunConfigValidation, ZeroTimeoutIsRejected) {

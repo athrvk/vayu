@@ -410,11 +410,14 @@ configurable in **Settings → MCP** and persisted.
     - An **omitted** `duration` is 60s engine-side, not "unbounded" and not
       "capped". When `maxDurationSeconds` is under 60, the tool sends the cap as
       an explicit duration so the run is actually bounded by it.
-  `concurrency`, `startConcurrency` and `iterations` are additionally constrained
-  to positive integers by the tool's own schema, because "unlimited" is an
-  obvious guess to spell `-1` or `0` and the engine reads them as an eager
-  per-worker pre-allocation count, a ramp seed, and a request budget (see the
-  accepted ranges under [POST /runs](api-reference.md#post-runs)).
+  `concurrency`, `startConcurrency`, `iterations` and `maxInFlight` are
+  additionally constrained to positive integers by the tool's own schema, because
+  "unlimited" is an obvious guess to spell `-1` or `0` and the engine reads them
+  as an eager per-worker pre-allocation count, a ramp seed, a request budget, and
+  an in-flight ceiling (see the accepted ranges under
+  [POST /runs](api-reference.md#post-runs)). `maxInFlight` is the one that bounds
+  work *downward*, so there is no separate cap setting for it - the enormous
+  value is the one that removes the backpressure the caller asked for.
   `duration` / `rampUpDuration` are also rejected when they are not durations at
   all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
   engine parses), since the engine now fails such a run rather than quietly
