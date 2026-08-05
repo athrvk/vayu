@@ -396,6 +396,15 @@ export default function McpSettingsPanel() {
 				} else {
 					showToast(res.message || `Couldn't connect ${CLIENT_LABEL[client]}.`, "error");
 				}
+			} catch (err) {
+				// Without this the rejected invoke only stopped the spinner, so a
+				// connect that never reached the CLI looked like nothing happened.
+				showToast(
+					err instanceof Error
+						? `Couldn't connect ${CLIENT_LABEL[client]}: ${err.message}`
+						: `Couldn't connect ${CLIENT_LABEL[client]}.`,
+					"error"
+				);
 			} finally {
 				setConnecting(null);
 			}
