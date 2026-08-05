@@ -119,13 +119,7 @@ export class McpHttpServer {
 			// safe to echo - that keeps falling through to the 500 path, where a
 			// dead socket belongs.
 			if (!(err instanceof BodyReadError)) throw err;
-			res.writeHead(err.status, {
-				"Content-Type": "application/json",
-				// The oversized case leaves unread bytes in flight; closing is how
-				// they are dropped without reading them. Harmless on the parse
-				// error, where the body was already consumed in full.
-				Connection: "close",
-			});
+			res.writeHead(err.status, { "Content-Type": "application/json" });
 			res.end(
 				JSON.stringify({
 					jsonrpc: "2.0",
@@ -180,24 +174,32 @@ const bodyNotJson = () =>
 /** Read and JSON-parse the request body, tolerating an empty body. */
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 	return new Promise((resolve, reject) => {
-		const chunks: Buffer[] = [];
+		let chunks: Buffer[] = [];
 		let size = 0;
+		let overflowed = false;
 		req.on("data", (chunk: Buffer) => {
+			// Past the cap the body keeps arriving and is thrown away chunk by
+			// chunk. Neither of the alternatives delivers the 413 it is meant to:
+			// destroying the socket, or closing it while the upload is still in
+			// flight, resets the connection before the client can read the
+			// response - it sees a dropped request, which is exactly what a
+			// documented status code exists to prevent. (This showed up as a
+			// macOS-only CI failure; on Linux the response happened to flush
+			// first.) Draining costs bandwidth already committed by the sender
+			// and protects what the cap is really for: this process's memory.
+			if (overflowed) return;
 			size += chunk.length;
 			if (size > MAX_BODY_BYTES) {
-				// Paused, not destroyed: destroying takes the socket down with it,
-				// and the 413 below is then written to a connection the client has
-				// already lost - it reads as a dropped request, which is what a
-				// documented status code is supposed to save it from. The response
-				// carries `Connection: close`, so the rest of the upload is
-				// discarded once it has been flushed.
-				req.pause();
+				overflowed = true;
+				chunks = [];
 				reject(bodyTooLarge());
 				return;
 			}
 			chunks.push(chunk);
 		});
 		req.on("end", () => {
+			// Already rejected with the 413; the drain finishing is not a result.
+			if (overflowed) return;
 			const raw = Buffer.concat(chunks).toString("utf8");
 			if (raw.trim() === "") {
 				resolve(undefined);
