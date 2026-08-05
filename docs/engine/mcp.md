@@ -491,6 +491,22 @@ from environment variables:
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 
+Both entry points sanitize their input through the same function
+(`sanitizeSafetyInput` in `electron/mcp/config.ts`), so the environment is held to
+exactly the rules Settings is held to:
+
+- **A malformed cap falls back to its default, never to "no cap".**
+  `VAYU_MCP_MAX_RPS="1,000"` is not a number, so the `1000` default applies and
+  still refuses an over-cap run. The CLI names what it dropped on stderr:
+  `[vayu-mcp] ignoring malformed VAYU_MCP_MAX_RPS="1,000" (using default 1000)`.
+  Non-positive values (`0`, `-5`) are treated the same way; fractional values are
+  floored.
+- **Allowlist entries are reduced to a bare hostname**, so
+  `https://api.example.com` and `api.example.com:8080` both match the
+  `api.example.com` the guard compares against. Entries are de-duplicated.
+- The two opt-in booleans stay off for any value other than the exact string
+  `true`.
+
 ## Design notes
 
 Rationale behind the load-bearing decisions.

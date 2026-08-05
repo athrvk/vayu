@@ -18,37 +18,20 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer } from "./server.js";
 import { EngineClient } from "./engine-client.js";
-import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
+import { buildSafetyConfigFromEnv } from "./config.js";
 import type { ToolContext } from "./tools.js";
-
-function readSafetyFromEnv(): Partial<McpSafetyConfig> {
-	const env = process.env;
-	const cfg: Partial<McpSafetyConfig> = {};
-	if (env.VAYU_MCP_ALLOWLIST) {
-		cfg.allowlist = env.VAYU_MCP_ALLOWLIST.split(",")
-			.map((h) => h.trim())
-			.filter(Boolean);
-	}
-	if (env.VAYU_MCP_MAX_RPS) cfg.maxRps = Number(env.VAYU_MCP_MAX_RPS);
-	if (env.VAYU_MCP_MAX_CONCURRENCY) cfg.maxConcurrency = Number(env.VAYU_MCP_MAX_CONCURRENCY);
-	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
-		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
-	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
-	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
-	if (env.VAYU_MCP_DISABLED_TOOLS) {
-		cfg.disabledTools = env.VAYU_MCP_DISABLED_TOOLS.split(",")
-			.map((t) => t.trim())
-			.filter(Boolean);
-	}
-	return cfg;
-}
 
 async function main(): Promise<void> {
 	const engineBaseUrl = process.env.VAYU_ENGINE_URL ?? "http://127.0.0.1:9876";
 	const version = process.env.VAYU_VERSION ?? "0.0.0";
 
 	const client = new EngineClient({ baseUrl: engineBaseUrl });
-	const config = resolveSafetyConfig(readSafetyFromEnv());
+	const { config, ignored } = buildSafetyConfigFromEnv(process.env);
+	for (const { variable, value, fallback } of ignored) {
+		console.error(
+			`[vayu-mcp] ignoring malformed ${variable}=${JSON.stringify(value)} (using default ${JSON.stringify(fallback)})`
+		);
+	}
 	const contextProvider = (): ToolContext => ({ client, config });
 
 	const server = createMcpServer({ name: "vayu", version }, contextProvider);

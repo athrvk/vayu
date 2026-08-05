@@ -130,3 +130,83 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 	}
 	return out;
 }
+
+/**
+ * The environment variable each safety field is read from by the stdio CLI.
+ * Lives beside the sanitizer so a value it drops can be named back to the
+ * operator without re-parsing the environment.
+ */
+const SAFETY_ENV_VARS = {
+	allowlist: "VAYU_MCP_ALLOWLIST",
+	allowAll: "VAYU_MCP_ALLOW_ALL",
+	maxRps: "VAYU_MCP_MAX_RPS",
+	maxConcurrency: "VAYU_MCP_MAX_CONCURRENCY",
+	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
+	allowWrites: "VAYU_MCP_ALLOW_WRITES",
+	disabledTools: "VAYU_MCP_DISABLED_TOOLS",
+} as const satisfies Record<keyof McpSafetyConfig, string>;
+
+/** An environment variable the sanitizer rejected, so the CLI can say so. */
+export interface IgnoredSafetyEnvVar {
+	/** The `VAYU_MCP_*` variable name. */
+	variable: string;
+	/** Its raw value, as it appeared in the environment. */
+	value: string;
+	/** The default that applies in its place. */
+	fallback: McpSafetyConfig[keyof McpSafetyConfig];
+}
+
+/** A safety config built from the environment, plus what was thrown away. */
+export interface EnvSafetyConfig {
+	config: McpSafetyConfig;
+	ignored: IgnoredSafetyEnvVar[];
+}
+
+function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
+	const cfg: Partial<McpSafetyConfig> = {};
+	if (env.VAYU_MCP_ALLOWLIST) {
+		cfg.allowlist = env.VAYU_MCP_ALLOWLIST.split(",")
+			.map((h) => h.trim())
+			.filter(Boolean);
+	}
+	if (env.VAYU_MCP_MAX_RPS) cfg.maxRps = Number(env.VAYU_MCP_MAX_RPS);
+	if (env.VAYU_MCP_MAX_CONCURRENCY) cfg.maxConcurrency = Number(env.VAYU_MCP_MAX_CONCURRENCY);
+	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
+		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
+	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
+	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
+	if (env.VAYU_MCP_DISABLED_TOOLS) {
+		cfg.disabledTools = env.VAYU_MCP_DISABLED_TOOLS.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+	return cfg;
+}
+
+/**
+ * Build the stdio CLI's safety config from environment variables. The env is an
+ * untrusted source exactly like the renderer and the persisted config file, so
+ * it passes through `sanitizeSafetyInput` for the same reason they do: without
+ * it, `Number("1,000")` is `NaN` and every `checkLoadCaps` comparison against
+ * that cap is `false`, i.e. the cap silently stops existing rather than falling
+ * back to its default.
+ *
+ * Anything the sanitizer rejects is reported in `ignored` so the CLI can tell a
+ * headless operator which default applied, rather than leaving them to discover
+ * it from an uncapped run.
+ */
+export function buildSafetyConfigFromEnv(env: NodeJS.ProcessEnv): EnvSafetyConfig {
+	const raw = readSafetyFromEnv(env);
+	const sanitized = sanitizeSafetyInput(raw);
+	const ignored: IgnoredSafetyEnvVar[] = [];
+	for (const key of Object.keys(raw) as (keyof McpSafetyConfig)[]) {
+		if (sanitized[key] !== undefined) continue;
+		const variable = SAFETY_ENV_VARS[key];
+		ignored.push({
+			variable,
+			value: env[variable] ?? "",
+			fallback: DEFAULT_MCP_SAFETY_CONFIG[key],
+		});
+	}
+	return { config: resolveSafetyConfig(sanitized), ignored };
+}
