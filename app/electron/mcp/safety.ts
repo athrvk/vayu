@@ -22,6 +22,15 @@ export interface GuardResult {
 
 const OK: GuardResult = { ok: true };
 
+/** The lowercased hostname `candidate` parses to, or null if it yields none. */
+function parseHostname(candidate: string): string | null {
+	try {
+		return new URL(candidate).hostname.toLowerCase() || null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Extract the lowercased hostname from a request URL. Returns null when the URL
  * cannot be parsed - which notably includes URLs still containing unresolved
@@ -31,16 +40,20 @@ export function extractHost(url: string): string | null {
 	if (typeof url !== "string" || url.trim() === "") return null;
 	// Unresolved template variables cannot be safety-checked.
 	if (url.includes("{{") || url.includes("}}")) return null;
-	try {
-		return new URL(url).hostname.toLowerCase();
-	} catch {
-		// Allow scheme-less inputs like "api.example.com/users".
-		try {
-			return new URL(`http://${url}`).hostname.toLowerCase();
-		} catch {
-			return null;
-		}
-	}
+	const parsed = parseHostname(url);
+	if (parsed) return parsed;
+	// A scheme-less "localhost:3000/api" does not throw: "localhost" is a legal
+	// scheme, so it parses with an empty hostname. An empty hostname is therefore
+	// as unparsed as a throw, and the scheme-less retry has to cover both cases
+	// or every host:port URL is refused as "unresolvable" - the shape the user
+	// reads as a variable-resolution bug.
+	//
+	// Not for input carrying an explicit "://" though: there the empty hostname
+	// is the URL's own answer ("file:///etc/passwd" is host-less), and prefixing
+	// a scheme would turn it into the host "file" - a target the allowlist could
+	// then be talked into permitting. Unknown hosts stay refused.
+	if (url.includes("://")) return null;
+	return parseHostname(`http://${url}`);
 }
 
 /**

@@ -384,6 +384,12 @@ configurable in **Settings → MCP** and persisted.
 - **Target allowlist** (default empty ⇒ deny all). Network-touching tools refuse
   off-list hosts with an actionable error. An **"Allow all hosts"** opt-in
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
+  Entries are hostnames, matched exactly: what you type in Settings is reduced to
+  a host (`https://api.example.com:8080/v1` and `api.example.com` are the same
+  entry), and the request URL is matched by its host whether or not it carries a
+  scheme (`localhost:3000/api` matches the entry `localhost`). An IPv6 target is
+  stored and shown in its canonical bracketed form - typing `::1` stores `[::1]`,
+  which is what a URL parses to.
   Because the check happens here, before the engine is called, a request sent
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See

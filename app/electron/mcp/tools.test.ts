@@ -399,6 +399,30 @@ describe("run_collection_smoke", () => {
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
 
+	test("does not skip a scheme-less host:port request whose host is allowlisted", async () => {
+		// A collection saved against "localhost:3000/..." had every request
+		// skipped, with a reason blaming unresolved {{variables}} in a URL that
+		// carried none.
+		const client = fakeClient({
+			listRequests: vi
+				.fn()
+				.mockResolvedValue([
+					{ id: "r1", name: "local", method: "GET", url: "localhost:3000/health" },
+				]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "localhost:3000/health" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["localhost"] })
+		);
+		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1, skipped: 0 });
+		expect(client.executeRequest).toHaveBeenCalledTimes(1);
+	});
+
 	test("composes each request engine-side and executes the composed payload unchanged", async () => {
 		// Canned engine output mirroring what POST /compose returns for a saved
 		// request: variables resolved, inherited auth applied, chain + own script

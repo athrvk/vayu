@@ -13,7 +13,7 @@ import {
 	checkLoadCaps,
 	defaultDurationUnderCap,
 } from "./safety.js";
-import { DEFAULT_MCP_SAFETY_CONFIG, resolveSafetyConfig } from "./config.js";
+import { DEFAULT_MCP_SAFETY_CONFIG, normalizeHost, resolveSafetyConfig } from "./config.js";
 
 describe("extractHost", () => {
 	test("parses hostname from a full URL, lowercased", () => {
@@ -27,6 +27,24 @@ describe("extractHost", () => {
 	});
 	test("returns null for empty input", () => {
 		expect(extractHost("")).toBeNull();
+	});
+	// These parse *successfully* with the host taken for a scheme and an empty
+	// hostname, so the scheme-less retry only runs if emptiness triggers it too.
+	test.each([
+		["localhost:3000/api", "localhost"],
+		["api.example.com:8080/x", "api.example.com"],
+		["localhost:3000", "localhost"],
+		["localhost:3000//api", "localhost"],
+	])("handles scheme-less %s (host:port)", (url, host) => {
+		expect(extractHost(url)).toBe(host);
+	});
+	test("keeps a genuinely host-less URL unresolvable rather than inventing one", () => {
+		// The empty hostname here is the URL's own answer, not a misparse - the
+		// scheme-less retry would turn it into the host "file".
+		expect(extractHost("file:///etc/passwd")).toBeNull();
+	});
+	test("returns an IPv6 host in the bracketed form the allowlist stores", () => {
+		expect(extractHost("http://[::1]:8080/x")).toBe("[::1]");
 	});
 });
 
@@ -45,6 +63,16 @@ describe("checkAllowlist", () => {
 		const res = checkAllowlist("https://evil.test/x", config);
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/not on Vayu's MCP allowlist/i);
+	});
+	test("allows a scheme-less host:port URL whose host is on the list", () => {
+		// The refusal this replaces named unresolved {{variables}}, sending the
+		// user hunting a resolution bug in a URL that resolved fine.
+		const config = resolveSafetyConfig({ allowlist: ["localhost"] });
+		expect(checkAllowlist("localhost:3000/api/users", config).ok).toBe(true);
+	});
+	test("matches an allowlisted IPv6 literal against its target", () => {
+		const config = resolveSafetyConfig({ allowlist: [normalizeHost("::1")] });
+		expect(checkAllowlist("http://[::1]:9876/x", config).ok).toBe(true);
 	});
 	test("denies when the host cannot be determined", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
