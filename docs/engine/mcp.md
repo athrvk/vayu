@@ -92,12 +92,15 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 `enableJsonResponse: true`); `GET`/`DELETE` return `405`; non-`/mcp` paths `404`.
 DNS-rebinding protection is on (Host must be `127.0.0.1:9877` / `localhost:9877`).
 A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
-error), and one over the 4 MB cap `413` with `-32600` and `Connection: close`
-(the unread remainder of the upload is discarded once the response is flushed).
-The body is read before the transport sees it, so these are answered directly
-rather than by the SDK. Both messages are fixed strings - nothing derived from
-the underlying error reaches the wire - and `-32603` ("Internal error") is left
-to mean a genuine handler failure, including a socket error while reading.
+error), and one over the 4 MB cap `413` with `-32600` - past the cap the rest of
+the upload is drained and discarded rather than the socket being closed under it,
+since resetting the connection mid-upload loses the very response the status code
+exists to deliver. The cap bounds what is held in memory, not what crosses the
+wire. The body is read before the transport sees it, so these are answered
+directly rather than by the SDK. Both messages are fixed strings - nothing
+derived from the underlying error reaches the wire - and `-32603`
+("Internal error") is left to mean a genuine handler failure, including a socket
+error while reading.
 The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping.
 
