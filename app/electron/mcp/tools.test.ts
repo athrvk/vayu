@@ -253,6 +253,98 @@ describe("data-write tools", () => {
 		});
 	});
 
+	test("update_environment overwrites the value and keeps secret/type/createdAt", async () => {
+		// A secret-marked token rotated through MCP must stay masked: the engine
+		// replaces the variables blob wholesale, so whatever this payload drops
+		// is gone for good and the popover renders the token in plaintext.
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: {
+					apiKey: {
+						value: "old",
+						enabled: true,
+						secret: true,
+						type: "string",
+						createdAt: 42,
+					},
+				},
+			}),
+		});
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { apiKey: "rotated" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		expect(payload).toMatchObject({
+			variables: {
+				apiKey: {
+					value: "rotated",
+					enabled: true,
+					secret: true,
+					type: "string",
+					createdAt: 42,
+				},
+			},
+		});
+	});
+
+	test("update_environment does not re-enable a disabled variable", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { host: { value: "old", enabled: false } },
+			}),
+		});
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { host: "new" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		expect(payload).toMatchObject({ variables: { host: { value: "new", enabled: false } } });
+	});
+
+	test("update_environment gives a new key a sane default entry", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { brandNew: "v" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const entry = (payload as { variables: Record<string, unknown> }).variables.brandNew;
+		expect(entry).toEqual({ value: "v", enabled: true });
+	});
+
+	test("update_environment replaces a malformed stored entry instead of spreading it", async () => {
+		// A bare string off disk is a real case (D17). Spreading it would write
+		// `{0:"o",1:"l",...}` into the blob every reader then has to survive.
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { loose: "old", listy: ["a"] },
+			}),
+		});
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { loose: "new", listy: "new" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const vars = (payload as { variables: Record<string, unknown> }).variables;
+		expect(vars.loose).toEqual({ value: "new", enabled: true });
+		expect(vars.listy).toEqual({ value: "new", enabled: true });
+	});
+
 	test("update_environment is refused when writes are disabled", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(

@@ -856,7 +856,25 @@ export const TOOLS: McpTool[] = [
 					? { ...(existing.variables as Record<string, unknown>) }
 					: {};
 			for (const [key, value] of Object.entries(vars as Record<string, string>)) {
-				mergedVars[key] = { value: String(value), enabled: true };
+				// Overwrite the *value*, not the entry: `secret`, `type` and
+				// `createdAt` are the user's own settings (a secret rotated here
+				// must stay masked in the popover), and nothing else restores
+				// them - the engine replaces the blob wholesale. The object guard
+				// keeps a malformed stored entry (a bare string, an array) from
+				// spreading into index-keyed garbage; the renderer treats those
+				// as a real case (`lib/variable-resolution.ts`, D17), so they are
+				// replaced with a sane entry rather than merged onto.
+				const prev = mergedVars[key];
+				const base =
+					prev && typeof prev === "object" && !Array.isArray(prev)
+						? (prev as Record<string, unknown>)
+						: {};
+				// `enabled` leads the spread so a new (or malformed) entry defaults
+				// to enabled while an existing explicit flag survives - writing a
+				// value must not silently re-enable a variable the user disabled.
+				// The tool returns the updated environment, so a caller who wrote
+				// to a disabled variable sees `enabled: false` in the result.
+				mergedVars[key] = { enabled: true, ...base, value: String(value) };
 			}
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no

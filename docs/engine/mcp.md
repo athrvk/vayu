@@ -151,7 +151,10 @@ Notes:
   value until it is restarted, so the tool says so in its text output too.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
-  partial updates preserve untouched variables and the name. It is a `PUT`, not
+  partial updates preserve untouched variables and the name. Overwriting an
+  existing variable changes its value only - its `secret`, `type`, `createdAt`
+  and enabled/disabled state are preserved, so a rotated secret stays masked and
+  a disabled variable stays disabled. It is a `PUT`, not
   a `POST`: since #95 the engine's `POST /environments` is create-only, and since
   #97 it rejects a body carrying an `id` outright. `create_request` stays a
   `POST` for the same reason - it creates, and lets the engine assign the id.
@@ -504,6 +507,7 @@ from environment variables:
 | `VAYU_MCP_MAX_RPS`              | `1000`                  | RPS cap.                               |
 | `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Concurrency cap.                       |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
+| `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 
