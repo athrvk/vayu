@@ -112,15 +112,24 @@ export class McpHttpServer {
 			// error"), which reads as the server having fallen over. The SDK's own
 			// parse-error path is unreachable here because the body is parsed
 			// before the transport sees it, so the codes are answered directly.
-			const tooLarge = err instanceof BodyTooLargeError;
-			res.writeHead(tooLarge ? 413 : 400, { "Content-Type": "application/json" });
+			//
+			// Only the two *client-caused* failures are answered here, each with a
+			// message written at its throw site. `readJsonBody` also rejects with
+			// the socket's own error, which is neither the client's mistake nor
+			// safe to echo - that keeps falling through to the 500 path, where a
+			// dead socket belongs.
+			if (!(err instanceof BodyReadError)) throw err;
+			res.writeHead(err.status, {
+				"Content-Type": "application/json",
+				// The oversized case leaves unread bytes in flight; closing is how
+				// they are dropped without reading them. Harmless on the parse
+				// error, where the body was already consumed in full.
+				Connection: "close",
+			});
 			res.end(
 				JSON.stringify({
 					jsonrpc: "2.0",
-					error: {
-						code: tooLarge ? -32600 : -32700,
-						message: err instanceof Error ? err.message : String(err),
-					},
+					error: { code: err.rpcCode, message: err.message },
 					id: null,
 				})
 			);
@@ -144,11 +153,29 @@ export class McpHttpServer {
 }
 
 /**
- * Body exceeded {@link MAX_BODY_BYTES}. Distinguished from a parse failure so
- * `handle()` can answer 413 rather than 400 - the payload was never read, so
- * calling it malformed would send the client rewriting valid JSON.
+ * A body the *client* got wrong, carrying the status and JSON-RPC code that
+ * says which way. Every message is a literal written here, never an underlying
+ * error's text: the response goes to whoever can reach the endpoint, so it
+ * states what the client did wrong and nothing about this process.
+ *
+ * Size and syntax are separate codes on purpose - the oversized body was never
+ * parsed, so calling it malformed would send the client rewriting valid JSON.
  */
-class BodyTooLargeError extends Error {}
+class BodyReadError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+		readonly rpcCode: number
+	) {
+		super(message);
+	}
+}
+
+const bodyTooLarge = () =>
+	new BodyReadError(`Request body exceeds the ${MAX_BODY_BYTES}-byte limit.`, 413, -32600);
+
+const bodyNotJson = () =>
+	new BodyReadError("Parse error: the request body is not valid JSON.", 400, -32700);
 
 /** Read and JSON-parse the request body, tolerating an empty body. */
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
@@ -158,8 +185,14 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 		req.on("data", (chunk: Buffer) => {
 			size += chunk.length;
 			if (size > MAX_BODY_BYTES) {
-				reject(new BodyTooLargeError(`Request body exceeds ${MAX_BODY_BYTES} bytes.`));
-				req.destroy();
+				// Paused, not destroyed: destroying takes the socket down with it,
+				// and the 413 below is then written to a connection the client has
+				// already lost - it reads as a dropped request, which is what a
+				// documented status code is supposed to save it from. The response
+				// carries `Connection: close`, so the rest of the upload is
+				// discarded once it has been flushed.
+				req.pause();
+				reject(bodyTooLarge());
 				return;
 			}
 			chunks.push(chunk);
@@ -173,7 +206,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 			try {
 				resolve(JSON.parse(raw));
 			} catch {
-				reject(new Error("Parse error: the request body is not valid JSON."));
+				reject(bodyNotJson());
 			}
 		});
 		req.on("error", reject);

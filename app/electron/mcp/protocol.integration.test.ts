@@ -432,6 +432,27 @@ describe("Streamable HTTP host", () => {
 			error: { code: -32700 },
 		});
 		expect(JSON.stringify(res.json)).not.toMatch(/Internal error/);
+		// The message is a literal written at the throw site. Nothing derived
+		// from the underlying error reaches the wire: this response goes to
+		// anyone who can reach the endpoint, and `readJsonBody` also rejects
+		// with the socket's own error, which is not the client's to read.
+		expect(res.json).toMatchObject({
+			error: { message: "Parse error: the request body is not valid JSON." },
+		});
+	});
+
+	it("answers an oversized body with 413 / -32600, not a parse error", async () => {
+		await start();
+		// Valid JSON, over the 4 MB cap - so a 400 "not valid JSON" would send
+		// the client rewriting a body that was never the problem.
+		const res = await request({
+			rawBody: JSON.stringify({ pad: "x".repeat(5 * 1024 * 1024) }),
+		});
+		expect(res.status).toBe(413);
+		expect(res.json).toMatchObject({
+			jsonrpc: "2.0",
+			error: { code: -32600 },
+		});
 	});
 
 	it("still serves a valid body after a malformed one on the same server", async () => {
