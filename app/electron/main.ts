@@ -484,11 +484,13 @@ async function startEngine() {
 }
 
 async function startMcp() {
-	if (!loadMcpEnabled()) {
-		console.log("[Main] MCP server disabled by preference; not starting.");
-		return;
-	}
 	try {
+		// Inside the try, not ahead of it: this is the first thing in the whole app
+		// to touch the persisted MCP config, so it is where a store failure lands.
+		if (!loadMcpEnabled()) {
+			console.log("[Main] MCP server disabled by preference; not starting.");
+			return;
+		}
 		mcpService = new VayuMcpService({
 			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
 			host: MCP_HOST,
@@ -827,10 +829,11 @@ app.whenReady().then(async () => {
 	// Start the engine
 	await startEngine();
 
-	// Start the MCP server (best-effort; never blocks app startup)
-	await startMcp();
-
-	// Then create the window
+	// Then create the window. Nothing below this line may sit between the engine
+	// and the window: the MCP server used to, and because it reads a config file
+	// at that point, a corrupt one left the app with a headless engine and no
+	// window at all. MCP is an optional convenience with no UI depending on it,
+	// so it starts after everything the user can see is up and wired.
 	createWindow();
 
 	// Start checking for updates once a window exists to receive events. The
@@ -844,6 +847,11 @@ app.whenReady().then(async () => {
 			createWindow();
 		}
 	});
+
+	// Start the MCP server last (best-effort; it never blocks app startup). It
+	// swallows its own failures, and starting it here means even one that escaped
+	// that guard would cost the user nothing but MCP.
+	await startMcp();
 });
 
 app.on("window-all-closed", () => {
