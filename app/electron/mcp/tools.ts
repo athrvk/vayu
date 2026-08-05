@@ -1079,7 +1079,14 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Iteration count (iterations mode)."),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
-			maxInFlight: z.number().optional().describe("In-flight cap (constant_rps only)."),
+			// A pending-request ceiling read as a `size_t`, so `-1` - the natural
+			// "unlimited" spelling - removes the ceiling instead of tightening it.
+			maxInFlight: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("In-flight cap (constant_rps only)."),
 			requestId: z
 				.string()
 				.optional()

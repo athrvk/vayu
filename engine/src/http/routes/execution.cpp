@@ -591,6 +591,10 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         "A ramp is seeded with this many in-flight requests before the first "
         "duration check, and it is read as a size_t, so a negative start is "
         "~1.8e19 of them." },
+        { "maxInFlight", 1, limits::MAX_CONCURRENCY,
+        "It is a pending-request ceiling read as a size_t, so a negative value "
+        "is ~1.8e19 - it removes the backpressure the field exists to provide "
+        "rather than tightening it." },
         { "timeout", 1, 86400000,
         "A transfer with no timeout never completes, so the run can never "
         "reach "
