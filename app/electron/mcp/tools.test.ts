@@ -494,6 +494,174 @@ describe("run_collection_smoke", () => {
 		expect(summary.results[0].error).toMatch(/500/);
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
+
+	/**
+	 * `GET /requests?collectionId=` returns direct children only, so a smoke run
+	 * on a parent folder is structurally partial. A green matrix that does not
+	 * say so reads as "the whole collection passed".
+	 */
+	test("discloses the sub-collections it did not run", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
+			listCollections: vi.fn().mockResolvedValue([
+				{ id: "c1", name: "API" },
+				{ id: "c2", name: "Billing", parentId: "c1" },
+				{ id: "c3", name: "Users", parentId: "c1" },
+				{ id: "c4", name: "Unrelated", parentId: "c9" },
+				{ id: "c5", name: "Root" },
+			]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/2 sub-collection\(s\) were NOT run/);
+		expect(text).toContain("Billing");
+		expect(text).toContain("Users");
+		// Only descendants of *this* collection are named.
+		expect(text).not.toContain("Unrelated");
+		expect(text).not.toContain("Root");
+		// The matrix itself is untouched: it counts the direct requests it ran.
+		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
+	});
+
+	test("says nothing extra when the collection has no sub-collections", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
+			listCollections: vi.fn().mockResolvedValue([{ id: "c1", name: "API" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.content.map((c) => c.text).join("\n")).not.toMatch(/sub-collection/);
+	});
+
+	test("an unreadable collection list is disclosed as unchecked, not as no children", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
+			listCollections: vi
+				.fn()
+				.mockRejectedValue(new EngineRequestError("Engine responded 500", 500, "boom")),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		// The run itself still succeeds - the lookup is a disclosure, not a gate.
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
+		expect(res.content.map((c) => c.text).join("\n")).toMatch(
+			/could not read the collection list/
+		);
+	});
+
+	test("the tool description states the scope it actually runs", () => {
+		const tool = TOOLS.find((t) => t.name === "run_collection_smoke");
+		expect(tool?.description).toMatch(/DIRECT requests/);
+		expect(tool?.description).toMatch(/one at a time/);
+	});
+});
+
+describe("get_live_metrics limit", () => {
+	function metricsClient() {
+		return fakeClient({ getLiveMetricsSnapshot: vi.fn().mockResolvedValue([]) });
+	}
+
+	/**
+	 * `limit` reaches `ticks.slice(-limit)`. A non-positive value does not
+	 * narrow that window, it widens it: `0` returns every collected tick and
+	 * `-3` returns all but the three oldest - the opposite of a limit. So these
+	 * must fail loudly rather than be repaired into a plausible answer.
+	 */
+	test.each([0, -3, 2.5])("rejects limit %s without calling the engine", async (limit) => {
+		const client = metricsClient();
+		const res = await dispatchTool(
+			"get_live_metrics",
+			{ runId: "run_1", limit },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/"limit" must be a whole number greater than 0/);
+		expect(client.getLiveMetricsSnapshot).not.toHaveBeenCalled();
+	});
+
+	test("forwards a positive limit, and defaults to 10 when omitted", async () => {
+		const client = metricsClient();
+		await dispatchTool("get_live_metrics", { runId: "run_1", limit: 5 }, ctxWith(client));
+		expect(client.getLiveMetricsSnapshot).toHaveBeenCalledWith(
+			"run_1",
+			5,
+			undefined,
+			undefined
+		);
+
+		const bare = metricsClient();
+		await dispatchTool("get_live_metrics", { runId: "run_1" }, ctxWith(bare));
+		expect(bare.getLiveMetricsSnapshot).toHaveBeenCalledWith("run_1", 10, undefined, undefined);
+	});
+
+	test("the input schema rejects a non-positive limit too", () => {
+		const shape = TOOLS.find((t) => t.name === "get_live_metrics")!.inputSchema as Record<
+			string,
+			z.ZodTypeAny
+		>;
+		expect(shape.limit.safeParse(0).success).toBe(false);
+		expect(shape.limit.safeParse(-3).success).toBe(false);
+		expect(shape.limit.safeParse(2.5).success).toBe(false);
+		expect(shape.limit.safeParse(10).success).toBe(true);
+		expect(shape.limit.safeParse(undefined).success).toBe(true);
+	});
+});
+
+/**
+ * A declared `outputSchema` makes the SDK reject any non-error result whose
+ * `structuredContent` does not validate, and that rejection reads as the tool's
+ * schema being broken - hiding the body. So every 200 the engine can answer
+ * with must produce a result the schema accepts.
+ */
+describe("get_engine_health output always satisfies its own schema", () => {
+	const healthSchema = () => TOOLS.find((t) => t.name === "get_engine_health")!.outputSchema!;
+
+	test.each([
+		["a bare string", "starting"],
+		["a number", 7],
+		["an array", [1, 2]],
+		["null", null],
+		["an object with no status", { uptime: 12 }],
+	])("wraps %s from a 200 body", async (_label, body) => {
+		const client = fakeClient({ health: vi.fn().mockResolvedValue(body) });
+		const res = await dispatchTool("get_engine_health", {}, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(healthSchema().safeParse(res.structuredContent).success).toBe(true);
+		expect(res.structuredContent).toMatchObject({ status: "unknown" });
+		// The body an operator needs is carried, not swallowed.
+		expect(res.structuredContent).toHaveProperty("raw", body ?? null);
+	});
+
+	test("a well-formed health body passes through untouched", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("get_engine_health", {}, ctxWith(client));
+		expect(res.structuredContent).toEqual({ status: "ok", version: "1.2.3" });
+		expect(healthSchema().safeParse(res.structuredContent).success).toBe(true);
+	});
 });
 
 describe("dispatchTool", () => {

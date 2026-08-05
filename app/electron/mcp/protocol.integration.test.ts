@@ -347,9 +347,11 @@ describe("Streamable HTTP host", () => {
 		host?: string;
 		accept?: string;
 		body?: unknown;
+		/** Sent verbatim - the only way to post a body that is not valid JSON. */
+		rawBody?: string;
 	}): Promise<{ status: number; json: unknown }> {
 		return new Promise((resolve) => {
-			const data = opts.body === undefined ? "" : JSON.stringify(opts.body);
+			const data = opts.rawBody ?? (opts.body === undefined ? "" : JSON.stringify(opts.body));
 			const req = http.request(
 				{
 					host: HOST,
@@ -414,6 +416,29 @@ describe("Streamable HTTP host", () => {
 			jsonrpc: "2.0",
 			result: { serverInfo: { name: "vayu" } },
 		});
+	});
+
+	/**
+	 * A client-side payload mistake used to come back as HTTP 500 / -32603
+	 * "Internal error" - the shape of a server that fell over, sending the
+	 * client to check whether Vayu is alive instead of at its own JSON.
+	 */
+	it("answers malformed JSON with 400 / -32700, not a 500", async () => {
+		await start();
+		const res = await request({ rawBody: '{"jsonrpc":"2.0", "id":1,' });
+		expect(res.status).toBe(400);
+		expect(res.json).toMatchObject({
+			jsonrpc: "2.0",
+			error: { code: -32700 },
+		});
+		expect(JSON.stringify(res.json)).not.toMatch(/Internal error/);
+	});
+
+	it("still serves a valid body after a malformed one on the same server", async () => {
+		await start();
+		await request({ rawBody: "not json at all" });
+		const res = await request({ body: initBody });
+		expect(res.status).toBe(200);
 	});
 
 	it("rejects a forged Host header (DNS-rebinding protection)", async () => {

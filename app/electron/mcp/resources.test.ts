@@ -174,3 +174,28 @@ describe("vayu://scripting/completions resource", () => {
 		await expect(scriptingResource().read(ctx)).rejects.toThrow("engine is down");
 	});
 });
+
+/**
+ * The description is what an agent reads before it reads the payload, so it is
+ * the part that can lie. `vayu://runs` serves one page - the reader asks for
+ * `?limit=100` - and a description promising "all runs" talks an agent out of
+ * looking for a baseline the workspace still holds.
+ */
+describe("vayu://runs description", () => {
+	const runsResource = () => {
+		const r = STATIC_RESOURCES.find((s) => s.uri === "vayu://runs");
+		if (!r) throw new Error("runs resource is not registered");
+		return r;
+	};
+
+	test("states the page size and does not promise every run", () => {
+		const description = runsResource().description;
+		expect(description.length).toBeGreaterThan(0);
+		expect(description).toContain("100");
+		expect(description).not.toMatch(/^All runs/);
+	});
+
+	test("points at the pagination fields that carry the real count", () => {
+		expect(runsResource().description).toMatch(/pagination\.total/);
+	});
+});

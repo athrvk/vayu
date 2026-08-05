@@ -34,7 +34,14 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "runs",
 		uri: "vayu://runs",
 		title: "Runs",
-		description: "All runs (single requests and load tests), newest first.",
+		// Says "100" because that is what the reader asks for
+		// (`EngineClient.listRuns`). The content's `pagination.total` / `hasMore`
+		// carry the real count, but an agent reads the description first: a
+		// workspace with more than 100 runs must not have last week's baseline
+		// presented as absent.
+		description:
+			"The most recent 100 runs (single requests and load tests), newest first. " +
+			"Read `pagination.total` / `pagination.hasMore` in the content for the full count.",
 		read: (ctx, signal) => ctx.client.listRuns(signal),
 	},
 	{

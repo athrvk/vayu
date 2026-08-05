@@ -103,7 +103,29 @@ export class McpHttpServer {
 			return;
 		}
 
-		const body = await readJsonBody(req);
+		let body: unknown;
+		try {
+			body = await readJsonBody(req);
+		} catch (err) {
+			// A client-side payload mistake is the client's, not a Vayu crash: the
+			// generic catch in `start()` would answer 500 / -32603 ("Internal
+			// error"), which reads as the server having fallen over. The SDK's own
+			// parse-error path is unreachable here because the body is parsed
+			// before the transport sees it, so the codes are answered directly.
+			const tooLarge = err instanceof BodyTooLargeError;
+			res.writeHead(tooLarge ? 413 : 400, { "Content-Type": "application/json" });
+			res.end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					error: {
+						code: tooLarge ? -32600 : -32700,
+						message: err instanceof Error ? err.message : String(err),
+					},
+					id: null,
+				})
+			);
+			return;
+		}
 
 		const transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: undefined,
@@ -121,6 +143,13 @@ export class McpHttpServer {
 	}
 }
 
+/**
+ * Body exceeded {@link MAX_BODY_BYTES}. Distinguished from a parse failure so
+ * `handle()` can answer 413 rather than 400 - the payload was never read, so
+ * calling it malformed would send the client rewriting valid JSON.
+ */
+class BodyTooLargeError extends Error {}
+
 /** Read and JSON-parse the request body, tolerating an empty body. */
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 	return new Promise((resolve, reject) => {
@@ -129,7 +158,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 		req.on("data", (chunk: Buffer) => {
 			size += chunk.length;
 			if (size > MAX_BODY_BYTES) {
-				reject(new Error("Request body too large"));
+				reject(new BodyTooLargeError(`Request body exceeds ${MAX_BODY_BYTES} bytes.`));
 				req.destroy();
 				return;
 			}
@@ -144,7 +173,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 			try {
 				resolve(JSON.parse(raw));
 			} catch {
-				reject(new Error("Invalid JSON body"));
+				reject(new Error("Parse error: the request body is not valid JSON."));
 			}
 		});
 		req.on("error", reject);

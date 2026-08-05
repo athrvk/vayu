@@ -176,6 +176,25 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 class ToolArgError extends Error {}
 
 /**
+ * A whole number greater than zero, or `fallback` when the caller omitted the
+ * argument.
+ *
+ * Rejects rather than clamps. The values this guards feed `Array.slice(-limit)`,
+ * where a non-positive number does not mean "fewer rows" but *more* than asked
+ * for - `0` returns everything, `-3` returns all but the three oldest - so a
+ * silent repair would hand back a plausible-looking result built on an argument
+ * the caller got wrong.
+ */
+function optionalPositiveInt(args: Record<string, unknown>, key: string, fallback: number): number {
+	const v = args[key];
+	if (v === undefined || v === null) return fallback;
+	if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+		throw new ToolArgError(`"${key}" must be a whole number greater than 0.`);
+	}
+	return v;
+}
+
+/**
  * The request fields an agent stated directly, raw - and *only* the ones it
  * actually supplied, so this can be laid over a saved request by `POST
  * /compose` without a `method: "GET"` default clobbering its stored verb.
@@ -435,6 +454,11 @@ const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();
 
+/** Whether a `GET /health` body can be returned as `structuredContent` as-is. */
+function isEngineHealthShape(value: unknown): value is Record<string, unknown> {
+	return engineHealthSchema.safeParse(value).success;
+}
+
 const smokeResultSchema = z.object({
 	collectionId: z.string(),
 	total: z.number(),
@@ -482,6 +506,56 @@ function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): s
 	});
 }
 
+/**
+ * The direct sub-collections of `collectionId`, by name.
+ *
+ * `GET /requests?collectionId=` returns a collection's *direct* requests only
+ * (the DB filters on `collection_id ==`), while collections nest via `parentId`
+ * - so a smoke run on a parent leaves every descendant folder untested. This
+ * names them so the result can say so.
+ *
+ * Returns `null` when the collection list could not be read: the caller
+ * discloses "could not check" rather than the absence of children, since the
+ * two are not the same claim.
+ */
+async function childCollectionNames(
+	client: EngineClient,
+	collectionId: string,
+	signal?: AbortSignal
+): Promise<string[] | null> {
+	let all: unknown;
+	try {
+		all = await client.listCollections(signal);
+	} catch {
+		return null;
+	}
+	if (!Array.isArray(all)) return null;
+	const names: string[] = [];
+	for (const item of all) {
+		if (!item || typeof item !== "object") continue;
+		const rec = item as Record<string, unknown>;
+		if (rec.parentId === collectionId) names.push(String(rec.name ?? rec.id ?? "unnamed"));
+	}
+	return names;
+}
+
+/** The disclosure `run_collection_smoke` attaches about folders it did not run. */
+function smokeScopeCaveat(children: string[] | null): string {
+	if (children === null) {
+		return (
+			"\n\nNote: could not read the collection list, so any sub-collections could not be " +
+			"checked. This tool runs a collection's direct requests only - requests in nested " +
+			"folders are never included."
+		);
+	}
+	if (children.length === 0) return "";
+	return (
+		`\n\nNote: ${children.length} sub-collection(s) were NOT run - this tool runs a ` +
+		`collection's direct requests only, and the counts above exclude every request nested ` +
+		`inside: ${children.join(", ")}. Call run_collection_smoke on each to cover them.`
+	);
+}
+
 /** Convert a `{key: value}` header map to the engine's KeyValueEntry[] shape. */
 function toKeyValueEntries(
 	headers: unknown
@@ -514,9 +588,17 @@ export const TOOLS: McpTool[] = [
 		handler: async (_args, ctx, signal) => {
 			try {
 				const value = await ctx.client.health(signal);
-				return value && typeof value === "object"
-					? structuredResult(value as Record<string, unknown>)
-					: jsonResult(value);
+				// Anything the outputSchema would reject is wrapped instead of
+				// returned bare. A declared outputSchema makes the SDK reject a
+				// non-error result whose `structuredContent` does not validate (and
+				// one with none at all), and that rejection surfaces as "Tool
+				// get_engine_health has an output schema but no structured content
+				// was provided" - blaming the schema and swallowing the body an
+				// operator needs to see. A mid-restart engine answering 200 with a
+				// bare string or a `status`-less object is exactly when it matters.
+				return isEngineHealthShape(value)
+					? structuredResult(value)
+					: structuredResult({ status: "unknown", raw: value ?? null });
 			} catch (err) {
 				return engineErrorResult(err);
 			}
@@ -891,7 +973,7 @@ export const TOOLS: McpTool[] = [
 		name: "run_collection_smoke",
 		category: "execute",
 		description:
-			"Execute every saved request in a collection once and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		readOnly: false,
 		annotations: {
 			title: "Run collection smoke test",
@@ -917,6 +999,10 @@ export const TOOLS: McpTool[] = [
 				return engineErrorResult(err);
 			}
 			const list = Array.isArray(requests) ? requests : [];
+			// Read before any traffic flows: after the loop this call competes with
+			// a cancellation the run itself may have raised, and the disclosure has
+			// to survive that.
+			const children = await childCollectionNames(ctx.client, collectionId, signal);
 			const results: Array<Record<string, unknown>> = [];
 			let passed = 0;
 			let failed = 0;
@@ -997,14 +1083,17 @@ export const TOOLS: McpTool[] = [
 				}
 			}
 
-			return structuredResult({
-				collectionId,
-				total: list.length,
-				passed,
-				failed,
-				skipped,
-				results,
-			});
+			return withCaveat(
+				structuredResult({
+					collectionId,
+					total: list.length,
+					passed,
+					failed,
+					skipped,
+					results,
+				}),
+				smokeScopeCaveat(children)
+			);
 		},
 	},
 	{
@@ -1234,11 +1323,19 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			runId: z.string().describe("Run ID to sample."),
-			limit: z.number().optional().describe("How many recent ticks to return (default 10)."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("How many recent ticks to return (default 10). Must be 1 or more."),
 		},
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
-			const limit = typeof args.limit === "number" ? args.limit : 10;
+			// Guarded here as well as in the schema: the SDK validates arguments
+			// before dispatch, but the handler is the layer that knows a
+			// non-positive limit reaches `slice(-limit)` and inverts the bound.
+			const limit = optionalPositiveInt(args, "limit", 10);
 			return callEngine(() =>
 				ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal)
 			);
