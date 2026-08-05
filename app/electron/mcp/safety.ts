@@ -113,14 +113,66 @@ export interface LoadRunParams {
 	mode?: string;
 	targetRps?: number;
 	concurrency?: number;
+	startConcurrency?: number;
 	duration?: string | number;
 	rampUpDuration?: string | number;
 	iterations?: number;
 }
 
 /**
- * Enforce the hard load caps (RPS / concurrency / duration). Returns the first
- * violation found, with a message naming the offending value and the ceiling.
+ * Modes the engine recognises (`parse_load_test_type`, `vayu/types.hpp`).
+ * Anything else falls through `LoadStrategy::create`, so the guard mirrors that
+ * fallback rather than trusting the string it was given.
+ */
+const KNOWN_LOAD_MODES = new Set(["constant_rps", "constant_concurrency", "ramp_up", "iterations"]);
+
+/**
+ * What the engine runs when `duration` is absent - `duration_field_ms(config,
+ * "duration", 60000)` in `load_strategy.cpp`. An omitted duration is therefore
+ * not "no duration", and a cap below this one only binds if the field is sent.
+ */
+const ENGINE_DEFAULT_DURATION_SECONDS = 60;
+
+/** What the engine runs when `iterations` is absent (`IterationsLoadStrategy`). */
+const ENGINE_DEFAULT_ITERATIONS = 1000;
+
+/**
+ * Whether the engine will run these params as an iterations run - the one mode
+ * that stops on a request count and never reads `duration`, so no duration cap
+ * can bound it. Mirrors `LoadStrategy::create` (`load_strategy.cpp`): an
+ * unrecognised mode carrying an `iterations` field still lands on that
+ * strategy, so keying on the mode string alone leaves a way past the cap.
+ */
+function isIterationsRun(params: LoadRunParams): boolean {
+	// The engine's own default for an absent `mode`, which is a duration mode.
+	const mode = params.mode ?? "constant_rps";
+	if (mode === "iterations") return true;
+	if (KNOWN_LOAD_MODES.has(mode)) return false;
+	return typeof params.iterations === "number";
+}
+
+/**
+ * The `duration` to send when the caller omitted one, or null when the engine
+ * default is already inside the cap and the payload needs no field. Iterations
+ * runs get null: `duration` is not read in that mode, so injecting it would be
+ * a value written and never read.
+ */
+export function defaultDurationUnderCap(
+	params: LoadRunParams,
+	config: McpSafetyConfig
+): string | null {
+	if (params.duration !== undefined) return null;
+	if (isIterationsRun(params)) return null;
+	if (config.maxDurationSeconds >= ENGINE_DEFAULT_DURATION_SECONDS) return null;
+	return `${config.maxDurationSeconds}s`;
+}
+
+/**
+ * Enforce the hard load caps (RPS / concurrency / duration / iterations).
+ * Returns the first violation found, with a message naming the offending value
+ * and the ceiling. Every field `start_load_run` forwards to the engine that can
+ * grow a run is checked here - a forwarded field this function does not read is
+ * a cap that cannot fire.
  */
 export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): GuardResult {
 	if (typeof params.targetRps === "number" && params.targetRps > config.maxRps) {
@@ -129,11 +181,17 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 			error: `targetRps ${params.targetRps} exceeds the MCP cap of ${config.maxRps}. Lower it or raise the cap in Settings.`,
 		};
 	}
-	if (typeof params.concurrency === "number" && params.concurrency > config.maxConcurrency) {
-		return {
-			ok: false,
-			error: `concurrency ${params.concurrency} exceeds the MCP cap of ${config.maxConcurrency}. Lower it or raise the cap in Settings.`,
-		};
+	// `startConcurrency` rides the same ceiling as `concurrency`: `ramp_up` seeds
+	// the run with it (`RampUpLoadStrategy`, `target_fn(0) = startConcurrency`),
+	// so an uncapped start is an uncapped run however low the target is.
+	for (const field of ["concurrency", "startConcurrency"] as const) {
+		const value = params[field];
+		if (typeof value === "number" && value > config.maxConcurrency) {
+			return {
+				ok: false,
+				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency}. Lower it or raise the cap in Settings.`,
+			};
+		}
 	}
 	// A duration the engine cannot read now fails the run rather than quietly
 	// becoming 60s, so say so here instead of starting a run that dies.
@@ -147,11 +205,36 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 		}
 	}
 	const durationSeconds = parseDurationSeconds(params.duration);
+	// The engine rejects a zero-length run with a 400 (`validate_run_config`),
+	// so name the field here instead of surfacing that error. `rampUpDuration`
+	// is deliberately exempt: zero there is an instant ramp, which the engine
+	// accepts (`ramp_target_concurrency` returns the target for `ramp_ms <= 0`).
+	if (durationSeconds !== null && durationSeconds <= 0) {
+		return {
+			ok: false,
+			error: `duration ${JSON.stringify(params.duration)} must be greater than zero - the engine refuses a run with no time to run in.`,
+		};
+	}
 	if (durationSeconds !== null && durationSeconds > config.maxDurationSeconds) {
 		return {
 			ok: false,
 			error: `duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it or raise the cap in Settings.`,
 		};
+	}
+	if (isIterationsRun(params)) {
+		const iterations = params.iterations ?? ENGINE_DEFAULT_ITERATIONS;
+		if (!Number.isFinite(iterations) || iterations <= 0) {
+			return {
+				ok: false,
+				error: `iterations ${JSON.stringify(params.iterations)} must be a positive whole number of requests.`,
+			};
+		}
+		if (iterations > config.maxIterations) {
+			return {
+				ok: false,
+				error: `iterations ${iterations} exceeds the MCP cap of ${config.maxIterations}. An iterations run stops on request count rather than time, so the duration cap cannot bound it - lower iterations, use a duration-bounded mode, or raise the cap in Settings.`,
+			};
+		}
 	}
 	return OK;
 }

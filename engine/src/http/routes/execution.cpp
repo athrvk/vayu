@@ -587,6 +587,10 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         "Each retained exemplar holds a captured exchange." },
         { "concurrency", 1, limits::MAX_CONCURRENCY,
         "Connections are pre-allocated per worker before any traffic flows." },
+        { "startConcurrency", 1, limits::MAX_CONCURRENCY,
+        "A ramp is seeded with this many in-flight requests before the first "
+        "duration check, and it is read as a size_t, so a negative start is "
+        "~1.8e19 of them." },
         { "timeout", 1, 86400000,
         "A transfer with no timeout never completes, so the run can never "
         "reach "

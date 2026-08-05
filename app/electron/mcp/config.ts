@@ -32,10 +32,19 @@ export interface McpSafetyConfig {
 	allowAll: boolean;
 	/** Hard ceiling on `targetRps` for `start_load_run` (constant_rps mode). */
 	maxRps: number;
-	/** Hard ceiling on `concurrency` for closed-loop load modes. */
+	/**
+	 * Hard ceiling on `concurrency` for closed-loop load modes, and on the
+	 * `startConcurrency` a ramp is seeded with.
+	 */
 	maxConcurrency: number;
 	/** Hard ceiling on a load run's duration, in seconds. */
 	maxDurationSeconds: number;
+	/**
+	 * Hard ceiling on `iterations` for an iterations-mode run. Its own cap
+	 * because that mode stops on a request count and never reads `duration`, so
+	 * `maxDurationSeconds` cannot bound it - see `checkLoadCaps`.
+	 */
+	maxIterations: number;
 	/**
 	 * Gates data-mutating tools (`create_request`, `update_environment`,
 	 * `update_engine_config`). When false (default), those tools refuse. It does
@@ -62,6 +71,10 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	maxRps: 1000,
 	maxConcurrency: 200,
 	maxDurationSeconds: 300,
+	// Ten times the engine's own default of 1000 iterations: an ordinary run an
+	// agent sizes for itself passes, and one that mistook the field for
+	// "unlimited" does not.
+	maxIterations: 10000,
 	allowWrites: false,
 	disabledTools: [],
 };
@@ -114,6 +127,9 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 	}
 	if (isFiniteNumber(input.maxDurationSeconds) && input.maxDurationSeconds > 0) {
 		out.maxDurationSeconds = Math.floor(input.maxDurationSeconds);
+	}
+	if (isFiniteNumber(input.maxIterations) && input.maxIterations > 0) {
+		out.maxIterations = Math.floor(input.maxIterations);
 	}
 	if (typeof input.allowAll === "boolean") {
 		out.allowAll = input.allowAll;

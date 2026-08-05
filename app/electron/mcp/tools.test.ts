@@ -727,6 +727,93 @@ describe("dispatchTool", () => {
 		expect(client.startRun).toHaveBeenCalledTimes(1);
 	});
 
+	// --- Load caps reach every field the run is actually built from (#312) ---
+
+	test("start_load_run refuses a startConcurrency over the cap", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				mode: "ramp_up",
+				concurrency: 10,
+				startConcurrency: 900,
+				duration: "30s",
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"], maxConcurrency: 200 })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/startConcurrency 900 exceeds/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run refuses an unbounded iterations run", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				mode: "iterations",
+				iterations: 1_000_000_000,
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"], maxIterations: 10000 })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/iterations 1000000000 exceeds the MCP cap of 10000/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("the schema refuses load counts the engine reads as enormous", () => {
+		// `-1` is the natural "unlimited" guess and casts to ~1.8e19 engine-side,
+		// where it is a request count and a ramp seed, not an error.
+		for (const field of ["startConcurrency", "iterations"]) {
+			expect(() =>
+				parseArgs("start_load_run", { url: "https://api.example.com", [field]: -1 })
+			).toThrow();
+			expect(() =>
+				parseArgs("start_load_run", { url: "https://api.example.com", [field]: 0 })
+			).toThrow();
+			expect(() =>
+				parseArgs("start_load_run", { url: "https://api.example.com", [field]: 2.5 })
+			).toThrow();
+		}
+	});
+
+	test("start_load_run sends an explicit duration when the cap is under the engine default", async () => {
+		// An omitted duration is 60s engine-side, so a 30s cap that says nothing
+		// gets a 60s run.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				concurrency: 10,
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"], maxDurationSeconds: 30 })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.duration).toBe("30s");
+	});
+
+	test("start_load_run leaves the duration alone when the cap is above the engine default", async () => {
+		const client = fakeClient();
+		await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				concurrency: 10,
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"], maxDurationSeconds: 300 })
+		);
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.duration).toBeUndefined();
+	});
+
 	test("start_load_run forwards an agent-supplied httpVersion", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(

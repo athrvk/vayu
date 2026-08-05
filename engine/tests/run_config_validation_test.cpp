@@ -144,6 +144,26 @@ TEST (RunConfigValidation, ConcurrencyBoundsAreInclusive) {
     expect_rejected (config, "concurrency");
 }
 
+// `startConcurrency` seeds the ramp before the first duration check, and the
+// MCP cap could not see it at all until it was checked here too.
+TEST (RunConfigValidation, NegativeStartConcurrencyIsRejected) {
+    auto config                = valid_config ();
+    config["mode"]             = "ramp_up";
+    config["startConcurrency"] = -1;
+    expect_rejected (config, "startConcurrency");
+}
+
+TEST (RunConfigValidation, StartConcurrencyBoundsAreInclusive) {
+    auto config                = valid_config ();
+    config["mode"]             = "ramp_up";
+    config["startConcurrency"] = 1;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["startConcurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["startConcurrency"] = vayu::core::constants::run_config::MAX_CONCURRENCY + 1;
+    expect_rejected (config, "startConcurrency");
+}
+
 // --- 3. Timeout: <= 0 left transfers that never expire ---------------------
 
 TEST (RunConfigValidation, ZeroTimeoutIsRejected) {

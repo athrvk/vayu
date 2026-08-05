@@ -931,6 +931,11 @@ export interface McpSafetyConfig {
 	maxConcurrency: number;
 	/** Hard ceiling on a load run's duration, in seconds. */
 	maxDurationSeconds: number;
+	/**
+	 * Hard ceiling on `iterations` for an iterations-mode run, which stops on a
+	 * request count and so cannot be bounded by `maxDurationSeconds`.
+	 */
+	maxIterations: number;
 	/** When false (default), collection/environment write tools are disabled. */
 	allowWrites: boolean;
 	/** Tool names the user has switched off (omitted from tools/list + rejected). */

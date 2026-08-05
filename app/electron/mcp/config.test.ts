@@ -57,6 +57,8 @@ describe("sanitizeSafetyInput", () => {
 		expect(
 			sanitizeSafetyInput({ maxDurationSeconds: Number.NaN }).maxDurationSeconds
 		).toBeUndefined();
+		expect(sanitizeSafetyInput({ maxIterations: 5000.7 }).maxIterations).toBe(5000);
+		expect(sanitizeSafetyInput({ maxIterations: 0 }).maxIterations).toBeUndefined();
 	});
 
 	it("keeps allowWrites only when it is a boolean", () => {

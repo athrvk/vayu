@@ -6,7 +6,13 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { extractHost, checkAllowlist, parseDurationSeconds, checkLoadCaps } from "./safety.js";
+import {
+	extractHost,
+	checkAllowlist,
+	parseDurationSeconds,
+	checkLoadCaps,
+	defaultDurationUnderCap,
+} from "./safety.js";
 import { DEFAULT_MCP_SAFETY_CONFIG, resolveSafetyConfig } from "./config.js";
 
 describe("extractHost", () => {
@@ -114,5 +120,95 @@ describe("checkLoadCaps", () => {
 	test("accepts a readable rampUpDuration and an absent duration", () => {
 		expect(checkLoadCaps({ rampUpDuration: "500ms" }, config).ok).toBe(true);
 		expect(checkLoadCaps({ concurrency: 10 }, config).ok).toBe(true);
+	});
+
+	// A ramp is seeded with `startConcurrency` before its first duration check,
+	// so a cap that reads only `concurrency` bounds the value the run ends at
+	// and not the one it starts with.
+	test("rejects a startConcurrency above the concurrency cap", () => {
+		const res = checkLoadCaps(
+			{ mode: "ramp_up", concurrency: 10, startConcurrency: 5000 },
+			config
+		);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/startConcurrency 5000 exceeds the MCP cap of 200/);
+	});
+	test("accepts a startConcurrency at the cap", () => {
+		expect(
+			checkLoadCaps({ mode: "ramp_up", concurrency: 200, startConcurrency: 200 }, config).ok
+		).toBe(true);
+	});
+
+	// An iterations run stops on a request count and never reads `duration`, so
+	// `maxDurationSeconds` cannot bound it and `maxIterations` is what does.
+	test("rejects an iterations run above the iterations cap", () => {
+		const res = checkLoadCaps({ mode: "iterations", iterations: 1_000_000_000 }, config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/iterations 1000000000 exceeds the MCP cap of 10000/);
+	});
+	test("accepts an iterations run at the cap", () => {
+		expect(checkLoadCaps({ mode: "iterations", iterations: 10_000 }, config).ok).toBe(true);
+	});
+	test("compares an omitted count against the engine's own default of 1000", () => {
+		// An absent `iterations` is not "no iterations" - the engine runs 1000 -
+		// so a cap under that has to refuse the run rather than wave it through.
+		const tight = resolveSafetyConfig({ maxIterations: 500 });
+		const res = checkLoadCaps({ mode: "iterations" }, tight);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/iterations 1000 exceeds the MCP cap of 500/);
+		expect(checkLoadCaps({ mode: "iterations" }, config).ok).toBe(true);
+	});
+	test("rejects a non-positive iterations count", () => {
+		const res = checkLoadCaps({ mode: "iterations", iterations: -1 }, config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/must be a positive whole number/);
+	});
+	test("an unrecognised mode carrying iterations is still bounded", () => {
+		// `LoadStrategy::create` falls through to the iterations strategy for a
+		// mode it cannot parse when the config has an `iterations` field, so a
+		// guard keying on the mode string alone would wave this past.
+		const res = checkLoadCaps({ mode: "burst", iterations: 1_000_000_000 }, config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/exceeds the MCP cap of 10000/);
+	});
+	test("a duration-mode run is not held to the iterations cap", () => {
+		expect(
+			checkLoadCaps(
+				{ mode: "constant_rps", iterations: 1_000_000_000, duration: "30s" },
+				config
+			).ok
+		).toBe(true);
+	});
+
+	// The engine 400s a zero-length run, so the tool names the field instead of
+	// starting a run that dies on arrival.
+	test("rejects a zero duration", () => {
+		const res = checkLoadCaps({ duration: "0s" }, config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/must be greater than zero/);
+	});
+	test("still accepts a zero rampUpDuration (an instant ramp the engine allows)", () => {
+		expect(
+			checkLoadCaps({ mode: "ramp_up", rampUpDuration: "0s", duration: "30s" }, config).ok
+		).toBe(true);
+	});
+});
+
+describe("defaultDurationUnderCap", () => {
+	test("supplies the cap when the run would otherwise take the engine's 60s default", () => {
+		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
+		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, config)).toBe("30s");
+	});
+	test("supplies nothing when the engine default is already inside the cap", () => {
+		const config = resolveSafetyConfig({ maxDurationSeconds: 300 });
+		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, config)).toBeNull();
+	});
+	test("supplies nothing when the caller gave a duration", () => {
+		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
+		expect(defaultDurationUnderCap({ duration: "10s" }, config)).toBeNull();
+	});
+	test("supplies nothing for an iterations run, which never reads duration", () => {
+		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
+		expect(defaultDurationUnderCap({ mode: "iterations", iterations: 10 }, config)).toBeNull();
 	});
 });
