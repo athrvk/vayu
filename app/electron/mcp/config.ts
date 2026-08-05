@@ -17,10 +17,12 @@
 export interface McpSafetyConfig {
 	/**
 	 * Hosts an agent is permitted to send traffic to (hostnames, no scheme or
-	 * port), e.g. `["api.example.com", "localhost"]`. **Empty by default** - an
-	 * empty allowlist denies all outbound requests, so a fresh install cannot be
-	 * used to hit arbitrary targets. The agent receives an actionable error and
-	 * asks the user to add the host.
+	 * port), e.g. `["api.example.com", "localhost"]`. An IPv6 target is stored in
+	 * the bracketed form `URL.hostname` produces, e.g. `["[::1]"]` - see
+	 * `normalizeHost`. **Empty by default** - an empty allowlist denies all
+	 * outbound requests, so a fresh install cannot be used to hit arbitrary
+	 * targets. The agent receives an actionable error and asks the user to add
+	 * the host.
 	 */
 	allowlist: string[];
 	/**
@@ -85,16 +87,59 @@ export function resolveSafetyConfig(override?: Partial<McpSafetyConfig>): McpSaf
 }
 
 /**
+ * Whether `host` (scheme, path and query already stripped) is meant as an IPv6
+ * literal rather than a name with a port: either it is bracketed, or it is bare
+ * with more than one colon, which no `name:port` can be.
+ */
+function isIpv6Candidate(host: string): boolean {
+	return host.startsWith("[") || (host.match(/:/g)?.length ?? 0) > 1;
+}
+
+/**
+ * The bracketed IPv6 literal `host` denotes, canonicalized the way WHATWG
+ * `URL.hostname` serializes it (`[0:0:0:0:0:0:0:1]` → `[::1]`) - which is what
+ * `extractHost` compares against, so a stored entry has to be in that exact
+ * form to ever match. `""` for anything unparseable, which the sanitizer's
+ * empty filter then drops rather than persisting garbage.
+ */
+function normalizeIpv6(host: string): string {
+	let literal = host;
+	if (literal.startsWith("[")) {
+		const close = literal.indexOf("]");
+		if (close === -1) return "";
+		// Only a port may follow the literal; anything else is malformed input.
+		const trailing = literal.slice(close + 1);
+		if (trailing !== "" && !/^:\d*$/.test(trailing)) return "";
+		literal = literal.slice(0, close + 1);
+	} else {
+		// A bare address is the whole input: RFC 3986 has no unbracketed form
+		// that could carry a port, so there is nothing here to strip.
+		literal = `[${host}]`;
+	}
+	try {
+		return new URL(`http://${literal}`).hostname;
+	} catch {
+		return "";
+	}
+}
+
+/**
  * Reduce a user-entered value to a bare hostname: strip scheme, path, query,
  * and port, then lowercase. `"https://api.example.com:8080/v1"` → `"api.example.com"`.
  * Matches the exact-hostname comparison the allowlist guard performs, so what the
  * user types in Settings lines up with what an agent's request URL resolves to.
+ *
+ * An IPv6 target normalizes to its **bracketed** canonical form (`"::1"`,
+ * `"[::1]:9876"` and `"http://[::1]:8080"` all → `"[::1]"`), because that is how
+ * `URL.hostname` serializes it on the guard's side. Stripping the port by the
+ * first colon would leave `""` or `"["` and no such entry could ever match.
  */
 export function normalizeHost(raw: string): string {
 	let host = raw.trim().toLowerCase();
 	if (host === "") return "";
 	host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme://
 	host = host.split("/")[0].split("?")[0]; // path / query
+	if (isIpv6Candidate(host)) return normalizeIpv6(host);
 	host = host.split(":")[0]; // port
 	return host.trim();
 }

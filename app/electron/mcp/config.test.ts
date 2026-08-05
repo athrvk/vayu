@@ -35,6 +35,23 @@ describe("normalizeHost", () => {
 	it("returns empty string for empty input", () => {
 		expect(normalizeHost("   ")).toBe("");
 	});
+
+	// Splitting the port off at the first colon reduced these to "" or "[", so no
+	// stored entry could contain a colon and no IPv6 host could ever match.
+	it.each(["::1", "[::1]", "[::1]:9876", "http://[::1]:8080", "[0:0:0:0:0:0:0:1]"])(
+		"normalizes the IPv6 target %s to the canonical bracketed form",
+		(raw) => {
+			expect(normalizeHost(raw)).toBe("[::1]");
+		}
+	);
+
+	it("canonicalizes a bare IPv6 address the way URL.hostname does", () => {
+		expect(normalizeHost("2001:DB8::1")).toBe("[2001:db8::1]");
+	});
+
+	it.each(["[", "[]", "[::1]junk", ":::"])("drops the malformed bracket form %s", (raw) => {
+		expect(normalizeHost(raw)).toBe("");
+	});
 });
 
 describe("sanitizeSafetyInput", () => {
@@ -43,6 +60,13 @@ describe("sanitizeSafetyInput", () => {
 			allowlist: ["https://api.example.com/x", "API.EXAMPLE.COM", "  ", "localhost:9876"],
 		});
 		expect(out.allowlist).toEqual(["api.example.com", "localhost"]);
+	});
+
+	it("keeps an IPv6 host through the sanitizer every allowlist edit passes", () => {
+		const out = sanitizeSafetyInput({
+			allowlist: ["::1", "[::1]:9876", "[", "localhost:9876"],
+		});
+		expect(out.allowlist).toEqual(["[::1]", "localhost"]);
 	});
 
 	it("drops non-string allowlist entries", () => {
