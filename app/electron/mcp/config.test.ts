@@ -7,11 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import {
+	buildSafetyConfigFromEnv,
 	DEFAULT_MCP_SAFETY_CONFIG,
 	normalizeHost,
 	resolveSafetyConfig,
 	sanitizeSafetyInput,
 } from "./config.js";
+import { checkAllowlist, checkLoadCaps } from "./safety.js";
 
 describe("normalizeHost", () => {
 	it("strips scheme, port, path, and query and lowercases", () => {
@@ -96,5 +98,105 @@ describe("sanitizeSafetyInput", () => {
 	it("round-trips cleanly through resolveSafetyConfig onto defaults", () => {
 		const resolved = resolveSafetyConfig(sanitizeSafetyInput({ allowlist: ["a.com"] }));
 		expect(resolved).toEqual({ ...DEFAULT_MCP_SAFETY_CONFIG, allowlist: ["a.com"] });
+	});
+});
+
+/*
+ * The seam the stdio CLI (`cli.ts`) builds its config from. These assert the
+ * guards downstream of it - a cap that still refuses, a host that still matches
+ * - because a `NaN` cap is not visibly wrong in the config object; it is only
+ * wrong at the `x > NaN` comparison inside `checkLoadCaps`.
+ */
+describe("buildSafetyConfigFromEnv", () => {
+	it("falls back to the default cap when a cap variable is not a number", () => {
+		const { config } = buildSafetyConfigFromEnv({ VAYU_MCP_MAX_RPS: "1,000" });
+
+		expect(config.maxRps).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxRps);
+		expect(Number.isNaN(config.maxRps)).toBe(false);
+		// The cap has to still fire - an unsanitized NaN would let this through.
+		expect(checkLoadCaps({ targetRps: 50000 }, config).ok).toBe(false);
+	});
+
+	it("falls back for every cap variable, not just RPS", () => {
+		const { config } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_CONCURRENCY: "500rps",
+			VAYU_MCP_MAX_DURATION_SECONDS: "unset",
+		});
+
+		expect(config.maxConcurrency).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxConcurrency);
+		expect(config.maxDurationSeconds).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxDurationSeconds);
+		expect(checkLoadCaps({ concurrency: 10000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ duration: "24h" }, config).ok).toBe(false);
+	});
+
+	it("rejects a non-positive cap the same way the Settings path does", () => {
+		const { config } = buildSafetyConfigFromEnv({ VAYU_MCP_MAX_RPS: "0" });
+
+		expect(config.maxRps).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxRps);
+	});
+
+	it("normalizes allowlist entries carrying a scheme or a port", () => {
+		const { config } = buildSafetyConfigFromEnv({
+			VAYU_MCP_ALLOWLIST: "https://api.example.com, localhost:9876 , API.EXAMPLE.COM",
+		});
+
+		expect(config.allowlist).toEqual(["api.example.com", "localhost"]);
+		expect(checkAllowlist("https://api.example.com/users", config).ok).toBe(true);
+		expect(checkAllowlist("http://localhost:9876/health", config).ok).toBe(true);
+	});
+
+	it("names each ignored variable, its raw value, and the default that applied", () => {
+		const { ignored } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_RPS: "1,000",
+			VAYU_MCP_MAX_CONCURRENCY: "200",
+		});
+
+		expect(ignored).toEqual([
+			{
+				variable: "VAYU_MCP_MAX_RPS",
+				value: "1,000",
+				fallback: DEFAULT_MCP_SAFETY_CONFIG.maxRps,
+			},
+		]);
+	});
+
+	it("reports nothing when every variable is well-formed", () => {
+		const { config, ignored } = buildSafetyConfigFromEnv({
+			VAYU_MCP_ALLOWLIST: "api.example.com",
+			VAYU_MCP_MAX_RPS: "50",
+			VAYU_MCP_MAX_CONCURRENCY: "10",
+			VAYU_MCP_MAX_DURATION_SECONDS: "30",
+			VAYU_MCP_ALLOW_ALL: "true",
+			VAYU_MCP_ALLOW_WRITES: "true",
+			VAYU_MCP_DISABLED_TOOLS: "run_request, stop_run",
+		});
+
+		expect(ignored).toEqual([]);
+		expect(config).toEqual({
+			allowlist: ["api.example.com"],
+			allowAll: true,
+			maxRps: 50,
+			maxConcurrency: 10,
+			maxDurationSeconds: 30,
+			allowWrites: true,
+			disabledTools: ["run_request", "stop_run"],
+		});
+	});
+
+	it("returns the safe defaults for an empty environment", () => {
+		const { config, ignored } = buildSafetyConfigFromEnv({});
+
+		expect(config).toEqual(DEFAULT_MCP_SAFETY_CONFIG);
+		expect(ignored).toEqual([]);
+	});
+
+	it('leaves the opt-in booleans off for any value other than "true"', () => {
+		const { config } = buildSafetyConfigFromEnv({
+			VAYU_MCP_ALLOW_ALL: "1",
+			VAYU_MCP_ALLOW_WRITES: "yes",
+		});
+
+		expect(config.allowAll).toBe(false);
+		expect(config.allowWrites).toBe(false);
 	});
 });
