@@ -118,15 +118,30 @@ describe("buildSafetyConfigFromEnv", () => {
 	});
 
 	it("falls back for every cap variable, not just RPS", () => {
-		const { config } = buildSafetyConfigFromEnv({
+		const { config, ignored } = buildSafetyConfigFromEnv({
 			VAYU_MCP_MAX_CONCURRENCY: "500rps",
 			VAYU_MCP_MAX_DURATION_SECONDS: "unset",
+			VAYU_MCP_MAX_ITERATIONS: "1e6 requests",
 		});
 
 		expect(config.maxConcurrency).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxConcurrency);
 		expect(config.maxDurationSeconds).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxDurationSeconds);
+		expect(config.maxIterations).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxIterations);
 		expect(checkLoadCaps({ concurrency: 10000 }, config).ok).toBe(false);
 		expect(checkLoadCaps({ duration: "24h" }, config).ok).toBe(false);
+		// The iterations cap is the one a malformed value must not silently
+		// disable: that mode stops on a request count, so no other cap bounds it.
+		expect(checkLoadCaps({ mode: "iterations", iterations: 1_000_000 }, config).ok).toBe(false);
+		expect(ignored.map((i) => i.variable)).toContain("VAYU_MCP_MAX_ITERATIONS");
+	});
+
+	it("reads the iterations cap from the environment", () => {
+		const { config, ignored } = buildSafetyConfigFromEnv({ VAYU_MCP_MAX_ITERATIONS: "250" });
+
+		expect(ignored).toEqual([]);
+		expect(config.maxIterations).toBe(250);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 251 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 250 }, config).ok).toBe(true);
 	});
 
 	it("rejects a non-positive cap the same way the Settings path does", () => {
@@ -166,18 +181,23 @@ describe("buildSafetyConfigFromEnv", () => {
 			VAYU_MCP_MAX_RPS: "50",
 			VAYU_MCP_MAX_CONCURRENCY: "10",
 			VAYU_MCP_MAX_DURATION_SECONDS: "30",
+			VAYU_MCP_MAX_ITERATIONS: "500",
 			VAYU_MCP_ALLOW_ALL: "true",
 			VAYU_MCP_ALLOW_WRITES: "true",
 			VAYU_MCP_DISABLED_TOOLS: "run_request, stop_run",
 		});
 
 		expect(ignored).toEqual([]);
+		// Exhaustive on purpose: a field added to McpSafetyConfig without an env
+		// var lands here as an unexpected key. That is how the missing
+		// VAYU_MCP_MAX_ITERATIONS was caught.
 		expect(config).toEqual({
 			allowlist: ["api.example.com"],
 			allowAll: true,
 			maxRps: 50,
 			maxConcurrency: 10,
 			maxDurationSeconds: 30,
+			maxIterations: 500,
 			allowWrites: true,
 			disabledTools: ["run_request", "stop_run"],
 		});

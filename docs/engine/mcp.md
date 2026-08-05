@@ -507,6 +507,7 @@ from environment variables:
 | `VAYU_MCP_MAX_RPS`              | `1000`                  | RPS cap.                               |
 | `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Concurrency cap.                       |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
+| `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 

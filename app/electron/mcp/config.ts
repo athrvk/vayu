@@ -158,6 +158,7 @@ const SAFETY_ENV_VARS = {
 	maxRps: "VAYU_MCP_MAX_RPS",
 	maxConcurrency: "VAYU_MCP_MAX_CONCURRENCY",
 	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
+	maxIterations: "VAYU_MCP_MAX_ITERATIONS",
 	allowWrites: "VAYU_MCP_ALLOW_WRITES",
 	disabledTools: "VAYU_MCP_DISABLED_TOOLS",
 } as const satisfies Record<keyof McpSafetyConfig, string>;
@@ -189,6 +190,7 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
 	if (env.VAYU_MCP_MAX_CONCURRENCY) cfg.maxConcurrency = Number(env.VAYU_MCP_MAX_CONCURRENCY);
 	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
+	if (env.VAYU_MCP_MAX_ITERATIONS) cfg.maxIterations = Number(env.VAYU_MCP_MAX_ITERATIONS);
 	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
 	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
 	if (env.VAYU_MCP_DISABLED_TOOLS) {
