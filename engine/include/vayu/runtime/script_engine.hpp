@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::runtime {
@@ -128,6 +129,29 @@ struct ScriptContext {
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;
+
+    /**
+     * @brief The jar `pm.cookies` reads and `pm.sendRequest` sends through,
+     *        or null where there is no jar (issue #301).
+     *
+     * Null is not "an empty jar": a load run's test scripts have no jar at all
+     * (see cookie_jar.hpp for why the load path stays out of it), and so does
+     * a context built by hand. `pm.cookies` throws a sentence saying so rather
+     * than answering `undefined` for every name - a binding that cannot fail
+     * is worse than a missing one, and "the cookie you set is not here" is
+     * exactly the answer that would send someone hunting the wrong bug.
+     *
+     * `pm.sendRequest` **shares** it, deliberately: the flow the jar exists
+     * for is "log in with sendRequest in a pre-request script, then let the
+     * real request carry the session", which an isolated auxiliary jar would
+     * break. A cookie the auxiliary request collects is therefore visible to
+     * the main one, and to the next request in the same environment.
+     */
+    vayu::http::CookieJar* cookie_jar = nullptr;
+
+    /// Which jar - the environment id, or `NO_ENVIRONMENT_SCOPE`. Read only
+    /// when `cookie_jar` is set.
+    std::string cookie_scope{ vayu::http::NO_ENVIRONMENT_SCOPE };
 
     /**
      * @brief Expose @p req to the script as a mutable `pm.request`.

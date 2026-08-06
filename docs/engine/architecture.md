@@ -186,6 +186,34 @@ MSVC) - two interpreters behind one `pm.*` surface, so an engine-level
 behaviour difference was a Windows-vs-Unix script divergence. The original
 copy is deleted.
 
+### Cookie Jar
+
+`http::CookieJar` (`include/vayu/http/cookie_jar.hpp`), owned by `http::Server`
+and reached by route handlers through `RouteContext::cookie_jar`. It is what
+makes a session survive from one design-mode request to the next.
+
+- **Scope: one jar per environment**, plus one for requests sent with no
+  environment selected. The environment is the axis that separates staging from
+  production, and cookies ignore port and scheme - so two local services on
+  different ports would otherwise share a session cookie.
+- **Lifetime: the process.** In memory only; a stored jar is credential-grade
+  material and would need the treatment auth tokens already have rather than a
+  new path beside the request store. `GET /cookies` shows it, `DELETE /cookies`
+  empties it, and the app surfaces both in Settings → General → Cookies.
+- **Storage: libcurl's own lines.** The jar holds what `CURLINFO_COOKIELIST`
+  exports and hands it back through `CURLOPT_COOKIELIST`, so domain matching,
+  path matching, `Secure` and expiry stay inside libcurl's cookie engine. The
+  parser and matcher in `cookie_jar.cpp` serve only the two *read* views
+  (`pm.cookies`, `GET /cookies`), which need an answer without a transfer.
+- **Not on the load path.** `EventLoop` never touches it: a shared jar across
+  workers is either a lock on the hot path or per-worker jars that do not
+  actually share, and a load run repeats a single request anyway.
+- **Threading:** one mutex around the scope map; every accessor copies out, so
+  no reference into the storage escapes to a caller.
+
+`pm.sendRequest` shares the jar of the execute it runs inside, so a pre-request
+script can log in and leave the session where the real request will find it.
+
 ### Auth Resolution & OAuth 2.0
 
 The engine resolves request auth server-side - the persisted `auth` object is
@@ -315,7 +343,8 @@ Both passes are best-effort: a failure is logged and never blocks startup.
    headers, body - are written back into the request, so they override the auth
    resolved in step 2
    ↓
-5. Send HTTP request via libcurl
+5. Send HTTP request via libcurl, through the environment's cookie jar - stored
+   cookies go out, Set-Cookie comes back in (see Cookie Jar below)
    ↓
 6. Execute test script (if provided)
    ↓

@@ -111,6 +111,11 @@ struct ContextData {
      * script's budget.
      */
     int send_request_count = 0;
+
+    /// What `pm.cookies` reads and `pm.sendRequest` sends through - see
+    /// `ScriptContext::cookie_jar`, which owns the rationale.
+    vayu::http::CookieJar* cookie_jar = nullptr;
+    std::string cookie_scope{ vayu::http::NO_ENVIRONMENT_SCOPE };
 };
 
 // Get context data from JS context
@@ -4024,7 +4029,13 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // otherwise a loop against a refusing host would never reach the cap.
     data->send_request_count++;
 
-    vayu::http::Client client;
+    // Shares the enclosing execute's jar - see ScriptContext::cookie_jar for
+    // why sharing rather than isolating is the right default. Null jar (a load
+    // run) leaves the client cookie-less, which is what it was before #301.
+    vayu::http::ClientConfig client_config;
+    client_config.cookie_jar   = data->cookie_jar;
+    client_config.cookie_scope = data->cookie_scope;
+    vayu::http::Client client (client_config);
     auto sent = client.send (request);
 
     JSValue err = JS_NULL;
@@ -4050,6 +4061,113 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     JS_FreeValue (ctx, ret);
 
     return JS_UNDEFINED;
+}
+
+// ============================================================================
+// pm.cookies - the jar, matched against the current request's URL
+// ============================================================================
+
+// The jar's cookies that would be sent to the request this script belongs to.
+// Returns nullopt having thrown: either there is no jar here (a load run, a
+// hand-built context - see ScriptContext::cookie_jar) or there is no request
+// to match against, and both deserve a sentence rather than an empty answer.
+std::optional<std::vector<vayu::http::JarCookie>>
+jar_cookies_from_context (JSContext* ctx, const char* member) {
+    auto* data = get_context_data (ctx);
+    if (!data || !data->request) {
+        JS_ThrowInternalError (ctx, "No request available");
+        return std::nullopt;
+    }
+    if (!data->cookie_jar) {
+        JS_ThrowPlainError (ctx,
+        "pm.cookies.%s is not available here: the cookie jar is a design-mode "
+        "feature, and a load run's scripts have no jar to read. Use "
+        "pm.response.cookies for the Set-Cookie of the response in hand. See "
+        "docs/engine/scripting.md.",
+        member);
+        return std::nullopt;
+    }
+    return data->cookie_jar->matching (data->cookie_scope, data->request->url);
+}
+
+// Which cookie answers for a name when the jar holds it more than once - the
+// same name on `/` and on `/admin`, say. RFC 6265 §5.4 orders the request's
+// Cookie header by descending path length, so the longest matching path is the
+// one a server reads as *the* value, and it is the one to report. The jar's
+// own order cannot decide this: it is libcurl's internal order, not wire order.
+const vayu::http::JarCookie*
+find_jar_cookie (const std::vector<vayu::http::JarCookie>& cookies, const std::string& name) {
+    const vayu::http::JarCookie* best = nullptr;
+    for (const auto& cookie : cookies) {
+        if (cookie.name != name) {
+            continue;
+        }
+        if (!best || cookie.path.size () >= best->path.size ()) {
+            best = &cookie;
+        }
+    }
+    return best;
+}
+
+JSValue js_jar_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto name = read_cookie_name_arg (ctx, "get", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto cookies = jar_cookies_from_context (ctx, "get");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    const auto* cookie = find_jar_cookie (*cookies, *name);
+    // undefined for an absent cookie, exactly as pm.response.cookies.get does.
+    return cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED;
+}
+
+JSValue js_jar_cookies_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto name = read_cookie_name_arg (ctx, "has", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto cookies = jar_cookies_from_context (ctx, "has");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewBool (ctx, find_jar_cookie (*cookies, *name) != nullptr);
+}
+
+JSValue
+js_jar_cookies_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto cookies = jar_cookies_from_context (ctx, "toObject");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    JSValue obj = JS_NewObject (ctx);
+    // Through find_jar_cookie rather than by assigning as we go, so a name the
+    // jar holds twice reads the same here as through get().
+    for (const auto& cookie : *cookies) {
+        const auto* chosen = find_jar_cookie (*cookies, cookie.name);
+        JS_SetPropertyStr (ctx, obj, cookie.name.c_str (),
+        JS_NewString (ctx, chosen->value.c_str ()));
+    }
+    return obj;
+}
+
+// pm.cookies - always bound, like pm.sendRequest, so a script that reaches for
+// it where there is no jar is told why instead of meeting "not a function".
+void setup_pm_cookies (JSContext* ctx, JSValue pm) {
+    JSValue cookies = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, cookies, "get",
+    JS_NewCFunction (ctx, js_jar_cookies_get, "get", 1));
+    JS_SetPropertyStr (ctx, cookies, "has",
+    JS_NewCFunction (ctx, js_jar_cookies_has, "has", 1));
+    JS_SetPropertyStr (ctx, cookies, "toObject",
+    JS_NewCFunction (ctx, js_jar_cookies_to_object, "toObject", 0));
+    JS_SetPropertyStr (ctx, pm, "cookies", cookies);
 }
 
 void setup_pm_object (JSContext* ctx) {
@@ -4090,6 +4208,11 @@ void setup_pm_object (JSContext* ctx) {
 
     // pm.crypto
     setup_pm_crypto (ctx, pm);
+
+    // pm.cookies - the jar (issue #301). Read-only for now: the write half
+    // (`set`/`unset`/`clear`) mutates a jar in-flight transfers are reading,
+    // which needs its own design.
+    setup_pm_cookies (ctx, pm);
 
     // pm.sendRequest - always bound, even when the capability is off, so a
     // script that calls it gets a sentence explaining why rather than
@@ -4244,6 +4367,8 @@ class ScriptEngine::Impl {
         // through a pooled context.
         ctx_data.allow_send_request = config.allow_send_request;
         ctx_data.send_request_count = 0;
+        ctx_data.cookie_jar         = ctx.cookie_jar;
+        ctx_data.cookie_scope       = ctx.cookie_scope;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response and pm.info with new data

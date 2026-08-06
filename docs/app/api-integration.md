@@ -114,6 +114,21 @@ apiService.getConfig(): Promise<EngineConfig>
 apiService.updateConfig(config): Promise<EngineConfig>
 ```
 
+#### Cookie jar
+
+```typescript
+apiService.getCookies(): Promise<GetCookiesResponse>
+apiService.clearCookies(scope?: { environmentId: string | null }): Promise<ClearCookiesResponse>
+```
+
+The engine keeps one cookie jar per environment for design-mode requests
+(issue #301); `CookiesCard` in Settings → General shows and clears them.
+`clearCookies` distinguishes three cases the way the engine does, and they are
+not interchangeable: **omitted** clears every jar, `{ environmentId: null }`
+clears only the jar used when no environment is selected, and an id clears that
+environment's. It reaches `DELETE /cookies` with the parameter absent, present
+and empty, or present with the id, respectively.
+
 #### Create vs update
 
 For collections, requests and environments the engine splits the write verbs:
@@ -343,6 +358,9 @@ export const API_ENDPOINTS = {
   REQUESTS: "/requests",
   REQUEST_BY_ID: (id: string) => `/requests/${id}`,
   
+  // Cookie jar - GET reads every scope, DELETE clears one or all
+  COOKIES: "/cookies",
+
   // Execution
   EXECUTE_REQUEST: "/execute",
   START_LOAD_TEST: "/runs",

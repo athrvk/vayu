@@ -31,6 +31,8 @@
 #include <chrono>
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
@@ -132,6 +134,51 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     vayu::http::detail::ingest_header_line (line, response->headers);
 
     return total_size;
+}
+
+/**
+ * @brief Hand the scope's stored cookies to libcurl's cookie engine.
+ *
+ * Three steps, in this order: enable the engine (`CURLOPT_COOKIEFILE` with an
+ * empty path reads no file and turns it on), flush whatever the handle still
+ * holds, then inject. The flush matters because `curl_easy_reset` deliberately
+ * keeps a handle's cookies - without it a `Client` reused for a second send,
+ * or one whose jar was cleared from Settings mid-session, would carry cookies
+ * the jar no longer has.
+ *
+ * From here on libcurl decides what actually goes on the wire: which cookies
+ * match the URL, which expired, and what a `Set-Cookie` in the response
+ * replaces. See cookie_jar.hpp for why that is deliberately not our code.
+ */
+void apply_jar_cookies (CURL* curl, const ClientConfig& config) {
+    curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
+    curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
+    for (const auto& line : config.cookie_jar->lines_for (config.cookie_scope)) {
+        curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
+    }
+}
+
+/**
+ * @brief Store what the transfer left in the handle's jar back into the scope.
+ *
+ * Called even when the transfer failed, for the same reason the timing reads
+ * are: a redirect chain that dies on its last hop still collected the cookies
+ * of the hops that succeeded, and dropping those would make a login flow
+ * depend on the last request having gone well.
+ */
+void capture_jar_cookies (CURL* curl, const ClientConfig& config) {
+    struct curl_slist* held = nullptr;
+    if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) != CURLE_OK) {
+        return;
+    }
+    std::vector<std::string> lines;
+    for (const struct curl_slist* item = held; item != nullptr; item = item->next) {
+        if (item->data) {
+            lines.emplace_back (item->data);
+        }
+    }
+    curl_slist_free_all (held);
+    config.cookie_jar->store (config.cookie_scope, std::move (lines));
 }
 
 /**
@@ -296,6 +343,12 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
     }
 
+    // Cookie jar (issue #301) - only when a caller opted in; see
+    // ClientConfig::cookie_jar.
+    if (impl_->config.cookie_jar) {
+        apply_jar_cookies (curl, impl_->config);
+    }
+
     // Perform the request. Stamp submission just before perform so that
     // perceived latency excludes our own setup cost above but covers everything
     // libcurl does on this thread. For single-shot sends there is no generator
@@ -307,6 +360,12 @@ Result<Response> Client::send (const Request& request) {
     // Cleanup headers
     if (headers_list) {
         curl_slist_free_all (headers_list);
+    }
+
+    // Before any error return below: a failed transfer can still have
+    // collected cookies - see capture_jar_cookies.
+    if (impl_->config.cookie_jar) {
+        capture_jar_cookies (curl, impl_->config);
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)

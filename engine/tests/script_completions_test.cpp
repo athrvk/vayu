@@ -216,8 +216,9 @@ TEST (ScriptCompletions, EveryOfferedHeaderMemberIsCallableInTheRuntime) {
     EXPECT_GE (offered, 7) << "the header accessors are missing from the completion list";
 }
 
-// Same guard for the cookie list (#301). It is offered one level down
-// (`pm.response.cookies.get`), so a member the runtime lacks would only show up
+// Same guard for both cookie surfaces (#301): `pm.response.cookies.*`, the
+// response's own Set-Cookie, and `pm.cookies.*`, the jar. Both are offered one
+// level down (`…cookies.get`), so a member the runtime lacks would only show up
 // when a user accepts the suggestion and the script throws.
 TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
     const auto completions = get_script_completions ();
@@ -235,7 +236,8 @@ TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
     int offered = 0;
     for (const auto& item : completions) {
         const std::string label = item.value ("label", std::string{});
-        if (label.rfind ("pm.response.cookies.", 0) != 0) {
+        if (label.rfind ("pm.response.cookies.", 0) != 0 &&
+        label.rfind ("pm.cookies.", 0) != 0) {
             continue;
         }
         offered++;
@@ -247,7 +249,7 @@ TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
         << label << " is offered as a call but the runtime does not implement it";
     }
 
-    EXPECT_GE (offered, 3) << "the cookie accessors are missing from the completion list";
+    EXPECT_GE (offered, 6) << "the cookie accessors are missing from the completion list";
 }
 
 // The same drift, on the variable scopes: `pm.variables` was offered by

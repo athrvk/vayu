@@ -47,6 +47,8 @@ import type {
 	GetRunReportResponse,
 	StopRunResponse,
 	GetHealthResponse,
+	GetCookiesResponse,
+	ClearCookiesResponse,
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
@@ -227,6 +229,27 @@ export const apiService = {
 			variables,
 		});
 		return GlobalsTransformer.toFrontend(response);
+	},
+
+	// Cookie jar (issue #301)
+	async getCookies(): Promise<GetCookiesResponse> {
+		return await httpClient.get<GetCookiesResponse>(API_ENDPOINTS.COOKIES);
+	},
+
+	/**
+	 * Clear one jar, or every jar.
+	 *
+	 * The parameter distinguishes three cases the way the engine does: omitted
+	 * clears everything, `null` clears the jar used when no environment is
+	 * selected, and an id clears that environment's. Passing `null` and passing
+	 * nothing are therefore *not* the same call: one reaches the engine with
+	 * the parameter present and empty, the other with no parameter at all.
+	 */
+	async clearCookies(scope?: { environmentId: string | null }): Promise<ClearCookiesResponse> {
+		return await httpClient.delete<ClearCookiesResponse>(
+			API_ENDPOINTS.COOKIES,
+			scope === undefined ? undefined : { environmentId: scope.environmentId ?? "" }
+		);
 	},
 
 	// Execution

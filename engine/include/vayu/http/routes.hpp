@@ -19,6 +19,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
@@ -485,6 +486,10 @@ struct RouteContext {
     bool verbose;
     ShutdownCallback on_shutdown; // Optional graceful-shutdown callback
     vayu::http::OAuth2AuthorizeManager& authorize_manager; // Owned by Server; see server.hpp
+    /// The design-mode cookie jar (issue #301). Owned by Server; read by
+    /// `/execute` (which sends through it) and by `/cookies` (which shows and
+    /// clears it). Not reachable from the load path - see cookie_jar.hpp.
+    vayu::http::CookieJar& cookie_jar;
 };
 
 // Route registration functions (implemented in separate files)
@@ -501,6 +506,7 @@ void register_metrics_routes (RouteContext& ctx);
 void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);
 void register_oauth_routes (RouteContext& ctx);
+void register_cookie_routes (RouteContext& ctx);
 
 /**
  * @brief Generate the TypeScript declarations for the `pm.*` script surface.

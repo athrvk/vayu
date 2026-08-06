@@ -35,6 +35,12 @@ vi.mock("@/services", () => ({
 	apiService: { deleteRun: vi.fn() },
 }));
 
+// UpdatesCard and CookiesCard each talk to something outside this panel - the
+// Electron updater bridge and the engine's cookie jar - and neither is the
+// subject here. CookiesCard has its own tests.
+vi.mock("./UpdatesCard", () => ({ UpdatesCard: () => null }));
+vi.mock("./CookiesCard", () => ({ CookiesCard: () => null }));
+
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
