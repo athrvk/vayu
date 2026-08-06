@@ -33,6 +33,15 @@ Ensure Vayu is running, then register the endpoint once per machine. In the app,
 **Settings → MCP** offers a one-click **Connect** for Claude Code and VS Code
 (shells out to their CLIs) and copyable snippets for the rest.
 
+Connect resolves the client CLI before running it, because a GUI-launched app
+often has a stripped PATH. On macOS and Linux that means the login shell
+(`$SHELL -lc`, falling back to `/bin/sh -lc` for a shell that does not accept
+`-lc`); on Windows it means `where`, preferring an `.exe` and then a `.cmd`
+shim over the extensionless POSIX script VS Code also installs. A `.cmd`/`.bat`
+shim is run through `cmd.exe`, which Node has required since 20.12. If the CLI
+is not installed, or the run fails for any reason, Connect says so and the
+snippet below it is the manual path.
+
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
 claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
@@ -480,7 +489,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
 | `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
 | `cli.ts`           | Standalone stdio server (env-configured).                                   |
-| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.                    |
+| `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                              |
 
