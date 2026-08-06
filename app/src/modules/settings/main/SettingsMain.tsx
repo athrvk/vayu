@@ -55,10 +55,14 @@ import { TIMING } from "@/config/timing";
 
 /**
  * Check if a config entry requires a restart when changed
- * We detect this by checking if the label contains "(Requires Restart)"
+ *
+ * The label is the only signal the engine sends: it writes "(Requires Restart)"
+ * into the label itself (`engine/src/db/database.cpp`). A second `requiresRestart`
+ * boolean was checked here and typed on `ConfigEntry`, but nothing has ever
+ * written it - the MCP tool surface carried the same dead check.
  */
 const isRestartRequired = (entry: ConfigEntry): boolean => {
-	return entry.label.includes("(Requires Restart)") || entry.requiresRestart === true;
+	return entry.label.includes("(Requires Restart)");
 };
 
 // Client (app) categories render their own header via ClientSettingsPanel; only

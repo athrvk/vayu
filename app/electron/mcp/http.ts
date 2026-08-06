@@ -17,6 +17,7 @@
 import http from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
+import { MCP_PATH } from "../constants.js";
 
 export interface McpHttpServerOptions {
 	host: string;
@@ -25,7 +26,6 @@ export interface McpHttpServerOptions {
 	contextProvider: ToolContextProvider;
 }
 
-const MCP_PATH = "/mcp";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Lifecycle wrapper around the Node HTTP server that fronts the MCP endpoint. */

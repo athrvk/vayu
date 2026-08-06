@@ -54,13 +54,11 @@ const TOOLS: McpToolInfo[] = [
 		name: "list_collections",
 		description: "List collections.",
 		category: "read",
-		readOnly: true,
 	},
 	{
 		name: "run_request",
 		description: "Send one request.",
 		category: "execute",
-		readOnly: false,
 	},
 ];
 
@@ -147,6 +145,39 @@ describe("McpSettingsPanel load failures", () => {
 	});
 });
 
+/**
+ * The endpoint is the main process's to know: it is built there from
+ * `MCP_HOST` / `MCP_PORT` / `MCP_PATH` and reported over `mcp:status`. This
+ * panel used to keep its own `http://127.0.0.1:9877/mcp` literal as a fallback -
+ * a third copy of the URL, shown as fact whenever the status could not be read,
+ * and one port change away from telling the user to point an agent at nothing.
+ */
+describe("McpSettingsPanel endpoint", () => {
+	it("shows the URL the main process reports, whatever it is", async () => {
+		getMcpStatus.mockResolvedValue({ ...STATUS, url: "http://127.0.0.1:9999/mcp" });
+
+		await renderPanel();
+
+		expect(screen.getAllByText("http://127.0.0.1:9999/mcp").length).toBeGreaterThan(0);
+	});
+
+	it("shows no URL at all, and nothing to copy, when the status never arrives", async () => {
+		getMcpStatus.mockRejectedValue(new Error("no answer"));
+
+		await renderPanel();
+
+		expect(screen.queryByText(/^https?:\/\//)).not.toBeInTheDocument();
+		// The placeholder stands in wherever the URL would have been - the
+		// endpoint line and every connect snippet.
+		expect(screen.getAllByText(/unavailable - mcp status not loaded/i).length).toBeGreaterThan(
+			0
+		);
+		const copyButtons = screen.getAllByRole("button", { name: /^copy$/i });
+		expect(copyButtons.length).toBeGreaterThan(0);
+		for (const button of copyButtons) expect(button).toBeDisabled();
+	});
+});
+
 describe("McpSettingsPanel write failures", () => {
 	it("reports a failed save and re-reads what the main process actually holds", async () => {
 		await renderPanel();
@@ -205,7 +236,6 @@ describe("McpSettingsPanel tool list", () => {
 				// Deliberately outside McpToolCategory: the IPC boundary is untyped
 				// at runtime, which is exactly how such a tool would arrive.
 				category: "analyze",
-				readOnly: true,
 			} as unknown as McpToolInfo,
 		]);
 
@@ -232,7 +262,6 @@ describe("McpSettingsPanel tool list", () => {
 				name: "analyze_run",
 				description: "A tool in a category added after this panel shipped.",
 				category: "analyze",
-				readOnly: true,
 			} as unknown as McpToolInfo,
 		]);
 

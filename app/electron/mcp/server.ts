@@ -16,7 +16,7 @@
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { TOOLS, type ElicitFn, type ToolContext } from "./tools.js";
+import { TOOLS, dispatchTool, type ElicitFn, type ToolContext } from "./tools.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
 
@@ -111,7 +111,11 @@ export function createMcpServer(
 				annotations: tool.annotations,
 			},
 			async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => {
-				const result = await tool.handler(
+				// Through `dispatchTool`, not `tool.handler` directly: one dispatch
+				// path means the disabled-tool rejection and the argument-error
+				// translation cannot diverge between production and the tests.
+				const result = await dispatchTool(
+					tool.name,
 					(args ?? {}) as Record<string, unknown>,
 					ctx,
 					extra?.signal
@@ -139,13 +143,16 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 		mimeType: "application/json",
 	});
 
+	// Every callback below forwards `extra.signal` - the SDK aborts it when the
+	// client cancels the request, and the engine client turns that into an
+	// aborted fetch instead of a detached request running to its own timeout.
 	for (const r of STATIC_RESOURCES) {
-		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri) => ({
+		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri, extra) => ({
 			contents: [
 				{
 					uri: uri.href,
 					mimeType: "application/json",
-					text: JSON.stringify(await r.read(ctx), null, 2),
+					text: JSON.stringify(await r.read(ctx, extra.signal), null, 2),
 				},
 			],
 		}));
@@ -154,8 +161,8 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 	mcp.registerResource(
 		RUN_REPORT_RESOURCE.name,
 		new ResourceTemplate(RUN_REPORT_RESOURCE.uriTemplate, {
-			list: async () => {
-				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx);
+			list: async (extra) => {
+				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx, extra.signal);
 				return {
 					resources: extractRunIds(runs).map((id) => ({
 						uri: `vayu://run/${id}/report`,
@@ -165,6 +172,10 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 				};
 			},
 			complete: {
+				// Unsignalled by necessity: the SDK's completion callback is
+				// `(value, context?)` with no `RequestHandlerExtra`, so there is
+				// no signal to forward here. Autocomplete is a single cheap
+				// `/runs` read, so an uncancelled one costs little.
 				runId: async (value: string) => {
 					const runs = await RUN_REPORT_RESOURCE.listRuns(ctx);
 					return extractRunIds(runs)
@@ -174,10 +185,10 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 			},
 		}),
 		meta(RUN_REPORT_RESOURCE.title, RUN_REPORT_RESOURCE.description),
-		async (uri, variables) => {
+		async (uri, variables, extra) => {
 			const raw = variables.runId;
 			const runId = Array.isArray(raw) ? (raw[0] ?? "") : String(raw ?? "");
-			const report = await RUN_REPORT_RESOURCE.read(ctx, runId);
+			const report = await RUN_REPORT_RESOURCE.read(ctx, runId, extra.signal);
 			return {
 				contents: [
 					{
@@ -197,8 +208,12 @@ function registerPrompts(mcp: McpServer, ctx: ToolContext): void {
 		mcp.registerPrompt(
 			p.name,
 			{ title: p.title, description: p.description, argsSchema: p.argsSchema },
-			async (args: Record<string, unknown>) => {
-				const result = await p.build((args ?? {}) as Record<string, unknown>, ctx);
+			async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => {
+				const result = await p.build(
+					(args ?? {}) as Record<string, unknown>,
+					ctx,
+					extra?.signal
+				);
 				return result as typeof result & Record<string, unknown>;
 			}
 		);

@@ -66,7 +66,16 @@ import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { Callout } from "@/components/shared";
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:9877/mcp";
+/**
+ * Shown until `mcp:status` reports the live URL - deliberately not a URL.
+ *
+ * The endpoint has one source of truth in the main process (`MCP_ENDPOINT_URL`,
+ * built from `MCP_HOST`/`MCP_PORT`/`MCP_PATH`), which this file cannot import:
+ * renderer and main share no module graph. A hardcoded copy here is a copy that
+ * drifts, and a plausible-looking URL is worse than no URL - it would be copied
+ * into an agent's config and silently fail to connect.
+ */
+const ENDPOINT_UNKNOWN = "(unavailable - MCP status not loaded)";
 
 interface ConnectSnippet {
 	label: string;
@@ -177,7 +186,15 @@ function groupToolsByCategory(tools: McpToolInfo[]): ToolGroup[] {
 }
 
 /** A small copy-to-clipboard button that flips to a check for a moment. */
-function CopyButton({ text, className }: { text: string; className?: string }) {
+function CopyButton({
+	text,
+	className,
+	disabled,
+}: {
+	text: string;
+	className?: string;
+	disabled?: boolean;
+}) {
 	const [copied, setCopied] = useState(false);
 	const onCopy = useCallback(() => {
 		void navigator.clipboard?.writeText(text).then(() => {
@@ -190,6 +207,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 			variant="ghost"
 			size="sm"
 			onClick={onCopy}
+			disabled={disabled}
 			className={cn("h-7 px-2 text-xs shrink-0", className)}
 		>
 			{copied ? (
@@ -323,7 +341,10 @@ export default function McpSettingsPanel() {
 		return () => window.removeEventListener("focus", onFocus);
 	}, []);
 
-	const endpoint = status?.url ?? DEFAULT_ENDPOINT;
+	// Until the status arrives there is no endpoint to copy - the placeholder is
+	// displayed, and every Copy is disabled so it cannot be pasted anywhere.
+	const endpoint = status?.url ?? ENDPOINT_UNKNOWN;
+	const hasEndpoint = status?.url !== undefined;
 	const running = status?.running ?? false;
 	const enabled = status?.enabled ?? false;
 
@@ -584,7 +605,7 @@ export default function McpSettingsPanel() {
 						<code className="flex-1 text-xs font-mono bg-muted rounded-md px-2 py-1.5 break-all">
 							{endpoint}
 						</code>
-						<CopyButton text={endpoint} />
+						<CopyButton text={endpoint} disabled={!hasEndpoint} />
 					</div>
 
 					{connectSnippets(endpoint).map((snippet) => (
@@ -615,7 +636,7 @@ export default function McpSettingsPanel() {
 											Connect
 										</Button>
 									)}
-									<CopyButton text={snippet.code} />
+									<CopyButton text={snippet.code} disabled={!hasEndpoint} />
 								</div>
 							</div>
 							<pre className="text-xs font-mono bg-muted rounded-md px-3 py-2 overflow-x-auto whitespace-pre">

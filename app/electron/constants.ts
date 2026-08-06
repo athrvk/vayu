@@ -34,8 +34,16 @@ export const ENGINE_DB_DIR = "db";
 // docs/engine/mcp.md.
 export const MCP_HOST = "127.0.0.1";
 export const MCP_PORT = 9877;
+/**
+ * The path the MCP server answers on. Lives here, not in `mcp/http.ts`, because
+ * the endpoint URL was previously assembled from a literal `/mcp` in three
+ * places (the path served, this URL, and a renderer default) with nothing
+ * holding them together. `mcp/http.ts` imports it, and the renderer is told the
+ * live URL over `mcp:status` rather than keeping a copy.
+ */
+export const MCP_PATH = "/mcp";
 /** URL agents connect to, e.g. `claude mcp add --transport http vayu <url>`. */
-export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}/mcp`;
+export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}${MCP_PATH}`;
 
 // Engine lifecycle
 export const ENGINE_HEALTH_MAX_ATTEMPTS = 90;
