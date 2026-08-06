@@ -5,46 +5,120 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PanelResizeHandle } from "./PanelResizeHandle";
-import { useLayoutStore, useTabsStore, useSessionStore, useSaveStore } from "@/stores";
+import { useLayoutStore, useTabsStore, useSaveStore } from "@/stores";
 import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
 	useRequestQuery,
-	useCollectionsQuery,
-	useEnvironmentsQuery,
-	useGlobalsQuery,
 	useUpdateGlobalsMutation,
 	useUpdateEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
+import { queryKeys } from "@/queries/keys";
 import { Input } from "@/components/ui";
-import type { Collection, ResolvedVariable } from "@/types";
+import type {
+	Collection,
+	Environment,
+	GlobalVariables,
+	ResolvedVariable,
+	VariableValue,
+} from "@/types";
 
 interface ContextBarProps {
 	mode?: "push" | "overlay";
 }
 
-/** Leaf-first ancestor chain for a collection (inclusive of the collection itself). */
-function buildLeafFirstChain(startId: string, collections: Collection[]): Collection[] {
-	const chain: Collection[] = [];
-	let currentId: string | undefined = startId;
-	while (currentId) {
-		const col = collections.find((c) => c.id === currentId);
-		if (!col) break;
-		chain.push(col);
-		currentId = col.parentId;
-	}
-	return chain;
+type VariableMap = Record<string, VariableValue>;
+
+/**
+ * Where one scope's variables live and how a commit gets written back.
+ *
+ * The three scopes differ only in those two things, so they are named once
+ * rather than spelled out three times. `read` deliberately goes to the query
+ * cache rather than to a hook's `data`: a commit built from the render closure
+ * is a snapshot of the cache as it was when the input was drawn, and the
+ * transport replaces the whole map - so blurring a second variable before the
+ * first mutation settled re-sent the first one's pre-edit value and silently
+ * reverted it.
+ */
+interface CommitScope {
+	/** The stored map as of now, not as of the render that drew the input. */
+	read: () => VariableMap | undefined;
+	/** Patch the cache so a later commit's `read` already sees this one. */
+	write: (next: VariableMap) => void;
+	/** Send the map to the engine. */
+	mutate: (
+		next: VariableMap,
+		handlers: { onError: (e: unknown) => void; onSettled: () => void }
+	) => void;
+}
+
+/** The bar's single entry in the save-context registry. */
+const SAVE_CONTEXT_ID = "context-bar-variables";
+
+/**
+ * Track in-flight commits so the quit-time flush waits for them.
+ *
+ * `onBeforeQuit` awaits `flushAll` (`App.tsx`), which only knows about
+ * *registered* save contexts - the bar registered none, so the renderer could be
+ * torn down mid-PUT with the input already showing the value as committed. One
+ * context covers the whole bar: `hasPendingChanges` says whether any commit is
+ * outstanding, and `save()` resolves when the last one settles.
+ *
+ * Returns a function that opens a commit and hands back its `settle` callback,
+ * for the mutation's `onSettled`. Commits are held as promises rather than
+ * counted so `save()` can await the requests themselves.
+ */
+function usePendingCommits(): () => () => void {
+	const registerContext = useSaveStore((s) => s.registerContext);
+	const unregisterContext = useSaveStore((s) => s.unregisterContext);
+	const updateContext = useSaveStore((s) => s.updateContext);
+	const pending = useRef<Set<Promise<void>>>(new Set());
+
+	useEffect(() => {
+		const inFlight = pending.current;
+		registerContext({
+			id: SAVE_CONTEXT_ID,
+			name: "Variables",
+			save: async () => {
+				await Promise.all([...inFlight]);
+			},
+			hasPendingChanges: false,
+		});
+		return () => unregisterContext(SAVE_CONTEXT_ID);
+	}, [registerContext, unregisterContext]);
+
+	return useCallback(() => {
+		let settle: () => void = () => {};
+		const commit = new Promise<void>((resolve) => {
+			settle = resolve;
+		});
+		pending.current.add(commit);
+		updateContext(SAVE_CONTEXT_ID, { hasPendingChanges: true });
+		useSaveStore.getState().startSaving();
+
+		return () => {
+			pending.current.delete(commit);
+			settle();
+			if (pending.current.size > 0) return;
+			updateContext(SAVE_CONTEXT_ID, { hasPendingChanges: false });
+			// A failed commit already reported itself through `failSave`; painting
+			// "Saved" over it is the same defect `runSave` guards against in the
+			// save store.
+			if (useSaveStore.getState().status !== "error") useSaveStore.getState().completeSave();
+		};
+	}, [updateContext]);
 }
 
 export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const { contextBarOpen, setContextBarOpen, contextBarWidth, setContextBarWidth } =
 		useLayoutStore();
 	const { openTabs, activeTabId } = useTabsStore();
-	const { activeEnvironmentId } = useSessionStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
 	// Resolve the active request's collection so collection-scope variables show up
@@ -56,18 +130,86 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	});
 	const variables = getAllVariables();
 
-	const { data: globalsData } = useGlobalsQuery();
-	const { data: collections = [] } = useCollectionsQuery();
-	const { data: environments = [] } = useEnvironmentsQuery();
+	const queryClient = useQueryClient();
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
 	const failSave = useSaveStore((s) => s.failSave);
+	const beginCommit = usePendingCommits();
 
 	if (!contextBarOpen || activeTab?.type !== "request") return null;
 
 	/**
-	 * Write the edited value back to the scope the resolved variable came from.
+	 * The scope that owns the definition the bar *displayed*, or null if that
+	 * source is gone.
+	 *
+	 * Keyed off `resolved.sourceId`, which the resolver emits precisely to name
+	 * the winning source (`useVariableResolver`, `ResolvedVariable`). The bar used
+	 * to re-derive the target instead - walking the collection chain for the first
+	 * definition with a truthy `enabled` - which disagrees with the resolver's
+	 * `isEnabledDefinition` wherever `enabled` is absent (D17: absent counts as
+	 * enabled). A leaf definition with no `enabled` key therefore displayed while
+	 * an *ancestor's* definition took the write, silently and cross-collection.
+	 * Re-deriving a winner someone else already picked is the whole bug; there is
+	 * no version of that walk that cannot drift from the resolver again.
+	 */
+	const commitScopeFor = (resolved: ResolvedVariable): CommitScope | null => {
+		if (resolved.scope === "global") {
+			return {
+				read: () =>
+					queryClient.getQueryData<GlobalVariables>(queryKeys.globals.all)?.variables,
+				write: (next) =>
+					queryClient.setQueryData<GlobalVariables>(queryKeys.globals.all, (old) =>
+						old ? { ...old, variables: next } : old
+					),
+				mutate: (next, handlers) =>
+					updateGlobalsMutation.mutate({ variables: next }, handlers),
+			};
+		}
+
+		// Every non-global winner carries the id of the environment or collection
+		// it came from. One without is a resolver that changed shape, not a
+		// variable to guess a home for.
+		const sourceId = resolved.sourceId;
+		if (!sourceId) return null;
+
+		if (resolved.scope === "environment") {
+			const key = queryKeys.environments.list();
+			const source = queryClient
+				.getQueryData<Environment[]>(key)
+				?.find((e) => e.id === sourceId);
+			if (!source) return null;
+			return {
+				read: () =>
+					queryClient.getQueryData<Environment[]>(key)?.find((e) => e.id === sourceId)
+						?.variables,
+				write: (next) =>
+					queryClient.setQueryData<Environment[]>(key, (old) =>
+						old?.map((e) => (e.id === sourceId ? { ...e, variables: next } : e))
+					),
+				mutate: (next, handlers) =>
+					updateEnvironmentMutation.mutate({ id: sourceId, variables: next }, handlers),
+			};
+		}
+
+		const key = queryKeys.collections.list();
+		const source = queryClient.getQueryData<Collection[]>(key)?.find((c) => c.id === sourceId);
+		if (!source) return null;
+		return {
+			read: () =>
+				queryClient.getQueryData<Collection[]>(key)?.find((c) => c.id === sourceId)
+					?.variables,
+			write: (next) =>
+				queryClient.setQueryData<Collection[]>(key, (old) =>
+					old?.map((c) => (c.id === sourceId ? { ...c, variables: next } : c))
+				),
+			mutate: (next, handlers) =>
+				updateCollectionMutation.mutate({ id: sourceId, variables: next }, handlers),
+		};
+	};
+
+	/**
+	 * Write the edited value back to the definition the bar displayed.
 	 *
 	 * Takes the input element, not the string, because every failure below has to
 	 * put the old value back on screen. These inputs are uncontrolled -
@@ -89,57 +231,36 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 		};
 		// `failSave` is the app's one save-failure surface (it toasts and sets the
 		// Dock's status) - see the note on it in save-store.
-		const onError = (error: unknown) =>
-			rollBack(error instanceof Error ? error.message : `Couldn't save {{${name}}}`);
 		// The definition this bar resolved against is gone - deleted from its
-		// scope, or the active environment changed, between render and blur.
+		// scope, or its environment or collection removed, between render and blur.
 		// Writing it back would resurrect it, so the edit is refused; saying so
 		// is the difference between "refused" and "silently swallowed".
 		const gone = () =>
 			rollBack(`{{${name}}} is no longer defined in its ${resolved.scope} scope`);
 
-		if (resolved.scope === "global") {
-			const vars = globalsData?.variables;
-			if (!vars?.[name]) return gone();
-			updateGlobalsMutation.mutate(
-				{ variables: { ...vars, [name]: { ...vars[name], value: newValue } } },
-				{ onError }
-			);
-			return;
-		}
+		const scope = commitScopeFor(resolved);
+		if (!scope) return gone();
 
-		if (resolved.scope === "environment") {
-			const env = environments.find((e) => e.id === activeEnvironmentId);
-			if (!env?.variables?.[name]) return gone();
-			updateEnvironmentMutation.mutate(
-				{
-					id: env.id,
-					variables: {
-						...env.variables,
-						[name]: { ...env.variables[name], value: newValue },
-					},
-				},
-				{ onError }
-			);
-			return;
-		}
+		const stored = scope.read();
+		const previous = stored?.[name];
+		if (!previous) return gone();
 
-		// Collection scope: the leaf-most enabled definition is the one shown
-		if (request?.collectionId) {
-			const chain = buildLeafFirstChain(request.collectionId, collections);
-			const source = chain.find((col) => col.variables?.[name]?.enabled);
-			if (!source?.variables) return gone();
-			updateCollectionMutation.mutate(
-				{
-					id: source.id,
-					variables: {
-						...source.variables,
-						[name]: { ...source.variables[name], value: newValue },
-					},
-				},
-				{ onError }
-			);
-		}
+		const next = { ...stored, [name]: { ...previous, value: newValue } };
+		scope.write(next);
+
+		const settle = beginCommit();
+		scope.mutate(next, {
+			onError: (error: unknown) => {
+				// Restore this name alone rather than the whole snapshot: another
+				// variable's commit may have patched the map in the meantime, and
+				// replacing it wholesale would revert that one too - the very
+				// staleness the fresh read exists to avoid.
+				const current = scope.read();
+				if (current) scope.write({ ...current, [name]: previous });
+				rollBack(error instanceof Error ? error.message : `Couldn't save {{${name}}}`);
+			},
+			onSettled: settle,
+		});
 	};
 
 	const entries = Object.entries(variables);
@@ -201,7 +322,17 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 									/>
 								) : (
 									<Input
-										key={`${name}:${resolved.value}`}
+										/*
+										 * Scope and source belong in the key, not just the
+										 * value. On the value alone, an environment switch
+										 * or a Ctrl+N tab switch mid-edit that happens to
+										 * resolve the same string kept the DOM node alive
+										 * and let the blur write into the *newly* resolved
+										 * definition. Including the source remounts the
+										 * node instead, so an abandoned edit is dropped -
+										 * the lesser outcome, and never a mistargeted one.
+										 */
+										key={`${name}:${resolved.scope}:${resolved.sourceId}:${resolved.value}`}
 										defaultValue={resolved.value}
 										className="h-7 text-xs font-mono"
 										onBlur={(e) => commitValue(name, resolved, e.target)}

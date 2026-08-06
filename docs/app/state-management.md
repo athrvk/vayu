@@ -253,6 +253,14 @@ report. The last two were added because both could fail in complete silence:
 manual-draft editors rendered an inline callout that a quit flush has no screen
 to show.
 
+`ContextBar` also **registers a context** (`context-bar-variables`), because
+`failSave` alone only covers the failure. A variable commit is a plain mutation
+rather than a draft, so it registers one entry for the whole bar whose
+`hasPendingChanges` tracks whether any commit is outstanding and whose `save()`
+resolves when the last one settles - without it `flushAll` had nothing to wait
+for, and the renderer could be torn down mid-PUT with the input already showing
+the value as committed.
+
 **Only the context that set a status clears it.** `SettingsMain` used to run an
 unconditional `setStatus("idle")` whenever it had nothing pending - which
 included mount - so merely opening Settings wiped an `error` another context had
