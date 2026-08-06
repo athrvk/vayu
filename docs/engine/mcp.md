@@ -191,8 +191,12 @@ Notes:
   could not be read), because a matrix whose `total` silently excludes nested
   folders reads as a whole-collection pass. Requests run serially, so a large
   collection takes as long as its requests do added together.
-- **Cancellation:** each tool call's `AbortSignal` is threaded into the engine
-  `fetch`, so a client cancelling an in-flight call actually aborts it.
+- **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
+  is threaded into the engine `fetch` for every tool call, resource read,
+  template list and prompt, so a client cancelling an in-flight call actually
+  aborts it rather than leaving the engine request running detached. The one
+  exception is the run-ID **completion** callback, which the SDK invokes as
+  `(value, context?)` with no request context to carry a signal.
 - **Timeouts:** engine-local calls are bounded at 35s, but `POST /execute` waits
   on a third-party server, so its budget is derived from the engine's own
   `defaultTimeout` setting (read per call from `GET /config`, up to its 300s
@@ -509,7 +513,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`.                                    |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
-| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.            |
+| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`, the one dispatch path `server.ts` and the tests share. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
@@ -530,7 +534,7 @@ on quit, and exposes IPC the Settings panel uses:
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference.              |
-| `mcp:getTools`      | IPC-safe tool catalog (name/description/category/readOnly). |
+| `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
 | `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`).                 |
 
 The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is a

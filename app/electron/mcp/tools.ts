@@ -84,9 +84,12 @@ export interface McpTool {
 	outputSchema?: z.ZodTypeAny;
 	/** MCP tool annotations (title + read-only/destructive/idempotent/open-world hints). */
 	annotations: ToolAnnotations;
-	/** Whether the tool only reads (never mutates state or sends load). */
-	readOnly: boolean;
-	/** Feature group for the Settings tool list. */
+	/**
+	 * Feature group for the Settings tool list. Also says whether the tool only
+	 * reads: `category === "read"` and nothing else does. A separate `readOnly`
+	 * boolean lived here restating exactly that for all 16 tools, read by no one
+	 * but its own test - the client-facing hint is `annotations.readOnlyHint`.
+	 */
 	category: ToolCategory;
 	handler: (
 		args: Record<string, unknown>,
@@ -100,7 +103,6 @@ export interface McpToolInfo {
 	name: string;
 	description: string;
 	category: ToolCategory;
-	readOnly: boolean;
 }
 
 // --- Result helpers ----------------------------------------------------------
@@ -505,8 +507,14 @@ const configUpdateSchema = z
 
 /**
  * Of the changed config keys, which require an engine restart to take effect.
- * The engine flags this in each entry's `label` ("… (Requires Restart)") - or an
- * explicit `requiresRestart` boolean if present.
+ *
+ * The label is the whole signal: the engine writes "… (Requires Restart)" into
+ * each entry's `label` (`engine/src/db/database.cpp`) and emits no boolean
+ * beside it. A `requiresRestart === true` branch used to run ahead of this
+ * regex on a field nothing has ever written - a check that could not fire,
+ * mirrored in `SettingsMain.tsx` and typed in `domain.ts`, which read as if the
+ * engine had a second, more reliable channel. If one is ever added, this is the
+ * one place that decides.
  */
 function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
 	const raw = Array.isArray(configResponse)
@@ -519,7 +527,7 @@ function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): s
 	return changedKeys.filter((key) => {
 		const e = byKey.get(key);
 		if (!e) return false;
-		return e.requiresRestart === true || /requires restart/i.test(String(e.label ?? ""));
+		return /requires restart/i.test(String(e.label ?? ""));
 	});
 }
 
@@ -593,7 +601,6 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		description:
 			"Check the Vayu engine's status and version. Use this first to confirm Vayu is running.",
-		readOnly: true,
 		annotations: {
 			title: "Check engine health",
 			readOnlyHint: true,
@@ -625,7 +632,6 @@ export const TOOLS: McpTool[] = [
 		name: "list_collections",
 		category: "read",
 		description: "List all request collections (folders that organize saved requests).",
-		readOnly: true,
 		annotations: {
 			title: "List collections",
 			readOnlyHint: true,
@@ -639,7 +645,6 @@ export const TOOLS: McpTool[] = [
 		name: "list_requests",
 		category: "read",
 		description: "List the saved requests inside a collection.",
-		readOnly: true,
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -654,7 +659,6 @@ export const TOOLS: McpTool[] = [
 		name: "list_environments",
 		category: "read",
 		description: "List all environments (named sets of variables like baseUrl, apiKey).",
-		readOnly: true,
 		annotations: {
 			title: "List environments",
 			readOnlyHint: true,
@@ -672,7 +676,6 @@ export const TOOLS: McpTool[] = [
 			"newest first. Returns a {data, pagination} envelope bounded to the first " +
 			"100 runs; each row carries a compact summary (url/method/mode/duration/" +
 			"concurrency/comment), not the full config snapshot.",
-		readOnly: true,
 		annotations: {
 			title: "List runs",
 			readOnlyHint: true,
@@ -687,7 +690,6 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance.",
-		readOnly: true,
 		annotations: {
 			title: "Get run report",
 			readOnlyHint: true,
@@ -703,7 +705,6 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		description:
 			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range.",
-		readOnly: true,
 		annotations: {
 			title: "Get engine config",
 			readOnlyHint: true,
@@ -718,7 +719,6 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
-		readOnly: false,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,
@@ -802,7 +802,6 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		description:
 			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
-		readOnly: false,
 		annotations: {
 			title: "Update engine config",
 			readOnlyHint: false,
@@ -865,7 +864,6 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		description:
 			"Create a saved request inside a collection (stores it; does not send it). GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed.",
-		readOnly: false,
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -916,7 +914,6 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		description:
 			"Set or overwrite variables on an environment (merges with the existing variables - other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
-		readOnly: false,
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -991,7 +988,6 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		description:
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
-		readOnly: false,
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -1118,7 +1114,6 @@ export const TOOLS: McpTool[] = [
 		category: "load",
 		description:
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here: the engine runs one on a single request only, never on a load run. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
-		readOnly: false,
 		annotations: {
 			title: "Start load test",
 			readOnlyHint: false,
@@ -1321,7 +1316,6 @@ export const TOOLS: McpTool[] = [
 		name: "stop_run",
 		category: "load",
 		description: "Stop an in-progress load test.",
-		readOnly: false,
 		annotations: {
 			title: "Stop run",
 			readOnlyHint: false,
@@ -1338,7 +1332,6 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream.",
-		readOnly: true,
 		annotations: {
 			title: "Get live metrics",
 			readOnlyHint: true,
@@ -1370,7 +1363,6 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
-		readOnly: true,
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,
@@ -1404,8 +1396,8 @@ export const TOOLS: McpTool[] = [
 	},
 ];
 
-/** Look up a tool by name. */
-export function findTool(name: string): McpTool | undefined {
+/** Look up a tool by name. Only `dispatchTool` needs this, so it stays local. */
+function findTool(name: string): McpTool | undefined {
 	return TOOLS.find((t) => t.name === name);
 }
 
@@ -1415,15 +1407,18 @@ export function toolCatalog(): McpToolInfo[] {
 		name: t.name,
 		description: t.description,
 		category: t.category,
-		readOnly: t.readOnly,
 	}));
 }
 
 /**
  * Dispatch a `tools/call`. Converts argument errors into tool errors so the
- * agent gets a readable message instead of a protocol failure. Used directly by
- * the unit tests; the SDK server registers each tool's handler and validates
- * arguments via the Zod `inputSchema` before dispatch.
+ * agent gets a readable message instead of a protocol failure.
+ *
+ * The single dispatch path: `server.ts` routes every registered tool callback
+ * through here, so the disabled-tool rejection below is the same code the tests
+ * exercise. (The SDK validates arguments against the Zod `inputSchema` first,
+ * and registration already skips disabled tools - this rejection is what
+ * answers a client that calls one anyway.)
  */
 export async function dispatchTool(
 	name: string,

@@ -24,7 +24,6 @@ export interface PromptMessage {
 
 export interface PromptResult {
 	messages: PromptMessage[];
-	description?: string;
 }
 
 export interface McpPromptDef {

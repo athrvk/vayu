@@ -23,6 +23,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
+import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { ToolContext } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
@@ -271,6 +272,125 @@ describe("resources", () => {
 	});
 });
 
+/**
+ * An engine call that never settles on its own, so the request is still in
+ * flight when the client cancels it, and that records the `AbortSignal` it was
+ * handed.
+ *
+ * `handed` staying undefined is the mutation check: drop the `extra.signal`
+ * threading in `server.ts` and the first assertion of every test below fails
+ * immediately, rather than the abort quietly never arriving.
+ */
+function hangingEngineCall() {
+	let markStarted!: () => void;
+	const started = new Promise<void>((resolve) => (markStarted = resolve));
+	let markAborted!: () => void;
+	const aborted = new Promise<void>((resolve) => (markAborted = resolve));
+	let handed: AbortSignal | undefined;
+	return {
+		started,
+		aborted,
+		handedSignal: () => handed,
+		call: (signal?: AbortSignal) =>
+			new Promise<never>((_resolve, reject) => {
+				handed = signal;
+				markStarted();
+				signal?.addEventListener("abort", () => {
+					markAborted();
+					reject(new Error("engine request aborted"));
+				});
+			}),
+	};
+}
+
+/**
+ * Cancellation has to reach the engine. Every resource / prompt definition
+ * accepts an `AbortSignal` and forwards it to `EngineClient`, but for a while
+ * only a unit test ever passed one: the SDK hands each callback a
+ * `RequestHandlerExtra` whose `signal` fires on `notifications/cancelled`, and
+ * `server.ts` dropped it. A cancelled read left the engine request running
+ * detached until the client's own 35s timeout.
+ */
+describe("client cancellation reaches the engine", () => {
+	it("aborts the engine request for a static resource read", async () => {
+		const hang = hangingEngineCall();
+		const { client, server } = await connectClient({
+			client: fakeClient({ listRuns: hang.call }),
+		});
+		const controller = new AbortController();
+		const read = client.readResource({ uri: "vayu://runs" }, { signal: controller.signal });
+		void read.catch(() => {});
+		await hang.started;
+		expect(hang.handedSignal(), "resource read got no signal from server.ts").toBeDefined();
+		controller.abort();
+		await hang.aborted;
+		expect(hang.handedSignal()?.aborted).toBe(true);
+		await server.close();
+	});
+
+	it("aborts the engine request for a templated run-report read", async () => {
+		const hang = hangingEngineCall();
+		const { client, server } = await connectClient({
+			// Matching the real arity matters: `getRunReport(runId, signal)`
+			// hands the signal second.
+			client: fakeClient({
+				getRunReport: (_runId: string, signal?: AbortSignal) => hang.call(signal),
+			}),
+		});
+		const controller = new AbortController();
+		const read = client.readResource(
+			{ uri: "vayu://run/run_1/report" },
+			{ signal: controller.signal }
+		);
+		void read.catch(() => {});
+		await hang.started;
+		expect(hang.handedSignal(), "template read got no signal from server.ts").toBeDefined();
+		controller.abort();
+		await hang.aborted;
+		expect(hang.handedSignal()?.aborted).toBe(true);
+		await server.close();
+	});
+
+	it("aborts the engine request behind the template's list callback", async () => {
+		const hang = hangingEngineCall();
+		const { client, server } = await connectClient({
+			client: fakeClient({ listRuns: hang.call }),
+		});
+		const controller = new AbortController();
+		const list = client.listResources(undefined, { signal: controller.signal });
+		void list.catch(() => {});
+		await hang.started;
+		expect(hang.handedSignal(), "list callback got no signal from server.ts").toBeDefined();
+		controller.abort();
+		await hang.aborted;
+		expect(hang.handedSignal()?.aborted).toBe(true);
+		await server.close();
+	});
+
+	it("aborts the engine request behind a prompt", async () => {
+		const hang = hangingEngineCall();
+		const { client, server } = await connectClient({
+			// Matching the real arity matters: `getRunReport(runId, signal)`
+			// hands the signal second.
+			client: fakeClient({
+				getRunReport: (_runId: string, signal?: AbortSignal) => hang.call(signal),
+			}),
+		});
+		const controller = new AbortController();
+		const prompt = client.getPrompt(
+			{ name: "summarize_run", arguments: { runId: "run_1" } },
+			{ signal: controller.signal }
+		);
+		void prompt.catch(() => {});
+		await hang.started;
+		expect(hang.handedSignal(), "prompt build got no signal from server.ts").toBeDefined();
+		controller.abort();
+		await hang.aborted;
+		expect(hang.handedSignal()?.aborted).toBe(true);
+		await server.close();
+	});
+});
+
 describe("prompts", () => {
 	it("lists the server-provided prompts", async () => {
 		const { client, server } = await connectClient();
@@ -395,6 +515,23 @@ describe("Streamable HTTP host", () => {
 			clientInfo: { name: "raw", version: "1.0.0" },
 		},
 	};
+
+	/**
+	 * The URL the host serves and the URL the app hands out have to be the same
+	 * string. They were assembled from three separate `/mcp` literals - the path
+	 * served here, `MCP_ENDPOINT_URL`, and a renderer default - with nothing
+	 * holding them together; the path now comes from `MCP_PATH` and the renderer
+	 * is told the live URL over `mcp:status`.
+	 */
+	it("serves exactly the endpoint the app advertises", () => {
+		const server = new McpHttpServer({
+			host: MCP_HOST,
+			port: MCP_PORT,
+			info: { name: "vayu", version: "test" },
+			contextProvider: contextProvider(),
+		});
+		expect(server.url).toBe(MCP_ENDPOINT_URL);
+	});
 
 	it("rejects GET with 405 (POST-only endpoint)", async () => {
 		await start();

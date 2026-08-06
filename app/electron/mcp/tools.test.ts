@@ -93,9 +93,9 @@ describe("tool registry", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);
 		const get = catalog.find((t) => t.name === "get_engine_config");
-		expect(get).toMatchObject({ category: "read", readOnly: true });
+		expect(get).toMatchObject({ category: "read" });
 		const upd = catalog.find((t) => t.name === "update_engine_config");
-		expect(upd).toMatchObject({ category: "write", readOnly: false });
+		expect(upd).toMatchObject({ category: "write" });
 		// Metadata only - no handler leaks across the boundary.
 		expect(get).not.toHaveProperty("handler");
 	});

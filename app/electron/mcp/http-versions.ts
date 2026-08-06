@@ -23,4 +23,3 @@
  */
 
 export const HTTP_VERSIONS = ["auto", "http1.1", "http2"] as const;
-export type HttpVersion = (typeof HTTP_VERSIONS)[number];

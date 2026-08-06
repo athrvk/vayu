@@ -884,7 +884,6 @@ export interface ConfigEntry {
 	min?: string;
 	max?: string;
 	updatedAt: number;
-	requiresRestart?: boolean;
 	/**
 	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the
 	 * engine omits the key entirely rather than sending `null` or `[]` when a
@@ -950,7 +949,6 @@ export interface McpToolInfo {
 	name: string;
 	description: string;
 	category: McpToolCategory;
-	readOnly: boolean;
 }
 
 export interface McpStatus {
