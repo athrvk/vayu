@@ -100,6 +100,7 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 - **Overlay mode** (<1200px): floats over main content, top-right (absolute positioned, shadow, z-10).
 - **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`.
 - **Content:** resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; displays `{{name}}` : `value` pairs (secrets masked).
+- **Editing:** a blur (or Enter) commits the value back to the definition the resolver picked - looked up by `ResolvedVariable.sourceId`, not re-derived (see [variable resolution](./variable-resolution.md#getvariableoriginsname)). The payload is read from the query cache at commit time and patched into it optimistically, so a second blur before the first mutation settles cannot re-send the first one's old value. Commits register with the save store, so a quit flush waits for one in flight.
 
 ### `Dock` (`components/layout/Dock.tsx`)
 
