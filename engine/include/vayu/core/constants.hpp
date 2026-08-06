@@ -112,6 +112,16 @@ namespace run_config {
 /// allocates until malloc fails. Ten times the per-worker ceiling leaves every
 /// realistic run untouched while keeping the pre-allocation finite.
 constexpr int64_t MAX_CONCURRENCY = 10 * static_cast<int64_t> (event_loop::MAX_CONCURRENT);
+/// Upper bound on `maxInFlight`, the open-loop backpressure ceiling. It is
+/// deliberately **not** `MAX_CONCURRENCY`: that bounds an eager curl-handle
+/// pre-allocation, while this bounds a counter of outstanding requests that
+/// allocates nothing up front. Reusing the connection guard here refused
+/// configurations the engine already runs implicitly - the default ceiling is
+/// `max(targetRps * 10, 1000)` (`load_strategy.cpp`), which reaches 500,000 at
+/// the load dialog's 50k RPS maximum. A million covers the default formula
+/// across the whole advertised RPS range and still keeps a negative value -
+/// ~1.8e19 once cast to `size_t` - from removing the backpressure entirely.
+constexpr int64_t MAX_IN_FLIGHT = 1000000;
 /// Upper bound on `max_response_samples` (each retained sample holds a full
 /// response body, and the vector is reserved up front).
 constexpr int64_t MAX_RESPONSE_SAMPLES = 1000000;

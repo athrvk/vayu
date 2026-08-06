@@ -1406,7 +1406,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
-| `maxInFlight` | `1`-`10000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. |
+| `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 
@@ -1485,8 +1485,12 @@ regardless of how fast responses return.
 **`maxInFlight`.** A hard cap on concurrent in-flight requests. It applies
 **only to `constant_rps`** (the open-loop rate mode), where it bounds how many
 requests may be outstanding before the engine drops new ones; default
-≈ `max(targetRps × 10, 1000)`. For the closed-loop modes the `concurrency`
-target *is* the in-flight bound, so `maxInFlight` is ignored there.
+≈ `max(targetRps × 10, 1000)`, accepted range `1`-`1000000`. That range holds
+the default formula across the whole advertised RPS span (50k RPS → 500,000),
+which is why it is not the `concurrency` guard - a ceiling of 10,000 would
+reject explicitly what the engine already does implicitly. For the closed-loop
+modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
+ignored there.
 
 **Durations.** `duration` and `rampUpDuration` take a number with an optional
 unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix (`"500ms"` is half a

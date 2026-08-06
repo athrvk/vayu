@@ -12,13 +12,21 @@
  *
  *   - **`LOAD_TEST_LIMITS`** - the range each control in the load dialog
  *     offers. The ceilings are *this app's* policy, not the engine's, and four
- *     of them are user-adjustable (Settings -> Load testing). They sit well
- *     inside what the engine accepts, which is deliberate: the engine's own
- *     bounds are crash guards, so hitting one should be impossible from the UI
- *     rather than merely unlikely.
+ *     of them are user-adjustable (Settings -> Load testing). They sit inside
+ *     what the engine accepts, which is deliberate: the engine's own bounds are
+ *     crash guards, so hitting one should be impossible from the UI rather than
+ *     merely unlikely. `MAX_IN_FLIGHT` is the one that sits *on* the engine's
+ *     bound rather than under it - a backpressure ceiling is not a crash guard,
+ *     and the engine's own default reaches 500,000 at the RPS maximum offered
+ *     here, so a lower dialog ceiling would hide ceilings the engine picks for
+ *     itself.
  *   - **`LOAD_TEST_CEILING_BOUNDS`** - how far the user may move those
  *     ceilings. The upper end of each is the engine's guard, so no Settings
  *     value can produce a request the engine rejects.
+ *
+ * Both invariants are pinned against the engine's own header by
+ * `load-test.engine-parity.test.ts`, because stating them here is what was
+ * already being done when `maxInFlight` drifted.
  */
 
 export const LOAD_TEST_DEFAULTS = {
