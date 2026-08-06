@@ -182,6 +182,19 @@ describe("McpSettingsPanel write failures", () => {
 	});
 });
 
+describe("McpSettingsPanel connect failures", () => {
+	it("surfaces a rejected connect instead of only stopping the spinner", async () => {
+		await renderPanel();
+		connectMcpClient.mockRejectedValue(new Error("mcp server is off"));
+
+		await act(async () => {
+			fireEvent.click(screen.getAllByRole("button", { name: /^connect$/i })[0]);
+		});
+
+		expect(toastMessages().join(" ")).toMatch(/couldn't connect .*mcp server is off/i);
+	});
+});
+
 describe("McpSettingsPanel tool list", () => {
 	it("renders a tool whose category the copy table does not describe", async () => {
 		getMcpTools.mockResolvedValue([
