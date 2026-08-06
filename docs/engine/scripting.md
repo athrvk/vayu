@@ -139,6 +139,7 @@ pm.response.json()            // Parse JSON (throws if invalid)
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
 pm.response.cookies           // Set-Cookie, parsed - see below
+                              // (the stored session is pm.cookies)
 ```
 
 `reason()` reports the reason phrase from the status line. Where none was
@@ -194,14 +195,14 @@ pm.response.cookies[0].attrs;          // ['Path=/', 'HttpOnly'] - raw chunks
 `cookies` is what the response's `Set-Cookie` header carried, parsed - an array
 of `{ name, value, attrs }` with `get()` / `has()` / `toObject()` over it.
 Attributes are the raw `;`-separated chunks in wire order; there are no
-`path` / `secure` / `expires` fields, because the engine keeps no cookie jar
-and would only be re-stating the string.
+`path` / `secure` / `expires` fields, because that is the header restated, and
+what the engine actually *holds* is [`pm.cookies`](#the-cookie-jar-pmcookies).
 
 Three things follow from that, and they are the ones worth knowing:
 
-- **Nothing here is sent.** Vayu has no cookie jar (issue #301 step 2), so a
-  cookie a response sets is not carried into the next request. Reading it and
-  setting a header yourself is the way to reuse a session today.
+- **This is one response, not the session.** It reports what this response set,
+  including a cookie the engine then discarded as expired. For what will be
+  sent on the next request, read [`pm.cookies`](#the-cookie-jar-pmcookies).
 - **Cookie names are case-sensitive**, unlike header names: `get('SESSION')`
   does not answer the `session` cookie. That is what RFC 6265 says, and
   answering otherwise would be a wrong value dressed as a right one.
@@ -584,6 +585,41 @@ so. See [MCP](mcp.md#the-script-sandbox-surface).
 Interpolation happens strictly before the pre-request script and a payload is
 resolved exactly once; a second pass here would break that invariant. Use
 `pm.variables.replaceIn(template)`.
+
+## The cookie jar (`pm.cookies`)
+
+```javascript
+pm.cookies.get('session');      // value, or undefined
+pm.cookies.has('session');      // boolean
+pm.cookies.toObject();          // { session: 'abc' }
+```
+
+`pm.cookies` is what the engine is holding *for this request's URL* - matched on
+domain, path, `Secure` and expiry, exactly as it will be sent. It is what makes
+"log in once, reuse the session" work: a `Set-Cookie` on one request is carried
+to the next one automatically, with no header to set by hand.
+
+- **One jar per environment**, plus one for requests sent with no environment
+  selected. A staging session therefore cannot ride along on a production call
+  even when both point at the same host - which cookies alone would not prevent,
+  since they ignore the port and the scheme.
+- **In memory only**, for as long as the engine runs. Nothing is written to
+  disk: a stored jar is credential-grade material. Settings → General → Cookies
+  shows every jar and clears them.
+- **`pm.sendRequest` shares the jar** of the request it runs inside. A
+  pre-request script that logs in through it leaves the session where the real
+  request will find it.
+- **Load runs have no jar.** These three throw there rather than answering
+  `undefined`, which would read as "the cookie is gone". The jar is deliberately
+  off the load path: sharing one across the event loop's workers would put a
+  lock on the hot path, and a load run repeats a single request anyway.
+- **Read-only for now.** `pm.cookies.set` / `unset` / `clear` and
+  `pm.cookies.jar()` are not bound - mutating a jar that in-flight transfers are
+  reading needs its own design, and a binding that silently does nothing would
+  be worse than a missing one.
+
+The jar is libcurl's own cookie engine underneath: matching, expiry and
+replacement are its rules, not a second implementation of RFC 6265.
 
 ## Console Output
 

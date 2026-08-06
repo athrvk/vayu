@@ -44,6 +44,12 @@ export const API_ENDPOINTS = {
 	// Global Variables
 	GLOBALS: `/globals`,
 
+	// Cookie jar (issue #301). GET reads every jar; DELETE clears one or all -
+	// its `environmentId` parameter follows the engine's null-vs-absent rule,
+	// so omitting it clears every jar and sending it empty clears the one used
+	// by requests with no environment selected.
+	COOKIES: `/cookies`,
+
 	// Scripting
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 	SCRIPT_TYPES: `/scripting/types`,

@@ -370,6 +370,44 @@ export interface StopRunResponse {
 	};
 }
 
+// Cookie jar API (issue #301)
+
+/**
+ * One cookie the engine holds, as `GET /cookies` reports it.
+ *
+ * Every field has a reader in `CookiesCard`: the name and value are the row,
+ * the domain and path say which requests it rides on, `secure` / `httpOnly`
+ * are the badges, and `expires` (0 for a session cookie) distinguishes "until
+ * you close vayu" from a date.
+ */
+export interface EngineCookie {
+	name: string;
+	value: string;
+	domain: string;
+	path: string;
+	secure: boolean;
+	httpOnly: boolean;
+	/** Unix seconds, or 0 for a session cookie. */
+	expires: number;
+}
+
+/**
+ * One jar. `environmentId` is null for requests sent with no environment
+ * selected - null rather than "" so it cannot be mistaken for an id.
+ */
+export interface CookieScope {
+	environmentId: string | null;
+	cookies: EngineCookie[];
+}
+
+export interface GetCookiesResponse {
+	scopes: CookieScope[];
+}
+
+export interface ClearCookiesResponse {
+	cleared: number;
+}
+
 // Health & Config API
 export type GetHealthResponse = EngineHealth;
 

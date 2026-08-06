@@ -740,11 +740,21 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
+        // Which jar this execution reads and writes: one per environment, with
+        // the no-environment jar for a request sent without one. Resolved once
+        // here so the send, the pre-request script's `pm.sendRequest` and both
+        // scripts' `pm.cookies` cannot disagree about which session they are
+        // looking at. See cookie_jar.hpp for the scope decision.
+        const std::string cookie_scope =
+        run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
+
         // Execute pre-request script. `for_prerequest` is what makes its
         // pm.request edits reach the wire; everything below this line - the
         // send, the stored trace, the raw request the app shows - reads the
         // post-script request.
         auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
+        pre_ctx.cookie_jar          = &ctx.cookie_jar;
+        pre_ctx.cookie_scope        = cookie_scope;
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
@@ -756,7 +766,9 @@ void register_execution_routes (RouteContext& ctx) {
 
         // Send HTTP request
         vayu::http::ClientConfig config;
-        config.verbose = ctx.verbose;
+        config.verbose      = ctx.verbose;
+        config.cookie_jar   = &ctx.cookie_jar;
+        config.cookie_scope = cookie_scope;
         vayu::http::Client client (config);
         const auto response = client.send (request).value ();
 
@@ -765,6 +777,8 @@ void register_execution_routes (RouteContext& ctx) {
 
         // Execute post-request script
         auto post_ctx = vayu::runtime::ScriptContext::for_test (request, response);
+        post_ctx.cookie_jar          = &ctx.cookie_jar;
+        post_ctx.cookie_scope        = cookie_scope;
         post_ctx.environment         = &env;
         post_ctx.globals             = &globals;
         post_ctx.collectionVariables = &collectionVariables;

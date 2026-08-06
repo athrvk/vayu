@@ -637,6 +637,11 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 - **`useEnvironmentsQuery()`** - Fetch all environments
 - **`useGlobalsQuery()`** - Fetch global variables
+- **`useCookiesQuery()`** / **`useClearCookiesMutation()`** (`queries/cookies.ts`) -
+  The engine's cookie jars, one per environment, read and cleared by
+  `CookiesCard` in Settings. The mutation invalidates rather than patching the
+  cache: a clear that raced a request in flight would otherwise leave the panel
+  claiming an empty jar the engine has already refilled
 
 **Mutations:**
 - **`useCreateEnvironmentMutation()`**
@@ -766,7 +771,7 @@ runs: {
   timeSeries: (id) => ["runs", "timeSeries", id],
   samples: (id) => ["runs", "samples", id],               // captured response bodies, fetched lazily
 },
-// environments mirrors collections; globals / health / config /
+// environments mirrors collections; globals / cookies / health / config /
 // scriptCompletions / scriptTypes / oauth / prefetch each own a root.
 ```
 

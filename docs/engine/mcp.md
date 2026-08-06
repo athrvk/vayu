@@ -311,6 +311,18 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
 An unknown `requestId` is the engine's definitive 404, surfaced as a readable
 "no saved request with id" tool error.
 
+**Cookies are shared with the app, per environment.** `run_request` and
+`run_collection_smoke` go through `POST /execute`, which sends through the
+engine's cookie jar (issue #301) - so a `Set-Cookie` an agent collects is sent
+on its next call, and on the user's next Send in the same environment. That is
+deliberate: the jar belongs to the environment, not to the caller, and giving
+MCP a jar of its own would make the same saved request behave differently for
+an agent than in the UI - a surprise in the harder direction to debug. The
+state stays visible and resettable: Settings → General → Cookies lists every
+jar and clears it, and `GET /cookies` reports the same. An agent that must not
+inherit a session should run in an environment of its own. `start_load_run` is
+unaffected - load runs never touch the jar.
+
 > **History.** Until issue #226 MCP carried `resolve.ts` - a full main-process
 > port of the renderer's composition pipeline - because the engine composed
 > only partway. That copy (and its `dynamic-variables.ts` twin) is deleted;

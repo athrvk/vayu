@@ -15,6 +15,7 @@
 #include <memory>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -27,6 +28,25 @@ struct ClientConfig {
     bool verbose = vayu::core::constants::defaults::VERBOSE;
     std::string proxy_url;
     std::string ca_bundle_path;
+
+    /**
+     * @brief The jar this client reads cookies from and writes them back to,
+     *        or null to send no stored cookie and keep none (issue #301).
+     *
+     * Null is the default because most `Client` users are not a user's
+     * request: the OAuth token call, the import fetch and the update check are
+     * the engine talking on its own behalf, and a session cookie picked up
+     * there belongs to nobody's environment. Only `POST /execute` and the
+     * `pm.sendRequest` inside it opt in - see `cookie_scope`.
+     */
+    CookieJar* cookie_jar = nullptr;
+
+    /**
+     * @brief Which jar - the environment id, or `NO_ENVIRONMENT_SCOPE`.
+     *
+     * Read only when `cookie_jar` is set.
+     */
+    std::string cookie_scope{ NO_ENVIRONMENT_SCOPE };
 };
 
 /**

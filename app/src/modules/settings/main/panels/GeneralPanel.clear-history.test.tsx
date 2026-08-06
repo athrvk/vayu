@@ -48,8 +48,10 @@ vi.mock("@/services", () => ({
 // The real zustand stores (toast, client settings) are left in place - they are
 // cheap and behave, and stubbing them would only widen what this test asserts.
 
-// UpdatesCard talks to the Electron updater bridge, which isn't the subject here.
+// UpdatesCard talks to the Electron updater bridge and CookiesCard to the
+// engine's cookie jar; neither is the subject here. CookiesCard has its own tests.
 vi.mock("./UpdatesCard", () => ({ UpdatesCard: () => null }));
+vi.mock("./CookiesCard", () => ({ CookiesCard: () => null }));
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 

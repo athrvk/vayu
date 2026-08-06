@@ -35,6 +35,7 @@ import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { UpdatesCard } from "./UpdatesCard";
+import { CookiesCard } from "./CookiesCard";
 
 interface AppPaths {
 	appDir: string;
@@ -193,6 +194,11 @@ export default function GeneralPanel() {
 					</div>
 				</CardContent>
 			</Card>
+
+			{/* The engine's cookie jar - engine-held state the user never typed,
+			    which is why it sits beside run history rather than in a panel
+			    of its own. */}
+			<CookiesCard />
 
 			{/* Storage paths */}
 			<Card>

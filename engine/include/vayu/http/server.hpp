@@ -48,6 +48,10 @@ class Server {
     // stops and joins any live loopback listeners, and db_ (external) is still
     // alive at that point. Previously a function-local static outliving db_.
     OAuth2AuthorizeManager oauth_authorize_manager_;
+    // Same reverse-order reasoning as oauth_authorize_manager_ above: the
+    // route lambdas and any in-flight /execute hold a reference to it, so it
+    // must outlive server_. Process-lifetime by design - see cookie_jar.hpp.
+    CookieJar cookie_jar_;
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{ false };

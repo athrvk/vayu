@@ -20,6 +20,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL, read-only, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
@@ -290,15 +291,16 @@ pm.response.cookies[0].attrs;         // ['Path=/', 'HttpOnly'] - raw chunks
 An array of `{ name, value, attrs }` in wire order, parsed from that one
 response's `Set-Cookie`. It is **not** Postman's `CookieList` and its entries
 are not `postman-collection` `Cookie` objects: there is no `key`, no `path`,
-no `secure`, no `expires`, because the engine keeps no cookie jar and those
-fields would be a restatement of the attribute string rather than state
-anything holds. `attrs` is that string, split on `;` and untouched otherwise.
+no `secure`, no `expires`, because those fields would restate the attribute
+string rather than report what the engine holds - the jar itself is
+[`pm.cookies`](#the-cookie-jar-pmcookies). `attrs` is that string, split on `;`
+and untouched otherwise.
 
 Three divergences worth knowing before porting a script:
 
-- **No jar.** A cookie a response sets is not sent on the next request
-  (`pm.cookies.*` is absent for the same reason). Reuse a session by reading
-  the value here and setting the header yourself.
+- **This is the response, not the session.** What will actually be sent next
+  time is `pm.cookies`; this reports what this one response set, expired
+  cookies included.
 - **Names are case-sensitive**, unlike header names - `get('SESSION')` does not
   find the `session` cookie. RFC 6265 says they differ, and answering anyway
   would be a wrong value dressed as a right one.
@@ -308,6 +310,34 @@ Three divergences worth knowing before porting a script:
 The parse is shared with the response Cookies tab in the UI through
 `engine/tests/fixtures/set-cookie-conformance.json`, so a cookie cannot read one
 way on screen and another in a script.
+
+### The cookie jar (`pm.cookies`)
+
+```javascript
+pm.cookies.get('session');   // value, or undefined
+pm.cookies.has('session');   // boolean
+pm.cookies.toObject();       // { session: 'abc' }
+```
+
+The read half of Postman's `pm.cookies`, over a jar the engine keeps for
+design-mode requests: a `Set-Cookie` on one request is sent on the next one
+automatically. What these answer is matched against **this request's URL** -
+domain, path, `Secure` and expiry - so they report what will go on the wire and
+not everything stored.
+
+Divergences from Postman:
+
+- **No `pm.cookies.jar()`, and no write half.** `set` / `unset` / `clear` are
+  not bound. Mutating a jar that in-flight transfers are reading needs its own
+  design; a binding that accepted a cookie and dropped it would be worse than
+  a missing one.
+- **Scope is the environment**, not the domain-with-permission model Postman
+  uses. One jar per environment plus one for "no environment", in memory only,
+  clearable in Settings → General → Cookies.
+- **`pm.sendRequest` shares the jar** with the request around it, so logging in
+  from a pre-request script leaves the session where the real request finds it.
+- **Load runs have no jar**, and these throw there rather than answering
+  `undefined` - see [scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
 
 ---
 
@@ -332,10 +362,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.iterationData.*` - data-file driven runs, and with them
   `pm.info.iteration` / `pm.info.iterationCount` (see
   [above](#script-identity-pminfo---three-fields-all-optional))
-- `pm.cookies.*` - the cookie jar. Vayu keeps none, so there is nothing to read
-  or set, and a cookie a response sets is not carried into the next request.
-  `pm.response.cookies` **is** supported (see above); it reads that one
-  response's `Set-Cookie` and nothing more
+- `pm.cookies.set(...)` / `.unset(...)` / `.clear()` / `.jar()` - the jar's
+  write half. The read half (`get` / `has` / `toObject`) is supported - see
+  [above](#the-cookie-jar-pmcookies)
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
   `pm.request.url` is a writable **string** that the write-back requires to still
   be one, and a JS string primitive cannot carry properties; boxing it would

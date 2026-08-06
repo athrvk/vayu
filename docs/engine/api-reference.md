@@ -853,6 +853,71 @@ disappearing rather than as an error. A non-object `variables` (`42`, a string,
 an array) had the same effect and is now a `400` - see
 [Accepted field shapes](#accepted-field-shapes).
 
+## Cookies
+
+The engine keeps a cookie jar for design-mode requests (`POST /execute` and the
+`pm.sendRequest` calls inside it), so a session set by one request is sent on
+the next. **One jar per environment**, plus one for requests sent with no
+environment selected; in memory only, for the life of the engine process, and
+never written to disk. Load runs neither read nor write it.
+
+### GET /cookies
+
+Every jar that holds anything, one entry per scope.
+
+**Response:**
+```json
+{
+  "scopes": [
+    {
+      "environmentId": "env_staging",
+      "cookies": [
+        {
+          "name": "session",
+          "value": "abc123",
+          "domain": ".staging.example.com",
+          "path": "/",
+          "secure": true,
+          "httpOnly": true,
+          "expires": 1767225600
+        }
+      ]
+    }
+  ]
+}
+```
+
+`environmentId` is `null` for the no-environment jar - null rather than `""` so
+a client cannot mistake it for an id. `expires` is unix seconds, or `0` for a
+session cookie (one that lives until the engine exits). A scope with no cookies
+left is not reported.
+
+### DELETE /cookies
+
+Clear one jar, or all of them.
+
+**Query parameters:**
+
+| Parameter | Meaning |
+|-----------|---------|
+| *(none)* | Clear every jar |
+| `environmentId=<id>` | Clear that environment's jar |
+| `environmentId=` | Clear the no-environment jar |
+
+The three cases are the [null-vs-absent rule](#the-null-vs-absent-rule) in a
+query string: an empty value is a real scope - the one no id can name - and not
+a mistake.
+
+**Response:**
+```json
+{
+  "cleared": 3
+}
+```
+
+`cleared` counts the cookies dropped; clearing a scope that holds nothing is a
+`200` with `0`, not an error.
+
 ## Authentication
 
 The engine **resolves auth server-side**. Every request's `auth` object (on

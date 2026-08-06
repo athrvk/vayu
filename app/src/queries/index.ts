@@ -61,6 +61,9 @@ export {
 // Global Variables
 export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 
+// Cookie jar
+export { useCookiesQuery, useClearCookiesMutation } from "./cookies";
+
 // Health & Config
 export { useHealthQuery } from "./health";
 export { useConfigQuery, useUpdateConfigMutation } from "./config";

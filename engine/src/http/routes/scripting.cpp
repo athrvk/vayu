@@ -146,8 +146,9 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "The response's Set-Cookie header, parsed: an array of { name, value, "
     "attrs } in wire order, with get()/has()/toObject() over it. `attrs` "
-    "holds the raw attribute chunks ('Path=/', 'HttpOnly'). Read-only - vayu "
-    "keeps no cookie jar, so nothing here is sent on a later request." },
+    "holds the raw attribute chunks ('Path=/', 'HttpOnly'). This is one "
+    "response's Set-Cookie and nothing else - for what vayu will send on the "
+    "next request, read pm.cookies." },
     { "sortText", "1_pm_response_cookies" } });
 
     completions.push_back ({ { "label", "pm.response.cookies.get" },
@@ -666,6 +667,49 @@ nlohmann::json get_script_completions () {
     "function (err, res) {\n  if (err) { return; }\n  "
     "pm.environment.set('token', res.json().access_token);\n});" },
     { "sortText", "0_pm_sendRequest" } });
+
+    // ========================================
+    // pm.cookies - the jar, read-side
+    // ========================================
+    completions.push_back ({ { "label", "pm.cookies" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.cookies" }, { "detail", "The cookie jar for this request's URL" },
+    { "documentation",
+    "The cookies vayu holds that would be sent to this request's URL - what "
+    "makes 'log in once, reuse the session' work. Matched on domain, path, "
+    "Secure and expiry, so it answers for this URL and no other.\n\nOne jar "
+    "per environment, kept in memory for as long as the engine runs and "
+    "clearable in Settings; requests sent with no environment selected share "
+    "one jar of their own. Load runs have no jar and these throw there. "
+    "Read-only for now - use pm.response.cookies for what a single response "
+    "set." },
+    { "sortText", "0_pm_cookies" } });
+
+    completions.push_back ({ { "label", "pm.cookies.get" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.get(\"${1:session}\")" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.get(name: string): string | undefined" },
+    { "documentation",
+    "The value of a stored cookie that would be sent to this URL, or "
+    "undefined when the jar holds none of that name for it. Cookie names are "
+    "case-sensitive. When the jar holds the name on more than one path, the "
+    "longest matching path answers - the value the server reads "
+    "first.\n\nExample:\nconst session = pm.cookies.get('session');" },
+    { "sortText", "1_pm_cookies_get" } });
+
+    completions.push_back ({ { "label", "pm.cookies.has" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.cookies.has(\"${1:session}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.cookies.has(name: string): boolean" },
+    { "documentation",
+    "Whether the jar holds a cookie of that name that would be sent to this "
+    "URL (case-sensitive)." },
+    { "sortText", "1_pm_cookies_has" } });
+
+    completions.push_back ({ { "label", "pm.cookies.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.cookies.toObject()" },
+    { "detail", "pm.cookies.toObject(): object" },
+    { "documentation",
+    "Every stored cookie that would be sent to this URL, as a name-to-value "
+    "object." },
+    { "sortText", "1_pm_cookies_to_object" } });
 
     // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it

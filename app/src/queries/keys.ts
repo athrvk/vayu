@@ -82,6 +82,12 @@ export const queryKeys = {
 		all: ["globals"] as const,
 	},
 
+	// Cookie jar. One key for the whole read - the engine reports every scope
+	// in one call, and the panel shows them together.
+	cookies: {
+		all: ["cookies"] as const,
+	},
+
 	// Health
 	health: {
 		all: ["health"] as const,
