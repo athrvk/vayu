@@ -119,13 +119,20 @@ vayu::Request get_request (const std::string& url) {
     return request;
 }
 
-/// Send @p url in @p scope through @p jar and return the response body.
-std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
+/// Send @p url in @p scope through @p jar and return the whole response - the
+/// raw-request view is as much a subject of these tests as the body is.
+vayu::Response
+response_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
     ClientConfig config;
     config.cookie_jar   = &jar;
     config.cookie_scope = scope;
     Client client (config);
-    return client.send (get_request (url)).value ().body;
+    return client.send (get_request (url)).value ();
+}
+
+/// Send @p url in @p scope through @p jar and return the response body.
+std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
+    return response_in_scope (jar, scope, url).body;
 }
 
 } // namespace
@@ -386,6 +393,31 @@ TEST (CookieJarTransfer, AServerExpiringACookieRemovesItFromTheJar) {
     // than merging into what was there is what makes this stick.
     send_in_scope (jar, "env_a", server.url ("/logout"));
     EXPECT_EQ (send_in_scope (jar, "env_a", server.url ("/echo")), "");
+}
+
+// The jar attaches cookies inside libcurl, so the raw-request view had no way
+// to know about them and said nothing was sent (issue #339) - silent
+// misinformation in the surface whose whole job is showing what went out. The
+// value is shown plainly: this view exists to be exact, and the same value is
+// already readable in Settings. The verbose log keeps its redaction.
+TEST (CookieJarTransfer, TheRawRequestViewShowsTheCookieThatWasSent) {
+    CookieServer server;
+    CookieJar jar;
+
+    send_in_scope (jar, "env_a", server.url ("/login"));
+    const auto sent = response_in_scope (jar, "env_a", server.url ("/echo"));
+
+    EXPECT_EQ (sent.body, "session=abc123") << "the cookie never reached the server";
+    EXPECT_NE (sent.raw_request.find ("Cookie: session=abc123"), std::string::npos)
+    << "the wire carried the cookie and the raw view denied it:\n"
+    << sent.raw_request;
+
+    // The other half of the claim: the view reports what was sent, so a scope
+    // with no matching cookie must not gain a Cookie line it never had.
+    const auto none = response_in_scope (jar, "env_b", server.url ("/echo"));
+    EXPECT_EQ (none.raw_request.find ("Cookie:"), std::string::npos)
+    << "a cookie appeared in a scope that sent none:\n"
+    << none.raw_request;
 }
 
 // ============================================================================

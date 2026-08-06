@@ -1243,6 +1243,17 @@ A client splitting a folded `Set-Cookie` must split on a comma followed by
 for the response headers stored on a design run's `trace_data.response` and on
 captured load-run samples, which come off the same parse.
 
+**`rawRequest` is the header block libcurl actually sent**, captured from the
+transfer's last outbound header frame and followed by the request body. So it
+carries what libcurl added on its own - the `Cookie` line the
+[cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
+and an h2 request rendered in HTTP/1 form - none of which appear in
+`requestHeaders`, which stays the *composed* headers. Values are not redacted:
+this field exists to say exactly what went out. On a followed redirect it is the
+final hop, matching the response beside it. A transfer that failed before
+sending anything (DNS failure, connection refused) has no frame to read, and
+falls back to a request synthesized from what was composed.
+
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
 `"test"` for the post-request one) and `level` is the `console.*` method that was

@@ -192,6 +192,10 @@ TEST_F (HttpClientTest, UnreachableHostsRawRequestNamesWhatWasAskedFor) {
     // they can produce - reverting the fix would leave them all green. Here
     // nothing is negotiated at all, so the line can only come from what was
     // requested, and a stale literal would print HTTP/1.1 instead.
+    //
+    // Since #339 this also pins the synthesized fallback: a connection refused
+    // at port 1 never produces an outbound header frame, so this is the raw
+    // view built from the composed request rather than off the wire.
     Request request;
     request.method       = HttpMethod::GET;
     request.url          = "http://127.0.0.1:1/"; // port 1: connection refused
@@ -205,6 +209,61 @@ TEST_F (HttpClientTest, UnreachableHostsRawRequestNamesWhatWasAskedFor) {
     EXPECT_EQ (response.http_version, ""); // nothing negotiated - still honest
     EXPECT_TRUE (response.raw_request.rfind ("GET / HTTP/2\r\n", 0) == 0)
     << "raw_request began: " << response.raw_request.substr (0, 40);
+}
+
+// The raw view is the wire's own header block (issue #339), not a rebuild of
+// the composed headers. `Accept: */*` is what proves it: libcurl adds that
+// itself and it appears in no composed header map, so a view rebuilt from
+// `request_headers` cannot contain it.
+TEST_F (HttpClientTest, RawRequestIsTheHeaderBlockThatWentOnTheWire) {
+    Headers headers = { { "X-Trace", "abc" } };
+
+    auto result = client_->get (mock_->url ("/headers"), headers);
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& raw = result.value ().raw_request;
+    EXPECT_TRUE (raw.starts_with ("GET /headers HTTP/1.1\r\n")) << raw;
+    EXPECT_NE (raw.find ("Host: 127.0.0.1:"), std::string::npos) << raw;
+    EXPECT_NE (raw.find ("X-Trace: abc"), std::string::npos) << raw;
+    EXPECT_NE (raw.find ("User-Agent: "), std::string::npos) << raw;
+    EXPECT_NE (raw.find ("Accept: */*"), std::string::npos)
+    << "the view was rebuilt from the composed headers, not read off the wire:\n"
+    << raw;
+    EXPECT_TRUE (raw.ends_with ("\r\n\r\n")) << "header block is unterminated:\n" << raw;
+}
+
+// A followed redirect sends two requests; the view describes the one that
+// produced the response being looked at, which is the last frame.
+TEST_F (HttpClientTest, RawRequestOfAFollowedRedirectShowsTheFinalHop) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/redirect/1"); // 302 -> /get
+    request.follow_redirects = true;
+    request.timeout_ms       = 5000;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.raw_request.starts_with ("GET /get HTTP/1.1\r\n"))
+    << "the raw view named the hop that redirected, not the one that answered:\n"
+    << response.raw_request;
+}
+
+// The body is ours, not libcurl's - the frame stops at the blank line, so the
+// two halves have to be joined without swallowing or duplicating it.
+TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
+    auto result = client_->post (mock_->url ("/post"), R"({"name": "test"})",
+    { { "Content-Type", "application/json" } });
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& raw = result.value ().raw_request;
+    // libcurl's own Accept again, so this pins the joined halves of the wire
+    // view rather than a synthesized block that happens to have the same shape.
+    EXPECT_NE (raw.find ("Accept: */*"), std::string::npos) << raw;
+    EXPECT_NE (raw.find ("Content-Length: 16\r\n"), std::string::npos) << raw;
+    EXPECT_TRUE (raw.ends_with ("\r\n\r\n" R"({"name": "test"})")) << raw;
 }
 
 TEST_F (HttpClientTest, SendsPostRequest) {
