@@ -401,6 +401,20 @@ async function composeLoadRunRequest(
  */
 const DEFAULT_LOAD_MODE = "constant_concurrency";
 
+/**
+ * The engine's `maxInFlight` guard (`run_config::MAX_IN_FLIGHT` in
+ * `engine/include/vayu/core/constants.hpp`), mirrored here so the schema
+ * rejects an out-of-range value by name instead of surfacing a 400.
+ *
+ * It is a literal rather than an import because production code in `electron/`
+ * may not reach into `src/` - `tsconfig.node.json` withholds the `@/*` mapping
+ * on purpose, so the import would not type-check. The copy is kept honest from
+ * the test side, the way the dynamic-variable table already is: `tools.test.ts`
+ * ties it to the renderer's `LOAD_TEST_LIMITS`, and
+ * `src/constants/load-test.engine-parity.test.ts` ties that to this header.
+ */
+export const MAX_IN_FLIGHT_BOUND = 1_000_000;
+
 // --- Shared input schema fragments ------------------------------------------
 
 /** Optional resolution scope shared by the ad-hoc execute/load tools. */
@@ -1182,12 +1196,17 @@ export const TOOLS: McpTool[] = [
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			// A pending-request ceiling read as a `size_t`, so `-1` - the natural
 			// "unlimited" spelling - removes the ceiling instead of tightening it.
+			// The upper bound is the engine's, so a value this schema accepts is
+			// one `POST /runs` accepts.
 			maxInFlight: z
 				.number()
 				.int()
 				.positive()
+				.max(MAX_IN_FLIGHT_BOUND)
 				.optional()
-				.describe("In-flight cap (constant_rps only)."),
+				.describe(
+					`In-flight cap (constant_rps only), 1-${MAX_IN_FLIGHT_BOUND}. Default max(targetRps * 10, 1000).`
+				),
 			requestId: z
 				.string()
 				.optional()

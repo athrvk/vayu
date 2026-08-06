@@ -7,9 +7,16 @@
 
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
-import { dispatchTool, toolCatalog, TOOLS, type ToolContext } from "./tools.js";
+import {
+	dispatchTool,
+	MAX_IN_FLIGHT_BOUND,
+	toolCatalog,
+	TOOLS,
+	type ToolContext,
+} from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { EngineRequestError, EngineTimeoutError, type EngineClient } from "./engine-client.js";
+import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
 /**
  * Default `composeRequest` fake: the engine's identity composition for an
@@ -1063,6 +1070,38 @@ describe("dispatchTool", () => {
 				parseArgs("start_load_run", { url: "https://api.example.com", [field]: 2.5 })
 			).toThrow();
 		}
+	});
+
+	test("the schema's maxInFlight ceiling is the engine's, inclusive", () => {
+		// The bound exists so an out-of-range value is named here rather than
+		// returned as an opaque 400 from POST /runs - which means it has to be
+		// the *same* bound, not a stricter guess. 500,000 is what the engine's
+		// own default formula reaches at 50k RPS, so refusing it would refuse a
+		// run the engine starts on its own.
+		for (const value of [1, 500_000, MAX_IN_FLIGHT_BOUND]) {
+			expect(() =>
+				parseArgs("start_load_run", {
+					url: "https://api.example.com",
+					maxInFlight: value,
+				})
+			).not.toThrow();
+		}
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				maxInFlight: MAX_IN_FLIGHT_BOUND + 1,
+			})
+		).toThrow();
+	});
+
+	test("the maxInFlight ceiling is the one the load dialog advertises", () => {
+		// Third copy of the same number: engine header, renderer constant, this
+		// schema. `electron/` production code may not import `src/`, so the copy
+		// stays - and this is the half of the chain that keeps it honest, the
+		// renderer-to-engine half living in
+		// `src/constants/load-test.engine-parity.test.ts`. An agent and a human
+		// composing the same run must be accepted or refused identically.
+		expect(MAX_IN_FLIGHT_BOUND).toBe(LOAD_TEST_LIMITS.MAX_IN_FLIGHT.MAX);
 	});
 
 	test("start_load_run sends an explicit duration when the cap is under the engine default", async () => {

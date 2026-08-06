@@ -186,10 +186,27 @@ TEST (RunConfigValidation, MaxInFlightBoundsAreInclusive) {
     auto config           = valid_config ();
     config["maxInFlight"] = 1;
     EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["maxInFlight"] = vayu::core::constants::run_config::MAX_CONCURRENCY;
+    config["maxInFlight"] = vayu::core::constants::run_config::MAX_IN_FLIGHT;
     EXPECT_FALSE (validate_run_config (config).has_value ());
-    config["maxInFlight"] = vayu::core::constants::run_config::MAX_CONCURRENCY + 1;
+    config["maxInFlight"] = vayu::core::constants::run_config::MAX_IN_FLIGHT + 1;
     expect_rejected (config, "maxInFlight");
+}
+
+// The backpressure ceiling is not the connection guard, and the two are not
+// interchangeable: `MAX_CONCURRENCY` bounds an eager per-worker curl-handle
+// pre-allocation, `maxInFlight` bounds a counter that pre-allocates nothing.
+// Borrowing the connection guard for it refused, with a 400, exactly the
+// ceilings the engine's own default formula reaches on its own.
+TEST (RunConfigValidation, MaxInFlightAcceptsWhatTheDefaultFormulaReaches) {
+    // `max(targetRps * 10, 1000)` (load_strategy.cpp) at the load dialog's
+    // 50k RPS maximum. Omitted, this ceiling is used without complaint; asking
+    // for it explicitly must not be a 400.
+    auto config           = valid_config ();
+    config["maxInFlight"] = 500000;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    EXPECT_GT (config["maxInFlight"].get<int64_t> (),
+    vayu::core::constants::run_config::MAX_CONCURRENCY)
+    << "the case no longer covers the asymmetry it was written for";
 }
 
 // --- 3. Timeout: <= 0 left transfers that never expire ---------------------

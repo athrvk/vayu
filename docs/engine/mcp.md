@@ -468,7 +468,9 @@ configurable in **Settings → MCP** and persisted.
   an in-flight ceiling (see the accepted ranges under
   [POST /runs](api-reference.md#post-runs)). `maxInFlight` is the one that bounds
   work *downward*, so there is no separate cap setting for it - the enormous
-  value is the one that removes the backpressure the caller asked for.
+  value is the one that removes the backpressure the caller asked for; its
+  schema additionally carries the engine's own ceiling of `1000000`, so a value
+  this tool accepts is one `POST /runs` accepts.
   `duration` / `rampUpDuration` are also rejected when they are not durations at
   all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
   engine parses), since the engine now fails such a run rather than quietly
