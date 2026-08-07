@@ -23,6 +23,9 @@
  * its right edge, so ArrowRight widens it; the context bar's sits on its left,
  * so ArrowLeft widens. Getting this from the prop rather than a second component
  * is the whole reason for sharing.
+ *
+ * It governs the *spatial* keys only. Home and End name a point in the value
+ * model the handle announces, so they land on the same bound from either side.
  */
 
 import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from "@/constants/layout";
@@ -72,11 +75,20 @@ export function PanelResizeHandle({
 	};
 
 	const onKeyDown = (e: React.KeyboardEvent) => {
+		// Arrows and Page keys are spatial: the direction they move the pointer is
+		// the direction the edge travels, so they follow `grow`.
 		const nudge = (delta: number) => {
 			e.preventDefault();
-			// The store clamps to PANEL_MIN_WIDTH / PANEL_MAX_WIDTH, so ±Infinity
-			// from Home and End needs no special case here.
 			setWidth(width + delta * grow);
+		};
+
+		// Home and End are absolute against the value model this handle declares
+		// (`aria-valuemin`/`max`), so they must NOT follow `grow` - on the context
+		// bar's left-side handle that inverted them, and a screen reader hearing
+		// "min 220, max 480" announced Home as the minimum while it jumped to 480.
+		const jumpTo = (target: number) => {
+			e.preventDefault();
+			setWidth(target);
 		};
 
 		switch (e.key) {
@@ -89,9 +101,9 @@ export function PanelResizeHandle({
 			case "PageDown":
 				return nudge(-PAGE_STEP);
 			case "Home":
-				return nudge(-Infinity);
+				return jumpTo(PANEL_MIN_WIDTH);
 			case "End":
-				return nudge(Infinity);
+				return jumpTo(PANEL_MAX_WIDTH);
 			case "Enter":
 			case " ":
 				// The keyboard equivalent of the double-click reset, which was

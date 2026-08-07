@@ -79,13 +79,26 @@ describe("PanelResizeHandle", () => {
 		expect(setWidth).toHaveBeenLastCalledWith(236);
 	});
 
-	it("sends Home and End to the bounds, which the store clamps", () => {
-		const { setWidth, handle } = setup("right");
-		fireEvent.keyDown(handle, { key: "Home" });
-		expect(setWidth).toHaveBeenCalledWith(-Infinity);
-		fireEvent.keyDown(handle, { key: "End" });
-		expect(setWidth).toHaveBeenLastCalledWith(Infinity);
-	});
+	// Home and End are absolute against the declared value model, not spatial like
+	// the arrows - so unlike the arrow cases above they must agree on both sides.
+	// Pinning only `side="right"` is how the inverted mapping shipped green: there
+	// the spatial and the absolute reading happen to coincide.
+	it.each(["right", "left"] as const)(
+		"sends Home to the min it announces and End to the max, on a %s-edge handle",
+		(side) => {
+			const { setWidth, handle } = setup(side);
+			// Read the bounds off the element rather than the constants: the defect
+			// was the keys disagreeing with the model the handle announces, so the
+			// announcement is what the assertion has to be anchored to.
+			expect(handle).toHaveAttribute("aria-valuemin", String(PANEL_MIN_WIDTH));
+			expect(handle).toHaveAttribute("aria-valuemax", String(PANEL_MAX_WIDTH));
+
+			fireEvent.keyDown(handle, { key: "Home" });
+			expect(setWidth).toHaveBeenCalledWith(Number(handle.getAttribute("aria-valuemin")));
+			fireEvent.keyDown(handle, { key: "End" });
+			expect(setWidth).toHaveBeenLastCalledWith(Number(handle.getAttribute("aria-valuemax")));
+		}
+	);
 
 	it("resets on Enter and Space - the double-click had no keyboard route", () => {
 		const { setWidth, handle } = setup("right");
