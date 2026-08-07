@@ -165,26 +165,126 @@ int64_t now_seconds) {
     return path_matches (cookie.path, path);
 }
 
-std::vector<std::string> CookieJar::lines_for (const std::string& scope) const {
-    const std::lock_guard<std::mutex> lock (mutex_);
-    const auto it = scopes_.find (scope);
-    return it == scopes_.end () ? std::vector<std::string>{} : it->second;
+std::string format_cookie_line (const JarCookie& cookie) {
+    std::string line;
+    if (cookie.http_only) {
+        line += HTTP_ONLY_PREFIX;
+    }
+    line += cookie.domain;
+    line += '\t';
+    line += cookie.include_subdomains ? "TRUE" : "FALSE";
+    line += '\t';
+    line += cookie.path;
+    line += '\t';
+    line += cookie.secure ? "TRUE" : "FALSE";
+    line += '\t';
+    line += std::to_string (cookie.expires);
+    line += '\t';
+    line += cookie.name;
+    line += '\t';
+    line += cookie.value;
+    return line;
 }
 
-void CookieJar::store (const std::string& scope, std::vector<std::string> lines) {
-    const std::lock_guard<std::mutex> lock (mutex_);
-    if (lines.empty ()) {
-        // Do not leave an empty scope behind: `snapshot()` reports scopes, and
-        // an environment whose cookies all expired would otherwise show up as
-        // a jar with nothing in it.
-        scopes_.erase (scope);
-        return;
+std::optional<JarCookie> cookie_for_url (const std::string& url, JarCookie cookie) {
+    if (cookie.name.empty ()) {
+        return std::nullopt;
     }
-    scopes_[scope] = std::move (lines);
+    // The line's own separators. A value carrying one would be written as a
+    // line with the wrong field count, which parse_cookie_line then refuses -
+    // the cookie would appear to have been stored and be gone on the next read.
+    for (const std::string_view field :
+    { std::string_view (cookie.name), std::string_view (cookie.value),
+    std::string_view (cookie.domain), std::string_view (cookie.path) }) {
+        if (field.find_first_of ("\t\r\n") != std::string_view::npos) {
+            return std::nullopt;
+        }
+    }
+
+    if (!cookie.domain.empty () && !cookie.path.empty ()) {
+        cookie.include_subdomains = cookie.domain.starts_with (".");
+        return cookie;
+    }
+
+    CURLU* parsed = curl_url ();
+    if (!parsed) {
+        return std::nullopt;
+    }
+    std::optional<std::string> host;
+    std::optional<std::string> path;
+    if (curl_url_set (parsed, CURLUPART_URL, url.c_str (), 0) == CURLUE_OK) {
+        host = url_part (parsed, CURLUPART_HOST);
+        path = url_part (parsed, CURLUPART_PATH);
+    }
+    curl_url_cleanup (parsed);
+    if (!host || !path) {
+        return std::nullopt;
+    }
+
+    if (cookie.domain.empty ()) {
+        // Host-only, which is what a Set-Cookie with no Domain attribute is.
+        cookie.domain = *host;
+    }
+    if (cookie.path.empty ()) {
+        // RFC 6265 §5.1.4 default-path: everything up to the last `/`, and `/`
+        // when that leaves nothing.
+        const size_t last = path->rfind ('/');
+        cookie.path =
+        (last == std::string::npos || last == 0) ? "/" : path->substr (0, last);
+    }
+    cookie.include_subdomains = cookie.domain.starts_with (".");
+    return cookie;
+}
+
+std::vector<std::string> apply_cookie_writes (std::vector<std::string> lines,
+const std::vector<CookieWrite>& writes) {
+    for (const auto& write : writes) {
+        switch (write.kind) {
+        case CookieWrite::Kind::Clear: lines.clear (); break;
+
+        case CookieWrite::Kind::Set: {
+            const auto written = parse_cookie_line (write.line);
+            if (!written) {
+                // Refused at the binding, so reaching here means a caller built
+                // a line by hand; dropping it is better than storing a line no
+                // reader can parse.
+                break;
+            }
+            // RFC 6265 §5.3: name, domain and path are a cookie's identity, so
+            // a second write of the same three replaces rather than duplicates.
+            std::erase_if (lines, [&written] (const std::string& line) {
+                const auto held = parse_cookie_line (line);
+                return held && held->name == written->name &&
+                held->domain == written->domain && held->path == written->path;
+            });
+            lines.push_back (write.line);
+            break;
+        }
+
+        case CookieWrite::Kind::Unset: {
+            // URL-scoped, like the read half: `unset` removes what a request to
+            // that URL would have carried, not every cookie sharing the name.
+            const auto doomed = matching_in (lines, write.url);
+            std::erase_if (lines, [&write, &doomed] (const std::string& line) {
+                const auto held = parse_cookie_line (line);
+                if (!held || held->name != write.name) {
+                    return false;
+                }
+                return std::any_of (doomed.begin (), doomed.end (),
+                [&held] (const JarCookie& match) {
+                    return match.name == held->name &&
+                    match.domain == held->domain && match.path == held->path;
+                });
+            });
+            break;
+        }
+        }
+    }
+    return lines;
 }
 
 std::vector<JarCookie>
-CookieJar::matching (const std::string& scope, const std::string& url) const {
+matching_in (const std::vector<std::string>& lines, const std::string& url) {
     CURLU* parsed = curl_url ();
     if (!parsed) {
         return {};
@@ -206,13 +306,53 @@ CookieJar::matching (const std::string& scope, const std::string& url) const {
     const auto now              = static_cast<int64_t> (std::time (nullptr));
 
     std::vector<JarCookie> out;
-    for (const auto& line : lines_for (scope)) {
+    for (const auto& line : lines) {
         auto cookie = parse_cookie_line (line);
         if (cookie && cookie_matches (*cookie, *host, *path, secure_transport, now)) {
             out.push_back (std::move (*cookie));
         }
     }
     return out;
+}
+
+std::vector<std::string> CookieJar::lines_for (const std::string& scope) const {
+    const std::lock_guard<std::mutex> lock (mutex_);
+    const auto it = scopes_.find (scope);
+    return it == scopes_.end () ? std::vector<std::string>{} : it->second;
+}
+
+void CookieJar::store (const std::string& scope, std::vector<std::string> lines) {
+    const std::lock_guard<std::mutex> lock (mutex_);
+    if (lines.empty ()) {
+        // Do not leave an empty scope behind: `snapshot()` reports scopes, and
+        // an environment whose cookies all expired would otherwise show up as
+        // a jar with nothing in it.
+        scopes_.erase (scope);
+        return;
+    }
+    scopes_[scope] = std::move (lines);
+}
+
+std::vector<JarCookie>
+CookieJar::matching (const std::string& scope, const std::string& url) const {
+    return matching_in (lines_for (scope), url);
+}
+
+void CookieJar::apply (const std::string& scope, const std::vector<CookieWrite>& writes) {
+    if (writes.empty ()) {
+        return;
+    }
+    const std::lock_guard<std::mutex> lock (mutex_);
+    const auto it = scopes_.find (scope);
+    auto applied  = apply_cookie_writes (
+    it == scopes_.end () ? std::vector<std::string>{} : it->second, writes);
+    if (applied.empty ()) {
+        // Same reason store() erases: an emptied scope is not a scope the
+        // Settings panel should list.
+        scopes_.erase (scope);
+        return;
+    }
+    scopes_[scope] = std::move (applied);
 }
 
 std::vector<CookieScopeView> CookieJar::snapshot () const {

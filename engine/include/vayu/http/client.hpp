@@ -47,6 +47,17 @@ struct ClientConfig {
      * Read only when `cookie_jar` is set.
      */
     std::string cookie_scope{ NO_ENVIRONMENT_SCOPE };
+
+    /**
+     * @brief Script jar writes this transfer carries (issue #337).
+     *
+     * Applied on top of the scope's stored lines when the handle is seeded, so
+     * a `pm.cookies.jar().set` made just before the send rides the request it
+     * was made for - and the transfer's own capture is what writes it back to
+     * the jar. See cookie_jar.hpp for why the write is not applied to the map
+     * directly. Read only when `cookie_jar` is set.
+     */
+    std::vector<CookieWrite> cookie_writes;
 };
 
 /**

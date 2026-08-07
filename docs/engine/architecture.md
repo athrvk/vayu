@@ -203,16 +203,28 @@ makes a session survive from one design-mode request to the next.
 - **Storage: libcurl's own lines.** The jar holds what `CURLINFO_COOKIELIST`
   exports and hands it back through `CURLOPT_COOKIELIST`, so domain matching,
   path matching, `Secure` and expiry stay inside libcurl's cookie engine. The
-  parser and matcher in `cookie_jar.cpp` serve only the two *read* views
-  (`pm.cookies`, `GET /cookies`), which need an answer without a transfer.
+  parser and matcher in `cookie_jar.cpp` serve the *read* views (`pm.cookies`,
+  `pm.cookies.jar().get`, `GET /cookies`), which need an answer without a
+  transfer, and the URL-scoped removal `jar().unset` performs. They never
+  decide what goes on the wire.
 - **Not on the load path.** `EventLoop` never touches it: a shared jar across
   workers is either a lock on the hot path or per-worker jars that do not
   actually share, and a load run repeats a single request anyway.
 - **Threading:** one mutex around the scope map; every accessor copies out, so
   no reference into the storage escapes to a caller.
+- **Script writes are staged, not applied in place** (`pm.cookies.jar()`, issue
+  #337). `capture_jar_cookies` *replaces* a scope's contents with what the
+  finishing handle held, so a write dropped into the map beside an in-flight
+  transfer would be discarded by it. Instead a write becomes a `CookieWrite`
+  that the execution's next transfer applies on top of the stored lines when it
+  seeds its handle (`ClientConfig::cookie_writes`) - the request carries it, and
+  that transfer's own capture is what persists it. A write with no transfer left
+  to ride, a post-request script's, is applied by the route through
+  `CookieJar::apply`. Either path applies it exactly once.
 
 `pm.sendRequest` shares the jar of the execute it runs inside, so a pre-request
-script can log in and leave the session where the real request will find it.
+script can log in and leave the session where the real request will find it; it
+also carries any write staged before it.
 
 ### Auth Resolution & OAuth 2.0
 

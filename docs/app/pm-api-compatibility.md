@@ -20,7 +20,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL, read-only, see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear`, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
@@ -325,12 +325,32 @@ automatically. What these answer is matched against **this request's URL** -
 domain, path, `Secure` and expiry - so they report what will go on the wire and
 not everything stored.
 
+The write half is `pm.cookies.jar()`, Postman's own jar object:
+
+```javascript
+const jar = pm.cookies.jar();
+jar.set(pm.request.url, { name: 'session', value: token });  // or (url, name, value)
+jar.get('https://api.example.com/', 'session');              // value, or undefined
+jar.unset('https://api.example.com/', 'session');
+jar.clear();                                                 // this environment's jar
+```
+
+Every method is URL-scoped and takes an optional trailing `callback(err, value)`,
+invoked inline. A written cookie's `domain` and `path` default from the URL, and
+it is then matched by exactly the rules a received cookie is.
+
 Divergences from Postman:
 
-- **No `pm.cookies.jar()`, and no write half.** `set` / `unset` / `clear` are
-  not bound. Mutating a jar that in-flight transfers are reading needs its own
-  design; a binding that accepted a cookie and dropped it would be worse than
-  a missing one.
+- **No flat `pm.cookies.set(name, value)`.** Only the `jar()` form ships: a
+  written cookie needs a URL to take its domain and path from, which is why
+  Postman's own write half lives on the jar object.
+- **A write is applied after the transfer it was made before**, not the moment
+  it is called - so it rides that request and cannot be lost when the response's
+  cookies are captured. Details in
+  [scripting.md](../engine/scripting.md#writing-to-the-jar-pmcookiesjar).
+- **`jar.clear()` takes no URL** and empties this environment's jar. Postman's
+  clears per URL; Vayu's scope is the environment, so that is the unit here.
+- **`expires` is seconds since the epoch**, not a date string.
 - **Scope is the environment**, not the domain-with-permission model Postman
   uses. One jar per environment plus one for "no environment", in memory only,
   clearable in Settings → General → Cookies.
@@ -362,8 +382,8 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.iterationData.*` - data-file driven runs, and with them
   `pm.info.iteration` / `pm.info.iterationCount` (see
   [above](#script-identity-pminfo---three-fields-all-optional))
-- `pm.cookies.set(...)` / `.unset(...)` / `.clear()` / `.jar()` - the jar's
-  write half. The read half (`get` / `has` / `toObject`) is supported - see
+- `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
+  Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)
 - `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
   `pm.request.url` is a writable **string** that the write-back requires to still

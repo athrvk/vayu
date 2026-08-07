@@ -154,6 +154,22 @@ struct ScriptContext {
     std::string cookie_scope{ vayu::http::NO_ENVIRONMENT_SCOPE };
 
     /**
+     * @brief Where `pm.cookies.jar()`'s writes are staged, or null to refuse
+     *        them (issue #337).
+     *
+     * The caller owns the vector for the same reason it owns `environment`:
+     * the write has to outlive the script and be applied where the ordering is
+     * known - by the transfer that follows (`ClientConfig::cookie_writes`), or
+     * by the route through `CookieJar::apply` when no transfer follows. See
+     * cookie_jar.hpp for why a script cannot simply write into the map.
+     *
+     * Null is refused loudly rather than silently dropped: a context that
+     * never applies what a script wrote would report success for a cookie that
+     * went nowhere.
+     */
+    std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
+
+    /**
      * @brief Expose @p req to the script as a mutable `pm.request`.
      *
      * The one supported way to opt into write-back, so the read snapshot and
