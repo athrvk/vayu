@@ -30,10 +30,16 @@ export const TIMING = {
 	 * granularity the formatter has (a minute), which is all it needs to be.
 	 */
 	RELATIVE_TIME_TICK_MS: 30_000,
-	/** How long the "Saved" indicator stays visible after a save. */
+	/**
+	 * How long the "Saved" indicator stays visible after a save.
+	 *
+	 * Read in exactly one place - `completeSaveThenIdle` in `save-store.ts`, which
+	 * is the only way a success is reported - so every saving surface in the app
+	 * shows it for the same time.
+	 */
 	SAVED_STATUS_DURATION_MS: 3000,
 
-	/** Transient status feedback (copied / saved / error chips) reset delay. */
+	/** Transient in-component status feedback (the response viewer's copy tick). */
 	STATUS_RESET_MS: 2000,
 
 	/**

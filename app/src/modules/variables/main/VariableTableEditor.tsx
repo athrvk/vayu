@@ -56,7 +56,6 @@ import {
 	TooltipIconButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 import type { VariableType } from "@/lib/variable-cast";
 
 const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
@@ -191,9 +190,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setActiveContext,
 		markPendingSave,
 		startSaving,
-		completeSave,
+		completeSaveThenIdle,
 		failSave,
-		setStatus,
 	} = useSaveStore();
 
 	const [variables, setVariables] = useState<VariableRow[]>([]);
@@ -282,10 +280,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				hasPendingChangesRef.current = false;
 				setHasPendingChanges(false);
 			}
-			completeSave();
-			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+			completeSaveThenIdle();
 		},
-		[completeSave, setStatus]
+		[completeSaveThenIdle]
 	);
 
 	// Auto-save function (payload order by createdAt so round-trip preserves order)

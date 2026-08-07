@@ -112,7 +112,9 @@ function usePendingCommits(): () => () => void {
 			// A failed commit already reported itself through `failSave`; painting
 			// "Saved" over it is the same defect `runSave` guards against in the
 			// save store.
-			if (useSaveStore.getState().status !== "error") useSaveStore.getState().completeSave();
+			if (useSaveStore.getState().status !== "error") {
+				useSaveStore.getState().completeSaveThenIdle();
+			}
 		};
 	}, [updateContext]);
 }

@@ -18,9 +18,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSaveStore } from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
-import { TIMING } from "@/config/timing";
-
-const { SAVED_STATUS_DURATION_MS } = TIMING;
 
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */
@@ -55,9 +52,8 @@ export function useSaveManager({
 		status,
 		markPendingSave,
 		startSaving,
-		completeSave,
+		completeSaveThenIdle,
 		failSave,
-		setStatus,
 		reset,
 		registerContext,
 		unregisterContext,
@@ -69,7 +65,6 @@ export function useSaveManager({
 	const autoSaveDelayMs = useClientSettingsStore((s) => s.autoSave.delayMs);
 
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-	const savedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	// Saves are queued, never dropped - see performSave.
 	const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const onSaveRef = useRef(onSave);
@@ -91,15 +86,15 @@ export function useSaveManager({
 		enabledRef.current = enabled;
 	}, [enabled]);
 
-	// Clear timeouts on unmount
+	// Clear the pending auto-save on unmount. The "saved" indicator's own reset
+	// is the store's now, and deliberately survives this component: the Dock
+	// outlives the request pane, so the status it is showing has to be cleared by
+	// whoever set it, not by whichever pane happened to unmount.
 	useEffect(() => {
 		return () => {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
 				timeoutRef.current = null;
-			}
-			if (savedTimeoutRef.current) {
-				clearTimeout(savedTimeoutRef.current);
 			}
 		};
 	}, []);
@@ -131,15 +126,7 @@ export function useSaveManager({
 			startSaving();
 			try {
 				await save();
-				completeSave();
-
-				// Reset to idle after showing "saved" status
-				if (savedTimeoutRef.current) {
-					clearTimeout(savedTimeoutRef.current);
-				}
-				savedTimeoutRef.current = setTimeout(() => {
-					setStatus("idle");
-				}, SAVED_STATUS_DURATION_MS);
+				completeSaveThenIdle();
 			} catch (error) {
 				console.error("Save failed:", error);
 				failSave(error instanceof Error ? error.message : "Save failed");
@@ -147,7 +134,7 @@ export function useSaveManager({
 		});
 		saveQueueRef.current = run;
 		return run;
-	}, [entityId, startSaving, completeSave, failSave, setStatus]);
+	}, [entityId, startSaving, completeSaveThenIdle, failSave]);
 
 	// Register/unregister with centralized save context
 	useEffect(() => {

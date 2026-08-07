@@ -267,15 +267,24 @@ included mount - so merely opening Settings wiped an `error` another context had
 just published to the Dock. It now tracks whether the `pending` on screen is its
 own and leaves anything else alone.
 
-The same rule is why **`completeSaveThenIdle` exists**: it sets `saved` and
-arms the return to `idle` behind a check that the status is still the `saved` it
-set. A bare `completeSave()` followed by
-`setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS)` fires regardless of
-what happened in the meantime, so a rename that succeeded two seconds ago cleared
-the failure a delete had just published. `triggerSave` has always guarded its own
-reset this way; the collection tree now shares that one implementation rather
-than a copy of the timer. `useSaveManager`, `SettingsMain` and
-`VariableTableEditor` still hand-roll theirs - see issue #369.
+The same rule is why **`completeSaveThenIdle` is the only way to report a
+success**: it sets `saved` and arms the return to `idle` behind two checks - that
+the status is still the `saved` it set, and that no later save has re-armed the
+reset since. A bare `completeSave()` followed by
+`setTimeout(() => setStatus("idle"), …)` fires regardless of what happened in the
+meantime, so a rename that succeeded two seconds ago cleared the failure a delete
+had just published; and two saves a second apart had the first one's timer end
+the second one's indicator early. `triggerSave` has always guarded the first way,
+`useSaveManager` hand-rolled the second as a `clearTimeout` of its own timer.
+Both live in the store now, and the six call sites (`useSaveManager`,
+`SettingsMain`, `VariableTableEditor`, `ContextBar`, both collection-tree
+renames) share that one implementation rather than five copies of the timer.
+
+`completeSave` is gone with them. It set `saved` and armed nothing, so every
+caller either paired it with a hand-rolled timer or - `ContextBar`, the one
+non-draft commit path - left "Saved" in the Dock until something else happened to
+change it. The indicator's lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one
+place, for every surface that saves.
 
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
