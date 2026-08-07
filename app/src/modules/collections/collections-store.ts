@@ -16,10 +16,17 @@ interface CollectionsUIState {
 
 	// Actions
 	toggleCollectionExpanded: (collectionId: string) => void;
+	/**
+	 * Expand one collection, idempotently.
+	 *
+	 * The tree used to hand-roll `if (!expanded.has(id)) toggle(id)` at three
+	 * sites while this sat here with no callers - a toggle guarded by a read of
+	 * the set it toggles, which is this action with an extra dependency on
+	 * `expandedCollectionIds` bolted on. That dependency is why the ⋯ menu's
+	 * actions had to be rebuilt on every expand.
+	 */
 	expandCollection: (collectionId: string) => void;
 	expandCollections: (collectionIds: string[]) => void;
-	collapseCollection: (collectionId: string) => void;
-	reset: () => void;
 }
 
 export const useCollectionsStore = create<CollectionsUIState>((set) => ({
@@ -38,6 +45,9 @@ export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 
 	expandCollection: (collectionId) =>
 		set((state) => {
+			// Same skip as `expandCollections`: expanding what is already expanded
+			// must not produce a new Set, or every caller re-renders the tree.
+			if (state.expandedCollectionIds.has(collectionId)) return state;
 			const newExpanded = new Set(state.expandedCollectionIds);
 			newExpanded.add(collectionId);
 			return { expandedCollectionIds: newExpanded };
@@ -52,17 +62,5 @@ export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 			const newExpanded = new Set(state.expandedCollectionIds);
 			for (const id of collectionIds) newExpanded.add(id);
 			return { expandedCollectionIds: newExpanded };
-		}),
-
-	collapseCollection: (collectionId) =>
-		set((state) => {
-			const newExpanded = new Set(state.expandedCollectionIds);
-			newExpanded.delete(collectionId);
-			return { expandedCollectionIds: newExpanded };
-		}),
-
-	reset: () =>
-		set({
-			expandedCollectionIds: new Set<string>(),
 		}),
 }));

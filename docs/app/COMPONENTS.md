@@ -166,6 +166,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 | `CollectionItem.tsx` | A collection (folder) row |
 | `RequestItem.tsx` | A request row (method badge, click → open in RequestBuilder, context menu) |
 | `ImportModal.tsx` | Import collections from file/URL/paste (Postman / Insomnia / OpenAPI). Mounted globally in `Shell`; open-state in a dedicated store. See [import-collections/](./import-collections/README.md) for the parser pipeline |
+| `tree-utils.ts` | Every `parentId` walk in the renderer: `walkAncestors` (the ancestor chain, root first), `isDescendant`, `collectDescendantEntityIds` (what a cascade delete reaches). Each carries a visited-set termination guard - the engine tolerates cycles in stored data, and an unguarded walk hangs the window rather than answering wrongly. Also used by `queries/collections.ts` and `useVariableResolver` |
 | `CollectionDetail/` | The collection editor screen (see below) |
 
 ### `CollectionDetail/` (screen `"collection-detail"`)

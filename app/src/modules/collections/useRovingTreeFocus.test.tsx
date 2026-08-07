@@ -190,6 +190,32 @@ describe("useRovingTreeFocus", () => {
 		expect(rename).toHaveBeenCalledTimes(2);
 	});
 
+	// The click path, which nothing asserted: `onFocus` re-anchors the roving
+	// tabindex so Tab returns to the row the pointer left off at, rather than to
+	// whichever row happened to be seeded first.
+	it("re-anchors the tabbable row when a row is clicked into", () => {
+		render(<Tree expanded />);
+		expect(items().filter((i) => i.tabIndex === 0)).toEqual([byName("demo")]);
+
+		// A click focuses the control inside the row, not the row itself - so the
+		// handler has to walk up to the treeitem.
+		fireEvent.focus(byName("req-2"));
+
+		expect(items().filter((i) => i.tabIndex === 0)).toEqual([byName("req-2")]);
+	});
+
+	it("re-seeds a tabbable row when the one holding it is collapsed away", () => {
+		const { rerender } = render(<Tree expanded />);
+		fireEvent.focus(byName("req-1"));
+		expect(items().filter((i) => i.tabIndex === 0)).toEqual([byName("req-1")]);
+
+		// `req-1` is unmounted by the collapse. Without the re-seed the tree owns
+		// no tabbable row at all and drops out of the tab order entirely.
+		rerender(<Tree expanded={false} />);
+
+		expect(items().filter((i) => i.tabIndex === 0)).toEqual([byName("demo")]);
+	});
+
 	it("ignores arrow keys while renaming in a text field", () => {
 		render(
 			<>

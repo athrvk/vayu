@@ -267,6 +267,16 @@ included mount - so merely opening Settings wiped an `error` another context had
 just published to the Dock. It now tracks whether the `pending` on screen is its
 own and leaves anything else alone.
 
+The same rule is why **`completeSaveThenIdle` exists**: it sets `saved` and
+arms the return to `idle` behind a check that the status is still the `saved` it
+set. A bare `completeSave()` followed by
+`setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS)` fires regardless of
+what happened in the meantime, so a rename that succeeded two seconds ago cleared
+the failure a delete had just published. `triggerSave` has always guarded its own
+reset this way; the collection tree now shares that one implementation rather
+than a copy of the timer. `useSaveManager`, `SettingsMain` and
+`VariableTableEditor` still hand-roll theirs - see issue #369.
+
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
 reader was the Dock's error line, which the toast replaced.
@@ -524,10 +534,19 @@ UI-only: Which collections are expanded/collapsed in the tree.
 ```typescript
 const {
   expandedCollectionIds,
-  toggleCollectionExpanded, expandCollection, collapseCollection,
-  reset
+  toggleCollectionExpanded, expandCollection, expandCollections
 } = useCollectionsStore();
 ```
+
+**Every action here has a caller, and expanding is idempotent.** `expandCollection`
+(one id) and `expandCollections` (an ancestor chain) both return the *same* Set
+when nothing changes, because it is passed down the whole tree and listed in
+effect dependencies - a fresh Set for a no-op re-renders every row and re-runs
+the reveal effect. That is why the tree calls them instead of hand-rolling
+`if (!expanded.has(id)) toggle(id)`, which reads the set it writes and so drags
+`expandedCollectionIds` into the dependencies of everything that expands.
+`collapseCollection` and `reset` used to live here with no callers at all;
+collapsing goes through `toggleCollectionExpanded`.
 
 #### `modules/history/history-store.ts` - History Filter & Sort
 

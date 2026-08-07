@@ -19,6 +19,7 @@ import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useResponseStore } from "@/stores/response-store";
+import { walkAncestors } from "@/modules/collections/tree-utils";
 import type {
 	Collection,
 	Request,
@@ -235,18 +236,13 @@ export function useRequestQuery(requestId: string | null) {
 export function useCollectionAncestors(collectionId: string | null | undefined): Collection[] {
 	const { data: collections = [] } = useCollectionsQuery();
 
-	return useMemo(() => {
-		if (!collectionId) return [];
-		const chain: Collection[] = [];
-		let currentId: string | undefined = collectionId;
-		while (currentId) {
-			const col = collections.find((c) => c.id === currentId);
-			if (!col) break;
-			chain.unshift(col); // root first
-			currentId = col.parentId;
-		}
-		return chain;
-	}, [collections, collectionId]);
+	// `walkAncestors` carries the cycle guard this loop was missing: it runs
+	// inside a `useMemo`, so a `parentId` cycle hangs the renderer rather than
+	// producing a wrong chain (see modules/collections/tree-utils).
+	return useMemo(
+		() => (collectionId ? walkAncestors(collectionId, collections) : []),
+		[collections, collectionId]
+	);
 }
 
 // ============ Collection Mutations ============
