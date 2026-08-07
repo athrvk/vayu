@@ -2,7 +2,7 @@
 
 Living backlog of deferred / surfaced work. Each item notes **why** it's pending and **what** it needs so it can be picked up as a focused plan.
 
-_Last updated: 2026-08-01. Recently shipped: **N2** (app lint sweep, now CI-enforced) via issue #189; **A1** (engine-owned request composition) via issue #226. Previously shipped and removed from this list: **W1** (windowed percentiles) via PR #54; **N3** (uPlot chart unification) + the four-category app-settings overhaul via PR #55 (0.8.0); **P2** (`/config` validation message) via PR #50._
+_Last updated: 2026-08-07. Recently shipped: **N2** (app lint sweep, now CI-enforced) via issue #189; **A1** (engine-owned request composition) via issue #226. Previously shipped and removed from this list: **W1** (windowed percentiles) via PR #54; **N3** (uPlot chart unification) + the four-category app-settings overhaul via PR #55 (0.8.0); **P2** (`/config` validation message) via PR #50._
 
 ---
 
@@ -48,6 +48,24 @@ by-id compose path now also builds the part list engine-side. See
 `docs/engine/api-reference.md` → *POST /compose*, `docs/engine/architecture.md`
 → *Request composition boundary*, and `docs/engine/mcp.md` → *Request
 composition* for the current state.
+
+---
+
+## Approved multi-phase designs (not deferred - scheduled)
+
+### Collection runner / scenario primitive
+
+Approved design-first via issue #340; the decisions live in
+[collection-runner-design.md](collection-runner-design.md), which phases the
+work into six implementer-ready sub-issues (plan resolution -> design-mode
+runner -> runner UI -> flow control -> `pm.iterationData` -> load-mode
+scenarios). Listed here because the phases stretch past one release, not because
+anything is deferred. Two coordination points worth knowing from this file's
+side: phase 6 (load-mode scenarios) shares the hot path **P1** re-tunes and must
+land after or with it, and the design rules `maxInFlight` moot for scenario runs
+- so P1's `maxInFlight` bound applies to single-request load runs only, not to
+scenarios. Flow control (#303) is phases 4-5 and is no longer blocked on a
+product decision.
 
 ---
 
