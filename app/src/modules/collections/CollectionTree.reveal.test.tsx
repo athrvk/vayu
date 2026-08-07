@@ -40,6 +40,13 @@ const child = { id: "child", name: "Billing", parentId: "root", order: 0 };
 const grandchild = { id: "grand", name: "Invoices", parentId: "child", order: 0 };
 const request = { id: "r1", collectionId: "grand", name: "Get invoice", method: "GET", order: 0 };
 
+/**
+ * Mutable so a test can render before the per-collection request lists have
+ * arrived and swap them in afterwards - the state every cold start passes
+ * through, and the one the reveal has to survive.
+ */
+let requestsByCollection = new Map<string, Array<typeof request>>();
+
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({
 		data: [root, child, grandchild],
@@ -48,8 +55,10 @@ vi.mock("@/queries", () => ({
 		error: null,
 		refetch: vi.fn(),
 	}),
+	// A fresh Map per call, exactly as the real hook once did - which is what
+	// made the reveal effect re-run after every render.
 	useMultipleCollectionRequests: () => ({
-		requestsByCollection: new Map([["grand", [request]]]),
+		requestsByCollection: new Map(requestsByCollection),
 	}),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -74,11 +83,15 @@ const expanded = () => [...useCollectionsStore.getState().expandedCollectionIds]
 
 // jsdom implements no scrolling. The reveal effect calls this once a row
 // exists, which these tests are the first to actually reach.
+const scrollIntoView = vi.fn();
+
 beforeEach(() => {
-	Element.prototype.scrollIntoView = vi.fn();
+	scrollIntoView.mockClear();
+	Element.prototype.scrollIntoView = scrollIntoView;
 	// Everything collapsed: the state in which the bug is visible at all.
 	useCollectionsStore.setState({ expandedCollectionIds: new Set<string>() });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	requestsByCollection = new Map([["grand", [request]]]);
 });
 
 describe("revealing the active tab in the tree", () => {
@@ -200,6 +213,35 @@ describe("collapsing a collection on the selected tab's ancestor path", () => {
 		expect(expanded()).toContain("grand");
 	});
 
+	it("does not scroll again when an unrelated folder is collapsed", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		const { container } = renderTree();
+		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+		// `root` holds no part of the selection's row; collapsing it re-renders
+		// the tree, and an unguarded scroll effect would yank the view back to a
+		// row the user just navigated away from.
+		collapse(container, "root");
+
+		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+	});
+
+	it("scrolls again once the selection actually changes", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		renderTree();
+		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+		selectTab({ id: "t2", type: "collection", entityId: "child" });
+
+		expect(scrollIntoView).toHaveBeenCalledTimes(2);
+	});
+
 	it("re-reveals when the selection moves to a different entity", () => {
 		useTabsStore.setState({
 			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
@@ -211,6 +253,41 @@ describe("collapsing a collection on the selected tab's ancestor path", () => {
 
 		selectTab({ id: "t2", type: "collection", entityId: "grand" });
 
+		expect(expanded()).toContain("child");
+		expect(expanded()).toContain("grand");
+	});
+});
+
+/**
+ * On a cold start the tabs are restored before the per-collection request lists
+ * land, so the owning collection of a selected request is unknown for the first
+ * render or two. The effect must treat that as "not yet", not as "done" - it
+ * leaves its ref unset so the reveal happens when the data arrives.
+ */
+describe("revealing a request whose collection has not loaded yet", () => {
+	it("expands nothing while the lists are empty, then reveals when they arrive", () => {
+		requestsByCollection = new Map();
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+		});
+		const { rerender } = renderTree();
+
+		// Nothing to walk up from: the request belongs to no known collection.
+		expect(expanded()).toEqual([]);
+
+		requestsByCollection = new Map([["grand", [request]]]);
+		act(() => {
+			rerender(
+				<QueryClientProvider client={new QueryClient()}>
+					<TooltipProvider>
+						<CollectionTree />
+					</TooltipProvider>
+				</QueryClientProvider>
+			);
+		});
+
+		expect(expanded()).toContain("root");
 		expect(expanded()).toContain("child");
 		expect(expanded()).toContain("grand");
 	});

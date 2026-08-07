@@ -29,20 +29,20 @@ import {
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
+import { walkAncestors, collectDescendantEntityIds } from "./tree-utils";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
-import { TIMING } from "@/config/timing";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
 	const { openTab, openTabs, activeTabId, closeTabsForEntities } = useTabsStore();
-	const { expandedCollectionIds, toggleCollectionExpanded, expandCollections } =
+	const { expandedCollectionIds, toggleCollectionExpanded, expandCollection, expandCollections } =
 		useCollectionsStore();
-	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
+	const { startSaving, completeSaveThenIdle, failSave } = useSaveStore();
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
 	// Both reveal and scroll are once-per-selection, and each records the
@@ -100,10 +100,20 @@ export default function CollectionTree() {
 		[requestsByCollection]
 	);
 
-	const rootCollections = useMemo(
-		() => [...collections].filter((c) => !c.parentId).sort(compareCollectionOrder),
-		[collections]
-	);
+	/*
+	 * Roots are the collections with no parent *and* the ones whose parent is not
+	 * loaded. An orphan used to match neither the roots filter nor any parent's
+	 * children, so it rendered nowhere at all - which is precisely the shape a bad
+	 * or half-applied reparent leaves behind, and the user saw a collection
+	 * silently disappear rather than a tree that looked wrong. Degrading visibly
+	 * is the point: the row is reachable, so it can be moved or deleted.
+	 */
+	const rootCollections = useMemo(() => {
+		const loadedIds = new Set(collections.map((c) => c.id));
+		return collections
+			.filter((c) => !c.parentId || !loadedIds.has(c.parentId))
+			.sort(compareCollectionOrder);
+	}, [collections]);
 
 	/*
 	 * Reveal whatever the active tab points at: expand its ancestor folders so
@@ -155,12 +165,9 @@ export default function CollectionTree() {
 		// unset so this reveals once they do, rather than counting as done.
 		if (!target) return;
 
-		const ancestorChain: string[] = [];
-		let cursor: string | undefined = target;
-		while (cursor) {
-			ancestorChain.push(cursor);
-			cursor = collections.find((c) => c.id === cursor)?.parentId ?? undefined;
-		}
+		// walkAncestors, not a local loop: this walk is unbounded on a `parentId`
+		// cycle, which hangs the renderer inside an effect (see tree-utils).
+		const ancestorChain = walkAncestors(target, collections).map((c) => c.id);
 		revealedSelectionRef.current = selectionId;
 		expandCollections(ancestorChain);
 	}, [
@@ -283,10 +290,7 @@ export default function CollectionTree() {
 	const handleCreateSubfolder = async (parentId: string) => {
 		if (!newSubCollectionName.trim() || createCollectionMutation.isPending) return;
 
-		// Ensure parent collection is expanded
-		if (!expandedCollectionIds.has(parentId)) {
-			toggleCollectionExpanded(parentId);
-		}
+		expandCollection(parentId);
 
 		try {
 			await createCollectionMutation.mutateAsync({
@@ -300,58 +304,62 @@ export default function CollectionTree() {
 		handleCancelSubfolder();
 	};
 
-	const handleCreateRequest = async (collectionId: string) => {
-		if (createRequestMutation.isPending) return;
+	// Memoised because `getCollectionActions` lists it: rebuilt every render, it
+	// would rebuild every collection's ⋯ menu with it.
+	const handleCreateRequest = useCallback(
+		async (collectionId: string) => {
+			if (createRequestMutation.isPending) return;
 
-		if (!expandedCollectionIds.has(collectionId)) {
-			toggleCollectionExpanded(collectionId);
-		}
+			expandCollection(collectionId);
 
-		let request: Request | undefined;
-		try {
-			request = await createRequestMutation.mutateAsync({
-				collectionId: collectionId,
-				name: DEFAULT_REQUEST_NAME,
-				method: "GET",
-				url: "",
-			});
-		} catch (error) {
-			reportFailure(error, "Failed to create request");
-			return;
-		}
+			let request: Request | undefined;
+			try {
+				request = await createRequestMutation.mutateAsync({
+					collectionId: collectionId,
+					name: DEFAULT_REQUEST_NAME,
+					method: "GET",
+					url: "",
+				});
+			} catch (error) {
+				reportFailure(error, "Failed to create request");
+				return;
+			}
 
-		if (request) {
-			navigateToRequest(collectionId, request.id);
-		}
-	};
+			if (request) {
+				navigateToRequest(collectionId, request.id);
+			}
+		},
+		[createRequestMutation, expandCollection, navigateToRequest, reportFailure]
+	);
 
-	const handleRenameCollection = (collection: Collection) => {
+	const handleRenameCollection = useCallback((collection: Collection) => {
 		setRenamingId(collection.id);
 		setRenameValue(collection.name);
-	};
+	}, []);
 
 	const handleRenameSubmit = async (collectionId: string) => {
-		if (!renameValue.trim()) {
-			setRenamingId(null);
-			setRenameValue("");
-			return;
-		}
+		const trimmedValue = renameValue.trim();
+		// Enter submits and then blur submits again, because the field is still
+		// mounted while the PUT is in flight. Clearing the rename state *before*
+		// awaiting unmounts the field, so there is no second blur to fire - and a
+		// name that did not change never reaches the wire at all, which is the
+		// guard the request-rename path has always had and this one had not.
+		setRenamingId(null);
+		setRenameValue("");
+
+		const original = collections.find((c) => c.id === collectionId);
+		if (!trimmedValue || original?.name === trimmedValue) return;
 
 		startSaving();
 		try {
 			await updateCollectionMutation.mutateAsync({
 				id: collectionId,
-				name: renameValue.trim(),
+				name: trimmedValue,
 			});
-			completeSave();
-			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+			completeSaveThenIdle();
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename collection");
 		}
-
-		setRenamingId(null);
-		setRenameValue("");
 	};
 
 	/**
@@ -412,9 +420,7 @@ export default function CollectionTree() {
 				label: "Add Folder",
 				icon: FolderPlus,
 				onSelect: () => {
-					if (!expandedCollectionIds.has(collection.id)) {
-						toggleCollectionExpanded(collection.id);
-					}
+					expandCollection(collection.id);
 					setCreatingSubfolder(collection.id);
 				},
 			},
@@ -430,34 +436,31 @@ export default function CollectionTree() {
 					}),
 			},
 		],
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[expandedCollectionIds, toggleCollectionExpanded]
+		// Honest deps, which is only possible now that both handlers are memoised
+		// and the expand goes through `expandCollection` rather than reading the
+		// expanded set. The suppression that used to sit here hid two callbacks
+		// captured from whichever render last rebuilt this - benign only by
+		// accident, and this is the seam the drag-and-drop work extends.
+		[expandCollection, handleCreateRequest, handleRenameCollection]
 	);
 
 	const handleDeleteCollection = useCallback(
 		async (collectionId: string) => {
 			setDeletingCollectionId(collectionId);
-			setDeleteConfirm(null);
 			// Gather the collection, its descendant folders, and every request they
 			// contain: deleting a collection cascades, so all their tabs go stale.
-			const affected = new Set<string>([collectionId]);
-			const stack = [collectionId];
-			while (stack.length > 0) {
-				const current = stack.pop()!;
-				for (const req of getRequestsByCollection(current)) affected.add(req.id);
-				for (const child of collections) {
-					if (child.parentId === current) {
-						affected.add(child.id);
-						stack.push(child.id);
-					}
-				}
-			}
+			const affected = collectDescendantEntityIds(collectionId, collections, (id) =>
+				getRequestsByCollection(id).map((r) => r.id)
+			);
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);
 			} catch (error) {
 				reportFailure(error, "Failed to delete collection");
 			} finally {
+				// Only now: the dialog stays up, with its confirm button spinning,
+				// for as long as the delete is actually running.
+				setDeleteConfirm(null);
 				setDeletingCollectionId(null);
 			}
 		},
@@ -473,7 +476,6 @@ export default function CollectionTree() {
 	const handleDeleteRequest = useCallback(
 		async (requestId: string) => {
 			setDeletingRequestId(requestId);
-			setDeleteConfirm(null);
 			try {
 				await deleteRequestMutation.mutateAsync(requestId);
 				// Close any open tab pointing at the now-deleted request.
@@ -481,6 +483,7 @@ export default function CollectionTree() {
 			} catch (error) {
 				reportFailure(error, "Failed to delete request");
 			} finally {
+				setDeleteConfirm(null);
 				setDeletingRequestId(null);
 			}
 		},
@@ -493,12 +496,22 @@ export default function CollectionTree() {
 
 	const handleConfirmDelete = useCallback(() => {
 		if (!deleteConfirm) return;
+		// The dialog now stays open while the delete runs, so its confirm button
+		// survives long enough to be clicked twice. `isDeleting` disables it from
+		// the next render on; this covers the frame before that.
+		if (deletingCollectionId || deletingRequestId) return;
 		if (deleteConfirm.type === "collection") {
 			handleDeleteCollection(deleteConfirm.id);
 		} else {
 			handleDeleteRequest(deleteConfirm.id);
 		}
-	}, [deleteConfirm, handleDeleteCollection, handleDeleteRequest]);
+	}, [
+		deleteConfirm,
+		deletingCollectionId,
+		deletingRequestId,
+		handleDeleteCollection,
+		handleDeleteRequest,
+	]);
 
 	const handleStartRequestRename = (request: Request) => {
 		setRenamingRequestId(request.id);
@@ -507,13 +520,11 @@ export default function CollectionTree() {
 
 	const handleRequestRenameSubmit = async (requestId: string) => {
 		const trimmedValue = renameRequestValue.trim();
-
-		// Validate: name cannot be empty
-		if (!trimmedValue) {
-			setRenamingRequestId(null);
-			setRenameRequestValue("");
-			return;
-		}
+		// Cleared before the await for the same reason as the collection path:
+		// while the field is still mounted, the blur that follows Enter submits a
+		// second time.
+		setRenamingRequestId(null);
+		setRenameRequestValue("");
 
 		// Find the original request to check if name actually changed
 		// Search through all collections to find the request
@@ -526,12 +537,8 @@ export default function CollectionTree() {
 			}
 		}
 
-		// Skip save if name hasn't actually changed
-		if (originalRequest && originalRequest.name === trimmedValue) {
-			setRenamingRequestId(null);
-			setRenameRequestValue("");
-			return;
-		}
+		// Empty name, or a name that did not change: nothing to save.
+		if (!trimmedValue || originalRequest?.name === trimmedValue) return;
 
 		startSaving();
 		try {
@@ -539,15 +546,10 @@ export default function CollectionTree() {
 				id: requestId,
 				name: trimmedValue,
 			});
-			completeSave();
-			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
+			completeSaveThenIdle();
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename request");
 		}
-
-		setRenamingRequestId(null);
-		setRenameRequestValue("");
 	};
 
 	const handleRequestRenameCancel = useCallback(() => {
@@ -712,7 +714,7 @@ export default function CollectionTree() {
 						/>
 					)}
 
-				{/* Root-level collections (no parentId) - sorted by order, scrollable.
+				{/* Root-level collections (no parent loaded) - sorted by order, scrollable.
 			    role="tree" + roving tabindex: the whole tree is one tab stop and
 			    arrow keys move between rows (see useRovingTreeFocus). */}
 				{!isLoadingCollections && rootCollections.length > 0 && (

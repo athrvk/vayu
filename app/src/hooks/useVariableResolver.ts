@@ -31,8 +31,11 @@
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useSessionStore } from "@/stores";
-import type { VariableValue, ResolvedVariable, VariableOrigin, Collection } from "@/types";
+import type { VariableValue, ResolvedVariable, VariableOrigin } from "@/types";
 import { castByType } from "@/lib/variable-cast";
+// The chain this hook used to build itself, guard and all - see tree-utils for
+// why every `parentId` walk in the renderer now comes from one place.
+import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,
 	isEnabledDefinition,
@@ -56,30 +59,6 @@ interface UseVariableResolverReturn {
 	 * `VariableOrigin` for why the losers are worth keeping.
 	 */
 	getVariableOrigins: (name: string) => VariableOrigin[];
-}
-
-/**
- * Build root-first ancestor chain for a collection (inclusive of the collection itself).
- *
- * The `seen` set is a termination guard, not deduplication: a `parentId` cycle
- * would otherwise walk forever inside a `useMemo`, which is a synchronous hang
- * of the renderer rather than a wrong preview. The engine rejects cycles on
- * write (#79), so this only fires on a database that already went bad - but the
- * cost of surviving it is one `Set`, and the cost of not is a frozen window.
- */
-function buildCollectionChain(startId: string, collections: Collection[]): Collection[] {
-	const chain: Collection[] = [];
-	const seen = new Set<string>();
-	let currentId: string | undefined = startId;
-	while (currentId) {
-		if (seen.has(currentId)) break;
-		seen.add(currentId);
-		const col = collections.find((c) => c.id === currentId);
-		if (!col) break;
-		chain.unshift(col); // root first
-		currentId = col.parentId;
-	}
-	return chain;
 }
 
 export function useVariableResolver(
@@ -147,7 +126,7 @@ export function useVariableResolver(
 		//    have scope "collection", and collapsing them by scope would hide the
 		//    override that actually happened.
 		if (activeCollectionId) {
-			for (const col of buildCollectionChain(activeCollectionId, collections)) {
+			for (const col of walkAncestors(activeCollectionId, collections)) {
 				for (const [key, val] of Object.entries(col.variables ?? {})) {
 					push(key, val as VariableValue, "collection", { id: col.id, name: col.name });
 				}

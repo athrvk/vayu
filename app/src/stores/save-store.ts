@@ -19,6 +19,7 @@
 
 import { create } from "zustand";
 
+import { TIMING } from "@/config/timing";
 import { useToastStore } from "./toast-store";
 
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
@@ -75,6 +76,17 @@ interface SaveState {
 	markPendingSave: () => void;
 	startSaving: () => void;
 	completeSave: () => void;
+	/**
+	 * `completeSave`, plus the return to `idle` that every caller wants after it -
+	 * and the guard that only the context which set a status clears it.
+	 *
+	 * A bare `setTimeout(() => setStatus("idle"))` fires two seconds later
+	 * regardless of what happened in between, so it clears a failure another
+	 * surface published to the Dock, or wipes a `pending` from an edit made since.
+	 * `triggerSave` has always guarded its own reset this way; the callers that
+	 * hand-rolled the timer did not.
+	 */
+	completeSaveThenIdle: () => void;
 	failSave: (error: string) => void;
 	reset: () => void;
 
@@ -105,11 +117,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// all do), so overwriting unconditionally turned a failed Cmd+S into
 			// "Saved" - with the failure toast still on screen next to it.
 			if (get().status === "error") return;
-			set({ status: "saved" });
-			setTimeout(() => {
-				// Only reset to idle if we're still in the "saved" state
-				if (get().status === "saved") get().setStatus("idle");
-			}, 2000);
+			get().completeSaveThenIdle();
 		} catch (error) {
 			get().failSave(error instanceof Error ? error.message : "Save failed");
 		}
@@ -127,6 +135,14 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		startSaving: () => set({ status: "saving" }),
 
 		completeSave: () => set({ status: "saved" }),
+
+		completeSaveThenIdle: () => {
+			set({ status: "saved" });
+			setTimeout(() => {
+				// Only reset to idle if this "saved" is still the status on screen.
+				if (get().status === "saved") get().setStatus("idle");
+			}, TIMING.STATUS_RESET_MS);
+		},
 
 		failSave: (error) => {
 			set({ status: "error" });

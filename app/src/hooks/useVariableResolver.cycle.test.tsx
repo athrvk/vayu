@@ -17,11 +17,17 @@
  * database that already went bad; the guard is three lines and the failure it
  * prevents cannot be recovered from without killing the app.
  *
- * **Why the lookup budget.** Without the guard this test would spin forever and
+ * The walk itself now lives in `modules/collections/tree-utils` and is unit
+ * tested there; what these cover is that the hook still gets the terminating
+ * one, and that the chain it produces keeps the leaf-over-root override order
+ * the preview depends on.
+ *
+ * **Why the step budget.** Without the guard this test would spin forever and
  * take the whole vitest run with it - a synchronous loop never yields, so the
- * per-test timeout can never fire. The collections array therefore counts its
- * own `find` calls and throws past a budget no correct walk can reach, which
- * turns "hangs" into "fails with a message". Mutation-check the guard by
+ * per-test timeout can never fire. Each fixture collection therefore counts
+ * reads of its own `parentId` - exactly one per step of the walk, whatever it
+ * uses to look nodes up - and throws past a budget no correct walk can reach,
+ * which turns "hangs" into "fails with a message". Mutation-check the guard by
  * deleting the `seen` set: these tests fail in milliseconds, they do not stall.
  */
 
@@ -51,25 +57,28 @@ const LOOKUP_BUDGET = 10;
 let lookups = 0;
 
 /**
- * The collections array, with `find` counting itself.
+ * The collections, each counting reads of its own `parentId`.
  *
- * An own property shadows `Array.prototype.find`, so the walk calls this one
- * without knowing; the real implementation still does the matching.
+ * One read per step of the walk, so an unterminated walk trips the budget no
+ * matter how the walk looks its nodes up - which a counter wrapped around
+ * `Array.find` did not survive, having silently stopped counting the day the
+ * walk moved to a `Map`.
  */
 function budgetedCollections(list: Array<Partial<Collection>>): Collection[] {
-	const arr = list as unknown as Collection[];
-	Object.defineProperty(arr, "find", {
-		configurable: true,
-		value: (predicate: (c: Collection) => boolean) => {
-			if (++lookups > LOOKUP_BUDGET) {
-				throw new Error(
-					`buildCollectionChain made more than ${LOOKUP_BUDGET} lookups - the parentId walk is not terminating`
-				);
-			}
-			return Array.prototype.find.call(arr, predicate);
-		},
-	});
-	return arr;
+	return list.map((collection) => {
+		const { parentId } = collection;
+		return Object.defineProperty({ ...collection }, "parentId", {
+			enumerable: true,
+			get() {
+				if (++lookups > LOOKUP_BUDGET) {
+					throw new Error(
+						`more than ${LOOKUP_BUDGET} parentId reads - the collection chain walk is not terminating`
+					);
+				}
+				return parentId;
+			},
+		});
+	}) as Collection[];
 }
 
 const v = (value: string) => ({ value, enabled: true });
