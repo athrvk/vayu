@@ -37,6 +37,18 @@ export const TIMING = {
 	STATUS_RESET_MS: 2000,
 
 	/**
+	 * How long the collection tree's typeahead buffer survives between
+	 * keystrokes before the next letter starts a fresh search.
+	 *
+	 * The WAI-ARIA practices leave the number to the implementation. 500ms is
+	 * what native tree views use: long enough to type a three-letter prefix
+	 * without hurrying, short enough that a letter pressed after a pause means
+	 * "jump to something starting with this" rather than extending a prefix the
+	 * user has forgotten they were building.
+	 */
+	TREE_TYPEAHEAD_MS: 500,
+
+	/**
 	 * Radix tooltip open delay, set once on the root `TooltipProvider` in
 	 * `main.tsx` and inherited everywhere.
 	 *

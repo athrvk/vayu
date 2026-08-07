@@ -24,14 +24,30 @@
  *   data-tree-menu      row actions            (Shift+F10 / Menu key)
  *   data-tree-rename    rename control         (F2 key)
  *   data-tree-delete    delete control         (Delete key)
+ *   data-tree-label     the row's name         (typeahead)
  *
  * Focus is deliberately separate from selection: arrows move focus without
  * opening anything; Enter/Space opens.
  */
 
-import { useCallback, useEffect, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { TIMING } from "@/config/timing";
 
 const ITEM = '[role="treeitem"]';
+
+/**
+ * A row's name, for typeahead.
+ *
+ * `data-tree-label` rather than `textContent`: a request row's text starts with
+ * its method badge, so "Get users" reads as "GETGet users" and typing `g`,`e`
+ * matches by accident while typing `l` for "List orders" matches nothing at all.
+ * A collection row ends with its child count for the same reason. The attribute
+ * is the name the user actually sees. Falls back to the text so a row that has
+ * not declared one is merely imprecise rather than unreachable.
+ */
+function labelOf(el: HTMLElement): string {
+	return (el.getAttribute("data-tree-label") ?? el.textContent ?? "").trim().toLowerCase();
+}
 
 /**
  * A row's children are rendered as a *sibling* of that row, both inside a
@@ -54,6 +70,11 @@ function parentItem(current: HTMLElement): HTMLElement | null {
 }
 
 export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
+	// The typeahead buffer and when it was last appended to. A ref, not state:
+	// nothing renders from it, and a render per keystroke would rebuild every
+	// row in the tree just to move focus by one.
+	const typeahead = useRef({ prefix: "", at: 0 });
+
 	const items = useCallback(
 		() => Array.from(treeRef.current?.querySelectorAll<HTMLElement>(ITEM) ?? []),
 		[treeRef]
@@ -150,6 +171,54 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 						click("[data-tree-menu]");
 					}
 					break;
+				case "*": {
+					take();
+					// Expand every sibling folder of the focused row. Siblinghood
+					// comes from the DOM walk rather than from props: two rows are
+					// siblings when `parentItem` returns the same row, which is
+					// `null` for two roots. Already-expanded rows are skipped, so
+					// this never collapses anything.
+					const parent = parentItem(current);
+					for (const item of list) {
+						if (item.getAttribute("aria-expanded") !== "false") continue;
+						if (parentItem(item) !== parent) continue;
+						item.querySelector<HTMLElement>("[data-tree-toggle]")?.click();
+					}
+					break;
+				}
+				default: {
+					// Typeahead. Printable characters only, and never a shortcut:
+					// Ctrl/Cmd/Alt combinations belong to the app, not to the tree.
+					// Space never arrives here - it activates, above.
+					if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) break;
+					take();
+					const now = Date.now();
+					const stale = now - typeahead.current.at > TIMING.TREE_TYPEAHEAD_MS;
+					const prefix = (stale ? "" : typeahead.current.prefix) + e.key.toLowerCase();
+					typeahead.current = { prefix, at: now };
+
+					// Repeating one letter cycles through the rows starting with it,
+					// rather than building "ppp" - which no row can match, so the
+					// most natural way to ask for "the next Payments-ish row" would
+					// silently do nothing. The ARIA practices call this out by name.
+					const repeated = [...prefix].every((c) => c === prefix[0]);
+					const search = repeated ? prefix[0] : prefix;
+
+					// A single letter searches from the row *after* the current one,
+					// so pressing it again steps on. A longer prefix includes the
+					// current row, which is the one it most likely still describes -
+					// otherwise typing "in" would jump off "Invoices" the moment the
+					// "n" landed.
+					const start = search.length === 1 ? i + 1 : i;
+					for (let n = 0; n < list.length; n++) {
+						const candidate = list[(start + n + list.length) % list.length];
+						if (labelOf(candidate).startsWith(search)) {
+							focusItem(candidate);
+							break;
+						}
+					}
+					break;
+				}
 			}
 		},
 		[items, focusItem, treeRef]
