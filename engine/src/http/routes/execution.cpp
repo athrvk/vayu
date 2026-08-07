@@ -22,6 +22,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
@@ -839,20 +840,31 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Validate required fields
-        if (!json.contains ("method") || !json.contains ("url")) {
-            vayu::utils::log_warning (
-            "POST /runs - Missing required fields: method, url");
-            send_error (res, 400, "Missing required fields: method, url");
-            return;
-        }
+        // A scenario run states its work as an ordered collection, so it has no
+        // single method/url to require and states its iteration count inside
+        // the block. Both checks below describe the single-request payload
+        // only; the scenario block's own required fields are checked by
+        // resolve_scenario further down, beside the shared numeric validation.
+        const bool is_scenario =
+        json.contains ("scenario") && !json["scenario"].is_null ();
 
-        if (!json.contains ("mode") && !json.contains ("duration") &&
-        !json.contains ("iterations")) {
-            vayu::utils::log_warning (
-            "POST /runs - Missing mode/duration/iterations config");
-            send_error (res, 400, "Must specify either 'mode' with 'duration' or 'iterations'");
-            return;
+        // Validate required fields
+        if (!is_scenario) {
+            if (!json.contains ("method") || !json.contains ("url")) {
+                vayu::utils::log_warning (
+                "POST /runs - Missing required fields: method, url");
+                send_error (res, 400, "Missing required fields: method, url");
+                return;
+            }
+
+            if (!json.contains ("mode") && !json.contains ("duration") &&
+            !json.contains ("iterations")) {
+                vayu::utils::log_warning (
+                "POST /runs - Missing mode/duration/iterations config");
+                send_error (res, 400,
+                "Must specify either 'mode' with 'duration' or 'iterations'");
+                return;
+            }
         }
 
         // Range-check the numeric config *before* the run row exists, so a
@@ -874,6 +886,58 @@ void register_execution_routes (RouteContext& ctx) {
             "POST /runs - Invalid httpVersion: " + err->second.dump ());
             res.status = err->first;
             res.set_content (err->second.dump (), "application/json");
+            return;
+        }
+
+        // Resolve the scenario block here, with the rest of the pre-row
+        // validation: an unknown collection, an empty sequence or a step that
+        // cannot be composed must leave no run behind, and resolution is what
+        // finds all three. Nothing executes a plan yet, so this returns 501
+        // rather than starting a run - a loud placeholder in place of a run
+        // that would silently do nothing.
+        //
+        // The 501 is returned *before* `create_run` on purpose: a row written
+        // for a run no executor will ever pick up would sit `pending` until a
+        // restart's `reconcile_orphaned_runs` failed it. The sequential runner
+        // replaces this block with the create_run/start_run pair below, and
+        // writes `build_scenario_manifest`'s object into `config_snapshot` in
+        // place of the raw `scenario` block.
+        if (is_scenario) {
+            vayu::core::ScenarioResolveOptions options;
+            if (auto it = json.find ("environmentId");
+                it != json.end () && it->is_string ()) {
+                options.environment_id = it->get<std::string> ();
+            }
+            options.timeout_ms = resolve_request_timeout_ms (json,
+            ctx.db.get_config_int ("defaultTimeout",
+            vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+            options.limits.max_steps =
+            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioSteps",
+            static_cast<int> (vayu::core::constants::scenario::MAX_STEPS)));
+            options.limits.max_data_rows =
+            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataRows",
+            static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
+
+            auto resolved =
+            vayu::core::resolve_scenario (ctx.db, json["scenario"], options);
+            if (!resolved.ok) {
+                vayu::utils::log_warning (
+                "POST /runs - Invalid scenario: " + resolved.error);
+                send_error (res, 400, resolved.error, "invalid_scenario");
+                return;
+            }
+
+            vayu::utils::log_info (
+            "POST /runs - Scenario resolved: collection=" + resolved.request.collection_id +
+            ", steps=" + std::to_string (resolved.plan.steps.size ()) +
+            ", iterations=" + std::to_string (resolved.request.iterations));
+            send_error (res, 501,
+            "Scenario runs are not executed yet. The plan resolved to " +
+            std::to_string (resolved.plan.steps.size ()) + " step(s) over " +
+            std::to_string (resolved.request.iterations) +
+            " iteration(s); the sequential runner that executes it is not in "
+            "this build.",
+            "scenario_not_implemented");
             return;
         }
 

@@ -243,6 +243,22 @@ constexpr size_t MAX_TRACE_BODY_BYTES = 5 * 1024 * 1024;
 } // namespace json
 
 /**
+ * @brief Collection-runner (scenario) bounds.
+ */
+namespace scenario {
+/// Largest plan one scenario run may resolve to (config key `maxScenarioSteps`).
+/// The whole plan is composed up front and held in memory for the run's life,
+/// and load-mode scenarios allocate one latency histogram per step, so plan
+/// size is a memory bound in both modes rather than a policy preference.
+constexpr size_t MAX_STEPS = 200;
+/// Largest inline `data` array one scenario run may carry (config key
+/// `maxScenarioDataRows`). The rows arrive on the run payload because the app
+/// owns file parsing and the script sandbox has no filesystem access; this is
+/// what bounds the payload that decision costs.
+constexpr size_t MAX_DATA_ROWS = 1000;
+} // namespace scenario
+
+/**
  * @brief Metrics collector configuration for high-RPS load testing
  */
 namespace metrics_collector {
