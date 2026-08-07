@@ -8,7 +8,7 @@
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
-import { compareCollectionOrder } from "@/types";
+import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
@@ -97,7 +97,7 @@ export default function CollectionItem({
 	const isDeleting = deletingCollectionId === collection.id;
 	const childCollections = allCollections
 		.filter((c) => c.parentId === collection.id)
-		.sort(compareCollectionOrder);
+		.sort(compareTreeOrder);
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;

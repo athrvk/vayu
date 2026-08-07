@@ -109,7 +109,12 @@ export interface UpdateCollectionRequest {
 	id: string;
 	name?: string;
 	description?: string;
-	parentId?: string;
+	/**
+	 * `string | null`, not `string`: the engine reads absent as "keep the current
+	 * parent" and an explicit JSON `null` as "move to the root", so a move out of
+	 * a folder is only expressible as a null that survives to the wire.
+	 */
+	parentId?: string | null;
 	order?: number;
 	variables?: Record<string, VariableValue>;
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
@@ -149,6 +154,12 @@ export interface CreateRequestRequest {
 
 export interface UpdateRequestRequest {
 	id: string;
+	/**
+	 * The collection this request should belong to - a cross-collection move.
+	 * The engine 400s an id that resolves to no collection rather than stranding
+	 * the row, and a move that states no `order` appends in the destination.
+	 */
+	collectionId?: string;
 	name?: string;
 	description?: string;
 	method?: string;

@@ -27,7 +27,7 @@ import type {
 	CreateRequestRequest,
 	UpdateRequestRequest,
 } from "@/types";
-import { compareCollectionOrder } from "@/types";
+import { compareTreeOrder } from "@/types";
 
 // ============ Collection Queries ============
 
@@ -86,15 +86,6 @@ export function useRequestsQuery(collectionId: string | null) {
 	});
 }
 
-/** Requests within a collection are ordered by `order`, then by creation time. */
-function compareRequestOrder(a: Request, b: Request): number {
-	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
-	if (orderDiff !== 0) return orderDiff;
-	const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-	const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-	return aTime - bTime;
-}
-
 /**
  * Fetch requests for multiple collections (e.g., all expanded ones)
  * Uses TanStack Query's useQueries for parallel fetching.
@@ -130,7 +121,7 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 				const requests = query.data ?? [];
 				requestsByCollection.set(
 					stableCollectionIds[index],
-					[...requests].sort(compareRequestOrder)
+					[...requests].sort(compareTreeOrder)
 				);
 			});
 			return {
@@ -271,7 +262,7 @@ export function useCreateCollectionMutation() {
 		onSuccess: (newCollection) => {
 			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
 				const next = old ? [...old, newCollection] : [newCollection];
-				return next.sort(compareCollectionOrder);
+				return next.sort(compareTreeOrder);
 			});
 			// The warm-cache pass is a query like any other: it succeeded once at
 			// startup and would stay fresh forever, so a collection created
@@ -293,7 +284,7 @@ export function useUpdateCollectionMutation() {
 			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
 				const next =
 					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
-				return next.sort(compareCollectionOrder);
+				return next.sort(compareTreeOrder);
 			});
 		},
 	});
@@ -364,11 +355,29 @@ export function useUpdateRequestMutation() {
 	return useMutation({
 		mutationFn: (data: UpdateRequestRequest) => apiService.updateRequest(data),
 		onSuccess: (updatedRequest) => {
-			// Update in cache - need to find which collection it belongs to
-			// Invalidate all request lists to be safe
-			queryClient.invalidateQueries({
-				queryKey: queryKeys.requests.lists(),
-			});
+			/*
+			 * Only the lists that can have changed. This used to invalidate every
+			 * collection's list on any single-request update, so a rename refetched
+			 * the whole tree - and the sibling PUTs a reorder issues would storm the
+			 * engine once per row.
+			 *
+			 * A cross-collection move touches two lists. The response carries only
+			 * the *new* collectionId, so the source is read from the detail cache,
+			 * which still holds the pre-update row until the write below - the one
+			 * place the old owner is knowable. An uncached detail (nothing had the
+			 * request open) leaves the source list to its normal staleness rather
+			 * than reinstating the fan-out.
+			 */
+			const previous = queryClient.getQueryData<Request>(
+				queryKeys.requests.detail(updatedRequest.id)
+			);
+			const affected = new Set([updatedRequest.collectionId]);
+			if (previous?.collectionId) affected.add(previous.collectionId);
+			for (const collectionId of affected) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.requests.listByCollection(collectionId),
+				});
+			}
 			// Update detail cache
 			queryClient.setQueryData(queryKeys.requests.detail(updatedRequest.id), updatedRequest);
 		},

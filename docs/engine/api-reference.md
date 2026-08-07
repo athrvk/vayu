@@ -131,8 +131,12 @@ One rule, identical for every field of all three resources:
 The defaults are `{}` for `variables`, the resource's own default for `auth`
 (`{"mode":"none"}` for a collection, `{"mode":"inherit"}` for a request), `[]`
 for `params` / `headers`, `""` for `description` and the two script fields,
-`{"mode":"none"}` for a request `body`, `0` for `order` on update, `true` for
-`followRedirects`, `10` for `maxRedirects`, and `false` for `isActive`.
+`{"mode":"none"}` for a request `body`, `true` for `followRedirects`, `10` for
+`maxRedirects`, and `false` for `isActive`.
+
+`order` is the one default that is computed rather than constant: it means
+"append after the current siblings", on both resources and on both verbs - see
+[Ordering](#ordering) below.
 
 A request's `httpVersion` is the one field whose default is not fixed: absent
 or `null` seeds it from the live `defaultHttpVersion` config entry (`"auto"`
@@ -146,6 +150,49 @@ A field that has **no** default cannot be reset, so `null` is a `400` on either
 verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
 `method` and `url`. Each is also required on create.
+
+### Ordering
+
+Collections and requests both carry an `order` column that fixes their position
+among their siblings - a collection among the children of its `parentId`, a
+request among the requests of its `collectionId`.
+
+**Reading.** `GET /collections` and `GET /requests` sort by `order` ascending,
+then `createdAt` ascending, then `id` ascending. All three keys are load-bearing:
+`order` alone is not a total order (every request created before explicit orders
+existed sits at `0`), and rows are stored with `INSERT OR REPLACE` on a TEXT
+primary key, which hands the row a *new* rowid on every edit - so without an
+explicit tiebreak, renaming a request silently moved it among its ties. Clients
+must apply the same rule if they sort locally; the app's `compareTreeOrder` is
+pinned to this one by
+`engine/tests/fixtures/tree-order-conformance.json`, read by both test suites.
+
+**Writing.** `order` defaults to "append after the current siblings" - one past
+the highest `order` any sibling holds:
+
+| Write | `order` |
+|---|---|
+| Create, `order` absent or `null` | appended |
+| Create, `order` stated | as given |
+| Update, `order` stated | as given |
+| Update, `order` absent, no move | unchanged |
+| Update, `order` absent or `null`, **and** the row changes parent (a collection's `parentId`, a request's `collectionId`) | appended in the destination |
+| Update, `order` `null`, no move | appended among its current siblings |
+
+A move that states no order therefore lands at the end of the destination rather
+than at whatever slot its position in the *old* list happened to name. Ordering
+*within* a list is always the caller's to state.
+
+**Bulk import** is the one exception to the append scan: `POST /import/apply`
+writes rows that cannot see each other yet, so an omitted `order` gives the
+payload's items consecutive slots starting from the append point - see
+[POST /import/apply](#post-importapply).
+
+**Concurrency caveat.** Each `PUT` is its own write under its own lock, so a
+reorder expressed as N sibling `PUT`s is last-write-wins between concurrent
+clients, and the collection cycle guard is read-then-write across two lock
+scopes. Neither is fixed by a per-row endpoint; both are the job of the atomic
+batch reorder endpoint (issue #364).
 
 ### Accepted field shapes
 
@@ -351,7 +398,7 @@ the null-vs-absent rule.
 {
   "name": "My API",        // Required, no default (null is a 400)
   "parentId": null,         // Optional, null for root
-  "order": 0,               // Optional, appended after siblings if omitted
+  "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {}           // Optional, collection-scoped variables
 }
 ```
@@ -373,9 +420,14 @@ its value, an explicit `null` resets it to the default.
 {
   "name": "Renamed",       // Optional; null is a 400 (no default)
   "parentId": null,         // Optional, null moves it to the root
+  "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null         // Optional, null resets to {}
 }
 ```
+
+A `parentId` that changes the collection's parent and states no `order` appends
+the collection among its new siblings, rather than carrying a position from the
+list it just left. See [Ordering](#ordering).
 
 **Response:** The updated collection object.
 
@@ -413,8 +465,9 @@ terminates even if the stored `parent_id` tree contains a cycle (see
 
 ### GET /requests
 
-List requests in a collection. Results are ordered by the requests' `order`
-field (ascending), the same contract `GET /collections` has for collections.
+List requests in a collection. Results are ordered by `order`, then `createdAt`,
+then `id` - the same contract `GET /collections` has for collections. See
+[Ordering](#ordering) for why the tiebreak is part of the contract.
 
 **Query Parameters:**
 - `collectionId` (required): Collection ID to fetch requests from
@@ -516,7 +569,8 @@ the null-vs-absent rule.
   "auth": {},                        // Optional, authentication config
   "preRequestScript": "",            // Optional, JavaScript pre-request script
   "postRequestScript": "",           // Optional, JavaScript test script
-  "order": 0,                        // Optional, position within the collection
+  "order": 0,                        // Optional, appended after the collection's requests if
+                                      // omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto"              // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
@@ -528,10 +582,18 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if a
-required field is missing or `null`, on an unrecognized `method`, on a
+required field is missing or `null`, if `collectionId` names a collection that
+does not exist (message `Collection '<id>' does not exist`), on an unrecognized
+`method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values).
+
+Unlike a collection's `parentId`, a request's `collectionId` **must** resolve to
+a stored collection. A request under no collection is unreachable: no
+per-collection `GET` lists it, and no cascade delete ever reaps it. Bulk import
+is unaffected - `POST /import/apply` resolves owners from the payload's own temp
+ids before any row is written.
 
 ### PUT /requests/:id
 
@@ -539,8 +601,14 @@ Update an existing request. **Update only** - a `404` when the id does not
 exist, never a silent create. Merge-patch body, same rule as collections.
 
 **Request:** any subset of the `POST /requests` fields, minus `id` (it is the
-path). Omitting `followRedirects` / `maxRedirects` leaves the stored values
-untouched; sending `null` resets them to `true` / `10`. A non-boolean
+path). Sending `collectionId` moves the request to another collection; the id
+must resolve to a stored collection (`400` otherwise), and a move that states no
+`order` appends in the destination - see [Ordering](#ordering). An update that
+states no `collectionId` is not checked against the request's stored one, so a
+row stranded before this validation existed stays editable, and repairable by a
+`PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects`
+leaves the stored values untouched; sending `null` resets them to `true` / `10`.
+A non-boolean
 `followRedirects` or a non-integer `maxRedirects` is ignored rather than
 rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -556,7 +624,8 @@ request re-seeds it.
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
-`collectionId` / `name` / `method` / `url`, an unrecognized `method`, a
+`collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
+that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, or an `httpVersion` that is not
 `"auto"` / `"http1.1"` / `"http2"`.
 
@@ -657,8 +726,13 @@ accepted a client-supplied `id` - which they no longer do (see
 - `order` is optional. For collections, an omitted `order` appends after the
   existing siblings and then in payload order (each sibling gets the next slot -
   the per-item default cannot do this in bulk, because none of the payload's own
-  siblings are stored yet). For requests it defaults to `0`, as with
-  `POST /requests`; clients that care about request order should send it.
+  siblings are stored yet). For requests it defaults to `0` on this path only:
+  `POST /requests` appends by scanning the collection's stored rows, which a bulk
+  write cannot do for a collection it is creating in the same call, so a client
+  that cares about request order must state it here. The app's importer does -
+  and deliberately omits `order` on its **root** collections, so an import into a
+  non-empty workspace lands after the roots already there instead of colliding
+  with their `0, 1, 2...`.
 - Up to **10,000 items** per call (collections + requests + environments).
 
 **Response:** `200`
@@ -1389,7 +1463,9 @@ inside the block rather than through `mode` / `duration` / `iterations`:
 
 The collection is resolved into an ordered, fully composed plan **once, before
 anything is sent**: direct requests by `requests.order`, then - with `recursive`
-- descendant collections by `collections.order`, depth-first. Each step is
+- descendant collections by `collections.order`, depth-first, each list under
+the tiebreak in [Ordering](#ordering), which is what makes a run's sequence the
+one the sidebar shows. Each step is
 composed through the same path `POST /compose` uses, so a step's request and
 joined scripts are byte-identical to what a Send of that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath

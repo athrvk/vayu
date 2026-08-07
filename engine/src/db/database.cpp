@@ -594,7 +594,17 @@ void Database::create_collection (const Collection& c) {
 
 std::vector<Collection> Database::get_collections () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Collection> (order_by (&Collection::order));
+    // The tie rule is pinned to three keys, not left to the implicit rowid.
+    // `INSERT OR REPLACE` on a TEXT primary key reassigns the rowid on every
+    // edit, so a single-key ORDER BY let an unrelated rename silently reshuffle
+    // a collection among its equal-`order` siblings - and the sidebar, the MCP
+    // smoke tool and a scenario plan each saw a different shuffle. `created_at`
+    // second matches what the renderer displays; `id` last makes the result a
+    // total order even for rows written in the same millisecond. The renderer's
+    // comparator applies the identical rule, pinned by
+    // tests/fixtures/tree-order-conformance.json.
+    return impl_->storage.get_all<Collection> (multi_order_by (order_by (&Collection::order),
+    order_by (&Collection::created_at), order_by (&Collection::id)));
 }
 
 std::optional<Collection> Database::get_collection (const std::string& id) {
@@ -668,8 +678,11 @@ std::optional<Request> Database::get_request (const std::string& id) {
 
 std::vector<Request> Database::get_requests_in_collection (const std::string& collection_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id), order_by (&Request::order));
+    // Same three-key tie rule as get_collections - see the comment there for why
+    // the implicit rowid cannot be the tiebreak.
+    return impl_->storage.get_all<Request> (where (c (&Request::collection_id) == collection_id),
+    multi_order_by (order_by (&Request::order), order_by (&Request::created_at),
+    order_by (&Request::id)));
 }
 
 void Database::delete_request (const std::string& id) {

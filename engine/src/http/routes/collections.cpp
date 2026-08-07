@@ -15,7 +15,9 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <algorithm>
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -75,6 +77,26 @@ const std::optional<std::string>& parent_id) {
 }
 
 /**
+ * The `order` a collection takes when the caller states none: one past the
+ * highest already held by a sibling under @p parent_id.
+ *
+ * @p self_id is excluded so a collection asked to reset its own order lands
+ * after its *other* siblings rather than one past itself. On a create the id is
+ * not stored yet, so the exclusion is a no-op there.
+ */
+static int next_sibling_order (vayu::db::Database& db,
+const std::optional<std::string>& parent_id,
+const std::string& self_id) {
+    int max_order = -1;
+    for (const auto& col : db.get_collections ()) {
+        if (col.id != self_id && col.parent_id == parent_id) {
+            max_order = std::max (max_order, col.order);
+        }
+    }
+    return max_order + 1;
+}
+
+/**
  * Applies the request body onto `c` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means - the only thing that differs
@@ -97,6 +119,7 @@ bool is_create) {
 
     apply_string_field (json, "description", c.description, "", is_create);
 
+    const std::optional<std::string> previous_parent = c.parent_id;
     if (json.contains ("parentId")) {
         c.parent_id = json["parentId"].is_null () ?
         std::nullopt :
@@ -104,22 +127,20 @@ bool is_create) {
     } else if (is_create) {
         c.parent_id = std::nullopt;
     }
+    // A collection that changed parent is a newcomer among its new siblings; its
+    // stored `order` was a position in a list it has left.
+    const bool reparented = !is_create && c.parent_id != previous_parent;
 
     if (json.contains ("order") && !json["order"].is_null ()) {
         c.order = json["order"].get<int> ();
-    } else if (is_create) {
-        // Absent or null on create: append after the current siblings so a new
-        // collection lands at the end rather than colliding on 0.
-        auto all      = db.get_collections ();
-        int max_order = -1;
-        for (const auto& col : all) {
-            if (col.parent_id == c.parent_id && col.order > max_order) {
-                max_order = col.order;
-            }
-        }
-        c.order = max_order + 1;
-    } else if (json.contains ("order")) {
-        c.order = 0; // Explicit null on update -> reset to the column default.
+    } else if (is_create || reparented || json.contains ("order")) {
+        // "Append after the current siblings" *is* this field's default, so the
+        // one null-vs-absent rule lands all three of these on it: create (absent
+        // or null), a reparent that states no order, and an explicit null on
+        // update ("reset to the default"). Null used to reset to 0 instead,
+        // which collided with the first sibling rather than resetting anything;
+        // a reparent used to keep a position from the list it had just left.
+        c.order = next_sibling_order (db, c.parent_id, c.id);
     }
 
     if (auto err = apply_json_field (json, "variables", c.variables, "{}", is_create)) {
