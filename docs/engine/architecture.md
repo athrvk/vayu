@@ -212,6 +212,14 @@ makes a session survive from one design-mode request to the next.
   actually share, and a load run repeats a single request anyway.
 - **Threading:** one mutex around the scope map; every accessor copies out, so
   no reference into the storage escapes to a caller.
+- **Shown as sent.** Because libcurl attaches the matching cookies itself, the
+  composed header map never sees them - so the raw-request view is built from
+  the transfer's last `CURLINFO_HEADER_OUT` frame (`client.cpp`) rather than
+  from `request_headers`, and shows the `Cookie` line the wire carried, value
+  plain. The verbose transfer log keeps its redaction (`debug_redact.hpp`): a
+  log gets exported and shared, the raw view is read on the machine whose
+  Settings already display the same value. A script-written cookie is on that
+  frame too, since it goes out on the same transfer.
 - **Script writes are staged, not applied in place** (`pm.cookies.jar()`, issue
   #337). `capture_jar_cookies` *replaces* a scope's contents with what the
   finishing handle held, so a write dropped into the map beside an in-flight

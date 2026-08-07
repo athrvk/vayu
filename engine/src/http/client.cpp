@@ -45,9 +45,40 @@ namespace vayu::http {
 
 namespace {
 
+/**
+ * @brief What a transfer's debug stream leaves behind for the caller.
+ *
+ * `verbose` gates the *logging* only - the outbound header frame is captured on
+ * every send, because the raw-request view is built from it (issue #339). Since
+ * the cookie jar, libcurl synthesizes headers we never composed (`Cookie`, from
+ * CURLOPT_COOKIELIST), so the composed header map no longer describes what went
+ * on the wire and only libcurl can say what did.
+ *
+ * The captured frame is deliberately **not** redacted. It backs the raw-request
+ * view, which exists to show exactly what was sent and whose values the user can
+ * already read in Settings; the verbose log below keeps its redaction because
+ * logs get exported and shared. Two surfaces, two audiences, two policies.
+ */
+struct TransferDebug {
+    bool verbose = false;
+    /// The last CURLINFO_HEADER_OUT frame, verbatim. Last, not first, so a
+    /// followed redirect reports the request that produced the response the
+    /// caller is looking at.
+    std::string last_header_out;
+};
+
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
-    (void)userptr;
+    auto* debug = static_cast<TransferDebug*> (userptr);
+
+    if (debug != nullptr && type == CURLINFO_HEADER_OUT) {
+        debug->last_header_out.assign (data, size);
+    }
+    // Nothing else to do when the caller only wanted the capture: the frames
+    // below are logging, and DATA_OUT can be a whole request body.
+    if (debug == nullptr || !debug->verbose) {
+        return 0;
+    }
 
     std::string text (data, size);
     // Remove trailing newlines
@@ -187,6 +218,108 @@ void capture_jar_cookies (CURL* curl, const ClientConfig& config) {
 }
 
 /**
+ * @brief The raw-request view, built from the header block libcurl actually sent.
+ *
+ * @p header_frame is a whole CURLINFO_HEADER_OUT frame - request line included,
+ * terminated by its own blank line - so the body is all that has to be added.
+ * Being the wire's own bytes, it carries what libcurl added on our behalf
+ * (`Cookie` from the jar, `Accept`, `Content-Length`, and the h2 pseudo-headers
+ * rendered in HTTP/1 form) rather than what we composed and hoped matched.
+ *
+ * The terminator is re-normalized rather than trusted: whether a frame ends in
+ * one CRLF or two is libcurl's business, and the body must not run into the
+ * last header line.
+ */
+std::string raw_request_from_wire (std::string header_frame, const std::string& body) {
+    while (!header_frame.empty () &&
+    (header_frame.back () == '\r' || header_frame.back () == '\n')) {
+        header_frame.pop_back ();
+    }
+    header_frame += "\r\n\r\n";
+    header_frame += body;
+    return header_frame;
+}
+
+/**
+ * @brief The raw-request view when there is no wire to read it off.
+ *
+ * The fallback for a transfer that failed before libcurl sent anything - DNS
+ * failure, connection refused, a timeout during connect. Synthesized from the
+ * composed request, which is what this view was built from throughout before
+ * #339, so an unreachable host still shows the request that was attempted.
+ */
+std::string synthesize_raw_request (const Request& request, const Response& response) {
+    std::stringstream raw_req;
+
+    // Parse URL to extract host and path
+    std::string host;
+    std::string path = "/";
+    std::string url  = request.url;
+
+    // Remove protocol prefix
+    size_t proto_end = url.find ("://");
+    if (proto_end != std::string::npos) {
+        url = url.substr (proto_end + 3);
+    }
+
+    // Split host and path
+    size_t path_start = url.find ('/');
+    if (path_start != std::string::npos) {
+        host = url.substr (0, path_start);
+        path = url.substr (path_start);
+    } else {
+        host = url;
+        // Check for query string without path
+        size_t query_start = host.find ('?');
+        if (query_start != std::string::npos) {
+            path = "/" + host.substr (query_start);
+            host = host.substr (0, query_start);
+        }
+    }
+
+    // Request line: METHOD /path <version>. Normally the negotiated version.
+    // When nothing was negotiated (connection refused, DNS failure) this line
+    // still has to read as syntactically valid HTTP, so it cannot be blank the
+    // way response.http_version is - but it falls back to what was *requested*
+    // rather than a flat HTTP/1.1. Printing HTTP/1.1 after the user asked for
+    // http2 and never reached a server would contradict both their intent and
+    // the outcome, which is the kind of confident wrong answer this whole task
+    // exists to remove. The fallback never reaches response.http_version.
+    std::string display_version = response.http_version;
+    if (display_version.empty ()) {
+        display_version =
+        request.http_version == HttpVersion::Http2 ? "HTTP/2" : "HTTP/1.1";
+    }
+    raw_req << to_string (request.method) << " " << path << " " << display_version << "\r\n";
+
+    // Host header (required for HTTP/1.1)
+    raw_req << "Host: " << host << "\r\n";
+
+    // Add all request headers
+    for (const auto& [key, value] : response.request_headers) {
+        // Skip if it's a Host header (we already added it)
+        if (key == "Host" || key == "host")
+            continue;
+        raw_req << key << ": " << value << "\r\n";
+    }
+
+    // Add Content-Length for body
+    if (!request.body.content.empty ()) {
+        raw_req << "Content-Length: " << request.body.content.size () << "\r\n";
+    }
+
+    // End of headers
+    raw_req << "\r\n";
+
+    // Body
+    if (!request.body.content.empty ()) {
+        raw_req << request.body.content;
+    }
+
+    return raw_req.str ();
+}
+
+/**
  * @brief Convert curl error code to our ErrorCode
  */
 Error curl_to_error (CURLcode code, const char* error_buffer) {
@@ -305,9 +438,8 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
     }
 
-    // rawRequest's request line names the negotiated protocol, so it can only
-    // be built after the transfer completes - see below, just before the
-    // error-path early return.
+    // rawRequest is read off the wire, so it can only be built after the
+    // transfer completes - see below, just before the error-path early return.
 
     // Set callbacks
     curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -337,11 +469,15 @@ Result<Response> Client::send (const Request& request) {
     curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
     vayu::http::to_curl_http_version (request.http_version));
 
-    // Verbose output for debugging
-    if (impl_->config.verbose) {
-        curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
-        curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
-    }
+    // The debug stream is always on, verbose or not: the raw-request view is
+    // built from the outbound header frame it carries, which is the only place
+    // libcurl's own additions (jar cookies above all) can be read from. The
+    // config flag decides whether the frames are also logged - see TransferDebug.
+    TransferDebug transfer_debug;
+    transfer_debug.verbose = impl_->config.verbose;
+    curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
+    curl_easy_setopt (curl, CURLOPT_DEBUGDATA, &transfer_debug);
 
     // Proxy
     if (!impl_->config.proxy_url.empty ()) {
@@ -412,77 +548,16 @@ Result<Response> Client::send (const Request& request) {
                      ""));
     }
 
-    // Build raw request string. Only buildable now: the request line names
-    // the negotiated protocol, which isn't known until after curl_easy_perform
-    // returns. Everything else here (host/path/headers/body) was already
-    // fixed before the transfer ran.
-    std::stringstream raw_req;
-
-    // Parse URL to extract host and path
-    std::string host;
-    std::string path = "/";
-    std::string url  = request.url;
-
-    // Remove protocol prefix
-    size_t proto_end = url.find ("://");
-    if (proto_end != std::string::npos) {
-        url = url.substr (proto_end + 3);
-    }
-
-    // Split host and path
-    size_t path_start = url.find ('/');
-    if (path_start != std::string::npos) {
-        host = url.substr (0, path_start);
-        path = url.substr (path_start);
-    } else {
-        host = url;
-        // Check for query string without path
-        size_t query_start = host.find ('?');
-        if (query_start != std::string::npos) {
-            path = "/" + host.substr (query_start);
-            host = host.substr (0, query_start);
-        }
-    }
-
-    // Request line: METHOD /path <version>. Normally the negotiated version.
-    // When nothing was negotiated (connection refused, DNS failure) this line
-    // still has to read as syntactically valid HTTP, so it cannot be blank the
-    // way response.http_version is - but it falls back to what was *requested*
-    // rather than a flat HTTP/1.1. Printing HTTP/1.1 after the user asked for
-    // http2 and never reached a server would contradict both their intent and
-    // the outcome, which is the kind of confident wrong answer this whole task
-    // exists to remove. The fallback never reaches response.http_version.
-    std::string display_version = response.http_version;
-    if (display_version.empty ()) {
-        display_version =
-        request.http_version == HttpVersion::Http2 ? "HTTP/2" : "HTTP/1.1";
-    }
-    raw_req << to_string (request.method) << " " << path << " " << display_version << "\r\n";
-
-    // Host header (required for HTTP/1.1)
-    raw_req << "Host: " << host << "\r\n";
-
-    // Add all request headers
-    for (const auto& [key, value] : response.request_headers) {
-        // Skip if it's a Host header (we already added it)
-        if (key == "Host" || key == "host")
-            continue;
-        raw_req << key << ": " << value << "\r\n";
-    }
-
-    // Add Content-Length for body
-    if (!request.body.content.empty ()) {
-        raw_req << "Content-Length: " << request.body.content.size () << "\r\n";
-    }
-
-    // End of headers
-    raw_req << "\r\n";
-
-    // Body
-    if (!request.body.content.empty ()) {
-        raw_req << request.body.content;
-    }
-    response.raw_request = raw_req.str ();
+    // The raw-request view: what libcurl put on the wire, read off the last
+    // outbound header frame it handed the debug callback. Built here rather
+    // than before the transfer because there is nothing to read until the
+    // transfer has run - and because only the wire knows about the headers
+    // libcurl adds itself, which since the cookie jar includes `Cookie`
+    // (issue #339). A transfer that never sent anything has no frame; it falls
+    // back to the composed request, which is all that ever existed for it.
+    response.raw_request = transfer_debug.last_header_out.empty () ?
+    synthesize_raw_request (request, response) :
+    raw_request_from_wire (transfer_debug.last_header_out, request.body.content);
 
     // Check for errors
     if (res != CURLE_OK) {

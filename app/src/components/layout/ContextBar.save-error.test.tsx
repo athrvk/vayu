@@ -25,7 +25,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ContextBar } from "./ContextBar";
+import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveStore } from "@/stores/save-store";
 import type { ResolvedVariable } from "@/types";
@@ -34,15 +36,6 @@ const globalsMutate = vi.fn();
 
 vi.mock("@/queries", () => ({
 	useRequestQuery: () => ({ data: { id: "req_1", collectionId: null } }),
-	useGlobalsQuery: () => ({
-		data: {
-			variables: {
-				host: { value: "example.com", enabled: true, secret: false, type: "string" },
-			},
-		},
-	}),
-	useCollectionsQuery: () => ({ data: [] }),
-	useEnvironmentsQuery: () => ({ data: [] }),
 	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
 	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
@@ -73,10 +66,28 @@ vi.mock("@/stores", async () => {
 	return {
 		useLayoutStore: () => layoutStore,
 		useTabsStore: () => tabsStore,
-		useSessionStore: () => ({ activeEnvironmentId: null }),
 		useSaveStore: saveStore.useSaveStore,
 	};
 });
+
+// The commit reads its scope from the query cache at blur time rather than from
+// the render closure, so the stored map is seeded here rather than mocked onto a
+// query hook - see `ContextBar.commit-scope.test.tsx`.
+function renderBar() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	client.setQueryData(queryKeys.globals.all, {
+		id: "globals",
+		updatedAt: "",
+		variables: {
+			host: { value: "example.com", enabled: true, secret: false, type: "string" },
+		},
+	});
+	return render(
+		<QueryClientProvider client={client}>
+			<ContextBar />
+		</QueryClientProvider>
+	);
+}
 
 function valueInput(): HTMLInputElement {
 	return screen.getByDisplayValue("example.com") as HTMLInputElement;
@@ -91,12 +102,13 @@ describe("ContextBar - a rejected variable edit", () => {
 
 	it("toasts the engine's reason and puts the stored value back", () => {
 		globalsMutate.mockImplementation(
-			(_payload: unknown, opts: { onError: (e: Error) => void }) => {
+			(_payload: unknown, opts: { onError: (e: Error) => void; onSettled: () => void }) => {
 				opts.onError(new Error("value must not be empty"));
+				opts.onSettled();
 			}
 		);
 
-		render(<ContextBar />);
+		renderBar();
 		const input = valueInput();
 
 		act(() => {
@@ -119,7 +131,7 @@ describe("ContextBar - a rejected variable edit", () => {
 		delete resolved.host;
 		resolved.missing = { value: "example.com", scope: "global" };
 
-		render(<ContextBar />);
+		renderBar();
 		const input = valueInput();
 
 		act(() => {

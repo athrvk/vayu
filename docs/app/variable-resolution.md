@@ -137,6 +137,16 @@ in the list, "last" and "wins" are different things.
 collection the winning value came from (absent for `global`), so the popover can
 say *which* environment rather than just "Environment".
 
+**An edit writes back to that source, never to one re-derived.** The context bar
+commits against `sourceId`, so the definition that receives the value is the one
+the bar displayed. It used to walk the collection chain itself for the first
+definition with a truthy `enabled`, which disagrees with the resolver's
+`isEnabledDefinition` on every definition where `enabled` is *absent* (D17 counts
+absent as enabled) - so a leaf definition without the key displayed while an
+ancestor's took the write. Any second implementation of "which definition wins"
+can drift from this one; there is only meant to be the one, and `sourceId` is how
+it is carried.
+
 ### The engine implementation
 
 `engine/src/http/request_composer.cpp` is the execution-time implementation of

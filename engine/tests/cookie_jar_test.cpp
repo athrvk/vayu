@@ -119,13 +119,20 @@ vayu::Request get_request (const std::string& url) {
     return request;
 }
 
-/// Send @p url in @p scope through @p jar and return the response body.
-std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
+/// Send @p url in @p scope through @p jar and return the whole response - the
+/// raw-request view is as much a subject of these tests as the body is.
+vayu::Response
+response_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
     ClientConfig config;
     config.cookie_jar   = &jar;
     config.cookie_scope = scope;
     Client client (config);
-    return client.send (get_request (url)).value ().body;
+    return client.send (get_request (url)).value ();
+}
+
+/// Send @p url in @p scope through @p jar and return the response body.
+std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::string& url) {
+    return response_in_scope (jar, scope, url).body;
 }
 
 } // namespace
@@ -388,6 +395,32 @@ TEST (CookieJarTransfer, AServerExpiringACookieRemovesItFromTheJar) {
     EXPECT_EQ (send_in_scope (jar, "env_a", server.url ("/echo")), "");
 }
 
+// The jar attaches cookies inside libcurl, so the raw-request view had no way
+// to know about them and said nothing was sent (issue #339) - silent
+// misinformation in the surface whose whole job is showing what went out. The
+// value is shown plainly: this view exists to be exact, and the same value is
+// already readable in Settings. The verbose log keeps its redaction.
+TEST (CookieJarTransfer, TheRawRequestViewShowsTheCookieThatWasSent) {
+    CookieServer server;
+    CookieJar jar;
+
+    send_in_scope (jar, "env_a", server.url ("/login"));
+    const auto sent = response_in_scope (jar, "env_a", server.url ("/echo"));
+
+    EXPECT_EQ (sent.body, "session=abc123")
+    << "the cookie never reached the server";
+    EXPECT_NE (sent.raw_request.find ("Cookie: session=abc123"), std::string::npos)
+    << "the wire carried the cookie and the raw view denied it:\n"
+    << sent.raw_request;
+
+    // The other half of the claim: the view reports what was sent, so a scope
+    // with no matching cookie must not gain a Cookie line it never had.
+    const auto none = response_in_scope (jar, "env_b", server.url ("/echo"));
+    EXPECT_EQ (none.raw_request.find ("Cookie:"), std::string::npos)
+    << "a cookie appeared in a scope that sent none:\n"
+    << none.raw_request;
+}
+
 // ============================================================================
 // What the script sees
 // ============================================================================
@@ -495,6 +528,8 @@ struct ScriptedSend {
     std::string script_error;
     /// The Cookie header the server saw, for the /echo endpoint.
     std::string echoed;
+    /// The transfer's own outbound header frame (issue #339).
+    std::string raw_request;
 };
 
 /// The route's sequence in miniature (execution.cpp): run a pre-request script
@@ -527,8 +562,8 @@ vayu::Environment& env) {
     config.cookie_scope  = scope;
     config.cookie_writes = std::move (writes);
     Client client (config);
-    return { result.success, result.error_message,
-        client.send (request).value ().body };
+    const auto response = client.send (request).value ();
+    return { result.success, result.error_message, response.body, response.raw_request };
 }
 
 /// The same, for a script with no send after it - a post-request script's
@@ -578,6 +613,12 @@ TEST (CookieJarWrite, ACookieAScriptSetIsOnTheWireOfTheRequestItWasSetFor) {
     EXPECT_NE (send_in_scope (jar, "env_a", server.url ("/echo")).find ("session=written"),
     std::string::npos)
     << "the write did not survive the enclosing transfer's capture";
+
+    // The raw-request view reads that transfer's own header frame (#339), so a
+    // written cookie shows up there for free - the claim the architecture doc
+    // now makes about the two features meeting.
+    EXPECT_NE (sent.raw_request.find ("session=written"), std::string::npos)
+    << "the raw-request view did not show the written cookie; got: " << sent.raw_request;
 }
 
 TEST (CookieJarWrite, TheFlatPostmanSpellingSetsTheSameCookie) {
