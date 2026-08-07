@@ -613,13 +613,77 @@ to the next one automatically, with no header to set by hand.
   `undefined`, which would read as "the cookie is gone". The jar is deliberately
   off the load path: sharing one across the event loop's workers would put a
   lock on the hot path, and a load run repeats a single request anyway.
-- **Read-only for now.** `pm.cookies.set` / `unset` / `clear` and
-  `pm.cookies.jar()` are not bound - mutating a jar that in-flight transfers are
-  reading needs its own design, and a binding that silently does nothing would
-  be worse than a missing one.
+- **Writing goes through `jar()`**, below. There is deliberately no flat
+  `pm.cookies.set(name, value)`: a written cookie needs a URL to take its
+  domain and path from, which is exactly why Postman's write half hangs off
+  the jar object.
 
 The jar is libcurl's own cookie engine underneath: matching, expiry and
 replacement are its rules, not a second implementation of RFC 6265.
+
+### Writing to the jar (`pm.cookies.jar()`)
+
+```javascript
+const jar = pm.cookies.jar();
+
+jar.set(pm.request.url, { name: 'session', value: token });
+jar.set(pm.request.url, 'session', token);            // the same, flat
+jar.get('https://api.example.com/', 'session');        // value, or undefined
+jar.unset('https://api.example.com/', 'session');
+jar.clear();                                           // this environment's jar
+```
+
+Postman's jar object, whole. Every method is **URL-scoped** - it takes the URL
+the cookie belongs to rather than assuming this request's - and each accepts an
+optional trailing `callback(err, value)`, invoked inline the way
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is,
+since the work has already happened by the time it is called. `get` also
+*returns* the value, which a synchronous implementation can do honestly.
+
+The cookie object needs `name` and `value`; everything else is optional and
+defaults from the URL:
+
+| Field | Default |
+|-------|---------|
+| `domain` | the URL's host, host-only. A leading dot (`.example.com`) means subdomains too |
+| `path` | RFC 6265 default-path - the URL's path with its last segment removed, so `/v1/orders/42` gives `/v1/orders` |
+| `secure`, `httpOnly` | `false` |
+| `expires` | `0`, a session cookie. Otherwise **seconds since the epoch** - `Math.floor(date.getTime() / 1000)` |
+
+Anything else is refused with an error rather than guessed at: a non-string
+`value`, a `secure: "yes"`, a date string in `expires`, a field carrying a tab
+or newline (the separators of the format the jar stores), or a URL that cannot
+be parsed. A cookie stored under the wrong domain reads as "the session did not
+stick" three requests later, which is a much worse afternoon than a thrown
+error.
+
+**A written cookie is matched by the same rules a received one is.** Setting it
+for one host does not send it to another, `/admin` does not reach `/`, and the
+jar's per-environment isolation holds - the write half is not a way around the
+matching the read half respects.
+
+**When the write takes effect.** A write is *staged*, not applied where it is
+made, and the next transfer of that execution carries it:
+
+- A `set` in a **pre-request script** rides the request it was made before, and
+  that request's own cookie capture is what writes it into the jar. It cannot
+  be discarded by that capture, which is the reason for the ordering: the
+  engine replaces a scope's contents with what the finishing transfer held, so
+  a write dropped into the jar beside an in-flight request would vanish with it.
+- A `set` followed by **`pm.sendRequest`** is carried by that auxiliary
+  request. A `set` *inside* a `sendRequest` callback is a sequential write -
+  `pm.sendRequest` is synchronous, so the callback runs after its transfer
+  finished and the write lands on the next one.
+- A `set` in a **post-request script** has no transfer left to ride, so it is
+  applied to the jar when the script ends.
+
+`clear()` empties **this environment's jar and no other**. Nothing is on disk,
+so the cost is a re-login; other environments, and the no-environment jar, are
+untouched. There is no confirmation gate for scripts - "reset my session" is a
+legitimate thing for a script to want, and Settings → General → Cookies shows
+the result.
+
+Load runs have no jar, so these throw there exactly as the read half does.
 
 ## Console Output
 

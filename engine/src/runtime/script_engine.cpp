@@ -116,6 +116,11 @@ struct ContextData {
     /// `ScriptContext::cookie_jar`, which owns the rationale.
     vayu::http::CookieJar* cookie_jar = nullptr;
     std::string cookie_scope{ vayu::http::NO_ENVIRONMENT_SCOPE };
+
+    /// Where `pm.cookies.jar()` stages its writes - see
+    /// `ScriptContext::cookie_writes`. Drained by `pm.sendRequest`, which
+    /// hands them to the auxiliary transfer.
+    std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
 };
 
 // Get context data from JS context
@@ -4035,6 +4040,15 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     vayu::http::ClientConfig client_config;
     client_config.cookie_jar   = data->cookie_jar;
     client_config.cookie_scope = data->cookie_scope;
+    // Staged jar writes ride the next transfer of this execution, and this is
+    // it - so a script that sets a cookie and then sends through
+    // pm.sendRequest carries it. Drained rather than copied: this transfer's
+    // capture persists them, and applying them a second time afterwards would
+    // undo whatever its response changed.
+    if (data->cookie_writes) {
+        client_config.cookie_writes = std::move (*data->cookie_writes);
+        data->cookie_writes->clear ();
+    }
     vayu::http::Client client (client_config);
     auto sent = client.send (request);
 
@@ -4067,16 +4081,15 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
 // pm.cookies - the jar, matched against the current request's URL
 // ============================================================================
 
-// The jar's cookies that would be sent to the request this script belongs to.
-// Returns nullopt having thrown: either there is no jar here (a load run, a
-// hand-built context - see ScriptContext::cookie_jar) or there is no request
-// to match against, and both deserve a sentence rather than an empty answer.
-std::optional<std::vector<vayu::http::JarCookie>>
-jar_cookies_from_context (JSContext* ctx, const char* member) {
+// The context behind a pm.cookies member, or nullptr having thrown the
+// sentence that says why there is no jar here (a load run, a hand-built
+// context - see ScriptContext::cookie_jar). @p member is the full spelling, so
+// the message names what the script actually wrote.
+ContextData* jar_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
-    if (!data || !data->request) {
-        JS_ThrowInternalError (ctx, "No request available");
-        return std::nullopt;
+    if (!data) {
+        JS_ThrowInternalError (ctx, "No script context available");
+        return nullptr;
     }
     if (!data->cookie_jar) {
         JS_ThrowPlainError (ctx,
@@ -4085,9 +4098,36 @@ jar_cookies_from_context (JSContext* ctx, const char* member) {
         "pm.response.cookies for the Set-Cookie of the response in hand. See "
         "docs/engine/scripting.md.",
         member);
+        return nullptr;
+    }
+    return data;
+}
+
+// The scope's lines with this script's own staged writes applied on top. Every
+// read goes through this, so a `jar().set` followed by a read answers with what
+// was just written rather than with the map the write has not reached yet.
+std::vector<std::string> staged_jar_lines (const ContextData& data) {
+    auto lines = data.cookie_jar->lines_for (data.cookie_scope);
+    if (!data.cookie_writes) {
+        return lines;
+    }
+    return vayu::http::apply_cookie_writes (std::move (lines), *data.cookie_writes);
+}
+
+// The jar's cookies that would be sent to the request this script belongs to.
+// Returns nullopt having thrown: either there is no jar, or there is no request
+// to match against, and both deserve a sentence rather than an empty answer.
+std::optional<std::vector<vayu::http::JarCookie>>
+jar_cookies_from_context (JSContext* ctx, const char* member) {
+    auto* data = get_context_data (ctx);
+    if (!data || !data->request) {
+        JS_ThrowInternalError (ctx, "No request available");
         return std::nullopt;
     }
-    return data->cookie_jar->matching (data->cookie_scope, data->request->url);
+    if (!jar_context (ctx, member)) {
+        return std::nullopt;
+    }
+    return vayu::http::matching_in (staged_jar_lines (*data), data->request->url);
 }
 
 // Which cookie answers for a name when the jar holds it more than once - the
@@ -4157,6 +4197,301 @@ js_jar_cookies_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return obj;
 }
 
+// ----------------------------------------------------------------------------
+// pm.cookies.jar() - the write half (issue #337)
+// ----------------------------------------------------------------------------
+
+// Where a jar write is staged, or nullptr having thrown. A jar with nowhere to
+// apply writes is refused rather than silently accepted: a call that reported
+// success for a cookie that went nowhere is the failure this whole surface
+// exists to avoid.
+std::vector<vayu::http::CookieWrite>* jar_writes (JSContext* ctx, const char* member) {
+    auto* data = jar_context (ctx, member);
+    if (!data) {
+        return nullptr;
+    }
+    if (!data->cookie_writes) {
+        JS_ThrowPlainError (ctx,
+        "pm.cookies.%s is not available here: this execution has nowhere to "
+        "apply a jar write, so accepting one would report success for a cookie "
+        "that goes nowhere. See docs/engine/scripting.md.",
+        member);
+        return nullptr;
+    }
+    return data->cookie_writes;
+}
+
+// One required string argument of a jar() method. Every one of them is
+// URL-scoped, which is the whole reason Postman's write half hangs off `jar()`
+// rather than off `pm.cookies` - so the URL is never optional.
+std::optional<std::string> read_jar_string_arg (JSContext* ctx,
+const char* member,
+const char* label,
+int index,
+int argc,
+JSValueConst* argv) {
+    if (index >= argc || !JS_IsString (argv[index])) {
+        JS_ThrowTypeError (ctx, "pm.cookies.jar().%s needs a %s string, got %s", member,
+        label, index >= argc ? "no argument" : js_type_name (ctx, argv[index]));
+        return std::nullopt;
+    }
+    std::string text = js_to_string (ctx, argv[index]);
+    if (text.empty ()) {
+        JS_ThrowTypeError (ctx, "pm.cookies.jar().%s needs a non-empty %s", member, label);
+        return std::nullopt;
+    }
+    return text;
+}
+
+// `set`'s cookie object: `{ name, value, domain?, path?, secure?, httpOnly?,
+// expires? }`. Returns the reason it was refused rather than a half-filled
+// cookie - a field misread here becomes a cookie stored under the wrong
+// domain, which reads as "the session did not stick" three requests later.
+std::optional<std::string>
+read_jar_cookie_arg (JSContext* ctx, JSValueConst arg, vayu::http::JarCookie& out) {
+    if (!JS_IsObject (arg) || JS_IsArray (arg) || JS_IsFunction (ctx, arg)) {
+        return "pm.cookies.jar().set expects (url, {name, value, ...}) or "
+               "(url, name, value), got " +
+        std::string (js_type_name (ctx, arg)) + " as its second argument";
+    }
+
+    const auto required_string = [&] (const char* key,
+                                 std::string& target) -> std::optional<std::string> {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, arg, key));
+        if (!JS_IsString (value.get ())) {
+            return "pm.cookies.jar().set cookie." + std::string (key) +
+            " must be a string, got " + std::string (js_type_name (ctx, value.get ()));
+        }
+        target = js_to_string (ctx, value.get ());
+        return std::nullopt;
+    };
+    if (auto reason = required_string ("name", out.name)) {
+        return reason;
+    }
+    if (auto reason = required_string ("value", out.value)) {
+        return reason;
+    }
+
+    const auto optional_string = [&] (const char* key,
+                                 std::string& target) -> std::optional<std::string> {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, arg, key));
+        if (JS_IsUndefined (value.get ()) || JS_IsNull (value.get ())) {
+            return std::nullopt;
+        }
+        if (!JS_IsString (value.get ())) {
+            return "pm.cookies.jar().set cookie." + std::string (key) +
+            " must be a string, got " + std::string (js_type_name (ctx, value.get ()));
+        }
+        target = js_to_string (ctx, value.get ());
+        return std::nullopt;
+    };
+    if (auto reason = optional_string ("domain", out.domain)) {
+        return reason;
+    }
+    if (auto reason = optional_string ("path", out.path)) {
+        return reason;
+    }
+
+    const auto optional_bool = [&] (const char* key,
+                               bool& target) -> std::optional<std::string> {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, arg, key));
+        if (JS_IsUndefined (value.get ()) || JS_IsNull (value.get ())) {
+            return std::nullopt;
+        }
+        // Not JS_ToBool: a truthy string would make `secure: "false"` mean
+        // secure, and a cookie's flags are not a place to guess.
+        if (!JS_IsBool (value.get ())) {
+            return "pm.cookies.jar().set cookie." + std::string (key) +
+            " must be true or false, got " +
+            std::string (js_type_name (ctx, value.get ()));
+        }
+        target = JS_ToBool (ctx, value.get ()) != 0;
+        return std::nullopt;
+    };
+    if (auto reason = optional_bool ("secure", out.secure)) {
+        return reason;
+    }
+    if (auto reason = optional_bool ("httpOnly", out.http_only)) {
+        return reason;
+    }
+
+    ScopedValue js_expires (ctx, JS_GetPropertyStr (ctx, arg, "expires"));
+    if (!JS_IsUndefined (js_expires.get ()) && !JS_IsNull (js_expires.get ())) {
+        // Seconds since the epoch, which is what the jar stores and what a
+        // Netscape line carries. A Date or a date string is refused with the
+        // conversion rather than guessed at, because guessing wrong writes a
+        // cookie that expires in 1970 and is simply never sent again.
+        if (!JS_IsNumber (js_expires.get ())) {
+            return "pm.cookies.jar().set cookie.expires must be a number of "
+                   "seconds since the epoch (use Math.floor(date.getTime() / "
+                   "1000)), got " +
+            std::string (js_type_name (ctx, js_expires.get ()));
+        }
+        int64_t seconds = 0;
+        if (JS_ToInt64 (ctx, &seconds, js_expires.get ()) < 0) {
+            return std::string ("pm.cookies.jar().set cookie.expires is not a "
+                                "whole number of seconds");
+        }
+        if (seconds < 0) {
+            return std::string ("pm.cookies.jar().set cookie.expires must not "
+                                "be negative; 0 means a session cookie");
+        }
+        out.expires = seconds;
+    }
+    return std::nullopt;
+}
+
+// Postman's callback, honoured the way pm.sendRequest honours its own: the
+// work already happened synchronously, so it is invoked inline with
+// `(null, result)`. Optional, because the call is complete without it - and
+// `result` is *also* returned, which a synchronous implementation can do
+// honestly and a script reads more easily than a closure.
+//
+// Takes ownership of @p result either way.
+JSValue finish_jar_call (JSContext* ctx, int argc, JSValueConst* argv, int callback_index, JSValue result) {
+    if (callback_index >= argc || JS_IsUndefined (argv[callback_index]) ||
+    JS_IsNull (argv[callback_index])) {
+        return result;
+    }
+    if (!JS_IsFunction (ctx, argv[callback_index])) {
+        JS_FreeValue (ctx, result);
+        return JS_ThrowTypeError (ctx, "pm.cookies.jar()'s callback must be a function, got %s",
+        js_type_name (ctx, argv[callback_index]));
+    }
+
+    JSValue args[2] = { JS_NULL, JS_DupValue (ctx, result) };
+    JSValue ret = JS_Call (ctx, argv[callback_index], JS_UNDEFINED, 2, args);
+    JS_FreeValue (ctx, args[1]);
+    // A callback that threw - a failed pm.expect inside it, most likely - is
+    // the script's error, not something to swallow here.
+    if (JS_IsException (ret)) {
+        JS_FreeValue (ctx, result);
+        return JS_EXCEPTION;
+    }
+    JS_FreeValue (ctx, ret);
+    return result;
+}
+
+JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto url = read_jar_string_arg (ctx, "get", "URL", 0, argc, argv);
+    if (!url) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_jar_string_arg (ctx, "get", "cookie name", 1, argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto* data = jar_context (ctx, "jar().get");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+
+    // Matched against the URL given here rather than the request's, which is
+    // the difference between this and the flat read half.
+    const auto cookies = vayu::http::matching_in (staged_jar_lines (*data), *url);
+    const auto* cookie = find_jar_cookie (cookies, *name);
+    return finish_jar_call (ctx, argc, argv, 2,
+    cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED);
+}
+
+JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto url = read_jar_string_arg (ctx, "set", "URL", 0, argc, argv);
+    if (!url) {
+        return JS_EXCEPTION;
+    }
+
+    vayu::http::JarCookie cookie;
+    int callback_index = 2;
+    if (argc > 1 && JS_IsString (argv[1])) {
+        // Postman's other spelling: set(url, name, value, cb). Both forms are
+        // URL-scoped, which is the property decision 1 of #337 required.
+        auto name = read_jar_string_arg (ctx, "set", "cookie name", 1, argc, argv);
+        if (!name) {
+            return JS_EXCEPTION;
+        }
+        if (argc < 3 || !JS_IsString (argv[2])) {
+            return JS_ThrowTypeError (ctx, "pm.cookies.jar().set(url, name, value) needs a value string, got %s",
+            argc < 3 ? "no argument" : js_type_name (ctx, argv[2]));
+        }
+        cookie.name    = std::move (*name);
+        cookie.value   = js_to_string (ctx, argv[2]);
+        callback_index = 3;
+    } else if (auto reason =
+               read_jar_cookie_arg (ctx, argc > 1 ? argv[1] : JS_UNDEFINED, cookie)) {
+        return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
+    }
+
+    auto* writes = jar_writes (ctx, "jar().set");
+    if (!writes) {
+        return JS_EXCEPTION;
+    }
+
+    // One helper builds the line for a written cookie and a received one alike
+    // - see cookie_jar.hpp. It is also what fills the fields the object left
+    // out, from the URL that scopes the call.
+    const auto stored = vayu::http::cookie_for_url (*url, cookie);
+    if (!stored) {
+        return JS_ThrowTypeError (ctx,
+        "pm.cookies.jar().set could not store \"%s\" for %s: the URL must be "
+        "absolute and parseable, the name non-empty, and no field may contain "
+        "a tab or newline",
+        cookie.name.c_str (), url->c_str ());
+    }
+    writes->push_back ({ vayu::http::CookieWrite::Kind::Set,
+    vayu::http::format_cookie_line (*stored), {}, {} });
+    return finish_jar_call (ctx, argc, argv, callback_index, JS_UNDEFINED);
+}
+
+JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto url = read_jar_string_arg (ctx, "unset", "URL", 0, argc, argv);
+    if (!url) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_jar_string_arg (ctx, "unset", "cookie name", 1, argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto* writes = jar_writes (ctx, "jar().unset");
+    if (!writes) {
+        return JS_EXCEPTION;
+    }
+    writes->push_back ({ vayu::http::CookieWrite::Kind::Unset, {},
+    std::move (*url), std::move (*name) });
+    return finish_jar_call (ctx, argc, argv, 2, JS_UNDEFINED);
+}
+
+JSValue js_jar_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* writes = jar_writes (ctx, "jar().clear");
+    if (!writes) {
+        return JS_EXCEPTION;
+    }
+    // The current environment's jar, and no other - decision 2 of #337. The
+    // blast radius is a session reset, which Settings shows and a script can
+    // legitimately want; it is not the whole process's cookies.
+    writes->push_back ({ vayu::http::CookieWrite::Kind::Clear, {}, {}, {} });
+    return finish_jar_call (ctx, argc, argv, 0, JS_UNDEFINED);
+}
+
+// pm.cookies.jar() - Postman's jar object, built per call as Postman's is.
+// Deliberately does *not* throw where there is no jar: it is an accessor, and
+// the sentence explaining the absence belongs on the method the script
+// actually called, so `typeof pm.cookies.jar().set` stays answerable.
+JSValue js_cookies_jar (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    JSValue jar = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, jar, "get", JS_NewCFunction (ctx, js_jar_get, "get", 3));
+    JS_SetPropertyStr (ctx, jar, "set", JS_NewCFunction (ctx, js_jar_set, "set", 4));
+    JS_SetPropertyStr (ctx, jar, "unset", JS_NewCFunction (ctx, js_jar_unset, "unset", 3));
+    JS_SetPropertyStr (ctx, jar, "clear", JS_NewCFunction (ctx, js_jar_clear, "clear", 1));
+    return jar;
+}
+
 // pm.cookies - always bound, like pm.sendRequest, so a script that reaches for
 // it where there is no jar is told why instead of meeting "not a function".
 void setup_pm_cookies (JSContext* ctx, JSValue pm) {
@@ -4167,6 +4502,8 @@ void setup_pm_cookies (JSContext* ctx, JSValue pm) {
     JS_NewCFunction (ctx, js_jar_cookies_has, "has", 1));
     JS_SetPropertyStr (ctx, cookies, "toObject",
     JS_NewCFunction (ctx, js_jar_cookies_to_object, "toObject", 0));
+    JS_SetPropertyStr (
+    ctx, cookies, "jar", JS_NewCFunction (ctx, js_cookies_jar, "jar", 0));
     JS_SetPropertyStr (ctx, pm, "cookies", cookies);
 }
 
@@ -4209,9 +4546,8 @@ void setup_pm_object (JSContext* ctx) {
     // pm.crypto
     setup_pm_crypto (ctx, pm);
 
-    // pm.cookies - the jar (issue #301). Read-only for now: the write half
-    // (`set`/`unset`/`clear`) mutates a jar in-flight transfers are reading,
-    // which needs its own design.
+    // pm.cookies - the jar's flat read half (issue #301) and, through
+    // `jar()`, its write half (issue #337).
     setup_pm_cookies (ctx, pm);
 
     // pm.sendRequest - always bound, even when the capability is off, so a
@@ -4369,6 +4705,7 @@ class ScriptEngine::Impl {
         ctx_data.send_request_count = 0;
         ctx_data.cookie_jar         = ctx.cookie_jar;
         ctx_data.cookie_scope       = ctx.cookie_scope;
+        ctx_data.cookie_writes      = ctx.cookie_writes;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response and pm.info with new data

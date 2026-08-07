@@ -252,6 +252,26 @@ TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
     EXPECT_GE (offered, 6) << "the cookie accessors are missing from the completion list";
 }
 
+// The guard above is offered-implies-callable only, so a method the runtime
+// binds and the list forgets fails nothing there - which is how the write half
+// could ship invisible to every user who discovers the API through completions.
+// These are the entries #337 requires, named.
+TEST (ScriptCompletions, TheCookieJarsWriteHalfIsOffered) {
+    const auto completions = get_script_completions ();
+
+    std::vector<std::string> labels;
+    for (const auto& item : completions) {
+        labels.push_back (item.value ("label", std::string{}));
+    }
+    ASSERT_FALSE (labels.empty ());
+
+    for (const char* expected : { "pm.cookies.jar", "pm.cookies.jar().get",
+         "pm.cookies.jar().set", "pm.cookies.jar().unset", "pm.cookies.jar().clear" }) {
+        EXPECT_NE (std::find (labels.begin (), labels.end (), expected), labels.end ())
+        << expected << " is bound by the runtime but not offered";
+    }
+}
+
 // The same drift, on the variable scopes: `pm.variables` was offered by
 // `scripting.md` for months while the runtime had no such object, and every
 // scope method added in #184 is invisible in the editor until it is listed

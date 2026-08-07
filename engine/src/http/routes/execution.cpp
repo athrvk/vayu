@@ -748,6 +748,14 @@ void register_execution_routes (RouteContext& ctx) {
         const std::string cookie_scope =
         run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
+        // Where each script's `pm.cookies.jar()` writes are staged. The
+        // pre-request script's ride the send below and are persisted by its
+        // capture; the post-request script's have no transfer left to carry
+        // them, so the route applies them. Either way exactly once - see
+        // cookie_jar.hpp.
+        std::vector<vayu::http::CookieWrite> pre_cookie_writes;
+        std::vector<vayu::http::CookieWrite> post_cookie_writes;
+
         // Execute pre-request script. `for_prerequest` is what makes its
         // pm.request edits reach the wire; everything below this line - the
         // send, the stored trace, the raw request the app shows - reads the
@@ -755,6 +763,7 @@ void register_execution_routes (RouteContext& ctx) {
         auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
         pre_ctx.cookie_jar          = &ctx.cookie_jar;
         pre_ctx.cookie_scope        = cookie_scope;
+        pre_ctx.cookie_writes       = &pre_cookie_writes;
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
@@ -766,9 +775,10 @@ void register_execution_routes (RouteContext& ctx) {
 
         // Send HTTP request
         vayu::http::ClientConfig config;
-        config.verbose      = ctx.verbose;
-        config.cookie_jar   = &ctx.cookie_jar;
-        config.cookie_scope = cookie_scope;
+        config.verbose       = ctx.verbose;
+        config.cookie_jar    = &ctx.cookie_jar;
+        config.cookie_scope  = cookie_scope;
+        config.cookie_writes = std::move (pre_cookie_writes);
         vayu::http::Client client (config);
         const auto response = client.send (request).value ();
 
@@ -779,6 +789,7 @@ void register_execution_routes (RouteContext& ctx) {
         auto post_ctx = vayu::runtime::ScriptContext::for_test (request, response);
         post_ctx.cookie_jar          = &ctx.cookie_jar;
         post_ctx.cookie_scope        = cookie_scope;
+        post_ctx.cookie_writes       = &post_cookie_writes;
         post_ctx.environment         = &env;
         post_ctx.globals             = &globals;
         post_ctx.collectionVariables = &collectionVariables;
@@ -787,6 +798,12 @@ void register_execution_routes (RouteContext& ctx) {
         post_ctx.request_name        = script_request_name;
         auto post_script_result =
         execute_script (script_engine, post_request_script, post_ctx, "Post-request");
+
+        // The post-request script's jar writes: the transfer has already
+        // captured, so there is nothing left to carry them and the route is
+        // where they land. A write its own `pm.sendRequest` already carried is
+        // not in here - that call drains the queue.
+        ctx.cookie_jar.apply (cookie_scope, post_cookie_writes);
 
         // Persist script-set variables (design mode only; best-effort)
         persist_script_variables (ctx.db, run, env, globals, collectionVariables);

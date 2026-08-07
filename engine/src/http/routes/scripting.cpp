@@ -680,8 +680,8 @@ nlohmann::json get_script_completions () {
     "per environment, kept in memory for as long as the engine runs and "
     "clearable in Settings; requests sent with no environment selected share "
     "one jar of their own. Load runs have no jar and these throw there. "
-    "Read-only for now - use pm.response.cookies for what a single response "
-    "set." },
+    "Writing is done through pm.cookies.jar(); use pm.response.cookies for "
+    "what a single response set." },
     { "sortText", "0_pm_cookies" } });
 
     completions.push_back ({ { "label", "pm.cookies.get" }, { "kind", KIND_FUNCTION },
@@ -710,6 +710,64 @@ nlohmann::json get_script_completions () {
     "Every stored cookie that would be sent to this URL, as a name-to-value "
     "object." },
     { "sortText", "1_pm_cookies_to_object" } });
+
+    // pm.cookies.jar() - the write half (#337). Offered one level deeper than
+    // the flat reads because every method is URL-scoped: the URL is what a
+    // written cookie's domain and path come from.
+    completions.push_back ({ { "label", "pm.cookies.jar" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar()" }, { "detail", "pm.cookies.jar(): object" },
+    { "documentation",
+    "Postman's cookie jar object - the write half, plus a URL-scoped read. "
+    "get(url, name), set(url, cookie), unset(url, name) and clear() all take "
+    "the URL the cookie belongs to rather than assuming this request's.\n\nA "
+    "write is applied after the transfer it was made before, so the request "
+    "that follows carries it and the jar keeps it.\n\nExample:\n"
+    "pm.cookies.jar().set(pm.request.url, { name: 'session', value: token "
+    "});" },
+    { "sortText", "1_pm_cookies_jar" } });
+
+    completions.push_back ({ { "label", "pm.cookies.jar().get" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar().get(\"${1:https://api.example.com}\", \"${2:session}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.jar().get(url: string, name: string, callback?): string | undefined" },
+    { "documentation",
+    "The value of a stored cookie that would be sent to that URL, or "
+    "undefined. Same matching as pm.cookies.get, against the URL you pass "
+    "instead of this request's; a cookie this script has just set is "
+    "included. The value is returned and also handed to the optional "
+    "callback as (null, value)." },
+    { "sortText", "1_pm_cookies_jar_get" } });
+
+    completions.push_back ({ { "label", "pm.cookies.jar().set" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar().set(\"${1:https://api.example.com}\", { name: \"${2:session}\", value: ${3:token} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.jar().set(url: string, cookie: object, callback?): void" },
+    { "documentation",
+    "Store a cookie for that URL. The cookie object needs name and value; "
+    "domain, path, secure, httpOnly and expires (seconds since the epoch, 0 "
+    "for a session cookie) are optional and default from the URL. "
+    "set(url, name, value) is accepted too.\n\nThe cookie is matched by the "
+    "same rules a received one is, so setting it for one host does not send "
+    "it to another." },
+    { "sortText", "1_pm_cookies_jar_set" } });
+
+    completions.push_back ({ { "label", "pm.cookies.jar().unset" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar().unset(\"${1:https://api.example.com}\", \"${2:session}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?): void" },
+    { "documentation",
+    "Remove the cookies of that name the URL would have carried. Cookies of "
+    "the same name stored for another host or path are left alone." },
+    { "sortText", "1_pm_cookies_jar_unset" } });
+
+    completions.push_back ({ { "label", "pm.cookies.jar().clear" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.cookies.jar().clear()" },
+    { "detail", "pm.cookies.jar().clear(callback?): void" },
+    { "documentation",
+    "Empty this environment's jar - a session reset, and nothing wider: "
+    "other environments' jars are untouched. Nothing is on disk, so this "
+    "costs a re-login and no more." },
+    { "sortText", "1_pm_cookies_jar_clear" } });
 
     // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it

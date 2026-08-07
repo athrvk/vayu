@@ -31,6 +31,19 @@
  * here" without performing a transfer, something no libcurl call offers. They
  * never decide what goes on the wire.
  *
+ * ## A script's writes are staged, not applied where they are made
+ *
+ * `pm.cookies.jar().set/unset/clear` (issue #337) do not touch the map while
+ * the script runs. They stage a `CookieWrite`, and the next transfer of that
+ * execution seeds its handle with the scope's lines *plus* the staged writes
+ * applied on top (`apply_cookie_writes`) - so the write rides the request it
+ * was made for, and the transfer's own capture is what persists it. That
+ * ordering is the point: `capture_jar_cookies` **replaces** the scope's list
+ * with what the finishing handle held, so a write applied into the live map
+ * beside an in-flight transfer would be discarded by it. A write that has no
+ * transfer left to ride (a post-request script's) is applied by the route
+ * through `CookieJar::apply`.
+ *
  * ## Scope, lifetime, persistence, threading
  *
  * - **Scope: one jar per environment**, keyed by environment id, with
@@ -128,6 +141,76 @@ bool secure_transport,
 int64_t now_seconds);
 
 /**
+ * @brief Write one cookie back as a Netscape line - the inverse of
+ *        `parse_cookie_line`, and the only place a line is built.
+ *
+ * A script-written cookie has no `Set-Cookie` to come from, so it becomes one
+ * of libcurl's own lines here and is thereafter the same kind of thing a
+ * received cookie is.
+ */
+[[nodiscard]] std::string format_cookie_line (const JarCookie& cookie);
+
+/**
+ * @brief Fill a script-supplied cookie's URL-derived defaults.
+ *
+ * `pm.cookies.jar().set(url, cookie)` carries the URL precisely so domain and
+ * path have somewhere to come from: an empty @p cookie.domain becomes @p url's
+ * host (host-only, as a `Set-Cookie` with no `Domain` attribute is), and an
+ * empty `path` becomes RFC 6265 §5.1.4's default-path - the URL's path with
+ * its last segment removed. Explicit fields are kept as given; a leading dot
+ * on the domain is libcurl's spelling of "subdomains too" and sets the
+ * tailmatch flag.
+ *
+ * `nullopt` when the result could not be stored honestly: an unparseable URL,
+ * an empty name, or a field carrying a tab or newline - the separators of the
+ * very format this is about to be written in, which would silently corrupt the
+ * line and make the cookie vanish on the next read.
+ */
+[[nodiscard]] std::optional<JarCookie>
+cookie_for_url (const std::string& url, JarCookie cookie);
+
+/**
+ * @brief One staged jar mutation from a script (issue #337).
+ *
+ * Staged rather than applied - see the file comment for why the write cannot
+ * land in the live map beside a transfer.
+ */
+struct CookieWrite {
+    enum class Kind {
+        /// Merge `line` in, replacing a cookie of the same name/domain/path.
+        Set,
+        /// Drop the cookies named `name` that would be sent to `url`.
+        Unset,
+        /// Empty the scope.
+        Clear,
+    };
+
+    Kind kind = Kind::Set;
+    /// `Set` only: the line to merge, from `format_cookie_line`.
+    std::string line;
+    /// `Unset` only: the URL the removal is scoped to, and the cookie name.
+    std::string url;
+    std::string name;
+};
+
+/**
+ * @brief @p lines with @p writes applied on top, in order. Pure - it is what
+ *        a transfer seeds its handle with and what `CookieJar::apply` stores.
+ */
+[[nodiscard]] std::vector<std::string> apply_cookie_writes (std::vector<std::string> lines,
+const std::vector<CookieWrite>& writes);
+
+/**
+ * @brief The cookies among @p lines that would be sent to @p url.
+ *
+ * `CookieJar::matching` over lines the caller already holds, so a script can
+ * read the jar *with* its own staged writes applied without those writes
+ * having to reach the map first. An unparseable URL matches nothing.
+ */
+[[nodiscard]] std::vector<JarCookie>
+matching_in (const std::vector<std::string>& lines, const std::string& url);
+
+/**
  * @brief One scope's contents, for `GET /cookies`.
  */
 struct CookieScopeView {
@@ -174,6 +257,16 @@ class CookieJar {
      */
     [[nodiscard]] std::vector<JarCookie>
     matching (const std::string& scope, const std::string& url) const;
+
+    /**
+     * @brief Apply staged script writes to @p scope.
+     *
+     * For writes with no transfer left to carry them - a post-request
+     * script's. A write made before a transfer rides that transfer instead
+     * (`ClientConfig::cookie_writes`), so it is applied exactly once either
+     * way; see the file comment.
+     */
+    void apply (const std::string& scope, const std::vector<CookieWrite>& writes);
 
     /**
      * @brief Every scope's contents, for the Settings panel. Scopes with no

@@ -180,11 +180,16 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
  * From here on libcurl decides what actually goes on the wire: which cookies
  * match the URL, which expired, and what a `Set-Cookie` in the response
  * replaces. See cookie_jar.hpp for why that is deliberately not our code.
+ *
+ * A script's staged writes are applied on top of the stored lines here rather
+ * than in the jar, so the transfer carries them and its capture persists them
+ * - the ordering cookie_jar.hpp describes.
  */
 void apply_jar_cookies (CURL* curl, const ClientConfig& config) {
     curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
     curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
-    for (const auto& line : config.cookie_jar->lines_for (config.cookie_scope)) {
+    for (const auto& line : apply_cookie_writes (
+         config.cookie_jar->lines_for (config.cookie_scope), config.cookie_writes)) {
         curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
     }
 }
