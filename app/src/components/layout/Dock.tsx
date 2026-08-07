@@ -8,8 +8,15 @@
 import { FolderOpen, Clock, Braces, Info, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
-import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
+import {
+	useLayoutStore,
+	useEngineStore,
+	useSaveStore,
+	useTabsStore,
+	type DrawerView,
+} from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { contextBarHasContent } from "./context-bar-content";
 
 interface DrawerButton {
 	view: DrawerView;
@@ -184,7 +191,15 @@ function EngineStatus() {
 export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
+	const { openTabs, activeTabId } = useTabsStore();
 	const saveStatus = useSaveStore((s) => s.status);
+
+	// "Open" is not the same as "on screen": the bar renders nothing off a request
+	// tab, so a button pressed on `contextBarOpen` alone lit up with nothing to
+	// show. Pressed mirrors what is visible instead - the toggle still works, and
+	// the state it reports is the state the user can see.
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const contextBarVisible = contextBarOpen && contextBarHasContent(activeTab?.type);
 
 	// No TooltipProvider of its own. A bare nested one would reset this strip to
 	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.
@@ -266,7 +281,7 @@ export function Dock() {
 				{/* Right - toggles */}
 				<div className="flex items-center gap-0.5">
 					<DockButton
-						active={contextBarOpen}
+						active={contextBarVisible}
 						onClick={toggleContextBar}
 						label="Toggle context bar"
 						shortcut={`(${formatChord({ mod: true, key: "I" })})`}

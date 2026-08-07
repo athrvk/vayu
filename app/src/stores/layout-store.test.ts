@@ -40,6 +40,20 @@ describe("layout-store drawer width", () => {
 		expect(useLayoutStore.getState().drawerWidth).toBe(PANEL_MAX_WIDTH);
 	});
 
+	/*
+	 * The context bar shares the drawer's bounds and its clamp, and had no test
+	 * for either: deleting the clamp let `setContextBarWidth(Infinity)` through
+	 * `partialize` into localStorage, where it comes back as a panel wider than
+	 * the window on the next launch.
+	 */
+	it("clamps the context bar to the same panel bounds", () => {
+		const { setContextBarWidth } = useLayoutStore.getState();
+		setContextBarWidth(50);
+		expect(useLayoutStore.getState().contextBarWidth).toBe(PANEL_MIN_WIDTH);
+		setContextBarWidth(Infinity);
+		expect(useLayoutStore.getState().contextBarWidth).toBe(PANEL_MAX_WIDTH);
+	});
+
 	describe("v2 -> v3 migration", () => {
 		// zustand exposes the configured migrate through persist options
 		const migrate = (

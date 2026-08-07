@@ -98,8 +98,9 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 - **Push mode** (≥1200px): adjacent to main content, takes layout space.
 - **Overlay mode** (<1200px): floats over main content, top-right (absolute positioned, shadow, z-10).
-- **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`.
-- **Content:** resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; displays `{{name}}` : `value` pairs (secrets masked).
+- **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`. The button's pressed state is "open **and** the active tab has content for the bar" (`contextBarHasContent`, shared with the bar itself) - `contextBarOpen` alone lit the button up on the six tab types the bar renders nothing for.
+- **Structure:** an `<aside>` landmark ("Context sidebar"), like the Drawer facing it. The resize handle and the header are direct children; the scroll lives on an inner wrapper, so the drag strip and the close button stay put while the variables list scrolls. The left edge is the handle's own 1px hairline - the panel draws no `border-l` of its own.
+- **Content:** resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; each row shows the name (`TruncatedText`), its winning scope (`VariableScopeBadge`) and the value (secrets masked). Value inputs are named `Value of <name>`.
 - **Editing:** a blur (or Enter) commits the value back to the definition the resolver picked - looked up by `ResolvedVariable.sourceId`, not re-derived (see [variable resolution](./variable-resolution.md#getvariableoriginsname)). The payload is read from the query cache at commit time and patched into it optimistically, so a second blur before the first mutation settles cannot re-send the first one's old value. Commits register with the save store, so a quit flush waits for one in flight.
 
 ### `Dock` (`components/layout/Dock.tsx`)
@@ -108,7 +109,7 @@ Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. When the engine is *down* the indicator becomes a focusable tooltip carrying `engineError` - the health poll's reason, which was previously recorded and rendered nowhere, so a refused connection, a timeout and a TLS failure all read as one word. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
-- **Right - toggles:** Context bar toggle (⌘I).
+- **Right - toggles:** Context bar toggle (⌘I). Pressed when the bar is open *and* the active tab is one it has content for, so the highlight always matches what is on screen.
 
 ## Request Builder (`modules/request-builder/`)
 
