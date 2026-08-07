@@ -70,6 +70,20 @@ describe("resource writes use POST to create and PUT to update", () => {
 		expect(put.mock.calls[0][1]).not.toHaveProperty("id");
 	});
 
+	it("sends parentId: null through to the wire for a move to the root", async () => {
+		// Absent means "keep the parent" to the engine, so a move out of a folder
+		// exists only as a null that survives serialization. `UpdateCollectionRequest.parentId`
+		// was typed `string`, which made this call unwriteable rather than wrong.
+		await apiService.updateCollection({ id: "col_1", parentId: null });
+		expect(put).toHaveBeenCalledWith("/collections/col_1", { parentId: null });
+		expect(JSON.stringify(put.mock.calls[0][1])).toContain('"parentId":null');
+	});
+
+	it("sends collectionId on a request update, so a move reaches the engine", async () => {
+		await apiService.updateRequest({ id: "req_1", collectionId: "col_2" });
+		expect(put).toHaveBeenCalledWith("/requests/req_1", { collectionId: "col_2" });
+	});
+
 	it("creates a request with POST /requests", async () => {
 		await apiService.createRequest({
 			collectionId: "col_1",

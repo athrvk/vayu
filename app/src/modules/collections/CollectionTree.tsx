@@ -33,7 +33,7 @@ import { walkAncestors, collectDescendantEntityIds } from "./tree-utils";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
-import { compareCollectionOrder } from "@/types";
+import { compareTreeOrder } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
 
@@ -112,7 +112,7 @@ export default function CollectionTree() {
 		const loadedIds = new Set(collections.map((c) => c.id));
 		return collections
 			.filter((c) => !c.parentId || !loadedIds.has(c.parentId))
-			.sort(compareCollectionOrder);
+			.sort(compareTreeOrder);
 	}, [collections]);
 
 	/*
@@ -387,6 +387,16 @@ export default function CollectionTree() {
 					auth: request.auth,
 					preRequestScript: request.preRequestScript,
 					postRequestScript: request.postRequestScript,
+					/*
+					 * The copy takes its source's `order`, which lands it directly
+					 * *after* the source: the tie falls to `createdAt` and the copy is
+					 * newer (see `compareTreeOrder`, pinned to the engine's SQL). An
+					 * omitted order would append it to the end of the collection, and
+					 * inserting it at `order + 1` would need every following sibling
+					 * renumbered - a multi-row write that belongs to the atomic batch
+					 * reorder endpoint, not to a duplicate.
+					 */
+					order: request.order,
 				});
 				openTab({ type: "request", entityId: copy.id });
 			} catch (error) {

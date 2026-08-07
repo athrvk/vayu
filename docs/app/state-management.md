@@ -649,13 +649,23 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 - **`usePrefetchCollectionsAndRequests()`** - Warm-cache pass over every
   collection's requests at startup
 
+**Sorting:** every tree list - roots, a collection's children, a collection's
+requests - sorts with the single exported `compareTreeOrder` (`types/domain.ts`):
+`order`, then `createdAt`, then `id` byte-wise. There were two comparators with
+two different tie rules and neither matched the engine's, so "run this folder"
+could execute in an order the sidebar had never shown. The rule is pinned to the
+engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
+`types/tree-order.conformance.test.ts` and by the engine's `tree_order_test.cpp`
+- change one side and the other suite fails.
+
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
 - **`useDeleteCollectionMutation()`** - Delete collection (invalidates coarsely,
   see below)
 - **`useCreateRequestMutation()`** - Create request
-- **`useUpdateRequestMutation()`** - Update request
+- **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
+  that can have changed, see below)
 - **`useDeleteRequestMutation()`** - Delete request (also clears the response)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
   `POST /import/apply` in one transaction
@@ -817,6 +827,15 @@ query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` sits under
   `collections.all` + `requests.all` wholesale. `requests.detail` entries carry
   `staleTime: Infinity`, so without this a deleted request stays fresh forever
   and keeps feeding restored tabs.
+- **A single-request update invalidates narrowly, for the same reason.** Which
+  lists a request write can affect *is* client-side knowledge: the request's own
+  collection, plus the one it left if the write was a move. So
+  `useUpdateRequestMutation` invalidates `requests.listByCollection(id)` per
+  affected collection rather than `requests.lists()`. It used to refetch every
+  collection's list on any rename, which a reorder (a run of sibling PUTs) turns
+  into one full-tree refetch per row. The source collection of a move is read
+  from the `requests.detail` cache, which still holds the pre-update row at that
+  point - the response carries only the new owner.
 - **The warm-cache prefetch is a query too.** `usePrefetchCollectionsAndRequests`
   is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
   creating a collection can invalidate it - it succeeds once at startup and

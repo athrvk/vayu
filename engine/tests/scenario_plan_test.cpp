@@ -175,6 +175,29 @@ TEST_F (ScenarioPlanTest, RecursiveDescentIsDepthFirstByCollectionOrder) {
     (std::vector<std::string>{ "root_a", "root_b", "a_1", "g_1", "b_1" }));
 }
 
+TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
+    // Every request created before explicit orders existed sits at 0, so this is
+    // the common case, not an edge one: what "run this folder" executes must be
+    // what the tree displays. The rule is `order`, then `created_at`, then `id`
+    // (issue #360, pinned by fixtures/tree-order-conformance.json) - not the
+    // rowid, which an unrelated edit reassigns.
+    seed_collection ("root", "");
+    seed_request ("later", "root", /*order=*/0);
+    seed_request ("earlier", "root", /*order=*/0);
+    auto make_older = [&] (const std::string& id, int64_t created_at) {
+        auto row       = db_->get_request (id);
+        ASSERT_TRUE (row.has_value ());
+        row->created_at = created_at;
+        db_->save_request (*row);
+    };
+    make_older ("earlier", 1000);
+    make_older ("later", 2000);
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("root"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (step_ids (resolved.plan), (std::vector<std::string>{ "earlier", "later" }));
+}
+
 TEST_F (ScenarioPlanTest, NonRecursiveIgnoresSubCollections) {
     seed_collection ("root", "");
     seed_collection ("child", "root");

@@ -1,0 +1,64 @@
+{
+	"description": "The one sidebar/scenario ordering rule, read by both suites. Rows sort by `order` ascending, ties by `createdAt` ascending, remaining ties by `id` ascending under byte-wise (SQLite BINARY) comparison. Engine side: engine/tests/tree_order_test.cpp inserts each case's rows into the collections and the requests table and reads them back through Database::get_collections / get_requests_in_collection, so the SQL ORDER BY is what is being asserted. Renderer side: app/src/types/tree-order.conformance.test.ts sorts the same rows with compareTreeOrder. A rule that changes on one side and not the other fails here or in ctest, never in a user's sidebar.",
+	"cases": [
+		{
+			"name": "explicit order wins over both creation time and id",
+			"rows": [
+				{ "id": "row-a", "order": 1, "createdAt": 1700000000000 },
+				{ "id": "row-z", "order": 0, "createdAt": 1700000009000 }
+			],
+			"expected": ["row-z", "row-a"]
+		},
+		{
+			"name": "a tie on order falls to the older createdAt, not to the id",
+			"rows": [
+				{ "id": "row-a", "order": 3, "createdAt": 1700000005000 },
+				{ "id": "row-z", "order": 3, "createdAt": 1700000001000 }
+			],
+			"expected": ["row-z", "row-a"]
+		},
+		{
+			"name": "all-zero orders (the pre-drag world) sort by creation time, not by id",
+			"rows": [
+				{ "id": "row-alpha", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "row-gamma", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "row-beta", "order": 0, "createdAt": 1700000002000 }
+			],
+			"expected": ["row-gamma", "row-beta", "row-alpha"]
+		},
+		{
+			"name": "a full tie on order and createdAt falls to the id",
+			"rows": [
+				{ "id": "row-z", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "row-m", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "row-c", "order": 2, "createdAt": 1700000004000 }
+			],
+			"expected": ["row-c", "row-m", "row-z"]
+		},
+		{
+			"name": "the id tiebreak is byte-wise, not locale-aware (uppercase sorts first)",
+			"rows": [
+				{ "id": "row-a", "order": 0, "createdAt": 1700000000000 },
+				{ "id": "Row-A", "order": 0, "createdAt": 1700000000000 }
+			],
+			"expected": ["Row-A", "row-a"]
+		},
+		{
+			"name": "negative orders sort ahead of zero",
+			"rows": [
+				{ "id": "row-zero", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "row-pinned", "order": -1, "createdAt": 1700000009000 }
+			],
+			"expected": ["row-pinned", "row-zero"]
+		},
+		{
+			"name": "order is the primary key even when creation time disagrees on every row",
+			"rows": [
+				{ "id": "row-1", "order": 10, "createdAt": 1700000001000 },
+				{ "id": "row-2", "order": 5, "createdAt": 1700000002000 },
+				{ "id": "row-3", "order": 7, "createdAt": 1700000003000 }
+			],
+			"expected": ["row-2", "row-3", "row-1"]
+		}
+	]
+}
