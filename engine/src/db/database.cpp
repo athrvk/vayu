@@ -733,6 +733,36 @@ const std::vector<Environment>& environments) {
 }
 
 // ============================================================================
+// Batch reorder - repositioned collections + requests in one transaction
+// ============================================================================
+
+// Same shape as import_apply: retry_on_busy holds the recursive mutex while the
+// lambda runs, and the lambda only touches the same storage handle. Collections
+// first so a request that moved into a collection this batch also reparented
+// still lands after its owner's row.
+void Database::apply_reorder (const std::vector<Collection>& collections,
+const std::vector<Request>& requests) {
+    if (collections.empty () && requests.empty ()) {
+        return;
+    }
+
+    vayu::utils::log_debug ("Applying reorder: " + std::to_string (collections.size ()) +
+    " collections, " + std::to_string (requests.size ()) + " requests");
+
+    retry_on_busy ("apply reorder", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& c : collections) {
+                impl_->storage.replace (c);
+            }
+            for (const auto& r : requests) {
+                impl_->storage.replace (r);
+            }
+            return true; // Commit
+        });
+    });
+}
+
+// ============================================================================
 // Environments - Named variable sets (dev, staging, prod)
 // ============================================================================
 

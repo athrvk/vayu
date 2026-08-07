@@ -174,6 +174,28 @@ apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id
 apiService.deleteRequest(id): Promise<void>
 ```
 
+#### Reorder
+
+```typescript
+apiService.reorder(data: ReorderRequest): Promise<ReorderResponse>  // POST /reorder
+```
+
+The write path behind a drop. One call repositions any number of collections and
+requests, and the engine applies the whole batch in one transaction - so a drop
+that displaces N siblings is one round trip, not N `updateRequest` calls that can
+half-land and race a concurrent create into the middle of their range.
+
+The payload carries `moves` (each row's new `order`, plus `parentId` /
+`collectionId` when it changes owner) and `normalize` (scopes to renumber dense
+`0..n-1` in display order first, for a collection whose rows all predate explicit
+orders). `modules/collections/reorder-math.ts` computes both from the sibling
+lists the tree is already showing; the full contract is in
+[engine/api-reference.md](../engine/api-reference.md) under `POST /reorder`.
+
+Unlike the other writes, the response is **read**: it is the rows as written, and
+`useReorderMutation` settles its caches on them so a normalization the engine
+performed shows up without waiting for the refetch.
+
 #### Environments
 
 ```typescript
@@ -357,6 +379,9 @@ export const API_ENDPOINTS = {
   // Requests
   REQUESTS: "/requests",
   REQUEST_BY_ID: (id: string) => `/requests/${id}`,
+
+  // Batch reorder for both entity kinds - one drop, one call, one transaction
+  REORDER: "/reorder",
   
   // Cookie jar - GET reads every scope, DELETE clears one or all
   COOKIES: "/cookies",

@@ -667,8 +667,37 @@ engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
 - **`useDeleteRequestMutation()`** - Delete request (also clears the response)
+- **`useReorderMutation()`** - Reposition collections and requests through
+  `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
   `POST /import/apply` in one transaction
+
+**Reordering (`useReorderMutation`)** is the one mutation that writes its caches
+three times, because a drag is only believable if the row is where the pointer
+left it before the write returns:
+
+- `onMutate` snapshots every key the plan can touch and *draws the plan* into the
+  caches - the same two steps the engine performs, normalize each named scope to
+  `0..n-1` in display order, then position each move. A cross-collection move
+  crosses list caches and updates `requests.detail` (which carries
+  `staleTime: Infinity`, so a stale `collectionId` there would outlive every
+  refetch).
+- `onSuccess` re-applies the rows the engine actually wrote, which the response
+  carries. They are normally what was drawn, but a normalization is authoritative
+  from the engine, so the tree settles on real positions rather than a guess.
+- `onError` restores the snapshots wholesale and reports through
+  `useSaveStore.failSave` - the one channel every save failure reaches the Dock
+  and the toast through. The mutation owns this rather than its caller, so the
+  gesture layer cannot forget it.
+- `onSettled` invalidates the affected keys **once** - the collections list only
+  if a collection moved, and only the request lists the plan named.
+
+Every write goes through `setQueryData` with a fresh array, never a mutation in
+place: the map `useMultipleCollectionRequests` builds is compared by reference by
+the reveal effect, so an in-place edit would move a row on screen that the tree
+never notices. The plan itself comes from
+`modules/collections/reorder-math.ts` - a pure module, node-tested, that turns
+sibling lists and a drop index into the minimal set of rows to rewrite.
 
 #### Environments & Variables
 

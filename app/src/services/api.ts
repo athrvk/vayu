@@ -37,6 +37,8 @@ import type {
 	ListRequestsParams,
 	CreateRequestRequest,
 	UpdateRequestRequest,
+	ReorderRequest,
+	ReorderResponse,
 	CreateEnvironmentRequest,
 	UpdateEnvironmentRequest,
 	ComposeRequestRequest,
@@ -191,6 +193,25 @@ export const apiService = {
 
 	async deleteRequest(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.REQUEST_BY_ID(id));
+	},
+
+	/**
+	 * Reposition collections and requests in one atomic batch.
+	 *
+	 * The response is the rows as written, not an acknowledgement: the caller
+	 * has already drawn the drop optimistically and settles its caches on these
+	 * rows, so a normalization the engine performed is visible immediately
+	 * rather than only after the refetch lands.
+	 */
+	async reorder(data: ReorderRequest): Promise<ReorderResponse> {
+		const response = await httpClient.post<{
+			collections: RawCollection[];
+			requests: RawRequest[];
+		}>(API_ENDPOINTS.REORDER, data);
+		return {
+			collections: response.collections.map(CollectionTransformer.toFrontend),
+			requests: response.requests.map(RequestTransformer.toFrontend),
+		};
 	},
 
 	// Environments
