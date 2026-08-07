@@ -27,6 +27,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ContextBar } from "./ContextBar";
+import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveStore } from "@/stores/save-store";
@@ -82,9 +83,13 @@ function renderBar() {
 			host: { value: "example.com", enabled: true, secret: false, type: "string" },
 		},
 	});
+	// The header's close button is a `TooltipIconButton`, which needs the provider
+	// the app mounts once in `main.tsx`.
 	return render(
 		<QueryClientProvider client={client}>
-			<ContextBar />
+			<TooltipProvider>
+				<ContextBar />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }

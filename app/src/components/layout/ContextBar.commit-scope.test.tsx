@@ -32,6 +32,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ContextBar } from "./ContextBar";
+import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveStore } from "@/stores/save-store";
@@ -142,9 +143,13 @@ function seed(client: QueryClient) {
 function renderBar() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	seed(client);
+	// The header's close button is a `TooltipIconButton`, which needs the provider
+	// the app mounts once in `main.tsx`.
 	const view = render(
 		<QueryClientProvider client={client}>
-			<ContextBar />
+			<TooltipProvider>
+				<ContextBar />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 	return { client, ...view };
@@ -366,7 +371,9 @@ describe("ContextBar - the input itself", () => {
 		resolved = { token: { value: "same", scope: "environment", sourceId: "env_b" } };
 		rerender(
 			<QueryClientProvider client={client}>
-				<ContextBar />
+				<TooltipProvider>
+					<ContextBar />
+				</TooltipProvider>
 			</QueryClientProvider>
 		);
 

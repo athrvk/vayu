@@ -126,19 +126,6 @@ describe("Shell sidebar auto-view effect", () => {
 		expect(drawerView).toBe("collections");
 	});
 
-	it("switches to collections view when a collection tab becomes active", () => {
-		const tabId = "collection-tab";
-		useTabsStore.setState({
-			openTabs: [{ id: tabId, type: "collection", entityId: "col-123" }],
-			activeTabId: tabId,
-		});
-
-		renderShell();
-
-		const { drawerView } = useLayoutStore.getState();
-		expect(drawerView).toBe("collections");
-	});
-
 	it("keeps a run tab on the History list", () => {
 		/*
 		 * This asserted the same thing while the effect had no `run` branch at

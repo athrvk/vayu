@@ -20,7 +20,9 @@ import {
 	useUpdateCollectionMutation,
 } from "@/queries";
 import { queryKeys } from "@/queries/keys";
-import { Input } from "@/components/ui";
+import { Input, TooltipIconButton, VariableScopeBadge } from "@/components/ui";
+import { TruncatedText } from "@/components/shared";
+import { contextBarHasContent } from "./context-bar-content";
 import type {
 	Collection,
 	Environment,
@@ -137,7 +139,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const failSave = useSaveStore((s) => s.failSave);
 	const beginCommit = usePendingCommits();
 
-	if (!contextBarOpen || activeTab?.type !== "request") return null;
+	if (!contextBarOpen || !contextBarHasContent(activeTab?.type)) return null;
 
 	/**
 	 * The scope that owns the definition the bar *displayed*, or null if that
@@ -266,12 +268,21 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const entries = Object.entries(variables);
 
 	return (
-		<div
+		/* <aside>, so the bar is a landmark a screen reader can jump to, the same
+		   way the Drawer facing it across the window already is. It was an
+		   anonymous <div>, so the left panel could be reached by landmark
+		   navigation and the right one could not.
+
+		   No `border-l` here: the resize handle paints its own 1px hairline, and
+		   the two together drew a doubled 2px edge - the Drawer's identical handle
+		   is what the single line should look like. */
+		<aside
 			className={cn(
-				"flex flex-col shrink-0 border-l border-border bg-panel overflow-y-auto",
+				"flex flex-col shrink-0 bg-panel",
 				mode === "overlay" ? "absolute right-0 top-0 bottom-0 shadow-lg z-10" : "relative"
 			)}
 			style={{ width: contextBarWidth }}
+			aria-label="Context sidebar"
 		>
 			<PanelResizeHandle
 				side="left"
@@ -284,39 +295,51 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 			{/* Header */}
 			<div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
 				<span className="text-xs font-medium text-foreground">Context</span>
-				<button
+				<TooltipIconButton
+					label="Close context bar"
+					icon={<X className="w-3.5 h-3.5" />}
+					className="h-6 w-6"
+					tooltipSide="bottom"
 					onClick={() => setContextBarOpen(false)}
-					className="text-muted-foreground hover:text-foreground"
-					aria-label="Close context bar"
-				>
-					<X className="w-3.5 h-3.5" />
-				</button>
+				/>
 			</div>
 
-			{/* Variables in scope */}
-			<div className="p-3">
+			{/* Variables in scope.
+
+			    The scroll lives here rather than on the root. With it on the root,
+			    the root was both the scroll container and the handle's positioning
+			    context, so scrolling the list carried the drag strip, the header
+			    and the close button out of view and left the lower edge
+			    un-draggable - `Drawer.tsx` puts the overflow on an inner wrapper
+			    for exactly this reason. `min-h-0` because a flex child's default
+			    `min-height: auto` refuses to shrink below its content, which would
+			    push the overflow back up to the root. */}
+			<div className="flex-1 min-h-0 overflow-y-auto p-3">
 				<p className="text-xs font-medium text-muted-foreground mb-2">Variables in scope</p>
 				{entries.length === 0 ? (
 					<p className="text-xs text-muted-foreground">No variables in scope</p>
 				) : (
 					<div className="space-y-1">
-						{/* Column headers - mirrors the key-value editor used for headers */}
-						{/* <div className="grid grid-cols-2 gap-2 px-1 text-xs font-medium text-muted-foreground">
-							<div>Variable</div>
-							<div>Value</div>
-						</div> */}
 						{entries.map(([name, resolved]) => (
 							<div key={name} className="grid grid-cols-2 gap-2 items-center">
-								<span
-									className="text-xs font-mono text-foreground truncate px-1"
-									title={`{{${name}}} - ${resolved.scope} scope`}
-								>
-									{`${name}`}
-								</span>
+								{/* The scope decides where an edit lands, so it is
+								    visible rather than hidden in a mouse-only
+								    `title`; `VariableScopeBadge` is the primitive
+								    the variable popover already uses to say it. */}
+								<div className="flex items-center gap-1.5 min-w-0 px-1">
+									<TruncatedText className="text-xs font-mono text-foreground">
+										{name}
+									</TruncatedText>
+									<VariableScopeBadge
+										scope={resolved.scope}
+										className="shrink-0"
+									/>
+								</div>
 								{resolved.secret ? (
 									<Input
 										value="••••••"
 										readOnly
+										aria-label={`Value of ${name}`}
 										className="h-7 text-xs font-mono text-muted-foreground"
 										title="Secret values can be edited from the Variables page"
 									/>
@@ -334,6 +357,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 										 */
 										key={`${name}:${resolved.scope}:${resolved.sourceId}:${resolved.value}`}
 										defaultValue={resolved.value}
+										aria-label={`Value of ${name}`}
 										className="h-7 text-xs font-mono"
 										onBlur={(e) => commitValue(name, resolved, e.target)}
 										onKeyDown={(e) => {
@@ -351,6 +375,6 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 					</div>
 				)}
 			</div>
-		</div>
+		</aside>
 	);
 }
