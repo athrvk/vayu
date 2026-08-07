@@ -265,6 +265,32 @@ reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 `utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
 
+**`config_snapshot` for a scenario run** - a run started from a `scenario` block
+(see [POST /runs](api-reference.md#post-runs)) stores a **step manifest**, never
+the resolved plan. No such row exists yet: a `scenario` payload resolves and
+answers `501`, so this describes the shape the runner will write, decided and
+pinned by `scenario_plan_test.cpp` ahead of the phase that writes it.
+
+```json
+{
+  "source": "collection", "collectionId": "col_123", "recursive": false,
+  "iterations": 3, "dataRowCount": 2,
+  "steps": [
+    { "index": 0, "requestId": "req_1", "name": "Log in",
+      "url": "https://{{host}}/login", "method": "POST" }
+  ]
+}
+```
+
+`url` is the **stored, uncomposed** one. The resolved plan is credential-grade -
+it carries resolved `Authorization` headers, and an `apikey` auth with
+`in: "query"` puts a live key in the composed URL - so persisting it would route
+around the `auth` allowlist above rather than respect it. The plan lives in
+memory for the run's life and nowhere else. Inline `data` rows are not
+snapshotted either: they are user data of unknown sensitivity, and the manifest
+records only their count. The writer is `vayu::core::build_scenario_manifest`
+(`core/scenario_plan.cpp`).
+
 **Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
 every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
 the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**

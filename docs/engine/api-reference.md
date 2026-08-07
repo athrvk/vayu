@@ -1367,6 +1367,68 @@ explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
 
+#### The `scenario` block (collection runs)
+
+A run may instead state its work as an **ordered collection** - the collection
+runner's sequence primitive. The block replaces the single request, so a payload
+carrying it needs no top-level `method` / `url`, and states its iteration count
+inside the block rather than through `mode` / `duration` / `iterations`:
+
+```jsonc
+{
+  "scenario": {
+    "source": "collection",         // required; the only accepted value today
+    "collectionId": "col_123",      // required
+    "recursive": false,             // optional, default false - descend into sub-collections
+    "iterations": 1,                // optional; defaults to the data row count, else 1
+    "data": [ { "user": "a" } ]     // optional inline rows; see maxScenarioDataRows
+  },
+  "environmentId": "env_123"        // optional, and what {{variables}} resolve against
+}
+```
+
+The collection is resolved into an ordered, fully composed plan **once, before
+anything is sent**: direct requests by `requests.order`, then - with `recursive`
+- descendant collections by `collections.order`, depth-first. Each step is
+composed through the same path `POST /compose` uses, so a step's request and
+joined scripts are byte-identical to what a Send of that request would run. A
+collection edited mid-run therefore cannot change the sequence underneath
+itself, and no execution path re-reads the database for request data.
+
+> **Not executed yet.** A valid `scenario` block currently resolves, validates,
+> and answers **`501`** with `error.code: "scenario_not_implemented"`, naming
+> the step and iteration count it resolved to. The sequential runner that
+> executes a plan is a later phase. No run row is created, so a `501` leaves
+> nothing behind.
+
+**Every rejection is a `400`** with `error.code: "invalid_scenario"`, raised
+before any run row exists - an empty or oversized sequence is never silently run
+as a smaller one:
+
+| Input | Rejected because |
+|-------|------------------|
+| `source` absent, or anything but `"collection"` | The discriminator exists for a future stored scenario; an unknown value must not fall through to the collection path. |
+| `collectionId` absent, not a string, or empty | There is nothing to resolve. The id is echoed back when it names no collection. |
+| The collection (with `recursive` applied) has no requests | An empty sequence is a mistake, not a zero-step run. |
+| A step's composition fails | The message names the step index, request name and id. |
+| More steps than `maxScenarioSteps` | The whole plan is held in memory for the run's life; the message carries the count and the cap. |
+| `recursive` present and not a boolean | |
+| `iterations` present and not a whole number in `1`-`2147483647` | It is read as a count, so `0`, a fraction and a string are each a run nobody asked for. |
+| `data` present and empty | A data set that binds nothing is a mistake - omit the field to run without one. |
+| `data` not an array, or a row that is not an object | |
+| More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
+
+A cycle in the `collections.parent_id` tree terminates the recursive walk rather
+than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
+
+**Two settings bound a scenario** (both in the `general_engine` category, see
+[GET /config](#get-config)):
+
+| Key                   | Default | Range      | Effect |
+|-----------------------|---------|------------|--------|
+| `maxScenarioSteps`    | `200`   | 1-10000    | Largest plan one run may resolve to. The sequence is composed up front and held in memory, and a load-mode scenario allocates a latency histogram per step, so this bounds memory rather than expressing a preference. |
+| `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/JSON file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
+
 **Response:**
 ```json
 {

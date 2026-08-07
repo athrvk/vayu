@@ -1391,6 +1391,28 @@ void Database::seed_default_config () {
     "general_engine", vayu::to_string (vayu::DEFAULT_HTTP_VERSION),
     std::nullopt, std::nullopt, http_version_options_json (), now });
 
+    upsert_config (ConfigEntry{ "maxScenarioSteps",
+    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer",
+    "Maximum Scenario Steps",
+    "Largest number of requests one collection run may resolve to. The whole "
+    "sequence is composed before the first send and held in memory for the "
+    "run, and a load-mode scenario allocates a latency histogram per step, so "
+    "this bounds memory rather than expressing a preference. A collection that "
+    "resolves to more steps than this is rejected outright - the run is never "
+    "silently truncated.",
+    "general_engine", std::to_string (vayu::core::constants::scenario::MAX_STEPS),
+    "1", "10000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxScenarioDataRows",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer",
+    "Maximum Scenario Data Rows",
+    "Largest data set one collection run may carry. The app parses the CSV or "
+    "JSON file and sends the rows on the run payload - the engine never reads "
+    "a file from disk - so this bounds how big that payload may get. A larger "
+    "data set is rejected rather than truncated.",
+    "general_engine", std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS),
+    "1", "1000000", std::nullopt, now });
+
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION
     // SQLite optimization settings for high-throughput load testing

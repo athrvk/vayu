@@ -274,6 +274,7 @@ add_library(vayu_core STATIC
     src/utils/id.cpp
     src/db/database.cpp
     src/core/load_strategy.cpp
+    src/core/scenario_plan.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
@@ -458,6 +459,7 @@ if(VAYU_BUILD_TESTS)
         tests/http_version_support_test.cpp
         tests/http_version_test.cpp
         tests/request_composer_test.cpp
+        tests/scenario_plan_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
