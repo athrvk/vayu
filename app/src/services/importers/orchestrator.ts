@@ -49,8 +49,18 @@ export class ImportOrchestrator {
 
 		// Note: opts.importScripts is applied at PARSE time by the parsers (they emit empty scripts
 		// when false). The orchestrator only needs importEnvironments.
-		for (let i = 0; i < result.collections.length; i++) {
-			flatten(result.collections[i], null, i, collections, requests);
+		/*
+		 * Root collections state no `order`. They are joining a list that already
+		 * has occupants, and the engine's create path appends after the stored
+		 * roots (handing out consecutive slots from there for a bulk payload).
+		 * Sending the payload index instead collided head-on with the existing
+		 * roots' 0, 1, 2..., so an import into a non-empty workspace interleaved
+		 * itself through the user's tree by tie lottery instead of landing at the
+		 * end. Everything below a root keeps its explicit index - those parents
+		 * are new in this payload, so there is nothing to collide with.
+		 */
+		for (const root of result.collections) {
+			flatten(root, null, undefined, collections, requests);
 		}
 
 		const environments: ImportApplyEnvironment[] = opts.importEnvironments
@@ -107,11 +117,19 @@ export class ImportOrchestrator {
 	}
 }
 
-/** Depth-first, parents before their requests before their children - the tree order the preview shows. */
+/**
+ * Depth-first, parents before their requests before their children - the tree
+ * order the preview shows.
+ *
+ * `order` is `undefined` for a root, which leaves the slot to the engine's
+ * append path (see `run`). Spread rather than assigned, for the same reason the
+ * redirect fields below are: "absent" is the state the engine's field appliers
+ * read, and the payload is compared structurally in tests.
+ */
 function flatten(
 	c: CollectionDraft,
 	parentTempId: string | null,
-	order: number,
+	order: number | undefined,
 	collections: ImportApplyCollection[],
 	requests: ImportApplyRequestItem[]
 ): void {
@@ -121,7 +139,7 @@ function flatten(
 		parentTempId,
 		name: c.name,
 		description: c.description,
-		order,
+		...(order !== undefined ? { order } : {}),
 		variables: c.variables,
 		auth: c.auth,
 		preRequestScript: c.preRequestScript,

@@ -165,9 +165,18 @@ describe("ImportOrchestrator", () => {
 		const root = collections[0];
 		const child = collections[1];
 		expect(root.parentTempId).toBeNull();
-		expect(root.order).toBe(0);
+		/*
+		 * A root states no order at all (issue #360). The engine's create path
+		 * appends after the roots already in the workspace; sending the payload
+		 * index collided with their 0, 1, 2... and an import into a non-empty
+		 * workspace interleaved itself through the user's tree by tie lottery.
+		 * Asserted as an absent *key*, not `undefined`: the field appliers read
+		 * presence, and `order: undefined` would serialize away in a way this
+		 * assertion could not tell from the real thing.
+		 */
+		expect("order" in root).toBe(false);
 		expect(child.parentTempId).toBe(root.tempId);
-		expect(child.order).toBe(0); // first child of its own parent
+		expect(child.order).toBe(0); // first child of its own parent, no collision
 
 		const r1 = requests.find((r) => r.name === "r1")!;
 		const r2 = requests.find((r) => r.name === "r2")!;

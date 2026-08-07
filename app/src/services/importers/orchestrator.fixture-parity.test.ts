@@ -41,13 +41,22 @@ function legacyCreates(result: ImportResult, options: ImportOptions) {
 	const requests: Record<string, unknown>[] = [];
 	const environments: Record<string, unknown>[] = [];
 
-	const createTree = (c: CollectionDraft, parentId: string | undefined, order: number) => {
+	const createTree = (
+		c: CollectionDraft,
+		parentId: string | undefined,
+		order: number | undefined
+	) => {
 		collections.push({
 			id: c.tempId,
 			name: c.name,
 			description: c.description,
 			parentId,
-			order,
+			// One deliberate divergence from the per-item path (issue #360): a root
+			// states no order, so the engine appends it after the workspace's
+			// existing roots instead of colliding with their 0, 1, 2... Everything
+			// below a root still carries its index, and that is what this walk is
+			// still guarding.
+			...(order !== undefined ? { order } : {}),
 			variables: c.variables,
 			auth: c.auth,
 			preRequestScript: c.preRequestScript,
@@ -75,8 +84,7 @@ function legacyCreates(result: ImportResult, options: ImportOptions) {
 		for (let i = 0; i < c.children.length; i++) createTree(c.children[i], c.tempId, i);
 	};
 
-	for (let i = 0; i < result.collections.length; i++)
-		createTree(result.collections[i], undefined, i);
+	for (const root of result.collections) createTree(root, undefined, undefined);
 	if (options.importEnvironments) {
 		for (const e of result.environments) {
 			environments.push({

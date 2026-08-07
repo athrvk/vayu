@@ -460,6 +460,7 @@ if(VAYU_BUILD_TESTS)
         tests/http_version_test.cpp
         tests/request_composer_test.cpp
         tests/scenario_plan_test.cpp
+        tests/tree_order_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp

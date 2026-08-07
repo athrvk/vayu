@@ -141,11 +141,47 @@ export interface Collection {
 	updatedAt: string;
 }
 
-/** Stable comparator for sorting collections by order, then by id. */
-export function compareCollectionOrder(a: Collection, b: Collection): number {
+/** A row the sidebar places in a tree - a {@link Collection} or a {@link Request}. */
+export interface OrderedTreeRow {
+	order?: number;
+	createdAt?: string;
+	id?: string;
+}
+
+/**
+ * The one ordering rule for collections and requests alike: `order` ascending,
+ * ties by creation time, remaining ties by id.
+ *
+ * There used to be two comparators with two different tie rules - collections
+ * tiebroke by id, requests by `createdAt` - while the engine tiebroke by
+ * neither, leaving ties to a rowid that `INSERT OR REPLACE` reassigns on every
+ * edit. So "run this folder" could execute in a different order than the
+ * sidebar showed, and either order could change after an unrelated rename.
+ *
+ * The rule is now identical on both sides, pinned by
+ * `engine/tests/fixtures/tree-order-conformance.json` (issue #360). Two details
+ * are load-bearing rather than incidental:
+ *
+ *  - **`createdAt` before `id`.** Every request created before explicit orders
+ *    existed sits at `order: 0`, so creation time is what the user has been
+ *    seeing; making the id primary would visibly reshuffle their tree.
+ *  - **`<` rather than `localeCompare`.** The engine's tiebreak is SQLite's
+ *    BINARY collation, which is byte-wise; locale collation disagrees with it
+ *    on case ("Row-A" vs "row-a"), and this comparator's job is to match the
+ *    engine exactly.
+ */
+export function compareTreeOrder(a: OrderedTreeRow, b: OrderedTreeRow): number {
 	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
 	if (orderDiff !== 0) return orderDiff;
-	return (a.id ?? "").localeCompare(b.id ?? "");
+
+	const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+	const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+	if (aTime !== bTime) return aTime - bTime;
+
+	const aId = a.id ?? "";
+	const bId = b.id ?? "";
+	if (aId === bId) return 0;
+	return aId < bId ? -1 : 1;
 }
 
 /**
@@ -199,13 +235,6 @@ export interface Request {
 	order: number;
 	createdAt: string;
 	updatedAt: string;
-}
-
-/** Stable comparator for sorting requests within a collection. */
-export function compareRequestOrder(a: Request, b: Request): number {
-	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
-	if (orderDiff !== 0) return orderDiff;
-	return (a.id ?? "").localeCompare(b.id ?? "");
 }
 
 export interface Environment {

@@ -50,9 +50,13 @@ const std::string& id) {
 /**
  * Testable core of GET /requests: one DB fetch, one serialized JSON array.
  *
- * The rows arrive already ordered by `order` (get_requests_in_collection has
- * the ORDER BY), matching the ordering contract collections have had all
- * along. Each row is serialized into its own buffer inside the try, so a row
+ * The rows arrive already ordered by `order`, then `created_at`, then `id`
+ * (get_requests_in_collection has the ORDER BY), matching the ordering contract
+ * collections have had all along - see the ordering section of
+ * `docs/engine/api-reference.md` for why the tiebreak is part of the contract
+ * rather than a detail.
+ *
+ * Each row is serialized into its own buffer inside the try, so a row
  * that fails to serialize is skipped whole - it cannot leave a half-written
  * item behind and corrupt the array, and one bad row does not fail the whole
  * response. Extracted for requests_route_test.cpp, same as
@@ -222,6 +226,54 @@ bool is_create) {
 }
 
 /**
+ * Rejects a write that would park a request under a collection that does not
+ * exist. Without it a stale or mistyped `collectionId` succeeded and stranded
+ * the row invisibly: no per-collection GET lists it, and the cascade delete of
+ * any real collection never reaps it. This is the endpoint a cross-collection
+ * move uses, so the check guards the move as much as the create.
+ *
+ * Lives in the route cores rather than in `apply_request_fields`, because
+ * `POST /import/apply` runs the shared applier against collection rows it has
+ * not written yet - every id would look missing there.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+reject_missing_collection (vayu::db::Database& db, const std::string& collection_id) {
+    if (db.get_collection (collection_id).has_value ()) {
+        return std::nullopt;
+    }
+    return std::make_pair (400,
+    error_body (400, "Collection '" + collection_id + "' does not exist"));
+}
+
+/**
+ * The `order` a new request takes when the caller states none: one past the
+ * highest among the collection's current requests, so a created or duplicated
+ * request lands at the *end* of its collection.
+ *
+ * It used to default to 0 (`apply_int_field`), which tied every UI-created
+ * request with every other and meant the stored column encoded nothing. The
+ * moment explicit orders existed - the first drag - every new request would
+ * have jumped to the top.
+ *
+ * Mirrors the sibling scan `apply_collection_fields` already does for
+ * collections, and sits here for the same reason `reject_missing_collection`
+ * does: bulk import sends explicit orders and cannot scan rows it has yet to
+ * write.
+ */
+static int next_request_order (vayu::db::Database& db, const std::string& collection_id) {
+    int max_order = -1;
+    for (const auto& existing : db.get_requests_in_collection (collection_id)) {
+        max_order = std::max (max_order, existing.order);
+    }
+    return max_order + 1;
+}
+
+/** True when the body leaves `order` to the engine - absent, or an explicit null. */
+static bool order_is_defaulted (const nlohmann::json& json) {
+    return !json.contains ("order") || json["order"].is_null ();
+}
+
+/**
  * Testable core of POST /requests - **create only**, returning
  * {http_status, json_body}. An id that already exists is a 409 pointing at PUT;
  * POST never updates (issue #95). A body `id` is rejected outright (#97) - see
@@ -249,6 +301,12 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     if (auto err = apply_request_fields (db, r, json, /*is_create=*/true)) {
         return *err;
     }
+    if (auto err = reject_missing_collection (db, r.collection_id)) {
+        return *err;
+    }
+    if (order_is_defaulted (json)) {
+        r.order = next_request_order (db, r.collection_id);
+    }
 
     db.save_request (r);
     return { 200, vayu::json::serialize (r) };
@@ -274,6 +332,21 @@ const nlohmann::json& json) {
     vayu::db::Request r = *existing;
     if (auto err = apply_request_fields (db, r, json, /*is_create=*/false)) {
         return *err;
+    }
+    // Only when the write states a collection: an already-stranded row (written
+    // before this check existed) must stay repairable by a PUT that moves it
+    // somewhere real, rather than becoming unwritable.
+    if (json.contains ("collectionId")) {
+        if (auto err = reject_missing_collection (db, r.collection_id)) {
+            return *err;
+        }
+    }
+    // A move that states no `order` appends in the destination. Carrying the
+    // source position across would drop the request into an arbitrary slot among
+    // its new siblings - the same defect a collection reparent had. Ordering
+    // *within* a collection is still the caller's to state.
+    if (r.collection_id != existing->collection_id && order_is_defaulted (json)) {
+        r.order = next_request_order (db, r.collection_id);
     }
     r.updated_at = now_ms ();
 

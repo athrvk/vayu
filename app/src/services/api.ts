@@ -183,7 +183,6 @@ export const apiService = {
 	},
 
 	async updateRequest(data: UpdateRequestRequest): Promise<Request> {
-		console.log("Updating request with data:", data);
 		// PUT, not POST - see updateCollection above for why.
 		const { id, ...patch } = data;
 		const response = await httpClient.put<RawRequest>(API_ENDPOINTS.REQUESTS_UPDATE(id), patch);
