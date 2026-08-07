@@ -497,6 +497,7 @@ void register_health_routes (RouteContext& ctx);
 void register_config_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
+void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);
 void register_run_routes (RouteContext& ctx);

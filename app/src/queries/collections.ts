@@ -19,6 +19,7 @@ import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useResponseStore } from "@/stores/response-store";
+import { useSaveStore } from "@/stores/save-store";
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import type {
 	Collection,
@@ -27,6 +28,7 @@ import type {
 	UpdateCollectionRequest,
 	CreateRequestRequest,
 	UpdateRequestRequest,
+	ReorderRequest,
 } from "@/types";
 import { compareTreeOrder } from "@/types";
 
@@ -376,6 +378,236 @@ export function useUpdateRequestMutation() {
 			}
 			// Update detail cache
 			queryClient.setQueryData(queryKeys.requests.detail(updatedRequest.id), updatedRequest);
+		},
+	});
+}
+
+// ============ Reorder ============
+
+/**
+ * Every cache key a plan can touch, worked out before anything is written.
+ *
+ * A request move that states no `collectionId` stays where it is, but the plan
+ * does not say where that is - so the owner is read out of the list caches the
+ * tree is already showing. An uncached one simply contributes no key: nothing
+ * on screen is displaying it, so nothing on screen can go stale.
+ */
+function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
+	let touchesCollections = false;
+	const requestScopes = new Set<string>();
+	const movedRequestIds: string[] = [];
+
+	const ownerOf = (requestId: string): string | undefined => {
+		for (const [key, rows] of queryClient.getQueriesData<Request[]>({
+			queryKey: queryKeys.requests.lists(),
+		})) {
+			void key;
+			const found = rows?.find((row) => row.id === requestId);
+			if (found) return found.collectionId;
+		}
+		return undefined;
+	};
+
+	for (const scope of plan.normalize) {
+		if (scope.type === "collection") touchesCollections = true;
+		else requestScopes.add(scope.collectionId);
+	}
+	for (const move of plan.moves) {
+		if (move.type === "collection") {
+			touchesCollections = true;
+			continue;
+		}
+		movedRequestIds.push(move.id);
+		const current = ownerOf(move.id);
+		if (current) requestScopes.add(current);
+		if (move.collectionId) requestScopes.add(move.collectionId);
+	}
+	return { touchesCollections, requestScopes, movedRequestIds };
+}
+
+/** The collections of one scope, renumbered dense in display order. */
+function normalizeCollectionScope(list: Collection[], parentId: string | null): Collection[] {
+	const positions = new Map(
+		list
+			.filter((c) => (c.parentId ?? null) === parentId)
+			.sort(compareTreeOrder)
+			.map((c, index) => [c.id, index] as const)
+	);
+	return list.map((c) => {
+		const order = positions.get(c.id);
+		return order === undefined || order === c.order ? c : { ...c, order };
+	});
+}
+
+/**
+ * Draws the plan into the caches, exactly as the engine will apply it -
+ * normalize each named scope, then position each move.
+ *
+ * Every write goes through `setQueryData` with a fresh array. The maps
+ * `useMultipleCollectionRequests` builds are referentially compared by the
+ * reveal effect (see the comment on that hook), so mutating a cached array in
+ * place would move a row on screen without the tree ever noticing.
+ */
+function drawPlan(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
+	for (const scope of plan.normalize) {
+		if (scope.type === "collection") {
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
+				old ? normalizeCollectionScope(old, scope.parentId) : old
+			);
+		} else {
+			queryClient.setQueryData<Request[]>(
+				queryKeys.requests.listByCollection(scope.collectionId),
+				(old) => old?.map((r, index) => ({ ...r, order: index }))
+			);
+		}
+	}
+
+	for (const move of plan.moves) {
+		if (move.type === "collection") {
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
+				old
+					?.map((c) =>
+						c.id === move.id
+							? {
+									...c,
+									order: move.order,
+									...("parentId" in move
+										? { parentId: move.parentId ?? undefined }
+										: {}),
+								}
+							: c
+					)
+					.sort(compareTreeOrder)
+			);
+			continue;
+		}
+		placeRequest(queryClient, move.id, move.order, move.collectionId);
+	}
+}
+
+/**
+ * Puts one request at `order`, moving it between list caches when `collectionId`
+ * names a different owner. Shared by the optimistic draw and by the settle on
+ * the engine's response, so a move cannot be applied one way going out and
+ * another coming back.
+ */
+function placeRequest(
+	queryClient: ReturnType<typeof useQueryClient>,
+	requestId: string,
+	order: number,
+	collectionId: string | undefined
+) {
+	let moved: Request | undefined;
+	for (const [key, rows] of queryClient.getQueriesData<Request[]>({
+		queryKey: queryKeys.requests.lists(),
+	})) {
+		const found = rows?.find((row) => row.id === requestId);
+		if (!found) continue;
+		moved = found;
+		if (collectionId && collectionId !== found.collectionId) {
+			queryClient.setQueryData<Request[]>(key, (old) =>
+				old?.filter((row) => row.id !== requestId)
+			);
+		}
+		break;
+	}
+
+	const owner = collectionId ?? moved?.collectionId;
+	if (!owner) return; // Nothing cached is showing it; nothing on screen to fix.
+	const next: Request = { ...(moved as Request), id: requestId, collectionId: owner, order };
+	queryClient.setQueryData<Request[]>(queryKeys.requests.listByCollection(owner), (old) => {
+		if (!old) return old;
+		const without = old.filter((row) => row.id !== requestId);
+		return [...without, next].sort(compareTreeOrder);
+	});
+	// Only if something already held it: `staleTime: Infinity` means an entry
+	// written here would never be refetched, and a half-built row from a list
+	// entry is not the full request a restored tab reads.
+	queryClient.setQueryData<Request>(queryKeys.requests.detail(requestId), (old) =>
+		old ? { ...old, collectionId: owner, order } : old
+	);
+}
+
+/**
+ * Apply one atomic batch reorder - the write path behind a drop.
+ *
+ * One `POST /reorder` per drop, not one `PUT` per displaced sibling: the engine
+ * validates the whole batch and writes it in a single transaction, so a drop
+ * that displaces N rows cannot half-land, cannot race a concurrent create into
+ * the middle of its range, and costs one round trip instead of N.
+ *
+ * The cache work is three passes over the same helpers:
+ *
+ *  - `onMutate` snapshots every key the plan can touch and draws the plan into
+ *    the caches, so the row is where the user dropped it before the request
+ *    leaves.
+ *  - `onSuccess` re-applies the rows the engine actually wrote. They are
+ *    normally what was drawn, but a normalization the client planned and the
+ *    engine performed is authoritative here, so the tree settles on real
+ *    positions rather than on a guess that happens to sort the same.
+ *  - `onError` restores the snapshots wholesale and reports through `failSave`,
+ *    the one channel every save failure in the app reaches the Dock and the
+ *    toast through.
+ *
+ * `onSettled` then invalidates the affected keys once - not per row, which is
+ * the invalidation storm the per-row path produced.
+ */
+export function useReorderMutation() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (plan: ReorderRequest) => apiService.reorder(plan),
+		onMutate: async (plan: ReorderRequest) => {
+			const keys = affectedKeys(queryClient, plan);
+			const listKeys = [...keys.requestScopes].map((id) =>
+				queryKeys.requests.listByCollection(id)
+			);
+			const snapshotKeys = [
+				...(keys.touchesCollections ? [queryKeys.collections.list()] : []),
+				...listKeys,
+				...keys.movedRequestIds.map((id) => queryKeys.requests.detail(id)),
+			];
+
+			// An in-flight refetch would otherwise land after the optimistic
+			// draw and overwrite it with the pre-drop order.
+			await Promise.all(
+				snapshotKeys.map((queryKey) => queryClient.cancelQueries({ queryKey }))
+			);
+			const snapshots = snapshotKeys.map(
+				(queryKey) => [queryKey, queryClient.getQueryData(queryKey)] as const
+			);
+
+			drawPlan(queryClient, plan);
+			return { snapshots, keys };
+		},
+		onSuccess: (result) => {
+			if (result.collections.length > 0) {
+				const written = new Map(result.collections.map((c) => [c.id, c]));
+				queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
+					old?.map((c) => written.get(c.id) ?? c).sort(compareTreeOrder)
+				);
+			}
+			for (const request of result.requests) {
+				placeRequest(queryClient, request.id, request.order, request.collectionId);
+			}
+		},
+		onError: (error, _plan, context) => {
+			for (const [queryKey, data] of context?.snapshots ?? []) {
+				queryClient.setQueryData(queryKey, data);
+			}
+			useSaveStore
+				.getState()
+				.failSave(error instanceof Error ? error.message : "Failed to reorder");
+		},
+		onSettled: (_data, _error, _plan, context) => {
+			if (context?.keys.touchesCollections) {
+				queryClient.invalidateQueries({ queryKey: queryKeys.collections.list() });
+			}
+			for (const collectionId of context?.keys.requestScopes ?? []) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.requests.listByCollection(collectionId),
+				});
+			}
 		},
 	});
 }

@@ -67,6 +67,23 @@ class Database {
     const std::vector<Request>& requests,
     const std::vector<Environment>& environments);
 
+    /**
+     * @brief Persist a whole batch reorder in one transaction (issue #365).
+     *
+     * The rows carry positions (and, for a move, owners) that the caller has
+     * already validated against each other; either every one lands or none
+     * does. A reorder expressed as N sibling `PUT`s could be interrupted
+     * halfway, leaving a parent with two rows at the same `order` and a gap
+     * where the moved one used to be - a shape no read repairs, because the tie
+     * rule then decides the display order.
+     *
+     * Separate from `import_apply` despite the shared shape: this writes rows
+     * that already exist and must not touch environments, and the two callers
+     * validate entirely different things beforehand.
+     */
+    void apply_reorder (const std::vector<Collection>& collections,
+    const std::vector<Request>& requests);
+
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);

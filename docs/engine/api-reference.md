@@ -188,11 +188,14 @@ writes rows that cannot see each other yet, so an omitted `order` gives the
 payload's items consecutive slots starting from the append point - see
 [POST /import/apply](#post-importapply).
 
-**Concurrency caveat.** Each `PUT` is its own write under its own lock, so a
-reorder expressed as N sibling `PUT`s is last-write-wins between concurrent
-clients, and the collection cycle guard is read-then-write across two lock
-scopes. Neither is fixed by a per-row endpoint; both are the job of the atomic
-batch reorder endpoint (issue #364).
+**Repositioning several rows at once** is [`POST /reorder`](#post-reorder), not a
+run of `PUT`s. Each `PUT` is its own write under its own lock, so a reorder
+expressed as N sibling `PUT`s is last-write-wins between concurrent clients, can
+be interrupted halfway (leaving two rows at one `order` and a gap where the
+moved one was), and its collection cycle guard is read-then-write across two lock
+scopes. The batch endpoint validates and writes under one transaction, which
+closes all three. The per-row `PUT`s remain correct for a single row - a rename,
+a move that appends - and still carry those caveats when used in a loop.
 
 ### Accepted field shapes
 
@@ -640,6 +643,85 @@ Delete a request.
   "id": "req_1234567890"
 }
 ```
+
+## Reorder
+
+### POST /reorder
+
+Reposition collections and requests in one atomic batch - the write path behind a
+drag-and-drop reorder or a cross-folder move. One drop is one call and one
+transaction: nothing partial survives a rejection, and no concurrent create can
+land inside the range the batch is renumbering.
+
+**Request:**
+```json
+{
+  "normalize": [
+    {"type": "request", "collectionId": "col_1234567890"}
+  ],
+  "moves": [
+    {"type": "request",    "id": "req_1", "order": 0, "collectionId": "col_2"},
+    {"type": "collection", "id": "col_3", "order": 1, "parentId": null}
+  ]
+}
+```
+
+Both arrays are optional (absent or `null` means none); an empty batch is a
+`200` that writes nothing.
+
+**`moves`** - each entry names one row and the position it takes:
+
+| Field | Rule |
+|---|---|
+| `type` | `"collection"` or `"request"`; anything else is a `400` |
+| `id` | Non-empty string naming a **stored** row of that type |
+| `order` | Required, a non-negative integer. Not a float, not negative - this endpoint writes dense positions, and either would be a silently truncated or unreachable slot |
+| `parentId` (collection) | Absent keeps the current parent; `null` moves to the root; a string moves under that collection, which must exist |
+| `collectionId` (request) | Absent keeps the current owner; a string moves to that collection, which must exist |
+
+A row may appear in `moves` at most once - two positions for one row is a `400`
+naming it, not a last-writer-wins accident of iteration order.
+
+**`normalize`** - each entry names a scope whose children are renumbered dense
+`0..n-1` in the [pinned display order](#ordering) **before** any move applies. A
+collection scope states `parentId` (`null` for the root collections) and a
+request scope states `collectionId`; the named collection must exist, and for a
+collection scope `parentId` must be *stated* rather than omitted, so a renumber
+can never land on a scope the caller did not mean.
+
+Normalization exists for the first drop into a collection whose rows predate
+explicit orders: every row sits at `0`, so its displayed position lives only in
+the tiebreak and there are no slots to shift into. Materializing that order in
+the same batch is what keeps the other siblings from appearing to jump. It is
+idempotent - a scope already dense writes nothing at all.
+
+Where a row is named by both lists, the move wins.
+
+**Validation is complete before the first write.** Entry shapes, the existence of
+every named row and owner, and the acyclicity of the **post-move** collection
+graph are all checked first; a failure is a `400` naming the offending row with
+nothing written. The cycle check reading the post-move shape is what makes two
+reparents that each look legal alone (`A` under `B` and `B` under `A`) a
+deterministic rejection rather than a race - unlike `PUT /collections/:id`, which
+validates and writes under different locks.
+
+**Response:** the rows as written, in the same serialized shape a list entry
+carries - not an acknowledgement. A client that drew the drop optimistically
+settles its caches on these, so a normalization the engine performed is visible
+without waiting for a refetch.
+
+```json
+{
+  "collections": [],
+  "requests": [
+    {"id": "req_1", "collectionId": "col_2", "order": 0, "name": "Get users", "...": "..."}
+  ]
+}
+```
+
+**Errors:** `400` for any malformed entry, a row or owner that does not exist, a
+duplicate move, a cycle, or a batch over 10000 entries - in every case nothing at
+all was written. Body that is not JSON or not an object is also a `400`.
 
 ## Import
 

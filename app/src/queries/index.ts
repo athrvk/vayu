@@ -29,6 +29,7 @@ export {
 	useCreateRequestMutation,
 	useUpdateRequestMutation,
 	useDeleteRequestMutation,
+	useReorderMutation,
 	isRequestNotFound,
 } from "./collections";
 export { RequestNotFoundError } from "./collections";

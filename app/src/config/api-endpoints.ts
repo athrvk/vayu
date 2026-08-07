@@ -36,6 +36,10 @@ export const API_ENDPOINTS = {
 	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
 	REQUESTS_UPDATE: (id: string) => `/requests/${id}`,
 
+	// Batch reorder for both entity kinds (issue #365). One drop is one call and
+	// one engine transaction; a reorder expressed as N sibling PUTs is neither.
+	REORDER: `/reorder`,
+
 	// Environments
 	ENVIRONMENTS: `/environments`,
 	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,

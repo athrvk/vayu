@@ -177,6 +177,42 @@ export interface UpdateRequestRequest {
 	order?: number;
 }
 
+// Reorder API (POST /reorder)
+
+/**
+ * One row's new position in a batch reorder, and - when it changes owner - its
+ * new owner.
+ *
+ * `parentId` / `collectionId` follow the same merge-patch rule the single-row
+ * `PUT`s use: omitted keeps the current owner, present states a move. Unlike
+ * those, an owner that resolves to no stored collection is a `400` rather than
+ * a tolerated forward reference, because nothing here is bulk-created.
+ */
+export type ReorderMove =
+	| { type: "collection"; id: string; order: number; parentId?: string | null }
+	| { type: "request"; id: string; order: number; collectionId?: string };
+
+/**
+ * A scope whose children are renumbered dense `0..n-1` in display order before
+ * the moves apply. `parentId: null` is the root collections, and is stated
+ * rather than omitted - the engine rejects an absent `parentId` so a renumber
+ * can never land on a scope the caller did not mean.
+ */
+export type ReorderNormalize =
+	| { type: "collection"; parentId: string | null }
+	| { type: "request"; collectionId: string };
+
+export interface ReorderRequest {
+	moves: ReorderMove[];
+	normalize: ReorderNormalize[];
+}
+
+/** The rows as written - one drop is one transaction, so this is all of them. */
+export interface ReorderResponse {
+	collections: Collection[];
+	requests: Request[];
+}
+
 // Environments API
 export interface ListEnvironmentsResponse {
 	environments: Environment[];

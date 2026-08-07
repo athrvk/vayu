@@ -367,6 +367,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/config.cpp
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
+        src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/globals.cpp
         src/http/routes/runs.cpp
@@ -461,10 +462,12 @@ if(VAYU_BUILD_TESTS)
         tests/request_composer_test.cpp
         tests/scenario_plan_test.cpp
         tests/tree_order_test.cpp
+        tests/reorder_route_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
+        src/http/routes/reorder.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
         src/http/routes/environments.cpp
