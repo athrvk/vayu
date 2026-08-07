@@ -95,6 +95,8 @@ struct ContextData {
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;
+    std::optional<size_t> iteration;
+    std::optional<size_t> iteration_count;
     bool has_error = false;
     std::string error_message;
 
@@ -3098,7 +3100,9 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
  * entirely, so a script reads `undefined` rather than an empty string that
  * looks like an answer.
  *
- * `iteration` / `iterationCount` are deliberately absent - see ScriptContext.
+ * `iteration` / `iterationCount` are present only for a scenario run's steps -
+ * the runner is the one caller that sets them, and every other caller leaves
+ * them unset so the script reads `undefined` (see ScriptContext).
  */
 void setup_pm_info (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
@@ -3124,6 +3128,14 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
         if (data->event) {
             JS_SetPropertyStr (ctx, info, "eventName",
             JS_NewString (ctx, *data->event == ScriptEvent::PreRequest ? "prerequest" : "test"));
+        }
+        if (data->iteration) {
+            JS_SetPropertyStr (ctx, info, "iteration",
+            JS_NewInt64 (ctx, static_cast<int64_t> (*data->iteration)));
+        }
+        if (data->iteration_count) {
+            JS_SetPropertyStr (ctx, info, "iterationCount",
+            JS_NewInt64 (ctx, static_cast<int64_t> (*data->iteration_count)));
         }
     }
 
@@ -4698,6 +4710,8 @@ class ScriptEngine::Impl {
         ctx_data.request_id          = ctx.request_id;
         ctx_data.request_name        = ctx.request_name;
         ctx_data.event               = ctx.event;
+        ctx_data.iteration           = ctx.iteration;
+        ctx_data.iteration_count     = ctx.iteration_count;
         // Both per-execution: the capability is this caller's, and the request
         // budget starts full for every script rather than carrying over
         // through a pooled context.

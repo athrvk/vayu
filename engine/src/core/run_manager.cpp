@@ -13,6 +13,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/scenario_runner.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -513,15 +514,12 @@ std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () cons
     return runs;
 }
 
-bool RunManager::start_run (const std::string& run_id,
+bool RunManager::spawn_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
-bool verbose) {
-    // `workers_mtx_` is held from the shutting_down_ check through the moment
-    // the new worker's handle is recorded. Anything narrower loses the run:
-    // shutdown() could set the flag, snapshot run_workers_ and join it between
-    // the check and the insert, leaving this worker running over state the
-    // drain has already declared safe to destroy.
+const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
+    // See the declaration for why `workers_mtx_` is held across the whole
+    // block rather than just the insert.
     std::vector<std::thread> finished;
     {
         std::lock_guard<std::mutex> workers_lock (workers_mtx_);
@@ -562,17 +560,10 @@ bool verbose) {
         context->is_running    = true;
         context->start_time_ms = now_ms ();
 
-        // Spawn metrics collection thread first (will be joined by worker thread)
-        context->metrics_thread =
-        std::thread ([context, &db] () { collect_metrics (context, &db); });
-        // Note: metrics_thread is NOT detached - it will be joined by the worker thread
-
-        // Spawn background thread for execution. The handle is kept - not
-        // detached - so shutdown can join it before `db` and this manager go
-        // out of scope from under the references the lambda captures.
-        run_workers_[run_id] = std::thread ([context, &db, verbose, this] () {
-            execute_load_test (context, &db, verbose, *this);
-        });
+        // The handle is kept - not detached - so shutdown can join the worker
+        // before `db` and this manager go out of scope from under the
+        // references it captures.
+        run_workers_[run_id] = spawn (context);
     }
 
     // Outside the lock: these threads are past retain_run and only unwinding,
@@ -583,6 +574,35 @@ bool verbose) {
             thread.join ();
     }
     return true;
+}
+
+bool RunManager::start_run (const std::string& run_id,
+const nlohmann::json& config,
+vayu::db::Database& db,
+bool verbose) {
+    return spawn_run (run_id, config, db, [&] (const std::shared_ptr<RunContext>& context) {
+        // Spawn metrics collection thread first - it is NOT detached and is
+        // joined by the worker thread below.
+        context->metrics_thread =
+        std::thread ([context, &db] () { collect_metrics (context, &db); });
+        return std::thread ([context, &db, verbose, this] () {
+            execute_load_test (context, &db, verbose, *this);
+        });
+    });
+}
+
+bool RunManager::start_scenario_run (const std::string& run_id,
+const nlohmann::json& config,
+std::shared_ptr<const ScenarioExecution> execution,
+vayu::db::Database& db,
+vayu::http::CookieJar& cookie_jar,
+bool verbose) {
+    return spawn_run (run_id, config, db,
+    [&, execution = std::move (execution)] (const std::shared_ptr<RunContext>& context) {
+        return std::thread ([context, execution, &db, &cookie_jar, verbose, this] () {
+            execute_scenario_run (context, execution, &db, &cookie_jar, verbose, *this);
+        });
+    });
 }
 
 void execute_load_test (std::shared_ptr<RunContext> context,

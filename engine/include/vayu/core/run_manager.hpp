@@ -23,8 +23,15 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+
+namespace vayu::http {
+// A scenario run's steps send through the daemon's jar; the manager only passes
+// the reference along, so the listener machinery stays out of this header.
+class CookieJar;
+} // namespace vayu::http
 
 namespace vayu::core {
 
@@ -411,6 +418,27 @@ class RunManager {
     // takes `mutex_` itself.
     std::vector<std::thread> take_finished_workers ();
 
+    /**
+     * @brief Register a run's context and spawn its worker under
+     * `workers_mtx_` - the shutdown-race discipline both run kinds need.
+     *
+     * `workers_mtx_` is held from the `shutting_down_` check through the moment
+     * the worker's handle is recorded, because anything narrower loses the run:
+     * shutdown() could set the flag, snapshot `run_workers_` and join it
+     * between the check and the insert, leaving a worker running over state the
+     * drain has already declared safe to destroy. Both `start_run` and
+     * `start_scenario_run` come through here rather than each keeping a copy of
+     * that reasoning.
+     *
+     * @param spawn Builds the worker thread from the registered context. Called
+     *              with the lock held, and may spawn helper threads onto the
+     *              context first (the load path's metrics thread).
+     */
+    bool spawn_run (const std::string& run_id,
+    const nlohmann::json& config,
+    vayu::db::Database& db,
+    const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn);
+
     public:
     ~RunManager ();
 
@@ -449,6 +477,28 @@ class RunManager {
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
+    bool verbose);
+
+    /**
+     * @brief Start a scenario run: the same lifecycle, a different executor.
+     *
+     * Refuses (having registered and spawned nothing) once shutdown has begun,
+     * exactly as `start_run` does. No metrics thread and no event loop are
+     * spawned - a scenario run's work is sequential and its live stream carries
+     * `step` events rather than the load path's per-tick aggregates, so a
+     * metrics thread would publish ticks of zeros nobody asked for.
+     *
+     * @param execution The plan resolved before the run row existed, shared
+     *                  immutably with the worker.
+     * @param cookie_jar The daemon's jar; steps send through the run's
+     *                   environment scope, which is what carries a session from
+     *                   one step to the next.
+     */
+    bool start_scenario_run (const std::string& run_id,
+    const nlohmann::json& config,
+    std::shared_ptr<const ScenarioExecution> execution,
+    vayu::db::Database& db,
+    vayu::http::CookieJar& cookie_jar,
     bool verbose);
 
     /**

@@ -3223,11 +3223,13 @@ TEST_F (ScriptEngineTest, PmInfoDoesNotSurviveIntoTheNextExecution) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
-// Deliberately unbound, and pinned so it stays that way until a collection
-// runner exists (#303). Vayu runs a load test's `tests` script once per
-// *sampled* response after the run has finished - a reservoir index reported
-// as `iteration` would be a plausible-looking lie.
-TEST_F (ScriptEngineTest, PmInfoOmitsTheIterationPair) {
+// Bound by the scenario runner and by nothing else (#353). A context that
+// declares no iteration - a POST /execute send, and the load path's deferred
+// `validate_scripts`, which builds exactly this `for_test` shape - leaves both
+// undefined. That is #300's ruling intact: a reservoir sample index reported as
+// an iteration number would be a plausible-looking lie, so the load path still
+// reports none.
+TEST_F (ScriptEngineTest, PmInfoOmitsTheIterationPairOutsideAScenarioRun) {
     auto result = engine.execute_test (R"JS(
         pm.test("no iteration", function() {
             pm.expect(typeof pm.info.iteration).to.equal("undefined");
@@ -3235,6 +3237,51 @@ TEST_F (ScriptEngineTest, PmInfoOmitsTheIterationPair) {
         });
     )JS",
     request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The other half: a runner-set context reports real numbers, including
+// iteration 0 - which must read as 0, not as absent, or every first iteration
+// would look like a run that declared none.
+TEST_F (ScriptEngineTest, PmInfoReportsTheIterationPairWhenTheRunnerSetsIt) {
+    auto ctx            = ScriptContext::for_test (request, response);
+    ctx.environment     = &env;
+    ctx.iteration       = 0;
+    ctx.iteration_count = 5;
+
+    auto result = engine.execute (R"JS(
+        pm.test("iteration is bound", function() {
+            pm.expect(pm.info.iteration).to.equal(0);
+            pm.expect(pm.info.iterationCount).to.equal(5);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Pooled contexts again: a step that ran with an iteration must not leave one
+// behind for the next caller that declared none.
+TEST_F (ScriptEngineTest, TheIterationPairDoesNotSurviveIntoTheNextExecution) {
+    auto first            = ScriptContext::for_test (request, response);
+    first.iteration       = 2;
+    first.iteration_count = 3;
+    auto first_result     = engine.execute ("pm.info.iteration;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second = ScriptContext::for_test (request, response);
+    auto result = engine.execute (R"JS(
+        pm.test("no leak", function() {
+            pm.expect(typeof pm.info.iteration).to.equal("undefined");
+            pm.expect(typeof pm.info.iterationCount).to.equal("undefined");
+        });
+    )JS",
+    second);
 
     ASSERT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1);

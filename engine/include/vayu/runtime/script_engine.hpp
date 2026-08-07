@@ -120,15 +120,23 @@ struct ScriptContext {
      * below, so `pm.info.eventName` cannot disagree with the hook that is
      * actually running.
      *
-     * There is deliberately no `iteration` / `iterationCount` here. Vayu runs
-     * a load test's `tests` script once per *sampled* response after the run
-     * has finished, not once per iteration, and a reservoir sample index
-     * reported as an iteration number would be a binding that cannot fail -
-     * worse than a missing one (issue #300).
+     * `iteration` / `iterationCount` are set by the **scenario runner and by
+     * nothing else**, which is what keeps issue #300's ruling intact rather
+     * than reopening it: a load test's `tests` script runs once per *sampled*
+     * response after the run has finished, so a reservoir sample index reported
+     * as an iteration number would be a binding that cannot fail - worse than
+     * a missing one. `validate_scripts` therefore still sets neither, and a
+     * script that reads `pm.info.iteration` outside a scenario run reads
+     * `undefined`. A scenario run has a real iteration index, so it reports it.
+     *
+     * `iteration` is 0-based (Postman's convention); `iterationCount` is the
+     * total the run will perform.
      */
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;
+    std::optional<size_t> iteration;
+    std::optional<size_t> iteration_count;
 
     /**
      * @brief The jar `pm.cookies` reads and `pm.sendRequest` sends through,

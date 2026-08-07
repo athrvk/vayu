@@ -211,7 +211,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `id`              | TEXT PK | `run_` + UUID                                               |
 | `request_id`      | TEXT    | FK → `requests.id` (optional; set in design mode)           |
 | `environment_id`  | TEXT    | FK → `environments.id` (optional)                           |
-| `type`            | TEXT    | `"design"` or `"load"`                                      |
+| `type`            | TEXT    | `"design"`, `"load"` or `"scenario"` (a collection run)      |
 | `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
 | `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
 | `start_time`      | INTEGER | Unix ms                                                     |
@@ -259,6 +259,27 @@ Do not confuse this **results** summary with the `summary` key on a `GET /runs` 
 one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) built
 per request and never stored.
 
+**A scenario run's `summary`** is a different shape, written by
+`vayu::core::build_scenario_summary_payload` (`core/scenario_runner.cpp`): the
+three keys `apply_run_summary` reads plus everything sequence-shaped under
+`scenario`, which the report serves as its own section.
+
+```json
+{
+  "total_requests": 6, "test_duration": 1.8, "rps": 3.3,
+  "scenario": {
+    "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
+    "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
+    "steps_stored": 6, "steps_dropped": 0
+  }
+}
+```
+
+`total_requests` is the number of **step executions**, and it is here precisely
+because the report would otherwise count the rows that survived
+`maxScenarioStoredSteps` and call that the run's size. `steps_dropped` is what
+that cap thinned - always successes, never a failure.
+
 **`config_snapshot` redaction** - the snapshot is the raw run payload, which can
 carry auth credentials. Before persistence, its top-level `auth` object is
 reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
@@ -267,9 +288,8 @@ reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 
 **`config_snapshot` for a scenario run** - a run started from a `scenario` block
 (see [POST /runs](api-reference.md#post-runs)) stores a **step manifest**, never
-the resolved plan. No such row exists yet: a `scenario` payload resolves and
-answers `501`, so this describes the shape the runner will write, decided and
-pinned by `scenario_plan_test.cpp` ahead of the phase that writes it.
+the resolved plan. The manifest *replaces* the block as sent, rather than
+sitting beside it (`scenario_snapshot`, `http/routes/execution.cpp`).
 
 ```json
 {
@@ -422,6 +442,8 @@ than assuming all eight are there and flat:
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
 | Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
+| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`). Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `general_engine`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
+
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
 not live in SQLite forever. When a body is cut, its node gains two keys:
@@ -435,7 +457,8 @@ The cut is on a raw byte boundary (the body is an opaque string), so a split UTF
 possible; `store_result` dumps the trace with `error_handler_t::replace`, turning a stray
 continuation byte into U+FFFD rather than throwing. The cap is applied by
 `vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
-(`execution.cpp`) produces. It applies **only** to the design-mode writer - the load-run writers
+(`http/request_exchange.cpp`) produces. It applies to the design-mode writer and
+to the scenario runner, which shares that trace builder - the load-run writers
 store timing/error envelopes, not bodies.
 
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
