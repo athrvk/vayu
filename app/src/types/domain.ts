@@ -506,8 +506,31 @@ export interface RunResult {
 }
 
 /**
+ * What a collection run's list row says about the sequence that ran, from the
+ * snapshot's scenario manifest (`add_scenario`,
+ * `engine/src/http/routes/runs.cpp`). Present on `type: "scenario"` rows only -
+ * its presence is what tells a row it is a collection run without a second
+ * fetch.
+ *
+ * `stepCount` and not the manifest's `steps` array: the array carries a name, a
+ * method and a URL per step, and shipping it on every list row would undo the
+ * reason the compact summary exists. The array stays on `GET /runs/:id`, which
+ * is what the run tab's context bar reads.
+ */
+export interface RunScenarioSummary {
+	/** The collection that ran. The name is resolved app-side, from the tree. */
+	collectionId?: string;
+	/** Passes over the plan. */
+	iterations?: number;
+	/** Whether sub-collections were included. */
+	recursive?: boolean;
+	/** Steps in one pass - the plan's length, not the executions. */
+	stepCount?: number;
+}
+
+/**
  * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Mirrors all nine keys
+ * of the full {@link RunConfigSnapshot}. Mirrors all ten keys
  * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
  * omitted by the engine when absent from the stored snapshot, except
  * `httpVersion` which the engine always normalizes to a value (see
@@ -534,6 +557,12 @@ export interface RunSummary {
 	followRedirects?: boolean;
 	/** Sent by the engine, not yet rendered - see the note above. */
 	maxRedirects?: number;
+	/**
+	 * A collection run's sequence, and nothing else's - see
+	 * {@link RunScenarioSummary}. Read by the history row, which has no `url` to
+	 * show for one.
+	 */
+	scenario?: RunScenarioSummary;
 }
 
 export interface Run {

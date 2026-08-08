@@ -20,8 +20,11 @@
  * (`bodyTruncated`/`bodyBytes`, the `httpVersion` fallback).
  *
  * A row streamed live has no stored result yet and therefore no exchange to
- * show; it still expands, into its timing-free shell. Inventing a response for
- * it would be a claim the run has not made.
+ * show. Inventing a response for it would be a claim the run has not made - so
+ * it expands onto the reason instead. An accordion that opens onto nothing at
+ * all reads as a bug in the app rather than as a step whose exchange has not
+ * been written yet, which is what it is: the engine batches every step row to
+ * SQLite when the run ends.
  */
 
 import { Badge } from "@/components/ui";
@@ -112,6 +115,17 @@ export default function ScenarioStepCard({
 					: step.outcome === "passed" && "border-status-success/20"
 			)}
 		>
+			{!response && (
+				<p className="text-xs text-muted-foreground">
+					{step.result
+						? // A stored row whose trace carried neither a response nor an
+							// error - `responseFromRunResult` returns null for it rather
+							// than a hollow 0-byte response.
+							"This step recorded no exchange."
+						: "The request and response appear here once the run finishes - steps are stored when it ends."}
+				</p>
+			)}
+
 			{response && (
 				<div className="space-y-2">
 					{/* The engine caps a stored trace body at `maxTraceBodyBytes`,

@@ -72,6 +72,9 @@ vi.mock("@/queries", () => ({
 		d?.pages?.flatMap((p) => p.data) ?? [],
 	runsTotal: (d: { pages?: Array<{ pagination: { total: number } }> } | undefined) =>
 		d?.pages?.[0]?.pagination.total ?? 0,
+	// Read only to name the collection on a scenario row; every fixture here is
+	// a load or design run, so an empty tree is the honest stub.
+	useCollectionsQuery: () => ({ data: [] }),
 }));
 
 // Stubbed so a fixture run only needs the fields `filterRuns` reads. RunItem's

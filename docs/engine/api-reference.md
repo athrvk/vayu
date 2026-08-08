@@ -2176,6 +2176,24 @@ run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`.
 
+A **collection run** (`type: "scenario"`) carries none of the first eight: its
+work is a sequence, so there is no single `url`, `method` or `mode` to report.
+Its row instead carries a tenth key, `scenario`, present on scenario runs only:
+
+```json
+"scenario": {
+  "collectionId": "col_1234567890",
+  "iterations": 3,
+  "recursive": true,
+  "stepCount": 12
+}
+```
+
+`stepCount` is the length of the snapshot's step manifest, not the manifest
+itself - a row that shipped every step's name, method and URL would undo the
+reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
+four keys is omitted when the stored snapshot has no such key.
+
 **Response (envelope):**
 ```json
 {

@@ -23,7 +23,6 @@ import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
-import { QUERY_CACHE } from "@/config/cache";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
 
 class ScenarioRunService {
@@ -86,7 +85,22 @@ class ScenarioRunService {
 				.fetchQuery({
 					queryKey: queryKeys.runs.report(runId),
 					queryFn: () => apiService.getRunReport(runId),
-					staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+					/*
+					 * `staleTime: 0`, and the whole fix rides on it. The run tab
+					 * mounts the moment the run starts and fetches this key
+					 * immediately, when the engine has stored no step rows yet -
+					 * they are written in one batch at the end - so the cache
+					 * holds a report with an empty `results[]`, seconds old.
+					 * `fetchQuery` under the hook's own five-minute
+					 * `RUNS_STALE_TIME_MS` would find that entry fresh and resolve
+					 * from it without a request, leaving the step list on the live
+					 * rows forever: every step expanded into an empty panel,
+					 * because only a stored row carries the exchange.
+					 *
+					 * This is the one fetch in the app that knows the data just
+					 * changed, so it is the one that must not honour the cache.
+					 */
+					staleTime: 0,
 				})
 				.catch((e: unknown) => console.warn("[ScenarioRunService] report fetch failed", e)),
 		]);

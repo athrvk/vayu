@@ -285,6 +285,10 @@ describe("stored step results", () => {
 		fireEvent.click(screen.getByText("In flight").closest("button")!);
 
 		expect(screen.queryByTestId("response-body")).toBeNull();
+		// Not an empty panel, though: an accordion that opens onto nothing at
+		// all reads as a broken app rather than as a step whose exchange has
+		// not been written yet, which is what it is.
+		expect(screen.getByText(/once the run finishes/i)).toBeTruthy();
 	});
 });
 

@@ -10,13 +10,14 @@
  */
 
 /**
- * A run type the renderer was not written for must render, not crash.
+ * How each run type reads in the history sidebar.
  *
- * The engine gained a third `runs.type` - `scenario`, a collection run - before
- * the app gained any UI for one (that is a later phase). Every branch in this
- * row is `run.type === "load"`, so a scenario row takes the non-load path; what
- * this pins is that the row still renders its identity and stays clickable,
- * rather than the list dying on an unknown value.
+ * A collection run has no url and no method - its work is a sequence - so every
+ * `summary` branch written for a load or design run leaves its row as a status
+ * and a timestamp and nothing else. `summary.scenario` is what it has instead,
+ * and the cases below are about the row using it: which collection ran, how big
+ * the run was, and an accessible name that says which of the three kinds of run
+ * this is.
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -39,6 +40,20 @@ function run(type: Run["type"]): Run {
 	} as Run;
 }
 
+/** A collection run's row, as the paginated `GET /runs` sends one. */
+function scenarioRun(scenario: Record<string, unknown>): Run {
+	return {
+		id: "run_2",
+		type: "scenario",
+		status: "completed",
+		startTime: 1_750_000_000_000,
+		endTime: 1_750_000_003_000,
+		requestId: null,
+		environmentId: null,
+		summary: { scenario },
+	} as Run;
+}
+
 const noop = () => {};
 
 describe("RunItem run types", () => {
@@ -52,20 +67,124 @@ describe("RunItem run types", () => {
 		expect(screen.getByRole("button", { name: "Delete run" })).toBeInTheDocument();
 	});
 
-	it("keeps the load-run affordances to load runs", () => {
-		const { container } = render(
-			<RunItem run={run("scenario")} onSelect={noop} onDelete={vi.fn()} isDeleting={false} />
+	it("names the collection that ran, where another row would show a url", () => {
+		render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 4, iterations: 2 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
 		);
-		const scenarioIcons = container.querySelectorAll("svg").length;
 
-		const loadRender = render(
+		expect(screen.getByText("Checkout flow")).toBeInTheDocument();
+		expect(screen.getByText("4 steps")).toBeInTheDocument();
+		expect(screen.getByText("2 iterations")).toBeInTheDocument();
+	});
+
+	it("falls back to the id when the collection has been deleted since", () => {
+		// The row has the id and nothing else; showing it beats a blank line,
+		// and inventing a name for a folder that is gone would be worse than
+		// either.
+		render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_gone", stepCount: 1 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+			/>
+		);
+
+		expect(screen.getByText("col_gone")).toBeInTheDocument();
+		// One step, not "1 steps".
+		expect(screen.getByText("1 step")).toBeInTheDocument();
+	});
+
+	it("leaves out a single iteration, which is the default and says nothing", () => {
+		render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 3, iterations: 1 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
+		);
+
+		expect(screen.queryByText("1 iterations")).not.toBeInTheDocument();
+		expect(screen.getByText("3 steps")).toBeInTheDocument();
+	});
+
+	it("renders a scenario row stored before the engine sent the descriptor", () => {
+		// `type` says scenario, the payload says nothing. The row must still
+		// render rather than reaching into an absent object.
+		render(
+			<RunItem
+				run={{ ...scenarioRun({}), summary: {} } as Run}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+			/>
+		);
+
+		expect(
+			screen.getByRole("button", { name: /Open collection run, completed/ })
+		).toBeInTheDocument();
+	});
+
+	it("announces each run type as what it is", () => {
+		// A collection run announced as a "request run", with no url after it,
+		// was a row a screen-reader user could not tell apart from any other.
+		const labels: Record<string, RegExp> = {
+			load: /Open load test run/,
+			design: /Open request run/,
+		};
+		for (const [type, pattern] of Object.entries(labels)) {
+			const { unmount } = render(
+				<RunItem
+					run={run(type as Run["type"])}
+					onSelect={noop}
+					onDelete={vi.fn()}
+					isDeleting={false}
+				/>
+			);
+			expect(screen.getByRole("button", { name: pattern })).toBeInTheDocument();
+			unmount();
+		}
+
+		render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 2 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
+		);
+		expect(
+			screen.getByRole("button", { name: /Open collection run, completed, Checkout flow/ })
+		).toBeInTheDocument();
+	});
+
+	it("gives each type its own badge and keeps the load one to load runs", () => {
+		// Counting icons was the old shape of this test, and it stopped meaning
+		// anything the moment a scenario row gained a badge of its own: the two
+		// rows rendered the same number of them while carrying different ones.
+		// The rule is which badge, so that is what is read.
+		const scenario = render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 2 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+			/>
+		).container;
+		expect(scenario.querySelector(".text-purple-500")).toBeNull();
+
+		const load = render(
 			<RunItem run={run("load")} onSelect={noop} onDelete={vi.fn()} isDeleting={false} />
-		);
-		const loadIcons = loadRender.container.querySelectorAll("svg").length;
-
-		// The load badge is one of them, so the counts must differ - a row that
-		// rendered identically would mean the type branch had stopped mattering
-		// and this test would pass while proving nothing.
-		expect(loadIcons).toBeGreaterThan(scenarioIcons);
+		).container;
+		expect(load.querySelector(".text-purple-500")).not.toBeNull();
 	});
 });

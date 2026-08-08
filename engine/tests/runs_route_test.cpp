@@ -196,6 +196,46 @@ TEST_F (RunsRouteTest, SummaryHttpVersionDefaultsToAutoOnNullOrAbsent) {
     EXPECT_EQ (body["data"][1]["summary"]["httpVersion"], "auto");
 }
 
+// A collection run's row has no url and no method - its work is a sequence -
+// so `scenario` is the only thing on it that says what ran. The step manifest
+// itself stays off the row: it is the size of the plan, and the row is the part
+// that has to stay cheap as history grows.
+TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
+    .config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
+    "recursive":true,"iterations":3,"dataRowCount":0,
+    "steps":[{"index":0,"requestId":"req_1","name":"login","method":"POST","url":"https://a/login"},
+             {"index":1,"requestId":"req_2","name":"checkout","method":"GET","url":"https://a/cart"}]}})" });
+
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    EXPECT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+
+    const auto& summary = body["data"][0]["summary"];
+    ASSERT_TRUE (summary.contains ("scenario"));
+    const auto& scenario = summary["scenario"];
+    EXPECT_EQ (scenario["collectionId"], "col_1");
+    EXPECT_EQ (scenario["iterations"], 3);
+    EXPECT_EQ (scenario["recursive"], true);
+    // The count, never the array - a row that shipped every step's name, method
+    // and URL would be the full snapshot wearing another name.
+    EXPECT_EQ (scenario["stepCount"], 2);
+    EXPECT_FALSE (scenario.contains ("steps"));
+    // A scenario has no url/method/mode to report, and nothing invents one.
+    EXPECT_FALSE (summary.contains ("url"));
+    EXPECT_FALSE (summary.contains ("method"));
+    EXPECT_FALSE (summary.contains ("mode"));
+}
+
+// The key is a scenario's alone: a load run must not grow one, or the app's
+// "is this a collection run" read becomes true for every row.
+TEST_F (RunsRouteTest, SummaryOmitsScenarioOnANonScenarioRun) {
+    seed ({ .id = "run_load", .config_snapshot = R"({"url":"https://a/","mode":"constant_rps"})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("scenario"));
+}
+
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {
     seed ({ .id = "run_bad", .config_snapshot = "not valid json {{{" });
 

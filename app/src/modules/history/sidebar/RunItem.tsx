@@ -23,7 +23,21 @@ import {
 	Trash2,
 	Zap,
 	Network,
+	ListOrdered,
+	Repeat,
+	Folder,
+	FolderTree,
 } from "lucide-react";
+
+/**
+ * How each run type is announced. One map so the row cannot name a type in the
+ * label that it does not draw an icon for.
+ */
+const RUN_KIND_LABEL: Record<Run["type"], string> = {
+	load: "load test",
+	design: "request",
+	scenario: "collection",
+};
 
 interface RunItemProps {
 	run: Run;
@@ -31,6 +45,16 @@ interface RunItemProps {
 	onDelete: (runId: string, event: React.MouseEvent) => void;
 	isDeleting: boolean;
 	isSelected?: boolean;
+	/**
+	 * The name of the collection a scenario run ran, resolved by the list from
+	 * the loaded tree.
+	 *
+	 * A prop rather than a query in here: the row is presentational over
+	 * already-shaped data (the summary), one collections query serves the whole
+	 * page, and a hook here would make every row a query subscriber. Absent for
+	 * every other run type, and for a collection deleted since the run.
+	 */
+	collectionName?: string;
 }
 
 export default function RunItem({
@@ -39,6 +63,7 @@ export default function RunItem({
 	onDelete,
 	isDeleting,
 	isSelected = false,
+	collectionName,
 }: RunItemProps) {
 	// Format timestamp to relative time
 	const formatTime = (timestamp: number) => {
@@ -69,6 +94,22 @@ export default function RunItem({
 	const protocolLabel = isHttpVersion(requestedHttpVersion)
 		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
 		: undefined;
+
+	/*
+	 * A collection run has no url and no method - its work is a sequence - so
+	 * every branch above leaves the row with a status and a timestamp and
+	 * nothing else. `summary.scenario` is what it has instead: which collection
+	 * ran, and how big the run was.
+	 *
+	 * Keyed off the summary rather than `run.type`, because the row can only
+	 * render what the payload carries: a run recorded before the engine sent
+	 * this key is still `type: "scenario"` and still has nothing to show, and
+	 * falling back to the id-less shape is the honest answer for it.
+	 */
+	const scenario = run.type === "scenario" ? run.summary?.scenario : undefined;
+	// The name if the collection is still there, the id if it is not, and a
+	// plain label if the run predates the descriptor. Never a blank line.
+	const scenarioLabel = collectionName ?? scenario?.collectionId ?? null;
 
 	// Get status icon and color
 	const getStatusIcon = () => {
@@ -150,6 +191,9 @@ export default function RunItem({
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						)}
+						{run.type === "scenario" && (
+							<ListOrdered className="w-3.5 h-3.5 text-primary shrink-0" />
+						)}
 						<Button
 							variant="rowActionDestructive"
 							size="icon"
@@ -182,6 +226,44 @@ export default function RunItem({
 						>
 							{requestUrl}
 						</p>
+					</div>
+				)}
+
+				{/* What ran, for a collection run - the row's only identity. */}
+				{run.type === "scenario" && scenarioLabel && (
+					<div className="flex items-start gap-2 mb-1.5 min-w-0">
+						<Folder className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
+						<p
+							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
+							title={scenarioLabel}
+						>
+							{scenarioLabel}
+						</p>
+					</div>
+				)}
+
+				{scenario && (
+					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
+						{scenario.stepCount != null && (
+							<span className="flex items-center gap-1 shrink-0">
+								<ListOrdered className="w-3 h-3" />
+								{scenario.stepCount} step{scenario.stepCount === 1 ? "" : "s"}
+							</span>
+						)}
+						{/* One pass is the default and saying so on every row is noise;
+						    more than one is the thing that changes what the run was. */}
+						{scenario.iterations != null && scenario.iterations > 1 && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Repeat className="w-3 h-3" />
+								{scenario.iterations} iterations
+							</span>
+						)}
+						{scenario.recursive && (
+							<span className="flex items-center gap-1 shrink-0">
+								<FolderTree className="w-3 h-3" />
+								Sub-folders
+							</span>
+						)}
 					</div>
 				)}
 
@@ -238,8 +320,11 @@ export default function RunItem({
 			<button
 				type="button"
 				onClick={() => onSelect(run.id)}
-				aria-label={`Open ${run.type === "load" ? "load test" : "request"} run, ${run.status}${
-					requestUrl ? `, ${requestUrl}` : ""
+				// Named by what it is. A collection run announced as a "request run"
+				// with no url after it was a row a screen-reader user could not tell
+				// apart from any other row in the list.
+				aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
+					requestUrl ? `, ${requestUrl}` : scenarioLabel ? `, ${scenarioLabel}` : ""
 				}`}
 				className="absolute inset-0 z-0 cursor-pointer"
 			/>

@@ -263,6 +263,17 @@ run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
 `400` with **no run row created** - a failed start leaves nothing to clean up.
 
+What comes back for one differs in two places worth knowing. `GET /runs/:id`
+returns the **resolved manifest** in place of the block that was sent
+(`{source, collectionId, recursive, iterations, dataRowCount, steps[]}`, each
+step `{index, requestId, name, method, url}` with the *stored* url, never a
+composed one) - that is what the run tab's context bar reads, through
+`run-scenario.ts`. The paginated `GET /runs` list row cannot carry the manifest
+and instead carries `summary.scenario`
+(`{collectionId, iterations, recursive, stepCount}`), present on scenario rows
+only; the history row reads it because a collection run has no `url` or `method`
+for the ordinary row to show.
+
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
 unchanged - every send site composes first, so nothing is interpolated twice.

@@ -61,11 +61,40 @@ void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
+// A scenario run's list-row descriptor, or an absent key when the snapshot is
+// not a scenario's.
+//
+// A collection run has no `url` and no `method` - its work is a sequence, not a
+// request - so without this a list row carries nothing that identifies it at
+// all, and the history sidebar draws a scenario run as a bare status and a
+// timestamp. What a row needs is which collection ran and how big the run was.
+//
+// `stepCount`, not the manifest's `steps` array: the array carries a name, a
+// method and a URL per step, and a list row that shipped it would undo the
+// reason `summary` exists. The array stays on `GET /runs/:id`.
+void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
+    if (!src.contains ("scenario") || !src["scenario"].is_object ()) {
+        return;
+    }
+    const auto& scenario = src["scenario"];
+
+    nlohmann::json row = nlohmann::json::object ();
+    for (const char* key : { "collectionId", "iterations", "recursive" }) {
+        add_if_present (row, scenario, key);
+    }
+    if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
+        row["stepCount"] = scenario["steps"].size ();
+    }
+    if (!row.empty ()) {
+        dst["scenario"] = std::move (row);
+    }
+}
+
 // The compact list-row summary: exactly the nine keys the history/dashboard
 // list UIs read, each omitted when absent from the snapshot (httpVersion
-// excepted - see add_http_version). A malformed config_snapshot yields an
-// empty object, never an error - the full snapshot stays available on
-// GET /runs/:id.
+// excepted - see add_http_version), plus `scenario` on a collection run only.
+// A malformed config_snapshot yields an empty object, never an error - the full
+// snapshot stays available on GET /runs/:id.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
@@ -76,6 +105,7 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
                 add_if_present (summary, config, key);
             }
             add_http_version (summary, config);
+            add_scenario (summary, config);
         }
     } catch (...) {
         // Malformed snapshot -> empty summary (never a 500).

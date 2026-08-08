@@ -131,12 +131,17 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 
 | Section (`id`) | What it shows |
 |---|---|
-| Run config (`run-config`) | `RunConfigSection.tsx` - mode, duration, target RPS, concurrency, iterations, ramp and requested protocol, read from the run's stored `configSnapshot`. Words come from `loadTestModeLabel` / `formatConcurrency`. A design run has no `mode` key and reads as "Single send". |
-| Source (`run-source`) | `RunSourceSection.tsx` - the environment the run used (`Run.environmentId`, which nothing rendered before) and a link opening the request it ran from. A deleted environment is named as deleted rather than folded into "No environment"; a deleted request (`isRequestNotFound`, never a transport failure) drops the link. |
+| Run config (`run-config`) | `RunConfigSection.tsx` - mode, duration, target RPS, concurrency, iterations, ramp and requested protocol, read from the run's stored `configSnapshot`. Words come from `loadTestModeLabel` / `formatConcurrency`. A design run has no `mode` key and reads as "Single send". A **collection run** has none of those keys at all - it reads its `scenario` block instead (`run-scenario.ts`) and shows "Collection run", the plan's step count, iterations, and whether sub-folders were included. |
+| Source (`run-source`) | `RunSourceSection.tsx` - the environment the run used (`Run.environmentId`, which nothing rendered before) and a link opening the request it ran from. A deleted environment is named as deleted rather than folded into "No environment"; a deleted request (`isRequestNotFound`, never a transport failure) drops the link. A **collection run** links no request - its source is the folder - so the row names the collection and opens *that* tab. |
+
+`run-scenario.ts` is the one place the snapshot's `scenario` block is narrowed
+(it arrives as `unknown` through `RunConfigSnapshot`'s index signature). It gates
+on `run.type === "scenario"` as well as the key, so a load run whose raw body
+happened to carry a `scenario` the engine ignored is never described as one.
 
 The collection and run sections gate on `tab.entityId` as well as the type: a tab open on nothing renders no pane either, and a section there would query nothing while lighting the Dock toggle over an empty bar.
 
-**There is deliberately no "last run" section on a collection tab.** A collection has no runs of its own until the collection runner exists (#354); a section claiming one could only invent it.
+**There is deliberately no "last run" section on a collection tab**, still, now that the runner exists (#354). A collection's runs are not addressable: `GET /runs` filters by `requestId`, and a collection run's row links no request, so finding one means a substring search of every stored snapshot for the collection id - a scan per open bar, for a number History already shows. It earns the slot once the runs list can be filtered by collection.
 
 **There is deliberately no "last result" section.** Status, duration and age of the last send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary. What would earn the slot is a *trend* across recent sends, which the pane structurally cannot show; that needs the paginated `GET /runs` to carry each design run's result first (today only `GET /runs/:id` attaches it), so it is tracked separately in #380.
 
@@ -290,6 +295,8 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
+
+A **collection run** row has no url and no method - its work is a sequence - so it renders `summary.scenario` (`GET /runs`) instead: the collection's name, the plan's step count, and iterations when there was more than one pass. The name is not on the wire; `HistoryList` resolves it from the loaded tree with one shared `useCollectionsQuery` and passes it down, so the row stays presentational over already-shaped data and the page does not become one query per row. A collection deleted since its run falls back to the id it does have. The type filter carries all three run types - `filterRuns` compares its value to `run.type` directly, so a type the dropdown cannot name is one the list can only show under "All".
 
 **Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunView.tsx` (a single request execution, opened as an editable copy), `ScenarioRunView.tsx` (a collection run's step list) or `LoadTestDetail.tsx` (load-test report).
 
