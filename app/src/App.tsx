@@ -26,6 +26,7 @@ import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProv
 import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCompletionProvider";
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -75,6 +76,10 @@ function App() {
 
 	// Bridge native menu items (Preferences…/Settings) to in-app navigation
 	useMenuActions();
+
+	// An agent writing over MCP mutates the engine from the main process, which
+	// no query can see. This is the channel that tells the cache to refetch.
+	useMcpDataInvalidation();
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {

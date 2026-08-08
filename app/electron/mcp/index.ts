@@ -16,7 +16,7 @@
 import { EngineClient } from "./engine-client.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import type { ToolContext } from "./tools.js";
+import type { McpDataChangedEvent, ToolContext } from "./tools.js";
 
 export interface VayuMcpServiceOptions {
 	engineBaseUrl: string;
@@ -24,6 +24,11 @@ export interface VayuMcpServiceOptions {
 	port: number;
 	version: string;
 	safety?: Partial<McpSafetyConfig>;
+	/**
+	 * Called when a successful tool call changed engine data, so the owner can
+	 * forward it to the renderer. Omitted when there is no renderer to tell.
+	 */
+	onDataChanged?: (event: McpDataChangedEvent) => void;
 }
 
 export class VayuMcpService {
@@ -38,7 +43,11 @@ export class VayuMcpService {
 			host: opts.host,
 			port: opts.port,
 			info: { name: "vayu", version: opts.version },
-			contextProvider: (): ToolContext => ({ client: this.client, config: this.config }),
+			contextProvider: (): ToolContext => ({
+				client: this.client,
+				config: this.config,
+				onDataChanged: opts.onDataChanged,
+			}),
 		});
 	}
 
@@ -79,5 +88,5 @@ export {
 } from "./store.js";
 export { connectClient } from "./connect.js";
 export type { McpConnectClient, McpConnectResult } from "./connect.js";
-export { toolCatalog } from "./tools.js";
-export type { McpToolInfo, ToolCategory } from "./tools.js";
+export { toolCatalog, MCP_DATA_ENTITIES } from "./tools.js";
+export type { McpToolInfo, ToolCategory, McpDataEntity, McpDataChangedEvent } from "./tools.js";

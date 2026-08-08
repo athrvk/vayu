@@ -1,0 +1,82 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+import { describe, expect, test, vi, afterEach } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { invalidateForMcpEvent } from "./mcp-invalidation";
+import { queryKeys } from "@/queries/keys";
+import type { McpDataChangedEvent } from "@/types/domain";
+
+/** Apply one event against a spied client and return the keys it invalidated. */
+function keysFor(event: McpDataChangedEvent) {
+	const queryClient = new QueryClient();
+	const spy = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+	const handled = invalidateForMcpEvent(queryClient, event);
+	return { handled, keys: spy.mock.calls.map(([filters]) => filters?.queryKey) };
+}
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+describe("invalidateForMcpEvent", () => {
+	test("a created request invalidates only its own collection's list", () => {
+		const { handled, keys } = keysFor({ entity: "request", collectionId: "col_1" });
+		expect(handled).toBe(true);
+		expect(keys).toEqual([queryKeys.requests.listByCollection("col_1")]);
+	});
+
+	test("a request change with no named collection invalidates every list", () => {
+		// The owner is unknowable from here, and a per-collection key would leave
+		// whichever list actually changed stale.
+		const { keys } = keysFor({ entity: "request" });
+		expect(keys).toEqual([queryKeys.requests.lists()]);
+	});
+
+	test("an environment change invalidates the list and the details", () => {
+		const { keys } = keysFor({ entity: "environment" });
+		expect(keys).toEqual([queryKeys.environments.all]);
+	});
+
+	test("a run invalidates both list families", () => {
+		const { keys } = keysFor({ entity: "run" });
+		expect(keys).toEqual([queryKeys.runs.lists(), queryKeys.runs.allRuns()]);
+	});
+
+	test("a run linked to a saved request also invalidates its last design run", () => {
+		const { keys } = keysFor({ entity: "run", requestId: "req_7" });
+		expect(keys).toContainEqual(queryKeys.runs.lastDesign("req_7"));
+	});
+
+	test("a run leaves per-run reports alone", () => {
+		// A new run cannot have changed an existing run's report, and those are
+		// the expensive fetches in this family.
+		const { keys } = keysFor({ entity: "run", requestId: "req_7" });
+		expect(keys).not.toContainEqual(queryKeys.runs.report("req_7"));
+		expect(keys).not.toContainEqual(queryKeys.runs.all);
+	});
+
+	test("a cookie change invalidates the single jar key", () => {
+		const { keys } = keysFor({ entity: "cookie" });
+		expect(keys).toEqual([queryKeys.cookies.all]);
+	});
+
+	test("a config change invalidates the config query", () => {
+		const { keys } = keysFor({ entity: "config" });
+		expect(keys).toEqual([queryKeys.config.all]);
+	});
+
+	test("an unknown entity is reported, not thrown", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const { handled, keys } = keysFor({
+			entity: "sasquatch",
+		} as unknown as McpDataChangedEvent);
+		expect(handled).toBe(false);
+		expect(keys).toEqual([]);
+		expect(warn).toHaveBeenCalled();
+	});
+});

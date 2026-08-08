@@ -11,6 +11,7 @@
 
 import type { ThemeSource } from "./ui";
 import type {
+	McpDataChangedEvent,
 	McpSafetyConfig,
 	McpStatus,
 	McpConnectClient,
@@ -57,6 +58,8 @@ interface ElectronAPI {
 	updateMcpSafety: (partial: Partial<McpSafetyConfig>) => Promise<McpSafetyConfig>;
 	setMcpEnabled: (enabled: boolean) => Promise<McpStatus>;
 	connectMcpClient: (client: McpConnectClient) => Promise<McpConnectResult>;
+	/** An agent's write landed engine-side; invalidate the named family. */
+	onMcpDataChanged: (callback: (event: McpDataChangedEvent) => void) => () => void;
 
 	// Theme management
 	getTheme: () => Promise<ThemeInfo>;

@@ -879,6 +879,34 @@ query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` sits under
   creating a collection can invalidate it - it succeeds once at startup and
   would otherwise never re-run for a collection created mid-session.
 
+**Writes from outside the renderer: `mcp:data-changed`.** An MCP tool call
+mutates the engine from the Electron **main** process, so no mutation runs here
+and no query notices - and with `refetchOnWindowFocus: false` (below) nothing
+ever catches up on its own. A request an agent created stayed invisible in the
+collection tree until some unrelated renderer mutation happened to invalidate
+the lists. The main process now sends one event per data family a successful
+call touched; `useMcpDataInvalidation()` (registered once, in `App.tsx`) maps it
+to keys through `lib/mcp-invalidation.ts`:
+
+| Entity | Invalidates | Why that key |
+|--------|-------------|--------------|
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here |
+| `environment` | `environments.all` | Variables are read through the detail cache as well as the list |
+| `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` when the call named one | The history list polls, but Settings' count and a request tab's restored response do not |
+| `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
+| `config` | `config.all` | |
+
+The event carries no engine data, only which family went stale, so a row still
+reaches the UI by exactly one path: the query layer. Per-run reports and time
+series are deliberately left alone - a new run cannot have changed an existing
+run's report. The entity list is duplicated across the process boundary
+(`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
+`types/domain.ts`) because production code under `electron/` cannot import from
+`app/src`; `data-changed.conformance.test.ts` is what keeps the copies equal,
+and the map above is a `Record` over the union so a new family fails to compile
+until it names a reader. The emitting side is documented in
+[`docs/engine/mcp.md`](../engine/mcp.md).
+
 **Retry policy:** the shared default is `shouldRetryQuery` (`lib/query-client.ts`),
 not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
 deleted row answers identically every time, so retrying it only delays the error
