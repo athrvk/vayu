@@ -188,7 +188,8 @@ on every request tab. See `docs/app/COMPONENTS.md` for the sections themselves.
   - Transforms between frontend (snake_case) and backend (camelCase) formats
   - Handles error transformation and user-friendly messages
 
-- **`codegen/`**: Snippet generation (curl, JS fetch) - the outbound half of the
+- **`codegen/`**: Snippet generation (curl, JS fetch, Python requests, HTTPie,
+  PowerShell) - the outbound half of the
   symmetry `services/curl/` opens by parsing curl in. Pure functions over a
   `SnippetRequest`, fed `POST /compose`'s output, so a generated snippet is what
   Vayu would actually send rather than the template it was written as

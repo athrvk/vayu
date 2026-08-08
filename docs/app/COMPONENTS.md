@@ -128,7 +128,19 @@ Resolves the active request's variables (global + collection-scoped + environmen
 
 Snippets are generated from **`POST /compose`'s output** - the request with `{{variables}}` substituted and `inherit` auth walked by the engine that will send it - so what you paste is what Vayu would put on the wire. A **Templated** mode generates from the stored request instead, references intact, for pasting into a bug report. Composing happens on expand and on an explicit recompose, never per keystroke (the section only mounts while expanded, and the query is `staleTime: Infinity`).
 
-`services/codegen/` holds the generators, closing the symmetry with `services/curl/`, which parses curl *in* and generated nothing out. Each target is a pure function of a `SnippetRequest`; `CODE_TARGETS` is the registry (curl, JS fetch - httpie and PowerShell fit the same interface). Auth is flattened into headers/query/`-u` in `prepare.ts` rather than per target, because the engine keeps `auth` beside the request and applies it at send time: a snippet built from the composed *headers* alone would authenticate in Vayu and 401 in a terminal. Modes no static command can reproduce (OAuth 2.0, digest, AWS, NTLM) produce a note instead of a silent drop.
+`services/codegen/` holds the generators, closing the symmetry with `services/curl/`, which parses curl *in* and generated nothing out. Each target is a pure function of a `SnippetRequest`; `CODE_TARGETS` is the registry, and adding a target is one entry plus one function. Auth is flattened into headers/query/`-u` in `prepare.ts` rather than per target, because the engine keeps `auth` beside the request and applies it at send time: a snippet built from the composed *headers* alone would authenticate in Vayu and 401 in a terminal. Modes no static command can reproduce (OAuth 2.0, digest, AWS, NTLM) produce a note instead of a silent drop.
+
+**Quoting is per target, never a flag on another one** - that is why PowerShell is its own generator rather than "curl with different quotes". Each language's escape rule and its form-body switch differ in ways that fail silently:
+
+| Target | String rule | Multipart vs urlencoded |
+|---|---|---|
+| `curl` | POSIX single quotes, `'` → `'\''` | `-F` vs `--data-urlencode` |
+| `fetch` | `JSON.stringify` (it *is* the JS literal grammar) | `FormData` vs `URLSearchParams` |
+| `python` | `JSON.stringify` - JSON's escapes are a strict subset of Python 3's | `files=` vs `data=` (a multipart body passed as `data=` is silently urlencoded) |
+| `httpie` | POSIX, shared with curl | `--multipart` vs `--form` (`--form` alone is urlencoded) |
+| `powershell` | Single quotes, `'` → `''`; a POSIX `'\''` would put a backslash in the data | `-Form` vs `-Body` |
+
+HTTPie takes headers as bare `Name:value` words and a body as `--raw`, so the composed bytes go out unchanged rather than HTTPie building a new JSON object from `key=value`. PowerShell emits `Invoke-RestMethod`, not `curl` - on Windows PowerShell `curl` is an alias for that cmdlet, so a snippet saying `curl` runs something else than the reader expects.
 
 **Secrets are masked by default in resolved output**, revealing is explicit, and masking happens *before* quoting - after it, a value containing a quote no longer matches itself. What is masked: every variable the resolver marks secret, plus the credential the auth mode carries. Jar cookies are never in a snippet (libcurl attaches them at transfer time) and the section says so.
 

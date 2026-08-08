@@ -36,7 +36,16 @@ import { queryKeys } from "@/queries/keys";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
-import { ToggleGroup, ToggleGroupItem, TooltipIconButton } from "@/components/ui";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	ToggleGroup,
+	ToggleGroupItem,
+	TooltipIconButton,
+} from "@/components/ui";
 import { TIMING } from "@/config/timing";
 import { CODE_TARGETS, authSecrets, generateSnippet, type CodeTargetId } from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
@@ -104,19 +113,23 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 	return (
 		<div className="space-y-2">
-			<div className="flex items-center gap-1 flex-wrap">
-				<ToggleGroup
-					value={target}
-					onValueChange={(v) => v && setTarget(v as CodeTargetId)}
-					aria-label="Snippet language"
-				>
+			{/* A Select rather than a segmented control: `ToggleGroup` is an
+			    `inline-flex` with no wrap, and five target names do not fit the
+			    bar's 252px. The mode switch below stays a ToggleGroup - two
+			    segments do fit, and both choices being visible is the point of
+			    it. */}
+			<Select value={target} onValueChange={(v) => setTarget(v as CodeTargetId)}>
+				<SelectTrigger className="h-7 text-xs" aria-label="Snippet language">
+					<SelectValue />
+				</SelectTrigger>
+				<SelectContent>
 					{CODE_TARGETS.map((t) => (
-						<ToggleGroupItem key={t.id} value={t.id}>
+						<SelectItem key={t.id} value={t.id} className="text-xs">
 							{t.label}
-						</ToggleGroupItem>
+						</SelectItem>
 					))}
-				</ToggleGroup>
-			</div>
+				</SelectContent>
+			</Select>
 
 			<div className="flex items-center gap-1 flex-wrap">
 				<ToggleGroup

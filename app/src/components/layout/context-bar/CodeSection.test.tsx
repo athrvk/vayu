@@ -32,6 +32,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { CodeSection } from "./CodeSection";
+import { CODE_TARGETS } from "@/services/codegen";
 import type { ResolvedVariable } from "@/types";
 
 const composeRequest = vi.fn();
@@ -97,7 +98,17 @@ function snippet(): string {
 	return document.querySelector("pre")!.textContent ?? "";
 }
 
+/** Drive the language Select the way the repo drives every other Radix one. */
+async function pickLanguage(label: string) {
+	fireEvent.click(screen.getByRole("combobox", { name: "Snippet language" }));
+	fireEvent.click(await screen.findByRole("option", { name: label }));
+}
+
 beforeEach(() => {
+	// Radix's Select scrolls its highlighted item into view on open, and jsdom
+	// has no layout, so the method does not exist - the same stub the collection
+	// tree's tests use.
+	Element.prototype.scrollIntoView = vi.fn();
 	composeRequest.mockReset();
 	composeRequest.mockResolvedValue({
 		method: "POST",
@@ -128,10 +139,36 @@ describe("CodeSection - it generates from what will be sent", () => {
 		renderSection();
 		await waitFor(() => expect(snippet()).toContain("curl"));
 
-		fireEvent.click(screen.getByRole("radio", { name: "JS fetch" }));
+		await pickLanguage("JS fetch");
 
 		await waitFor(() => expect(snippet()).toContain("await fetch("));
-		// One compose for both languages - the payload is the same request.
+		// One compose for every language - the payload is the same request, and
+		// the generators are pure functions of it.
+		expect(composeRequest).toHaveBeenCalledTimes(1);
+	});
+
+	it("offers every registered target, and generates each from the same payload", async () => {
+		renderSection();
+		await waitFor(() => expect(snippet()).toContain("curl"));
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Snippet language" }));
+		for (const target of CODE_TARGETS) {
+			expect(screen.getByRole("option", { name: target.label })).toBeInTheDocument();
+		}
+		fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+		// A spot check per language that the resolved payload reached it - the
+		// per-target grammar is `services/codegen/codegen.test.ts`.
+		for (const [label, marker] of [
+			["Python requests", "import requests"],
+			["HTTPie", "http POST"],
+			["PowerShell", "Invoke-RestMethod"],
+		] as const) {
+			await pickLanguage(label);
+			await waitFor(() => expect(snippet()).toContain(marker));
+			expect(snippet()).toContain("https://api.example.com/v1/users");
+		}
+
 		expect(composeRequest).toHaveBeenCalledTimes(1);
 	});
 
