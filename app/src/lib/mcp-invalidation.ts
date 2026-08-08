@@ -35,12 +35,33 @@ const INVALIDATORS: Record<
 	(queryClient: QueryClient, event: McpDataChangedEvent) => void
 > = {
 	/*
+	 * A collection write is taken coarsely, the way `useDeleteCollectionMutation`
+	 * takes it: `delete_collection` cascades through every descendant collection
+	 * and every request inside them, and which rows those are is engine-side
+	 * knowledge - a client that re-derived the subtree would drift from the
+	 * engine's definition of "descendant". `requests.all` rather than a list key
+	 * because `requests.detail` entries carry `staleTime: Infinity`, so a deleted
+	 * request would otherwise stay fresh forever and keep feeding restored tabs.
+	 */
+	collection: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+	},
+
+	/*
 	 * The tree reads one list per collection, so a created request only needs its
 	 * owner's list - the same narrowing `useUpdateRequestMutation` does rather
 	 * than refetching every collection on one row's change. Without a named
 	 * collection the owner is unknowable from here, so the whole `lists()` prefix
 	 * goes; that prefix also covers the reorder pass, which reads at `lists()`
 	 * itself and would be missed by a per-collection key alone.
+	 *
+	 * A named `requestId` also takes that row's detail cache, which the lists do
+	 * not cover: `requestDetailOptions` is `staleTime: Infinity`, so an updated
+	 * or deleted request would keep feeding a restored tab the copy it read on
+	 * open. Only the tools that name one row (`update_request`, `delete_request`)
+	 * carry the hint; `create_request` names none, and its row has no detail
+	 * entry yet.
 	 */
 	request: (queryClient, event) => {
 		void queryClient.invalidateQueries({
@@ -48,6 +69,11 @@ const INVALIDATORS: Record<
 				? queryKeys.requests.listByCollection(event.collectionId)
 				: queryKeys.requests.lists(),
 		});
+		if (event.requestId) {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.requests.detail(event.requestId),
+			});
+		}
 	},
 
 	/*

@@ -31,7 +31,13 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		health: vi.fn().mockResolvedValue({ status: "ok", version: "1.2.3" }),
 		listCollections: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue([]),
+		listRequests: vi.fn().mockResolvedValue([]),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
+		getRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Get users", method: "GET" }),
+		updateRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Renamed" }),
+		deleteRequest: vi.fn().mockResolvedValue({ message: "Request deleted successfully" }),
+		createCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "API" }),
+		deleteCollection: vi.fn().mockResolvedValue({ message: "Collection deleted successfully" }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [] }),
 		getConfig: vi.fn().mockResolvedValue({ entries: [] }),
 		getEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev", variables: {} }),
@@ -81,7 +87,12 @@ describe("the registry declares its effects", () => {
 		// which family a tool touches is exactly what `category` does not say -
 		// an `execute` tool writes a run row and refills the cookie jar.
 		const expected: Record<string, string[]> = {
+			create_collection: ["collection"],
+			update_collection: ["collection"],
+			delete_collection: ["collection"],
 			create_request: ["request"],
+			update_request: ["request"],
+			delete_request: ["request"],
 			update_environment: ["environment"],
 			update_engine_config: ["config"],
 			run_request: ["run", "cookie"],
@@ -112,6 +123,70 @@ describe("dispatch emits mcp:data-changed", () => {
 		expect(res.isError).toBeFalsy();
 		expect(onDataChanged).toHaveBeenCalledTimes(1);
 		expect(onDataChanged).toHaveBeenCalledWith({ entity: "request", collectionId: "col_1" });
+	});
+
+	test("a collection write reports the collection family", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("create_collection", { name: "API" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "collection" });
+	});
+
+	test("a cascade delete reports the collection family once it has happened", async () => {
+		const client = fakeClient({
+			listCollections: vi
+				.fn()
+				.mockResolvedValue([{ id: "col_1", name: "API", parentId: "" }]),
+		});
+		const { ctx, onDataChanged } = ctxWithNotifier(client, WRITES_ENABLED);
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1", confirmed: true },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "collection", collectionId: "col_1" });
+	});
+
+	test("an unconfirmed delete emits nothing - nothing changed", async () => {
+		// The preview is a successful result, so "not an error" is not the test:
+		// the emit has to hang off the delete actually happening.
+		const client = fakeClient({
+			listCollections: vi
+				.fn()
+				.mockResolvedValue([{ id: "col_1", name: "API", parentId: "" }]),
+		});
+		const { ctx, onDataChanged } = ctxWithNotifier(client, WRITES_ENABLED);
+		const res = await dispatchTool("delete_collection", { collectionId: "col_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+		expect(onDataChanged).not.toHaveBeenCalled();
+	});
+
+	test("an unstarted load run emits nothing either", async () => {
+		// Same rule as the delete preview, on the gate that has always had one: a
+		// described run is not a run, and the history lists have not moved.
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), {
+			allowlist: ["api.example.com"],
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/x", mode: "constant_rps", targetRps: 10 },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).not.toHaveBeenCalled();
+	});
+
+	test("a single-request write carries the row id as its scope hint", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", name: "Renamed" },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "request", requestId: "req_1" });
 	});
 
 	test("a failed dispatch emits nothing", async () => {

@@ -48,8 +48,10 @@ export interface McpSafetyConfig {
 	 */
 	maxIterations: number;
 	/**
-	 * Gates data-mutating tools (`create_request`, `update_environment`,
-	 * `update_engine_config`). When false (default), those tools refuse. It does
+	 * Gates every tool in the `write` category - the collection and saved-request
+	 * CRUD verbs, `update_environment` and `update_engine_config`. When false
+	 * (default), those tools refuse; the two deletes additionally require
+	 * confirmation even with it on. It does
 	 * **not** gate traffic-sending tools (`run_request`, `run_collection_smoke`)
 	 * or load runs - those are governed by the allowlist, the hard caps, and the
 	 * load-run confirmation gate independently.

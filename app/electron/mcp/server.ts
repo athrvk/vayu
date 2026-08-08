@@ -43,13 +43,16 @@ const INSTRUCTIONS =
 	"tools drive that engine. Call get_engine_health first. Tools are grouped by " +
 	"capability: read (inspect collections, requests, environments, runs, config, " +
 	"and live metrics - always safe), execute (run_request, run_collection_smoke - " +
-	"send real traffic to a target), write (create_request, update_environment, " +
-	"update_engine_config - mutate saved data or engine config), and load " +
-	"(start_load_run, stop_run - start/stop a load test). Traffic-touching tools " +
+	"send real traffic to a target), write (create/update/delete collections and " +
+	"saved requests, update_environment, update_engine_config - mutate saved data " +
+	"or engine config), and load (start_load_run, stop_run - start/stop a load " +
+	"test). Traffic-touching tools " +
 	"(run_request, run_collection_smoke, start_load_run) are restricted to an " +
 	"allowlist, and load runs also enforce hard RPS/concurrency/duration caps. " +
-	"start_load_run asks the user to confirm (via elicitation when supported, " +
-	"otherwise a confirmed:true flag). The write tools require the user to enable " +
+	"start_load_run, delete_collection and delete_request ask the user to confirm " +
+	"(via elicitation when supported, otherwise a confirmed:true flag); " +
+	"delete_collection cascades, so its prompt states how many sub-collections and " +
+	"saved requests it would destroy. The write tools require the user to enable " +
 	"write access. Some update_engine_config keys need an engine restart to take " +
 	"effect; the result flags those under restartRequired (saved, but the running " +
 	"engine keeps the old value until restarted). The user may disable individual " +
