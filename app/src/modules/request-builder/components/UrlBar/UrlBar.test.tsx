@@ -57,6 +57,7 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 		saveStatus: "idle",
 		resolveString: (s: string) => s,
 		resolveVariables: (s: string) => s,
+		resolvedAuth: null,
 		getVariable: () => null,
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],

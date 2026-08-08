@@ -15,6 +15,9 @@ import { apiService } from "@/services/api";
 import {
 	introspectSchema,
 	buildIntrospectionRequest,
+	IntrospectionError,
+	MAX_INTROSPECTION_CHARS,
+	type IntrospectionFailureKind,
 	type IntrospectionTarget,
 } from "./introspect";
 import type { ComposedRequest, SanityResult } from "@/types";
@@ -168,7 +171,7 @@ describe("introspectSchema", () => {
 		// "GraphQL said no" and "this is not JSON", which reached
 		// buildClientSchema with undefined before it was guarded.
 		mockExecute({ status: 200, bodyRaw: "{}" });
-		await expect(introspectSchema(TARGET)).rejects.toThrow(/no data/i);
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/no introspection data/i);
 	});
 
 	it("surfaces an execute failure rather than reporting an empty schema", async () => {
@@ -181,5 +184,83 @@ describe("introspectSchema", () => {
 		vi.mocked(apiService.composeRequest).mockRejectedValue(new Error("collection not found"));
 		await expect(introspectSchema(TARGET)).rejects.toThrow(/collection not found/);
 		expect(apiService.executeRequest).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * Every failure used to arrive as a bare Error and collapse into one badge
+ * reading "introspection failed" - so an expired token and an endpoint with
+ * introspection switched off, whose fixes have nothing in common, were
+ * indistinguishable to the user (#383). The kind is decided here because this
+ * is the only layer still holding the status, the error list and the body.
+ */
+describe("failure classification", () => {
+	async function kindOf(promise: Promise<unknown>): Promise<IntrospectionFailureKind> {
+		try {
+			await promise;
+		} catch (e) {
+			expect(e).toBeInstanceOf(IntrospectionError);
+			return (e as IntrospectionError).kind;
+		}
+		throw new Error("expected introspection to fail");
+	}
+
+	it.each([401, 403])("classifies HTTP %i as a credentials problem", async (status) => {
+		mockExecute({ status, bodyRaw: "" });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("auth");
+	});
+
+	it("classifies any other non-2xx as an http failure, not an auth one", async () => {
+		mockExecute({ status: 500, bodyRaw: "boom" });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("http");
+	});
+
+	it("classifies a server that says introspection is disabled as unsupported", async () => {
+		mockExecute({
+			status: 200,
+			bodyRaw: JSON.stringify({
+				errors: [{ message: "GraphQL introspection is not allowed by Apollo Server" }],
+			}),
+		});
+		expect(await kindOf(introspectSchema(TARGET))).toBe("unsupported");
+	});
+
+	it("classifies other GraphQL errors as parse, keeping the server's own words", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ errors: [{ message: "nope" }] }) });
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/nope/);
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ errors: [{ message: "nope" }] }) });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("parse");
+	});
+
+	it("classifies a non-JSON answer as parse", async () => {
+		mockExecute({ status: 200, bodyRaw: "<html>" });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("parse");
+	});
+
+	it("classifies JSON that is not an introspection result as parse", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: { notASchema: true } }) });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("parse");
+	});
+
+	it("classifies never getting an answer as network", async () => {
+		vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+		vi.mocked(apiService.executeRequest).mockRejectedValue(new Error("engine unreachable"));
+		expect(await kindOf(introspectSchema(TARGET))).toBe("network");
+	});
+
+	/*
+	 * The parse below is synchronous and holds the renderer's only thread, so a
+	 * pathological response has to be refused before it is parsed rather than
+	 * after - the refusal is what keeps the window responsive.
+	 */
+	it("refuses a response over the size cap without parsing it", async () => {
+		const oversized = `{"data":"${"x".repeat(MAX_INTROSPECTION_CHARS)}"}`;
+		mockExecute({ status: 200, bodyRaw: oversized });
+		expect(await kindOf(introspectSchema(TARGET))).toBe("too-large");
+	});
+
+	it("accepts a large response under the cap", async () => {
+		mockExecute({ status: 200, bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }) });
+		await expect(introspectSchema(TARGET)).resolves.toBeDefined();
 	});
 });

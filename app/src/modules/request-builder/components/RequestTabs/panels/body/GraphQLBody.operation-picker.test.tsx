@@ -66,7 +66,6 @@ function renderBody(body: string) {
 				onBodyChange={onBodyChange}
 				schemaTarget={TARGET}
 				onEditorMount={vi.fn()}
-				active
 			/>
 		</TooltipProvider>
 	);

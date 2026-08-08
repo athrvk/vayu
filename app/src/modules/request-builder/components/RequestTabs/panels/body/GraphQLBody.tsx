@@ -33,9 +33,16 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { schemaCacheKey, useSchemaCache, type SchemaTarget } from "@/lib/graphql/schema-cache";
+import {
+	schemaCacheKey,
+	useSchemaCache,
+	type SchemaEntry,
+	type SchemaFailure,
+	type SchemaTarget,
+} from "@/lib/graphql/schema-cache";
 import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "@/utils/helpers";
 import { TIMING } from "@/config/timing";
 import {
 	operationNames,
@@ -50,41 +57,97 @@ export interface GraphQLBodyProps {
 	/**
 	 * The endpoint to introspect: the request as typed plus its scope, which
 	 * the engine composes (`POST /compose`) before the introspection query is
-	 * sent. Unresolved on purpose - only `resolvedUrl` inside it is a preview,
-	 * and it is used for cache identity and display, never sent.
+	 * sent. Unresolved on purpose - only `resolvedUrl` and `resolvedAuth` inside
+	 * it are previews, used for cache identity and display, never sent.
 	 */
 	schemaTarget: SchemaTarget;
 	/** Registers each editor so the panel can relayout them on a height change. */
 	onEditorMount: OnMount;
-	/** True while the mode is graphql - drives the schema lifecycle. */
-	active: boolean;
 }
 
-function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | "error" }) {
+/**
+ * What the badge says about a failure, per kind.
+ *
+ * The store keeps the classified failure and the engine's own words; this is
+ * the sentence that names the fix. One static "introspection failed" used to
+ * cover all of them, so an expired token and an endpoint with introspection
+ * switched off - opposite actions - read identically (#383).
+ *
+ * Exhaustive by type: a new failure kind in `introspect.ts` is a type error
+ * here rather than a silent fall back to the generic sentence.
+ */
+const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
+	auth: "Credentials were rejected. Check the request's auth, then refresh.",
+	unsupported: "This endpoint does not allow introspection, so only syntax is checked.",
+	http: "The endpoint answered with an error status.",
+	network: "The endpoint could not be reached.",
+	parse: "The answer was not an introspection result.",
+	"too-large": "The schema is too large to load.",
+	unknown: "Introspection failed.",
+};
+
+function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
+	const status = entry?.status ?? "idle";
 	if (status === "idle") return null;
+
+	const age = entry?.fetchedAt ? `Schema loaded ${formatRelativeTime(entry.fetchedAt)}.` : null;
+
 	if (status === "loading") {
 		return (
-			<span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+			<BadgeText className="text-muted-foreground" title={age ?? "Loading the schema."}>
 				<Loader2 className="w-3 h-3 animate-spin" />
 				Schema
-			</span>
+			</BadgeText>
 		);
 	}
+
 	if (status === "ready") {
 		return (
-			<span className="flex items-center gap-1 text-[10px] text-success-text">
+			<BadgeText className="text-success-text" title={age ?? "Schema loaded."}>
 				<CheckCircle2 className="w-3 h-3" />
 				Schema
-			</span>
+			</BadgeText>
 		);
 	}
+
+	const failure = entry?.error;
+	const hint = FAILURE_HINT[failure?.kind ?? "unknown"];
+	const detail = failure?.message ? `${hint} ${failure.message}` : hint;
+
+	/*
+	 * A refresh that failed over a schema that loaded earlier is not "no schema":
+	 * the editors still complete against the last good one, so the badge says
+	 * how old it is and what went wrong, rather than claiming there is nothing.
+	 */
+	if (entry?.schema) {
+		return (
+			<BadgeText className="text-warning-text" title={age ? `${detail} ${age}` : detail}>
+				<AlertCircle className="w-3 h-3" />
+				Schema stale
+			</BadgeText>
+		);
+	}
+
 	return (
-		<span
-			className="flex items-center gap-1 text-[10px] text-destructive-text"
-			title="Schema introspection failed - syntax checking only"
-		>
+		<BadgeText className="text-destructive-text" title={`${detail} Syntax checking only.`}>
 			<AlertCircle className="w-3 h-3" />
 			No schema
+		</BadgeText>
+	);
+}
+
+function BadgeText({
+	className,
+	title,
+	children,
+}: {
+	className: string;
+	title: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<span className={cn("flex items-center gap-1 text-[10px]", className)} title={title}>
+			{children}
 		</span>
 	);
 }
@@ -104,15 +167,13 @@ function PaneTitle({ children }: { children: string }) {
 	return <span className={EYEBROW_CLASS}>{children}</span>;
 }
 
-export function GraphQLBody({
-	body,
-	onBodyChange,
-	schemaTarget,
-	onEditorMount,
-	active,
-}: GraphQLBodyProps) {
-	const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
-	const activeSchema = useSchemaCache((s) => s.getActiveSchema());
+export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }: GraphQLBodyProps) {
+	// One subscription, not three: the entry object is the store's own reference,
+	// so it is a stable snapshot, and status/schema/error/freshness cannot be
+	// read a render apart from each other.
+	const entry = useSchemaCache((s) => s.getActiveEntry());
+	const schemaStatus = entry?.status ?? "idle";
+	const activeSchema = entry?.schema ?? null;
 
 	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
@@ -128,23 +189,31 @@ export function GraphQLBody({
 	 * against the real schema.
 	 *
 	 * Keyed on the cache key rather than the URL: the credentials are part of
-	 * the target now, so changing environment - or the auth block - is a
-	 * different schema to fetch, not the same one already cached.
+	 * the target now, so changing environment - or the auth block, or a variable
+	 * either resolves through - is a different schema to fetch, not the same one
+	 * already cached.
+	 *
+	 * The cleanup clears the target as well as the debounce. This component
+	 * mounts only while the body mode is graphql, so unmounting *is* leaving
+	 * GraphQL, and leaving the last one pointing at a schema kept Monaco
+	 * completing a closed tab's endpoint. The clear is guarded on still being
+	 * the active target, so switching requests - which mounts the next body
+	 * before this one's cleanup runs - does not blank the new one.
 	 */
 	const targetKey = schemaCacheKey(schemaTarget);
 	useEffect(() => {
-		if (!active) {
-			useSchemaCache.getState().setActiveTarget(null);
-			return;
-		}
 		useSchemaCache.getState().setActiveTarget(schemaTarget);
-		if (!schemaTarget.url) return;
+		if (!schemaTarget.url)
+			return () => useSchemaCache.getState().clearActiveTarget(schemaTarget);
 		const id = setTimeout(() => {
 			void useSchemaCache.getState().ensureSchema(schemaTarget);
 		}, TIMING.GRAPHQL_INTROSPECTION_DEBOUNCE_MS);
-		return () => clearTimeout(id);
+		return () => {
+			clearTimeout(id);
+			useSchemaCache.getState().clearActiveTarget(schemaTarget);
+		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [active, targetKey]);
+	}, [targetKey]);
 
 	/*
 	 * Everything the envelope carries, derived from the body. The query and
@@ -165,11 +234,10 @@ export function GraphQLBody({
 	const [variables, setVariables] = useState("");
 	const lastWrittenBody = useRef<string | undefined>(undefined);
 	useEffect(() => {
-		if (!active) return;
 		if (body === lastWrittenBody.current) return;
 		setVariables(parseGraphQLBody(body || "").variables);
 		lastWrittenBody.current = body;
-	}, [active, body]);
+	}, [body]);
 
 	/*
 	 * One write path, taking only what changed. The rest comes from `parts` (the
@@ -202,17 +270,12 @@ export function GraphQLBody({
 
 	// Drive the variables editor's JSON schema from the query's `$variables` plus
 	// the introspected schema, so it validates and autocompletes against what the
-	// operation expects. Clears the schema when this mode is not active.
+	// operation expects.
 	useEffect(() => {
 		const monaco = monacoRef.current;
 		if (!monaco || !variablesModelUri) return;
-		applyVariablesSchema(
-			monaco,
-			variablesModelUri,
-			active ? query : "",
-			active ? activeSchema : null
-		);
-	}, [active, query, activeSchema, variablesModelUri]);
+		applyVariablesSchema(monaco, variablesModelUri, query, activeSchema);
+	}, [query, activeSchema, variablesModelUri]);
 
 	const refresh = () => {
 		if (!schemaTarget.url) return;
@@ -245,7 +308,7 @@ export function GraphQLBody({
 								</SelectContent>
 							</Select>
 						)}
-						<SchemaStatusBadge status={schemaStatus} />
+						<SchemaStatusBadge entry={entry} />
 						{schemaTarget.url && (
 							/*
 							 * Bespoke tiny affordance (12px, no button chrome), so it wraps

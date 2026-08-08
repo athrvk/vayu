@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/form_body.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
@@ -3052,6 +3053,24 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "response", response);
 }
 
+/**
+ * The string `pm.request.body` shows, and the yardstick the write-back measures
+ * an edit against - one function so the two cannot disagree about what a body
+ * looks like as a string.
+ *
+ * For a content mode it is the content itself. For `x-www-form-urlencoded` it
+ * is the exact wire body. For `form-data` it is a rendering of the parts and
+ * *not* the bytes sent: a multipart envelope carries a boundary libcurl
+ * generates at transfer time, so no faithful string exists before the send.
+ * Reading `content` alone - which is what this replaced - handed every form
+ * body `""`, indistinguishable from a request with no body at all.
+ */
+std::string script_body_view (const Body& body) {
+    return vayu::http::is_form_mode (body.mode) ?
+    vayu::http::encode_urlencoded (body.fields) :
+    body.content;
+}
+
 void setup_pm_request (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -3081,10 +3100,13 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         }
         JS_SetPropertyStr (ctx, request, "headers", headers);
 
-        // pm.request.body
+        // pm.request.body - a string for every mode, including the two that
+        // carry their content in `fields`. A bodyless request still defines no
+        // property at all, so `typeof pm.request.body` stays the way a script
+        // tells "no body" from "a body that happens to be empty".
         if (data->request->body.mode != BodyMode::None) {
-            JS_SetPropertyStr (ctx, request, "body",
-            JS_NewString (ctx, data->request->body.content.c_str ()));
+            const std::string view = script_body_view (data->request->body);
+            JS_SetPropertyStr (ctx, request, "body", JS_NewString (ctx, view.c_str ()));
         }
     }
 
@@ -3315,12 +3337,46 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
         staged.body = Body{};
     } else if (JS_IsString (js_body.get ())) {
-        staged.body.content = js_to_string (ctx, js_body.get ());
-        if (staged.body.mode == BodyMode::None) {
-            // A body on a request that had none: Text is the mode that means
-            // "this string, as written". Nothing downstream derives
-            // Content-Type from the mode, so the script still owns that header.
-            staged.body.mode = BodyMode::Text;
+        std::string body_text = js_to_string (ctx, js_body.get ());
+        // Every other member of pm.request is authoritative rather than a diff:
+        // whatever the object holds is what is sent. `body` cannot be read that
+        // way for a form mode, because the string the script was handed is a
+        // *view* of the fields - applying it back unconditionally would rewrite
+        // the field list of every request whose script merely read the body
+        // (dropping the disabled rows the view leaves out), and would refuse
+        // every form-data request outright. So an unchanged string means
+        // untouched, and the body is left exactly as it stands.
+        const bool untouched = staged.body.mode != BodyMode::None &&
+        body_text == script_body_view (staged.body);
+        if (untouched) {
+            // Nothing to apply. The wire outcome is identical either way for a
+            // content mode; for a form mode this is what keeps a read-only
+            // script from rewriting the body it only looked at.
+        } else if (staged.body.mode == BodyMode::FormData) {
+            // The only mode whose string view is not what goes on the wire, so
+            // it is the only one that cannot take a string back. Parsing one
+            // into text parts would also be the wrong shape the moment a part
+            // can be a file (issue #393): a script appending a field would
+            // silently drop the upload. Refused rather than applied to a body
+            // the transfer layer would then ignore.
+            return std::string (
+            "pm.request.body cannot be assigned on a form-data request: its "
+            "parts are multipart, not a string - edit the request's form "
+            "fields, or delete pm.request.body to send no body");
+        } else if (staged.body.mode == BodyMode::Form) {
+            // The string view is the wire body here, so it parses straight back
+            // into the fields the transfer layer reads. `content` is cleared to
+            // hold the type's invariant: exactly one of the two carries a body.
+            staged.body.fields = vayu::http::parse_urlencoded (body_text);
+            staged.body.content.clear ();
+        } else {
+            staged.body.content = std::move (body_text);
+            if (staged.body.mode == BodyMode::None) {
+                // A body on a request that had none: Text is the mode that means
+                // "this string, as written". Nothing downstream derives
+                // Content-Type from the mode, so the script still owns that header.
+                staged.body.mode = BodyMode::Text;
+            }
         }
     } else {
         return "pm.request.body must be a string, got " +

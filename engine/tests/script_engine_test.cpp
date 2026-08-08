@@ -11,6 +11,7 @@
 #include <chrono>
 #include <regex>
 
+#include "vayu/http/form_body.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
@@ -1348,6 +1349,207 @@ TEST_F (ScriptEngineTest, PreRequestScriptDeletingTheBodyDropsIt) {
     EXPECT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (request.body.mode, BodyMode::None);
     EXPECT_TRUE (request.body.content.empty ());
+}
+
+// ============================================================================
+// Form bodies and pm.request.body
+// ============================================================================
+//
+// The two form modes carry their content in `fields`, so a bridge that read
+// `content` handed the script `""` - indistinguishable from a request with no
+// body. Every read assertion below goes through a header the script sets from
+// the body, so it is the sent `Request` being checked, not the JS object.
+
+namespace {
+
+Body urlencoded_body () {
+    Body body;
+    body.mode   = BodyMode::Form;
+    body.fields = { { "grant_type", "client_credentials", true },
+        { "scope", "read write", true } };
+    return body;
+}
+
+Body form_data_body () {
+    Body body;
+    body.mode   = BodyMode::FormData;
+    body.fields = { { "name", "Ada", true }, { "role", "admin", true } };
+    return body;
+}
+
+} // namespace
+
+TEST_F (ScriptEngineTest, ScriptReadsAUrlencodedBodyAsTheStringThatGoesOnTheWire) {
+    request.body = urlencoded_body ();
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // Exactly what apply_method_and_body puts in the body frame - the space in
+    // "read write" percent-encoded by the one shared encoder.
+    EXPECT_EQ (request.headers["X-Seen-Body"], "grant_type=client_credentials&scope=read%20write");
+}
+
+TEST_F (ScriptEngineTest, ScriptReadsAFormDataBodyAsItsFieldsRatherThanEmpty) {
+    request.body = form_data_body ();
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Body-Empty'] = String(pm.request.body === '');
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // A rendering of the parts, not the multipart envelope: that carries a
+    // boundary libcurl generates at transfer time.
+    EXPECT_EQ (request.headers["X-Seen-Body"], "name=Ada&role=admin");
+    EXPECT_EQ (request.headers["X-Body-Empty"], "false");
+}
+
+TEST_F (ScriptEngineTest, ScriptReadingAFormBodySeesOnlyTheEnabledFields) {
+    request.body        = urlencoded_body ();
+    request.body.fields = { { "kept", "1", true }, { "off", "2", false } };
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // A disabled row is stored but never sent, so a script signing the body
+    // must not see it either.
+    EXPECT_EQ (request.headers["X-Seen-Body"], "kept=1");
+}
+
+TEST_F (ScriptEngineTest, ScriptCanTellAFormBodyApartFromNoBody) {
+    ASSERT_EQ (request.body.mode, BodyMode::None);
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Body-Type'] = typeof pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // The bodyless case is still `undefined`, which is what makes the non-empty
+    // string above meaningful.
+    EXPECT_EQ (request.headers["X-Body-Type"], "undefined");
+}
+
+TEST_F (ScriptEngineTest, ScriptOnlyReadingAFormBodyLeavesItsFieldsAlone) {
+    request.body        = urlencoded_body ();
+    request.body.fields = { { "kept", "1", true }, { "off", "2", false } };
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // The write-back reads `body` off the JS object whether or not the script
+    // assigned it, so an unchanged string has to mean untouched. Applying it
+    // regardless would parse the *view* back - and the view leaves disabled
+    // rows out, so a script that only looked at the body would delete one.
+    ASSERT_EQ (request.body.fields.size (), 2u);
+    EXPECT_EQ (request.body.fields[1].key, "off");
+    EXPECT_FALSE (request.body.fields[1].enabled);
+}
+
+TEST_F (ScriptEngineTest, ScriptWritingAUrlencodedBodyReachesTheFieldsThatAreSent) {
+    request.body = urlencoded_body ();
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = pm.request.body + '&signature=abc';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::Form);
+    // The edit lands in `fields`, which is what the transfer layer reads for a
+    // form mode - a string parked in `content` would be ignored entirely.
+    ASSERT_EQ (request.body.fields.size (), 3u);
+    EXPECT_EQ (request.body.fields[0].key, "grant_type");
+    EXPECT_EQ (request.body.fields[0].value, "client_credentials");
+    EXPECT_EQ (request.body.fields[1].key, "scope");
+    EXPECT_EQ (request.body.fields[1].value, "read write");
+    EXPECT_EQ (request.body.fields[2].key, "signature");
+    EXPECT_EQ (request.body.fields[2].value, "abc");
+    EXPECT_TRUE (request.body.content.empty ());
+    EXPECT_EQ (vayu::http::encode_urlencoded (request.body.fields),
+    "grant_type=client_credentials&scope=read%20write&signature=abc");
+}
+
+TEST_F (ScriptEngineTest, ScriptWritingBackAnUnchangedUrlencodedBodyChangesNothing) {
+    request.body      = urlencoded_body ();
+    const Body before = request.body;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (request.body.fields.size (), before.fields.size ());
+    for (size_t i = 0; i < before.fields.size (); ++i) {
+        EXPECT_EQ (request.body.fields[i].key, before.fields[i].key);
+        EXPECT_EQ (request.body.fields[i].value, before.fields[i].value);
+        EXPECT_TRUE (request.body.fields[i].enabled);
+    }
+}
+
+TEST_F (ScriptEngineTest, ScriptWritingAFormDataBodyIsRefusedRatherThanDropped) {
+    request.body      = form_data_body ();
+    const Body before = request.body;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = 'name=Grace';
+    )JS",
+    request, env);
+
+    // The whole write-back is all-or-nothing, so the request goes out as it
+    // stood - the one thing that must never happen is the edit being accepted
+    // and then ignored by the transfer layer.
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("form-data"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::FormData);
+    ASSERT_EQ (request.body.fields.size (), before.fields.size ());
+    EXPECT_EQ (request.body.fields[0].value, "Ada");
+    EXPECT_TRUE (request.body.content.empty ());
+}
+
+TEST_F (ScriptEngineTest, ScriptDeletingAFormDataBodySendsNoBody) {
+    request.body = form_data_body ();
+
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.body;
+    )JS",
+    request, env);
+
+    // The refusal above is about assigning a string, not about clearing the
+    // body: dropping it altogether is expressible and stays allowed.
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::None);
+    EXPECT_TRUE (request.body.fields.empty ());
+}
+
+TEST_F (ScriptEngineTest, TestScriptReadsAFormBodyToo) {
+    request.body = urlencoded_body ();
+
+    auto result = engine.execute_test (R"JS(
+        pm.test('body is visible', function () {
+            if (pm.request.body !== 'grant_type=client_credentials&scope=read%20write') {
+                throw new Error('got: ' + pm.request.body);
+            }
+        });
+    )JS",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
 TEST_F (ScriptEngineTest, PreRequestScriptEditsMadeBeforeAThrowStillApply) {

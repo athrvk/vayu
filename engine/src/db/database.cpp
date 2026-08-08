@@ -740,6 +740,13 @@ const std::vector<Environment>& environments) {
 // lambda runs, and the lambda only touches the same storage handle. Collections
 // first so a request that moved into a collection this batch also reparented
 // still lands after its owner's row.
+//
+// `update` behind an existence check rather than `replace` (issue #386): a
+// reorder only repositions rows that already exist, so the upsert half of
+// `replace` could only ever re-create a row something else deleted - silently,
+// and inside a transaction the endpoint advertises as all-or-nothing. Throwing
+// out of the transaction lambda leaves the guard uncommitted, so the rows
+// updated before the missing one roll back with it.
 void Database::apply_reorder (const std::vector<Collection>& collections,
 const std::vector<Request>& requests) {
     if (collections.empty () && requests.empty ()) {
@@ -751,15 +758,31 @@ const std::vector<Request>& requests) {
 
     retry_on_busy ("apply reorder", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
-            for (const auto& c : collections) {
-                impl_->storage.replace (c);
+            for (const auto& row : collections) {
+                if (impl_->storage.count<Collection> (
+                    where (c (&Collection::id) == row.id)) == 0) {
+                    throw MissingRowError ("Collection", row.id);
+                }
+                impl_->storage.update (row);
             }
-            for (const auto& r : requests) {
-                impl_->storage.replace (r);
+            for (const auto& row : requests) {
+                if (impl_->storage.count<Request> (
+                    where (c (&Request::id) == row.id)) == 0) {
+                    throw MissingRowError ("Request", row.id);
+                }
+                impl_->storage.update (row);
             }
             return true; // Commit
         });
     });
+}
+
+// The one place a caller can scope the DB mutex around more than a single call.
+// Deliberately `std::function` rather than a template: the mutex lives behind
+// the pImpl, and a header-inlined template would have to expose it.
+void Database::with_lock (const std::function<void ()>& fn) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    fn ();
 }
 
 // ============================================================================
