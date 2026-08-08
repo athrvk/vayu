@@ -5,9 +5,12 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
+import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
+import type { TreeEntity } from "./drop-position";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
@@ -58,6 +61,12 @@ export default function RequestItem({
 	const isSelected = selectedRequestId === request.id;
 	const isDeleting = deletingRequestId === request.id;
 	const isRenaming = renamingRequestId === request.id;
+
+	const entity = useMemo<TreeEntity>(
+		() => ({ kind: "request", id: request.id, name: request.name, collectionId }),
+		[request.id, request.name, collectionId]
+	);
+	const dnd = useRowDnd(entity);
 
 	const rowRef = useRef<HTMLDivElement>(null);
 	/**
@@ -119,6 +128,10 @@ export default function RequestItem({
 		<div
 			ref={rowRef}
 			data-request-id={request.id}
+			// The collection this row's requests block belongs to. Read by the drag
+			// hit test, which has the element and no way to derive its owner: a
+			// request is not in the loaded collections list.
+			data-owner-id={collectionId}
 			data-tree-label={request.name}
 			role="treeitem"
 			tabIndex={-1}
@@ -132,6 +145,11 @@ export default function RequestItem({
 			aria-setsize={setSize}
 			onClick={(e) => isRowSurface(e) && handleClick(e)}
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
+			// The drag is captured on the row, so the whole row is the handle -
+			// there is no grip icon to hunt for, and below the movement threshold
+			// every click affordance above is untouched.
+			{...dnd.handlers}
+			data-drop-blocked={dnd.isBlocked || undefined}
 			// Indent inside the row (see CollectionItem) so the fill still
 			// reaches both panel edges.
 			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
@@ -145,9 +163,13 @@ export default function RequestItem({
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
-					: "hover:bg-accent"
+					: "hover:bg-accent",
+				// Last, so a drop target's ring wins over the selected row's - the
+				// two are the same colour and the drop is the transient one.
+				rowDndClasses(dnd)
 			)}
 		>
+			<RowDropIndicator edge={dnd.dropEdge} indentPx={8 + depth * INDENT_STEP} />
 			<button
 				onClick={handleClick}
 				onDoubleClick={handleDoubleClick}
@@ -215,6 +237,7 @@ export default function RequestItem({
 				data-tree-delete
 				onClick={handleDelete}
 			/>
+			<RowMoveControls entity={entity} />
 
 			{!isRenaming && !isDeleting && (
 				<RowActionsMenu
@@ -231,6 +254,7 @@ export default function RequestItem({
 							icon: Copy,
 							onSelect: () => onDuplicateRequest(request),
 						},
+						...(dnd.moveAction ? [dnd.moveAction] : []),
 						{
 							label: "Delete",
 							icon: Trash2,

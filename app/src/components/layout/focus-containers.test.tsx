@@ -10,6 +10,7 @@ import collectionItemSrc from "@/modules/collections/CollectionItem.tsx?raw";
 import requestItemSrc from "@/modules/collections/RequestItem.tsx?raw";
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	// TabStrip resolves labels through one `useQueries`, so these are options.
 	requestDetailOptions: () => ({
 		queryKey: ["request"],

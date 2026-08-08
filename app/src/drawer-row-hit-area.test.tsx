@@ -101,6 +101,7 @@ const idle = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
 const noopMutation = { mutateAsync: vi.fn(), isPending: false };
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => idle,
 	useEnvironmentsQuery: () => ({ ...idle, data: [ENVIRONMENT] }),
 	useCreateEnvironmentMutation: () => noopMutation,

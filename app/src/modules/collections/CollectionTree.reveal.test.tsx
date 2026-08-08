@@ -48,6 +48,7 @@ const request = { id: "r1", collectionId: "grand", name: "Get invoice", method: 
 let requestsByCollection = new Map<string, Array<typeof request>>();
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => ({
 		data: [root, child, grandchild],
 		isLoading: false,

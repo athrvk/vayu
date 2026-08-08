@@ -45,6 +45,7 @@ const source = {
 const last = { id: "r2", collectionId: "c1", name: "Last", method: "GET", order: 2 };
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => ({
 		data: [collection],
 		isLoading: false,
