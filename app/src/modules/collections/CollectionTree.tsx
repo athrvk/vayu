@@ -22,6 +22,8 @@ import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
 import { useTreeCrud } from "./useTreeCrud";
+import { useTreeDnd } from "./useTreeDnd";
+import { MoveToDialog } from "./MoveToDialog";
 import {
 	CollectionTreeContext,
 	type CollectionTreeContextValue,
@@ -80,7 +82,7 @@ export default function CollectionTree() {
 			.sort(compareTreeOrder);
 	}, [collections]);
 
-	useRevealActiveSelection(treeRef, {
+	const { revealEntity } = useRevealActiveSelection(treeRef, {
 		selectedCollectionId,
 		selectedRequestId,
 		collections,
@@ -97,6 +99,29 @@ export default function CollectionTree() {
 		getRequestsByCollection,
 	});
 
+	/*
+	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
+	 * both states already own the row's input, and a move landing on a row that
+	 * is about to disappear is the two-writers problem in its clearest form.
+	 * Read from the CRUD slice rather than tracked again here - one source.
+	 */
+	const isRowBusy = useCallback(
+		(entityId: string) =>
+			entityId === rows.renamingId ||
+			entityId === rows.renamingRequestId ||
+			entityId === rows.deletingCollectionId ||
+			entityId === rows.deletingRequestId,
+		[rows.renamingId, rows.renamingRequestId, rows.deletingCollectionId, rows.deletingRequestId]
+	);
+
+	const { dnd, announcement, moveTarget, closeMoveDialog, moveToOwner } = useTreeDnd({
+		collections,
+		getRequestsByCollection,
+		treeRef,
+		isRowBusy,
+		revealEntity,
+	});
+
 	const treeContext = useMemo<CollectionTreeContextValue>(
 		() => ({
 			allCollections: collections,
@@ -104,8 +129,7 @@ export default function CollectionTree() {
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
-			// Phase 3 (#367) mounts the drag machinery here; see the context module.
-			dnd: null,
+			dnd,
 			...rows,
 		}),
 		[
@@ -114,6 +138,7 @@ export default function CollectionTree() {
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
+			dnd,
 			rows,
 		]
 	);
@@ -320,7 +345,9 @@ export default function CollectionTree() {
 					aria-atomic="true"
 					className="sr-only"
 					data-tree-live
-				/>
+				>
+					{announcement}
+				</div>
 
 				<DeleteConfirmDialog
 					open={!!panel.deleteConfirm}
@@ -337,6 +364,13 @@ export default function CollectionTree() {
 					}
 					onConfirm={panel.confirmDelete}
 					isDeleting={panel.isDeleteInFlight}
+				/>
+
+				<MoveToDialog
+					entity={moveTarget}
+					collections={collections}
+					onClose={closeMoveDialog}
+					onMove={moveToOwner}
 				/>
 			</div>
 		</DrawerPanel>

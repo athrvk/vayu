@@ -43,6 +43,7 @@ const requests = new Map([
 ]);
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => ({
 		data: collections,
 		isLoading: false,

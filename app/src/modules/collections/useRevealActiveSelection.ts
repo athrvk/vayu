@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { walkAncestors } from "./tree-utils";
+import type { TreeEntity } from "./drop-position";
 import type { Collection, Request } from "@/types";
 
 export interface RevealActiveSelectionOptions {
@@ -17,6 +18,20 @@ export interface RevealActiveSelectionOptions {
 	/** Read only as a scroll trigger: a row appears when its ancestors expand. */
 	expandedCollectionIds: Set<string>;
 	expandCollections: (collectionIds: string[]) => void;
+}
+
+export interface RevealActiveSelection {
+	/**
+	 * Put a row that just moved back where the user can see it and keep going
+	 * from: ancestors expanded, scrolled into view, and holding the tree's
+	 * single tab stop so a repeated Alt+Arrow lands on the same row.
+	 *
+	 * Separate from the selection reveal above and deliberately not routed
+	 * through it: a move does not change the selection, so nothing in that
+	 * effect's dependency list would fire, and forcing it to would re-expand
+	 * ancestors the user has since collapsed.
+	 */
+	revealEntity: (entity: TreeEntity) => void;
 }
 
 /**
@@ -37,9 +52,10 @@ export function useRevealActiveSelection(
 		expandedCollectionIds,
 		expandCollections,
 	}: RevealActiveSelectionOptions
-): void {
+): RevealActiveSelection {
 	const revealedSelectionRef = useRef<string | null>(null);
 	const scrolledSelectionRef = useRef<string | null>(null);
+	const movedRowRef = useRef<{ attribute: string; id: string } | null>(null);
 
 	/*
 	 * Reveal whatever the active tab points at: expand its ancestor folders so
@@ -125,4 +141,47 @@ export function useRevealActiveSelection(
 		expandedCollectionIds,
 		requestsByCollection,
 	]);
+
+	const revealEntity = useCallback(
+		(entity: TreeEntity) => {
+			const ownerId = entity.kind === "collection" ? entity.parentId : entity.collectionId;
+			if (ownerId) {
+				expandCollections(walkAncestors(ownerId, collections).map((c) => c.id));
+			}
+			movedRowRef.current = {
+				attribute: entity.kind === "collection" ? "data-collection-id" : "data-request-id",
+				id: entity.id,
+			};
+		},
+		[collections, expandCollections]
+	);
+
+	/*
+	 * The other half of `revealEntity`, and it runs after *every* render on
+	 * purpose: the row it is waiting for may not exist yet (a move into a
+	 * collapsed folder renders it only once the expand lands), and there is no
+	 * dependency that names "the moved row is now in the DOM". Clearing a ref
+	 * rather than state keeps this out of the render loop it observes.
+	 */
+	useEffect(() => {
+		const pending = movedRowRef.current;
+		if (!pending) return;
+		const tree = treeRef.current;
+		const row = tree?.querySelector<HTMLElement>(
+			`[${pending.attribute}="${CSS.escape(pending.id)}"]`
+		);
+		if (!tree || !row) return;
+		movedRowRef.current = null;
+		row.scrollIntoView({ block: "nearest" });
+		// The roving tabindex has to follow: the moved row is where the user is
+		// working, and leaving the tab stop on the row it displaced means the
+		// next Alt+Arrow moves something else (see useRovingTreeFocus).
+		for (const item of tree.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
+			item.tabIndex = -1;
+		}
+		row.tabIndex = 0;
+		row.focus();
+	});
+
+	return { revealEntity };
 }

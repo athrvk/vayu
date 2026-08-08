@@ -55,6 +55,17 @@ export const TIMING = {
 	TREE_TYPEAHEAD_MS: 500,
 
 	/**
+	 * How long a drag has to hover a collapsed folder before it springs open.
+	 *
+	 * The gesture that has to survive it is "pass over a folder on the way
+	 * somewhere else", so this is deliberately longer than an incidental
+	 * traverse and shorter than the moment a user would give up and drop
+	 * somewhere they did not want. 700ms is what macOS Finder and Windows
+	 * Explorer both use for the same interaction.
+	 */
+	TREE_SPRING_LOAD_MS: 700,
+
+	/**
 	 * Radix tooltip open delay, set once on the root `TooltipProvider` in
 	 * `main.tsx` and inherited everywhere.
 	 *

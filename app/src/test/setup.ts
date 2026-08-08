@@ -59,6 +59,28 @@ if (typeof globalThis.Path2D === "undefined") {
 	} as unknown as typeof Path2D;
 }
 
+/*
+ * jsdom implements pointer *events* but not pointer *capture*, so the three
+ * methods a captured drag calls are simply absent (verified: `undefined` on
+ * `Element.prototype`). The collection tree's drag guards every call, so this is
+ * not what makes the tests pass - it is what keeps them honest, since without a
+ * capture the retargeting the real gesture depends on is not modelled at all.
+ */
+if (hasDom && typeof Element.prototype.setPointerCapture !== "function") {
+	const captured = new WeakMap<Element, Set<number>>();
+	Element.prototype.setPointerCapture = function setPointerCapture(pointerId: number) {
+		const ids = captured.get(this) ?? new Set<number>();
+		ids.add(pointerId);
+		captured.set(this, ids);
+	};
+	Element.prototype.releasePointerCapture = function releasePointerCapture(pointerId: number) {
+		captured.get(this)?.delete(pointerId);
+	};
+	Element.prototype.hasPointerCapture = function hasPointerCapture(pointerId: number) {
+		return captured.get(this)?.has(pointerId) ?? false;
+	};
+}
+
 if (typeof globalThis.ResizeObserver === "undefined") {
 	globalThis.ResizeObserver = class {
 		observe() {}

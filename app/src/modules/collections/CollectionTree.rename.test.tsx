@@ -39,6 +39,7 @@ const collection = { id: "c1", name: "Acme API", order: 0 };
 const request = { id: "r1", collectionId: "c1", name: "Get users", method: "GET", order: 0 };
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => ({
 		data: [collection],
 		isLoading: false,
