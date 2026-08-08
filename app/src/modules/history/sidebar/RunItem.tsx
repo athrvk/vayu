@@ -184,15 +184,28 @@ export default function RunItem({
 					{/* z-10: sits above the stretched activator below, so delete
 					    stays clickable while the rest of the card selects the run. */}
 					<div className="relative z-10 flex items-center gap-1 shrink-0">
-						{/* The purple is raw palette, and stays: measured 3.93 light /
-						    4.59 dark against the panel, so it clears the 3.0 icon bar in
-						    both themes, and there is no violet semantic token to move it
-						    to. Not every raw palette class is a defect. */}
+						{/*
+						 * This slot marks the run types whose *identity line* would
+						 * otherwise be indistinguishable - which is load and design,
+						 * and only those two. Both print a bare URL, so nothing else
+						 * in the row separates a five-minute load test from a single
+						 * send.
+						 *
+						 * A collection run deliberately has no badge here. Its
+						 * identity is a folder name over a steps/iterations line, a
+						 * shape no other run type produces, so a badge would be the
+						 * third glyph in one small card saying the same thing -
+						 * after the folder icon and the step count. It read as
+						 * duplication because it was: the badge and the step count
+						 * were the same glyph.
+						 *
+						 * The purple is raw palette, and stays: measured 3.93 light /
+						 * 4.59 dark against the panel, so it clears the 3.0 icon bar
+						 * in both themes, and there is no violet semantic token to
+						 * move it to. Not every raw palette class is a defect.
+						 */}
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-						)}
-						{run.type === "scenario" && (
-							<ListOrdered className="w-3.5 h-3.5 text-primary shrink-0" />
 						)}
 						<Button
 							variant="rowActionDestructive"

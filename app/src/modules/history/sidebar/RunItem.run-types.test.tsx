@@ -167,11 +167,9 @@ describe("RunItem run types", () => {
 		).toBeInTheDocument();
 	});
 
-	it("gives each type its own badge and keeps the load one to load runs", () => {
-		// Counting icons was the old shape of this test, and it stopped meaning
-		// anything the moment a scenario row gained a badge of its own: the two
-		// rows rendered the same number of them while carrying different ones.
-		// The rule is which badge, so that is what is read.
+	it("keeps the load badge to load runs", () => {
+		// Counting icons was the old shape of this test and it never meant much;
+		// the rule is *which* badge, so that is what is read.
 		const scenario = render(
 			<RunItem
 				run={scenarioRun({ collectionId: "col_1", stepCount: 2 })}
@@ -186,5 +184,41 @@ describe("RunItem run types", () => {
 			<RunItem run={run("load")} onSelect={noop} onDelete={vi.fn()} isDeleting={false} />
 		).container;
 		expect(load.querySelector(".text-purple-500")).not.toBeNull();
+	});
+
+	/**
+	 * The badge slot beside Delete marks the run types whose identity line would
+	 * otherwise look the same - load and design, which both print a bare URL. A
+	 * collection run's identity is a folder name over a steps/iterations line, so
+	 * a badge there is a third glyph saying what the folder icon and the step
+	 * count already say, and it was drawn with the *same* glyph as the step count.
+	 *
+	 * Read by glyph count rather than by class: this is about one card not
+	 * repeating a picture, which a class assertion cannot see.
+	 */
+	it("does not repeat the step-count glyph as a type badge", () => {
+		const { container } = render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 4, iterations: 2 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
+		);
+
+		// lucide stamps its name onto the node (`lucide-list-ordered`), so
+		// identical glyphs are countable. Every icon in the card must differ.
+		const glyphs = Array.from(container.querySelectorAll("svg")).map(
+			(n) => n.getAttribute("class")?.match(/lucide-[a-z0-9-]+/)?.[0] ?? "unknown"
+		);
+
+		// Prove the scan read something before trusting what it did not find - a
+		// guard that matched nothing would "pass" on an empty list forever.
+		expect(glyphs.length).toBeGreaterThan(3);
+		expect(glyphs).not.toContain("unknown");
+		expect(glyphs).toContain("lucide-list-ordered");
+
+		expect(new Set(glyphs).size).toBe(glyphs.length);
 	});
 });
