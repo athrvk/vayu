@@ -158,6 +158,7 @@ export default function BodyPanel() {
 		setBodyDrafts,
 		getAutoContentType,
 		setAutoContentType,
+		resolvedAuth,
 	} = useRequestBuilderContext();
 	// The environment scoping GraphQL introspection's compose call - the same id
 	// the builder's Send path passes.
@@ -205,15 +206,18 @@ export default function BodyPanel() {
 	 * the collection chain can settle, which is what an Auth-panel-authed
 	 * endpoint needs to answer introspection at all.
 	 *
-	 * `resolvedUrl` is the one preview-resolved value here, and it is never
-	 * sent: it identifies the cache entry, so editing a variable the URL
-	 * interpolates points at a different schema instead of reusing the old one.
+	 * `resolvedUrl` and `resolvedAuth` are the preview-resolved values here, and
+	 * neither is sent: they identify the cache entry, so editing a variable the
+	 * URL interpolates - or the credential the auth resolves to, wherever in the
+	 * chain it lives - points at a different schema instead of reusing the old
+	 * one.
 	 */
 	const gqlSchemaTarget: SchemaTarget = {
 		url: (request.url || "").trim(),
 		resolvedUrl: resolveString(request.url || "").trim(),
 		headers: toFlatHeaders(request.headers),
 		auth: { ...request.auth },
+		resolvedAuth,
 		collectionId: request.collectionId || undefined,
 		environmentId: activeEnvironmentId || undefined,
 	};
@@ -402,7 +406,6 @@ export default function BodyPanel() {
 							onBodyChange={(b) => updateField("body", b)}
 							schemaTarget={gqlSchemaTarget}
 							onEditorMount={handleEditorMount}
-							active
 						/>
 					</div>
 					<ResizeHandle

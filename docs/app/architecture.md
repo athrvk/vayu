@@ -159,7 +159,7 @@ The app uses a dual-state management approach:
    - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress
    - `import-modal-store.ts`: Import dialog visibility and state
-   - `lib/graphql/schema-cache.ts`: Introspected GraphQL schema cache keyed by endpoint URL
+   - `lib/graphql/schema-cache.ts`: Introspected GraphQL schemas, keyed by resolved endpoint URL + collection + environment + a digest of the **resolved** credentials (so an upstream auth or variable edit is a different entry, not a stale hit). LRU-bounded, and a failed refresh keeps the last good schema
    - Module-local stores (e.g., `modules/collections/collections-store.ts`) co-locate with their feature
 
 2. **TanStack Query** (`queries/`): Server state, caching, synchronization
