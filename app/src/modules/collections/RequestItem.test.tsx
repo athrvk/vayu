@@ -54,6 +54,8 @@ function renderItem() {
 		<RequestItem
 			request={REQUEST}
 			collectionId="col_1"
+			posInSet={1}
+			setSize={1}
 			onSelect={onSelect}
 			onDelete={vi.fn()}
 			onStartRename={onStartRename}

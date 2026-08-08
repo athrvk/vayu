@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect, useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
@@ -17,6 +18,14 @@ export interface RequestItemProps {
 	collectionId: string;
 	/** Tree depth, so the row can indent itself and still span full width. */
 	depth?: number;
+	/**
+	 * 1-based position among the rows this one shares a parent with, and how
+	 * many there are. Required rather than defaulted: only the renderer that
+	 * maps the siblings knows them, and a default would announce a plausible
+	 * lie ("1 of 1") to a screen reader rather than fail.
+	 */
+	posInSet: number;
+	setSize: number;
 	onSelect: (collectionId: string, requestId: string) => void;
 	onDelete: (requestId: string) => Promise<void>;
 	onBeforeDelete?: (requestId: string, requestName: string) => void;
@@ -35,6 +44,8 @@ export default function RequestItem({
 	request,
 	collectionId,
 	depth = 1,
+	posInSet,
+	setSize,
 	onSelect,
 	onDelete,
 	onBeforeDelete,
@@ -48,6 +59,25 @@ export default function RequestItem({
 	onStartRename,
 	onDuplicate,
 }: RequestItemProps) {
+	const rowRef = useRef<HTMLDivElement>(null);
+	/**
+	 * Set when the rename field is about to be closed *from the keyboard*, so
+	 * focus can be put back on the row once React has unmounted the field.
+	 *
+	 * Without it F2, Escape drops the user out of the tree entirely: the field
+	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
+	 * of the document. Blur deliberately does not set it - a blur means focus has
+	 * already gone somewhere the user chose, and yanking it back would be worse
+	 * than the bug.
+	 */
+	const returnFocusToRow = useRef(false);
+
+	useEffect(() => {
+		if (isRenaming || !returnFocusToRow.current) return;
+		returnFocusToRow.current = false;
+		rowRef.current?.focus();
+	}, [isRenaming]);
+
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
 		// The second click of a double-click also fires `click`; ignore it so the
@@ -87,10 +117,19 @@ export default function RequestItem({
 
 	return (
 		<div
+			ref={rowRef}
 			data-request-id={request.id}
+			data-tree-label={request.name}
 			role="treeitem"
 			tabIndex={-1}
 			aria-selected={isSelected}
+			// The hierarchy a screen reader announces. Without these every row in
+			// the tree reads as a flat list item: the group wrapper that nests a
+			// folder's children is not a treeitem, so depth is invisible unless
+			// each row states it. Level is 1-based, so a root row is level 1.
+			aria-level={depth + 1}
+			aria-posinset={posInSet}
+			aria-setsize={setSize}
 			onClick={(e) => isRowSurface(e) && handleClick(e)}
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			// Indent inside the row (see CollectionItem) so the fill still
@@ -132,8 +171,10 @@ export default function RequestItem({
 						onChange={(e) => onRenameChange?.(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
+								returnFocusToRow.current = true;
 								onRenameSubmit?.(request.id);
 							} else if (e.key === "Escape") {
+								returnFocusToRow.current = true;
 								onRenameCancel?.();
 							}
 						}}
