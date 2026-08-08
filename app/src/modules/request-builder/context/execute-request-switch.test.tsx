@@ -48,6 +48,9 @@ vi.mock("@/queries", () => ({
 	useGlobalsQuery: () => ({ data: { variables: {} } }),
 	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
 	useCollectionsQuery: () => ({ data: [] }),
+	// The provider walks this for the auth an `inherit` resolves to; nothing
+	// here is about inheritance, so the chain is empty.
+	useCollectionAncestors: () => [],
 	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
 	useEnvironmentsQuery: () => ({ data: [] }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),

@@ -307,6 +307,16 @@ export interface RequestBuilderContextValue {
 	// Variable Resolution
 	resolveString: (input: string) => string;
 	resolveVariables: (input: string) => string;
+	/**
+	 * The auth this request will actually send - `inherit` walked through the
+	 * collection chain, `{{variables}}` resolved - or null for none.
+	 *
+	 * Preview only, never sent: execution resolves engine-side (`POST /compose`).
+	 * Read by the GraphQL schema cache, whose identity has to move when the
+	 * credentials do, including when they move somewhere upstream of this
+	 * request (#383).
+	 */
+	resolvedAuth: Record<string, unknown> | null;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	/** Every definition of a name, winner and losers alike. Display-only. */

@@ -21,6 +21,7 @@ import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
+	useCollectionAncestors,
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
 	useCollectionsQuery,
@@ -40,6 +41,7 @@ import type {
 	VariableScope,
 	RequestBuilderContextValue,
 } from "../types";
+import { resolveAuthForSend } from "../utils/auth-resolution";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 
@@ -220,10 +222,29 @@ export default function RequestBuilderProvider({
 	// Variable resolution
 	const {
 		resolveString,
+		resolveObject,
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
 		getVariableOrigins,
 	} = useVariableResolver({ collectionId: collectionId || undefined });
+
+	/**
+	 * The auth this request will actually send: `inherit` walked through the
+	 * collection chain by the shared resolver, then `{{variables}}` resolved for
+	 * preview. Null when the request sends no credentials.
+	 *
+	 * Preview only, like the resolved URL beside it - execution resolves
+	 * engine-side (`POST /compose`) and this is never sent. Its reader is the
+	 * GraphQL schema cache's identity: keyed on the auth block *as typed*, an
+	 * `inherit` was one unchanging value, so editing the ancestor collection's
+	 * credential or the environment variable its token interpolates served the
+	 * schema fetched with the old one (#383).
+	 */
+	const collectionAncestors = useCollectionAncestors(collectionId);
+	const resolvedAuth = useMemo<Record<string, unknown> | null>(() => {
+		const forSend = resolveAuthForSend(request.auth, collectionAncestors);
+		return forSend ? resolveObject(forSend) : null;
+	}, [request.auth, collectionAncestors, resolveObject]);
 
 	// Variable update mutations
 	const { activeEnvironmentId } = useSessionStore();
@@ -523,6 +544,7 @@ export default function RequestBuilderProvider({
 			saveStatus,
 			resolveString,
 			resolveVariables: resolveString,
+			resolvedAuth,
 			getVariable,
 			getAllVariables,
 			getVariableOrigins,
@@ -553,6 +575,7 @@ export default function RequestBuilderProvider({
 			hasUnsavedChanges,
 			saveStatus,
 			resolveString,
+			resolvedAuth,
 			getVariable,
 			getAllVariables,
 			getVariableOrigins,
