@@ -368,9 +368,14 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
     { "documentation",
-    "The request body content (if any). Assign a string to replace it, or "
+    "The request body as a string (if any). Assign a string to replace it, or "
     "delete it to send none. A body set on a request that had none is sent as "
-    "raw text - set Content-Type yourself." },
+    "raw text - set Content-Type yourself. A form body reads as its fields "
+    "encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire "
+    "body and an assignment parses back into the fields, while for form-data "
+    "it "
+    "is a rendering of the parts (the multipart bytes carry a boundary that "
+    "does not exist until the send) and an assignment is refused." },
     { "sortText", "1_pm_request_body" } });
 
     // Snippets for the mutation patterns. Without these, `pm.request.` offers

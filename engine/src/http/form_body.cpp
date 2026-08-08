@@ -27,6 +27,26 @@ std::string percent_encode (const std::string& value) {
     return out;
 }
 
+// The inverse, with the media type's `+` rule applied before unescaping so a
+// `%2B` still decodes to a literal plus. libcurl's unescape returns the decoded
+// length out-of-band because a decoded value may contain NUL bytes.
+std::string percent_decode (std::string value) {
+    for (char& c : value) {
+        if (c == '+') {
+            c = ' ';
+        }
+    }
+    int decoded_length = 0;
+    char* unescaped    = curl_easy_unescape (
+    nullptr, value.c_str (), static_cast<int> (value.size ()), &decoded_length);
+    if (!unescaped) {
+        return {};
+    }
+    std::string out (unescaped, static_cast<size_t> (decoded_length));
+    curl_free (unescaped);
+    return out;
+}
+
 } // namespace
 
 bool is_form_mode (BodyMode mode) {
@@ -58,6 +78,32 @@ std::string encode_urlencoded (const std::vector<FormField>& fields) {
         out += percent_encode (field.value);
     }
     return out;
+}
+
+std::vector<FormField> parse_urlencoded (const std::string& encoded) {
+    std::vector<FormField> fields;
+    size_t start = 0;
+    while (start <= encoded.size ()) {
+        const size_t amp     = encoded.find ('&', start);
+        const size_t end     = amp == std::string::npos ? encoded.size () : amp;
+        const std::string kv = encoded.substr (start, end - start);
+        if (!kv.empty ()) {
+            const size_t eq = kv.find ('=');
+            FormField field;
+            field.key =
+            percent_decode (eq == std::string::npos ? kv : kv.substr (0, eq));
+            field.value   = eq == std::string::npos ?
+              std::string{} :
+              percent_decode (kv.substr (eq + 1));
+            field.enabled = true;
+            fields.push_back (std::move (field));
+        }
+        if (amp == std::string::npos) {
+            break;
+        }
+        start = amp + 1;
+    }
+    return fields;
 }
 
 bool has_wire_body (const Body& body) {

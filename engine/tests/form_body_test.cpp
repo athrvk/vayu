@@ -322,6 +322,63 @@ TEST (FormBodyRules, EncodesEnabledFieldsOnly) {
     EXPECT_EQ (encode_urlencoded ({ { "empty", "", true } }), "empty=");
 }
 
+TEST (FormBodyRules, ParsesUrlencodedBackIntoFields) {
+    const auto fields = parse_urlencoded ("a=1&b=two");
+    ASSERT_EQ (fields.size (), 2u);
+    EXPECT_EQ (fields[0].key, "a");
+    EXPECT_EQ (fields[0].value, "1");
+    EXPECT_EQ (fields[1].key, "b");
+    EXPECT_EQ (fields[1].value, "two");
+    // Nothing in the string says a row is off, and inventing a disabled one
+    // would drop a field the caller wrote.
+    EXPECT_TRUE (fields[0].enabled);
+    EXPECT_TRUE (fields[1].enabled);
+
+    EXPECT_TRUE (parse_urlencoded ("").empty ());
+}
+
+TEST (FormBodyRules, ParseUrlencodedDecodesTheMediaTypesEscapes) {
+    // `+` is a space in this media type; a literal plus arrives as %2B and has
+    // to survive as one, which is why the two are handled in that order.
+    const auto fields = parse_urlencoded ("q=hello+world&sum=1%2B1&sp=a%20b");
+    ASSERT_EQ (fields.size (), 3u);
+    EXPECT_EQ (fields[0].value, "hello world");
+    EXPECT_EQ (fields[1].value, "1+1");
+    EXPECT_EQ (fields[2].value, "a b");
+
+    // Keys are decoded too - the encoder escapes both sides.
+    const auto keyed = parse_urlencoded ("odd%20key=v");
+    ASSERT_EQ (keyed.size (), 1u);
+    EXPECT_EQ (keyed[0].key, "odd key");
+}
+
+TEST (FormBodyRules, ParseUrlencodedHandlesPairsWithoutAValue) {
+    // A list of pairs has no malformed case to reject: a segment with no `=`
+    // is a field with an empty value, and an empty segment is nothing at all.
+    const auto fields = parse_urlencoded ("flag&a=1&&b=");
+    ASSERT_EQ (fields.size (), 3u);
+    EXPECT_EQ (fields[0].key, "flag");
+    EXPECT_EQ (fields[0].value, "");
+    EXPECT_EQ (fields[1].key, "a");
+    EXPECT_EQ (fields[1].value, "1");
+    EXPECT_EQ (fields[2].key, "b");
+    EXPECT_EQ (fields[2].value, "");
+}
+
+TEST (FormBodyRules, EncodeAndParseAreInverses) {
+    // The round-trip the script bridge depends on: a script that reads
+    // pm.request.body and writes it straight back must change nothing.
+    const std::vector<FormField> fields = { { "grant_type", "client_credentials", true },
+        { "scope", "read write", true }, { "sum", "1+1", true }, { "empty", "", true } };
+
+    const auto reparsed = parse_urlencoded (encode_urlencoded (fields));
+    ASSERT_EQ (reparsed.size (), fields.size ());
+    for (size_t i = 0; i < fields.size (); ++i) {
+        EXPECT_EQ (reparsed[i].key, fields[i].key);
+        EXPECT_EQ (reparsed[i].value, fields[i].value);
+    }
+}
+
 TEST (FormBodyRules, HasWireBodyIsModeAware) {
     Body none;
     EXPECT_FALSE (has_wire_body (none));
