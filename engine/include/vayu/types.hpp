@@ -99,6 +99,14 @@ struct CaseInsensitiveLess {
             return std::tolower (c1) < std::tolower (c2);
         });
     }
+
+    /// Header-name equality, for the callers that compare a name outside the
+    /// map - the same rule the map's ordering already applies, rather than a
+    /// private lower-casing copy at each call site.
+    static bool equal (const std::string& a, const std::string& b) {
+        const CaseInsensitiveLess less;
+        return !less (a, b) && !less (b, a);
+    }
 };
 
 /**
@@ -108,15 +116,35 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
 /**
  * @brief Request body content types
+ *
+ * `Form` is `x-www-form-urlencoded` and `FormData` is `multipart/form-data`.
+ * Both carry their content as `Body::fields`, never as `Body::content` - see
+ * `vayu/http/form_body.hpp` for the wire encoding of each.
  */
 enum class BodyMode { None, Json, Text, Form, FormData, Binary, GraphQL };
 
 /**
+ * @brief One entry of a form body.
+ *
+ * Mirrors the renderer's `KeyValueEntry`: a disabled row is stored and
+ * round-tripped, and dropped only when the body is put on the wire.
+ */
+struct FormField {
+    std::string key;
+    std::string value;
+    bool enabled = true;
+};
+
+/**
  * @brief Request body
+ *
+ * Exactly one of `content` and `fields` carries the body: the two form modes
+ * use `fields`, every other content-bearing mode uses `content`.
  */
 struct Body {
     BodyMode mode = BodyMode::None;
     std::string content;
+    std::vector<FormField> fields;
 };
 
 /**

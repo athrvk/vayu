@@ -207,7 +207,7 @@ message `Invalid 'auth': must be a JSON object`.
 |---|---|
 | `variables` (collection / environment / globals) | object |
 | `auth` (collection / request) | object |
-| `body` (request) | object |
+| `body` (request) | object - see [The request `body` union](#the-request-body-union) |
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
@@ -216,6 +216,45 @@ is dropped, and `auth` resolves to none, so a request the caller believes carrie
 credentials goes out bare. The write is therefore rejected rather than stored:
 `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
 stored value is left untouched.
+
+### The request `body` union
+
+`body` is a discriminated union on `mode`, and the shape of what it carries
+depends on which mode it is. The same union is read on the execution endpoints
+(`POST /compose`, `POST /execute`, `POST /runs`) and stored on a request row,
+so a body that round-trips through storage sends the same bytes.
+
+| `mode` | Carries | On the wire |
+|---|---|---|
+| `none` | nothing | no body |
+| `json` / `text` / `graphql` | `content` (string) | `content`, verbatim |
+| `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
+| `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
+
+`fields` is an array of `{key: string, value: string, enabled?: bool}` - the
+same row shape `params` and `headers` use. `key` is required and must be a
+string; `value` defaults to `""` and a non-boolean `enabled` reads as enabled.
+A form mode carrying no `fields` array is a `400`, as is a `fields` on a mode
+whose content is a string. Rows with `enabled: false` are stored and returned
+but never sent, so switching one back on needs no re-compose; `{{variables}}`
+resolve inside both `key` and `value` during composition.
+
+Two Content-Type rules follow from the encoding:
+
+- `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
+  **only when the request declares no Content-Type of its own** - an explicit
+  header wins.
+- `form-data` **always** sets its own Content-Type, and a caller-supplied one is
+  dropped. The header has to carry the boundary of the body that was actually
+  encoded, which no caller can name in advance.
+
+`form-data` supports text parts only. A file part has no representation in the
+payload yet - importers count file parts as skipped rather than importing them
+as empty text fields.
+
+The older mode spellings `form` (for `x-www-form-urlencoded`) and `formdata`
+(for `form-data`) are still accepted on input; responses always use the long
+names.
 
 ### Behavior change (pre-1.0)
 
@@ -568,7 +607,7 @@ the null-vs-absent rule.
   "params": [],                      // Optional, array of {key, value, enabled}
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
-  "bodyType": "none",                // Optional: "none", "json", "text", "form-data", "x-www-form-urlencoded"
+  "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
   "auth": {},                        // Optional, authentication config
   "preRequestScript": "",            // Optional, JavaScript pre-request script
   "postRequestScript": "",           // Optional, JavaScript test script

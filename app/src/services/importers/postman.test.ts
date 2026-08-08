@@ -289,6 +289,62 @@ describe("PostmanV21Parser", () => {
 		expect(req.params).toEqual([{ key: "page", value: "2", enabled: false }]);
 	});
 
+	/**
+	 * An imported form body has to arrive in the shape the *engine* reads:
+	 * `deserialize_request` matches these mode strings exactly and takes the
+	 * content out of `fields` (issue #381). A Postman `formdata` item that
+	 * mapped to any other spelling, or to a `content` string, would import
+	 * cleanly, display correctly, and send an empty body.
+	 */
+	it("maps both form body modes to the engine's fields shape", () => {
+		const requests = parse(
+			collectionOf([
+				{
+					name: "Urlencoded",
+					request: {
+						method: "POST",
+						url: "https://x/form",
+						body: {
+							mode: "urlencoded",
+							urlencoded: [
+								{ key: "a", value: "1" },
+								{ key: "b", value: "2", disabled: true },
+							],
+						},
+					},
+				},
+				{
+					name: "Multipart",
+					request: {
+						method: "POST",
+						url: "https://x/multipart",
+						body: {
+							mode: "formdata",
+							formdata: [
+								{ key: "note", value: "hi", type: "text" },
+								{ key: "avatar", src: "/tmp/a.png", type: "file" },
+							],
+						},
+					},
+				},
+			])
+		).collections[0].requests;
+
+		expect(requests[0].body).toEqual({
+			mode: "x-www-form-urlencoded",
+			fields: [
+				{ key: "a", value: "1", enabled: true },
+				{ key: "b", value: "2", enabled: false },
+			],
+		});
+		// File parts have no engine-side representation yet, so they are counted
+		// as skipped rather than imported as empty text fields.
+		expect(requests[1].body).toEqual({
+			mode: "form-data",
+			fields: [{ key: "note", value: "hi", enabled: true }],
+		});
+	});
+
 	it("leaves a literal single-brace value alone", () => {
 		// `{beta}` is a valid literal path segment in Postman, where only `{{x}}` is
 		// template syntax. Rewriting it invented a variable that resolves to nothing.

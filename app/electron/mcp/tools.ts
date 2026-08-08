@@ -245,6 +245,31 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 
 class ToolArgError extends Error {}
 
+/** The body modes whose content is a field list rather than a string. */
+const FORM_BODY_MODES = new Set(["form-data", "x-www-form-urlencoded"]);
+
+/**
+ * The body an agent described, in the shape the engine reads.
+ *
+ * Both form modes carry their content as `fields` - the same
+ * `{key, value, enabled}` rows the request builder and every importer produce
+ * - so a `body` string is split on `&` into entries rather than handed over
+ * whole. These two tools have advertised both modes all along while emitting
+ * `{ mode, content }`, which the engine reads no `fields` from: before issue
+ * #381 that meant an empty body on the wire, and now it is a refusal. Either
+ * way the mode was documented and unusable; splitting here makes the schema's
+ * promise true.
+ */
+function bodyPayload(bodyType: string, content: string): Record<string, unknown> {
+	if (!FORM_BODY_MODES.has(bodyType)) return { mode: bodyType, content };
+	const fields = [...new URLSearchParams(content)].map(([key, value]) => ({
+		key,
+		value,
+		enabled: true,
+	}));
+	return { mode: bodyType, fields };
+}
+
 /**
  * A whole number greater than zero, or `fallback` when the caller omitted the
  * argument.
@@ -271,9 +296,9 @@ function optionalPositiveInt(args: Record<string, unknown>, key: string, fallbac
  *
  * Nothing here resolves `{{variables}}` anymore: composition - interpolation
  * and the `inherit` auth walk - is engine-owned (issue #226), and MCP hands
- * the engine raw strings. The body is emitted as `{ mode, content }` - the
- * shape the engine's `deserialize_request` reads (it keys off `mode`, not
- * `type`).
+ * the engine raw strings. The body is emitted in the shape the engine's
+ * `deserialize_request` reads - keyed off `mode`, not `type`, and carrying
+ * `fields` rather than `content` for the two form modes (see `bodyPayload`).
  */
 function readRequestOverrides(args: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
@@ -292,7 +317,7 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
 	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
-		out.body = { mode: str(args, "bodyType") ?? "text", content: bodyContent };
+		out.body = bodyPayload(str(args, "bodyType") ?? "text", bodyContent);
 	}
 	// httpVersion is an override like any other field here: `POST /compose`
 	// always emits a stored request's protocol, so a `start_load_run
@@ -807,7 +832,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type: json, text, form-data, x-www-form-urlencoded (default text)."
+					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported."
 				),
 			auth: authInput,
 			httpVersion: z
@@ -952,7 +977,12 @@ export const TOOLS: McpTool[] = [
 			method: z.string().optional().describe("HTTP method (default GET)."),
 			headers: z.record(z.string()).optional().describe("Headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
-			bodyType: z.string().optional().describe("Body type: json, text, ... (default text)."),
+			bodyType: z
+				.string()
+				.optional()
+				.describe(
+					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields."
+				),
 			description: z.string().optional(),
 		},
 		handler: async (args, ctx, signal) => {
@@ -976,7 +1006,7 @@ export const TOOLS: McpTool[] = [
 				// The engine stores the body blob verbatim; the canonical shape keys
 				// off `mode` (not `type`), so a `type`-keyed body would not round-trip
 				// in the app. `bodyType` mirrors it into the denormalized column.
-				payload.body = { mode: bodyType, content: body };
+				payload.body = bodyPayload(bodyType, body);
 				payload.bodyType = bodyType;
 			}
 			const description = str(args, "description");

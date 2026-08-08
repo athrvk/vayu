@@ -357,6 +357,38 @@ TEST_F (RequestComposerTest, ComposesAnInlineRequestAgainstAScope) {
     EXPECT_EQ (payload["environmentId"], "env_1");
 }
 
+// A form body carries its content as `fields`, so resolution has to reach
+// inside them - the composer's `content` pass alone would leave a form body
+// full of literal `{{...}}` on the wire. The engine only started *sending*
+// these bodies with issue #381; this pins the half of the pipeline that was
+// already right, so the two cannot drift apart.
+TEST_F (RequestComposerTest, ResolvesVariablesInsideFormFields) {
+    seed_collection ("col", "", R"({"host":{"value":"col.test","enabled":true}})");
+    seed_environment ("env_1", R"({"secret":{"value":"s3cr3t","enabled":true}})");
+
+    const json body = {
+        { "request",
+        { { "method", "post" }, { "url", "https://{{host}}/x" },
+        { "body",
+        { { "mode", "x-www-form-urlencoded" },
+        { "fields",
+        json::array ({ { { "key", "at-{{host}}" }, { "value", "{{secret}}" }, { "enabled", true } },
+        { { "key", "off" }, { "value", "{{secret}}" }, { "enabled", false } } }) } } } } },
+        { "collectionId", "col" }, { "environmentId", "env_1" }
+    };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["body"]["mode"], "x-www-form-urlencoded");
+    EXPECT_EQ (payload["body"]["fields"][0]["key"], "at-col.test");
+    EXPECT_EQ (payload["body"]["fields"][0]["value"], "s3cr3t");
+    // A disabled field is still resolved and still carried: it is dropped at
+    // the wire, not during composition, so switching it back on in the UI
+    // needs no re-compose.
+    EXPECT_EQ (payload["body"]["fields"][1]["value"], "s3cr3t");
+    EXPECT_EQ (payload["body"]["fields"][1]["enabled"], false);
+}
+
 TEST_F (RequestComposerTest, InlineOverlayReplacesStoredFieldsAndStillResolves) {
     seed_collection ("col", "", R"({"host":{"value":"stored.test","enabled":true}})");
     auto r = make_request ("req_1", "col");

@@ -102,8 +102,31 @@ Response error_response (const Error& error);
  * Shared by both clients so the two cannot drift apart again.
  *
  * Requires `validate_transferable(request)` to have passed.
+ *
+ * @return The multipart body attached to the handle, which the caller **must**
+ *         free with `curl_mime_free` once the transfer has finished, or
+ *         nullptr for every other body mode. Returned rather than owned here
+ *         because the two drivers keep per-transfer state in different places:
+ *         a local for the single-request client, `TransferData` for the loop.
  */
-void apply_method_and_body (CURL* curl, const Request& request);
+[[nodiscard]] curl_mime* apply_method_and_body (CURL* curl, const Request& request);
+
+/**
+ * @brief The "Content-Type: ..." header line the body implies, or empty.
+ *
+ * Empty when the request already declares a Content-Type (a header the user
+ * typed always wins) and empty for every mode that implies none. Both clients
+ * call this after their own header loop so the two cannot drift.
+ */
+[[nodiscard]] std::string body_content_type_header (const Request& request);
+
+/**
+ * @brief True when this request header must not be forwarded as written.
+ *
+ * Only a Content-Type on a multipart body, whose boundary libcurl owns - see
+ * `vayu::http::content_type_is_engine_owned`.
+ */
+[[nodiscard]] bool suppresses_request_header (const Request& request, const std::string& key);
 
 /**
  * @brief Record one "Key: Value" response header line into `headers`.
