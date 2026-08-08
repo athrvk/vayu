@@ -74,9 +74,12 @@ struct ScenarioPlan {
 /**
  * The validated `scenario` block of a `POST /runs` payload.
  *
- * `data` rows themselves are deliberately absent: they are user data of unknown
- * sensitivity and are never snapshotted, so only their count survives
- * validation.
+ * `data` rows themselves are deliberately absent, and their absence here is
+ * structural rather than a convention to remember: this is the object
+ * `build_scenario_manifest` serializes into `runs.config_snapshot`, and the
+ * rows are user data of unknown sensitivity that is never persisted. They live
+ * on `ScenarioExecution`, which nothing writes to disk; only their count
+ * survives into the snapshot.
  */
 struct ScenarioRequest {
     /// Only `"collection"` today. The discriminator exists so a future stored
@@ -95,15 +98,25 @@ struct ScenarioRequest {
  * A resolved scenario, ready to execute: what was asked for and what it
  * resolved to.
  *
- * The two travel together from the route to the run's worker thread because
- * neither is enough on its own - the plan is what executes, and the request is
- * what says how many times and (from phase 5) with which data rows. Held by
- * `shared_ptr<const>`: resolution happened once, before the run row existed,
- * and nothing may edit it afterwards.
+ * The three travel together from the route to the run's worker thread because
+ * none is enough on its own - the plan is what executes, the request is what
+ * says how many times, and the rows are what each iteration binds to
+ * `pm.iterationData`. Held by `shared_ptr<const>`: resolution happened once,
+ * before the run row existed, and nothing may edit it afterwards.
  */
 struct ScenarioExecution {
     ScenarioRequest request;
     ScenarioPlan plan;
+    /**
+     * The `data` rows, in payload order - each a JSON object, already validated
+     * as one. Empty for a run sent without `data`, which is what makes
+     * `pm.iterationData` `undefined` for its steps.
+     *
+     * They live here and nowhere else: `ScenarioRequest` feeds the snapshot and
+     * must not carry them, and the engine never reads them from disk because it
+     * never writes them there.
+     */
+    std::vector<nlohmann::json> data_rows;
 };
 
 /** Bounds a plan must respect, read from config by the caller. */
@@ -137,6 +150,8 @@ struct ScenarioResolution {
     std::string error;
     ScenarioRequest request;
     ScenarioPlan plan;
+    /// The validated `data` rows, for `ScenarioExecution::data_rows`.
+    std::vector<nlohmann::json> data_rows;
 };
 
 /**

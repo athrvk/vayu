@@ -28,10 +28,11 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
-| Script identity     | `pm.info.requestId`, `.requestName`, `.eventName` - each optional, see below     |
+| Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
+| Data rows           | `pm.iterationData.get(name)`, `.toObject()` - read-only, data-driven collection runs only, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -95,7 +96,7 @@ ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
 `"undefined"`.
 
-### Script identity (`pm.info`) - three fields, all optional
+### Script identity (`pm.info`) - five fields, all optional
 
 `pm.info` is always an object; each field is present only when there is a
 truthful value for it, so a script tests with `typeof` rather than assuming:
@@ -105,6 +106,8 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `requestId` | The saved request the send is filed under | An ad-hoc request (MCP's `run_request` with no `requestId`, a load run started from a URL) |
 | `requestName` | The request's name **as the client sent it** - the name in the editor, which for an unsaved edit differs from the stored row | A request with no name, and an ad-hoc one |
 | `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
+| `iteration` | The 0-based pass over the plan, in a collection run | Anywhere else - a single Send, a load run's Tests script |
+| `iterationCount` | How many passes that run will make | The same places |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {
@@ -113,12 +116,14 @@ if (pm.info.eventName === "prerequest") {
 console.log("running " + (pm.info.requestName || "an unnamed request"));
 ```
 
-`iteration` and `iterationCount` are **not** exposed, and that is a decision
-rather than an omission (issue #300). Vayu has no collection runner: a load
-test's Tests script runs **once per sampled response, after the run
-finishes**, and samples are a reservoir rather than the first N iterations, so
-any number reported there would not be an iteration count. They return when
-there is a runner to count (issue #303).
+`iteration` and `iterationCount` are set by the **collection runner and by
+nothing else**, which is the same decision issue #300 recorded rather than a
+reversal of it. There is now a runner to count, so a scenario run's steps read
+the real index (`iteration` counts from 0, and reads as `0` on the first pass);
+everywhere else both stay `undefined`, because a load test's Tests script runs
+**once per sampled response, after the run finishes**, and samples are a
+reservoir rather than the first N iterations - a number reported there would not
+be an iteration count.
 
 ### `pm.sendRequest` is synchronous, callback-only, and not available to agents
 
@@ -389,6 +394,34 @@ Divergences from Postman:
 Details, including every case that throws, are in
 [scripting.md](../engine/scripting.md#flow-control-pmexecution).
 
+### Data rows (`pm.iterationData`)
+
+```javascript
+pm.iterationData.get('username');  // this iteration's value for that column
+pm.iterationData.toObject();       // the whole row
+```
+
+A collection run can be given rows - the app parses the CSV or JSON file and
+sends them inline on the run payload; the engine never opens a file. Row
+`i % rows` binds to iteration `i`, so `iterations` above the row count wraps.
+
+Divergences from Postman:
+
+- **It is `undefined` when the run has no data**, rather than an empty scope
+  that answers `undefined` to every column. Absence is a fact worth being able
+  to test: `pm.iterationData ? pm.iterationData.get('user') : 'default'`. This
+  is the opposite treatment to `pm.execution` above, deliberately - flow control
+  is a capability, and one that silently does nothing is a false success.
+- **It is read-only**: `set`, `unset` and `clear` throw. The rows are a run
+  input, not a scope, so a write has nowhere to land and the next iteration
+  binds a different row regardless.
+- **Which row was used is recorded.** Every step's stored row and live event
+  carries `dataRowIndex`, and the step list shows it beside the iteration, so a
+  wrapped run says which row a pass re-used.
+
+Details are in
+[scripting.md](../engine/scripting.md#data-rows-pmiterationdata).
+
 ---
 
 ## Not (yet) supported
@@ -409,9 +442,6 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   wanting a generated value uses `pm.variables.replaceIn("{{$guid}}")` (see
   below) or writes the JavaScript for it. The supported set and the reasoning
   are in [variable resolution](./variable-resolution.md#dynamic-variables)
-- `pm.iterationData.*` - data-file driven runs, and with them
-  `pm.info.iteration` / `pm.info.iterationCount` (see
-  [above](#script-identity-pminfo---three-fields-all-optional))
 - `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
   Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)

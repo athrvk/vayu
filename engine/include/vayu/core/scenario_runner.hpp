@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -61,6 +62,15 @@ enum class StepOutcome { Passed, Failed, Skipped, Errored };
 struct StepRecord {
     size_t iteration  = 0; ///< 0-based, as `pm.info.iteration` reports it.
     size_t step_index = 0; ///< Position in the plan.
+    /**
+     * Which `data` row this iteration bound, or absent for a run without one.
+     *
+     * Carried on every record because the wrap must not be silent (issue
+     * #356): with `iterations` above the row count, iteration 4 of a 3-row set
+     * reads row 1, and "which row produced this" is otherwise unanswerable
+     * from a run's stored steps.
+     */
+    std::optional<size_t> data_row_index;
     std::string step_name;
     std::string request_id;
     StepOutcome outcome = StepOutcome::Passed;

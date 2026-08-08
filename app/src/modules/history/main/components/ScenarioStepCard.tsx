@@ -88,6 +88,17 @@ export default function ScenarioStepCard({
 	// arrives, which is why the shell renders without one rather than blank.
 	const error = step.result?.error;
 
+	// "Iteration 2 · Row 3". The row is shown whenever the run had a data set,
+	// including a single-iteration one, because it is the only place the step
+	// says which row produced it - and with `iterations` above the row count
+	// the two numbers deliberately disagree.
+	const context = [
+		showIteration ? `Iteration ${step.iteration + 1}` : "",
+		step.dataRowIndex === undefined ? "" : `Row ${step.dataRowIndex + 1}`,
+	]
+		.filter(Boolean)
+		.join(" · ");
+
 	return (
 		<SampledExchange
 			label={step.stepIndex + 1}
@@ -103,7 +114,7 @@ export default function ScenarioStepCard({
 			statusCode={step.statusCode}
 			statusText={step.result?.statusText}
 			latencyMs={step.latencyMs}
-			timestamp={showIteration ? `Iteration ${step.iteration + 1}` : ""}
+			timestamp={context}
 			error={error}
 			phases={phases}
 			isExpanded={isExpanded}

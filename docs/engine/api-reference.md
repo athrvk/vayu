@@ -1693,8 +1693,18 @@ the same request does, and the two cannot drift apart.
 `pm.info.iterationCount`. No other caller sets them - see
 [scripting.md](scripting.md#script-identity-pminfo).
 
+**A run with `data` binds one row per iteration.** Row `i % rows` binds to
+iteration `i`, and the run's scripts read it as `pm.iterationData` -
+`get(name)` and `toObject()`, read-only, and `undefined` for a run sent without
+`data`. With `iterations` absent the row count *is* the iteration count; with
+both given the explicit count wins and the index wraps. The rows reach the run's
+worker and nowhere else: they are not persisted, and the snapshot records
+`dataRowCount` only. The full contract is in
+[scripting.md](scripting.md#data-rows-pmiterationdata).
+
 **Each step execution writes one `results` row** carrying the design-mode trace
-plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`. Bodies are
+plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -
+for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -2064,14 +2074,16 @@ replays the steps it missed:
 event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
-       "statusCode":200,"latencyMs":42.7}
+       "statusCode":200,"latencyMs":42.7,"dataRowIndex":1}
 
 event: complete
 data: {"event":"complete","runId":"run_1234567890"}
 ```
 
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
-[Scenario runs](#scenario-runs). A scenario run publishes no `metrics` ticks:
+[Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
+`data`, on the same terms as on the stored row, so a step reads the same live
+and after a reload. A scenario run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
 

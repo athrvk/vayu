@@ -392,6 +392,12 @@ export interface ScenarioStepEvent {
 	/** `0` when the step never reached a server. */
 	statusCode: number;
 	latencyMs: number;
+	/**
+	 * Which `data` row this iteration bound, absent for a run without a data
+	 * set - on the same terms as the stored row's, so a step reads the same
+	 * live and after a reload.
+	 */
+	dataRowIndex?: number;
 }
 
 /**
@@ -488,6 +494,13 @@ export interface RunResultTrace {
 	/** The stored request this step came from. */
 	requestId?: string;
 	outcome?: StepOutcome;
+	/**
+	 * Which `data` row this iteration bound, absent for a run without a data
+	 * set. Present so the wrap is visible: with `iterations` above the row
+	 * count, iteration 4 of a 3-row set reads row 1, and the iteration number
+	 * alone cannot say that.
+	 */
+	dataRowIndex?: number;
 }
 
 /**

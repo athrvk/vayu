@@ -48,7 +48,7 @@ function storedStep(
 	iteration: number,
 	stepIndex: number,
 	outcome: StepOutcome = "passed",
-	overrides: { name?: string; statusCode?: number } = {}
+	overrides: { name?: string; statusCode?: number; dataRowIndex?: number } = {}
 ): NonNullable<RunReport["results"]>[number] {
 	return {
 		timestamp: 1_700_000_000_000,
@@ -57,6 +57,7 @@ function storedStep(
 		trace: {
 			iteration,
 			stepIndex,
+			dataRowIndex: overrides.dataRowIndex,
 			stepName: overrides.name ?? `Step ${stepIndex + 1}`,
 			requestId: `req_${stepIndex}`,
 			outcome,
@@ -193,6 +194,19 @@ describe("stepRowsFromReport", () => {
 		// The stored row travels with the mapped one - it is what the response
 		// pane restores from.
 		expect(rows[0].result).toBeDefined();
+	});
+
+	it("carries the data row an iteration bound, and leaves it absent without one", () => {
+		// The wrap is what makes this worth reading back: iteration 2 of a
+		// two-row set is row 0 again, and nothing else on the row says so.
+		const rows = stepRowsFromReport(
+			report({
+				results: [storedStep(0, 0, "passed", { dataRowIndex: 0 }), storedStep(1, 0)],
+			})
+		);
+
+		expect(rows[0].dataRowIndex).toBe(0);
+		expect(rows[1].dataRowIndex).toBeUndefined();
 	});
 
 	it("sorts stored rows into plan order", () => {

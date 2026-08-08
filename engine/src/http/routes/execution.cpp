@@ -842,7 +842,11 @@ void register_execution_routes (RouteContext& ctx) {
             auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
             execution->request = std::move (resolved.request);
             execution->plan    = std::move (resolved.plan);
-            scenario_execution = std::move (execution);
+            // The manifest above was built before this move, and from
+            // `resolved.request` - which carries the row *count* and never the
+            // rows. That is what keeps user data out of `config_snapshot`.
+            execution->data_rows = std::move (resolved.data_rows);
+            scenario_execution   = std::move (execution);
 
             vayu::utils::log_info ("POST /runs - Scenario: collection=" +
             scenario_execution->request.collection_id +

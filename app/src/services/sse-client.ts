@@ -84,6 +84,9 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		outcome: e.outcome as StepOutcome,
 		statusCode: typeof e.statusCode === "number" ? e.statusCode : 0,
 		latencyMs: typeof e.latencyMs === "number" ? e.latencyMs : 0,
+		// Absent for a run with no data set, and left absent rather than
+		// defaulted: a `0` here would read as "row 1 of a data file".
+		...(typeof e.dataRowIndex === "number" ? { dataRowIndex: e.dataRowIndex } : {}),
 	};
 }
 

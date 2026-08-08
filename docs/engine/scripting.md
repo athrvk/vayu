@@ -779,6 +779,60 @@ summary, its own outcome on the step's `results` row and on the SSE `step` event
 Its row carries the request it would have sent and **no response**, because there
 was none; the app's step list shows that rather than an empty `200`.
 
+## Data rows (`pm.iterationData`)
+
+A collection run can be given a set of rows - a CSV or JSON file the app parses
+and sends inline on the run payload as `scenario.data`. **Row `i % rows` binds to
+iteration `i`**, and that row is what `pm.iterationData` reads:
+
+```javascript
+pm.iterationData.get('username');  // this iteration's value for that column
+pm.iterationData.toObject();       // the whole row as a plain object
+```
+
+`get` on a column the row does not carry returns `undefined`, as every other
+`pm` scope reader does. Values keep their JSON type: a JSON file's `3` arrives
+as a number, and a CSV column arrives as a string, because that is what the
+file said.
+
+**`pm.iterationData` is `undefined` where there is no row** - a single Send, a
+load run's deferred `tests` script, and a collection run started without a data
+set. That is deliberate, and it is the opposite treatment to `pm.execution`
+above: flow control is a *capability*, and one that silently does nothing is a
+false success, so it is always bound and explains itself. A data row is *data*,
+and "this run is not data-driven" is a fact a script may legitimately branch on:
+
+```javascript
+const user = pm.iterationData ? pm.iterationData.get('username') : 'default-user';
+```
+
+A stashed reference (`globalThis.saved = pm.iterationData`) read from a later
+script throws rather than answering with the finished run's row.
+
+### It is read-only
+
+`set`, `unset` and `clear` are bound and **throw**. The rows are an input to the
+run, not a variable scope: there is no destination a write could land in, the
+next iteration binds a different row regardless, and accepting the value would
+report success for something that vanished. Carry a value forward with
+`pm.environment`, `pm.collectionVariables` or `pm.globals`.
+
+### How many iterations, and which row
+
+With `data` present and `iterations` absent, the run performs **one iteration per
+row** (Postman's default). With both given the explicit count wins and the row
+index wraps - five iterations over three rows read rows 0, 1, 2, 0, 1.
+
+The wrap is not silent: every step's `results` row and every `step` SSE event
+carries **`dataRowIndex`**, and the app's step list shows it beside the iteration
+("Iteration 4 · Row 1"). `pm.info.iteration` reports the pass; `dataRowIndex`
+reports the row, and with a wrap the two deliberately disagree.
+
+Rows are validated before the run row exists: a `data` that is present and empty,
+a row that is not an object (the message names its index), or a set over
+`maxScenarioDataRows` is a `400`. Rows are never persisted - the run's snapshot
+records `dataRowCount` and nothing else.
+
 ## Console Output
 
 Log messages that appear in test results:

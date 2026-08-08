@@ -17,6 +17,7 @@
 
 #include <functional>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -137,6 +138,27 @@ struct ScriptContext {
     std::optional<ScriptEvent> event;
     std::optional<size_t> iteration;
     std::optional<size_t> iteration_count;
+
+    /**
+     * @brief The data row this iteration is bound to, read as
+     *        `pm.iterationData`, or null where the run has no data (issue
+     *        #356).
+     *
+     * Points into the run's `ScenarioExecution::data_rows`, which outlives
+     * every script of the run; the object is always a JSON object, because
+     * anything else is a `400` before the run row exists.
+     *
+     * Null is the ordinary case and reaches the script as **`undefined`**
+     * rather than as an empty scope that answers `undefined` to every key.
+     * That is deliberate, and it is not the `pm.execution` / `pm.cookies`
+     * treatment: those are capabilities, and a capability that silently does
+     * nothing is #188's false success. This is *data*, and "this run has no
+     * data" is a fact a script may legitimately branch on -
+     * `if (pm.iterationData)` is the guard, and it can only work if absence is
+     * visible. A `POST /execute` send and a load run's deferred `tests` script
+     * therefore see `undefined`, as they do for `pm.info.iteration`.
+     */
+    const nlohmann::json* iteration_data = nullptr;
 
     /**
      * @brief Whether this script runs inside an ordered sequence, and may

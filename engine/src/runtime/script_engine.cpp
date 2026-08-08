@@ -98,7 +98,10 @@ struct ContextData {
     std::optional<ScriptEvent> event;
     std::optional<size_t> iteration;
     std::optional<size_t> iteration_count;
-    bool has_error = false;
+    /// The row `pm.iterationData` reads, or null - see
+    /// `ScriptContext::iteration_data`, which owns the rationale.
+    const nlohmann::json* iteration_data = nullptr;
+    bool has_error                       = false;
     std::string error_message;
 
     /**
@@ -4687,6 +4690,145 @@ void setup_pm_execution (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "execution", execution);
 }
 
+// ============================================================================
+// pm.iterationData - the data row bound to this iteration (issue #356)
+// ============================================================================
+
+// Turn one JSON value from the row into a JS value.
+//
+// Dump-and-parse rather than a hand-written walk: a data row is arbitrary JSON,
+// and QuickJS's own parser already accepts exactly that - nested objects,
+// arrays, `null`, numbers no double-only converter would keep. A second
+// implementation here would be a copy that stops receiving the parser's fixes.
+// `replace` on the dump because a row is user data: a lone UTF-8 continuation
+// byte must become U+FFFD, not throw out of a getter.
+JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* label) {
+    const std::string dumped =
+    value.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    JSValue parsed = JS_ParseJSON (ctx, dumped.c_str (), dumped.size (), "<iterationData>");
+    if (JS_IsException (parsed)) {
+        JS_FreeValue (ctx, parsed);
+        // Clear QuickJS's own exception before replacing it with one that says
+        // which value failed - the raw parse error names only a column.
+        JSValue pending = JS_GetException (ctx);
+        JS_FreeValue (ctx, pending);
+        return JS_ThrowPlainError (ctx,
+        "pm.iterationData could not read %s from this iteration's data row - "
+        "the value is not representable as JSON",
+        label);
+    }
+    return parsed;
+}
+
+// The row this script is bound to, or null with a TypeError already thrown.
+//
+// `pm.iterationData` is only an object when a row exists, so the ordinary way
+// to reach these functions already implies one. The check is for the way that
+// does not: the global object survives a pooled context, so a script can stash
+// `pm.iterationData` and a later script running in the same context can call
+// what it stashed. That call reads the *current* execution's row - none - and
+// must say so rather than answering about a run that has finished.
+ContextData* iteration_data_context (JSContext* ctx, const char* member) {
+    auto* data = get_context_data (ctx);
+    if (!data || !data->iteration_data) {
+        JS_ThrowTypeError (ctx,
+        "pm.iterationData.%s is not available here: this script is not running "
+        "an iteration of a collection run with a data set. See "
+        "docs/engine/scripting.md.",
+        member);
+        return nullptr;
+    }
+    return data;
+}
+
+// pm.iterationData.get(key) - the row's value for `key`, or `undefined`.
+//
+// An unknown key is `undefined`, matching every other `pm` scope reader; the
+// argument is coerced the way `pm.variables.get` coerces it, so the two scopes
+// answer a non-string key identically.
+JSValue js_iteration_data_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = iteration_data_context (ctx, "get");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_UNDEFINED;
+    }
+
+    const std::string key = js_to_string (ctx, argv[0]);
+    const auto found      = data->iteration_data->find (key);
+    if (found == data->iteration_data->end ()) {
+        return JS_UNDEFINED;
+    }
+    return js_from_json (ctx, *found, key.c_str ());
+}
+
+// pm.iterationData.toObject() - the whole row, as a plain object.
+JSValue js_iteration_data_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = iteration_data_context (ctx, "toObject");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    return js_from_json (ctx, *data->iteration_data, "this row");
+}
+
+// pm.iterationData.set / unset / clear - refused, loudly.
+//
+// The rows are a run *input*, not a scope: there is no destination a write
+// could land in, no persistence story for one, and the next iteration binds a
+// different row regardless. Accepting the call and dropping the value is
+// exactly #188's false success, so the write is bound and throws rather than
+// being absent and answering "not a function" - which reads as a gap in the
+// engine rather than as a decision.
+JSValue js_iteration_data_write (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_ThrowTypeError (ctx,
+    "pm.iterationData is read-only: the data rows are an input to this run, "
+    "not a variable scope, so a write here would have nowhere to land. Use "
+    "pm.environment, pm.collectionVariables or pm.globals to carry a value on "
+    "from a row.");
+}
+
+// pm.iterationData - the row, or `undefined` when the run has no data set.
+//
+// Rebuilt per execution beside pm.info, and cleared rather than left standing
+// when there is no row: contexts are pooled, so the previous step's object
+// would otherwise answer a single send with the last collection run's data.
+//
+// Absence is `undefined` and not an empty scope - see
+// `ScriptContext::iteration_data` for why this one binding differs from
+// pm.execution and pm.cookies.
+void setup_pm_iteration_data (JSContext* ctx, JSValue pm) {
+    auto* data = get_context_data (ctx);
+
+    JSValue previous = JS_GetPropertyStr (ctx, pm, "iterationData");
+    if (!JS_IsUndefined (previous)) {
+        JS_FreeValue (ctx, previous);
+    }
+
+    if (!data || !data->iteration_data) {
+        JS_SetPropertyStr (ctx, pm, "iterationData", JS_UNDEFINED);
+        return;
+    }
+
+    JSValue iteration_data = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, iteration_data, "get",
+    JS_NewCFunction (ctx, js_iteration_data_get, "get", 1));
+    JS_SetPropertyStr (ctx, iteration_data, "toObject",
+    JS_NewCFunction (ctx, js_iteration_data_to_object, "toObject", 0));
+    for (const char* writer : { "set", "unset", "clear" }) {
+        JS_SetPropertyStr (ctx, iteration_data, writer,
+        JS_NewCFunction (ctx, js_iteration_data_write, writer, 2));
+    }
+    JS_SetPropertyStr (ctx, pm, "iterationData", iteration_data);
+}
+
 void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
@@ -4714,6 +4856,10 @@ void setup_pm_object (JSContext* ctx) {
 
     // pm.info
     setup_pm_info (ctx, pm);
+
+    // pm.iterationData - present only for a data-driven collection run's steps
+    // (issue #356), so it is refreshed per execution like pm.info.
+    setup_pm_iteration_data (ctx, pm);
 
     // pm.environment, pm.globals, pm.collectionVariables
     for (const auto& binding : variable_scope_bindings) {
@@ -4885,6 +5031,7 @@ class ScriptEngine::Impl {
         ctx_data.event               = ctx.event;
         ctx_data.iteration           = ctx.iteration;
         ctx_data.iteration_count     = ctx.iteration_count;
+        ctx_data.iteration_data      = ctx.iteration_data;
         // Both per-execution: the capability is this caller's, and the request
         // budget starts full for every script rather than carrying over
         // through a pooled context.
@@ -4896,13 +5043,15 @@ class ScriptEngine::Impl {
         ctx_data.in_scenario        = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
-        // Refresh pm.request, pm.response and pm.info with new data
+        // Refresh pm.request, pm.response, pm.info and pm.iterationData with
+        // new data
         JSValue global = JS_GetGlobalObject (js_ctx);
         JSValue pm     = JS_GetPropertyStr (js_ctx, global, "pm");
         if (!JS_IsUndefined (pm)) {
             setup_pm_response (js_ctx, pm);
             setup_pm_request (js_ctx, pm);
             setup_pm_info (js_ctx, pm);
+            setup_pm_iteration_data (js_ctx, pm);
         }
         JS_FreeValue (js_ctx, pm);
         JS_FreeValue (js_ctx, global);

@@ -62,7 +62,7 @@ function storedStep(
 	iteration: number,
 	stepIndex: number,
 	outcome: StepOutcome,
-	overrides: { name?: string; body?: string; statusCode?: number } = {}
+	overrides: { name?: string; body?: string; statusCode?: number; dataRowIndex?: number } = {}
 ) {
 	return {
 		timestamp: 1_700_000_000_000,
@@ -72,6 +72,7 @@ function storedStep(
 		trace: {
 			iteration,
 			stepIndex,
+			dataRowIndex: overrides.dataRowIndex,
 			stepName: overrides.name ?? `Step ${stepIndex + 1}`,
 			requestId: `req_${stepIndex}`,
 			outcome,
@@ -305,6 +306,36 @@ describe("iterations", () => {
 
 		expect(screen.getByText("Iteration 1")).toBeTruthy();
 		expect(screen.getByText("Iteration 2")).toBeTruthy();
+	});
+
+	it("names the data row an iteration bound, beside the iteration", () => {
+		// Two iterations over one row: the numbers disagree, which is exactly
+		// what the row label is for - "Iteration 2" alone cannot say that this
+		// pass re-used row 1.
+		reportQuery.data = report({
+			results: [
+				storedStep(0, 0, "passed", { name: "Only step", dataRowIndex: 0 }),
+				storedStep(1, 0, "passed", { name: "Only step", dataRowIndex: 0 }),
+			],
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getAllByText("Iteration 1 · Row 1")).toHaveLength(1);
+		expect(screen.getAllByText("Iteration 2 · Row 1")).toHaveLength(1);
+	});
+
+	it("says nothing about a data row for a run that had none", () => {
+		reportQuery.data = report({
+			results: [
+				storedStep(0, 0, "passed", { name: "Only step" }),
+				storedStep(1, 0, "passed", { name: "Only step" }),
+			],
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/Row/)).toBeNull();
 	});
 
 	it("says nothing about iterations for a single pass", () => {
