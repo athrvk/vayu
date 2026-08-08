@@ -16,13 +16,11 @@
  */
 
 #include <gtest/gtest.h>
-#include <httplib.h>
 
-#include <map>
-#include <mutex>
 #include <string>
-#include <thread>
+#include <vector>
 
+#include "echo_server.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/form_body.hpp"
@@ -31,74 +29,9 @@
 namespace vayu::http {
 namespace {
 
-/// Records what the last request actually carried: its Content-Type, its raw
-/// body, and - for a multipart request - the parts httplib parsed out of it.
-///
-/// Multipart is asserted through those parsed parts rather than by matching
-/// the envelope byte for byte, because httplib parses a multipart body itself
-/// and leaves `req.body` empty. That is the better assertion anyway: httplib
-/// splits the body on the boundary it read from the *header*, so a body whose
-/// boundary disagreed with its Content-Type yields no parts at all, and a
-/// part it can read is a part a real server can read.
-class EchoServer {
-    public:
-    EchoServer () {
-        auto record = [this] (const httplib::Request& req, httplib::Response& res) {
-            {
-                std::lock_guard<std::mutex> lock (mutex_);
-                body_         = req.body;
-                content_type_ = req.get_header_value ("Content-Type");
-                parts_.clear ();
-                for (const auto& [name, field] : req.form.fields) {
-                    parts_[name] = field.content;
-                }
-            }
-            res.set_content ("{}", "application/json");
-        };
-        svr_.Post ("/echo", record);
-        svr_.Put ("/echo", record);
-
-        port_   = svr_.bind_to_any_port ("127.0.0.1");
-        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
-        svr_.wait_until_ready ();
-    }
-
-    ~EchoServer () {
-        svr_.stop ();
-        if (thread_.joinable ()) {
-            thread_.join ();
-        }
-    }
-
-    std::string url () const {
-        return "http://127.0.0.1:" + std::to_string (port_) + "/echo";
-    }
-
-    std::string body () const {
-        std::lock_guard<std::mutex> lock (mutex_);
-        return body_;
-    }
-
-    std::string content_type () const {
-        std::lock_guard<std::mutex> lock (mutex_);
-        return content_type_;
-    }
-
-    /// The multipart parts, by field name. Empty for every other body.
-    std::map<std::string, std::string> parts () const {
-        std::lock_guard<std::mutex> lock (mutex_);
-        return parts_;
-    }
-
-    private:
-    httplib::Server svr_;
-    std::thread thread_;
-    int port_ = 0;
-    mutable std::mutex mutex_;
-    std::string body_;
-    std::string content_type_;
-    std::map<std::string, std::string> parts_;
-};
+// The echo endpoint lives in `echo_server.hpp`: the GraphQL body test asserts
+// on the same wire, and two copies of a server would drift apart.
+using vayu::tests::EchoServer;
 
 Request form_request (const std::string& url, BodyMode mode, std::vector<FormField> fields) {
     Request request;

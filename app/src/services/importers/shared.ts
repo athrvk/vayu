@@ -9,6 +9,10 @@ import type { KeyValueEntry, RequestAuth, RequestBody, VariableValue } from "@/t
 import { asArray, asRecord, asStr, prop } from "@/lib/json-node";
 import { normalizeVars } from "./var-normalize";
 import { mapPostmanOAuth2 } from "./oauth2-import";
+import {
+	CONTENT_TYPE,
+	contentTypeToAdd,
+} from "@/modules/request-builder/components/RequestTabs/panels/body/content-type";
 
 /** Coerce any scalar to its string form (Vayu stores all values as strings). */
 export function asString(v: unknown): string {
@@ -127,6 +131,27 @@ export function rawBody(content: string, language: string | undefined): RequestB
 	} catch {
 		return { mode: "text", content };
 	}
+}
+
+/**
+ * The imported headers, plus the Content-Type this body cannot go without.
+ *
+ * The request builder adds `application/json` when you *pick* GraphQL, and only
+ * then - so an imported GraphQL request had no Content-Type at all and went out
+ * as libcurl's default `application/x-www-form-urlencoded`, which most GraphQL
+ * servers answer with a 400. The failure looks identical to a working request
+ * in every pane, since the header the user would look for is simply absent.
+ *
+ * The rule itself is `contentTypeToAdd`, not a copy of it: an explicitly
+ * imported Content-Type wins (including a deliberate `application/graphql`),
+ * and a disabled row does not count as declaring one.
+ */
+export function withRequiredContentType(
+	headers: KeyValueEntry[],
+	body: RequestBody
+): KeyValueEntry[] {
+	const required = contentTypeToAdd(body.mode, headers);
+	return required ? [...headers, { key: CONTENT_TYPE, value: required, enabled: true }] : headers;
 }
 
 /** Postman event entry → joined script string. */

@@ -115,11 +115,15 @@ Postman path-segment variables, host arrays, and port are not separately consume
 | `raw` | `rawBody(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)` |
 | `formdata` | `{ mode: "form-data", fields }` | only entries with `type !== "file"` kept; each dropped file entry adds to `ctx.skippedFileBody` |
-| `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below) |
+| `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
 | `file` | `{ mode: "none" }` | adds 1 to `ctx.skippedFileBody` |
 | anything else | `{ mode: "none" }` | |
 
 **GraphQL `variables` (`graphqlContent`):** Postman stores `body.graphql` as `{ query, variables }` where `variables` is the *text* of the Variables pane - a JSON-encoded string. Vayu's own `serializeGraphQLBody` writes `variables` as an object, and the engine sends the stored content verbatim, so the string is parsed here; embedding it as-is put `"variables": "{\"limit\": 10}"` on the wire (spec-invalid) and showed a double-escaped blob in the Variables pane. Two deliberate fallbacks: a variables string that is **not valid JSON is kept as text** (the pane text is the only copy of the user's work, so an import that deletes it is worse than one that shows it unparsed), and an **empty or whitespace-only** string drops the key entirely, which is what Vayu writes for an empty pane. Every other key on the object rides along untouched.
+
+**GraphQL `operationName`:** preserved verbatim, like every other key on the object. It names which operation in a multi-operation document to execute, and Vayu's GraphQL panes carry it through an edit and expose it as an operation picker above the query pane - so an imported request keeps running the operation it was imported with.
+
+**GraphQL `Content-Type` (`withRequiredContentType` in `shared.ts`):** a GraphQL body is a JSON envelope, so the request needs `Content-Type: application/json` - and Vayu's request builder adds that header only when you *pick* GraphQL, which an import never does. The header was therefore absent, and libcurl defaults to `application/x-www-form-urlencoded`, which most GraphQL servers answer with a `400`; nothing in the app said why. The header is now written at import, through the same `contentTypeToAdd` rule the mode picker uses: a Content-Type the collection declares wins (including a deliberate `application/graphql`), and a **disabled** row does not count as declaring one.
 
 **Raw language sniffing (`rawBody` in `shared.ts`):**
 

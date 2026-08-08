@@ -1,0 +1,184 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * `graphql-body.ts` had no test file, and the body-destruction bug lived
+ * exactly here: the pair round-tripped `{query, variables}` and silently
+ * deleted everything else the envelope carried, so an imported multi-operation
+ * request executed a different operation after any edit.
+ *
+ * The assertions therefore go through a full parse -> serialize cycle rather
+ * than checking one function in isolation: that cycle is what a keystroke does,
+ * and it is the only place the loss was observable.
+ */
+
+import { describe, expect, test } from "vitest";
+import {
+	operationNames,
+	parseGraphQLBody,
+	serializeGraphQLBody,
+	toGraphQLEnvelope,
+	type GraphQLBodyParts,
+} from "./graphql-body";
+
+/** What the panes do to a body: read it, change one thing, write it back. */
+function edit(body: string, change: Partial<GraphQLBodyParts> = {}): string {
+	return serializeGraphQLBody({ ...parseGraphQLBody(body), ...change });
+}
+
+describe("parseGraphQLBody", () => {
+	test("splits the envelope into panes", () => {
+		const parsed = parseGraphQLBody(
+			JSON.stringify({ query: "{ me }", variables: { limit: 10 } })
+		);
+		expect(parsed.query).toBe("{ me }");
+		expect(JSON.parse(parsed.variables)).toEqual({ limit: 10 });
+		expect(parsed.operationName).toBe("");
+		expect(parsed.extras).toEqual({});
+	});
+
+	test("reads operationName", () => {
+		expect(
+			parseGraphQLBody(JSON.stringify({ query: "query B { b }", operationName: "B" }))
+				.operationName
+		).toBe("B");
+	});
+
+	test("holds keys it does not model", () => {
+		const parsed = parseGraphQLBody(
+			JSON.stringify({ query: "{ me }", extensions: { trace: "on" } })
+		);
+		expect(parsed.extras).toEqual({ extensions: { trace: "on" } });
+	});
+
+	// The Insomnia import path: a bare document is not JSON, and showing it in
+	// the query pane is better than showing an empty editor.
+	test("falls back to the whole body as the query", () => {
+		const parsed = parseGraphQLBody("query B { b }");
+		expect(parsed.query).toBe("query B { b }");
+		expect(parsed.variables).toBe("");
+	});
+
+	// A JSON body that is not an envelope (an array, a number, an object with no
+	// `query`) is another user's payload arriving through a mode switch - it is
+	// shown, not reinterpreted.
+	test.each(["[1,2]", "42", '{"merchant":"mrc_8813"}'])(
+		"keeps non-envelope %s intact",
+		(body) => {
+			expect(parseGraphQLBody(body).query).toBe(body);
+		}
+	);
+
+	test("ignores a non-string operationName rather than sending it", () => {
+		expect(
+			parseGraphQLBody(JSON.stringify({ query: "{ me }", operationName: 7 })).operationName
+		).toBe("");
+	});
+});
+
+describe("serializeGraphQLBody", () => {
+	test("omits variables that are mid-edit", () => {
+		const written = edit(JSON.stringify({ query: "{ me }" }), { variables: "{ unclosed" });
+		expect(JSON.parse(written)).toEqual({ query: "{ me }" });
+	});
+
+	test("omits an absent operationName rather than writing an empty one", () => {
+		expect(JSON.parse(edit(JSON.stringify({ query: "{ me }" })))).toEqual({ query: "{ me }" });
+	});
+});
+
+describe("a keystroke preserves the whole envelope", () => {
+	// The bug itself. Editing the query of an imported multi-operation request
+	// used to drop `operationName`, so the server picked an operation instead of
+	// the user's. Mutation check: drop `operationName` from either half of
+	// graphql-body.ts and this reddens.
+	test("operationName survives an edit to the query", () => {
+		const body = JSON.stringify({
+			query: "query A { a } query B { b }",
+			operationName: "B",
+		});
+		const written = edit(body, { query: "query A { a } query B { b2 }" });
+		expect(JSON.parse(written)).toEqual({
+			query: "query A { a } query B { b2 }",
+			operationName: "B",
+		});
+	});
+
+	test("operationName survives an edit to the variables", () => {
+		const body = JSON.stringify({ query: "query B($n: Int) { b }", operationName: "B" });
+		expect(JSON.parse(edit(body, { variables: '{"n": 2}' }))).toEqual({
+			query: "query B($n: Int) { b }",
+			operationName: "B",
+			variables: { n: 2 },
+		});
+	});
+
+	test("keys the editor does not model survive an edit", () => {
+		const body = JSON.stringify({ query: "{ me }", extensions: { trace: "on" } });
+		expect(JSON.parse(edit(body, { query: "{ you }" }))).toEqual({
+			query: "{ you }",
+			extensions: { trace: "on" },
+		});
+	});
+
+	// Forward-compat has a limit worth stating: a modelled key always wins, so an
+	// envelope cannot end up with two of them.
+	test("a modelled key is written once", () => {
+		const written = edit(JSON.stringify({ query: "{ me }" }), { query: "{ you }" });
+		expect(written.match(/"query"/g)).toHaveLength(1);
+	});
+});
+
+describe("operationNames", () => {
+	test("lists named operations in source order", () => {
+		expect(operationNames("query B { b } mutation A { a }")).toEqual(["B", "A"]);
+	});
+
+	// An anonymous operation has no name to put on the wire, and by spec it can
+	// only be the sole operation - so there is nothing to pick between.
+	test("is empty for an anonymous operation", () => {
+		expect(operationNames("{ me }")).toEqual([]);
+	});
+
+	test("ignores fragments, which are not operations", () => {
+		expect(operationNames("fragment F on User { id } query B { ...F }")).toEqual(["B"]);
+	});
+
+	// Typing is the normal case, and a half-written document must not throw.
+	test.each(["", "   ", "query B {", "not graphql at all"])(
+		"is empty for unparseable %j",
+		(query) => {
+			expect(operationNames(query)).toEqual([]);
+		}
+	);
+});
+
+describe("toGraphQLEnvelope", () => {
+	test("wraps a bare document", () => {
+		expect(JSON.parse(toGraphQLEnvelope("query B { b }"))).toEqual({ query: "query B { b }" });
+	});
+
+	test("leaves an envelope alone", () => {
+		const body = JSON.stringify({ query: "{ me }", operationName: "B" });
+		expect(JSON.parse(toGraphQLEnvelope(body))).toEqual({
+			query: "{ me }",
+			operationName: "B",
+		});
+	});
+
+	// A JSON document that is not an envelope is still a query as far as the
+	// mime type promised - wrapping it is what makes it reach the server.
+	test("wraps JSON that is not an envelope", () => {
+		expect(JSON.parse(toGraphQLEnvelope('{"notQuery": 1}'))).toEqual({
+			query: '{"notQuery": 1}',
+		});
+	});
+
+	test("produces an envelope for an empty body", () => {
+		expect(JSON.parse(toGraphQLEnvelope(""))).toEqual({ query: "" });
+	});
+});

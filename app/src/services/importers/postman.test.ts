@@ -192,6 +192,97 @@ describe("PostmanV21Parser", () => {
 		});
 	});
 
+	it("preserves operationName on a multi-operation import", () => {
+		// Postman stores it and Vayu's panes now carry it. Without both halves the
+		// request executes whichever operation the server picks.
+		const [req] = parse(
+			collectionOf([
+				{
+					name: "gql",
+					request: {
+						method: "POST",
+						url: "https://x/graphql",
+						body: {
+							mode: "graphql",
+							graphql: {
+								query: "query A { a } query B { b }",
+								operationName: "B",
+							},
+						},
+					},
+				},
+			])
+		).collections[0].requests;
+
+		expect(JSON.parse((req.body as { content: string }).content)).toEqual({
+			query: "query A { a } query B { b }",
+			operationName: "B",
+		});
+	});
+
+	describe("GraphQL Content-Type", () => {
+		const gqlRequest = (headers: unknown[] = []) => ({
+			name: "gql",
+			request: {
+				method: "POST",
+				url: "https://x/graphql",
+				header: headers,
+				body: { mode: "graphql", graphql: { query: "{ me }" } },
+			},
+		});
+
+		// Without this the request goes out as libcurl's default
+		// `application/x-www-form-urlencoded`, which most GraphQL servers 400 -
+		// and it looks identical to a working request in every pane.
+		it("is added at import", () => {
+			const [req] = parse(collectionOf([gqlRequest()])).collections[0].requests;
+			expect(req.headers).toEqual([
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			]);
+		});
+
+		it("does not replace one the collection already declares", () => {
+			const [req] = parse(
+				collectionOf([gqlRequest([{ key: "content-type", value: "application/graphql" }])])
+			).collections[0].requests;
+			expect(req.headers).toEqual([
+				{ key: "content-type", value: "application/graphql", enabled: true },
+			]);
+		});
+
+		// A disabled row is not sent, so it does not count as declaring one.
+		it("is added when the declared row is disabled", () => {
+			const [req] = parse(
+				collectionOf([
+					gqlRequest([
+						{ key: "Content-Type", value: "application/graphql", disabled: true },
+					]),
+				])
+			).collections[0].requests;
+			expect(req.headers).toContainEqual({
+				key: "Content-Type",
+				value: "application/json",
+				enabled: true,
+			});
+		});
+
+		it("is not added to a body that needs no header of its own", () => {
+			const [req] = parse(
+				collectionOf([
+					{
+						name: "json",
+						request: {
+							method: "POST",
+							url: "https://x/y",
+							body: { mode: "raw", raw: "{}" },
+						},
+					},
+				])
+			).collections[0].requests;
+			expect(req.headers).toEqual([]);
+		});
+	});
+
 	it("reads item-level protocolProfileBehavior into the redirect settings", () => {
 		// Postman writes this block exactly where the user overrode redirect
 		// handling. The engine's default is follow=true, so dropping a `false` here

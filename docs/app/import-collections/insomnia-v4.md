@@ -109,12 +109,16 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 |--------------------------|--------------------|-------|
 | `application/json` | `{ mode: "json", content }` | `content = normalizeVars(body.text)`. |
 | `text/plain` | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. |
-| `application/graphql` | `{ mode: "graphql", content }` | `content = normalizeVars(body.text)`. |
+| `application/graphql` | `{ mode: "graphql", content }` | `content = toGraphQLEnvelope(normalizeVars(body.text))` - a bare query document is wrapped into `{query}`, an envelope passes through (see below). The request also gains a `Content-Type`. |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `mapKeyValues` (`name → key`, `disabled` honored). |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. Each dropped file part increments the `file_body` count in `meta.skipped` (parity with the Postman parser's `skippedFileBody`). |
 | anything else carrying text (`application/xml`, `application/yaml`, `text/csv`, Insomnia's "Other") | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. Reserved for a non-empty **string** `body.text`; the sibling Postman parser's `rawBody()` fallback behaves the same way. No JSON sniffing happens here - Insomnia states the mime, so an XML body stays `text`. |
 | anything else with no text (binary / file-only: `body.fileName` set) | `{ mode: "none" }` | Counted as `file_body` in `meta.skipped` - Vayu has no file body mode, and the file lives outside the export anyway. |
 | missing or empty body | `{ mode: "none" }` | Nothing was lost, so nothing is counted. |
+
+**GraphQL bodies (`toGraphQLEnvelope`):** Insomnia writes `application/graphql` for both shapes its editor produces - the GraphQL-over-HTTP envelope (`{query, variables}`) and, for a hand-written or older request, the **bare query document**. A bare document stored verbatim went on the wire as the whole HTTP body: not JSON, so a GraphQL server reads no `query` at all. Nothing showed it, because the query pane's raw-string fallback renders a bare document exactly as it renders a healthy one. It is normalized at import - the one place the shape is known to be GraphQL - and an envelope is returned untouched, so a mislabelled JSON envelope is never double-wrapped.
+
+**GraphQL `Content-Type` (`withRequiredContentType` in `shared.ts`):** the envelope is JSON, so the request needs `Content-Type: application/json`; the request builder adds it only on an interactive mode switch, which an import never performs. Written at import through the same `contentTypeToAdd` rule, so a Content-Type the export declares wins and a disabled row does not count as declaring one.
 
 ## Auth mapping
 

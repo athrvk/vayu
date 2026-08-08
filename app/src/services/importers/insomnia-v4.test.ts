@@ -306,6 +306,67 @@ describe("InsomniaV4Parser", () => {
 		expect("followRedirects" in draft()).toBe(false);
 	});
 
+	/*
+	 * The whole `application/graphql` chain was unproven end to end. Insomnia
+	 * writes the mime type on a body whose `text` may be either the envelope or
+	 * the bare document, and the bare one was stored and sent verbatim: not JSON,
+	 * so a GraphQL server reads no query - while the editor's raw-string fallback
+	 * made it look healthy.
+	 */
+	describe("application/graphql", () => {
+		const gqlRequest = (text: string, headers: unknown[] = []) => ({
+			_id: "r",
+			_type: "request",
+			parentId: "w",
+			name: "R",
+			method: "post",
+			url: "https://x/graphql",
+			headers,
+			body: { mimeType: "application/graphql", text },
+		});
+
+		it("normalizes a bare query document into the envelope", () => {
+			const req = firstRequest(gqlRequest("query B { b }"));
+			expect(req.body.mode).toBe("graphql");
+			expect(JSON.parse((req.body as { content: string }).content)).toEqual({
+				query: "query B { b }",
+			});
+		});
+
+		it("leaves an envelope alone, operationName included", () => {
+			const envelope = JSON.stringify({ query: "query B { b }", operationName: "B" });
+			const req = firstRequest(gqlRequest(envelope));
+			expect(JSON.parse((req.body as { content: string }).content)).toEqual({
+				query: "query B { b }",
+				operationName: "B",
+			});
+		});
+
+		it("normalizes {{ _.x }} vars inside the document", () => {
+			const req = firstRequest(gqlRequest("query { user(id: {{ _.userId }}) { id } }"));
+			expect(JSON.parse((req.body as { content: string }).content)).toEqual({
+				query: "query { user(id: {{userId}}) { id } }",
+			});
+		});
+
+		it("adds the Content-Type the wire needs", () => {
+			expect(firstRequest(gqlRequest("query B { b }")).headers).toEqual([
+				{ key: "Content-Type", value: "application/json", enabled: true },
+			]);
+		});
+
+		it("keeps a Content-Type the export declares", () => {
+			const req = firstRequest(
+				gqlRequest("query B { b }", [
+					{ name: "Content-Type", value: "application/graphql" },
+				])
+			);
+			expect(req.headers).toEqual([
+				{ key: "Content-Type", value: "application/graphql", enabled: true },
+			]);
+		});
+	});
+
 	describe("malformed exports fail with a named error", () => {
 		const cases: Array<[string, unknown]> = [
 			["non-array resources", { _type: "export", __export_format: 4, resources: {} }],

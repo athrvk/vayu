@@ -27,6 +27,11 @@ import {
 	Tooltip,
 	TooltipTrigger,
 	TooltipContent,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui";
 import {
 	schemaCacheKey,
@@ -39,7 +44,12 @@ import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/helpers";
 import { TIMING } from "@/config/timing";
-import { parseGraphQLBody, serializeGraphQLBody } from "./graphql-body";
+import {
+	operationNames,
+	parseGraphQLBody,
+	serializeGraphQLBody,
+	type GraphQLBodyParts,
+} from "@/lib/graphql/graphql-body";
 
 export interface GraphQLBodyProps {
 	body: string;
@@ -205,8 +215,14 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [targetKey]);
 
-	// The query is always a valid string, so derive it from the body directly.
-	const query = useMemo(() => parseGraphQLBody(body || "").query, [body]);
+	/*
+	 * Everything the envelope carries, derived from the body. The query and
+	 * `operationName` are always valid strings, and `extras` holds whatever else
+	 * the envelope had - all three ride along on every write, which is what stops
+	 * a keystroke in either pane from deleting them.
+	 */
+	const parts = useMemo(() => parseGraphQLBody(body || ""), [body]);
+	const query = parts.query;
 
 	/*
 	 * The variables editor keeps its own raw text as the source of truth: while
@@ -223,11 +239,34 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 		lastWrittenBody.current = body;
 	}, [body]);
 
-	const write = (nextQuery: string, nextVariables: string) => {
-		const next = serializeGraphQLBody(nextQuery, nextVariables);
+	/*
+	 * One write path, taking only what changed. The rest comes from `parts` (the
+	 * envelope as last stored) and from `variables` (the pane's own draft, which
+	 * is ahead of the body while it is mid-edit) - so a caller cannot write a
+	 * field by naming it and drop another by not naming it.
+	 */
+	const write = (changed: Partial<GraphQLBodyParts>) => {
+		const next = serializeGraphQLBody({ ...parts, variables, ...changed });
 		lastWrittenBody.current = next;
 		onBodyChange(next);
 	};
+
+	/*
+	 * A document with two operations must say which one to run - the spec forbids
+	 * an anonymous operation beside a named one, and a server given no
+	 * `operationName` for such a document answers with an error, not a guess. So
+	 * the picker appears exactly when the choice becomes real.
+	 *
+	 * An `operationName` the document no longer defines (renamed, or the pane is
+	 * mid-edit) is still what will be sent, so it is offered as an option rather
+	 * than dropped: the trigger then shows the truth, and picking a real
+	 * operation is one click. Nothing here rewrites the body on its own.
+	 */
+	const names = useMemo(() => operationNames(query), [query]);
+	const operations =
+		parts.operationName && !names.includes(parts.operationName)
+			? [...names, parts.operationName]
+			: names;
 
 	// Drive the variables editor's JSON schema from the query's `$variables` plus
 	// the introspected schema, so it validates and autocompletes against what the
@@ -249,6 +288,26 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 				<PaneHeader>
 					<PaneTitle>Query</PaneTitle>
 					<div className="flex items-center gap-2">
+						{names.length > 1 && (
+							<Select
+								value={parts.operationName}
+								onValueChange={(name) => write({ operationName: name })}
+							>
+								<SelectTrigger
+									className="h-6 w-auto gap-1 px-2 text-[11px]"
+									aria-label="Operation"
+								>
+									<SelectValue placeholder="Operation" />
+								</SelectTrigger>
+								<SelectContent>
+									{operations.map((name) => (
+										<SelectItem key={name} value={name}>
+											{name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						)}
 						<SchemaStatusBadge entry={entry} />
 						{schemaTarget.url && (
 							/*
@@ -291,7 +350,7 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 						height="100%"
 						language="graphql"
 						value={query}
-						onChange={(q) => write(q ?? "", variables)}
+						onChange={(q) => write({ query: q ?? "" })}
 						onMount={onEditorMount}
 					/>
 				</div>
@@ -316,7 +375,7 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 						value={variables}
 						onChange={(v) => {
 							setVariables(v ?? "");
-							write(query, v ?? "");
+							write({ variables: v ?? "" });
 						}}
 						onMount={handleVariablesMount}
 					/>
