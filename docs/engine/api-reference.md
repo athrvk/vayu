@@ -1655,7 +1655,7 @@ as a smaller one:
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
 
-**Two settings bound a scenario** (both in the `general_engine` category, see
+**Four settings bound a scenario** (all in the `general_engine` category, see
 [GET /config](#get-config)):
 
 | Key                   | Default | Range      | Effect |
@@ -1663,6 +1663,7 @@ than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does
 | `maxScenarioSteps`    | `200`   | 1-10000    | Largest plan one run may resolve to. The sequence is composed up front and held in memory, and a load-mode scenario allocates a latency histogram per step, so this bounds memory rather than expressing a preference. |
 | `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/JSON file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
 | `maxScenarioStoredSteps` | `5000` | 0-1000000 | Per-step `results` rows one run stores; `0` stores every step. Steps that did not pass are kept first, successes fill the rest, and what was thinned is reported in the run summary. |
+| `maxStepsPerIteration` | `0` | 0-1000000 | How many steps one iteration may execute before it is cut off. `pm.execution.setNextRequest` can send an iteration backwards, so a cycle would otherwise run forever. `0` derives the bound from the plan - ten times its step count, never below 100 - so a straight-through iteration can never trip it. |
 
 #### Scenario runs
 
@@ -1704,12 +1705,21 @@ capped by `maxTraceBodyBytes`; the row count is capped by
 | `passed` | The request completed and every assertion held. | Continues. |
 | `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
 | `errored` | The step did not complete: a transport failure, a timeout, or a script that threw. | **Ends the iteration.** The next iteration still runs. |
-| `skipped` | Reserved for flow control (a later phase); nothing produces it yet. | - |
+| `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
 
 A run whose steps failed still reaches `completed`: the outcome of the work is
 in the steps, and only the runner itself failing makes the run `failed`. A stop
 is honoured **between steps**, so a `stopped` run does not finish the iteration
 it was in.
+
+**A step's scripts can redirect the sequence.** `pm.execution.setNextRequest(name)`
+runs a named request next instead of the one that follows, `setNextRequest(null)`
+ends the iteration, and `pm.execution.skipRequest()` (pre-request scripts only)
+sends nothing and marks the step `skipped`. A target that names no step in the
+run, or one that two steps share, fails the step by name rather than guessing,
+and `maxStepsPerIteration` above is what stops a cycle. The full contract,
+including everywhere the two methods throw, is in
+[scripting.md](scripting.md#flow-control-pmexecution).
 
 **The stored snapshot carries a step manifest, never the composed plan.**
 `runs.config_snapshot` holds the block as validated - with `data` replaced by

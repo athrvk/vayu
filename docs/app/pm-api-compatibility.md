@@ -31,6 +31,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName` - each optional, see below     |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
+| Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -361,6 +362,35 @@ Divergences from Postman:
 
 ---
 
+### Flow control (`pm.execution`)
+
+```javascript
+pm.execution.setNextRequest('Checkout');  // run that request next
+pm.execution.setNextRequest(null);        // end this iteration, start the next
+pm.execution.skipRequest();               // pre-request only: do not send this one
+```
+
+Both are available **only inside a collection run**, and outside one they throw a
+sentence naming why rather than being ignored - a single Send has no next
+request, and a load run's test scripts run after the run has finished, against
+responses already recorded.
+
+Divergences from Postman:
+
+- **An unresolvable target fails the step**, by name. A name no request in the
+  run carries, and a name two of them share, are both errors that end the
+  iteration; Postman resolves an ambiguous name to whichever it finds.
+- **A cycle is bounded.** Two requests pointing at each other run forever in
+  Postman's runner; here the iteration is cut off by `maxStepsPerIteration` and
+  the failure names the steps that were looping.
+- **A skipped step is reported as `skipped`**, never as a pass, in the step list
+  and in the run summary alike.
+
+Details, including every case that throws, are in
+[scripting.md](../engine/scripting.md#flow-control-pmexecution).
+
+---
+
 ## Not (yet) supported
 
 These Postman APIs are **not** implemented - scripts that rely on them will fail:
@@ -392,7 +422,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   could work, but that shape has not been decided, so URL parsing is string work
   today. Deferred deliberately - see
   [scripting.md](../engine/scripting.md#url-parts-are-not-exposed-deferred).
-- `pm.execution` (flow control), `pm.visualizer`
+- `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,

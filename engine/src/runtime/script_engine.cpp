@@ -124,6 +124,15 @@ struct ContextData {
     /// `ScriptContext::cookie_writes`. Drained by `pm.sendRequest`, which
     /// hands them to the auxiliary transfer.
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
+
+    /// Whether `pm.execution` may record an intent at all - see
+    /// `ScriptContext::in_scenario`.
+    bool in_scenario = false;
+
+    /// What `pm.execution` recorded, copied onto the `ScriptResult` at the end
+    /// of the execution. Per-execution like the rest of this struct, so a
+    /// pooled context cannot carry one script's jump into the next.
+    ScriptControl control;
 };
 
 // Get context data from JS context
@@ -4575,6 +4584,109 @@ void setup_pm_cookies (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "cookies", cookies);
 }
 
+// ============================================================================
+// pm.execution - flow control (issue #355)
+// ============================================================================
+
+// The context a flow-control call may record on, or nullptr having thrown.
+// Outside a scenario run there is no sequence to redirect, and the call is
+// refused rather than accepted and dropped: `setNextRequest("checkout")`
+// silently ignored in a single send is the false success issue #188's rule
+// exists to prevent.
+ContextData* execution_context (JSContext* ctx, const char* member) {
+    auto* data = get_context_data (ctx);
+    if (!data) {
+        JS_ThrowInternalError (ctx, "No script context available");
+        return nullptr;
+    }
+    if (!data->in_scenario) {
+        JS_ThrowPlainError (ctx,
+        "pm.execution.%s is not available here: it redirects a collection "
+        "run's sequence, and this script is not running inside one. A single "
+        "send has no next request, and a load run's test scripts run after the "
+        "run has finished, against responses already recorded. See "
+        "docs/engine/scripting.md.",
+        member);
+        return nullptr;
+    }
+    return data;
+}
+
+// pm.execution.setNextRequest(name) - jump to the named step after this one
+// completes; setNextRequest(null) ends the iteration (Postman's convention).
+//
+// The argument is required and must be a string or null. Omitting it is a
+// TypeError rather than a synonym for null: "end the iteration" and "I forgot
+// the name" are different intents, and guessing between them would silently
+// end runs.
+JSValue js_execution_set_next_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = execution_context (ctx, "setNextRequest");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx,
+        "pm.execution.setNextRequest(name) needs a request name, or null to "
+        "end this iteration - it was called with no argument");
+    }
+    if (JS_IsNull (argv[0])) {
+        data->control = { ScriptControl::Kind::EndIteration, {} };
+        return JS_UNDEFINED;
+    }
+    if (!JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx,
+        "pm.execution.setNextRequest(name) needs a request name string, or "
+        "null to end this iteration - got %s",
+        js_type_name (ctx, argv[0]));
+    }
+
+    std::string target = js_to_string (ctx, argv[0]);
+    if (target.empty ()) {
+        return JS_ThrowTypeError (ctx,
+        "pm.execution.setNextRequest(name) was given an empty name, which "
+        "matches no request - pass a request's name, or null to end this "
+        "iteration");
+    }
+    data->control = { ScriptControl::Kind::Next, std::move (target) };
+    return JS_UNDEFINED;
+}
+
+// pm.execution.skipRequest() - do not send this step.
+//
+// Pre-request only. In a test script the request has already gone out and
+// there is nothing left to skip, so the call throws instead of recording an
+// intent the runner would have to refuse afterwards.
+JSValue js_execution_skip_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = execution_context (ctx, "skipRequest");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    if (data->event && *data->event == ScriptEvent::Test) {
+        return JS_ThrowPlainError (ctx,
+        "pm.execution.skipRequest() can only be called from a pre-request "
+        "script: by the time a test script runs, the request has already been "
+        "sent and there is nothing left to skip.");
+    }
+    data->control = { ScriptControl::Kind::Skip, {} };
+    return JS_UNDEFINED;
+}
+
+// pm.execution - always bound, like pm.cookies, so a script that reaches for it
+// outside a collection run is told why rather than meeting "not a function".
+void setup_pm_execution (JSContext* ctx, JSValue pm) {
+    JSValue execution = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, execution, "setNextRequest",
+    JS_NewCFunction (ctx, js_execution_set_next_request, "setNextRequest", 1));
+    JS_SetPropertyStr (ctx, execution, "skipRequest",
+    JS_NewCFunction (ctx, js_execution_skip_request, "skipRequest", 0));
+    JS_SetPropertyStr (ctx, pm, "execution", execution);
+}
+
 void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
@@ -4617,6 +4729,11 @@ void setup_pm_object (JSContext* ctx) {
     // pm.cookies - the jar's flat read half (issue #301) and, through
     // `jar()`, its write half (issue #337).
     setup_pm_cookies (ctx, pm);
+
+    // pm.execution - flow control (issue #355), bound the same way and for the
+    // same reason: outside a collection run it explains itself rather than
+    // being absent.
+    setup_pm_execution (ctx, pm);
 
     // pm.sendRequest - always bound, even when the capability is off, so a
     // script that calls it gets a sentence explaining why rather than
@@ -4776,6 +4893,7 @@ class ScriptEngine::Impl {
         ctx_data.cookie_jar         = ctx.cookie_jar;
         ctx_data.cookie_scope       = ctx.cookie_scope;
         ctx_data.cookie_writes      = ctx.cookie_writes;
+        ctx_data.in_scenario        = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response and pm.info with new data
@@ -4832,6 +4950,10 @@ class ScriptEngine::Impl {
         // Copy results
         result.tests          = std::move (ctx_data.tests);
         result.console_output = std::move (ctx_data.console_output);
+        // Carried even when the script threw afterwards: the caller decides
+        // what an instruction from a script that then failed is worth, and the
+        // scenario runner ends the iteration on an errored step regardless.
+        result.control = std::move (ctx_data.control);
 
         // Check if any tests failed
         for (const auto& test : result.tests) {

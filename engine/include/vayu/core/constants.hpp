@@ -263,6 +263,16 @@ constexpr size_t MAX_DATA_ROWS = 1000;
 /// would make the report path quadratic. Steps that did not pass are kept
 /// first and what was thinned is disclosed in the run summary.
 constexpr size_t MAX_STORED_STEPS = 5000;
+/// How many step executions one iteration may perform, derived from the plan
+/// when the config key `maxStepsPerIteration` is left at its default of 0:
+/// `STEPS_PER_ITERATION_MULTIPLIER x plan steps`, never below
+/// `MIN_STEPS_PER_ITERATION`. `pm.execution.setNextRequest` makes an infinite
+/// loop a two-line script, so an iteration needs a ceiling; the ceiling is a
+/// multiple of the sequence's own length because a plan of 3 steps and a plan
+/// of 200 do not want the same one, and the floor keeps a short plan's
+/// legitimate retry loops working.
+constexpr size_t STEPS_PER_ITERATION_MULTIPLIER = 10;
+constexpr size_t MIN_STEPS_PER_ITERATION        = 100;
 } // namespace scenario
 
 /**

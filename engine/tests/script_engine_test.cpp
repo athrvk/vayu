@@ -3489,3 +3489,178 @@ TEST_F (ScriptEngineTest, TheIterationPairDoesNotSurviveIntoTheNextExecution) {
     ASSERT_EQ (result.tests.size (), 1);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
+
+// ============================================================================
+// pm.execution - flow control (issue #355)
+// ============================================================================
+//
+// The binding records an intent on the ScriptResult and reaches into nothing:
+// only the scenario runner knows what a sequence is. These pin the value it
+// records and, at least as importantly, every case where the call is refused -
+// a binding that cannot fail is worse than a missing one (#188), and
+// `setNextRequest("checkout")` quietly ignored in a single send is exactly the
+// false success that rule exists to prevent.
+
+/// A pre-request context that declares itself part of a sequence, which is the
+/// scenario runner's shape and nothing else's.
+static ScriptContext scenario_prerequest (Request& request, Environment& env) {
+    ScriptContext ctx = ScriptContext::for_prerequest (request);
+    ctx.environment   = &env;
+    ctx.in_scenario   = true;
+    return ctx;
+}
+
+static ScriptContext
+scenario_test (const Request& request, const Response& response, Environment& env) {
+    ScriptContext ctx = ScriptContext::for_test (request, response);
+    ctx.environment   = &env;
+    ctx.in_scenario   = true;
+    return ctx;
+}
+
+TEST_F (ScriptEngineTest, SetNextRequestRecordsTheTargetOnTheResult) {
+    auto ctx = scenario_test (request, response, env);
+    auto result = engine.execute ("pm.execution.setNextRequest('checkout');", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::Next);
+    EXPECT_EQ (result.control.target, "checkout");
+}
+
+TEST_F (ScriptEngineTest, SetNextRequestNullEndsTheIteration) {
+    auto ctx    = scenario_test (request, response, env);
+    auto result = engine.execute ("pm.execution.setNextRequest(null);", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::EndIteration);
+    EXPECT_TRUE (result.control.target.empty ());
+}
+
+// Postman's rule, and the only one that can be right: a script is a sequence of
+// statements, so the last thing it said is what it meant.
+TEST_F (ScriptEngineTest, TheLastFlowControlCallInAScriptWins) {
+    auto ctx    = scenario_test (request, response, env);
+    auto result = engine.execute (R"JS(
+        pm.execution.setNextRequest('first');
+        pm.execution.setNextRequest('second');
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::Next);
+    EXPECT_EQ (result.control.target, "second");
+}
+
+TEST_F (ScriptEngineTest, SkipRequestRecordsASkipFromAPreRequestScript) {
+    auto ctx    = scenario_prerequest (request, env);
+    auto result = engine.execute ("pm.execution.skipRequest();", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::Skip);
+}
+
+// The request has already gone out by the time a test script runs, so there is
+// nothing left to skip. Recording the intent and refusing it later would let
+// the script believe it succeeded for the rest of its body.
+TEST_F (ScriptEngineTest, SkipRequestThrowsInATestScript) {
+    auto ctx    = scenario_test (request, response, env);
+    auto result = engine.execute ("pm.execution.skipRequest();", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pre-request"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
+}
+
+// The single-send contract: `POST /execute` runs exactly this, and it has no
+// next request to name.
+TEST_F (ScriptEngineTest, SetNextRequestThrowsInASingleSend) {
+    auto result = engine.execute_prerequest (
+    "pm.execution.setNextRequest('checkout');", request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
+}
+
+TEST_F (ScriptEngineTest, SkipRequestThrowsInASingleSend) {
+    auto result = engine.execute_prerequest ("pm.execution.skipRequest();", request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
+}
+
+// The load-mode contract, and it is a decision rather than an omission: a
+// deferred `tests` script has already run against a recorded response and
+// cannot redirect a sequence that already happened. `validate_scripts` builds
+// exactly this `for_test` shape and sets no `in_scenario`.
+TEST_F (ScriptEngineTest, SetNextRequestThrowsInALoadRunsDeferredTestScript) {
+    auto result = engine.execute_test (
+    "pm.execution.setNextRequest('checkout');", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
+}
+
+// Bound rather than absent, so the sentence above is reachable at all: a
+// missing binding answers "not a function", which sends someone hunting a
+// typo instead of reading why.
+TEST_F (ScriptEngineTest, PmExecutionIsBoundEvenWhereItRefusesEveryCall) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("both methods exist", function() {
+            pm.expect(typeof pm.execution.setNextRequest).to.equal("function");
+            pm.expect(typeof pm.execution.skipRequest).to.equal("function");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, SetNextRequestRejectsEveryArgumentThatNamesNothing) {
+    struct Case {
+        const char* script;
+        const char* expected;
+    };
+    // Omitting the argument is not a synonym for null: "end the iteration" and
+    // "I forgot the name" are different intents, and guessing between them
+    // would silently end runs.
+    const Case cases[] = {
+        { "pm.execution.setNextRequest();", "no argument" },
+        { "pm.execution.setNextRequest(3);", "number" },
+        { "pm.execution.setNextRequest(undefined);", "undefined" },
+        { "pm.execution.setNextRequest('');", "empty name" },
+    };
+
+    for (const auto& test_case : cases) {
+        auto ctx    = scenario_test (request, response, env);
+        auto result = engine.execute (test_case.script, ctx);
+        EXPECT_FALSE (result.success) << test_case.script;
+        EXPECT_NE (result.error_message.find (test_case.expected), std::string::npos)
+        << test_case.script << " reported: " << result.error_message;
+        EXPECT_EQ (result.control.kind, ScriptControl::Kind::None) << test_case.script;
+    }
+}
+
+// Contexts are pooled, so an instruction has to be per-execution state like
+// pm.info is. Hold it on the context instead and the next step of the run
+// inherits the previous step's jump.
+TEST_F (ScriptEngineTest, AnInstructionDoesNotSurviveIntoTheNextExecution) {
+    auto first = scenario_test (request, response, env);
+    auto first_result =
+    engine.execute ("pm.execution.setNextRequest('checkout');", first);
+    ASSERT_EQ (first_result.control.kind, ScriptControl::Kind::Next);
+
+    auto second        = scenario_test (request, response, env);
+    auto second_result = engine.execute ("1 + 1;", second);
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+    EXPECT_EQ (second_result.control.kind, ScriptControl::Kind::None);
+    EXPECT_TRUE (second_result.control.target.empty ());
+}

@@ -256,6 +256,7 @@ bool verbose) {
         ctx.request_name        = inputs.request_name;
         ctx.iteration           = inputs.iteration;
         ctx.iteration_count     = inputs.iteration_count;
+        ctx.in_scenario         = inputs.in_scenario;
     };
 
     // Execute pre-request script. `for_prerequest` is what makes its
@@ -266,6 +267,17 @@ bool verbose) {
     bind (pre_ctx, &pre_cookie_writes);
     outcome.pre_script_result =
     execute_script (engine, inputs.pre_script, pre_ctx, "Pre-request");
+
+    // `pm.execution.skipRequest()` - nothing goes out, and with no response
+    // there is nothing for a test script to assert on either. The script's jar
+    // writes are still applied here rather than dropped with the send they were
+    // staged for: a `jar().set` that reported success and then vanished is the
+    // same silent-loss defect the write half was built to avoid.
+    if (outcome.pre_script_result.control.kind == vayu::ScriptControl::Kind::Skip) {
+        outcome.sent = false;
+        jar.apply (cookie_scope, pre_cookie_writes);
+        return outcome;
+    }
 
     vayu::http::ClientConfig config;
     config.verbose       = verbose;
