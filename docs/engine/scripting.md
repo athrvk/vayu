@@ -263,6 +263,30 @@ pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (string, if any)
 ```
 
+`body` is a string for every mode, including the two whose content is a list of
+fields rather than text. A form body reads as its **enabled** fields encoded
+`key=value&…`:
+
+| Body mode | What `pm.request.body` reads | Assigning a string |
+|---|---|---|
+| `json` / `text` / `xml` / `graphql` / … | the content, as stored | replaces it |
+| `x-www-form-urlencoded` | the encoded fields - **exactly** the bytes sent | parses back into the fields |
+| `form-data` | the encoded fields - a *rendering*, not the bytes sent | refused with a named error |
+| none | the property is absent (`undefined`) | sends that string as raw text |
+
+The `form-data` split is not an oversight: a multipart body carries a boundary
+libcurl generates at transfer time, so no faithful string exists before the send.
+That makes the string safe to read and log, but a digest taken over it is **not**
+a digest of the multipart body that goes out - and it is why an assignment is
+refused there rather than accepted and then ignored by the transfer layer. To
+change a multipart body, edit the request's form fields; `delete pm.request.body`
+still drops it entirely.
+
+Reading a form body never rewrites it. The write-back reads `body` off the
+script's object whether or not the script assigned it, so an **unchanged** string
+means untouched - without that, a script that only looked at the body would
+delete the disabled rows the encoded view leaves out.
+
 ### Mutating the request (pre-request scripts)
 
 In a **pre-request** script these four fields are writable, and what they hold
@@ -291,6 +315,8 @@ Rules worth knowing before you rely on them:
   numbers or booleans, and `body` must be a string. Anything else fails the
   whole write-back - the request is sent unchanged and the reason is reported
   as the pre-request script error, visible in the response pane's Console tab.
+  Assigning a string to a `form-data` body fails the same way, for the same
+  reason: a value the engine cannot send is refused rather than dropped.
 - **Setting a variable does not re-render the URL.** `{{placeholders}}` are
   resolved at compose time (`POST /compose`), strictly before any script runs,
   so `pm.environment.set('host', …)` affects later runs only - a deliberate

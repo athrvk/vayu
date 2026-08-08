@@ -427,6 +427,16 @@ pm.request.body = JSON.stringify({ n: 2 });
   strings (`method` one of the seven verbs); a header value may be a string, number or
   boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
   `preScriptError`, which the response pane's Console tab shows.
+- **`body` is a string for every mode, including the two that store fields.** A
+  `x-www-form-urlencoded` or `form-data` body reads as its **enabled** fields encoded
+  `key=value&…` rather than as `""` - the empty string a `content`-only read used to give,
+  which no script could tell apart from a request with no body. For urlencoded that string
+  *is* the wire body and an assignment parses back into the fields; for `form-data` it is a
+  rendering of the parts, because the multipart bytes carry a boundary libcurl generates at
+  transfer time - so an assignment there is **refused with a named error** rather than
+  written to a body the transfer layer would ignore. Full table in
+  [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
+  never rewrites it: an unchanged string means untouched.
 - **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
   at **compose time** (`POST /compose`, engine-side since #226), whereas the
   pre-request script runs **later**, at execute. So `pm.environment.set("host", …)` with

@@ -53,6 +53,22 @@ namespace vayu::http {
 [[nodiscard]] std::string encode_urlencoded (const std::vector<FormField>& fields);
 
 /**
+ * @brief `key=value&…` parsed back into fields - the inverse of the encoder.
+ *
+ * Decoding is libcurl's `curl_easy_unescape` for the same reason the encoder
+ * uses `curl_easy_escape`. `+` decodes to a space first, because that is what
+ * the `application/x-www-form-urlencoded` media type says it means; a literal
+ * plus travels as `%2B` and survives. `encode_urlencoded` never emits a bare
+ * `+`, so encode-then-parse round-trips exactly.
+ *
+ * A pair with no `=` becomes a field with an empty value, and an empty segment
+ * is skipped - a body is a list of pairs, so there is no "malformed" here to
+ * reject. Every parsed field is enabled: the string carries no disabled rows,
+ * and inventing one would send a field the caller did not write.
+ */
+[[nodiscard]] std::vector<FormField> parse_urlencoded (const std::string& encoded);
+
+/**
  * @brief True when this body puts bytes in the request's body frame.
  *
  * The one predicate every caller uses, because "has a body" is mode-dependent:
