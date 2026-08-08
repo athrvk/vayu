@@ -50,7 +50,13 @@ export function DrawerPanel({ title, actions, children, className }: DrawerPanel
 			 * horizontal scrollbar to the drawer. Rows ellipse instead (see
 			 * TruncatedText) - the drawer never scrolls sideways.
 			 */}
-			<div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</div>
+			{/* `data-drawer-body` names the scrolling box for a view that has to
+			    scroll it itself - the collection tree's drag auto-scroll moves this
+			    element, not the window. An attribute rather than a ref prop: the
+			    frame has no reason to know which views want one. */}
+			<div data-drawer-body className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+				{children}
+			</div>
 		</div>
 	);
 }

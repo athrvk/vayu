@@ -1287,6 +1287,11 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   deletes, **Shift+F10 / Menu** opens row actions, **typeahead** jumps to the
   next row whose name starts with what you type, **`*`** expands every folder at
   the focused row's level.
+- **Alt+Arrow moves the row itself**, the keyboard half of drag-and-reorder:
+  Up/Down among its siblings, Right into the folder rendered above it, Left out
+  to after its parent. Alt because the tree owns the bare arrows and the app owns
+  Ctrl/Cmd; every move is announced in the live region below, and the row menu's
+  **"Move to..."** is the same move with no chord at all.
 - Every control inside a row is `tabIndex={-1}`, so Delete and Shift+F10 are the
   keyboard path to row actions - do not remove them without providing another.
   Both row types must render every hidden control: a folder row without
@@ -1295,7 +1300,8 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
 
 Rows declare behaviour through data attributes rather than props
 (`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,
-`data-tree-delete`, `data-tree-label`), so the hook needs nothing threaded
+`data-tree-delete`, `data-tree-move-up` / `-down` / `-in` / `-out`,
+`data-tree-label`), so the hook needs nothing threaded
 through `CollectionItem`'s prop list. `data-tree-label` is the row's name for
 typeahead and is not optional decoration: a request row's `textContent` starts
 with its method badge and a folder's ends with its child count, so matching the
@@ -1304,6 +1310,24 @@ text would search a string the user never sees.
 **Focus is not selection.** Arrows move focus without opening anything; Enter
 opens. Keep roving focus, `aria-selected`, and the open tab in tabs-store
 distinct - conflating them is the classic treeview bug.
+
+**The whole row is the drag handle, and that is only safe because the
+discriminator is movement.** There is no grip icon: the row already fought dead
+zones to become clickable everywhere (see the hit-area rule above), and a grip
+would hand most of that area back. A press becomes a drag at ~4px and not
+before, so every click affordance survives - and the completed drag swallows the
+one click the browser fires after it, or the row it was just dropped on would
+open. Never a timer: `RequestItem.test.tsx` pins that opening is synchronous.
+
+**Drop indicators are classes on rows that already exist.** A line between two
+rows is a 2px `bg-primary` span positioned inside the target row and indented to
+that row's own depth - the depth is the only thing separating "after this
+collapsed folder", "into it" and "after its parent". Dropping *into* a folder
+reuses the selected-row ring. Nothing new gets `role="treeitem"`: the
+roving-focus walk and the group nesting are read off the DOM, so an indicator
+node between rows would change the tree's shape mid-drag. A row that cannot take
+the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
+subtree, and the block the dragged row does not belong to.
 
 **A rename must hand focus back.** The rename field replaces the row's label and
 then unmounts, so closing it from the keyboard (Enter or Escape) with nothing to
@@ -1325,10 +1349,13 @@ roving-focus walk and the hit-area rules depend on. Folders and requests inside
 one group are **one** set - the requests continue the folders' numbering, or two
 adjacent rows both announce "1 of 1".
 
-`CollectionTree` also renders one polite live region (`data-tree-live`), empty.
-It ships ahead of anything that writes to it on purpose: a live region added at
-the same moment as its first message is not reliably announced (the same
-constraint `ResponseAnnouncer` carries).
+`CollectionTree` also renders one polite live region (`data-tree-live`). It
+shipped empty, ahead of anything that wrote to it, on purpose: a live region
+added at the same moment as its first message is not reliably announced (the
+same constraint `ResponseAnnouncer` carries). What writes to it now is a move -
+"Moved Get Users to position 2 of 5 in Billing", or the reason a move did not
+happen ("Get Users is already first in Billing"), which is the only feedback a
+keyboard user gets for a row that visibly went nowhere.
 
 Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
 control and the row genuinely differ** - the history, variables and settings

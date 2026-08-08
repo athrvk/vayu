@@ -5,10 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
+import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
+import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
@@ -73,6 +76,17 @@ export default function CollectionItem({
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
+
+	const entity = useMemo<TreeEntity>(
+		() => ({
+			kind: "collection",
+			id: collection.id,
+			name: collection.name,
+			parentId: collection.parentId ?? null,
+		}),
+		[collection.id, collection.name, collection.parentId]
+	);
+	const dnd = useRowDnd(entity);
 	const childCollections = allCollections
 		.filter((c) => c.parentId === collection.id)
 		.sort(compareTreeOrder);
@@ -156,6 +170,10 @@ export default function CollectionItem({
 				// Lets the tree scroll a selected collection into view, the way
 				// `data-request-id` on RequestItem already does for a request.
 				data-collection-id={collection.id}
+				// The folder block this row sits in, for the drag hit test - it has
+				// the element, not the row's model. Absent at the root, which is
+				// exactly the `null` parent scope the reorder batch names.
+				data-parent-id={collection.parentId ?? undefined}
 				data-tree-label={collection.name}
 				aria-expanded={isExpanded}
 				aria-selected={isSelected}
@@ -172,6 +190,11 @@ export default function CollectionItem({
 				aria-owns={isExpanded ? childrenId : undefined}
 				onClick={(e) => isRowSurface(e) && handleClick(e)}
 				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
+				// Whole-row drag handle: the gesture is captured here and only
+				// becomes a drag past the movement threshold, so every click
+				// affordance the hit-area rules bought is untouched.
+				{...dnd.handlers}
+				data-drop-blocked={dnd.isBlocked || undefined}
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
 					// label button inside it - it paints the keyboard focus ring.
@@ -186,10 +209,14 @@ export default function CollectionItem({
 					"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
-						: "hover:bg-accent"
+						: "hover:bg-accent",
+					// Last, so a drop target's ring wins over the selected row's -
+					// same colour, and the drop is the transient one.
+					rowDndClasses(dnd)
 				)}
 				style={{ paddingLeft: indentPx }}
 			>
+				<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
 				<button
 					onClick={handleToggleClick}
 					tabIndex={-1}
@@ -286,7 +313,15 @@ export default function CollectionItem({
 					<RowActionsMenu
 						label={`More actions for ${collection.name}`}
 						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-						actions={getCollectionActions(collection)}
+						// "Move to..." is appended rather than built in
+						// `getCollectionActions`: it belongs to the drag slice, which
+						// mounts after the CRUD slice and would otherwise have to be
+						// threaded backwards into it.
+						actions={
+							dnd.moveAction
+								? [...getCollectionActions(collection), dnd.moveAction]
+								: getCollectionActions(collection)
+						}
 					/>
 				)}
 				{/* Keyboard-only rename and delete targets: F2 and Delete click them
@@ -314,6 +349,7 @@ export default function CollectionItem({
 						onCollectionDeleteClick(collection.id, collection.name);
 					}}
 				/>
+				<RowMoveControls entity={entity} />
 			</div>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}

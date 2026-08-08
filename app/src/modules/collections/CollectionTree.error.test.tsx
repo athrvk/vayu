@@ -40,6 +40,7 @@ const queryState = {
 };
 
 vi.mock("@/queries", () => ({
+	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
 	useCollectionsQuery: () => queryState.collections,
 	// Destructured as { requestsByCollection }, a Map keyed by collection id.
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),

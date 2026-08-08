@@ -25,6 +25,7 @@
  *   data-tree-rename    rename control         (F2 key)
  *   data-tree-delete    delete control         (Delete key)
  *   data-tree-label     the row's name         (typeahead)
+ *   data-tree-move-*    reorder controls       (Alt+Arrow)
  *
  * Focus is deliberately separate from selection: arrows move focus without
  * opening anything; Enter/Space opens.
@@ -34,6 +35,23 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TIMING } from "@/config/timing";
 
 const ITEM = '[role="treeitem"]';
+
+/**
+ * Alt+Arrow moves the row itself, rather than the focus - the keyboard half of
+ * drag-and-reorder (#364 decision 8). Left and right are "out of" and "into",
+ * matching the plain arrows' collapse/expand direction so the pair reads as one
+ * mental model rather than two.
+ *
+ * Alt is the modifier because the tree owns the bare arrows for navigation and
+ * the app owns Ctrl/Cmd; a chord is also why the row menu carries a
+ * "Move to..." action that needs no keyboard at all.
+ */
+const MOVE_CONTROL: Record<string, string> = {
+	ArrowUp: "[data-tree-move-up]",
+	ArrowDown: "[data-tree-move-down]",
+	ArrowRight: "[data-tree-move-in]",
+	ArrowLeft: "[data-tree-move-out]",
+};
 
 /**
  * A row's name, for typeahead.
@@ -115,6 +133,14 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				e.preventDefault();
 				e.stopPropagation();
 			};
+
+			// Before the switch: Alt+Arrow is a move, not a navigation, and the
+			// four keys it uses all mean something else without the modifier.
+			if (e.altKey && MOVE_CONTROL[e.key]) {
+				take();
+				click(MOVE_CONTROL[e.key]);
+				return;
+			}
 
 			switch (e.key) {
 				case "ArrowDown":

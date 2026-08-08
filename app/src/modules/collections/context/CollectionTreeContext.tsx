@@ -23,6 +23,7 @@
 import { createContext, useContext } from "react";
 import type { Collection, Request } from "@/types";
 import type { RowAction } from "@/components/shared";
+import type { TreeEntity } from "../drop-position";
 
 /**
  * Where a drop would land: `inside` reparents into a folder, `before` / `after`
@@ -34,16 +35,45 @@ export interface CollectionTreeDropTarget {
 }
 
 /**
- * The drag-and-drop slice, phase 3 of #364 (#367). Typed and present now, so
- * the `useTreeDnd` hook lands as one provider field plus row wiring rather than
- * as another pass through the prop thread this context exists to remove.
- * `null` means no drag machinery is mounted - which is every render until #367.
+ * The pointer wiring a row spreads onto its own box. One object rather than
+ * five props because a row takes all of them or none: the gesture is only
+ * coherent if the same element sees the press, the moves and the release.
+ */
+export interface CollectionTreeRowHandlers {
+	onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
+	/** Swallows the click the browser fires after a completed drag. */
+	onClickCapture: (e: React.MouseEvent<HTMLElement>) => void;
+}
+
+/** Alt+Arrow, in tree terms: among siblings, into the folder above, out to the parent. */
+export type TreeMoveDirection = "up" | "down" | "in" | "out";
+
+/**
+ * The drag-and-drop slice, phase 3 of #364 (#367). It arrives through the
+ * context rather than as props because `CollectionItem` renders itself, so
+ * every one of these would otherwise be re-threaded at each depth.
+ *
+ * `null` means no drag machinery is mounted, which is what a test rendering a
+ * single row in isolation gets - the rows must stay usable without it.
  */
 export interface CollectionTreeDnd {
 	/** The entity being dragged, or null when no drag is in progress. */
 	draggingId: string | null;
 	/** The row the pointer is over, and where the drop would land on it. */
 	dropTarget: CollectionTreeDropTarget | null;
+	rowHandlers: (entity: TreeEntity) => CollectionTreeRowHandlers;
+	/** True while this row is an illegal target - the dragged folder's own subtree. */
+	isDropBlocked: (entity: TreeEntity) => boolean;
+	moveByKeyboard: (entity: TreeEntity, direction: TreeMoveDirection) => void;
+	/**
+	 * The row menu's "Move to..." entry - the discoverable path that needs no
+	 * chords. A factory rather than a handler so both row types get one action,
+	 * worded and iconed once, instead of two copies that drift.
+	 */
+	moveAction: (entity: TreeEntity) => RowAction;
 }
 
 /**
