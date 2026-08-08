@@ -17,6 +17,14 @@
  * logic of its own. It used to send only the request's header rows, so any
  * endpoint whose credentials came from the Auth panel answered 401 and the
  * schema never loaded (issue #228).
+ *
+ * The execution is **transient** (issue #382): the engine runs it in full but
+ * records no run row. Reusing `POST /execute` unqualified made every schema
+ * load an ordinary design run - a History entry the user never made, holding
+ * hundreds of KB of introspection response and the credentials the engine had
+ * resolved into the request headers, and evicting a real run each time because
+ * retention is count-based. Nothing about a background fetch belongs on disk,
+ * so the flag rides every introspection rather than being a caller's choice.
  */
 
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
@@ -49,8 +57,16 @@ export interface IntrospectionTarget {
  * deliberately dropped: its body is not an introspection query, and its script
  * parts belong to sending the request, not to loading a schema in the
  * background.
+ *
+ * `environmentId` is the target's, not the composed payload's: it scopes the
+ * cookie jar the engine sends through, and dropping it introspected a
+ * cookie-session endpoint in the no-environment jar - so the endpoint answered
+ * real requests and failed introspection with a confusing auth error (#382).
  */
-export function buildIntrospectionRequest(composed: ComposedRequest): ExecuteRequestRequest {
+export function buildIntrospectionRequest(
+	composed: ComposedRequest,
+	environmentId?: string
+): ExecuteRequestRequest {
 	const request: ExecuteRequestRequest = {
 		method: "POST",
 		url: composed.url,
@@ -58,6 +74,11 @@ export function buildIntrospectionRequest(composed: ComposedRequest): ExecuteReq
 		// The engine expects a structured body ({ mode, content }), not a raw
 		// string - content is the serialized JSON the server receives.
 		body: { mode: "json", content: JSON.stringify({ query: getIntrospectionQuery() }) },
+		// Nobody sent this request, so nothing about it belongs in History
+		// (#382). Without the flag every schema load filed a design run, stored
+		// the resolved credentials in its trace, and evicted a real run.
+		transient: true,
+		...(environmentId ? { environmentId } : {}),
 	};
 	// Compose erases `auth` when it resolves to nothing, and never returns a
 	// still-`inherit` block; either way an absent field is the engine's "send
@@ -78,7 +99,9 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 		collectionId: target.collectionId,
 		environmentId: target.environmentId,
 	});
-	const res = await apiService.executeRequest(buildIntrospectionRequest(composed));
+	const res = await apiService.executeRequest(
+		buildIntrospectionRequest(composed, target.environmentId)
+	);
 	if (res.status < 200 || res.status >= 300) {
 		throw new Error(`Introspection failed: HTTP ${res.status}`);
 	}

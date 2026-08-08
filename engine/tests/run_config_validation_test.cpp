@@ -290,6 +290,43 @@ TEST (RunConfigValidation, NonObjectConfigIsRejected) {
     EXPECT_TRUE (validate_run_config (nlohmann::json ("nope")).has_value ());
 }
 
+// --- `transient` belongs to POST /execute, never to a run (issue #382) -----
+
+TEST (RunConfigValidation, TransientIsRejectedOnALoadRun) {
+    // A run *is* its row - the run id is what POST /runs returns and what the
+    // live stream, the report and the step store are all keyed by. Ignoring the
+    // flag would leave a caller believing a load run left nothing behind while
+    // it wrote the largest trace the store holds.
+    auto config         = valid_config ();
+    config["transient"] = true;
+    expect_rejected (config, "transient");
+}
+
+TEST (RunConfigValidation, TransientIsRejectedOnAScenarioRun) {
+    // A scenario payload has no method/url of its own, so it is the shape most
+    // likely to be hand-assembled from an /execute payload - the one place the
+    // flag could realistically be carried over by accident.
+    nlohmann::json config{ { "scenario", { { "collectionId", "col_1" } } },
+        { "iterations", 2 }, { "transient", true } };
+    expect_rejected (config, "transient");
+}
+
+TEST (RunConfigValidation, TransientFalseIsRejectedToo) {
+    // Presence is the error, not the value: `false` on a run is not "recorded
+    // as usual", it is a caller who thinks this endpoint has a mode it does not.
+    auto config         = valid_config ();
+    config["transient"] = false;
+    expect_rejected (config, "transient");
+}
+
+TEST (RunConfigValidation, ANullTransientIsAcceptedAsAbsent) {
+    // Same absent-vs-null rule the numeric fields follow above: a client that
+    // spells "unset" as `null` sent no flag.
+    auto config         = valid_config ();
+    config["transient"] = nullptr;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
 // --- The collector's own guard, independent of the route ------------------
 
 TEST (MetricsCollectorSampleRateGuard, ZeroSampleRatesDoNotDivideByZero) {

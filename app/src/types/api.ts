@@ -286,6 +286,19 @@ export interface ExecuteRequestRequest {
 	 */
 	requestName?: string;
 	environmentId?: string;
+	/**
+	 * Run the request in full but record nothing: no run row, no History entry,
+	 * no result trace on disk, no retention prune (issue #382). Absent means
+	 * recorded, which is what every user-initiated send wants.
+	 *
+	 * The one caller is GraphQL schema introspection - a background fetch the
+	 * user never made, which as an ordinary design run filled History with runs
+	 * nobody sent, wrote the resolved credentials into a trace on disk, and
+	 * evicted real runs through the count-based retention prune. MCP's
+	 * `run_request` deliberately does *not* set it: an agent's runs belong in
+	 * History like anyone else's.
+	 */
+	transient?: boolean;
 }
 
 export type ExecuteRequestResponse = SanityResult;

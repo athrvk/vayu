@@ -447,6 +447,27 @@ const nlohmann::json& json,
 const std::optional<std::string>& request_id);
 
 /**
+ * The outcome of reading `POST /execute`'s `transient` flag (issue #382).
+ *
+ * `value` is what the payload asked for; `ok == false` means the field was
+ * present with a non-boolean type, which is a `400` rather than a silent
+ * `false` - see `read_transient_flag`.
+ */
+struct TransientFlag {
+    bool ok = true;
+    std::string error;
+    bool value = false;
+};
+
+/**
+ * Read the `transient` flag off a `POST /execute` payload.
+ *
+ * Extracted from the handler (execution.cpp) so transient_execute_test.cpp can
+ * drive it directly, matching the suite's other route-core tests.
+ */
+TransientFlag read_transient_flag (const nlohmann::json& json);
+
+/**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */

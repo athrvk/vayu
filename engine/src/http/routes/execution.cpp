@@ -211,6 +211,42 @@ std::string scenario_snapshot (const std::string& sanitized, const nlohmann::jso
     return parsed.dump ();
 }
 
+/**
+ * @brief Read `POST /execute`'s `transient` flag (issue #382).
+ *
+ * A transient execution runs the request in full - same composition, same
+ * cookie jar, same scripts, same response - but records nothing: no run row, no
+ * result trace, no retention prune. It exists because GraphQL schema
+ * introspection is a background fetch, not something the user sent: filing it
+ * as a design run put runs nobody made into History, snapshotted the
+ * post-auth request headers into a result trace on disk, and evicted real runs
+ * through the count-based retention prune.
+ *
+ * Absent and `null` both mean `false`: recording is the default, and only a
+ * caller that explicitly asks opts out. A present non-boolean is a **400**
+ * rather than a silent `false` - a client that sends `"true"` is asking for
+ * privacy it would not get, and that must not fail quietly. (This is stricter
+ * than `allowScriptRequests`, whose non-boolean-means-no is safe in the other
+ * direction: it denies a capability rather than granting exposure.)
+ *
+ * Non-static: transient_execute_test.cpp drives it directly, the suite having
+ * no in-process HTTP route harness.
+ */
+TransientFlag read_transient_flag (const nlohmann::json& json) {
+    TransientFlag flag;
+    auto field = json.find ("transient");
+    if (field == json.end () || field->is_null ()) {
+        return flag;
+    }
+    if (!field->is_boolean ()) {
+        flag.ok    = false;
+        flag.error = "'transient' must be a boolean";
+        return flag;
+    }
+    flag.value = field->get<bool> ();
+    return flag;
+}
+
 namespace {
 
 // Build the final response JSON with script results
@@ -268,62 +304,6 @@ const vayu::ScriptResult& post_script_result) {
     return response_json;
 }
 
-// Store result to database (logs errors but doesn't throw)
-void store_result (vayu::db::Database& db,
-const std::string& run_id,
-const vayu::Request& request,
-const vayu::Response& response) {
-    try {
-        const bool has_error = response.has_error ();
-
-        vayu::db::Result db_result;
-        db_result.run_id      = run_id;
-        db_result.timestamp   = now_ms ();
-        db_result.status_code = response.status_code;
-        db_result.status_text = response.status_text;
-        db_result.latency_ms  = response.timing.total_ms;
-        db_result.error       = has_error ? response.error_message : "";
-
-        // Build the full-fidelity trace, then cap the request/response bodies at
-        // the configured limit so one large exchange cannot bloat the DB forever.
-        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
-        nlohmann::json trace = build_result_trace (request, response);
-        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
-        "maxTraceBodyBytes",
-        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
-        vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
-
-        // A capped body may split a UTF-8 sequence, and the raw response body can
-        // be arbitrary bytes - dump with error_handler_t::replace so a lone
-        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
-        // the same guard).
-        db_result.trace_data =
-        trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
-        db.add_result (db_result);
-
-        auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
-        db.update_run_status_with_retry (run_id, status);
-
-        // A design run reached a terminal status - trim the run history so
-        // per-request clicks do not accumulate forever (retention knobs, or 0
-        // to disable). Best-effort: a prune failure must not fail the request.
-        try {
-            db.prune_runs_configured ();
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
-        }
-
-    } catch (const std::exception& e) {
-        vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));
-        try {
-            db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
-        } catch (...) {
-            vayu::utils::log_error (
-            "Failed to update run status after save error");
-        }
-    }
-}
-
 // One numeric field of a run config: what it is called on the wire, and the
 // closed interval it must fall in. Kept as data so the four checks below read
 // as a table rather than four hand-written branches that can drift apart.
@@ -361,6 +341,80 @@ const NumericRunField& field) {
 } // namespace
 
 /**
+ * @brief Record a finished design execution against its run row.
+ *
+ * Writes the result trace, moves the run to its terminal status, and trims the
+ * run history. Logs on failure rather than throwing: a storage problem must not
+ * turn a request the user already sent into an error.
+ *
+ * @param run_id The row to record against, or `std::nullopt` for a **transient**
+ * execution (issue #382), which records nothing at all. Both `POST /execute`
+ * call sites - the auth-failure path and the completed-exchange path - go
+ * through here, so "transient leaves no trace" is decided in exactly one place
+ * rather than guarded twice at the call sites.
+ *
+ * Non-static: transient_execute_test.cpp drives it against a real database,
+ * the suite having no in-process HTTP route harness.
+ */
+void record_design_result (vayu::db::Database& db,
+const std::optional<std::string>& run_id,
+const vayu::Request& request,
+const vayu::Response& response) {
+    if (!run_id) {
+        return;
+    }
+    try {
+        const bool has_error = response.has_error ();
+
+        vayu::db::Result db_result;
+        db_result.run_id      = *run_id;
+        db_result.timestamp   = now_ms ();
+        db_result.status_code = response.status_code;
+        db_result.status_text = response.status_text;
+        db_result.latency_ms  = response.timing.total_ms;
+        db_result.error       = has_error ? response.error_message : "";
+
+        // Build the full-fidelity trace, then cap the request/response bodies at
+        // the configured limit so one large exchange cannot bloat the DB forever.
+        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
+        nlohmann::json trace = build_result_trace (request, response);
+        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
+        "maxTraceBodyBytes",
+        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+        vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
+
+        // A capped body may split a UTF-8 sequence, and the raw response body can
+        // be arbitrary bytes - dump with error_handler_t::replace so a lone
+        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
+        // the same guard).
+        db_result.trace_data =
+        trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        db.add_result (db_result);
+
+        auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
+        db.update_run_status_with_retry (*run_id, status);
+
+        // A design run reached a terminal status - trim the run history so
+        // per-request clicks do not accumulate forever (retention knobs, or 0
+        // to disable). Best-effort: a prune failure must not fail the request.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        }
+
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));
+        try {
+            db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
+        } catch (...) {
+            vayu::utils::log_error (
+            "Failed to update run status after save error");
+        }
+    }
+}
+
+/**
  * @brief Validate a POST /runs config before the run row is created.
  *
  * Every field below is read downstream with `config.value (...)` and cast to
@@ -379,6 +433,17 @@ const NumericRunField& field) {
 std::optional<std::string> validate_run_config (const nlohmann::json& config) {
     if (!config.is_object ()) {
         return "Run config must be a JSON object";
+    }
+
+    // `transient` belongs to `POST /execute` alone (issue #382). A load or
+    // scenario run *is* its run row - the run id is the return value, and the
+    // live-metrics stream, the report and the scenario step store all key off
+    // it - so there is nothing coherent for the flag to mean here. Rejected
+    // rather than ignored: a caller that sends it believes this run will leave
+    // no trace, and it is about to leave a large one.
+    if (config.contains ("transient") && !config["transient"].is_null ()) {
+        return "'transient' is not valid on a run - it applies to POST /execute "
+               "only, because a run is identified by the row it creates";
     }
 
     // `duration` is the one non-numeric field here, and the only one whose bad
@@ -476,7 +541,9 @@ void register_execution_routes (RouteContext& ctx) {
      */
     httplib::Server::Handler execute_request =
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id;
+        // Absent for a transient execution (issue #382): no row exists to
+        // record against, and every recording step below keys off that.
+        std::optional<std::string> run_id;
 
         // Parse and validate request
         nlohmann::json json;
@@ -486,6 +553,16 @@ void register_execution_routes (RouteContext& ctx) {
             vayu::utils::log_warning (
             "POST /execute - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
+            return;
+        }
+
+        // Read before anything is built or written, with the other pre-row
+        // validation: a malformed flag must be a 400, not a run the caller
+        // believed would leave no trace.
+        const auto transient = read_transient_flag (json);
+        if (!transient.ok) {
+            vayu::utils::log_warning ("POST /execute - " + transient.error);
+            send_error (res, 400, transient.error);
             return;
         }
 
@@ -506,13 +583,16 @@ void register_execution_routes (RouteContext& ctx) {
         std::string pre_request_script = vayu::http::read_pre_request_script (json);
         std::string post_request_script = vayu::http::read_post_request_script (json);
 
-        // Create Run record
-        run_id = vayu::utils::generate_id ("run_");
+        // The run row. Built even for a transient execution, because it is also
+        // how this handler carries scope: `load_script_variable_scopes` and
+        // `persist_script_variables` read its `request_id` / `environment_id`,
+        // and the cookie scope below comes from the same field. Only the
+        // *persisted* half - the id, the config snapshot, the create - is
+        // conditional, so a transient execution resolves variables and cookies
+        // exactly as a recorded one does.
         vayu::db::Run run;
-        run.id              = run_id;
-        run.type            = vayu::RunType::Design;
-        run.status          = vayu::RunStatus::Running;
-        run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+        run.type   = vayu::RunType::Design;
+        run.status = vayu::RunStatus::Running;
         seed_run_times (run, now_ms ());
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
@@ -533,8 +613,19 @@ void register_execution_routes (RouteContext& ctx) {
         }
         const std::optional<std::string> script_request_name = std::move (resolved_name.name);
 
+        // The persisted half of the run row, skipped entirely when the caller
+        // asked for a transient execution. The config snapshot is built here
+        // rather than above because it is storage, not scope: sanitizing a
+        // payload nobody will store is work with no reader.
+        if (!transient.value) {
+            run.id              = vayu::utils::generate_id ("run_");
+            run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+            run_id              = run.id;
+        }
+
         // Log request details
-        vayu::utils::log_info ("POST /execute - Design Mode: run_id=" + run_id +
+        vayu::utils::log_info ("POST /execute - Design Mode: run_id=" +
+        run_id.value_or ("none (transient)") +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") +
         ", request_id=" + run.request_id.value_or ("none") +
@@ -542,12 +633,14 @@ void register_execution_routes (RouteContext& ctx) {
         ", has_pre_script=" + std::string (!pre_request_script.empty () ? "true" : "false") +
         ", has_post_script=" + std::string (!post_request_script.empty () ? "true" : "false"));
 
-        try {
-            ctx.db.create_run (run);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("Failed to create run: " + std::string (e.what ()));
-            send_error (res, 400, "Failed to create run record");
-            return;
+        if (run_id) {
+            try {
+                ctx.db.create_run (run);
+            } catch (const std::exception& e) {
+                vayu::utils::log_error ("Failed to create run: " + std::string (e.what ()));
+                send_error (res, 400, "Failed to create run record");
+                return;
+            }
         }
 
         // Initialize script engine
@@ -586,7 +679,7 @@ void register_execution_routes (RouteContext& ctx) {
             auth_resp.status_text   = vayu::http::status_text (0);
             auth_resp.error_code    = built.error_code;
             auth_resp.error_message = built.error_message;
-            store_result (ctx.db, run_id, request, auth_resp);
+            record_design_result (ctx.db, run_id, request, auth_resp);
             nlohmann::json body   = vayu::json::serialize (auth_resp);
             body["authErrorCode"] = built.detail_code;
             res.status            = 200;
@@ -616,8 +709,10 @@ void register_execution_routes (RouteContext& ctx) {
         auto exchange       = execute_exchange (script_engine, ctx.cookie_jar,
         cookie_scope, scopes, std::move (inputs), ctx.verbose);
 
-        // Store result to database (non-blocking, errors logged)
-        store_result (ctx.db, run_id, exchange.request, exchange.response);
+        // Store result to database (non-blocking, errors logged). A transient
+        // execution stops here: no trace row, so the post-auth headers this
+        // exchange carries never reach disk.
+        record_design_result (ctx.db, run_id, exchange.request, exchange.response);
 
         // Persist script-set variables (design mode only; best-effort)
         persist_script_variables (
