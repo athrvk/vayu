@@ -120,6 +120,25 @@ function entityFromRow(el: Element | null): TreeEntity | null {
 }
 
 /**
+ * Whether an event that reached a row's handler actually happened on that row.
+ *
+ * A row renders its own ⋯ menu, and Radix renders the menu's items through a
+ * **portal** - a React child of the row whose DOM lives on `document.body`.
+ * React bubbles synthetic events through the component tree rather than the DOM
+ * tree, so pressing "Delete" arrives here as a press on the row.
+ *
+ * Treating it as one is not a cosmetic bug: the press captures the pointer on
+ * the row, and the capture retargets the `pointerup` the menu item needed, so
+ * every action in every row menu silently stops working. A DOM containment
+ * check is the difference between the two, and it is the *only* difference -
+ * `closest("[data-tree-menu]")` cannot see it, because portalled content is not
+ * inside the trigger it belongs to.
+ */
+function isOwnEvent(e: { target: EventTarget | null; currentTarget: HTMLElement }): boolean {
+	return e.target instanceof Node && e.currentTarget.contains(e.target);
+}
+
+/**
  * The index a destination names, in the block *without* the moved row - which
  * is the index `reorder-math` splices into. `null` when the anchor is not in
  * the block, which means the tree changed under the drag.
@@ -467,6 +486,8 @@ export function useTreeDnd({
 	const onPointerDown = useCallback(
 		(e: React.PointerEvent<HTMLElement>, entity: TreeEntity) => {
 			if (e.button !== 0) return;
+			// An open row menu is a React child of this row but not a DOM one.
+			if (!isOwnEvent(e)) return;
 			// The chevron, the ⋯ menu and a rename field are their own controls;
 			// a press on one of them is not a press on the row.
 			if (
@@ -496,7 +517,10 @@ export function useTreeDnd({
 	const onPointerMove = useCallback(
 		(e: React.PointerEvent<HTMLElement>) => {
 			const pressed = pressedRef.current;
-			if (!pressed) return;
+			// `isOwnEvent` again for the same reason as the press: while a drag is
+			// live the row holds the pointer capture, so every real move targets
+			// the row - anything else reaching here came through a portal.
+			if (!pressed || !isOwnEvent(e)) return;
 
 			const next = moveGesture(gestureRef.current, { x: e.clientX, y: e.clientY });
 			if (next !== gestureRef.current) {
@@ -540,25 +564,32 @@ export function useTreeDnd({
 		[armSpring, indicatorFor, isRowBusy, updateAutoScroll]
 	);
 
-	const onPointerUp = useCallback(() => {
-		const pressed = pressedRef.current;
-		if (!pressed) return;
-		const dropped = gestureRef.current.phase === "dragging";
-		gestureRef.current = releaseGesture(gestureRef.current);
-		const destination = destinationRef.current;
-		endDrag();
-		if (!dropped || !destination) return;
+	const onPointerUp = useCallback(
+		(e: React.PointerEvent<HTMLElement>) => {
+			const pressed = pressedRef.current;
+			if (!pressed || !isOwnEvent(e)) return;
+			const dropped = gestureRef.current.phase === "dragging";
+			gestureRef.current = releaseGesture(gestureRef.current);
+			const destination = destinationRef.current;
+			endDrag();
+			if (!dropped || !destination) return;
 
-		const siblings =
-			destination.block === "collections"
-				? collectionSiblings(dataRef.current.collections, destination.ownerId)
-				: destination.ownerId
-					? requestSiblings(destination.ownerId)
-					: [];
-		const index = indexInBlock(siblings, pressed.entity.id, destination);
-		if (index === null) return;
-		applyPlacement(pressed.entity, { ownerId: destination.ownerId, index }, { undoable: true });
-	}, [applyPlacement, endDrag, requestSiblings]);
+			const siblings =
+				destination.block === "collections"
+					? collectionSiblings(dataRef.current.collections, destination.ownerId)
+					: destination.ownerId
+						? requestSiblings(destination.ownerId)
+						: [];
+			const index = indexInBlock(siblings, pressed.entity.id, destination);
+			if (index === null) return;
+			applyPlacement(
+				pressed.entity,
+				{ ownerId: destination.ownerId, index },
+				{ undoable: true }
+			);
+		},
+		[applyPlacement, endDrag, requestSiblings]
+	);
 
 	const onPointerCancel = useCallback(() => {
 		gestureRef.current = cancelGesture(gestureRef.current);
@@ -566,6 +597,10 @@ export function useTreeDnd({
 	}, [endDrag]);
 
 	const onClickCapture = useCallback((e: React.MouseEvent<HTMLElement>) => {
+		// A menu item's click bubbles through the row it belongs to. Swallowing
+		// it would be the drag eating the very action the user chose *because*
+		// the drag before it left a suppression armed.
+		if (!isOwnEvent(e)) return;
 		const { gesture, suppressed } = consumeClick(gestureRef.current);
 		gestureRef.current = gesture;
 		if (!suppressed) return;

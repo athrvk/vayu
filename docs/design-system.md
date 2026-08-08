@@ -1319,6 +1319,16 @@ before, so every click affordance survives - and the completed drag swallows the
 one click the browser fires after it, or the row it was just dropped on would
 open. Never a timer: `RequestItem.test.tsx` pins that opening is synchronous.
 
+**A row's pointer handlers must ignore what its own menu sends them.** The ⋯
+menu is a React child of the row and a *portal* in the DOM, and React bubbles
+synthetic events through the component tree - so a press on "Delete" arrives at
+the row's `onPointerDown`. Taking it captures the pointer on the row, the
+capture retargets the `pointerup` the menu item was waiting for, and every
+action in every row menu stops working while looking perfectly normal.
+`closest("[data-tree-menu]")` does not catch it (portalled content is not inside
+its trigger); a DOM containment check - `currentTarget.contains(target)` - does,
+and is the guard on every pointer handler a row spreads.
+
 **Drop indicators are classes on rows that already exist.** A line between two
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
 that row's own depth - the depth is the only thing separating "after this

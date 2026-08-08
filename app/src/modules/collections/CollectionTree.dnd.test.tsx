@@ -388,6 +388,38 @@ describe("the keyboard move", () => {
 	});
 });
 
+describe("the row's own ⋯ menu", () => {
+	it("is not a press on the row, even though its items bubble through it", async () => {
+		// Radix renders the menu through a *portal*: a React child of the row
+		// whose DOM lives on `body`. React bubbles synthetic events through the
+		// component tree rather than the DOM tree, so a press on a menu item
+		// arrives at the row's own pointer handlers. Taking it captures the
+		// pointer, and the capture retargets the `pointerup` the item needed -
+		// every action in the menu stops working, which is not something a test
+		// that clicks the item directly can see.
+		renderTree();
+		const source = requestRow("r1");
+		const trigger = Array.from(source.querySelectorAll("button")).find((b) =>
+			/more actions/i.test(b.getAttribute("aria-label") ?? "")
+		)!;
+		fireEvent.pointerDown(
+			trigger,
+			new PointerEvent("pointerdown", { bubbles: true, button: 0 })
+		);
+
+		const item = await screen.findByText("Move to...");
+		fireEvent.pointerDown(item, { button: 0, pointerId: 9, clientX: 200, clientY: 200 });
+
+		expect(source.hasPointerCapture(9)).toBe(false);
+
+		// And no amount of movement over the open menu starts a drag.
+		fireEvent.pointerMove(item, { pointerId: 9, clientX: 200, clientY: 260 });
+		expect(document.querySelector("[data-drop-indicator]")).toBeNull();
+		fireEvent.pointerUp(item, { pointerId: 9, clientX: 200, clientY: 260 });
+		expect(reorderMutate).not.toHaveBeenCalled();
+	});
+});
+
 describe("Move to...", () => {
 	it("moves the row and offers an undo that puts it back", async () => {
 		renderTree();
