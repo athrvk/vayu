@@ -1491,6 +1491,15 @@ void Database::seed_default_config () {
     "general_engine", std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
     "0", "1000000", std::nullopt, now });
 
+    upsert_config (ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Maximum Steps Per Iteration",
+    "How many requests one iteration of a collection run may send before it is "
+    "stopped. It exists because a script can redirect the sequence with "
+    "pm.execution.setNextRequest, and two steps pointing at each other would "
+    "otherwise run forever. 0 derives the limit from the collection - ten "
+    "times its request count, and never fewer than 100 - which is what you "
+    "want unless a run legitimately loops more than that.",
+    "general_engine", "0", "0", "1000000", std::nullopt, now });
+
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION
     // SQLite optimization settings for high-throughput load testing

@@ -538,6 +538,34 @@ struct ConsoleEntry {
 };
 
 /**
+ * @brief What a script asked the sequence around it to do next (issue #355).
+ *
+ * `pm.execution.setNextRequest` / `skipRequest` **record** an intent here and
+ * reach into nothing. `ScriptResult` is already the channel a script speaks to
+ * its caller through, and the caller - the scenario runner - is the only thing
+ * that knows what a sequence is; a binding that reached into the runner would
+ * also have to exist for callers that have no sequence at all.
+ *
+ * Last call wins within one script, which is Postman's behaviour.
+ *
+ * A `Kind` other than `None` is only ever produced inside a scenario run: both
+ * bindings throw where `ScriptContext::in_scenario` is false, so a `POST
+ * /execute` send and a load run's deferred `tests` script can never hand their
+ * caller an instruction it would silently drop.
+ */
+struct ScriptControl {
+    enum class Kind {
+        None,        ///< The script asked for nothing; run the next step.
+        Next,        ///< `setNextRequest(name)` - jump to `target`.
+        Skip,        ///< `skipRequest()` - do not send this step.
+        EndIteration ///< `setNextRequest(null)` - end this iteration.
+    };
+    Kind kind = Kind::None;
+    /// The step name to jump to; set for `Kind::Next` and empty otherwise.
+    std::string target;
+};
+
+/**
  * @brief Script execution result
  */
 struct ScriptResult {
@@ -545,6 +573,9 @@ struct ScriptResult {
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
     std::string error_message;
+    /// Flow control the script asked for - read by the scenario runner, and
+    /// `Kind::None` for every other caller (see ScriptControl).
+    ScriptControl control;
 };
 
 // ============================================================================

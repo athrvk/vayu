@@ -716,6 +716,69 @@ the result.
 
 Load runs have no jar, so these throw there exactly as the read half does.
 
+## Flow control (`pm.execution`)
+
+Inside a collection run (`POST /runs` with a `scenario` block), a script can say
+where the sequence goes next:
+
+```javascript
+pm.execution.setNextRequest('Checkout');  // run that request next, after this one finishes
+pm.execution.setNextRequest(null);        // end this iteration; the next one still runs
+pm.execution.skipRequest();               // pre-request only: do not send this request
+```
+
+**The script records an intent; the runner acts on it.** Neither method reaches
+into the run - they set a value on the script's result, and the runner, the only
+thing that knows what a sequence is, reads it once the step has finished. So
+`setNextRequest` does not abort the current request: it completes, its tests run,
+and the jump happens afterwards. The last call in a script wins, across the
+pre-request and test scripts alike.
+
+`setNextRequest` takes a request's **name**, not its id or URL, and jumping
+backwards is allowed - that is how a retry loop is written.
+
+### Where it throws
+
+Every one of these is a thrown error naming the reason, not a call that is
+accepted and quietly dropped. A binding that cannot fail is worse than a missing
+one: `setNextRequest('checkout')` ignored in a single send is a script that
+reports success for something that never happened.
+
+| Call | Where | What happens |
+|------|-------|--------------|
+| Either method | A single Send (`POST /execute`) | Throws - there is no next request |
+| Either method | A load run's deferred `tests` script | Throws - the script runs after the run finished, against a recorded response, and cannot redirect a sequence that already happened |
+| `skipRequest()` | A test script inside a collection run | Throws - the request has already gone out; there is nothing left to skip |
+| `setNextRequest()` | Anywhere | `TypeError` - the argument is required. Omitting it is not a synonym for `null` |
+| `setNextRequest(3)`, `setNextRequest('')` | Anywhere | `TypeError` - a target is a non-empty string, or `null` |
+
+### Where the step fails instead
+
+Two cases are the runner's to refuse, because only it can see the plan. Both end
+the iteration with the step marked `errored` and the reason in its row:
+
+- **A name no request in the run carries.** The message names the target.
+- **A name two or more requests share.** The message names every step that
+  answers to it, so the fix - rename one - is obvious. Resolving to the first
+  match would run a sequence nobody asked for.
+
+### The cycle bound
+
+`setNextRequest` makes an infinite loop a two-line script, so an iteration has a
+ceiling: **`maxStepsPerIteration`** (config, `general_engine`). Its default of
+`0` derives the bound from the collection - ten times its request count, and
+never fewer than 100 - so a straight-through iteration can never trip it, and a
+legitimate retry loop in a short collection has room. Exceeding it fails that
+step with a message naming the steps that were looping; the run continues with
+the next iteration and still reaches a terminal status.
+
+### Skipped is never passed
+
+A skipped step is stored and reported as `skipped` - its own count in the run
+summary, its own outcome on the step's `results` row and on the SSE `step` event.
+Its row carries the request it would have sent and **no response**, because there
+was none; the app's step list shows that rather than an empty `200`.
+
 ## Console Output
 
 Log messages that appear in test results:

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
@@ -22,6 +23,11 @@
 namespace vayu::core {
 
 namespace {
+
+/// How many recently executed step names the cycle-bound message names. Enough
+/// to show a loop of a few steps repeating, short enough to stay readable in a
+/// `results.error` cell.
+constexpr size_t CYCLE_TRAIL_LENGTH = 8;
 
 int64_t runner_now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -91,6 +97,13 @@ std::string& error) {
         error = "Pre-request script failed - " + exchange.pre_script_result.error_message;
         return StepOutcome::Errored;
     }
+    // After the script check and before everything that reads a response: a
+    // script that asked to skip and then threw did both, and the throw is the
+    // fact worth reporting. A skip itself is not a failure and carries no
+    // error - but it is never a pass either (issue #180).
+    if (!exchange.sent) {
+        return StepOutcome::Skipped;
+    }
     if (script_errored (exchange.post_script_result)) {
         error = "Test script failed - " + exchange.post_script_result.error_message;
         return StepOutcome::Errored;
@@ -115,7 +128,67 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     trace["outcome"]   = to_string (record.outcome);
 }
 
+/// The steps an iteration most recently executed, joined for the cycle-bound
+/// message. Bounded by the trail itself, not by the iteration: naming a hundred
+/// executions would bury the two or three that actually loop.
+std::string describe_recent_steps (const std::deque<std::string>& trail) {
+    std::string described;
+    for (const auto& name : trail) {
+        if (!described.empty ()) {
+            described += " -> ";
+        }
+        described += name;
+    }
+    return described;
+}
+
 } // namespace
+
+ScenarioStepNameIndex build_step_name_index (const ScenarioPlan& plan) {
+    ScenarioStepNameIndex index;
+    for (size_t position = 0; position < plan.steps.size (); ++position) {
+        index[plan.steps[position].name].push_back (position);
+    }
+    return index;
+}
+
+NextStepResolution resolve_next_step (const ScenarioStepNameIndex& index,
+const std::string& target) {
+    NextStepResolution resolution;
+
+    auto found = index.find (target);
+    if (found == index.end ()) {
+        resolution.error =
+        "setNextRequest(\"" + target + "\") names no request in this collection run";
+        return resolution;
+    }
+
+    if (found->second.size () > 1) {
+        std::string positions;
+        for (size_t i = 0; i < found->second.size (); ++i) {
+            if (i > 0) {
+                positions += i + 1 == found->second.size () ? " and " : ", ";
+            }
+            positions += std::to_string (found->second[i]);
+        }
+        resolution.error = "setNextRequest(\"" + target +
+        "\") is ambiguous - the name is carried by steps " + positions +
+        "; rename one of them so the target names a single request";
+        return resolution;
+    }
+
+    resolution.ok    = true;
+    resolution.index = found->second.front ();
+    return resolution;
+}
+
+size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps) {
+    if (configured > 0) {
+        return static_cast<size_t> (configured);
+    }
+    return std::max (constants::scenario::MIN_STEPS_PER_ITERATION,
+    plan_steps * constants::scenario::STEPS_PER_ITERATION_MULTIPLIER);
+}
 
 const char* to_string (StepOutcome outcome) {
     switch (outcome) {
@@ -257,17 +330,34 @@ RunManager& manager) {
         static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
         static_cast<int> (constants::scenario::MAX_STORED_STEPS))));
 
+        // Flow control's two supports, both fixed for the run: where a
+        // `setNextRequest` target resolves to, and how far one iteration may
+        // travel before a cycle is called a cycle.
+        const auto name_index                = build_step_name_index (plan);
+        const size_t max_steps_per_iteration = resolve_max_steps_per_iteration (
+        db.get_config_int ("maxStepsPerIteration", 0), plan.steps.size ());
+
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {
                 break;
             }
 
-            for (const auto& step : plan.steps) {
+            // An iteration is a walk over the plan rather than a pass through
+            // it: a script may send it backwards, forwards or out early, so the
+            // position is a variable and the loop is bounded by the budget
+            // above rather than by the plan's length.
+            size_t position             = 0;
+            size_t steps_this_iteration = 0;
+            std::deque<std::string> recent_steps;
+
+            while (position < plan.steps.size ()) {
                 // Checked per step, not per iteration: a 50-step iteration
                 // would otherwise keep sending for minutes after the stop.
                 if (context->should_stop) {
                     break;
                 }
+
+                const auto& step = plan.steps[position];
 
                 vayu::http::routes::ExchangeInputs inputs;
                 // A copy, not a move: the pre-request script writes back into
@@ -280,9 +370,19 @@ RunManager& manager) {
                 inputs.request_name    = step.name;
                 inputs.iteration       = iteration;
                 inputs.iteration_count = asked.iterations;
+                // The one caller that sets it: `pm.execution` throws
+                // everywhere else, because nowhere else has a sequence to
+                // redirect (issue #355).
+                inputs.in_scenario = true;
 
                 auto exchange = vayu::http::routes::execute_exchange (script_engine,
                 *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+
+                ++steps_this_iteration;
+                recent_steps.push_back (step.name);
+                if (recent_steps.size () > CYCLE_TRAIL_LENGTH) {
+                    recent_steps.pop_front ();
+                }
 
                 StepRecord record;
                 record.iteration   = iteration;
@@ -293,8 +393,65 @@ RunManager& manager) {
                 record.status_code = exchange.response.status_code;
                 record.status_text = exchange.response.status_text;
                 record.latency_ms  = exchange.response.timing.total_ms;
-                record.trace       = vayu::http::routes::build_result_trace (
+
+                // Where this iteration goes next, decided before the row is
+                // written: an instruction that cannot be honoured is this
+                // step's failure, so it has to reach `record.outcome` while the
+                // row and the SSE event are still ahead of us.
+                size_t next_position = position + 1;
+                bool end_iteration   = record.outcome == StepOutcome::Errored;
+                if (!end_iteration) {
+                    // The test script ran later, so its instruction wins over
+                    // the pre-request script's - "last call wins", across the
+                    // two scripts as within one. A skip comes only from the
+                    // pre-request script; the binding throws in a test script.
+                    const auto& control = exchange.post_script_result.control.kind !=
+                    vayu::ScriptControl::Kind::None ?
+                    exchange.post_script_result.control :
+                    exchange.pre_script_result.control;
+
+                    switch (control.kind) {
+                    case vayu::ScriptControl::Kind::None:
+                    case vayu::ScriptControl::Kind::Skip:
+                        // A skip has already happened - the exchange sent
+                        // nothing - and skipping one step is not a reason to
+                        // stop walking the plan.
+                        break;
+                    case vayu::ScriptControl::Kind::EndIteration:
+                        end_iteration = true;
+                        break;
+                    case vayu::ScriptControl::Kind::Next:
+                        if (steps_this_iteration >= max_steps_per_iteration) {
+                            record.outcome = StepOutcome::Errored;
+                            record.error =
+                            "Iteration exceeded maxStepsPerIteration (" +
+                            std::to_string (max_steps_per_iteration) +
+                            ") - setNextRequest is cycling through: " +
+                            describe_recent_steps (recent_steps);
+                            end_iteration = true;
+                        } else if (auto next =
+                                   resolve_next_step (name_index, control.target);
+                                   !next.ok) {
+                            record.outcome = StepOutcome::Errored;
+                            record.error   = next.error;
+                            end_iteration  = true;
+                        } else {
+                            next_position = next.index;
+                        }
+                        break;
+                    }
+                }
+
+                record.trace = vayu::http::routes::build_result_trace (
                 exchange.request, exchange.response);
+                if (!exchange.sent) {
+                    // A skipped step has no response, and the empty one
+                    // `build_result_trace` writes for a default `Response`
+                    // would read in the step's expanded view as a server that
+                    // answered with nothing. The row keeps the request, which
+                    // is what the step actually amounted to.
+                    record.trace.erase ("response");
+                }
                 stamp_step_identity (record.trace, record);
                 vayu::json::cap_trace_bodies (record.trace, max_trace_body_bytes);
 
@@ -334,6 +491,10 @@ RunManager& manager) {
                     " ended at step '" + record.step_name + "' - " + record.error);
                     break;
                 }
+                if (end_iteration) {
+                    break;
+                }
+                position = next_position;
             }
 
             if (!context->should_stop) {

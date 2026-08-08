@@ -139,6 +139,24 @@ struct ScriptContext {
     std::optional<size_t> iteration_count;
 
     /**
+     * @brief Whether this script runs inside an ordered sequence, and may
+     *        therefore redirect it (issue #355).
+     *
+     * Set by the scenario runner and by nothing else. With it false -
+     * a `POST /execute` send, a load run's deferred `tests` script, a context
+     * built by hand - `pm.execution.setNextRequest` and
+     * `pm.execution.skipRequest` throw a sentence naming why, rather than
+     * accepting a call and doing nothing.
+     *
+     * That is issue #188's standing rule, not caution:
+     * `setNextRequest("checkout")` silently ignored in a single send is exactly
+     * the false success it exists to prevent. It is also what keeps the load
+     * path honest - a deferred script has already run against a recorded
+     * response and cannot redirect a sequence that already happened.
+     */
+    bool in_scenario = false;
+
+    /**
      * @brief The jar `pm.cookies` reads and `pm.sendRequest` sends through,
      *        or null where there is no jar (issue #301).
      *

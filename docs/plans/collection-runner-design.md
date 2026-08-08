@@ -255,6 +255,12 @@ sensitivity, and the manifest records only the row count.
 
 ## Flow control
 
+> **Shipped.** `pm.execution.setNextRequest` / `skipRequest` exist. What they do,
+> and everywhere they throw, is described in
+> [Flow control](../engine/scripting.md#flow-control-pmexecution) and
+> [Scenario runs](../engine/api-reference.md#scenario-runs); what follows is the
+> reasoning those pages summarise, kept here until the last phase lands.
+
 ### The script returns an intent; the runner decides
 
 ```cpp
@@ -382,7 +388,7 @@ side effect of this feature.
 | `maxScenarioSteps` | 200 | Plan size, both modes. Also bounds per-step histograms |
 | `maxScenarioDataRows` | 1,000 | Inline `data` rows per run |
 | `maxScenarioStoredSteps` | 5,000 | `results` rows per scenario run (failures kept first) |
-| `maxStepsPerIteration` | `10 x steps`, floor 100 | `setNextRequest` cycle bound |
+| `maxStepsPerIteration` | `0` = `10 x steps`, floor 100 | `setNextRequest` cycle bound |
 
 ## Non-goals
 

@@ -30,6 +30,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/run_manager.hpp"
@@ -121,6 +122,54 @@ class ScenarioStepStore {
     std::vector<Entry> kept_first_;
     std::vector<Entry> fillers_;
 };
+
+/**
+ * @brief Every position a step name occupies in the plan.
+ *
+ * Names are not unique - two requests in the same collection may share one, and
+ * nothing in the schema prevents it - so the value is a list rather than an
+ * index. That list is what makes an ambiguous `setNextRequest` target a named
+ * error instead of a silent jump to whichever one resolution happened to see
+ * first.
+ */
+using ScenarioStepNameIndex = std::unordered_map<std::string, std::vector<size_t>>;
+
+/** Build that index once per run; positions are indices into `plan.steps`. */
+[[nodiscard]] ScenarioStepNameIndex build_step_name_index (const ScenarioPlan& plan);
+
+/** Where a `setNextRequest` target points, or why it points nowhere. */
+struct NextStepResolution {
+    bool ok      = false;
+    size_t index = 0;
+    /// Caller-facing sentence, on the failure path only. It reaches the step's
+    /// `results.error` and the app's step list, so it names the target and, for
+    /// an ambiguous one, every step that answers to it.
+    std::string error;
+};
+
+/**
+ * @brief Resolve a `setNextRequest` target against the plan.
+ *
+ * Both failures are loud by design (issue #355): a name no step carries is a
+ * script pointing at a request that is not in the run, and a duplicated name is
+ * ambiguous - continuing past either would run a sequence nobody asked for.
+ */
+[[nodiscard]] NextStepResolution
+resolve_next_step (const ScenarioStepNameIndex& index, const std::string& target);
+
+/**
+ * @brief How many step executions one iteration may perform.
+ *
+ * `setNextRequest` makes an infinite loop a two-line script, and the bound is
+ * what keeps such a run reaching a terminal status instead of sending forever.
+ *
+ * @param configured `maxStepsPerIteration`; `0` (the default) derives the bound
+ *                   from the plan, because the useful ceiling is a multiple of
+ *                   the sequence's own length rather than a fixed number.
+ * @param plan_steps The plan's size, so a straight-through iteration - which
+ *                   executes exactly that many steps - can never trip it.
+ */
+[[nodiscard]] size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps);
 
 /**
  * @brief Wrap one step as a wire-ready SSE `step` event, tagged with
