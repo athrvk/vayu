@@ -104,6 +104,19 @@ The service handles transformation between frontend (snake_case) and backend (ca
 }
 ```
 
+#### Request bodies
+
+`body` goes to the engine as the discriminated union `{ mode, content }` or -
+for the two form modes - `{ mode, fields }`, built by `buildExecBody`
+(`modules/request-builder/utils/execute-mapping.ts`) and passed through
+untransformed. The mode strings are a contract: the engine matches
+`"form-data"` and `"x-www-form-urlencoded"` exactly and reads the content out
+of `fields`, so a renamed mode or a flattened `content` string sends an empty
+body rather than failing. Disabled rows are sent and dropped engine-side, the
+engine writes the Content-Type each form mode implies, and file parts are not
+supported yet. See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
+for the full contract.
+
 ### API Methods
 
 #### Health & Configuration

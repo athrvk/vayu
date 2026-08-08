@@ -16,6 +16,7 @@
 #include <sstream>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/form_body.hpp"
 
 namespace vayu::json {
 
@@ -50,6 +51,19 @@ std::optional<Json> try_parse_body (const std::string& body) {
 // Request Serialization
 // ============================================================================
 
+namespace {
+
+Json serialize_form_fields (const std::vector<FormField>& fields) {
+    Json out = Json::array ();
+    for (const auto& field : fields) {
+        out.push_back (Json{ { "key", field.key }, { "value", field.value },
+        { "enabled", field.enabled } });
+    }
+    return out;
+}
+
+} // namespace
+
 Json serialize (const Request& request) {
     Json json;
 
@@ -77,13 +91,16 @@ Json serialize (const Request& request) {
             body_json["mode"]    = "text";
             body_json["content"] = request.body.content;
             break;
+        // The two form modes are emitted under the spelling every client
+        // produces (the renderer, the importers, the curl parser) and carry
+        // `fields`, so a serialized body parses back to the same request.
         case BodyMode::Form:
-            body_json["mode"]    = "form";
-            body_json["content"] = request.body.content;
+            body_json["mode"]   = "x-www-form-urlencoded";
+            body_json["fields"] = serialize_form_fields (request.body.fields);
             break;
         case BodyMode::FormData:
-            body_json["mode"]    = "formdata";
-            body_json["content"] = request.body.content;
+            body_json["mode"]   = "form-data";
+            body_json["fields"] = serialize_form_fields (request.body.fields);
             break;
         case BodyMode::Binary:
             body_json["mode"]    = "binary";
@@ -369,6 +386,73 @@ std::string serialize_variables (const vayu::Environment& env) {
     return obj.dump ();
 }
 
+namespace {
+
+// The `fields` half of a body, for the two form modes.
+//
+// A malformed field is refused rather than skipped: this endpoint's whole
+// contract is "send exactly what was built", and a silently dropped field is
+// the failure mode the form modes already had. The leniency that does exist
+// mirrors the D17 rules `parse_variables` applies to the same client shape -
+// an absent or non-boolean `enabled` means enabled, a non-string `value` means
+// "" - because those are the values a client can produce without meaning
+// anything by them. A field with no usable `key` has no wire form at all, so
+// it is an error.
+Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMode mode) {
+    const bool is_form = vayu::http::is_form_mode (mode);
+    const auto entry   = body_json.find ("fields");
+
+    if (entry == body_json.end () || entry->is_null ()) {
+        if (is_form) {
+            // The mode says the content is a field list and there is none.
+            // Before this was an error the request went out with an empty
+            // body, which is the same wrongness without the message.
+            return Error{ ErrorCode::InternalError,
+                "Body mode 'x-www-form-urlencoded'/'form-data' requires a "
+                "'fields' array" };
+        }
+        return std::vector<FormField>{};
+    }
+
+    if (!is_form) {
+        return Error{ ErrorCode::InternalError,
+            "Body 'fields' is only valid for the 'x-www-form-urlencoded' and "
+            "'form-data' modes" };
+    }
+    if (!entry->is_array ()) {
+        return Error{ ErrorCode::InternalError, "Body 'fields' must be an array" };
+    }
+
+    std::vector<FormField> fields;
+    fields.reserve (entry->size ());
+    for (const auto& item : *entry) {
+        if (!item.is_object ()) {
+            return Error{ ErrorCode::InternalError,
+                "Each entry of body 'fields' must be an object" };
+        }
+        const auto key = item.find ("key");
+        if (key == item.end () || !key->is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "Each entry of body 'fields' needs a string 'key'" };
+        }
+
+        FormField field;
+        field.key = key->get<std::string> ();
+        if (const auto value = item.find ("value");
+            value != item.end () && value->is_string ()) {
+            field.value = value->get<std::string> ();
+        }
+        if (const auto enabled = item.find ("enabled");
+            enabled != item.end () && enabled->is_boolean ()) {
+            field.enabled = enabled->get<bool> ();
+        }
+        fields.push_back (std::move (field));
+    }
+    return fields;
+}
+
+} // namespace
+
 Result<Request> deserialize_request (const Json& json) {
     try {
         Request request;
@@ -403,13 +487,19 @@ Result<Request> deserialize_request (const Json& json) {
             if (body_json.contains ("mode")) {
                 std::string mode = body_json["mode"].get<std::string> ();
 
+                // Both spellings of each form mode reach the same enumerator:
+                // every client produces the long one ("x-www-form-urlencoded",
+                // "form-data"), while "form"/"formdata" are the engine's own
+                // older names, still accepted so a stored or replayed payload
+                // keeps working. This table is the one place a spelling is
+                // added - same rule as read_post_request_script's.
                 if (mode == "json") {
                     request.body.mode = BodyMode::Json;
                 } else if (mode == "text") {
                     request.body.mode = BodyMode::Text;
-                } else if (mode == "form") {
+                } else if (mode == "form" || mode == "x-www-form-urlencoded") {
                     request.body.mode = BodyMode::Form;
-                } else if (mode == "formdata") {
+                } else if (mode == "formdata" || mode == "form-data") {
                     request.body.mode = BodyMode::FormData;
                 } else if (mode == "binary") {
                     request.body.mode = BodyMode::Binary;
@@ -426,6 +516,12 @@ Result<Request> deserialize_request (const Json& json) {
                     request.body.content = body_json["content"].dump ();
                 }
             }
+
+            auto fields = parse_form_fields (body_json, request.body.mode);
+            if (fields.is_error ()) {
+                return fields.error ();
+            }
+            request.body.fields = std::move (fields).value ();
         }
 
         // Options

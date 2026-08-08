@@ -23,6 +23,7 @@
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
 
 #include <curl/curl.h>
@@ -416,13 +417,27 @@ Result<Response> Client::send (const Request& request) {
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
-    detail::apply_method_and_body (curl, request);
+    curl_mime* mime = detail::apply_method_and_body (curl, request);
 
     // Set headers
     struct curl_slist* headers_list = nullptr;
     for (const auto& [key, value] : request.headers) {
+        if (detail::suppresses_request_header (request, key)) {
+            // Not sent, so not reported as sent either - libcurl writes the
+            // multipart Content-Type, boundary and all.
+            response.request_headers.erase (key);
+            continue;
+        }
         std::string header = key + ": " + value;
         headers_list       = curl_slist_append (headers_list, header.c_str ());
+    }
+
+    // The Content-Type the body mode implies, when the request declares none.
+    if (std::string content_type = detail::body_content_type_header (request);
+        !content_type.empty ()) {
+        headers_list = curl_slist_append (headers_list, content_type.c_str ());
+        response.request_headers["Content-Type"] =
+        vayu::http::implied_content_type (request.body);
     }
 
     // Add User-Agent if not set
@@ -498,9 +513,13 @@ Result<Response> Client::send (const Request& request) {
     CURLcode res = curl_easy_perform (curl);
     auto completion = std::chrono::steady_clock::now ();
 
-    // Cleanup headers
+    // Cleanup headers and the multipart body, both of which had to outlive the
+    // transfer that just finished.
     if (headers_list) {
         curl_slist_free_all (headers_list);
+    }
+    if (mime) {
+        curl_mime_free (mime);
     }
 
     // Before any error return below: a failed transfer can still have

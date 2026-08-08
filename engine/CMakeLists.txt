@@ -269,6 +269,7 @@ add_library(vayu_core STATIC
     src/http/request_exchange.cpp
     src/http/set_cookie.cpp
     src/http/cookie_jar.cpp
+    src/http/form_body.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
@@ -432,6 +433,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_send_request_test.cpp
         tests/set_cookie_test.cpp
         tests/cookie_jar_test.cpp
+        tests/form_body_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/execution_http_version_test.cpp

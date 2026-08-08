@@ -50,6 +50,9 @@ struct TransferData {
     char error_buffer[CURL_ERROR_SIZE] = { 0 };
     struct curl_slist* headers_list    = nullptr;
     struct curl_slist* resolve_list    = nullptr; // DNS pre-resolution list
+    /// Multipart body attached to the handle, freed with the rest of this
+    /// transfer's curl state. Only a `form-data` body has one.
+    curl_mime* mime = nullptr;
 
     ~TransferData ();
 };
