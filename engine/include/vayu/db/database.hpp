@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,23 @@ struct RunFilter {
     std::optional<RunStatus> status;
     std::optional<std::string> request_id;
     std::optional<std::string> q;
+};
+
+/**
+ * Thrown by `apply_reorder` when a row it was told to write is not stored at
+ * commit time. The batch is rolled back whole, and the row stays deleted.
+ *
+ * A reorder only ever repositions rows that already exist, so a missing one is
+ * never something to create: the previous `replace` would have resurrected a
+ * row a concurrent cascade had just deleted, silently, inside an endpoint whose
+ * contract is "all or nothing". The message names the row so the 409 the
+ * `/reorder` route turns this into is actionable.
+ */
+class MissingRowError : public std::runtime_error {
+    public:
+    MissingRowError (const std::string& kind, const std::string& id)
+    : std::runtime_error (kind + " '" + id + "' no longer exists") {
+    }
 };
 
 class Database {
@@ -77,12 +95,36 @@ class Database {
      * where the moved one used to be - a shape no read repairs, because the tie
      * rule then decides the display order.
      *
+     * Every row is **updated, never inserted**: one that is not stored at
+     * commit time throws `MissingRowError` and rolls the batch back (issue
+     * #386). Repositioning is by definition an operation on existing rows, so
+     * an insert here could only ever be a resurrection.
+     *
      * Separate from `import_apply` despite the shared shape: this writes rows
      * that already exist and must not touch environments, and the two callers
      * validate entirely different things beforehand.
      */
     void apply_reorder (const std::vector<Collection>& collections,
     const std::vector<Request>& requests);
+
+    /**
+     * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).
+     *
+     * Every other method here takes the lock per call, which is enough while a
+     * write depends only on its own arguments. It is not enough for a composite
+     * that *reads, decides, then writes*: `POST /reorder` validates a batch
+     * against the stored graph and only then commits it, and between those two
+     * steps another client's write can move the ground - two reparents that are
+     * each legal alone both commit and leave a cycle, or a create computes
+     * `max_order + 1` inside the range the batch is renumbering. Wrapping the
+     * whole composite makes the validation the write is based on still true
+     * when the write lands.
+     *
+     * The mutex is recursive, so @p fn may call any method on this Database.
+     * Hold it only for a bounded composite: everything else serializing on this
+     * lock - `/health`, the runs poll, SSE - waits for the whole of @p fn.
+     */
+    void with_lock (const std::function<void ()>& fn);
 
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();

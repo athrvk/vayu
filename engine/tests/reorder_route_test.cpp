@@ -22,9 +22,15 @@
  *    scope as dense 0..n-1, in the pinned `order`/`createdAt`/`id` rule, and is
  *    idempotent - a second call writes nothing.
  *
- *  - **A create concurrent with a batch cannot land inside it.** The append
- *    scan reads `max_order + 1`, so a request created after a dense renumber
- *    sits past the batch's range rather than tying with a row inside it.
+ *  - **The lock scope spans validate + stage + write** (issue #386). The three
+ *    tests at the bottom of this file each drive a genuinely concurrent writer
+ *    into the window between a batch's validation and its commit, through the
+ *    `before_write` seam, and assert the writer cannot get in: a conflicting
+ *    reparent batch waits and is then rejected against the committed graph, a
+ *    create waits and appends past the renumbered range rather than into it,
+ *    and a row deleted mid-batch fails the batch with a 409 instead of being
+ *    resurrected by the write. Before #386 each of those held only within one
+ *    batch, while the endpoint's contract claimed otherwise.
  *
  * Route cores are exercised directly, no in-process HTTP server, matching the
  * suite's other route tests.
@@ -32,9 +38,15 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -47,8 +59,11 @@ using nlohmann::json;
 namespace vayu::http::routes {
 // Defined in reorder.cpp / collections.cpp / requests.cpp; each returns
 // {http_status, json_body} - the same pair the HTTP handler writes out.
-std::pair<int, nlohmann::json>
-reorder_response (vayu::db::Database& db, const nlohmann::json& body);
+// `before_write` is reorder.cpp's test seam: invoked inside the batch's lock
+// scope once it has staged and immediately before it commits.
+std::pair<int, nlohmann::json> reorder_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::function<void ()>& before_write = nullptr);
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
@@ -133,6 +148,12 @@ class ReorderRouteTest : public ::testing::Test {
 
     static json normalize_requests (const std::string& collection_id) {
         return json{ { "type", "request" }, { "collectionId", collection_id } };
+    }
+
+    /** A collection move; `parent_id` is a collection id or `json(nullptr)`. */
+    static json move_collection (const std::string& id, int order, const json& parent_id) {
+        return json{ { "type", "collection" }, { "id", id }, { "order", order },
+            { "parentId", parent_id } };
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -468,25 +489,136 @@ TEST_F (ReorderRouteTest, TheResponseCarriesTheRowsAsWritten) {
 }
 
 // ---------------------------------------------------------------------------
-// Interleaving with a concurrent create
+// The lock scope: validate + stage + write (issue #386)
 // ---------------------------------------------------------------------------
 
-TEST_F (ReorderRouteTest, ACreateAfterABatchAppendsPastItRatherThanIntoIt) {
+/**
+ * A writer started from inside a batch's `before_write` seam - that is, on
+ * another thread, while the batch holds the DB lock - and given a window to
+ * finish before the batch commits.
+ *
+ * The window is what makes these tests decide in both directions, and it cannot
+ * be designed away: the defect *is* an interleaving, so a test for it has to
+ * produce one. With the lock scope spanning the batch, the writer blocks on the
+ * DB mutex, the wait runs its full timeout every time, and the batch commits
+ * first deterministically - there is no ordering in which it does not. Remove
+ * the lock scope and the writer proceeds immediately against the pre-write
+ * state, the wait returns as soon as it is done, and each test below sees the
+ * interleaving it forbids.
+ */
+class CompetingWriter {
+    public:
+    explicit CompetingWriter (std::function<void ()> work)
+    : work_ (std::move (work)) {
+    }
+    ~CompetingWriter () {
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+    CompetingWriter (const CompetingWriter&)            = delete;
+    CompetingWriter& operator= (const CompetingWriter&) = delete;
+
+    /** The `before_write` probe: starts the writer, then waits out the window. */
+    std::function<void ()> probe () {
+        return [this] {
+            thread_ = std::thread ([this] {
+                work_ ();
+                {
+                    std::lock_guard<std::mutex> guard (mutex_);
+                    done_ = true;
+                }
+                cv_.notify_all ();
+            });
+            std::unique_lock<std::mutex> guard (mutex_);
+            cv_.wait_for (
+            guard, std::chrono::milliseconds (300), [this] { return done_; });
+        };
+    }
+
+    void join () {
+        thread_.join ();
+    }
+
+    private:
+    std::function<void ()> work_;
+    std::thread thread_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool done_ = false;
+};
+
+TEST_F (ReorderRouteTest, AConflictingBatchWaitsAndIsRejectedAgainstTheCommittedGraph) {
+    const std::string a = make_collection ("A");
+    const std::string b = make_collection ("B");
+
+    // The mirror image of RejectsACycleFormedOnlyByTheBatchAsAWhole, split
+    // across two clients: A-under-B and B-under-A are each legal against the
+    // shape both of them read, and only the loser revalidating against the
+    // winner's committed graph rejects the second.
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result = reorder_response (
+        *db_, json{ { "moves", json::array ({ move_collection (b, 0, a) }) } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves", json::array ({ move_collection (a, 0, b) }) } }, other.probe ());
+    ASSERT_EQ (status, 200) << response.dump ();
+    other.join ();
+
+    EXPECT_EQ (other_status, 400) << other_body.dump ();
+    EXPECT_EQ (db_->get_collection (a)->parent_id, std::optional<std::string> (b));
+    EXPECT_FALSE (db_->get_collection (b)->parent_id.has_value ());
+}
+
+TEST_F (ReorderRouteTest, ACreateDuringABatchWaitsAndAppendsPastTheRenumberedRange) {
     const std::string col = make_collection ("Billing");
     for (const auto& name : { "a", "b", "c" }) {
         set_request_order (make_request (col, name), 0);
     }
 
-    auto [status, response] = reorder_response (
-    *db_, json{ { "normalize", json::array ({ normalize_requests (col) }) } });
-    ASSERT_EQ (status, 200) << response.dump ();
+    std::string late;
+    CompetingWriter creator ([&] { late = make_request (col, "late"); });
 
-    // The create's append scan reads `max_order + 1` under the same DB mutex the
-    // batch committed under, so it cannot tie with a row inside the dense range.
-    const std::string late = make_request (col, "late");
+    auto [status, response] = reorder_response (*db_,
+    json{ { "normalize", json::array ({ normalize_requests (col) }) } },
+    creator.probe ());
+    ASSERT_EQ (status, 200) << response.dump ();
+    creator.join ();
+
+    // The create's append scan reads `max_order + 1`. Let it run inside the
+    // batch's window and it reads the pre-renumber rows - every one at 0 - and
+    // takes slot 1, tying with the row the batch is renumbering to 1.
     EXPECT_EQ (db_->get_request (late)->order, 3);
     EXPECT_EQ (request_orders (col), (std::vector<int>{ 0, 1, 2, 3 }));
     EXPECT_EQ (request_ids (col).back (), late);
+}
+
+TEST_F (ReorderRouteTest, ARowDeletedAfterStagingFailsTheBatchRatherThanBeingResurrected) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+    const std::string b   = make_request (col, "b");
+    ASSERT_EQ (request_orders (col), (std::vector<int>{ 0, 1 }));
+
+    // No other thread can reach this window - that is the point of the lock -
+    // so the delete runs on this one, from inside the seam. The DB mutex is
+    // recursive, so it lands in the batch's own lock scope: the exact state
+    // `apply_reorder` must refuse to write over, whoever produced it.
+    json body{ { "moves", json::array ({ move_request (a, 1), move_request (b, 0) }) } };
+    auto [status, response] =
+    reorder_response (*db_, body, [&] { db_->delete_request (b); });
+
+    ASSERT_EQ (status, 409) << response.dump ();
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find (b), std::string::npos)
+    << response.dump ();
+    // `replace` would have written the staged row straight back.
+    EXPECT_FALSE (db_->get_request (b).has_value ());
+    // And the rows the batch had already updated roll back with it.
+    EXPECT_EQ (db_->get_request (a)->order, 0);
 }
 
 } // namespace

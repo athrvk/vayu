@@ -15,6 +15,7 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -210,10 +211,12 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
  *
  * The walk runs over the shape the batch *would* produce - stored parents with
  * every move's `parentId` applied on top - which is what makes this endpoint
- * close the TOCTOU race the per-row `PUT` has: validation and write share one
- * transaction here, so two concurrent reparents that each look legal alone
- * cannot both land. `PUT /collections/:id` validates against the shape it read
- * before writing, under a different lock than the write.
+ * close the TOCTOU race the per-row `PUT` has: this walk and the write it
+ * guards run under one acquisition of the DB mutex (see `reorder_response`), so
+ * two concurrent reparents that each look legal alone cannot both land - the
+ * second one revalidates against the first one's committed graph and is
+ * rejected. `PUT /collections/:id` validates against the shape it read before
+ * writing, under a different lock than the write.
  *
  * Only moved collections start a walk: a cycle in the post-move graph must pass
  * through an edge this batch changed, so a chain that reaches a root or an
@@ -343,11 +346,9 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
     out.requests[row.id] = std::move (row);
 }
 
-} // namespace
-
 /**
- * Testable core of POST /reorder - one drop, one round trip, one transaction
- * (issue #365), returning {http_status, json_body}.
+ * The batch, from validation to commit. Runs with the DB mutex already held by
+ * `reorder_response` - see there for why the whole of it has to.
  *
  * A drop that displaces N siblings used to have no sane write path: the only
  * write verbs are one row per `PUT`, so a renumber was N sequential requests -
@@ -367,19 +368,17 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
  *     into a legacy all-zeros collection has real slots to name; the moves then
  *     state the positions the drop actually produced, and win over the
  *     renumber for any row named by both.
- *  3. **One transaction under the DB mutex** (`Database::apply_reorder`), so the
- *     validation above and the write share a lock scope - which is what closes
- *     the read-then-write race `PUT /collections/:id`'s cycle guard still has.
+ *  3. **One transaction** (`Database::apply_reorder`), whose rows are updates,
+ *     never inserts - a row deleted out from under the batch is a 409 naming it
+ *     and a whole rollback, not a silent resurrection.
  *
  * The response carries the rows as written, because the client that drew the
  * drop optimistically needs the authoritative positions to settle its caches on
  * - a count would tell it nothing it could use.
- *
- * Extracted for reorder_route_test.cpp, following the suite's route-test
- * convention (no in-process HTTP server).
  */
-std::pair<int, nlohmann::json>
-reorder_response (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json> reorder_locked (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::function<void ()>& before_write) {
     if (!body.is_object ()) {
         return body_error ("Body must be a JSON object");
     }
@@ -461,10 +460,64 @@ reorder_response (vayu::db::Database& db, const nlohmann::json& body) {
         request_rows.push_back (row);
     }
 
+    if (before_write) {
+        before_write ();
+    }
+
     if (!writes.empty ()) {
-        db.apply_reorder (collection_rows, request_rows);
+        try {
+            db.apply_reorder (collection_rows, request_rows);
+        } catch (const vayu::db::MissingRowError& e) {
+            // Unreachable while every writer takes the DB mutex - the lock this
+            // runs under is what makes it so. It stays because `apply_reorder`
+            // is a public method whose no-resurrection rule holds for any
+            // caller, and a 409 is the honest answer to "the row you staged is
+            // gone": the client's tree is behind, and a retry is what fixes it.
+            return { 409, error_body (409, e.what ()) };
+        }
     }
     return { 200, nlohmann::json{ { "collections", collections_out }, { "requests", requests_out } } };
+}
+
+} // namespace
+
+/**
+ * Testable core of POST /reorder - one drop, one round trip, one lock scope
+ * (issues #365, #386), returning {http_status, json_body}.
+ *
+ * A drop that displaces N siblings used to have no sane write path: the only
+ * write verbs are one row per `PUT`, so a renumber was N sequential requests -
+ * non-atomic (a crash mid-sequence half-renumbers a parent), racy against a
+ * concurrent create computing `max_order + 1` between two of them and against
+ * `POST /import/apply`'s own transactional order slots, and an invalidation
+ * storm on the client. This endpoint takes the whole batch instead.
+ *
+ * **The whole batch runs under one acquisition of the DB mutex**, not one per
+ * call into `Database`. cpp-httplib serves on a thread pool and the renderer and
+ * MCP are genuinely concurrent clients, so a batch that validated under one lock
+ * and committed under another left three windows open (#386): two conflicting
+ * reparents both passing an acyclicity check neither one's commit was visible
+ * to, a create reading `max_order + 1` from inside the range being renumbered,
+ * and a cascade deleting a staged row between the read and the write. Holding
+ * the lock across the composite is what makes the validation still true when the
+ * write lands; `Database::with_lock` documents the cost of holding it.
+ *
+ * @param before_write Test seam, invoked inside the lock once the batch is
+ *        staged and immediately before it commits. It is the only way to
+ *        observe the window this issue closed: a probe that starts a competing
+ *        writer proves that writer waits, and one that mutates the DB directly
+ *        (the mutex is recursive) stages the delete-at-commit case. Production
+ *        callers omit it.
+ *
+ * Extracted for reorder_route_test.cpp, following the suite's route-test
+ * convention (no in-process HTTP server).
+ */
+std::pair<int, nlohmann::json> reorder_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::function<void ()>& before_write = nullptr) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] { result = reorder_locked (db, body, before_write); });
+    return result;
 }
 
 void register_reorder_routes (RouteContext& ctx) {
