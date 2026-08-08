@@ -25,20 +25,26 @@ import { CONTEXT_BAR_SECTIONS, sectionsForTab } from "./registry";
 import { contextBarHasContent } from "../context-bar-content";
 import type { Tab, TabType } from "@/stores";
 
+const ENTITY_TYPES: TabType[] = ["request", "collection", "run"];
+
+/**
+ * The tab types whose sections are gated on the tab being open on something -
+ * `appliesTo` in the registry. The request tab predates that gate and is
+ * deliberately left as it was: `Shell` shows the welcome screen for one with no
+ * entity, and narrowing it is not this change's business.
+ */
+const ENTITY_GATED_TYPES: TabType[] = ["collection", "run"];
+
 const tab = (type: TabType): Tab => ({
 	id: "t1",
 	type,
-	entityId: type === "request" ? "req_1" : null,
+	entityId: ENTITY_TYPES.includes(type) ? `${type}_1` : null,
 });
 
-const OTHER_TYPES: TabType[] = [
-	"welcome",
-	"collection",
-	"dashboard",
-	"run",
-	"variables",
-	"settings",
-];
+/** The same tab, but never opened on anything - see `appliesTo` in the registry. */
+const entitylessTab = (type: TabType): Tab => ({ id: "t1", type, entityId: null });
+
+const OTHER_TYPES: TabType[] = ["welcome", "dashboard", "variables", "settings"];
 
 describe("the context-bar section registry", () => {
 	it("ships the Phase 1 sections for a request tab, in reading order", () => {
@@ -49,6 +55,31 @@ describe("the context-bar section registry", () => {
 			"code",
 			"environment",
 		]);
+	});
+
+	it("ships the collection sections for a collection tab, in reading order", () => {
+		expect(sectionsForTab(tab("collection")).map((s) => s.id)).toEqual([
+			"collection-variables",
+			"collection-auth",
+			"collection-contents",
+		]);
+	});
+
+	it("ships the run sections for a run tab, in reading order", () => {
+		expect(sectionsForTab(tab("run")).map((s) => s.id)).toEqual(["run-config", "run-source"]);
+	});
+
+	it("has nothing for a collection or run tab that is not on an entity", () => {
+		// `Shell` renders no pane for one of these either. A section here would
+		// query nothing and light the Dock toggle over an empty bar.
+		expect(sectionsForTab(entitylessTab("collection"))).toEqual([]);
+		expect(sectionsForTab(entitylessTab("run"))).toEqual([]);
+	});
+
+	it("has no collection-run section, which nothing in the app can answer yet", () => {
+		// A collection has no runs of its own until the collection runner (#354)
+		// exists; a section claiming one could only invent it.
+		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).not.toContain("collection-last-run");
 	});
 
 	it("has no last-result section, which the response pane already is", () => {
@@ -72,7 +103,7 @@ describe("the context-bar section registry", () => {
 		}
 	});
 
-	it("has no sections for the other tab types yet", () => {
+	it("has no sections for the four tab types that deliberately show nothing", () => {
 		for (const type of OTHER_TYPES) {
 			expect(sectionsForTab(tab(type))).toEqual([]);
 		}
@@ -85,7 +116,12 @@ describe("the context-bar section registry", () => {
 
 describe("contextBarHasContent reads the registry", () => {
 	it("is true exactly where the registry has sections", () => {
-		expect(contextBarHasContent(tab("request"))).toBe(true);
+		for (const type of ENTITY_TYPES) {
+			expect(contextBarHasContent(tab(type))).toBe(true);
+		}
+		for (const type of ENTITY_GATED_TYPES) {
+			expect(contextBarHasContent(entitylessTab(type))).toBe(false);
+		}
 		for (const type of OTHER_TYPES) {
 			expect(contextBarHasContent(tab(type))).toBe(false);
 		}
@@ -96,8 +132,10 @@ describe("contextBarHasContent reads the registry", () => {
 		// The derivation, not the current answer: every tab type is checked
 		// against `sectionsForTab` itself, so a hardcoded predicate that happens
 		// to match today would still fail the moment the two disagree.
-		for (const type of [...OTHER_TYPES, "request" as const]) {
-			expect(contextBarHasContent(tab(type))).toBe(sectionsForTab(tab(type)).length > 0);
+		for (const type of [...OTHER_TYPES, ...ENTITY_TYPES]) {
+			for (const t of [tab(type), entitylessTab(type)]) {
+				expect(contextBarHasContent(t)).toBe(sectionsForTab(t).length > 0);
+			}
 		}
 	});
 });
