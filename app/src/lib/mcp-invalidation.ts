@@ -53,9 +53,18 @@ const INVALIDATORS: Record<
 	/*
 	 * `all`, not `list()`: an environment's variables are read through the detail
 	 * cache as well as the list, and `update_environment` changes exactly those.
+	 *
+	 * `compose` too, and at the `all` prefix rather than the written environment's
+	 * key: `POST /compose` substitutes those same variables, so a composition -
+	 * and the curl/fetch snippet the context bar builds from one - is built from
+	 * the pre-write values. The prefix, because a request composed against a
+	 * *different* environment still reads the globals this write may have
+	 * shadowed. Nothing refetches compose on its own, so a miss here is stale
+	 * until the tab is reopened.
 	 */
 	environment: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
 	},
 
 	/*

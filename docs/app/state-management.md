@@ -911,7 +911,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here |
-| `environment` | `environments.all` | Variables are read through the detail cache as well as the list |
+| `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
 | `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` when the call named one | The history list polls, but Settings' count and a request tab's restored response do not |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
