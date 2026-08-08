@@ -29,6 +29,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	setMcpEnabled: (enabled: boolean) => ipcRenderer.invoke("mcp:setEnabled", enabled),
 	connectMcpClient: (client: "claude" | "vscode") =>
 		ipcRenderer.invoke("mcp:connectClient", client),
+	// An agent's write reached the engine from the main process, so the renderer
+	// is told which data family to invalidate. One-way and data-free; the shape
+	// mirrors `McpDataChangedEvent` in electron/mcp/tools.ts, inlined because
+	// this file is a CommonJS script and must not grow imports.
+	onMcpDataChanged: (
+		callback: (event: {
+			entity: "request" | "environment" | "run" | "cookie" | "config";
+			collectionId?: string;
+			requestId?: string;
+		}) => void
+	) => {
+		const handler = (_event: unknown, change: unknown) =>
+			callback(change as Parameters<typeof callback>[0]);
+		ipcRenderer.on("mcp:data-changed", handler);
+		return () => ipcRenderer.removeListener("mcp:data-changed", handler);
+	},
 
 	// Theme management
 	getTheme: (): Promise<{ shouldUseDarkColors: boolean; themeSource: string }> =>

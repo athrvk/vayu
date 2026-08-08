@@ -30,6 +30,7 @@ import {
 	connectClient,
 	toolCatalog,
 	type McpConnectClient,
+	type McpDataChangedEvent,
 	type McpSafetyConfig,
 } from "./mcp/index.js";
 import {
@@ -497,6 +498,7 @@ async function startMcp() {
 			port: MCP_PORT,
 			version: app.getVersion(),
 			safety: loadPersistedSafety(),
+			onDataChanged: sendMcpDataChanged,
 		});
 		await mcpService.start();
 		console.log("[Main] MCP server listening at", mcpService.getUrl());
@@ -506,6 +508,23 @@ async function startMcp() {
 		console.error("[Main] Failed to start MCP server (continuing without it):", error);
 		mcpService = null;
 	}
+}
+
+/**
+ * Forward an MCP data change to the renderer so its query cache can invalidate.
+ *
+ * One-way, main-to-renderer, and it carries no data - only which family went
+ * stale (the #278 hardening posture: nothing here takes renderer input, and a
+ * push of engine data would be a second source of truth beside the queries).
+ *
+ * The window is read at send time, not captured: the MCP server starts before
+ * the window exists and outlives a renderer reload, so a captured reference
+ * would either be null forever or point at destroyed `webContents`.
+ */
+function sendMcpDataChanged(event: McpDataChangedEvent): void {
+	const contents = mainWindow?.webContents;
+	if (!contents || contents.isDestroyed()) return;
+	contents.send("mcp:data-changed", event);
 }
 
 async function stopMcp() {

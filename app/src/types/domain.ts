@@ -997,6 +997,27 @@ export interface McpConnectResult {
 	message?: string;
 }
 
+/**
+ * A data family an MCP call can change. Mirrors `MCP_DATA_ENTITIES` in
+ * `electron/mcp/tools.ts` - the main process owns the list, and production code
+ * there cannot import from here (see `tsconfig.node.json`), so the duplication
+ * is deliberate and pinned by `electron/mcp/data-changed.conformance.test.ts`.
+ */
+export type McpDataEntity = "request" | "environment" | "run" | "cookie" | "config";
+
+/**
+ * What the main process sends over `mcp:data-changed`. Invalidation only - the
+ * renderer refetches through its normal query layer rather than being handed
+ * engine data over IPC. See `lib/mcp-invalidation.ts` for the key mapping.
+ */
+export interface McpDataChangedEvent {
+	entity: McpDataEntity;
+	/** The collection the call named, when it named one. */
+	collectionId?: string;
+	/** The saved request the call named, when it named one. */
+	requestId?: string;
+}
+
 export interface ScriptCompletion {
 	label: string;
 	kind: number;

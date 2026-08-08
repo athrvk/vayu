@@ -49,6 +49,42 @@ export interface ElicitOutcome {
 /** Ask the human via the client; throws if the client can't elicit. */
 export type ElicitFn = (params: ElicitParams) => Promise<ElicitOutcome>;
 
+// --- Data-change notification ------------------------------------------------
+
+/**
+ * The data families an MCP call can change, named as the renderer's query cache
+ * groups them. An MCP call mutates the engine from the main process, so the
+ * renderer learns about it only if it is told: `refetchOnWindowFocus` is off
+ * app-wide, and nothing else crosses the process boundary.
+ *
+ * Mirrored as `McpDataEntity` in `app/src/types/domain.ts`, because production
+ * code under `electron/` cannot import from `app/src` (see the rationale in
+ * `tsconfig.node.json`). `data-changed.conformance.test.ts` keeps the two
+ * copies honest, and the renderer's mapping is exhaustive over this union, so
+ * a new entity fails to compile until it has a reader.
+ */
+export const MCP_DATA_ENTITIES = ["request", "environment", "run", "cookie", "config"] as const;
+
+export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
+
+/**
+ * One thing changed. Invalidation only - no data rides across, the renderer
+ * refetches through its normal query layer.
+ *
+ * The two scope hints are read from the call's own arguments and narrow the
+ * invalidation to the caches that can have gone stale; both are absent when the
+ * call named neither. They are hints, not identity: `requestId` on a
+ * `run` event is the saved request a design run was linked to (the key
+ * `runs.lastDesign` uses), not the run's own id.
+ */
+export interface McpDataChangedEvent {
+	entity: McpDataEntity;
+	/** The collection the call named, when it named one. */
+	collectionId?: string;
+	/** The saved request the call named, when it named one. */
+	requestId?: string;
+}
+
 export interface ToolContext {
 	client: EngineClient;
 	config: McpSafetyConfig;
@@ -58,6 +94,12 @@ export interface ToolContext {
 	 * agent-side gate (e.g. the `confirmed` flag).
 	 */
 	elicit?: ElicitFn;
+	/**
+	 * Called once per entity a successful call changed, so the renderer can
+	 * invalidate the matching queries. Absent when there is nothing to notify -
+	 * the stdio CLI has no window.
+	 */
+	onDataChanged?: (event: McpDataChangedEvent) => void;
 }
 
 export interface ToolResult {
@@ -91,6 +133,15 @@ export interface McpTool {
 	 * but its own test - the client-facing hint is `annotations.readOnlyHint`.
 	 */
 	category: ToolCategory;
+	/**
+	 * The data families a successful call changes. Required rather than
+	 * defaulted, and deliberately not derived from `category`: an `execute` tool
+	 * writes a history row and refills the cookie jar without being a "write",
+	 * and a `load` tool writes run rows. A default would let a new tool ship
+	 * silently invisible to the renderer, which is the bug this field exists to
+	 * close; `[]` is a statement that the tool only reads.
+	 */
+	invalidates: readonly McpDataEntity[];
 	handler: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,
@@ -613,6 +664,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "get_engine_health",
 		category: "read",
+		invalidates: [],
 		description:
 			"Check the Vayu engine's status and version. Use this first to confirm Vayu is running.",
 		annotations: {
@@ -645,6 +697,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "list_collections",
 		category: "read",
+		invalidates: [],
 		description: "List all request collections (folders that organize saved requests).",
 		annotations: {
 			title: "List collections",
@@ -658,6 +711,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "list_requests",
 		category: "read",
+		invalidates: [],
 		description: "List the saved requests inside a collection.",
 		annotations: {
 			title: "List requests",
@@ -672,6 +726,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "list_environments",
 		category: "read",
+		invalidates: [],
 		description: "List all environments (named sets of variables like baseUrl, apiKey).",
 		annotations: {
 			title: "List environments",
@@ -685,6 +740,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "list_runs",
 		category: "read",
+		invalidates: [],
 		description:
 			"List recent past runs (both single Design-mode requests and load tests), " +
 			"newest first. Returns a {data, pagination} envelope bounded to the first " +
@@ -702,6 +758,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "get_run_report",
 		category: "read",
+		invalidates: [],
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance.",
 		annotations: {
@@ -717,6 +774,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "get_engine_config",
 		category: "read",
+		invalidates: [],
 		description:
 			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range.",
 		annotations: {
@@ -731,6 +789,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "run_request",
 		category: "execute",
+		invalidates: ["run", "cookie"],
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
 		annotations: {
@@ -814,6 +873,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "update_engine_config",
 		category: "write",
+		invalidates: ["config"],
 		description:
 			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
 		annotations: {
@@ -876,6 +936,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "create_request",
 		category: "write",
+		invalidates: ["request"],
 		description:
 			"Create a saved request inside a collection (stores it; does not send it). GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed.",
 		annotations: {
@@ -926,6 +987,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "update_environment",
 		category: "write",
+		invalidates: ["environment"],
 		description:
 			"Set or overwrite variables on an environment (merges with the existing variables - other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
 		annotations: {
@@ -1000,6 +1062,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "run_collection_smoke",
 		category: "execute",
+		invalidates: ["run", "cookie"],
 		description:
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
@@ -1126,6 +1189,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "start_load_run",
 		category: "load",
+		invalidates: ["run"],
 		description:
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here: the engine runs one on a single request only, never on a load run. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		annotations: {
@@ -1334,6 +1398,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "stop_run",
 		category: "load",
+		invalidates: ["run"],
 		description: "Stop an in-progress load test.",
 		annotations: {
 			title: "Stop run",
@@ -1349,6 +1414,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "get_live_metrics",
 		category: "read",
+		invalidates: [],
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream.",
 		annotations: {
@@ -1380,6 +1446,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "compare_runs",
 		category: "read",
+		invalidates: [],
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
 		annotations: {
@@ -1452,10 +1519,45 @@ export async function dispatchTool(
 	if (ctx.config.disabledTools.includes(name)) {
 		return errorResult(`Tool "${name}" is disabled in Vayu Settings → MCP.`);
 	}
+	let result: ToolResult;
 	try {
-		return await tool.handler(args, ctx, signal);
+		result = await tool.handler(args, ctx, signal);
 	} catch (err) {
 		if (err instanceof ToolArgError) return errorResult(err.message);
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	// Only a call that succeeded changed anything. A tool that returned an error
+	// result may still have got as far as the engine, but it cannot say so, and
+	// an invalidation storm on every rejected call would be worse than the one
+	// stale list a genuinely-partial failure leaves behind.
+	if (!result.isError) notifyDataChanged(tool, args, ctx);
+	return result;
+}
+
+/**
+ * Tell the renderer what a successful call changed, one event per declared
+ * entity. The scope hints come from the call's own arguments: every tool in the
+ * registry spells these two the same way, so reading them here is what keeps a
+ * new write tool from having to remember an emit of its own.
+ *
+ * Notification failure must not fail a write the engine has already applied -
+ * the same rule `update_engine_config`'s best-effort read-back follows - so a
+ * throwing listener is logged and swallowed rather than turned into a tool
+ * error the agent would read as "the write did not happen".
+ */
+function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: ToolContext): void {
+	if (!ctx.onDataChanged || tool.invalidates.length === 0) return;
+	const collectionId = str(args, "collectionId");
+	const requestId = str(args, "requestId");
+	for (const entity of tool.invalidates) {
+		try {
+			ctx.onDataChanged({
+				entity,
+				...(collectionId !== undefined ? { collectionId } : {}),
+				...(requestId !== undefined ? { requestId } : {}),
+			});
+		} catch (err) {
+			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);
+		}
 	}
 }
