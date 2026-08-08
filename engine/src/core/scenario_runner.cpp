@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <deque>
+#include <optional>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
@@ -126,6 +127,11 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     trace["stepName"]  = record.step_name;
     trace["requestId"] = record.request_id;
     trace["outcome"]   = to_string (record.outcome);
+    // Only for a run that had rows: a run without a data set must not stamp a
+    // `0` that reads as "row 1 of a data file" in the step list.
+    if (record.data_row_index) {
+        trace["dataRowIndex"] = *record.data_row_index;
+    }
 }
 
 /// The steps an iteration most recently executed, joined for the cycle-bound
@@ -246,6 +252,12 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
         { "stepIndex", record.step_index }, { "name", record.step_name },
         { "outcome", to_string (record.outcome) },
         { "statusCode", record.status_code }, { "latencyMs", record.latency_ms } };
+    // Present on the same terms as on the stored row, so a step reads the same
+    // live and after a reload rather than gaining a row number when the run
+    // ends.
+    if (record.data_row_index) {
+        data["dataRowIndex"] = *record.data_row_index;
+    }
     return "event: step\nid: " + std::to_string (offset) + "\ndata: " + data.dump () + "\n\n";
 }
 
@@ -337,9 +349,21 @@ RunManager& manager) {
         const size_t max_steps_per_iteration = resolve_max_steps_per_iteration (
         db.get_config_int ("maxStepsPerIteration", 0), plan.steps.size ());
 
+        // The rows this run was given, bound one per iteration. Empty is the
+        // ordinary case and keeps `pm.iterationData` undefined throughout.
+        const auto& data_rows = execution->data_rows;
+
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {
                 break;
+            }
+
+            // Row `i % rows` binds to iteration `i`. An explicit `iterations`
+            // above the row count wraps rather than running short, and every
+            // record below carries the index so the wrap is visible.
+            std::optional<size_t> data_row_index;
+            if (!data_rows.empty ()) {
+                data_row_index = iteration % data_rows.size ();
             }
 
             // An iteration is a walk over the plan rather than a pass through
@@ -374,6 +398,9 @@ RunManager& manager) {
                 // everywhere else, because nowhere else has a sequence to
                 // redirect (issue #355).
                 inputs.in_scenario = true;
+                if (data_row_index) {
+                    inputs.iteration_data = &data_rows[*data_row_index];
+                }
 
                 auto exchange = vayu::http::routes::execute_exchange (script_engine,
                 *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
@@ -385,14 +412,15 @@ RunManager& manager) {
                 }
 
                 StepRecord record;
-                record.iteration   = iteration;
-                record.step_index  = step.index;
-                record.step_name   = step.name;
-                record.request_id  = step.request_id;
-                record.outcome     = classify_step (exchange, record.error);
-                record.status_code = exchange.response.status_code;
-                record.status_text = exchange.response.status_text;
-                record.latency_ms  = exchange.response.timing.total_ms;
+                record.iteration      = iteration;
+                record.data_row_index = data_row_index;
+                record.step_index     = step.index;
+                record.step_name      = step.name;
+                record.request_id     = step.request_id;
+                record.outcome        = classify_step (exchange, record.error);
+                record.status_code    = exchange.response.status_code;
+                record.status_text    = exchange.response.status_text;
+                record.latency_ms     = exchange.response.timing.total_ms;
 
                 // Where this iteration goes next, decided before the row is
                 // written: an instruction that cannot be honoured is this

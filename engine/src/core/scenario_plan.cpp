@@ -107,7 +107,8 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
 /// payload must not cost a collection walk.
 std::optional<std::string> parse_scenario_request (const nlohmann::json& scenario,
 const ScenarioLimits& limits,
-ScenarioRequest& out) {
+ScenarioRequest& out,
+std::vector<nlohmann::json>& rows_out) {
     if (!scenario.is_object ()) {
         return "'scenario' must be a JSON object (got " +
         std::string (scenario.type_name ()) + ")";
@@ -142,9 +143,9 @@ ScenarioRequest& out) {
         out.recursive = recursive->get<bool> ();
     }
 
-    // `data` rows never reach the plan or the snapshot - the app owns parsing
-    // the file they came from, and the engine only counts them (the binding
-    // that reads them lands with `pm.iterationData`).
+    // `data` rows reach the run's worker (as `pm.iterationData`) but never the
+    // plan or the snapshot - the app owns parsing the file they came from, and
+    // only their count is persisted.
     bool has_data = false;
     if (auto data = scenario.find ("data"); data != scenario.end () && !data->is_null ()) {
         if (!data->is_array ()) {
@@ -162,12 +163,17 @@ ScenarioRequest& out) {
             " rows, over the limit of " + std::to_string (limits.max_data_rows) +
             " (raise the 'maxScenarioDataRows' setting to allow more)";
         }
+        rows_out.reserve (data->size ());
         for (size_t i = 0; i < data->size (); ++i) {
             if (!(*data)[i].is_object ()) {
+                // A rejected set leaves no rows behind - never the ones before
+                // the bad one, which would be a partial data set.
+                rows_out.clear ();
                 return "'scenario.data' row " + std::to_string (i) +
                 " must be an object of name/value pairs (got " +
                 std::string ((*data)[i].type_name ()) + ")";
             }
+            rows_out.push_back ((*data)[i]);
         }
         has_data           = true;
         out.data_row_count = data->size ();
@@ -202,8 +208,8 @@ ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
 const ScenarioResolveOptions& options) {
     ScenarioResolution resolution;
-    if (auto reason =
-        parse_scenario_request (scenario, options.limits, resolution.request)) {
+    if (auto reason = parse_scenario_request (
+        scenario, options.limits, resolution.request, resolution.data_rows)) {
         return invalid (*reason);
     }
     const ScenarioRequest& request = resolution.request;

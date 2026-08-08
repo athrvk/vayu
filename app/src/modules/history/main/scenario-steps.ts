@@ -48,6 +48,12 @@ export interface ScenarioStepRow {
 	/** `0` when the step never reached a server. */
 	statusCode: number;
 	latencyMs: number;
+	/**
+	 * Which `data` row this iteration bound, absent for a run without a data
+	 * set. Both sources carry it, so a row does not gain a number when its
+	 * stored copy arrives.
+	 */
+	dataRowIndex?: number;
 	/** The stored result, present only on a row read back from the report. */
 	result?: RunResultSample;
 }
@@ -121,6 +127,7 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 	return {
 		iteration: trace.iteration,
 		stepIndex: trace.stepIndex,
+		dataRowIndex: trace.dataRowIndex,
 		name: trace.stepName ?? `Step ${trace.stepIndex + 1}`,
 		// An unstamped row predates the outcome and cannot be called passed -
 		// "errored" is the honest reading of "this step ran and said nothing".

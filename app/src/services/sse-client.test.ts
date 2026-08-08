@@ -32,6 +32,22 @@ describe("mapSseMetrics", () => {
 });
 
 describe("parseStepEvent", () => {
+	it("carries the data row when the run has one, and omits the key when it does not", () => {
+		const base = {
+			iteration: 1,
+			stepIndex: 0,
+			name: "Log in",
+			outcome: "passed",
+			statusCode: 200,
+			latencyMs: 42.7,
+		};
+
+		expect(parseStepEvent({ ...base, dataRowIndex: 2 })?.dataRowIndex).toBe(2);
+		// Absent, not 0 - a defaulted row index reads as "row 1 of a data file"
+		// for a run that had none.
+		expect(parseStepEvent(base)).not.toHaveProperty("dataRowIndex");
+	});
+
 	it("reads a scenario run's step event", () => {
 		expect(
 			parseStepEvent({

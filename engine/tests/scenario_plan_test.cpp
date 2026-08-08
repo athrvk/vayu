@@ -354,6 +354,38 @@ TEST_F (ScenarioPlanTest, ManifestRecordsOnlyTheDataRowCount) {
     // Absent `iterations` with a data set means one pass per row.
     EXPECT_EQ (manifest["iterations"], 2);
     EXPECT_EQ (manifest.dump ().find ("alice"), std::string::npos);
+
+    // The rows themselves ride the resolution to the run's worker, which is
+    // what `pm.iterationData` reads - they are kept out of the *manifest*, not
+    // out of the run.
+    ASSERT_EQ (resolved.data_rows.size (), 2u);
+    EXPECT_EQ (resolved.data_rows[0]["user"], "alice");
+    EXPECT_EQ (resolved.data_rows[1]["user"], "bob");
+}
+
+TEST_F (ScenarioPlanTest, ARunWithoutDataResolvesToNoRows) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_TRUE (resolved.data_rows.empty ());
+    EXPECT_EQ (resolved.request.iterations, 1u);
+}
+
+// A set that is rejected binds nothing at all - not even the rows before the
+// one at fault, which would be a partial data set the caller never sent.
+TEST_F (ScenarioPlanTest, ARejectedRowLeavesNoRowsBehind) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } }, json ("bob") });
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    ASSERT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("row 1"), std::string::npos) << resolved.error;
+    EXPECT_TRUE (resolved.data_rows.empty ());
 }
 
 TEST_F (ScenarioPlanTest, ExplicitIterationsWinsOverTheRowCount) {

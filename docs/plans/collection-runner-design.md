@@ -120,6 +120,11 @@ the offending request, before any `runs` row exists. This matches the existing
 
 ### An iteration is one pass over the plan; data rows arrive on the payload
 
+> **Shipped.** `pm.iterationData` binds the row; see
+> [Data rows](../engine/scripting.md#data-rows-pmiterationdata) and
+> [Scenario runs](../engine/api-reference.md#scenario-runs). The reasoning below
+> is what those pages summarise, kept here until the last phase lands.
+
 `iterations` (default `1`) is how many times the plan executes end to end.
 
 `data` is an inline JSON array of objects on the run payload. Row `i % rows`

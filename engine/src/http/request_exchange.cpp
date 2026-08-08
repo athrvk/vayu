@@ -257,6 +257,10 @@ bool verbose) {
         ctx.iteration           = inputs.iteration;
         ctx.iteration_count     = inputs.iteration_count;
         ctx.in_scenario         = inputs.in_scenario;
+        // Both scripts of a step read the same row: they are the same
+        // iteration, and a test script asserting against the row its request
+        // was built from is the point of a data-driven run.
+        ctx.iteration_data = inputs.iteration_data;
     };
 
     // Execute pre-request script. `for_prerequest` is what makes its

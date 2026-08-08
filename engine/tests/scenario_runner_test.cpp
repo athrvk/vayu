@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -202,8 +203,28 @@ class ScenarioRunnerTest : public ::testing::Test {
     /// Resolve, create the run row and start the worker, exactly as POST /runs
     /// does - minus the HTTP layer.
     std::string start (size_t iterations, const std::string& environment_id = "") {
-        json scenario{ { "source", "collection" }, { "collectionId", "col_1" },
-            { "iterations", iterations } };
+        return start_scenario (iterations, environment_id, json ());
+    }
+
+    /// As `start`, with a `data` block. Pass no @p iterations to leave the key
+    /// off the payload entirely, which is how "the row count is the default"
+    /// is exercised rather than assumed.
+    std::string start_with_data (const json& data,
+    std::optional<size_t> iterations  = std::nullopt,
+    const std::string& environment_id = "") {
+        return start_scenario (iterations, environment_id, data);
+    }
+
+    std::string start_scenario (std::optional<size_t> iterations,
+    const std::string& environment_id,
+    const json& data) {
+        json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
+        if (iterations) {
+            scenario["iterations"] = *iterations;
+        }
+        if (!data.is_null ()) {
+            scenario["data"] = data;
+        }
 
         vayu::core::ScenarioResolveOptions options;
         options.timeout_ms           = 5000;
@@ -217,6 +238,7 @@ class ScenarioRunnerTest : public ::testing::Test {
         auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
         execution->request = std::move (resolved.request);
         execution->plan    = std::move (resolved.plan);
+        execution->data_rows = std::move (resolved.data_rows);
 
         json config{ { "scenario", scenario } };
         if (!environment_id.empty ()) {
@@ -917,6 +939,132 @@ TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZer
     inputs.steps_executed = 3;
     auto summary          = vayu::core::build_scenario_summary_payload (inputs);
     EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 0.0);
+}
+
+
+// ============================================================================
+// Data-driven iterations - pm.iterationData (issue #356, phase 5)
+// ============================================================================
+//
+// The binding itself is pinned in script_engine_test.cpp; what these pin is
+// the wiring only a run can show: which row an iteration binds, how many
+// iterations a data set implies, and that the record says which row produced
+// it. The marker header is the proof the row reached the *wire* rather than
+// only the script - a row that binds but changes nothing sent is decorative.
+
+TEST_F (ScenarioRunnerTest, IterationsDefaultToTheRowCountAndEachBindsItsRow) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: pm.iterationData.get("marker")});)");
+
+    const auto run_id = start_with_data (json::array ({ { { "marker", "row-0" } },
+    { { "marker", "row-1" } }, { { "marker", "row-2" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // Three rows, no `iterations` on the payload: three passes, and row `i`
+    // reached the server on iteration `i`.
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[0].marker, "row-0");
+    EXPECT_EQ (seen[1].marker, "row-1");
+    EXPECT_EQ (seen[2].marker, "row-2");
+
+    EXPECT_EQ (summary_of (run_id)["scenario"]["iterations"].get<size_t> (), 3u);
+}
+
+TEST_F (ScenarioRunnerTest, AnExplicitIterationCountWrapsTheRowIndex) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: pm.iterationData.get("marker")});)");
+
+    const auto run_id = start_with_data (
+    json::array ({ { { "marker", "row-0" } }, { { "marker", "row-1" } } }),
+    /*iterations=*/5);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // The explicit count wins over the row count and the index wraps: five
+    // iterations over two rows is 0,1,0,1,0.
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 5u);
+    const std::vector<std::string> expected{ "row-0", "row-1", "row-0", "row-1", "row-0" };
+    for (size_t i = 0; i < seen.size (); ++i) {
+        EXPECT_EQ (seen[i].marker, expected[i]) << "iteration " << i;
+    }
+
+    // And the wrap is not silent: every stored record names the row it used,
+    // which is the only way a reader can tell iteration 2 from iteration 0.
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 5u);
+    for (size_t i = 0; i < rows.size (); ++i) {
+        auto trace = json::parse (rows[i].trace_data);
+        ASSERT_TRUE (trace.contains ("dataRowIndex")) << "iteration " << i;
+        EXPECT_EQ (trace["dataRowIndex"].get<size_t> (), i % 2) << "iteration " << i;
+    }
+}
+
+// A run with no data set must not stamp `dataRowIndex: 0`, which would read in
+// the step list as "row 1 of a data file" for a run that had none.
+TEST_F (ScenarioRunnerTest, ARunWithoutDataStampsNoRowIndexAndBindsNothing) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: typeof pm.iterationData});)");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    // Inside a collection run, and still undefined: `in_scenario` is not what
+    // binds a row - having one is.
+    EXPECT_EQ (seen[0].marker, "undefined");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    for (const auto& row : rows) {
+        EXPECT_FALSE (json::parse (row.trace_data).contains ("dataRowIndex"));
+    }
+}
+
+// The test script reads the same row its request was built from: asserting a
+// response against the row that produced it is the whole point of a
+// data-driven run.
+TEST_F (ScenarioRunnerTest, TheTestScriptReadsTheSameRowAsThePreRequestScript) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: pm.iterationData.get("marker")});)",
+    "pm.test('row is mine', function () {"
+    "  pm.expect(pm.iterationData.get('marker')).to.equal('row-' + "
+    "pm.info.iteration);"
+    "  pm.expect(pm.iterationData.toObject().marker).to.equal('row-' + "
+    "pm.info.iteration);"
+    "});");
+
+    const auto run_id = start_with_data (
+    json::array ({ { { "marker", "row-0" } }, { { "marker", "row-1" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 2u);
+    EXPECT_EQ (scenario["failed"].get<size_t> (), 0u);
+}
+
+// The live stream says what the stored row says. A step that gains a row
+// number only once the run ends would read as two different steps.
+TEST_F (ScenarioRunnerTest, StepEventsCarryTheRowIndexOnTheSameTermsAsTheStoredRow) {
+    vayu::core::StepRecord record;
+    record.iteration      = 3;
+    record.step_index     = 0;
+    record.step_name      = "Login";
+    record.data_row_index = 1;
+
+    auto with_row = json::parse (vayu::core::build_step_payload (record, 0).substr (
+    vayu::core::build_step_payload (record, 0).find ("data: ") + 6));
+    EXPECT_EQ (with_row["dataRowIndex"].get<size_t> (), 1u);
+
+    record.data_row_index = std::nullopt;
+    auto without_row = json::parse (vayu::core::build_step_payload (record, 0).substr (
+    vayu::core::build_step_payload (record, 0).find ("data: ") + 6));
+    EXPECT_FALSE (without_row.contains ("dataRowIndex"));
 }
 
 } // namespace

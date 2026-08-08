@@ -127,9 +127,10 @@ const std::string& script_type);
  * One exchange's inputs: a composed, auth-resolved request and the scripts
  * that bracket it.
  *
- * `iteration` / `iteration_count` are the scenario runner's alone - every other
- * caller leaves them unset so `pm.info.iteration` reads `undefined` (issue
- * #300, and see ScriptContext).
+ * `iteration` / `iteration_count` / `iteration_data` are the scenario runner's
+ * alone - every other caller leaves them unset so `pm.info.iteration` and
+ * `pm.iterationData` read `undefined` (issues #300 and #356, and see
+ * ScriptContext).
  */
 struct ExchangeInputs {
     vayu::Request request;
@@ -142,6 +143,10 @@ struct ExchangeInputs {
     /// Whether the scripts may redirect the sequence around this exchange -
     /// the scenario runner's alone, exactly as `iteration` is (issue #355).
     bool in_scenario = false;
+    /// The data row this iteration binds to `pm.iterationData`, or null when
+    /// the run has none. Borrowed for the length of the call and outlived by
+    /// the run's `ScenarioExecution` (issue #356).
+    const nlohmann::json* iteration_data = nullptr;
 };
 
 /** What one exchange produced. */

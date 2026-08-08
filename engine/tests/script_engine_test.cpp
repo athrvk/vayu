@@ -3664,3 +3664,177 @@ TEST_F (ScriptEngineTest, AnInstructionDoesNotSurviveIntoTheNextExecution) {
     EXPECT_EQ (second_result.control.kind, ScriptControl::Kind::None);
     EXPECT_TRUE (second_result.control.target.empty ());
 }
+
+// ============================================================================
+// pm.iterationData - the data row bound to this iteration (issue #356)
+// ============================================================================
+//
+// The read surface is `get` and `toObject`, the writers refuse, and absence is
+// `undefined` rather than an empty scope. That last one is the decision worth
+// pinning: unlike pm.execution, this is data, and a script that asks "is this
+// run data-driven?" can only get an answer if the binding is missing when
+// there is no row.
+
+/// A scenario step's test context, bound to @p row - the shape the runner
+/// builds, and the only shape that carries a row at all.
+static ScriptContext data_test (const Request& request,
+const Response& response,
+Environment& env,
+const nlohmann::json& row) {
+    ScriptContext ctx  = ScriptContext::for_test (request, response);
+    ctx.environment    = &env;
+    ctx.in_scenario    = true;
+    ctx.iteration_data = &row;
+    return ctx;
+}
+
+TEST_F (ScriptEngineTest, IterationDataGetReadsTheBoundRow) {
+    const nlohmann::json row{ { "username", "ada" }, { "attempts", 3 }, { "active", true },
+        { "profile", { { "city", "London" } } }, { "nickname", nullptr } };
+    auto ctx = data_test (request, response, env, row);
+
+    auto result = engine.execute (R"JS(
+        pm.test("row reads back", function() {
+            pm.expect(pm.iterationData.get("username")).to.equal("ada");
+            // Types survive the binding: a CSV column the app typed as a
+            // number must not arrive as the string "3".
+            pm.expect(pm.iterationData.get("attempts")).to.equal(3);
+            pm.expect(pm.iterationData.get("active")).to.equal(true);
+            pm.expect(pm.iterationData.get("profile").city).to.equal("London");
+            pm.expect(pm.iterationData.get("nickname")).to.equal(null);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The same answer every other pm scope reader gives, so a script that guards
+// on a column need not learn a new idiom for this one.
+TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
+    const nlohmann::json row{ { "username", "ada" } };
+    auto ctx = data_test (request, response, env, row);
+
+    auto result = engine.execute (R"JS(
+        pm.test("unknown key", function() {
+            pm.expect(typeof pm.iterationData.get("missing")).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, IterationDataToObjectReturnsTheWholeRow) {
+    const nlohmann::json row{ { "username", "ada" }, { "attempts", 3 } };
+    auto ctx = data_test (request, response, env, row);
+
+    auto result = engine.execute (R"JS(
+        pm.test("whole row", function() {
+            var all = pm.iterationData.toObject();
+            pm.expect(Object.keys(all).length).to.equal(2);
+            pm.expect(all.username).to.equal("ada");
+            pm.expect(all.attempts).to.equal(3);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// A write has no destination - the rows are a run input, not a scope - so the
+// call throws rather than accepting a value that would vanish at the next
+// iteration. Bound and refusing, for the reason pm.execution is.
+TEST_F (ScriptEngineTest, IterationDataRefusesEveryWrite) {
+    const nlohmann::json row{ { "username", "ada" } };
+
+    for (const char* script : { "pm.iterationData.set('username', 'bob');",
+         "pm.iterationData.unset('username');", "pm.iterationData.clear();" }) {
+        auto ctx    = data_test (request, response, env, row);
+        auto result = engine.execute (script, ctx);
+
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (result.error_message.find ("read-only"), std::string::npos)
+        << script << " reported: " << result.error_message;
+    }
+
+    // And the row itself is untouched by the attempt.
+    EXPECT_EQ (row.at ("username"), "ada");
+}
+
+// The #300 boundary, unchanged: a single send has no iteration and therefore
+// no row. `undefined` and not an empty scope - a script may branch on it.
+TEST_F (ScriptEngineTest, IterationDataIsUndefinedInASingleSend) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.test("no data", function() {
+            pm.expect(typeof pm.iterationData).to.equal("undefined");
+        });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The load-mode contract: `validate_scripts` builds exactly this `for_test`
+// shape and binds no row, because a deferred script runs after the run against
+// a sampled response and there is no iteration it belongs to.
+TEST_F (ScriptEngineTest, IterationDataIsUndefinedInALoadRunsDeferredTestScript) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("no data", function() {
+            pm.expect(typeof pm.iterationData).to.equal("undefined");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Contexts are pooled and the global object survives with them, so the binding
+// has to be rebuilt per execution the way pm.info is. Leave the previous
+// step's object standing and a single send reads the last collection run's
+// data - a row from a run that has finished, reported as this request's.
+TEST_F (ScriptEngineTest, ARowDoesNotSurviveIntoTheNextExecution) {
+    const nlohmann::json row{ { "username", "ada" } };
+    auto first = data_test (request, response, env, row);
+    auto first_result = engine.execute ("pm.iterationData.get('username');", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second_result = engine.execute_test (R"JS(
+        pm.test("no data", function() {
+            pm.expect(typeof pm.iterationData).to.equal("undefined");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+    ASSERT_EQ (second_result.tests.size (), 1u);
+    EXPECT_TRUE (second_result.tests[0].passed) << second_result.tests[0].error_message;
+}
+
+// The other half of that leak: a stashed reference outlives the execution it
+// was taken in, and calling it later must say there is no row rather than
+// reading the one this execution does not have.
+TEST_F (ScriptEngineTest, AStashedIterationDataRefusesOnceTheRowIsGone) {
+    const nlohmann::json row{ { "username", "ada" } };
+    auto first = data_test (request, response, env, row);
+    auto first_result =
+    engine.execute ("globalThis.stashed = pm.iterationData;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second_result = engine.execute_test (
+    "globalThis.stashed.get('username');", request, response, env);
+
+    EXPECT_FALSE (second_result.success);
+    EXPECT_NE (second_result.error_message.find ("not available here"), std::string::npos)
+    << second_result.error_message;
+}
