@@ -59,6 +59,14 @@ export function generatePowerShell(
 		});
 	}
 
+	if (isFormData) {
+		// `-Form` arrived in PowerShell 6.1. Windows PowerShell 5.1 - the shell
+		// whose `curl` alias is why this target exists at all - has no such
+		// parameter and fails the call outright, so the snippet says so in the one
+		// place the reader is already looking.
+		lines.push("# requires PowerShell 6.1+ (-Form)", "");
+	}
+
 	if (headers.length > 0) {
 		lines.push("$headers = @{");
 		for (const { name, expression } of headers) {

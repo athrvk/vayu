@@ -23,6 +23,33 @@ import { shellQuote } from "./curl";
 import { prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
+/**
+ * Build a request item HTTPie will read back as the field it was built from.
+ *
+ * HTTPie splits an item at the *earliest* separator it finds, taking the
+ * longest one at that position, and the separators are not just `=`: `=@` reads
+ * a local file into the field, `==` makes it a query parameter, `@` uploads a
+ * file and `:` writes a header. So an unescaped leading `@` or `=` on the value
+ * side silently changes what the item means - the same file-reference hazard
+ * curl's `-F` has - and a `:`, `=` or `@` anywhere in the key is read as the
+ * separator instead of the one we emit.
+ *
+ * The fix is HTTPie's documented escape, a backslash before the character that
+ * must not be read as a separator; `\` itself is that escape character, so a
+ * literal one is doubled or it swallows the character after it. Only a
+ * *leading* separator matters on the value side - past the `=` we emit, nothing
+ * later is the earliest match - so a JSON value keeps its colons and stays
+ * readable.
+ */
+function httpieItem(key: string, value: string): string {
+	const escapedKey = key.replace(/[\\:=@]/g, "\\$&");
+	const escapedValue = value
+		.split("\\")
+		.join("\\\\")
+		.replace(/^[:=@]/, "\\$&");
+	return `${escapedKey}=${escapedValue}`;
+}
+
 export function generateHttpie(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
@@ -54,7 +81,7 @@ export function generateHttpie(
 	} else if (prepared.body) {
 		if (prepared.body.kind === "urlencoded") args.push("--form");
 		for (const [key, value] of prepared.body.fields) {
-			args.push(shellQuote(`${key}=${value}`));
+			args.push(shellQuote(httpieItem(key, value)));
 		}
 	}
 

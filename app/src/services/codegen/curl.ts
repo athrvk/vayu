@@ -55,11 +55,21 @@ export function generateCurl(
 		args.push(`--data-raw ${shellQuote(prepared.body.content)}`);
 	} else if (prepared.body?.kind === "form-data") {
 		for (const [key, value] of prepared.body.fields) {
-			args.push(`-F ${shellQuote(`${key}=${value}`)}`);
+			// `--form-string`, not `-F`: `-F` reads a value beginning with `@` or
+			// `<` as a file reference and `;type=` as a per-part override, so a
+			// generated command would upload a local file the request never
+			// contained. `--form-string` takes the value literally, always.
+			args.push(`--form-string ${shellQuote(`${key}=${value}`)}`);
 		}
 	} else if (prepared.body?.kind === "urlencoded") {
 		for (const [key, value] of prepared.body.fields) {
-			args.push(`--data-urlencode ${shellQuote(`${key}=${value}`)}`);
+			// curl encodes only what follows the first `=`, so the field *name* has
+			// to arrive already encoded: a raw space, `&` or `=` in it sends a
+			// different field than the request carries, and a raw `@` hits curl's
+			// `name@file` form and reads a local file. Encoding the name here and
+			// leaving the value to curl is the split curl documents; the `%20` for a
+			// space matches what curl emits on the value side.
+			args.push(`--data-urlencode ${shellQuote(`${encodeURIComponent(key)}=${value}`)}`);
 		}
 	}
 
