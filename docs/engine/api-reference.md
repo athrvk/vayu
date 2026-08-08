@@ -1269,9 +1269,32 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "followRedirects": true,             // Optional, default true
   "maxRedirects": 10,                  // Optional, default 10
   "verifySSL": true,                   // Optional, default true
-  "httpVersion": "auto"                // Optional: "auto" | "http1.1" | "http2", default "auto"
+  "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
+  "transient": false                   // Optional, default false - see below
 }
 ```
+
+**`transient` runs the request without recording it** (issue #382). The
+execution is otherwise identical - same composition, the cookie jar named by
+`environmentId`, the same scripts, the same response body - but the engine
+creates **no run row**: nothing appears in `GET /runs`, no result trace is
+written, and the count-based retention prune does not run, so no existing run
+is evicted. Because the trace is where the post-auth request headers would have
+landed, a transient execution is also the only way to send with resolved
+credentials and leave none of them on disk.
+
+Absent and `null` both mean `false`; a present non-boolean is a **400**
+(`'transient' must be a boolean`) rather than a silent `false`, because a
+caller that asked for privacy must not be quietly refused it. The flag is
+**not valid on `POST /runs`** - a load or scenario run *is* the row it creates
+(the run id is the endpoint's return value), so sending it there is a **400**
+with `errorCode: "invalid_run_config"`.
+
+The one caller today is the app's GraphQL schema introspection
+(`lib/graphql/introspect.ts`), a background fetch the user never made. MCP's
+`run_request` deliberately does **not** set it: an agent's runs belong in
+History like anyone else's, and the tool builds its payload from named
+arguments, so an agent cannot supply the flag either.
 
 **`requestName` is script identity, not an HTTP field** - it never reaches the
 wire. The scripts read it as `pm.info.requestName` (with `requestId` as
@@ -1703,6 +1726,15 @@ An **absent** field, or an explicit `null`, is always accepted - every one of
 them has a default. The ceilings are crash guards, not policy: each client caps
 itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
 `start_load_run` tool has a user-settable cap in Settings).
+
+One field is rejected by **presence**, not by range: **`transient`**. It is
+`POST /execute`'s no-run-row flag (issue #382) and has no meaning here, because
+a load or scenario run *is* the row it creates - the run id is what this
+endpoint returns, and the live stream, the report and the scenario step store
+are all keyed by it. Ignoring the flag would leave a caller believing the run
+left nothing behind while it wrote the largest trace the store holds, so a
+present `transient` (`true` **or** `false`) is a `400` with `error.code`
+`invalid_run_config`. An explicit `null` is absent, as everywhere else here.
 
 The sample rates are additionally clamped to &ge; 1 inside the metrics
 collector, so the modulo cannot divide by zero even for a caller that bypasses

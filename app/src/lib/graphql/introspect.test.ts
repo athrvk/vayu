@@ -71,6 +71,26 @@ describe("buildIntrospectionRequest", () => {
 		expect(req.preRequestScripts).toBeUndefined();
 	});
 
+	// The #382 assertions: a schema load is not a run the user made, so it must
+	// leave no History entry, and it must reach the endpoint through the same
+	// cookie jar the endpoint's real requests use.
+	it("marks the execution transient so it files no run", () => {
+		const req = buildIntrospectionRequest(COMPOSED as ComposedRequest);
+		expect(req.transient).toBe(true);
+	});
+
+	it("carries the environment through so introspection uses its cookie jar", () => {
+		const req = buildIntrospectionRequest(COMPOSED as ComposedRequest, "env_1");
+		expect(req.environmentId).toBe("env_1");
+	});
+
+	it("omits environmentId entirely when the target has no environment", () => {
+		// Absent, not empty: the engine reads an absent id as the
+		// no-environment jar, and `""` would be a different thing to explain.
+		const req = buildIntrospectionRequest(COMPOSED as ComposedRequest);
+		expect("environmentId" in req).toBe(false);
+	});
+
 	it("omits auth entirely when composition resolved it to nothing", () => {
 		const req = buildIntrospectionRequest({ ...COMPOSED, auth: undefined } as ComposedRequest);
 		expect("auth" in req).toBe(false);
@@ -109,6 +129,10 @@ describe("introspectSchema", () => {
 		expect(sent.url).toBe("https://api.test/gql");
 		expect(sent.auth).toEqual({ mode: "bearer", token: "sk_live" });
 		expect(sent.headers?.["X-Team"]).toBe("payments");
+		// Composed by the environment, and sent through that environment's
+		// cookie jar - the two halves of #382 on the send itself.
+		expect(sent.transient).toBe(true);
+		expect(sent.environmentId).toBe("env_1");
 	});
 
 	it("omits auth from the compose body when the request has none", async () => {
@@ -137,6 +161,20 @@ describe("introspectSchema", () => {
 	it("throws when body is not valid JSON", async () => {
 		mockExecute({ status: 200, bodyRaw: "<html>" });
 		await expect(introspectSchema(TARGET)).rejects.toThrow();
+	});
+
+	it("throws when the response is valid JSON with neither data nor errors", async () => {
+		// A proxy or gateway that answers 200 with `{}` - the branch between
+		// "GraphQL said no" and "this is not JSON", which reached
+		// buildClientSchema with undefined before it was guarded.
+		mockExecute({ status: 200, bodyRaw: "{}" });
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/no data/i);
+	});
+
+	it("surfaces an execute failure rather than reporting an empty schema", async () => {
+		vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+		vi.mocked(apiService.executeRequest).mockRejectedValue(new Error("engine unreachable"));
+		await expect(introspectSchema(TARGET)).rejects.toThrow(/engine unreachable/);
 	});
 
 	it("surfaces a compose failure instead of sending an unresolved request", async () => {

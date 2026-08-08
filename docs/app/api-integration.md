@@ -248,6 +248,16 @@ composed `url` / `headers` / `auth`, and executes that - which is how an
 endpoint whose credentials live in the Auth panel gets introspected at all. It
 sends the composed request's auth but neither its body nor its script parts.
 
+It is the **only** send site that sets `transient: true` (issue #382), because
+it is the only one the user did not initiate. The engine then runs it in full
+and records nothing: no History entry, no result trace holding the credentials
+composition resolved, and no retention prune evicting a real run. It also
+carries the target's `environmentId` onto the execute payload, which is what
+scopes the engine's cookie jar - without it a cookie-session endpoint answered
+real requests and failed introspection alone. Every other send site omits the
+flag and is recorded as usual; see
+[api-reference.md](../engine/api-reference.md#post-execute).
+
 #### Run Management
 
 ```typescript

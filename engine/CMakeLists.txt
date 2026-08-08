@@ -446,6 +446,7 @@ if(VAYU_BUILD_TESTS)
         tests/run_shutdown_test.cpp
         tests/run_config_validation_test.cpp
         tests/run_row_seed_test.cpp
+        tests/transient_execute_test.cpp
         tests/script_compose_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
