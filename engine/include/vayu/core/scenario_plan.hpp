@@ -91,6 +91,21 @@ struct ScenarioRequest {
     size_t data_row_count = 0;
 };
 
+/**
+ * A resolved scenario, ready to execute: what was asked for and what it
+ * resolved to.
+ *
+ * The two travel together from the route to the run's worker thread because
+ * neither is enough on its own - the plan is what executes, and the request is
+ * what says how many times and (from phase 5) with which data rows. Held by
+ * `shared_ptr<const>`: resolution happened once, before the run row existed,
+ * and nothing may edit it afterwards.
+ */
+struct ScenarioExecution {
+    ScenarioRequest request;
+    ScenarioPlan plan;
+};
+
 /** Bounds a plan must respect, read from config by the caller. */
 struct ScenarioLimits {
     size_t max_steps     = 0;

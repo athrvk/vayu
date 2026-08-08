@@ -1,0 +1,413 @@
+/*
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the AGPL v3 license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#include "vayu/core/scenario_runner.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <utility>
+
+#include "vayu/core/constants.hpp"
+#include "vayu/http/request_exchange.hpp"
+#include "vayu/http/script_parts.hpp"
+#include "vayu/http/status.hpp"
+#include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
+
+namespace vayu::core {
+
+namespace {
+
+int64_t runner_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+
+/// The first failed assertion, phrased for the `results.error` column: a
+/// scenario step's failure has to say *which* expectation broke, because the
+/// step list is all a reader has to go on.
+std::string describe_failed_tests (const vayu::ScriptResult& pre,
+const vayu::ScriptResult& post) {
+    size_t failures = 0;
+    std::string first;
+    for (const auto* result : { &pre, &post }) {
+        for (const auto& test : result->tests) {
+            if (test.passed) {
+                continue;
+            }
+            ++failures;
+            if (first.empty ()) {
+                first = test.name;
+                if (!test.error_message.empty ()) {
+                    first += ": " + test.error_message;
+                }
+            }
+        }
+    }
+    if (failures == 0) {
+        return "";
+    }
+    if (failures == 1) {
+        return "Test failed - " + first;
+    }
+    return std::to_string (failures) + " tests failed - " + first;
+}
+
+/**
+ * Whether a script *errored* rather than merely disagreeing with the response.
+ *
+ * `ScriptResult::success` is also the tests' verdict - `ScriptEngine::execute`
+ * clears it when any `pm.test` fails - so it cannot be read as "the script
+ * ran". The message is what separates the two: a thrown script, a timeout and a
+ * refused `pm.request` write-back all carry one, and a failed expectation
+ * carries none. Reading `success` alone would report every failed assertion as
+ * a step that never ran, and end the iteration on it.
+ */
+bool script_errored (const vayu::ScriptResult& result) {
+    return !result.success && !result.error_message.empty ();
+}
+
+/**
+ * Decide what one exchange amounts to.
+ *
+ * The order is deliberate: a step that did not complete is `Errored` whatever
+ * its scripts reported, and a script that threw is `Errored` rather than
+ * `Failed`, because "the assertion did not hold" and "the assertion never ran"
+ * are different facts and only the first one means the run learned something.
+ */
+StepOutcome classify_step (const vayu::http::routes::ExchangeOutcome& exchange,
+std::string& error) {
+    if (exchange.response.has_error ()) {
+        error = exchange.response.error_message;
+        return StepOutcome::Errored;
+    }
+    if (script_errored (exchange.pre_script_result)) {
+        error = "Pre-request script failed - " + exchange.pre_script_result.error_message;
+        return StepOutcome::Errored;
+    }
+    if (script_errored (exchange.post_script_result)) {
+        error = "Test script failed - " + exchange.post_script_result.error_message;
+        return StepOutcome::Errored;
+    }
+    if (auto failed = describe_failed_tests (
+        exchange.pre_script_result, exchange.post_script_result);
+        !failed.empty ()) {
+        error = failed;
+        return StepOutcome::Failed;
+    }
+    return StepOutcome::Passed;
+}
+
+/// The step's identity, added to the design-mode trace. `restore-response.ts`
+/// reads the trace it already knows and ignores these; the app's step list
+/// (phase 3) reads these to say which step a row belongs to.
+void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
+    trace["iteration"] = record.iteration;
+    trace["stepIndex"] = record.step_index;
+    trace["stepName"]  = record.step_name;
+    trace["requestId"] = record.request_id;
+    trace["outcome"]   = to_string (record.outcome);
+}
+
+} // namespace
+
+const char* to_string (StepOutcome outcome) {
+    switch (outcome) {
+    case StepOutcome::Passed: return "passed";
+    case StepOutcome::Failed: return "failed";
+    case StepOutcome::Skipped: return "skipped";
+    case StepOutcome::Errored: return "errored";
+    }
+    return "unknown";
+}
+
+void ScenarioStepStore::add (vayu::db::Result result, bool kept_first) {
+    const size_t sequence = sequence_++;
+
+    if (capacity_ == 0 || stored () < capacity_) {
+        (kept_first ? kept_first_ : fillers_).push_back ({ sequence, std::move (result) });
+        return;
+    }
+
+    // Full. A step that did not pass takes a success's place - the newest one,
+    // so what survives is the run's opening rather than an arbitrary slice.
+    if (kept_first && !fillers_.empty ()) {
+        fillers_.pop_back ();
+        ++dropped_;
+        kept_first_.push_back ({ sequence, std::move (result) });
+        return;
+    }
+
+    ++dropped_;
+}
+
+std::vector<vayu::db::Result> ScenarioStepStore::take () {
+    std::vector<Entry> merged;
+    merged.reserve (kept_first_.size () + fillers_.size ());
+    merged.insert (merged.end (), std::make_move_iterator (kept_first_.begin ()),
+    std::make_move_iterator (kept_first_.end ()));
+    merged.insert (merged.end (), std::make_move_iterator (fillers_.begin ()),
+    std::make_move_iterator (fillers_.end ()));
+    kept_first_.clear ();
+    fillers_.clear ();
+
+    std::sort (merged.begin (), merged.end (),
+    [] (const Entry& a, const Entry& b) { return a.sequence < b.sequence; });
+
+    std::vector<vayu::db::Result> results;
+    results.reserve (merged.size ());
+    for (auto& entry : merged) {
+        results.push_back (std::move (entry.result));
+    }
+    return results;
+}
+
+std::string build_step_payload (const StepRecord& record, size_t offset) {
+    nlohmann::json data{ { "iteration", record.iteration },
+        { "stepIndex", record.step_index }, { "name", record.step_name },
+        { "outcome", to_string (record.outcome) },
+        { "statusCode", record.status_code }, { "latencyMs", record.latency_ms } };
+    return "event: step\nid: " + std::to_string (offset) + "\ndata: " + data.dump () + "\n\n";
+}
+
+nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inputs) {
+    nlohmann::json summary;
+    // The three keys `apply_run_summary` reads. Without `total_requests` the
+    // report would count the rows that survived the store's cap and call that
+    // the run's size.
+    summary["total_requests"] = inputs.steps_executed;
+    summary["test_duration"]  = inputs.duration_s;
+    summary["rps"]            = inputs.duration_s > 0 ?
+               static_cast<double> (inputs.steps_executed) / inputs.duration_s :
+               0.0;
+
+    summary["scenario"] = { { "iterations", inputs.iterations_requested },
+        { "iterations_completed", inputs.iterations_completed },
+        { "steps_executed", inputs.steps_executed }, { "passed", inputs.passed },
+        { "failed", inputs.failed }, { "skipped", inputs.skipped },
+        { "errored", inputs.errored }, { "steps_stored", inputs.steps_stored },
+        { "steps_dropped", inputs.steps_dropped } };
+    return summary;
+}
+
+void execute_scenario_run (std::shared_ptr<RunContext> context,
+std::shared_ptr<const ScenarioExecution> execution,
+vayu::db::Database* db_ptr,
+vayu::http::CookieJar* cookie_jar,
+bool verbose,
+RunManager& manager) {
+    auto& db          = *db_ptr;
+    const auto& plan  = execution->plan;
+    const auto& asked = execution->request;
+
+    ScenarioSummaryInputs summary;
+    summary.iterations_requested = asked.iterations;
+    const auto started_at        = std::chrono::steady_clock::now ();
+    vayu::RunStatus final_status = vayu::RunStatus::Completed;
+
+    try {
+        db.update_run_status (context->run_id, vayu::RunStatus::Running);
+
+        // Which jar every step reads and writes: one per environment, so "log
+        // in on step 1, reuse the session on step 2" is the jar's existing
+        // behaviour rather than anything this runner adds.
+        std::optional<std::string> environment_id;
+        if (auto it = context->config.find ("environmentId");
+            it != context->config.end () && it->is_string () &&
+            !it->get<std::string> ().empty ()) {
+            environment_id = it->get<std::string> ();
+        }
+        const std::string cookie_scope =
+        environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
+
+        // Loaded once, mutated by every step, persisted once at the end. The
+        // collection scope is the collection being run - a scenario has no
+        // single request row to derive one from.
+        auto scopes = vayu::http::routes::load_script_variable_scopes (
+        db, environment_id, asked.collection_id);
+
+        vayu::runtime::ScriptConfig script_config;
+        script_config.timeout_ms = static_cast<uint64_t> (
+        db.get_config_int ("scriptTimeout", constants::script_engine::TIMEOUT_MS));
+        script_config.memory_limit = static_cast<size_t> (db.get_config_int (
+        "scriptMemoryLimit", constants::script_engine::MEMORY_LIMIT));
+        script_config.stack_size   = static_cast<size_t> (
+        db.get_config_int ("scriptStackSize", constants::script_engine::STACK_SIZE));
+        script_config.enable_console = db.get_config_bool (
+        "scriptEnableConsole", constants::script_engine::ENABLE_CONSOLE);
+        // Payload-level, exactly as `POST /execute` reads it: whether a script
+        // may send is a property of who asked for this run.
+        script_config.allow_send_request =
+        vayu::http::read_allow_script_requests (context->config);
+
+        // One engine for the whole run: QuickJS contexts are pooled and reset
+        // per execution, so a per-step engine would pay for a runtime setup per
+        // step and buy nothing.
+        vayu::runtime::ScriptEngine script_engine (script_config);
+
+        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
+        "maxTraceBodyBytes", static_cast<int> (constants::json::MAX_TRACE_BODY_BYTES)));
+        ScenarioStepStore store (
+        static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
+        static_cast<int> (constants::scenario::MAX_STORED_STEPS))));
+
+        for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
+            if (context->should_stop) {
+                break;
+            }
+
+            for (const auto& step : plan.steps) {
+                // Checked per step, not per iteration: a 50-step iteration
+                // would otherwise keep sending for minutes after the stop.
+                if (context->should_stop) {
+                    break;
+                }
+
+                vayu::http::routes::ExchangeInputs inputs;
+                // A copy, not a move: the pre-request script writes back into
+                // this request, and the next iteration must start from the
+                // composed one rather than from whatever the last pass left.
+                inputs.request         = step.request;
+                inputs.pre_script      = step.pre_script;
+                inputs.post_script     = step.post_script;
+                inputs.request_id      = step.request_id;
+                inputs.request_name    = step.name;
+                inputs.iteration       = iteration;
+                inputs.iteration_count = asked.iterations;
+
+                auto exchange = vayu::http::routes::execute_exchange (script_engine,
+                *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+
+                StepRecord record;
+                record.iteration   = iteration;
+                record.step_index  = step.index;
+                record.step_name   = step.name;
+                record.request_id  = step.request_id;
+                record.outcome     = classify_step (exchange, record.error);
+                record.status_code = exchange.response.status_code;
+                record.status_text = exchange.response.status_text;
+                record.latency_ms  = exchange.response.timing.total_ms;
+                record.trace       = vayu::http::routes::build_result_trace (
+                exchange.request, exchange.response);
+                stamp_step_identity (record.trace, record);
+                vayu::json::cap_trace_bodies (record.trace, max_trace_body_bytes);
+
+                ++summary.steps_executed;
+                switch (record.outcome) {
+                case StepOutcome::Passed: ++summary.passed; break;
+                case StepOutcome::Failed: ++summary.failed; break;
+                case StepOutcome::Skipped: ++summary.skipped; break;
+                case StepOutcome::Errored: ++summary.errored; break;
+                }
+
+                vayu::db::Result row;
+                row.run_id      = context->run_id;
+                row.timestamp   = runner_now_ms ();
+                row.status_code = record.status_code;
+                row.status_text = record.status_text;
+                row.latency_ms  = record.latency_ms;
+                row.error       = record.error;
+                // A capped body may split a UTF-8 sequence and a response body
+                // can be arbitrary bytes, so a lone continuation byte becomes
+                // U+FFFD instead of throwing (store_result does the same).
+                row.trace_data = record.trace.dump (
+                -1, ' ', false, nlohmann::json::error_handler_t::replace);
+                store.add (std::move (row), record.outcome != StepOutcome::Passed);
+
+                context->append_tick (
+                build_step_payload (record, context->published_count.load ()));
+
+                if (record.outcome == StepOutcome::Errored) {
+                    // The iteration is over - a step that did not complete
+                    // leaves the ones after it standing on state that never
+                    // arrived. The run continues with the next iteration;
+                    // continue-on-failure is deliberately not invented ahead of
+                    // demand (design doc, "Deliberately left open").
+                    vayu::utils::log_warning ("Scenario run " + context->run_id +
+                    ": iteration " + std::to_string (iteration) +
+                    " ended at step '" + record.step_name + "' - " + record.error);
+                    break;
+                }
+            }
+
+            if (!context->should_stop) {
+                ++summary.iterations_completed;
+            }
+        }
+
+        // Once, at the end: per-step persistence would be N x M diff-and-write
+        // cycles against the DB mutex for a value only this run's later steps
+        // read. Best-effort, exactly as design mode's is.
+        vayu::http::routes::persist_script_variables (db, environment_id,
+        asked.collection_id, scopes.environment, scopes.globals, scopes.collection);
+
+        summary.steps_dropped = store.dropped ();
+        auto rows             = store.take ();
+        summary.steps_stored  = rows.size ();
+        try {
+            db.add_results_batch (rows);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Failed to store scenario step results: " + std::string (e.what ()));
+            summary.steps_stored = 0;
+        }
+
+        final_status = context->should_stop ? vayu::RunStatus::Stopped :
+                                              vayu::RunStatus::Completed;
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("Scenario run error: " + std::string (e.what ()));
+        final_status = vayu::RunStatus::Failed;
+    }
+
+    // Everything below runs on every path, including the failed one: a run that
+    // never reaches a terminal status is a run the app waits on forever.
+    summary.duration_s =
+    std::chrono::duration<double> (std::chrono::steady_clock::now () - started_at)
+    .count ();
+
+    try {
+        db.update_run_end_time (context->run_id);
+        db.update_run_summary (
+        context->run_id, build_scenario_summary_payload (summary).dump ());
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Failed to store scenario run summary: " + std::string (e.what ()));
+    }
+
+    try {
+        // Written after the summary, matching the load path: the terminal
+        // status is what tells a polling client the report is ready.
+        db.update_run_status_with_retry (context->run_id, final_status);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Failed to update scenario run status: " + std::string (e.what ()));
+    }
+
+    try {
+        db.prune_runs_configured ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+    }
+
+    if (verbose) {
+        vayu::utils::log_info ("Scenario run " + context->run_id + " " +
+        vayu::to_string (final_status) + ": " + std::to_string (summary.steps_executed) +
+        " step(s) over " + std::to_string (summary.iterations_completed) + " iteration(s), " +
+        std::to_string (summary.passed) + " passed, " + std::to_string (summary.failed) +
+        " failed, " + std::to_string (summary.errored) + " errored");
+    }
+
+    context->is_running = false;
+    // After the last step event, never before: a consumer treats `closed` as
+    // "no more data is coming" and would otherwise stop one event short.
+    context->closed.store (true, std::memory_order_release);
+    manager.retain_run (context->run_id);
+}
+
+} // namespace vayu::core

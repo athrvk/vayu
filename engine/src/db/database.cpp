@@ -85,7 +85,7 @@ template <> struct row_extractor<vayu::HttpMethod> {
     }
 };
 
-// RunType enum adapter (Design, Load)
+// RunType enum adapter (Design, Load, Scenario)
 template <> struct type_printer<vayu::RunType> {
     const std::string& print () {
         static const std::string res = "TEXT";
@@ -238,7 +238,7 @@ inline auto make_storage (const std::string& path) {
     make_table ("runs", make_column ("id", &Run::id, primary_key ()),
     make_column ("request_id", &Run::request_id),
     make_column ("environment_id", &Run::environment_id),
-    make_column ("type", &Run::type),     // "design" or "load"
+    make_column ("type", &Run::type), // "design", "load" or "scenario"
     make_column ("status", &Run::status), // pending/running/completed/failed
     make_column ("config_snapshot", &Run::config_snapshot), // JSON: full request copy
     make_column ("start_time", &Run::start_time), make_column ("end_time", &Run::end_time),
@@ -1455,6 +1455,18 @@ void Database::seed_default_config () {
     "data set is rejected rather than truncated.",
     "general_engine", std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS),
     "1", "1000000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
+    std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS), "integer",
+    "Maximum Stored Scenario Steps",
+    "How many per-step results one collection run keeps. The report loads and "
+    "parses every stored row, so this bounds what a long run costs the "
+    "dashboard. Steps that failed, errored or were skipped are kept first and "
+    "successes fill the rest, so raising this buys more successful steps to "
+    "look at - never a failure that was hidden. What was thinned is reported "
+    "in the run summary. 0 stores every step.",
+    "general_engine", std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
+    "0", "1000000", std::nullopt, now });
 
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION

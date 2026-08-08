@@ -256,6 +256,13 @@ constexpr size_t MAX_STEPS = 200;
 /// owns file parsing and the script sandbox has no filesystem access; this is
 /// what bounds the payload that decision costs.
 constexpr size_t MAX_DATA_ROWS = 1000;
+/// Largest number of per-step `results` rows one scenario run stores (config
+/// key `maxScenarioStoredSteps`; 0 = unlimited). `Database::get_results` loads
+/// every row of a run with no limit and the report parses each `trace_data`,
+/// which the dashboard polls - so an unbounded 200-step by 500-iteration run
+/// would make the report path quadratic. Steps that did not pass are kept
+/// first and what was thinned is disclosed in the run summary.
+constexpr size_t MAX_STORED_STEPS = 5000;
 } // namespace scenario
 
 /**

@@ -1553,11 +1553,14 @@ joined scripts are byte-identical to what a Send of that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath
 itself, and no execution path re-reads the database for request data.
 
-> **Not executed yet.** A valid `scenario` block currently resolves, validates,
-> and answers **`501`** with `error.code: "scenario_not_implemented"`, naming
-> the step and iteration count it resolved to. The sequential runner that
-> executes a plan is a later phase. No run row is created, so a `501` leaves
-> nothing behind.
+**A valid block answers `202 {runId}`** and creates a run with
+`type: "scenario"`, exactly as a load run does. The lifecycle is a load run's -
+the run is registered, streams over
+[`GET /runs/:runId/live`](#get-runsrunidlive), stops through
+[`POST /runs/:runId/stop`](#post-runsrunidstop) and reports through
+[`GET /runs/:runId/report`](#get-runsrunidreport) - and only the executor
+differs. See [Scenario runs](#scenario-runs) below for what it does while it
+runs and what it leaves behind.
 
 **Every rejection is a `400`** with `error.code: "invalid_scenario"`, raised
 before any run row exists - an empty or oversized sequence is never silently run
@@ -1586,6 +1589,61 @@ than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does
 |-----------------------|---------|------------|--------|
 | `maxScenarioSteps`    | `200`   | 1-10000    | Largest plan one run may resolve to. The sequence is composed up front and held in memory, and a load-mode scenario allocates a latency histogram per step, so this bounds memory rather than expressing a preference. |
 | `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/JSON file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
+| `maxScenarioStoredSteps` | `5000` | 0-1000000 | Per-step `results` rows one run stores; `0` stores every step. Steps that did not pass are kept first, successes fill the rest, and what was thinned is reported in the run summary. |
+
+#### Scenario runs
+
+A scenario run executes every step of the plan, in order, once per iteration.
+Each step is the `POST /execute` exchange - pre-request script, send through the
+environment's cookie jar, test script - so a step behaves exactly as a Send of
+the same request does, and the two cannot drift apart.
+
+**What carries between steps.**
+
+- **Variables.** The environment, globals and collection scopes are loaded once
+  at run start, mutated in memory by every step's scripts, and written back
+  **once, when the run ends** (through the same diff that keeps a Send from
+  rewriting a scope no script touched). The collection scope is the collection
+  being run.
+- **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
+  a session the next step sends.
+
+> **`{{variables}}` are resolved before the first send, not per step.** The plan
+> is composed once, so a value a script sets mid-run does **not** appear in a
+> later step's URL, headers or body. It reaches later steps through the script
+> API - `pm.environment.get(...)` in a pre-request script, which may then edit
+> `pm.request`. This is the price of resolving once, and resolving once is what
+> keeps a collection edited mid-run from changing the sequence underneath it.
+
+**Scripts** additionally read `pm.info.iteration` (0-based) and
+`pm.info.iterationCount`. No other caller sets them - see
+[scripting.md](scripting.md#script-identity-pminfo).
+
+**Each step execution writes one `results` row** carrying the design-mode trace
+plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`. Bodies are
+capped by `maxTraceBodyBytes`; the row count is capped by
+`maxScenarioStoredSteps` as described above.
+
+**Outcomes** are `passed`, `failed`, `skipped` and `errored`:
+
+| Outcome | Meaning | Effect on the iteration |
+|---------|---------|-------------------------|
+| `passed` | The request completed and every assertion held. | Continues. |
+| `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
+| `errored` | The step did not complete: a transport failure, a timeout, or a script that threw. | **Ends the iteration.** The next iteration still runs. |
+| `skipped` | Reserved for flow control (a later phase); nothing produces it yet. | - |
+
+A run whose steps failed still reaches `completed`: the outcome of the work is
+in the steps, and only the runner itself failing makes the run `failed`. A stop
+is honoured **between steps**, so a `stopped` run does not finish the iteration
+it was in.
+
+**The stored snapshot carries a step manifest, never the composed plan.**
+`runs.config_snapshot` holds the block as validated - with `data` replaced by
+its row count - plus `{index, requestId, name, method, url}` per step, where
+`url` is the **stored, uncomposed** one. The composed plan carries resolved
+`Authorization` headers and, for an `apikey` auth with `in: "query"`, a live key
+in the URL; it lives in memory for the run's life and nowhere else.
 
 **Response:**
 ```json
@@ -1905,6 +1963,26 @@ event: complete
 data: {"event":"complete","runId":"run_1234567890"}
 ```
 
+**A scenario run streams `step` events instead of `metrics` ticks.** One per
+step execution, on the same ring and the same monotonic `id:` numbering, so
+`Last-Event-ID` resume works identically and a client that reconnects mid-run
+replays the steps it missed:
+
+```
+event: step
+id: 3
+data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
+       "statusCode":200,"latencyMs":42.7}
+
+event: complete
+data: {"event":"complete","runId":"run_1234567890"}
+```
+
+`outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
+[Scenario runs](#scenario-runs). A scenario run publishes no `metrics` ticks:
+its work is sequential, so per-tick aggregates would be a rate of one request at
+a time rather than anything about the sequence.
+
 **Field reference** (all keys emitted by `MetricsCollector::get_current_stats()`):
 
 | Field | Meaning |
@@ -1986,7 +2064,7 @@ via `POST /config`.
 
 ### GET /runs
 
-List test runs (both design mode and load tests), newest first
+List test runs (design mode, load tests and collection runs), newest first
 (`start_time DESC` - the only order the UI uses). Rows carry a compact
 `summary` rather than the full `configSnapshot`, so the polled history sidebar
 stays cheap as history grows.
@@ -1994,7 +2072,7 @@ stays cheap as history grows.
 **Query parameters** (passing **any** of them opts into the paginated envelope):
 - `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
 - `offset` - rows to skip (default 0, negative floored to 0).
-- `type` - `design` | `load` (an unrecognised value is ignored, not an error).
+- `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
 - `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
 - `requestId` - exact match on the run's linked request.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
@@ -2080,7 +2158,9 @@ For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
 place it appears is `GET /runs/:runId/report`, whose `results` array and
 `metadata.configuration` are load-test concepts and are absent for a design
-run.
+run. **`result` is design-only by construction**: it serves the first stored row
+on the assumption that there is exactly one, and a `scenario` run has one per
+step - its steps are read from the report's `results` array instead.
 
 ```json
 {
@@ -2232,6 +2312,21 @@ alone rather than erroring. **The response shape is the same either way.**
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**A scenario run adds a `scenario` section** and no other run type carries one:
+
+```json
+"scenario": {
+  "iterations": 3, "iterationsCompleted": 3, "stepsExecuted": 6,
+  "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
+  "stepsStored": 6, "stepsDropped": 0
+}
+```
+
+`stepsStored` versus `stepsExecuted` is the honest reading of `results[]`: a run
+that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
+non-passing step among the ones kept. `summary.totalRequests` is the number of
+step executions, not the number of rows that survived.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted

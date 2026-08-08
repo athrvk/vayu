@@ -113,6 +113,22 @@ struct ReportExtras {
     size_t response_samples_dropped = 0;
     size_t exemplars_dropped        = 0;
     size_t sample_bodies_dropped    = 0;
+    // A scenario run's own tallies, read from the summary's `scenario` object.
+    // `has_scenario` false leaves the section out entirely rather than showing
+    // a load run four zeros - the section exists to say what a sequence did.
+    bool has_scenario           = false;
+    size_t iterations           = 0;
+    size_t iterations_completed = 0;
+    size_t steps_executed       = 0;
+    size_t steps_passed         = 0;
+    size_t steps_failed         = 0;
+    size_t steps_skipped        = 0;
+    size_t steps_errored        = 0;
+    size_t steps_stored         = 0;
+    // Step results the run's bounded store thinned away. Failures are kept
+    // first, so a non-zero count here means successes are missing from
+    // `results[]`, never a failure.
+    size_t steps_dropped = 0;
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
@@ -218,6 +234,20 @@ ReportExtras& extras) {
         read_number (sampling, "exemplars_dropped", extras.exemplars_dropped);
         read_number (sampling, "sample_bodies_dropped", extras.sample_bodies_dropped);
         read_number (sampling, "response_bodies_captured", extras.response_bodies_captured);
+    }
+
+    if (summary.contains ("scenario") && summary["scenario"].is_object ()) {
+        extras.has_scenario   = true;
+        const auto& scenario  = summary["scenario"];
+        read_number (scenario, "iterations", extras.iterations);
+        read_number (scenario, "iterations_completed", extras.iterations_completed);
+        read_number (scenario, "steps_executed", extras.steps_executed);
+        read_number (scenario, "passed", extras.steps_passed);
+        read_number (scenario, "failed", extras.steps_failed);
+        read_number (scenario, "skipped", extras.steps_skipped);
+        read_number (scenario, "errored", extras.steps_errored);
+        read_number (scenario, "steps_stored", extras.steps_stored);
+        read_number (scenario, "steps_dropped", extras.steps_dropped);
     }
 
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
@@ -650,6 +680,20 @@ const std::string& run_id) {
             { "exemplarsDropped", extras.exemplars_dropped },
             { "sampleBodiesDropped", extras.sample_bodies_dropped },
             { "responseBodiesCaptured", extras.response_bodies_captured } };
+    }
+
+    // What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is
+    // the honest reading of `results[]` below: a run whose store filled reports
+    // fewer rows than steps, with every non-passing step among them.
+    if (extras.has_scenario) {
+        json_report["scenario"] = { { "iterations", extras.iterations },
+            { "iterationsCompleted", extras.iterations_completed },
+            { "stepsExecuted", extras.steps_executed },
+            { "passed", extras.steps_passed }, { "failed", extras.steps_failed },
+            { "skipped", extras.steps_skipped },
+            { "errored", extras.steps_errored },
+            { "stepsStored", extras.steps_stored },
+            { "stepsDropped", extras.steps_dropped } };
     }
 
     if (extras.has_tests) {
