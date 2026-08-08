@@ -242,15 +242,21 @@ describe("VariablesSection - the commit target is the resolver's winner", () => 
 		expect(useToastStore.getState().toasts).toHaveLength(1);
 	});
 
-	it("keeps no unguarded parentId walk in the component", () => {
+	it("keeps no unguarded parentId walk in the component or the commit path", () => {
 		// `buildLeafFirstChain` re-implemented `buildCollectionChain` without its
 		// cycle guard, so a bad database froze the window on the first blur. The
 		// fix is that the component walks nothing at all - it is handed the winner.
-		// The guard reads the file it names: a scan of an empty string passes
+		// The guard reads the files it names: a scan of an empty string passes
 		// vacuously, which is how one of these shipped green for weeks.
-		const source = readFileSync(join(__dirname, "VariablesSection.tsx"), "utf8");
-		expect(source.length).toBeGreaterThan(1000);
-		expect(source).not.toContain("parentId");
+		//
+		// Both files, because the commit moved out of the component into
+		// `variable-commit.ts` - scanning only the shrunken component would let
+		// the walk come back in the half that actually writes.
+		for (const file of ["VariablesSection.tsx", "variable-commit.ts"]) {
+			const source = readFileSync(join(__dirname, file), "utf8");
+			expect(source.length).toBeGreaterThan(1000);
+			expect(source).not.toContain("parentId");
+		}
 	});
 });
 

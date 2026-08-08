@@ -76,7 +76,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
-- **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. Context bar is request-tab–only.
+- **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four.
 - **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
@@ -105,9 +105,11 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 `CONTEXT_BAR_SECTIONS` is one ordered list of `{ id, title, appliesTo(tab), Component }`. `sectionsForTab(tab)` filters it, and `contextBarHasContent(tab)` is `sectionsForTab(tab).length > 0` - so the bar's visibility and the Dock toggle's pressed state read the same list and cannot drift. Adding a section for another tab type is one entry here and nothing else.
 
-**A section's component is mounted only while its section is expanded** (`context-bar/Section.tsx`), which is the whole cost model: the bar is open on every request tab, so a collapsed section must register no queries. Collapse state persists per section id in `layout-store` (`contextBarCollapsedSections`, collapsed-by-exception).
+**A section's component is mounted only while its section is expanded** (`context-bar/Section.tsx`), which is the whole cost model: the bar is open on every tab that has sections, so a collapsed section must register no queries. Collapse state persists per section id in `layout-store` (`contextBarCollapsedSections`, collapsed-by-exception).
 
 Sections are leaf components over the existing query layer - no bar-wide shared state - each with its own loading and empty body (`SectionEmpty`, `SectionLoading`).
+
+**Request tab**
 
 | Section (`id`) | What it shows |
 |---|---|
@@ -117,6 +119,25 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below). |
 | Environment (`environment`) | `EnvironmentSection.tsx` - the active environment's name and a way into the Variables drawer. |
 
+**Collection tab**
+
+| Section (`id`) | What it shows |
+|---|---|
+| Variables in this collection (`collection-variables`) | `CollectionVariablesSection.tsx` - the definitions this collection owns (not a resolved set), editable through the same commit path as the request tab's list. A disabled definition is shown and marked `off` rather than hidden. |
+| Auth (`collection-auth`) | `CollectionAuthSection.tsx` - the mode this collection is set to, and what a descendant set to Inherit would pick up: the same `resolveAuthSource` walk, so a collection set to plain No Auth names the ancestor that answers instead. |
+| Contents (`collection-contents`) | `CollectionContentsSection.tsx` - direct child counts (requests, sub-collections), matching what the tree shows under the folder. |
+
+**Run tab**
+
+| Section (`id`) | What it shows |
+|---|---|
+| Run config (`run-config`) | `RunConfigSection.tsx` - mode, duration, target RPS, concurrency, iterations, ramp and requested protocol, read from the run's stored `configSnapshot`. Words come from `loadTestModeLabel` / `formatConcurrency`. A design run has no `mode` key and reads as "Single send". |
+| Source (`run-source`) | `RunSourceSection.tsx` - the environment the run used (`Run.environmentId`, which nothing rendered before) and a link opening the request it ran from. A deleted environment is named as deleted rather than folded into "No environment"; a deleted request (`isRequestNotFound`, never a transport failure) drops the link. |
+
+The collection and run sections gate on `tab.entityId` as well as the type: a tab open on nothing renders no pane either, and a section there would query nothing while lighting the Dock toggle over an empty bar.
+
+**There is deliberately no "last run" section on a collection tab.** A collection has no runs of its own until the collection runner exists (#354); a section claiming one could only invent it.
+
 **There is deliberately no "last result" section.** Status, duration and age of the last send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary. What would earn the slot is a *trend* across recent sends, which the pane structurally cannot show; that needs the paginated `GET /runs` to carry each design run's result first (today only `GET /runs/:id` attaches it), so it is tracked separately in #380.
 
 #### Variables section
@@ -124,6 +145,8 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 Resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; each row shows the name (`TruncatedText`), its winning scope (`VariableScopeBadge`) and the value (secrets masked). Value inputs are named `Value of <name>`.
 
 **Editing:** a blur (or Enter) commits the value back to the definition the resolver picked - looked up by `ResolvedVariable.sourceId`, not re-derived (see [variable resolution](./variable-resolution.md#getvariableoriginsname)). The payload is read from the query cache at commit time and patched into it optimistically, so a second blur before the first mutation settles cannot re-send the first one's old value. Commits register with the save store, so a quit flush waits for one in flight.
+
+The row and the commit are shared, not per section: `VariableRow.tsx` draws it (the remount key, the Escape restore, the uncontrolled input a rejected save depends on) and `variable-commit.ts`'s `useVariableCommit` writes it, so the collection tab's list gets the same fixes. Its rows are the collection's own definitions with that collection named as the source, which lands in the same place a collection-scope edit from the request tab does.
 
 #### Code section and `services/codegen/`
 
