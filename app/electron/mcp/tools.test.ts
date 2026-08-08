@@ -55,6 +55,17 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
+		getRequest: vi.fn().mockResolvedValue({
+			id: "req_1",
+			name: "Get users",
+			method: "GET",
+			url: "https://api.example.com/users",
+		}),
+		updateRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Renamed" }),
+		deleteRequest: vi.fn().mockResolvedValue({ message: "Request deleted successfully" }),
+		createCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "API" }),
+		updateCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "Renamed" }),
+		deleteCollection: vi.fn().mockResolvedValue({ message: "Collection deleted successfully" }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
 			name: "Dev",
@@ -94,6 +105,22 @@ describe("tool registry", () => {
 		expect(byName.get("create_request")?.category).toBe("write");
 		expect(byName.get("update_environment")?.category).toBe("write");
 		expect(byName.get("update_engine_config")?.category).toBe("write");
+	});
+
+	test("the collection/request CRUD verbs are write-category, deletes hinted destructive", () => {
+		const byName = new Map(TOOLS.map((t) => [t.name, t]));
+		for (const name of [
+			"create_collection",
+			"update_collection",
+			"delete_collection",
+			"update_request",
+			"delete_request",
+		]) {
+			expect(byName.get(name)?.category, name).toBe("write");
+		}
+		// The hint is what tells a client to treat the call as irreversible.
+		expect(byName.get("delete_collection")?.annotations.destructiveHint).toBe(true);
+		expect(byName.get("delete_request")?.annotations.destructiveHint).toBe(true);
 	});
 
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
@@ -219,6 +246,146 @@ describe("data-write tools", () => {
 		// asserted outright - including an `id: undefined` that would serialize
 		// to `"id": null` and be rejected just the same.
 		expect(Object.keys(payload as object)).not.toContain("id");
+	});
+
+	/*
+	 * Collection + request CRUD (#378). The write surface used to be create-only,
+	 * so an agent could file a request into a collection a human had made and
+	 * could never correct or remove it. These cover the two things that make the
+	 * new verbs safe to hand an agent: a patch carries only what the caller named
+	 * (the engine merge-patches, so anything extra is a field silently rewritten),
+	 * and a delete cannot happen without the user seeing what it destroys.
+	 */
+	test("every new write verb refuses before touching the engine when writes are off", async () => {
+		const client = fakeClient();
+		const calls: Array<[string, Record<string, unknown>, keyof EngineClient]> = [
+			["create_collection", { name: "API" }, "createCollection"],
+			["update_collection", { collectionId: "col_1", name: "API" }, "updateCollection"],
+			["delete_collection", { collectionId: "col_1", confirmed: true }, "deleteCollection"],
+			["update_request", { requestId: "req_1", name: "x" }, "updateRequest"],
+			["delete_request", { requestId: "req_1", confirmed: true }, "deleteRequest"],
+		];
+		for (const [tool, args, method] of calls) {
+			const res = await dispatchTool(tool, args, ctxWith(client, { allowWrites: false }));
+			expect(res.isError, tool).toBe(true);
+			expect(client[method], tool).not.toHaveBeenCalled();
+		}
+		// A delete must not even read what it would destroy while writes are off.
+		expect(client.listCollections).not.toHaveBeenCalled();
+		expect(client.getRequest).not.toHaveBeenCalled();
+	});
+
+	test("create_collection sends the stated fields and lets the engine assign the id", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_collection",
+			{ name: "API", parentId: "col_root", description: "Public endpoints" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.createCollection as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toEqual({
+			name: "API",
+			parentId: "col_root",
+			description: "Public endpoints",
+		});
+		expect(Object.keys(payload as object)).not.toContain("id");
+	});
+
+	test("create_collection omits parentId entirely for a top-level collection", async () => {
+		// A `parentId: undefined` serializes to `"parentId": null`, which the
+		// engine reads as an explicit reset rather than "not stated".
+		const client = fakeClient();
+		await dispatchTool(
+			"create_collection",
+			{ name: "API" },
+			ctxWith(client, { allowWrites: true })
+		);
+		const payload = (client.createCollection as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(Object.keys(payload as object)).toEqual(["name"]);
+	});
+
+	test("update_collection patches only what the caller named", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_collection",
+			{ collectionId: "col_1", name: "Renamed" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [id, payload] = (client.updateCollection as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(id).toBe("col_1");
+		expect(payload).toEqual({ name: "Renamed" });
+	});
+
+	test("update_collection refuses a patch that names nothing to change", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_collection",
+			{ collectionId: "col_1" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateCollection).not.toHaveBeenCalled();
+	});
+
+	test("update_request patches only the named field, leaving the rest stored", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", name: "Renamed" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [id, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(id).toBe("req_1");
+		// `PUT /requests/:id` merge-patches: a defaulted method or an empty header
+		// list here would blank a field the caller never mentioned.
+		expect(payload).toEqual({ name: "Renamed" });
+	});
+
+	test("update_request writes the body blob and its denormalized type together", async () => {
+		const client = fakeClient();
+		await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", body: "a=1&b=2", bodyType: "x-www-form-urlencoded" },
+			ctxWith(client, { allowWrites: true })
+		);
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload).toEqual({
+			body: {
+				mode: "x-www-form-urlencoded",
+				fields: [
+					{ key: "a", value: "1", enabled: true },
+					{ key: "b", value: "2", enabled: true },
+				],
+			},
+			bodyType: "x-www-form-urlencoded",
+		});
+	});
+
+	test("update_request refuses a bodyType with no body to describe", async () => {
+		// Writing the column without the blob leaves the two disagreeing about
+		// what the request sends.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", bodyType: "json" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("update_request refuses a patch with no fields at all", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateRequest).not.toHaveBeenCalled();
 	});
 
 	test("update_environment sends no body id - the path is the identity", async () => {
@@ -359,6 +526,241 @@ describe("data-write tools", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The delete gate (#378). `delete_collection` is the most destructive call in
+ * the app - it cascades through every descendant collection and every request
+ * inside them - so the write toggle alone is not its gate: it also asks, with
+ * the real counts read from the engine, the way `start_load_run` asks before
+ * generating traffic.
+ */
+describe("destructive deletes ask first", () => {
+	/** A three-deep subtree under col_1, plus an unrelated collection beside it. */
+	const TREE = [
+		{ id: "col_1", name: "API", parentId: "" },
+		{ id: "col_2", name: "v1", parentId: "col_1" },
+		{ id: "col_3", name: "users", parentId: "col_2" },
+		{ id: "col_other", name: "Elsewhere", parentId: "" },
+	];
+
+	/** 2 + 1 + 0 inside the subtree; the 5 outside it must never be counted. */
+	const REQUESTS: Record<string, unknown[]> = {
+		col_1: [{ id: "r1" }, { id: "r2" }],
+		col_2: [{ id: "r3" }],
+		col_3: [],
+		col_other: [{ id: "r4" }, { id: "r5" }, { id: "r6" }, { id: "r7" }, { id: "r8" }],
+	};
+
+	function treeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
+		return fakeClient({
+			listCollections: vi.fn().mockResolvedValue(TREE),
+			listRequests: vi
+				.fn()
+				.mockImplementation((id: string) => Promise.resolve(REQUESTS[id] ?? [])),
+			...overrides,
+		});
+	}
+
+	/** A context whose client answers elicitation with `outcome`. */
+	function ctxElicits(
+		client: EngineClient,
+		outcome: { action: string; content?: Record<string, unknown> }
+	): ToolContext {
+		return {
+			...ctxWith(client, { allowWrites: true }),
+			elicit: vi.fn().mockResolvedValue(outcome),
+		};
+	}
+
+	test("delete_collection previews the real subtree counts and deletes nothing", async () => {
+		const client = treeClient();
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toMatch(/awaiting confirmation/i);
+		// Counted, not guessed: 2 descendants and the 3 requests inside the
+		// subtree - never the 5 that live in the collection beside it.
+		expect(firstText(res)).toContain("2 sub-collection(s)");
+		expect(firstText(res)).toContain("3 saved request(s)");
+		expect(firstText(res)).toContain("API");
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+	});
+
+	test("delete_collection deletes on the confirmed flag and reports what went", async () => {
+		const client = treeClient();
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.deleteCollection).toHaveBeenCalledWith("col_1", undefined);
+		expect(res.content.map((c) => c.text).join("\n")).toContain("2 sub-collection(s)");
+	});
+
+	test("delete_collection takes elicitation as the confirmation", async () => {
+		const client = treeClient();
+		const ctx = ctxElicits(client, { action: "accept", content: { proceed: true } });
+		// No `confirmed` flag - the human answered the prompt instead.
+		const res = await dispatchTool("delete_collection", { collectionId: "col_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).not.toMatch(/awaiting confirmation/i);
+		expect(client.deleteCollection).toHaveBeenCalledTimes(1);
+		const prompt = (ctx.elicit as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+			message: string;
+		};
+		// The person answering sees the counts, not just an id.
+		expect(prompt.message).toContain("2 sub-collection(s)");
+		expect(prompt.message).toContain("3 saved request(s)");
+	});
+
+	test("a declined prompt deletes nothing, even with the flag set", async () => {
+		const client = treeClient();
+		const ctx = ctxElicits(client, { action: "accept", content: { proceed: false } });
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1", confirmed: true },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toMatch(/declined/i);
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+	});
+
+	test("delete_collection refuses an id the engine does not have", async () => {
+		const client = treeClient();
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_missing", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("col_missing");
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+	});
+
+	test("delete_collection refuses when the subtree cannot be read", async () => {
+		// A count nobody could verify must not become a prompt the user answers.
+		const client = treeClient({
+			listRequests: vi.fn().mockRejectedValue(new Error("fetch failed")),
+		});
+		const res = await dispatchTool(
+			"delete_collection",
+			{ collectionId: "col_1", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.deleteCollection).not.toHaveBeenCalled();
+	});
+
+	test("delete_request names the request in its preview and deletes nothing", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"delete_request",
+			{ requestId: "req_1" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toMatch(/awaiting confirmation/i);
+		expect(firstText(res)).toContain("Get users");
+		expect(firstText(res)).toContain("https://api.example.com/users");
+		expect(client.deleteRequest).not.toHaveBeenCalled();
+	});
+
+	test("delete_request deletes once confirmed", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"delete_request",
+			{ requestId: "req_1", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.deleteRequest).toHaveBeenCalledWith("req_1", undefined);
+	});
+
+	test("delete_request answers a missing id as such, not as a transport failure", async () => {
+		const client = fakeClient({
+			getRequest: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError("Engine responded 404", 404, "not found")
+				),
+		});
+		const res = await dispatchTool(
+			"delete_request",
+			{ requestId: "req_gone", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("req_gone");
+		expect(client.deleteRequest).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The whole point of #378, as one sequence: an agent sets up a collection, files
+ * a request in it, corrects the request, and cleans both up - without a human
+ * touching the UI. Each step feeds the next the id the engine assigned, which is
+ * what the create-only surface could not do.
+ */
+describe("an agent can round-trip its own work", () => {
+	test("create a collection, fill it, correct it, delete both", async () => {
+		const created = { id: "col_new", name: "Checkout API", parentId: "" };
+		const client = fakeClient({
+			createCollection: vi.fn().mockResolvedValue(created),
+			createRequest: vi.fn().mockResolvedValue({
+				id: "req_new",
+				name: "POST /orders",
+				collectionId: created.id,
+			}),
+			getRequest: vi
+				.fn()
+				.mockResolvedValue({ id: "req_new", name: "POST /orders", method: "POST" }),
+			listCollections: vi.fn().mockResolvedValue([created]),
+			listRequests: vi.fn().mockResolvedValue([]),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+
+		const collection = await dispatchTool("create_collection", { name: "Checkout API" }, ctx);
+		expect(collection.isError).toBeFalsy();
+		const collectionId = (JSON.parse(firstText(collection)) as { id: string }).id;
+
+		const request = await dispatchTool(
+			"create_request",
+			{ collectionId, name: "POST /orders", url: "https://api.example.com/orders" },
+			ctx
+		);
+		expect(request.isError).toBeFalsy();
+		const requestId = (JSON.parse(firstText(request)) as { id: string }).id;
+
+		const corrected = await dispatchTool(
+			"update_request",
+			{ requestId, url: "https://api.example.com/v2/orders" },
+			ctx
+		);
+		expect(corrected.isError).toBeFalsy();
+		expect((client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(requestId);
+
+		const removedRequest = await dispatchTool(
+			"delete_request",
+			{ requestId, confirmed: true },
+			ctx
+		);
+		expect(removedRequest.isError).toBeFalsy();
+		expect(client.deleteRequest).toHaveBeenCalledWith(requestId, undefined);
+
+		const removedCollection = await dispatchTool(
+			"delete_collection",
+			{ collectionId, confirmed: true },
+			ctx
+		);
+		expect(removedCollection.isError).toBeFalsy();
+		expect(client.deleteCollection).toHaveBeenCalledWith(collectionId, undefined);
 	});
 });
 

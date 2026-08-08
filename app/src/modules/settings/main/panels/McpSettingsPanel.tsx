@@ -896,13 +896,15 @@ export default function McpSettingsPanel() {
 						<CardTitle className="text-base">Write access</CardTitle>
 					</div>
 					<CardDescription>
-						When off (default), agents can read but not change saved data: the{" "}
-						<code className="font-mono">create_request</code>,{" "}
-						<code className="font-mono">update_environment</code>, and{" "}
-						<code className="font-mono">update_engine_config</code> tools are disabled.
-						This does not affect <code className="font-mono">run_request</code>,{" "}
-						<code className="font-mono">run_collection_smoke</code>, or load runs, which
-						are governed by the allowlist and caps.
+						When off (default), agents can read but not change saved data: every tool in
+						the <code className="font-mono">write</code> category is disabled -
+						creating, renaming and deleting collections and saved requests, plus{" "}
+						<code className="font-mono">update_environment</code> and{" "}
+						<code className="font-mono">update_engine_config</code>. A delete asks you
+						to confirm each time as well, stating how much a collection contains before
+						it goes. This does not affect <code className="font-mono">run_request</code>
+						, <code className="font-mono">run_collection_smoke</code>, or load runs,
+						which are governed by the allowlist and caps.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

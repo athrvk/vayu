@@ -63,7 +63,14 @@ export type ElicitFn = (params: ElicitParams) => Promise<ElicitOutcome>;
  * copies honest, and the renderer's mapping is exhaustive over this union, so
  * a new entity fails to compile until it has a reader.
  */
-export const MCP_DATA_ENTITIES = ["request", "environment", "run", "cookie", "config"] as const;
+export const MCP_DATA_ENTITIES = [
+	"collection",
+	"request",
+	"environment",
+	"run",
+	"cookie",
+	"config",
+] as const;
 
 export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
 
@@ -129,7 +136,7 @@ export interface McpTool {
 	/**
 	 * Feature group for the Settings tool list. Also says whether the tool only
 	 * reads: `category === "read"` and nothing else does. A separate `readOnly`
-	 * boolean lived here restating exactly that for all 16 tools, read by no one
+	 * boolean lived here restating exactly that for all 21 tools, read by no one
 	 * but its own test - the client-facing hint is `annotations.readOnlyHint`.
 	 */
 	category: ToolCategory;
@@ -244,6 +251,115 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 }
 
 class ToolArgError extends Error {}
+
+/**
+ * The refusal a data-mutating tool returns while the write toggle is off, or
+ * null when writes are allowed. One wording for the collection / request /
+ * environment tools: which of them was called does not change what the user has
+ * to do about it, and a copy per tool is a copy per tool to drift.
+ * `update_engine_config` keeps its own sentence, which names config.
+ */
+function writesDisabled(ctx: ToolContext): ToolResult | null {
+	if (ctx.config.allowWrites) return null;
+	return errorResult(
+		"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+	);
+}
+
+// --- Confirmation gate -------------------------------------------------------
+
+/**
+ * Results that reported success while changing nothing - a confirmation
+ * preview, or a prompt the user declined.
+ *
+ * Dispatch's rule is "a call that did not error changed what its tool
+ * declares", and a gated tool is the one shape that breaks it: the preview's
+ * whole point is that nothing happened, so emitting for it would refetch the
+ * collection tree every time an agent asked what a delete would destroy - and
+ * would say a run started when `start_load_run` only described one.
+ *
+ * A WeakSet rather than a field on {@link ToolResult}: the result object is
+ * handed to the SDK verbatim (`server.ts`), so an extra property would be
+ * serialized to the client as though it were part of the MCP result shape.
+ */
+const NOTHING_CHANGED = new WeakSet<ToolResult>();
+
+/** Mark a successful result as having changed nothing (see {@link NOTHING_CHANGED}). */
+function unchanged(result: ToolResult): ToolResult {
+	NOTHING_CHANGED.add(result);
+	return result;
+}
+
+/**
+ * What the user is being asked to agree to. The two halves are worded per tool
+ * because a load run and a cascade delete are agreed to for different reasons -
+ * but the *mechanism* below is one implementation, so a fix to the elicitation
+ * path reaches every gated tool.
+ */
+interface ConfirmationPrompt {
+	/** The question, shown in the client's dialog and repeated in the preview. */
+	message: string;
+	/** Label of the boolean the client renders. */
+	acceptTitle: string;
+	acceptDescription: string;
+	/** Returned when the human declines - states that nothing happened. */
+	declined: string;
+	/** Full text returned when the client cannot elicit and no flag was set. */
+	preview: string;
+}
+
+/**
+ * Ask the human before something destructive, however the client can manage it.
+ *
+ * Preferred path is elicitation - a real prompt to a real person. A client that
+ * cannot elicit falls back to the agent-side flag: the first call returns a
+ * preview and does nothing, and only a second call carrying `confirmed: true`
+ * proceeds. Anti-accident rather than anti-adversary (an agent can set the flag
+ * itself), which is the same posture `start_load_run` has always had; the
+ * elicitation path is what upgrades it to a human decision.
+ *
+ * Returns `null` when the caller may proceed, or the result to return instead.
+ */
+async function confirmDestructive(
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	prompt: ConfirmationPrompt
+): Promise<ToolResult | null> {
+	if (ctx.elicit) {
+		try {
+			const outcome = await ctx.elicit({
+				message: prompt.message,
+				requestedSchema: {
+					type: "object",
+					properties: {
+						proceed: {
+							type: "boolean",
+							title: prompt.acceptTitle,
+							description: prompt.acceptDescription,
+						},
+					},
+					required: ["proceed"],
+				},
+			});
+			if (outcome.action !== "accept" || outcome.content?.proceed === false) {
+				return unchanged(textResult(prompt.declined));
+			}
+			return null;
+		} catch {
+			// Client can't elicit - fall through to the flag-based gate.
+		}
+	}
+	if (args.confirmed !== true) return unchanged(textResult(prompt.preview));
+	return null;
+}
+
+/** The `confirmed` fallback flag, declared identically on every gated tool. */
+function confirmedInput(action: string) {
+	return z
+		.boolean()
+		.optional()
+		.describe(`Fallback confirmation for clients without elicitation: set true to ${action}.`);
+}
 
 /** The body modes whose content is a field list rather than a string. */
 const FORM_BODY_MODES = new Set(["form-data", "x-www-form-urlencoded"]);
@@ -683,6 +799,100 @@ function toKeyValueEntries(
 	}));
 }
 
+// --- Cascade accounting for delete_collection --------------------------------
+
+/** A `GET /collections` row, narrowed to the fields the cascade walk reads. */
+interface CollectionRow {
+	id: string;
+	name?: string;
+	parentId?: string | null;
+}
+
+/** The collections list, dropping anything without a usable id. */
+function readCollectionRows(value: unknown): CollectionRow[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter(
+		(row): row is CollectionRow =>
+			!!row && typeof row === "object" && typeof (row as CollectionRow).id === "string"
+	);
+}
+
+/**
+ * Every collection a cascade delete of `rootId` destroys, root first - itself
+ * plus every descendant, since collections nest through `parentId` and
+ * `DELETE /collections/:id` takes the whole subtree with it.
+ *
+ * Null when `rootId` is not in the list: the caller must say "no such
+ * collection" rather than ask the user to confirm destroying nothing. The
+ * `seen` set is what stops a malformed parent cycle from looping forever - the
+ * engine rejects cycles on write, but this walk reads whatever is stored.
+ */
+function collectionSubtree(rows: CollectionRow[], rootId: string): string[] | null {
+	if (!rows.some((row) => row.id === rootId)) return null;
+	const childrenOf = new Map<string, string[]>();
+	for (const row of rows) {
+		const parent = typeof row.parentId === "string" ? row.parentId : "";
+		if (!parent) continue;
+		childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), row.id]);
+	}
+	const seen = new Set<string>([rootId]);
+	const ordered: string[] = [rootId];
+	for (let i = 0; i < ordered.length; i++) {
+		for (const child of childrenOf.get(ordered[i]) ?? []) {
+			if (seen.has(child)) continue;
+			seen.add(child);
+			ordered.push(child);
+		}
+	}
+	return ordered;
+}
+
+/** What a cascade delete is about to destroy, read before the user is asked. */
+interface CascadeScope {
+	name: string;
+	/** Descendants only - the collection itself is not counted among them. */
+	descendants: number;
+	requests: number;
+}
+
+/**
+ * Read the subtree `collectionId` roots and count what goes with it.
+ *
+ * Every count here is read from the engine rather than assumed, because it is
+ * the number the user agrees to: a prompt that guessed would be asking consent
+ * for something other than what happens. A failed read therefore throws instead
+ * of degrading to "0 requests" - `ToolArgError` for a collection that does not
+ * exist, the transport error otherwise, and either way nothing is deleted.
+ */
+async function readCascadeScope(
+	client: EngineClient,
+	collectionId: string,
+	signal?: AbortSignal
+): Promise<CascadeScope> {
+	const rows = readCollectionRows(await client.listCollections(signal));
+	const subtree = collectionSubtree(rows, collectionId);
+	if (subtree === null) throw new ToolArgError(`No collection with id "${collectionId}".`);
+	const lists = await Promise.all(subtree.map((id) => client.listRequests(id, signal)));
+	const requests = lists.reduce<number>(
+		(total, list) => total + (Array.isArray(list) ? list.length : 0),
+		0
+	);
+	const root = rows.find((row) => row.id === collectionId);
+	return {
+		name: typeof root?.name === "string" && root.name !== "" ? root.name : collectionId,
+		descendants: subtree.length - 1,
+		requests,
+	};
+}
+
+/** One sentence naming everything a cascade delete destroys. */
+function describeCascade(scope: CascadeScope): string {
+	return (
+		`Deleting "${scope.name}" also destroys ${scope.descendants} sub-collection(s) and ` +
+		`${scope.requests} saved request(s) inside it. This cannot be undone.`
+	);
+}
+
 // --- Tool definitions --------------------------------------------------------
 
 export const TOOLS: McpTool[] = [
@@ -959,6 +1169,127 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "create_collection",
+		category: "write",
+		invalidates: ["collection"],
+		description:
+			"Create a collection (the folder saved requests live in). GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`.",
+		annotations: {
+			title: "Create collection",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			name: z.string().describe("Display name for the collection."),
+			parentId: z
+				.string()
+				.optional()
+				.describe("Optional parent collection ID; omit for a top-level collection."),
+			description: z.string().optional(),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const payload: Record<string, unknown> = { name: requireStr(args, "name") };
+			const parentId = str(args, "parentId");
+			if (parentId !== undefined) payload.parentId = parentId;
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			return callEngine(() => ctx.client.createCollection(payload, signal));
+		},
+	},
+	{
+		name: "update_collection",
+		category: "write",
+		invalidates: ["collection"],
+		description:
+			"Rename or re-describe a collection. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - everything else the collection holds (its variables, auth, scripts, and the requests inside it) is left alone. This is not a move: re-parenting a collection is a reorder operation and is not exposed here.",
+		annotations: {
+			title: "Update collection",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection ID to update."),
+			name: z.string().optional().describe("New display name."),
+			description: z.string().optional().describe("New description."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const collectionId = requireStr(args, "collectionId");
+			// The engine merge-patches, so a body naming nothing would be a write
+			// that changes nothing while reporting success. Say so instead.
+			const payload: Record<string, unknown> = {};
+			for (const field of ["name", "description"] as const) {
+				const value = str(args, field);
+				if (value !== undefined) payload[field] = value;
+			}
+			if (Object.keys(payload).length === 0) {
+				return errorResult('Pass at least one of "name" or "description" to change.');
+			}
+			return callEngine(() => ctx.client.updateCollection(collectionId, payload, signal));
+		},
+	},
+	{
+		name: "delete_collection",
+		category: "write",
+		invalidates: ["collection"],
+		description:
+			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. There is no undo.",
+		annotations: {
+			title: "Delete collection",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection ID to delete, with its whole subtree."),
+			confirmed: confirmedInput("actually delete the collection and its contents"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const collectionId = requireStr(args, "collectionId");
+			// Read what the cascade takes before asking: an unreadable subtree is a
+			// refusal, never a prompt carrying counts nobody verified.
+			let scope: CascadeScope;
+			try {
+				scope = await readCascadeScope(ctx.client, collectionId, signal);
+			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+			const cascade = describeCascade(scope);
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete the collection "${scope.name}"?\n\n${cascade}`,
+				acceptTitle: "Delete the collection",
+				acceptDescription: "Confirm to delete it and everything inside it.",
+				declined: "Collection not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`${cascade}\n\n` +
+					"This is a preview. To delete it, call delete_collection again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			const result = await callEngine(() =>
+				ctx.client.deleteCollection(collectionId, signal)
+			);
+			// The counts describe what was destroyed, so they belong only on a
+			// delete that happened - a refusal wearing them would read as one.
+			return result.isError
+				? result
+				: withCaveat(
+						result,
+						`\n\nDeleted "${scope.name}" with ${scope.descendants} sub-collection(s) and ${scope.requests} saved request(s).`
+					);
+		},
+	},
+	{
 		name: "create_request",
 		category: "write",
 		invalidates: ["request"],
@@ -986,11 +1317,8 @@ export const TOOLS: McpTool[] = [
 			description: z.string().optional(),
 		},
 		handler: async (args, ctx, signal) => {
-			if (!ctx.config.allowWrites) {
-				return errorResult(
-					"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
-				);
-			}
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
 			const payload: Record<string, unknown> = {
 				collectionId: requireStr(args, "collectionId"),
 				name: requireStr(args, "name"),
@@ -1015,6 +1343,131 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "update_request",
+		category: "write",
+		invalidates: ["request"],
+		description:
+			"Correct a saved request: its name, URL, method, headers, body or description. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value, including the request's auth and its pre/post-request scripts. Passing `headers` replaces the whole header list, so send every header the request should end up with.",
+		annotations: {
+			title: "Update saved request",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Saved request ID to update."),
+			name: z.string().optional().describe("New display name."),
+			url: z.string().optional().describe("New URL (may contain {{variables}})."),
+			method: z.string().optional().describe("New HTTP method."),
+			headers: z
+				.record(z.string())
+				.optional()
+				.describe("Replacement headers as a string map (replaces the stored list)."),
+			body: z.string().optional().describe("New request body content."),
+			bodyType: z
+				.string()
+				.optional()
+				.describe(
+					"Body type for `body`: json, text, graphql, form-data, x-www-form-urlencoded. Only meaningful alongside `body`."
+				),
+			description: z.string().optional().describe("New description."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const requestId = requireStr(args, "requestId");
+			/*
+			 * The payload carries exactly what the caller named: `PUT /requests/:id`
+			 * is a merge-patch (absent keeps, null resets), so a field omitted here
+			 * is a field left alone. That is also why nothing is defaulted - a
+			 * `method: "GET"` filler would silently rewrite the stored verb.
+			 */
+			const payload: Record<string, unknown> = {};
+			for (const field of ["name", "url", "method", "description"] as const) {
+				const value = str(args, field);
+				if (value !== undefined) payload[field] = value;
+			}
+			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
+				payload.headers = toKeyValueEntries(args.headers);
+			}
+			const body = str(args, "body");
+			const bodyType = str(args, "bodyType");
+			if (body !== undefined) {
+				// Both keys move together, the way create_request writes them: the
+				// blob is what round-trips in the app, `bodyType` the denormalized
+				// column beside it. Writing one without the other leaves the two
+				// disagreeing about what the request sends.
+				payload.body = bodyPayload(bodyType ?? "text", body);
+				payload.bodyType = bodyType ?? "text";
+			} else if (bodyType !== undefined) {
+				return errorResult(
+					'"bodyType" describes "body" - pass the body it applies to, or leave both out.'
+				);
+			}
+			if (Object.keys(payload).length === 0) {
+				return errorResult(
+					"Pass at least one field to change (name, url, method, headers, body or description)."
+				);
+			}
+			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));
+		},
+	},
+	{
+		name: "delete_request",
+		category: "write",
+		invalidates: ["request"],
+		description:
+			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. There is no undo.",
+		annotations: {
+			title: "Delete saved request",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Saved request ID to delete."),
+			confirmed: confirmedInput("actually delete the request"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const requestId = requireStr(args, "requestId");
+			// Read it first so the person answering the prompt sees what is about to
+			// go, rather than an id. A 404 here is the answer, not a failure to ask.
+			let stored: Record<string, unknown>;
+			try {
+				const value = await ctx.client.getRequest(requestId, signal);
+				stored =
+					value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+			} catch (err) {
+				if (err instanceof EngineRequestError && err.status === 404) {
+					return errorResult(`No saved request with id "${requestId}".`);
+				}
+				return engineErrorResult(err);
+			}
+			const name =
+				typeof stored.name === "string" && stored.name !== "" ? stored.name : requestId;
+			const target = [stored.method, stored.url]
+				.filter((v) => typeof v === "string")
+				.join(" ");
+			const subject = target ? `"${name}" (${target})` : `"${name}"`;
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete the saved request ${subject}?\n\nThis cannot be undone.`,
+				acceptTitle: "Delete the request",
+				acceptDescription: "Confirm to delete this saved request.",
+				declined: "Request not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`This would delete the saved request ${subject}. This cannot be undone.\n\n` +
+					"This is a preview. To delete it, call delete_request again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			return callEngine(() => ctx.client.deleteRequest(requestId, signal));
+		},
+	},
+	{
 		name: "update_environment",
 		category: "write",
 		invalidates: ["environment"],
@@ -1034,11 +1487,8 @@ export const TOOLS: McpTool[] = [
 			name: z.string().optional().describe("Optional new name for the environment."),
 		},
 		handler: async (args, ctx, signal) => {
-			if (!ctx.config.allowWrites) {
-				return errorResult(
-					"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
-				);
-			}
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
 			const environmentId = requireStr(args, "environmentId");
 			const vars = args.variables;
 			if (!vars || typeof vars !== "object" || Array.isArray(vars)) {
@@ -1319,12 +1769,7 @@ export const TOOLS: McpTool[] = [
 			collectionId: collectionIdInput,
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
-			confirmed: z
-				.boolean()
-				.optional()
-				.describe(
-					"Fallback confirmation for clients without elicitation: set true to actually start the run."
-				),
+			confirmed: confirmedInput("actually start the run"),
 		},
 		handler: async (args, ctx, signal) => {
 			let composed;
@@ -1393,43 +1838,18 @@ export const TOOLS: McpTool[] = [
 
 			const summary = `Start a load test against ${payload.url} (mode: ${payload.mode})?`;
 
-			// Preferred path: ask the human directly via the client.
-			if (ctx.elicit) {
-				try {
-					const outcome = await ctx.elicit({
-						message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
-						requestedSchema: {
-							type: "object",
-							properties: {
-								proceed: {
-									type: "boolean",
-									title: "Start the load test",
-									description: "Confirm to generate load now.",
-								},
-							},
-							required: ["proceed"],
-						},
-					});
-					if (outcome.action !== "accept" || outcome.content?.proceed === false) {
-						return textResult("Load run not started - the user declined.");
-					}
-					return withCaveat(
-						await callEngine(() => ctx.client.startRun(payload, signal)),
-						caveat
-					);
-				} catch {
-					// Client can't elicit - fall through to the flag-based gate.
-				}
-			}
-
-			// Fallback gate: preview unless explicitly confirmed.
-			if (args.confirmed !== true) {
-				return textResult(
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
+				acceptTitle: "Start the load test",
+				acceptDescription: "Confirm to generate load now.",
+				declined: "Load run not started - the user declined.",
+				preview:
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
-						"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
-						`Planned run:\n${JSON.stringify(payload, null, 2)}${caveat}`
-				);
-			}
+					"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
+					`Planned run:\n${JSON.stringify(payload, null, 2)}${caveat}`,
+			});
+			if (unconfirmed) return unconfirmed;
+
 			return withCaveat(await callEngine(() => ctx.client.startRun(payload, signal)), caveat);
 		},
 	},
@@ -1567,8 +1987,9 @@ export async function dispatchTool(
 	// Only a call that succeeded changed anything. A tool that returned an error
 	// result may still have got as far as the engine, but it cannot say so, and
 	// an invalidation storm on every rejected call would be worse than the one
-	// stale list a genuinely-partial failure leaves behind.
-	if (!result.isError) notifyDataChanged(tool, args, ctx);
+	// stale list a genuinely-partial failure leaves behind. A confirmation
+	// preview is the third case: successful, and deliberately without effect.
+	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx);
 	return result;
 }
 

@@ -1130,7 +1130,7 @@ export interface McpConnectResult {
  * there cannot import from here (see `tsconfig.node.json`), so the duplication
  * is deliberate and pinned by `electron/mcp/data-changed.conformance.test.ts`.
  */
-export type McpDataEntity = "request" | "environment" | "run" | "cookie" | "config";
+export type McpDataEntity = "collection" | "request" | "environment" | "run" | "cookie" | "config";
 
 /**
  * What the main process sends over `mcp:data-changed`. Invalidation only - the

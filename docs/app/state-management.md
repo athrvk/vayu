@@ -943,7 +943,8 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here |
+| `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
 | `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
 | `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` when the call named one | The history list polls, but Settings' count and a request tab's restored response do not |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |

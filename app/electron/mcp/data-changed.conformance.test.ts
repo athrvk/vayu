@@ -31,6 +31,7 @@ import type { McpDataEntity } from "@/types/domain";
  * direction - the main process gaining an entity the renderer never heard of.
  */
 const RENDERER_ENTITIES: Record<McpDataEntity, true> = {
+	collection: true,
 	request: true,
 	environment: true,
 	run: true,

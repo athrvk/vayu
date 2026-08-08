@@ -37,6 +37,27 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toEqual([queryKeys.requests.lists()]);
 	});
 
+	test("an updated request also drops its detail cache", () => {
+		// `requestDetailOptions` is `staleTime: Infinity`, so a restored tab would
+		// otherwise keep serving the copy it read when it opened.
+		const { keys } = keysFor({ entity: "request", requestId: "req_3" });
+		expect(keys).toContainEqual(queryKeys.requests.detail("req_3"));
+	});
+
+	test("a created request touches no detail cache", () => {
+		// A create names no request id, and the row it made has no detail entry to
+		// invalidate - the narrowing exists for the tools that name one row.
+		const { keys } = keysFor({ entity: "request", collectionId: "col_1" });
+		expect(keys).toEqual([queryKeys.requests.listByCollection("col_1")]);
+	});
+
+	test("a collection change invalidates collections and every request family", () => {
+		// A cascade delete takes descendants and their requests with it, and which
+		// rows those were is engine-side knowledge - so both families go wholesale.
+		const { keys } = keysFor({ entity: "collection" });
+		expect(keys).toEqual([queryKeys.collections.all, queryKeys.requests.all]);
+	});
+
 	test("an environment change invalidates the list and the details", () => {
 		const { keys } = keysFor({ entity: "environment" });
 		expect(keys).toContainEqual(queryKeys.environments.all);

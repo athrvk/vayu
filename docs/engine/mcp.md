@@ -151,7 +151,12 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
 | `run_request`          | execute  | `POST /compose` + `POST /execute`            | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
+| `create_collection`    | write    | `POST /collections`                          | write toggle               |
+| `update_collection`    | write    | `PUT /collections/:id` (merge-patch)         | write toggle               |
+| `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
+| `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle               |
+| `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm |
@@ -168,6 +173,25 @@ Notes:
   `restartRequired` in its structured result (the engine marks these in each
   entry's label). Such values are saved, but the running engine keeps the old
   value until it is restarted, so the tool says so in its text output too.
+- **The collection / request write verbs** are the CRUD an agent needs to work
+  unattended: `create_collection` gives it a `collectionId` to file new requests
+  under, and `update_request` / `delete_request` let it correct or remove a
+  request it got wrong instead of leaving the cleanup to a human. The two
+  updates are **merge-patches** - the tool sends only the fields the caller
+  named, and `PUT /collections/:id` / `PUT /requests/:id` keep everything else
+  stored, so a patch naming just `name` cannot blank a url, an auth block or a
+  script. A patch naming nothing is refused rather than sent as a write that
+  changes nothing, and `bodyType` without `body` is refused too (the blob and
+  its denormalized column move together or the two disagree about what the
+  request sends). `update_collection` renames and re-describes only: reparenting
+  is `POST /reorder`'s job and is not exposed here.
+- **`delete_collection` cascades**, so it reads the subtree first: `GET
+  /collections` gives it every descendant through `parentId`, one `GET
+  /requests?collectionId=` per collection in that subtree gives the request
+  count, and those counts are what the confirmation states. An unreadable
+  subtree - or an id no collection has - is a refusal, never a prompt carrying
+  a number nobody verified. `delete_request` reads the row the same way, so the
+  prompt names the request and its URL rather than an opaque id.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
   partial updates preserve untouched variables and the name. Overwriting an
@@ -483,12 +507,21 @@ configurable in **Settings → MCP** and persisted.
   engine parses), since the engine now fails such a run rather than quietly
   substituting 60s; a zero `duration` is rejected here for the same reason the
   engine `400`s it, while a zero `rampUpDuration` stays legal (an instant ramp).
-- **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
-  tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
-  are the enforcement). Elicitation upgrades it to a human prompt where supported.
-- **Write toggle** (`allowWrites`, default off) - gates the data-mutating tools
-  `create_request`, `update_environment`, `update_engine_config`. Does not gate
-  `run_request` / `run_collection_smoke` / load runs (allowlist + caps).
+- **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
+  call from starting load or destroying saved work, but on HTTP it is agent-side
+  (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
+  prompt where supported. Three tools carry it - `start_load_run`,
+  `delete_collection` and `delete_request` - through one implementation, so the
+  elicitation path cannot drift between them. A preview is a *successful* result
+  that deliberately did nothing, so it emits no `mcp:data-changed` event either.
+- **Write toggle** (`allowWrites`, default off) - gates every tool in the
+  **write** category: `create_collection`, `update_collection`,
+  `delete_collection`, `create_request`, `update_request`, `delete_request`,
+  `update_environment`, `update_engine_config`. Does not gate `run_request` /
+  `run_collection_smoke` / load runs (allowlist + caps). The two deletes need
+  the toggle **and** confirmation: the toggle is a single session-wide switch a
+  user flips once to let an agent save a request, which is not consent to
+  destroy a subtree.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
   `tools/call`.

@@ -218,6 +218,17 @@ export class EngineClient {
 	}
 
 	/**
+	 * Fetch a single saved request by id (`GET /requests/:id`). Used to name what
+	 * a delete is about to destroy before the user is asked to confirm it - a
+	 * confirmation prompt carrying only an opaque id is not one a human can
+	 * answer. A 404 arrives as an {@link EngineRequestError}, which is what the
+	 * caller turns into "no such saved request" rather than deleting blind.
+	 */
+	getRequest(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/requests/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
+	/**
 	 * First page of run history (newest first), bounded so an agent never pulls
 	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
 	 * carry the compact `summary`, not the full config_snapshot.
@@ -259,9 +270,46 @@ export class EngineClient {
 	// are no longer interchangeable: a POST carrying a known id is a 409, and a
 	// PUT to an unknown id is a 404.
 
+	/** Create a collection: `POST /collections` (the engine assigns the id). */
+	createCollection(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/collections", payload, signal);
+	}
+
+	/**
+	 * Update a collection: `PUT /collections/:id`. The engine merge-patches -
+	 * absent fields keep their stored value - so the body carries only what the
+	 * caller stated.
+	 */
+	updateCollection(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("PUT", `/collections/${encodeURIComponent(id)}`, payload, signal);
+	}
+
+	/**
+	 * Delete a collection: `DELETE /collections/:id`. **Cascades** - every
+	 * descendant collection and every request inside them go with it, which is
+	 * why the tool that calls this reads the subtree first and asks the user.
+	 */
+	deleteCollection(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/collections/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
 	/** Create a saved request: `POST /requests` (the engine assigns the id). */
 	createRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/requests", payload, signal);
+	}
+
+	/**
+	 * Update a saved request: `PUT /requests/:id`. Merge-patch engine-side, the
+	 * same as {@link updateCollection} - a body naming only `name` leaves the
+	 * stored url, headers and scripts alone.
+	 */
+	updateRequest(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("PUT", `/requests/${encodeURIComponent(id)}`, payload, signal);
+	}
+
+	/** Delete a saved request: `DELETE /requests/:id`. */
+	deleteRequest(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/requests/${encodeURIComponent(id)}`, undefined, signal);
 	}
 
 	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
