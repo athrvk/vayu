@@ -1,0 +1,111 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * MCP data-change invalidation.
+ *
+ * An MCP tool call mutates the engine from the Electron main process, so the
+ * renderer's caches have no way to notice: `refetchOnWindowFocus` is off
+ * app-wide (see `lib/query-client.ts`), and until now nothing crossed the
+ * process boundary. The main process sends one `mcp:data-changed` per family a
+ * successful call touched; this maps that family to the query keys that read it.
+ *
+ * Invalidation only - no engine data rides over IPC, so there is exactly one
+ * path by which a row reaches the UI and it is the query layer.
+ */
+
+import type { QueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/queries/keys";
+import type { McpDataChangedEvent, McpDataEntity } from "@/types/domain";
+
+/**
+ * Which caches each family invalidates.
+ *
+ * A `Record` over the union rather than a `switch`: a new entity added to
+ * `McpDataEntity` fails to compile until it names a reader here, which is the
+ * check that keeps this from becoming a channel that writes events nothing
+ * listens for.
+ */
+const INVALIDATORS: Record<
+	McpDataEntity,
+	(queryClient: QueryClient, event: McpDataChangedEvent) => void
+> = {
+	/*
+	 * The tree reads one list per collection, so a created request only needs its
+	 * owner's list - the same narrowing `useUpdateRequestMutation` does rather
+	 * than refetching every collection on one row's change. Without a named
+	 * collection the owner is unknowable from here, so the whole `lists()` prefix
+	 * goes; that prefix also covers the reorder pass, which reads at `lists()`
+	 * itself and would be missed by a per-collection key alone.
+	 */
+	request: (queryClient, event) => {
+		void queryClient.invalidateQueries({
+			queryKey: event.collectionId
+				? queryKeys.requests.listByCollection(event.collectionId)
+				: queryKeys.requests.lists(),
+		});
+	},
+
+	/*
+	 * `all`, not `list()`: an environment's variables are read through the detail
+	 * cache as well as the list, and `update_environment` changes exactly those.
+	 */
+	environment: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+	},
+
+	/*
+	 * The history list polls on its own, so this is about immediacy there - but
+	 * `allRuns` (Settings' count) and `lastDesign` (a request tab's restored
+	 * response) are not polled at all, and an MCP-run request left both stale
+	 * indefinitely. Reports and time series are keyed per run and describe runs
+	 * that already existed, so they are deliberately not touched.
+	 */
+	run: (queryClient, event) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		if (event.requestId) {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.runs.lastDesign(event.requestId),
+			});
+		}
+	},
+
+	/*
+	 * One key for every jar - the engine reports them together and the panel
+	 * shows them together (see `queries/cookies.ts`).
+	 */
+	cookie: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.cookies.all });
+	},
+
+	config: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.config.all });
+	},
+};
+
+/**
+ * Apply one `mcp:data-changed` event.
+ *
+ * An unknown entity is dropped rather than thrown: the event crosses a process
+ * boundary, so a main process newer than the renderer bundle (a hot reload
+ * against a rebuilt main) can legitimately name a family this build has never
+ * heard of, and losing one invalidation is a stale list while throwing inside
+ * an IPC listener is an unhandled rejection with the same stale list.
+ */
+export function invalidateForMcpEvent(
+	queryClient: QueryClient,
+	event: McpDataChangedEvent
+): boolean {
+	const invalidate = INVALIDATORS[event.entity];
+	if (!invalidate) {
+		console.warn("[MCP] Ignoring data-changed event for unknown entity:", event.entity);
+		return false;
+	}
+	invalidate(queryClient, event);
+	return true;
+}

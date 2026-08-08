@@ -551,6 +551,30 @@ on quit, and exposes IPC the Settings panel uses:
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
 | `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`).                 |
 
+One channel runs the other way, main → renderer:
+
+| Channel            | Purpose                                                       |
+| ------------------ | ------------------------------------------------------------- |
+| `mcp:data-changed` | A successful call changed engine data; invalidate its queries. |
+
+**The UI reflects MCP writes live.** An MCP call mutates the engine from the
+main process, which no renderer query can observe (`refetchOnWindowFocus` is off
+app-wide), so a request an agent created used to stay invisible in the
+collection tree until some unrelated mutation happened to refetch the lists.
+Each tool declares the data families it changes (`invalidates` in `tools.ts`)
+and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
+family after a call that did **not** return an error. The event names a family
+(`request`, `environment`, `run`, `cookie`, `config`) plus the `collectionId` /
+`requestId` the call itself named; it carries no engine data, so the renderer
+still reads every row through its query layer. The renderer side, including
+which query keys each family maps to, is in
+[`docs/app/state-management.md`](../app/state-management.md).
+
+Declaring the families per tool rather than deriving them from `category` is
+deliberate: an `execute` tool writes a run row and refills the cookie jar
+without being a "write", and the field is required, so a new tool cannot ship
+silently invisible to the UI.
+
 The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is a
 registered app-settings panel; it talks to `window.electronAPI` directly since
 MCP config is app-level, not engine-level.
