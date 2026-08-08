@@ -176,16 +176,19 @@ class ScenarioRunnerTest : public ::testing::Test {
     }
 
     /// A request in `col_1`, ordered by @p order, pointing at the mock server.
+    /// @p name defaults to one derived from @p id; flow-control tests pass it
+    /// explicitly, because `setNextRequest` targets a *name*.
     void seed_request (const std::string& id,
     int order,
     const std::string& path,
     const std::string& pre_script   = "",
     const std::string& post_script  = "",
-    const std::string& absolute_url = "") {
+    const std::string& absolute_url = "",
+    const std::string& name         = "") {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = "col_1";
-        r.name          = "Step " + id;
+        r.name          = name.empty () ? "Step " + id : name;
         r.method        = vayu::HttpMethod::GET;
         r.url = absolute_url.empty () ? server_->url (path) : absolute_url;
         r.pre_request_script  = pre_script;
@@ -625,6 +628,259 @@ TEST_F (ScenarioRunnerTest, TheRunPublishesOneStepEventPerStepAndClosesTheStream
 // ============================================================================
 // The summary payload
 // ============================================================================
+
+// ============================================================================
+// Flow control (issue #355)
+// ============================================================================
+//
+// The bar #303 set: a returned instruction must demonstrably change the
+// executed sequence, so these assert what the server saw and what the run
+// stored - never the `ScriptResult` field on its own.
+
+TEST_F (ScenarioRunnerTest, SetNextRequestChangesTheExecutedSequence) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("Checkout");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Checkout");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // Two sends, not three: step 2 was jumped over, and the jump target ran.
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["requestId"].get<std::string> (), "req_a");
+    EXPECT_EQ (json::parse (rows[1].trace_data)["requestId"].get<std::string> (), "req_c");
+    EXPECT_EQ (json::parse (rows[1].trace_data)["stepIndex"].get<size_t> (), 2u);
+}
+
+// A jump backwards is the point of the feature - a retry loop is one - and it
+// is also what the cycle bound below exists to survive.
+TEST_F (ScenarioRunnerTest, SetNextRequestCanSendTheIterationBackwards) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", "", "", "First");
+    // Jumps back exactly once: the second pass sees the flag the first set.
+    seed_request ("req_b", 1, "/login", "", R"(
+        if (!pm.environment.get("looped")) {
+            pm.environment.set("looped", "yes");
+            pm.execution.setNextRequest("First");
+        }
+    )");
+
+    seed_environment ("env_1", R"({})");
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 4u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/login");
+    EXPECT_EQ (seen[2].path, "/ok");
+    EXPECT_EQ (seen[3].path, "/login");
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 4u);
+    EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 1u);
+}
+
+TEST_F (ScenarioRunnerTest, SetNextRequestNullEndsTheIterationAndTheNextOneStillRuns) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest(null);)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u) << "step 2 ran despite the iteration ending";
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/ok");
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 2u);
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 2u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+    // Ending an iteration early is not failing it.
+    EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 2u);
+}
+
+TEST_F (ScenarioRunnerTest, SkipRequestSendsNothingAndIsNeverCountedAsAPass) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", R"(pm.execution.skipRequest();)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 1u) << "the skipped step still went on the wire";
+    EXPECT_EQ (seen[0].path, "/login");
+
+    // The step is still a row - a skip the run does not record is a step that
+    // silently disappears from the report.
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    auto skipped_trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (skipped_trace["outcome"].get<std::string> (), "skipped");
+    EXPECT_EQ (skipped_trace["requestId"].get<std::string> (), "req_a");
+    EXPECT_TRUE (skipped_trace.contains ("request"));
+    // A step that never sent has no response, and an empty one would read as a
+    // server that answered with nothing.
+    EXPECT_FALSE (skipped_trace.contains ("response"));
+    EXPECT_TRUE (rows[0].error.empty ()) << "a skip is not a failure";
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["skipped"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["failed"].get<size_t> (), 0u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+TEST_F (ScenarioRunnerTest, SkipRequestInATestScriptFailsTheStepRatherThanPretending) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.skipRequest();)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // The request had already gone out; what fails is the script.
+    EXPECT_EQ (server_->requests ().size (), 1u);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[0].error.find ("pre-request"), std::string::npos) << rows[0].error;
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["skipped"].get<size_t> (), 0u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
+}
+
+TEST_F (ScenarioRunnerTest, AnUnknownTargetFailsTheStepByNameAndEndsTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("Nowhere");)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (server_->requests ().size (), 1u);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[0].error.find ("Nowhere"), std::string::npos) << rows[0].error;
+
+    EXPECT_EQ (summary_of (run_id)["scenario"]["errored"].get<size_t> (), 1u);
+}
+
+TEST_F (ScenarioRunnerTest, AnAmbiguousTargetNamesEveryStepThatAnswersToIt) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("Twin");)");
+    seed_request ("req_b", 1, "/login", "", "", "", "Twin");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Twin");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // Neither twin ran: a jump nobody can resolve is not a jump to the first
+    // one that happens to match.
+    EXPECT_EQ (server_->requests ().size (), 1u);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[0].error.find ("ambiguous"), std::string::npos) << rows[0].error;
+    EXPECT_NE (rows[0].error.find ("1 and 2"), std::string::npos) << rows[0].error;
+}
+
+// Two steps pointing at each other is a two-line script, and Postman's runner
+// simply runs forever. The bound is what makes the run terminal.
+TEST_F (ScenarioRunnerTest, ACycleTripsTheStepBudgetAndTheRunStillFinishes) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "",
+    R"(pm.execution.setNextRequest("Pong");)", "", "Ping");
+    seed_request ("req_b", 1, "/login", "",
+    R"(pm.execution.setNextRequest("Ping");)", "", "Pong");
+    set_config ("maxStepsPerIteration", "6");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (server_->requests ().size (), 6u);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 6u);
+    EXPECT_EQ (json::parse (rows[5].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[5].error.find ("maxStepsPerIteration"), std::string::npos)
+    << rows[5].error;
+    // The message has to say what is looping, or it names a limit and leaves
+    // the reader to guess which steps hit it.
+    EXPECT_NE (rows[5].error.find ("Ping -> Pong"), std::string::npos)
+    << rows[5].error;
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 6u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
+}
+
+// ============================================================================
+// Flow-control resolution (pure)
+// ============================================================================
+
+TEST (ScenarioNextStep, ResolvesAUniqueNameToItsPosition) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 1, "req_b", "Second", {}, "", "", "" });
+
+    const auto index = vayu::core::build_step_name_index (plan);
+    auto resolved    = vayu::core::resolve_next_step (index, "Second");
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.index, 1u);
+    EXPECT_TRUE (resolved.error.empty ());
+}
+
+TEST (ScenarioNextStep, RefusesANameNoStepCarries) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+
+    auto resolved = vayu::core::resolve_next_step (
+    vayu::core::build_step_name_index (plan), "Missing");
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("Missing"), std::string::npos) << resolved.error;
+}
+
+TEST (ScenarioNextStep, RefusesADuplicatedNameAndNamesEveryPosition) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "Twin", {}, "", "", "" });
+    plan.steps.push_back ({ 1, "req_b", "Other", {}, "", "", "" });
+    plan.steps.push_back ({ 2, "req_c", "Twin", {}, "", "", "" });
+
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_name_index (plan), "Twin");
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("ambiguous"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("0 and 2"), std::string::npos) << resolved.error;
+}
+
+TEST (ScenarioStepBudget, DerivesTheBoundFromThePlanWhenUnconfigured) {
+    // Ten times the plan, with a floor that keeps a short plan's legitimate
+    // loops working.
+    EXPECT_EQ (vayu::core::resolve_max_steps_per_iteration (0, 3), 100u);
+    EXPECT_EQ (vayu::core::resolve_max_steps_per_iteration (0, 50), 500u);
+    // Whatever the derivation, a straight-through iteration can never trip it.
+    EXPECT_GE (vayu::core::resolve_max_steps_per_iteration (0, 200), 200u);
+}
+
+TEST (ScenarioStepBudget, AConfiguredBoundWins) {
+    EXPECT_EQ (vayu::core::resolve_max_steps_per_iteration (7, 50), 7u);
+}
 
 TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies) {
     vayu::core::ScenarioSummaryInputs inputs;

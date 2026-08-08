@@ -775,6 +775,48 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_cookies_jar_clear" } });
 
     // ========================================
+    // pm.execution - flow control inside a collection run (#355)
+    // ========================================
+    completions.push_back ({ { "label", "pm.execution" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.execution" }, { "detail", "Where this collection run goes next" },
+    { "documentation",
+    "Redirect the sequence a collection run is executing - jump to another "
+    "request, end the iteration early, or skip this request entirely.\n\nOnly "
+    "inside a collection run. A single Send has no next request and a load "
+    "run's test scripts run after the run has finished, so both methods throw "
+    "there rather than being quietly ignored." },
+    { "sortText", "0_pm_execution" } });
+
+    completions.push_back (
+    { { "label", "pm.execution.setNextRequest" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.execution.setNextRequest(\"${1:Request name}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.execution.setNextRequest(name: string | null): void" },
+    { "documentation",
+    "Run the named request next instead of the one that follows in the "
+    "collection - the request's name, not its URL. Pass null to end this "
+    "iteration and start the next one.\n\nThe current request still "
+    "completes; the jump happens after it. Calling it more than once in a "
+    "script keeps the last call. A name no request in the run carries, or one "
+    "two requests share, fails the step by name rather than guessing.\n\n"
+    "Jumping backwards is allowed and is how a retry loop is written; an "
+    "iteration that never stops is cut off by the maxStepsPerIteration "
+    "setting.\n\nExample:\nif (pm.response.code === 401) { "
+    "pm.execution.setNextRequest('Log in'); }" },
+    { "sortText", "1_pm_execution_setNextRequest" } });
+
+    completions.push_back ({ { "label", "pm.execution.skipRequest" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.execution.skipRequest()" },
+    { "detail", "pm.execution.skipRequest(): void" },
+    { "documentation",
+    "Do not send this request. The run continues with the next one and the "
+    "step is reported as skipped - never as passed.\n\nPre-request scripts "
+    "only: by the time a test script runs the request has already gone out, "
+    "so it throws there.\n\nExample:\nif (!pm.environment.get('token')) { "
+    "pm.execution.skipRequest(); }" },
+    { "sortText", "1_pm_execution_skipRequest" } });
+
+    // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it
     // ========================================
     completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },

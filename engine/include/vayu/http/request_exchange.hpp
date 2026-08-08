@@ -139,6 +139,9 @@ struct ExchangeInputs {
     std::optional<std::string> request_name;
     std::optional<size_t> iteration;
     std::optional<size_t> iteration_count;
+    /// Whether the scripts may redirect the sequence around this exchange -
+    /// the scenario runner's alone, exactly as `iteration` is (issue #355).
+    bool in_scenario = false;
 };
 
 /** What one exchange produced. */
@@ -150,6 +153,17 @@ struct ExchangeOutcome {
     vayu::Response response;
     vayu::ScriptResult pre_script_result;
     vayu::ScriptResult post_script_result;
+    /**
+     * Whether the request was actually sent.
+     *
+     * False only when the pre-request script called
+     * `pm.execution.skipRequest()`: `response` is then default-constructed,
+     * which reports neither an error nor a status, so a caller that classified
+     * the outcome from the response alone would call a skipped step a pass -
+     * the false-pass class issue #180 exists to eliminate. The test script does
+     * not run on that path either; there is no response for it to assert on.
+     */
+    bool sent = true;
 };
 
 /**
