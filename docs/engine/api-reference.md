@@ -193,7 +193,7 @@ run of `PUT`s. Each `PUT` is its own write under its own lock, so a reorder
 expressed as N sibling `PUT`s is last-write-wins between concurrent clients, can
 be interrupted halfway (leaving two rows at one `order` and a gap where the
 moved one was), and its collection cycle guard is read-then-write across two lock
-scopes. The batch endpoint validates and writes under one transaction, which
+scopes. The batch endpoint validates and writes under one lock scope, which
 closes all three. The per-row `PUT`s remain correct for a single row - a rename,
 a move that appends - and still carry those caveats when used in a loop.
 
@@ -688,9 +688,12 @@ Delete a request.
 ### POST /reorder
 
 Reposition collections and requests in one atomic batch - the write path behind a
-drag-and-drop reorder or a cross-folder move. One drop is one call and one
-transaction: nothing partial survives a rejection, and no concurrent create can
-land inside the range the batch is renumbering.
+drag-and-drop reorder or a cross-folder move. One drop is one call, one lock
+scope and one transaction: the batch validates, stages and commits under a single
+acquisition of the engine's database lock, so nothing partial survives a
+rejection and no concurrent write - a create computing its append slot, a
+conflicting batch, a cascade delete - can land between what this batch checked
+and what it wrote.
 
 **Request:**
 ```json
@@ -744,6 +747,13 @@ reparents that each look legal alone (`A` under `B` and `B` under `A`) a
 deterministic rejection rather than a race - unlike `PUT /collections/:id`, which
 validates and writes under different locks.
 
+That rejection is deterministic **because the check and the commit share one lock
+scope**: two such batches arriving concurrently are serialized whole, and the
+second revalidates against the first's committed graph rather than against the
+shape both of them read. The rows are written as updates, never inserts, so a
+batch whose row was deleted after it staged fails with a `409` naming the row and
+writes nothing at all - it never re-creates the deleted row.
+
 **Response:** the rows as written, in the same serialized shape a list entry
 carries - not an acknowledgement. A client that drew the drop optimistically
 settles its caches on these, so a normalization the engine performed is visible
@@ -759,8 +769,9 @@ without waiting for a refetch.
 ```
 
 **Errors:** `400` for any malformed entry, a row or owner that does not exist, a
-duplicate move, a cycle, or a batch over 10000 entries - in every case nothing at
-all was written. Body that is not JSON or not an object is also a `400`.
+duplicate move, a cycle, or a batch over 10000 entries. `409` if a staged row is
+gone by the time the batch commits. In every case nothing at all was written.
+Body that is not JSON or not an object is also a `400`.
 
 ## Import
 
