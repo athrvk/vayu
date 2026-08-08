@@ -23,6 +23,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import RequestItem from "./RequestItem";
+import { withCollectionTreeContext } from "@/test/collection-tree-context";
 import type { Request } from "@/types";
 
 const REQUEST: Request = {
@@ -51,15 +52,10 @@ function renderItem() {
 	const onSelect = vi.fn();
 	const onStartRename = vi.fn();
 	const { container } = render(
-		<RequestItem
-			request={REQUEST}
-			collectionId="col_1"
-			posInSet={1}
-			setSize={1}
-			onSelect={onSelect}
-			onDelete={vi.fn()}
-			onStartRename={onStartRename}
-		/>
+		withCollectionTreeContext(
+			<RequestItem request={REQUEST} collectionId="col_1" posInSet={1} setSize={1} />,
+			{ onRequestClick: onSelect, onStartRequestRename: onStartRename }
+		)
 	);
 	const target = container.querySelector("[data-tree-activate]") as HTMLElement;
 	return { onSelect, onStartRename, target, container };

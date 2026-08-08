@@ -8,16 +8,22 @@
 import { useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
-import type { Collection, Request } from "@/types";
+import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
-import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
+import { RowActionsMenu, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { INDENT_STEP } from "@/constants/layout";
 
+/**
+ * What differs per row. Everything shared - the expanded set, the selection,
+ * the rename and delete state, every handler - comes from
+ * `CollectionTreeContext`, because this component renders itself and each prop
+ * would otherwise have to be re-threaded at every depth.
+ */
 export interface CollectionItemProps {
 	collection: Collection;
-	allCollections: Collection[];
 	depth: number;
 	/**
 	 * 1-based position among the rows this one shares a parent with, and how
@@ -28,81 +34,38 @@ export interface CollectionItemProps {
 	 */
 	posInSet: number;
 	setSize: number;
-	expandedCollectionIds: Set<string>;
-	selectedCollectionId: string | null;
-	selectedRequestId: string | null;
-	renamingId: string | null;
-	renameValue: string;
-	deletingCollectionId: string | null;
-	deletingRequestId: string | null;
-	creatingSubfolder: string | null;
-	newSubCollectionName: string;
-	isCreatingSubfolder: boolean;
-	renamingRequestId: string | null;
-	renameRequestValue: string;
-	getRequestsByCollection: (collectionId: string) => Request[];
-	onCollectionClick: (collection: Collection) => void;
-	onRequestClick: (collectionId: string, requestId: string) => void;
-	onCollectionToggle: (collection: Collection) => void;
-	/** Actions for this collection's ⋯ menu; built by CollectionTree. */
-	getCollectionActions: (collection: Collection) => RowAction[];
-	onRenameChange: (value: string) => void;
-	onRenameSubmit: (collectionId: string) => void;
-	onRenameCancel: () => void;
-	onStartRename: (collection: Collection) => void;
-	onDeleteRequest: (requestId: string) => Promise<void>;
-	onRequestDeleteClick?: (requestId: string, requestName: string) => void;
-	/** Opens the confirm dialog for this collection - the Delete key's target. */
-	onCollectionDeleteClick?: (collectionId: string, collectionName: string) => void;
-	onDuplicateRequest?: (request: Request) => void;
-	onSubCollectionNameChange: (value: string) => void;
-	onCreateSubfolder: (parentId: string) => void;
-	onCancelSubfolder: () => void;
-	onRequestRenameChange: (value: string) => void;
-	onRequestRenameSubmit: (requestId: string) => void;
-	onRequestRenameCancel: () => void;
-	onStartRequestRename: (request: Request) => void;
 }
 
 export default function CollectionItem({
 	collection,
-	allCollections,
 	depth,
 	posInSet,
 	setSize,
-	expandedCollectionIds,
-	selectedCollectionId,
-	selectedRequestId,
-	renamingId,
-	renameValue,
-	deletingCollectionId,
-	deletingRequestId,
-	creatingSubfolder,
-	newSubCollectionName,
-	isCreatingSubfolder,
-	renamingRequestId,
-	renameRequestValue,
-	getRequestsByCollection,
-	onCollectionClick,
-	onRequestClick,
-	onCollectionToggle,
-	getCollectionActions,
-	onRenameChange,
-	onRenameSubmit,
-	onRenameCancel,
-	onStartRename,
-	onDeleteRequest,
-	onRequestDeleteClick,
-	onCollectionDeleteClick,
-	onDuplicateRequest,
-	onSubCollectionNameChange,
-	onCreateSubfolder,
-	onCancelSubfolder,
-	onRequestRenameChange,
-	onRequestRenameSubmit,
-	onRequestRenameCancel,
-	onStartRequestRename,
 }: CollectionItemProps) {
+	const {
+		allCollections,
+		expandedCollectionIds,
+		selectedCollectionId,
+		renamingId,
+		renameValue,
+		deletingCollectionId,
+		creatingSubfolder,
+		newSubCollectionName,
+		isCreatingSubfolder,
+		getRequestsByCollection,
+		getCollectionActions,
+		onCollectionClick,
+		onCollectionToggle,
+		onRenameChange,
+		onRenameSubmit,
+		onRenameCancel,
+		onStartRename,
+		onCollectionDeleteClick,
+		onSubCollectionNameChange,
+		onCreateSubfolder,
+		onCancelSubfolder,
+	} = useCollectionTreeContext();
+
 	const isExpanded = expandedCollectionIds.has(collection.id);
 	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
 	const FolderIcon = isExpanded ? FolderOpen : Folder;
@@ -348,7 +311,7 @@ export default function CollectionItem({
 					data-tree-delete
 					onClick={() => {
 						if (isDeleting) return;
-						onCollectionDeleteClick?.(collection.id, collection.name);
+						onCollectionDeleteClick(collection.id, collection.name);
 					}}
 				/>
 			</div>
@@ -395,47 +358,16 @@ export default function CollectionItem({
 						</div>
 					)}
 
-					{/* Child Collections (Subfolders) - Recursive */}
+					{/* Child Collections (Subfolders) - Recursive.
+					    Four props, all of them this row's own position in the tree:
+					    everything shared arrives through the context instead. */}
 					{childCollections.map((childCollection, index) => (
 						<CollectionItem
 							key={childCollection.id}
 							collection={childCollection}
-							allCollections={allCollections}
 							depth={depth + 1}
 							posInSet={index + 1}
 							setSize={childSetSize}
-							expandedCollectionIds={expandedCollectionIds}
-							selectedCollectionId={selectedCollectionId}
-							selectedRequestId={selectedRequestId}
-							renamingId={renamingId}
-							renameValue={renameValue}
-							deletingCollectionId={deletingCollectionId}
-							deletingRequestId={deletingRequestId}
-							creatingSubfolder={creatingSubfolder}
-							newSubCollectionName={newSubCollectionName}
-							isCreatingSubfolder={isCreatingSubfolder}
-							getRequestsByCollection={getRequestsByCollection}
-							onCollectionClick={onCollectionClick}
-							onCollectionToggle={onCollectionToggle}
-							onRequestClick={onRequestClick}
-							getCollectionActions={getCollectionActions}
-							onRenameChange={onRenameChange}
-							onRenameSubmit={onRenameSubmit}
-							onRenameCancel={onRenameCancel}
-							onStartRename={onStartRename}
-							onDeleteRequest={onDeleteRequest}
-							onRequestDeleteClick={onRequestDeleteClick}
-							onCollectionDeleteClick={onCollectionDeleteClick}
-							onDuplicateRequest={onDuplicateRequest}
-							onSubCollectionNameChange={onSubCollectionNameChange}
-							onCreateSubfolder={onCreateSubfolder}
-							onCancelSubfolder={onCancelSubfolder}
-							onRequestRenameChange={onRequestRenameChange}
-							onRequestRenameSubmit={onRequestRenameSubmit}
-							onRequestRenameCancel={onRequestRenameCancel}
-							onStartRequestRename={onStartRequestRename}
-							renamingRequestId={renamingRequestId}
-							renameRequestValue={renameRequestValue}
 						/>
 					))}
 
@@ -455,18 +387,6 @@ export default function CollectionItem({
 							depth={depth + 1}
 							posInSet={childCollections.length + index + 1}
 							setSize={childSetSize}
-							onSelect={onRequestClick}
-							onDelete={onDeleteRequest}
-							onBeforeDelete={onRequestDeleteClick}
-							isDeleting={deletingRequestId === request.id}
-							isSelected={selectedRequestId === request.id}
-							isRenaming={renamingRequestId === request.id}
-							renameValue={renameRequestValue}
-							onRenameChange={onRequestRenameChange}
-							onRenameSubmit={onRequestRenameSubmit}
-							onRenameCancel={onRequestRenameCancel}
-							onStartRename={onStartRequestRename}
-							onDuplicate={onDuplicateRequest}
 						/>
 					))}
 				</div>

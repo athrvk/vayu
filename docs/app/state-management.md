@@ -656,9 +656,9 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   **referentially stable** while the underlying results are unchanged (built in
   `useQueries`' `combine`, which TanStack memoises only for a `combine` of
   stable identity - hence the `useCallback`). Callers list it in effect
-  dependencies; when it was rebuilt on every call, `CollectionTree`'s reveal
-  effect re-ran on every render and re-expanded a collection the user had just
-  collapsed
+  dependencies; when it was rebuilt on every call, the collection tree's reveal
+  effect (`useRevealActiveSelection`) re-ran on every render and re-expanded a
+  collection the user had just collapsed
 - **`useRequestQuery(requestId)`** / **`requestDetailOptions(requestId)`** - One
   request by id (`GET /requests/:id`), used by a restored request tab and by a
   design-run copy on cold start. Only an `ApiError` with `statusCode === 404`
