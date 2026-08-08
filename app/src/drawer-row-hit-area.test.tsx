@@ -49,6 +49,7 @@ import { TooltipProvider } from "@/components/ui";
 import RequestItem from "@/modules/collections/RequestItem";
 import CollectionItem from "@/modules/collections/CollectionItem";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
+import { withCollectionTreeContext } from "@/test/collection-tree-context";
 import type { Collection, Environment, Request } from "@/types";
 
 const REQUEST: Request = {
@@ -134,15 +135,10 @@ function requestRow(): Row {
 	const onSelect = vi.fn();
 	const onStartRename = vi.fn();
 	const { container } = render(
-		<RequestItem
-			request={REQUEST}
-			collectionId="col_1"
-			posInSet={1}
-			setSize={1}
-			onSelect={onSelect}
-			onDelete={vi.fn()}
-			onStartRename={onStartRename}
-		/>
+		withCollectionTreeContext(
+			<RequestItem request={REQUEST} collectionId="col_1" posInSet={1} setSize={1} />,
+			{ onRequestClick: onSelect, onStartRequestRename: onStartRename }
+		)
 	);
 	return {
 		row: container.querySelector('[role="treeitem"]') as HTMLElement,
@@ -156,42 +152,10 @@ function collectionRow(): Row {
 	const onCollectionClick = vi.fn();
 	const onStartRename = vi.fn();
 	const { container } = render(
-		<CollectionItem
-			collection={COLLECTION}
-			allCollections={[COLLECTION]}
-			depth={0}
-			posInSet={1}
-			setSize={1}
-			expandedCollectionIds={new Set()}
-			selectedCollectionId={null}
-			selectedRequestId={null}
-			renamingId={null}
-			renameValue=""
-			deletingCollectionId={null}
-			deletingRequestId={null}
-			creatingSubfolder={null}
-			newSubCollectionName=""
-			isCreatingSubfolder={false}
-			renamingRequestId={null}
-			renameRequestValue=""
-			getRequestsByCollection={() => []}
-			onCollectionClick={onCollectionClick}
-			onRequestClick={vi.fn()}
-			onCollectionToggle={vi.fn()}
-			getCollectionActions={() => []}
-			onRenameChange={vi.fn()}
-			onRenameSubmit={vi.fn()}
-			onRenameCancel={vi.fn()}
-			onStartRename={onStartRename}
-			onDeleteRequest={vi.fn()}
-			onSubCollectionNameChange={vi.fn()}
-			onCreateSubfolder={vi.fn()}
-			onCancelSubfolder={vi.fn()}
-			onRequestRenameChange={vi.fn()}
-			onRequestRenameSubmit={vi.fn()}
-			onRequestRenameCancel={vi.fn()}
-			onStartRequestRename={vi.fn()}
-		/>
+		withCollectionTreeContext(
+			<CollectionItem collection={COLLECTION} depth={0} posInSet={1} setSize={1} />,
+			{ allCollections: [COLLECTION], onCollectionClick, onStartRename }
+		)
 	);
 	return {
 		row: container.querySelector('[role="treeitem"]') as HTMLElement,

@@ -7,12 +7,18 @@
 
 import { useEffect, useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
+import { useCollectionTreeContext } from "./context/CollectionTreeContext";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { INDENT_STEP } from "@/constants/layout";
 
+/**
+ * What differs per row. The selection, the rename and delete state and every
+ * handler come from `CollectionTreeContext` - the same source `CollectionItem`
+ * reads, so a row's behaviour cannot drift from its parent folder's.
+ */
 export interface RequestItemProps {
 	request: Request;
 	collectionId: string;
@@ -26,18 +32,6 @@ export interface RequestItemProps {
 	 */
 	posInSet: number;
 	setSize: number;
-	onSelect: (collectionId: string, requestId: string) => void;
-	onDelete: (requestId: string) => Promise<void>;
-	onBeforeDelete?: (requestId: string, requestName: string) => void;
-	isDeleting?: boolean;
-	isSelected?: boolean;
-	isRenaming?: boolean;
-	renameValue?: string;
-	onRenameChange?: (value: string) => void;
-	onRenameSubmit?: (requestId: string) => void;
-	onRenameCancel?: () => void;
-	onStartRename?: (request: Request) => void;
-	onDuplicate?: (request: Request) => void;
 }
 
 export default function RequestItem({
@@ -46,19 +40,25 @@ export default function RequestItem({
 	depth = 1,
 	posInSet,
 	setSize,
-	onSelect,
-	onDelete,
-	onBeforeDelete,
-	isDeleting,
-	isSelected,
-	isRenaming,
-	renameValue,
-	onRenameChange,
-	onRenameSubmit,
-	onRenameCancel,
-	onStartRename,
-	onDuplicate,
 }: RequestItemProps) {
+	const {
+		selectedRequestId,
+		deletingRequestId,
+		renamingRequestId,
+		renameRequestValue,
+		onRequestClick,
+		onRequestRenameChange,
+		onRequestRenameSubmit,
+		onRequestRenameCancel,
+		onStartRequestRename,
+		onRequestDeleteClick,
+		onDuplicateRequest,
+	} = useCollectionTreeContext();
+
+	const isSelected = selectedRequestId === request.id;
+	const isDeleting = deletingRequestId === request.id;
+	const isRenaming = renamingRequestId === request.id;
+
 	const rowRef = useRef<HTMLDivElement>(null);
 	/**
 	 * Set when the rename field is about to be closed *from the keyboard*, so
@@ -85,13 +85,13 @@ export default function RequestItem({
 		// (opening is idempotent), so there is nothing to defer - and none of the
 		// 80ms delay that made a single click to open feel laggy.
 		if (e.detail > 1) return;
-		onSelect(collectionId, request.id);
+		onRequestClick(collectionId, request.id);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-		onStartRename?.(request);
+		onStartRequestRename(request);
 	};
 
 	/**
@@ -108,11 +108,11 @@ export default function RequestItem({
 	 */
 	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
-	// Prefer the confirmation flow when the tree supplies one.
+	// Always the confirm dialog, never a bare delete: the ⋯ menu and the hidden
+	// `data-tree-delete` control the Delete key clicks are the same one action.
 	const handleDelete = () => {
 		if (isDeleting) return;
-		if (onBeforeDelete) onBeforeDelete(request.id, request.name);
-		else void onDelete(request.id);
+		onRequestDeleteClick(request.id, request.name);
 	};
 
 	return (
@@ -154,9 +154,9 @@ export default function RequestItem({
 				tabIndex={-1}
 				data-tree-activate
 				// self-stretch: the row is `items-center`, which makes every child
-				// content-height - so this button, the only thing wired to onSelect,
-				// was ~22px tall inside a 32px row that paints a full-height hover
-				// fill and `cursor-pointer`. The top and bottom ~5px of the row
+				// content-height - so this button, the only thing wired to the open
+				// handler, was ~22px tall inside a 32px row that paints a full-height
+				// hover fill and `cursor-pointer`. The top and bottom ~5px of the row
 				// looked clickable and were not. Stretching to the row's height
 				// costs nothing (the button's own `items-center` still centres the
 				// badge and label) and `focus-row` keeps painting the ring.
@@ -167,18 +167,18 @@ export default function RequestItem({
 				{isRenaming ? (
 					<Input
 						type="text"
-						value={renameValue ?? ""}
-						onChange={(e) => onRenameChange?.(e.target.value)}
+						value={renameRequestValue}
+						onChange={(e) => onRequestRenameChange(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
 								returnFocusToRow.current = true;
-								onRenameSubmit?.(request.id);
+								onRequestRenameSubmit(request.id);
 							} else if (e.key === "Escape") {
 								returnFocusToRow.current = true;
-								onRenameCancel?.();
+								onRequestRenameCancel();
 							}
 						}}
-						onBlur={() => onRenameSubmit?.(request.id)}
+						onBlur={() => onRequestRenameSubmit(request.id)}
 						className="flex-1 h-6 text-sm"
 						autoFocus
 						onClick={(e) => e.stopPropagation()}
@@ -205,7 +205,7 @@ export default function RequestItem({
 				aria-hidden="true"
 				tabIndex={-1}
 				data-tree-rename
-				onClick={() => onStartRename?.(request)}
+				onClick={() => onStartRequestRename(request)}
 			/>
 			<button
 				type="button"
@@ -224,14 +224,12 @@ export default function RequestItem({
 						{
 							label: "Rename",
 							icon: Edit2,
-							onSelect: () => onStartRename?.(request),
-							disabled: !onStartRename,
+							onSelect: () => onStartRequestRename(request),
 						},
 						{
 							label: "Duplicate",
 							icon: Copy,
-							onSelect: () => onDuplicate?.(request),
-							disabled: !onDuplicate,
+							onSelect: () => onDuplicateRequest(request),
 						},
 						{
 							label: "Delete",

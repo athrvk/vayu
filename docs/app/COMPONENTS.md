@@ -204,9 +204,12 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 
 | Component | Role |
 |---|---|
-| `CollectionTree.tsx` | Hierarchical tree of collections + requests in the sidebar; expandable folders, context menus, method badges. State from `useCollectionsStore` + `useCollectionsQuery`/`useRequestsQuery` |
-| `CollectionItem.tsx` | A collection (folder) row |
-| `RequestItem.tsx` | A request row (method badge, click → open in RequestBuilder, context menu) |
+| `CollectionTree.tsx` | Hierarchical tree of collections + requests in the sidebar; expandable folders, context menus, method badges. Layout and the panel chrome only - the reveal effects, the CRUD state and the shared row values each live in their own module below. State from `useCollectionsStore` + `useCollectionsQuery`/`useRequestsQuery` |
+| `context/CollectionTreeContext.tsx` | Everything a row needs that is not the row itself: the expanded set, the selection, the rename/delete state and every handler. `CollectionItem` renders itself recursively, so a threaded prop had to be re-listed at four sites and thirty of its thirty-three props were the same object at every depth. Rows read it through `useCollectionTreeContext()`, which throws when a row is rendered without the provider. Carries the typed `dnd` slot the drag work (#367) mounts into |
+| `useRevealActiveSelection.ts` | The two once-per-selection effects that keep the active tab's row rendered and on screen: expand its ancestors, then scroll it into view. Separate refs, because the scroll can only run a render after the reveal |
+| `useTreeCrud.ts` | Create, rename, duplicate and delete for the tree, with the inline form state each drives. Returns `panel` (what the tree's own chrome renders) and `rows` (the slice the context hands every row) |
+| `CollectionItem.tsx` | A collection (folder) row. Props are its entity, depth and position in the sibling set; everything else comes from the context |
+| `RequestItem.tsx` | A request row (method badge, click → open in RequestBuilder, context menu). Same prop rule as `CollectionItem` |
 | `ImportModal.tsx` | Import collections from file/URL/paste (Postman / Insomnia / OpenAPI). Mounted globally in `Shell`; open-state in a dedicated store. See [import-collections/](./import-collections/README.md) for the parser pipeline |
 | `tree-utils.ts` | Every `parentId` walk in the renderer: `walkAncestors` (the ancestor chain, root first), `isDescendant`, `collectDescendantEntityIds` (what a cascade delete reaches). Each carries a visited-set termination guard - the engine tolerates cycles in stored data, and an unguarded walk hangs the window rather than answering wrongly. Also used by `queries/collections.ts` and `useVariableResolver` |
 | `reorder-math.ts` | The arithmetic behind a drop: `planCollectionMove` / `planRequestMove` turn sibling lists and a target index into the `POST /reorder` batch, writing only the rows whose position changes and normalizing a scope whose rows all predate explicit orders. Pure and node-tested - the part of a drag a jsdom gesture cannot reach. Consumed by `useReorderMutation` |
