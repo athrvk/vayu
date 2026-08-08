@@ -27,9 +27,21 @@
  * - `serializeGraphQLBody` drops the variables when they are mid-edit and not
  *   yet valid JSON, rather than refusing to write - which would mean the query
  *   pane stopped saving while the variables pane had an unclosed brace.
+ *
+ * **"Not yet valid JSON" and "holds a `{{variable}}`" are different things, and
+ * conflating them dropped a working idiom.** `{"limit": {{n}}}` is not JSON at
+ * rest and is JSON on the wire, because the engine resolves templates in the
+ * body before sending; dropping it meant the request went out with no variables
+ * at all and nothing said so. So the serializer masks out-of-string tokens,
+ * checks *that* parses, and writes the token back into the envelope verbatim -
+ * the body at rest is a template, exactly as it is for every other body mode.
+ * Genuinely broken text is still dropped (that decision is PR #399's and stands);
+ * what changed is that the pane now says which of the two you have -
+ * `classifyVariables` is what it reads.
  */
 
 import { Kind, parse as parseGraphQLDocument } from "graphql";
+import { hasJsonTemplateSentinel, maskJsonTemplates, unmaskJsonTemplates } from "./templates";
 
 /** The envelope, split into the parts the editor edits plus the parts it carries. */
 export interface GraphQLBodyParts {
@@ -53,49 +65,121 @@ const EMPTY_PARTS = (query: string): GraphQLBodyParts => ({
 	extras: {},
 });
 
-export function parseGraphQLBody(body: string): GraphQLBodyParts {
+/**
+ * What the Variables pane's text is, from the wire's point of view.
+ *
+ * The pane's reader is a badge: `templated` and `invalid` look identical in the
+ * editor (both are red to Monaco's JSON worker) and could not be more different
+ * on the wire - one is sent after resolution, the other is not sent at all.
+ */
+export type VariablesForm = "empty" | "json" | "templated" | "invalid";
+
+export function classifyVariables(text: string): VariablesForm {
+	const trimmed = text.trim();
+	if (!trimmed) return "empty";
+	if (parseJson(trimmed) !== undefined) return "json";
+	return parseTemplatedJson(trimmed) ? "templated" : "invalid";
+}
+
+/** `JSON.parse`, or `undefined` when the text is not JSON. Never throws. */
+function parseJson(text: string): unknown {
 	try {
-		const parsed: unknown = JSON.parse(body);
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			const { query, variables, operationName, ...extras } = parsed as Record<
-				string,
-				unknown
-			>;
-			if (typeof query === "string") {
-				return {
-					query,
-					variables: variables ? JSON.stringify(variables, null, 2) : "",
-					operationName: typeof operationName === "string" ? operationName : "",
-					extras,
-				};
-			}
-		}
+		return JSON.parse(text) as unknown;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The text read as JSON with its out-of-string `{{tokens}}` masked, or null when
+ * it is broken for some other reason (or holds no token at all, in which case
+ * the plain parse above already answered).
+ */
+function parseTemplatedJson(text: string): { value: unknown; tokens: string[] } | null {
+	const { masked, tokens } = maskJsonTemplates(text);
+	if (tokens.length === 0) return null;
+	const value = parseJson(masked);
+	return value === undefined ? null : { value, tokens };
+}
+
+export function parseGraphQLBody(body: string): GraphQLBodyParts {
+	const parts = readEnvelope(body, JSON.parse.bind(JSON)) ?? readTemplatedEnvelope(body);
+	return parts ?? EMPTY_PARTS(body);
+}
+
+/** The envelope shape, or null when `body` is not one. */
+function readEnvelope(body: string, read: (text: string) => unknown): GraphQLBodyParts | null {
+	let parsed: unknown;
+	try {
+		parsed = read(body);
 	} catch {
 		// Body is not JSON - treat as a raw query string (e.g. Insomnia import)
+		return null;
 	}
-	// Raw query string - show as-is, no variables
-	return EMPTY_PARTS(body);
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+	const { query, variables, operationName, ...extras } = parsed as Record<string, unknown>;
+	if (typeof query !== "string") return null;
+	return {
+		query,
+		variables: variablesText(variables),
+		operationName: typeof operationName === "string" ? operationName : "",
+		extras,
+	};
+}
+
+/**
+ * The pane text for an envelope's `variables` value.
+ *
+ * A string-typed `variables` is shown verbatim rather than JSON-encoded: the
+ * Postman importer deliberately preserves that shape, and pretty-printing it
+ * rendered `{"id":1}` as the quoted, backslash-escaped blob `"{\"id\":1}"` -
+ * lossless and unreadable, and un-editable without deleting the escapes by
+ * hand. Editing it back to an object is what converts the envelope; until then
+ * it round-trips as it arrived.
+ */
+function variablesText(variables: unknown): string {
+	if (typeof variables === "string") return variables;
+	return variables ? JSON.stringify(variables, null, 2) : "";
+}
+
+/**
+ * An envelope whose `variables` hold `{{tokens}}` - not JSON at rest, JSON once
+ * the engine resolves it.
+ *
+ * Only the `variables` value may carry them. A token anywhere else (inside
+ * `extensions`, say) would survive parsing as a placeholder string and be
+ * written back as that placeholder, so such a body is refused here and falls
+ * through to the raw-query fallback - which is exactly what it does on master
+ * today, since it is not JSON either.
+ */
+function readTemplatedEnvelope(body: string): GraphQLBodyParts | null {
+	const templated = parseTemplatedJson(body);
+	if (!templated) return null;
+	const parts = readEnvelope(body, () => templated.value);
+	if (!parts) return null;
+	const carrier = JSON.stringify({ ...parts.extras, query: parts.query, o: parts.operationName });
+	if (hasJsonTemplateSentinel(carrier)) return null;
+	return { ...parts, variables: unmaskJsonTemplates(parts.variables, templated.tokens) };
 }
 
 export function serializeGraphQLBody(parts: GraphQLBodyParts): string {
 	const { query, variables, operationName, extras } = parts;
-	let vars: unknown;
-	try {
-		vars = variables.trim() ? JSON.parse(variables) : undefined;
-	} catch {
-		// Variables panel has in-progress invalid JSON - preserve everything else.
-		vars = undefined;
-	}
+	const trimmed = variables.trim();
+	const plain = trimmed ? parseJson(trimmed) : undefined;
+	// Variables panel has in-progress invalid JSON - preserve everything else.
+	const templated = plain === undefined && trimmed ? parseTemplatedJson(trimmed) : null;
+	const vars = plain !== undefined ? plain : templated?.value;
 	// Extras first so a key we *do* model always wins over a stale copy of it -
 	// `extras` is built by destructuring the three out, so this cannot happen
 	// today, and relying on that ordering rather than restating it is how it
 	// would stop being true.
-	return JSON.stringify({
+	const json = JSON.stringify({
 		...extras,
 		query,
 		...(operationName ? { operationName } : {}),
 		...(vars !== undefined && { variables: vars }),
 	});
+	return templated ? unmaskJsonTemplates(json, templated.tokens) : json;
 }
 
 /**

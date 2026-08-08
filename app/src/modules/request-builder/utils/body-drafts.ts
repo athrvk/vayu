@@ -112,3 +112,34 @@ export function switchBody(
 	 */
 	return { body: next[toKey] ?? "", drafts: next };
 }
+
+/**
+ * The Variables pane's raw text, for the same reason and with the same lifetime.
+ *
+ * The pane is a JSON editor over one *key* of the GraphQL envelope, so the body
+ * cannot always hold what it shows: text that is neither JSON nor a resolvable
+ * template is dropped by `serializeGraphQLBody` (deliberately - the query pane
+ * must keep saving while the variables pane has an unclosed brace). That makes
+ * the pane's own text the only copy, and `GraphQLBody`'s `useState` the wrong
+ * place to keep it: Radix unmounts the inactive tab, so a glance at Headers
+ * discarded a half-typed variables object exactly as it once discarded a stashed
+ * JSON body.
+ *
+ * Carried beside the mode drafts rather than inside them because it is not a
+ * *mode's* body - GraphQL's body is in the `graphql` bucket already. It is one
+ * pane's in-progress text, and it names its own request for the reason
+ * `BodyDrafts` does.
+ */
+export interface VariablesDraft {
+	/** Whose pane this is. Drafts do not survive a change of request. */
+	requestId: string | null;
+	text: string;
+}
+
+/** The draft to restore, or null when it belongs to another request. */
+export function ownVariablesDraft(
+	draft: VariablesDraft | null,
+	requestId: string | null
+): string | null {
+	return draft && draft.requestId === requestId ? draft.text : null;
+}

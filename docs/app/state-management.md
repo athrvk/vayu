@@ -1148,6 +1148,27 @@ Two things about it are deliberate and easy to undo by accident:
 Deliberately **not** persisted: a request has one body, and storing payloads it
 will never send would put them in exports and in the engine's schema.
 
+### `RequestBuilderContext` - the GraphQL Variables draft
+
+```typescript
+getVariablesDraft: () => VariablesDraft | null
+setVariablesDraft: (draft: VariablesDraft) => void
+```
+
+The Variables pane's raw text, for the same reason and with the same lifetime.
+The pane is a JSON editor over one *key* of the GraphQL envelope, and the
+envelope cannot always hold what it shows: text that is neither JSON nor a
+resolvable `{{template}}` is dropped by `serializeGraphQLBody`, deliberately, so
+that the query pane keeps saving while the variables pane has an unclosed brace.
+That makes the pane's own text the only copy - and `GraphQLBody`'s component
+state the wrong place for it, since the Radix unmount discards a half-typed
+variables object exactly as it once discarded a stashed JSON body.
+
+It is beside the mode drafts rather than inside them because it is not a mode's
+body (GraphQL's body is already in the `graphql` bucket). It carries its own
+`requestId` for the drafts' reason, and `ownVariablesDraft` - not a second reset
+in the provider - is what drops one belonging to another request.
+
 ### `RequestBuilderContext` - the added Content-Type row
 
 ```typescript

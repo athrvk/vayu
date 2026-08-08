@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { CheckCircle2, AlertCircle, Braces, Loader2, RefreshCw } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	CodeEditor,
@@ -45,10 +45,12 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/helpers";
 import { TIMING } from "@/config/timing";
 import {
+	classifyVariables,
 	operationNames,
 	parseGraphQLBody,
 	serializeGraphQLBody,
 	type GraphQLBodyParts,
+	type VariablesForm,
 } from "@/lib/graphql/graphql-body";
 
 export interface GraphQLBodyProps {
@@ -63,6 +65,16 @@ export interface GraphQLBodyProps {
 	schemaTarget: SchemaTarget;
 	/** Registers each editor so the panel can relayout them on a height change. */
 	onEditorMount: OnMount;
+	/**
+	 * The Variables pane's text as this request last had it, or null for none.
+	 *
+	 * Seeds the pane instead of the body, because the body cannot hold text that
+	 * is neither JSON nor a template. It comes from the provider rather than from
+	 * here so that it outlives this component, which Radix unmounts on every
+	 * glance at another tab (`utils/body-drafts.ts`).
+	 */
+	variablesDraft: string | null;
+	onVariablesDraftChange: (text: string) => void;
 }
 
 /**
@@ -136,6 +148,42 @@ function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 	);
 }
 
+/**
+ * What the Variables pane's text will do when the request is sent.
+ *
+ * Nothing at all for `empty` and `json`, which is the common case and needs no
+ * chrome. The other two are the point: to Monaco's JSON worker a `{{token}}` and
+ * an unclosed brace are the same red squiggle, and on the wire they could not be
+ * more different - one is resolved and sent, the other is not sent at all. The
+ * silent drop is what #384 item 5 reports; naming it is the fix, because the
+ * request otherwise goes out with no variables and nothing on screen says so.
+ */
+function VariablesFormBadge({ form }: { form: VariablesForm }) {
+	if (form === "empty" || form === "json") return null;
+
+	if (form === "templated") {
+		return (
+			<BadgeText
+				className="text-muted-foreground"
+				title="These variables contain {{variables}}, so they are not JSON until the request is sent. They are resolved and sent."
+			>
+				<Braces className="w-3 h-3" />
+				Templated
+			</BadgeText>
+		);
+	}
+
+	return (
+		<BadgeText
+			className="text-warning-text"
+			title="These variables are not valid JSON, so the request will be sent without them."
+		>
+			<AlertCircle className="w-3 h-3" />
+			Not sent
+		</BadgeText>
+	);
+}
+
 function BadgeText({
 	className,
 	title,
@@ -167,7 +215,14 @@ function PaneTitle({ children }: { children: string }) {
 	return <span className={EYEBROW_CLASS}>{children}</span>;
 }
 
-export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }: GraphQLBodyProps) {
+export function GraphQLBody({
+	body,
+	onBodyChange,
+	schemaTarget,
+	onEditorMount,
+	variablesDraft,
+	onVariablesDraftChange,
+}: GraphQLBodyProps) {
 	// One subscription, not three: the entry object is the store's own reference,
 	// so it is a stable snapshot, and status/schema/error/freshness cannot be
 	// read a render apart from each other.
@@ -230,14 +285,24 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 	 * `serializeGraphQLBody` drops - so re-deriving the editor value from the
 	 * body would wipe their input. Re-sync from the body only on external
 	 * changes (request switch, mode switch), tracked via the body we last wrote.
+	 *
+	 * The draft is what makes that survive an unmount: the state below is gone
+	 * the moment Radix tears the tab down, and seeding it from the body alone
+	 * would then lose exactly the text the body could not carry.
 	 */
-	const [variables, setVariables] = useState("");
-	const lastWrittenBody = useRef<string | undefined>(undefined);
+	const [variables, setVariables] = useState(
+		() => variablesDraft ?? parseGraphQLBody(body || "").variables
+	);
+	// Seeded with the mounted body so the effect below does not immediately
+	// re-derive the pane from it and discard the draft just restored.
+	const lastWrittenBody = useRef<string | undefined>(body);
 	useEffect(() => {
 		if (body === lastWrittenBody.current) return;
-		setVariables(parseGraphQLBody(body || "").variables);
+		const next = parseGraphQLBody(body || "").variables;
+		setVariables(next);
+		onVariablesDraftChange(next);
 		lastWrittenBody.current = body;
-	}, [body]);
+	}, [body, onVariablesDraftChange]);
 
 	/*
 	 * One write path, taking only what changed. The rest comes from `parts` (the
@@ -367,6 +432,7 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 			<ResizablePanel defaultSize="35%" minSize="15%" className="flex flex-col">
 				<PaneHeader>
 					<PaneTitle>Variables</PaneTitle>
+					<VariablesFormBadge form={classifyVariables(variables)} />
 				</PaneHeader>
 				<div className="min-h-0 flex-1">
 					<CodeEditor
@@ -375,6 +441,7 @@ export function GraphQLBody({ body, onBodyChange, schemaTarget, onEditorMount }:
 						value={variables}
 						onChange={(v) => {
 							setVariables(v ?? "");
+							onVariablesDraftChange(v ?? "");
 							write({ variables: v ?? "" });
 						}}
 						onMount={handleVariablesMount}

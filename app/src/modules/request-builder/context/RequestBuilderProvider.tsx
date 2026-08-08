@@ -18,7 +18,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
-import { emptyDrafts, type BodyDrafts } from "../utils/body-drafts";
+import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
 	useCollectionAncestors,
@@ -199,6 +199,19 @@ export default function RequestBuilderProvider({
 	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
 	const setBodyDrafts = useCallback((drafts: BodyDrafts) => {
 		bodyDraftsRef.current = drafts;
+	}, []);
+
+	/*
+	 * The GraphQL Variables pane's in-progress text, which the stored body cannot
+	 * always hold. Here for the drafts' reason - the panel is unmounted whenever
+	 * another tab is on screen - and, like them, not reset by the request-change
+	 * effect below: the draft names its own request and `ownVariablesDraft` drops
+	 * one belonging to another.
+	 */
+	const variablesDraftRef = useRef<VariablesDraft | null>(null);
+	const getVariablesDraft = useCallback(() => variablesDraftRef.current, []);
+	const setVariablesDraft = useCallback((draft: VariablesDraft) => {
+		variablesDraftRef.current = draft;
 	}, []);
 
 	/*
@@ -528,6 +541,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			getBodyDrafts,
 			setBodyDrafts,
+			getVariablesDraft,
+			setVariablesDraft,
 			getAutoContentType,
 			setAutoContentType,
 			response,
@@ -561,6 +576,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			getBodyDrafts,
 			setBodyDrafts,
+			getVariablesDraft,
+			setVariablesDraft,
 			getAutoContentType,
 			setAutoContentType,
 			response,
