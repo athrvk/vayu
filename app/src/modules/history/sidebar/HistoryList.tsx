@@ -15,7 +15,13 @@ import {
 	type FilterStatus,
 	type FilterType,
 } from "@/modules/history/history-store";
-import { useRunsQuery, useDeleteRunMutation, flattenRunPages, runsTotal } from "@/queries";
+import {
+	useRunsQuery,
+	useDeleteRunMutation,
+	flattenRunPages,
+	runsTotal,
+	useCollectionsQuery,
+} from "@/queries";
 import {
 	DrawerPanel,
 	EmptyState,
@@ -34,6 +40,7 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import RunItem from "./RunItem";
+import type { Run } from "@/types";
 
 /**
  * A run that is still executing is stopped by the engine before it is deleted,
@@ -105,6 +112,23 @@ export default function HistoryList() {
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
 	const runs = filterRuns(allRuns, { filterType, filterStatus, sortBy });
+
+	/*
+	 * A collection run's row carries the collection's id, not its name - the
+	 * engine's list row is built from the run's snapshot and never joins. The
+	 * name is here instead: the tree is already loaded and cached, so this costs
+	 * one shared query for the whole page rather than one per row.
+	 *
+	 * A collection deleted since its run resolves to nothing, and the row falls
+	 * back to the id it does have. Guessing a name for a folder that is gone
+	 * would be the one answer worse than the id.
+	 */
+	const { data: collections = [] } = useCollectionsQuery();
+	const collectionName = (run: Run): string | undefined => {
+		const id = run.summary?.scenario?.collectionId;
+		if (!id) return undefined;
+		return collections.find((c) => c.id === id)?.name;
+	};
 
 	/*
 	 * The drawer has three sibling views. The collections tree already tells the
@@ -203,6 +227,7 @@ export default function HistoryList() {
 								<SelectItem value="all">All Types</SelectItem>
 								<SelectItem value="load">Load Test</SelectItem>
 								<SelectItem value="design">Design Mode</SelectItem>
+								<SelectItem value="scenario">Collection Run</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -301,6 +326,7 @@ export default function HistoryList() {
 									onDelete={handleDeleteClick}
 									isDeleting={deletingId === run.id}
 									isSelected={selectedRunId === run.id}
+									collectionName={collectionName(run)}
 								/>
 							))}
 

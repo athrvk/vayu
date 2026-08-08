@@ -24,13 +24,14 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { RunSourceSection } from "./RunSourceSection";
 import { useTabsStore } from "@/stores";
 import { RequestNotFoundError } from "@/queries/collections";
-import type { Environment, Run } from "@/types";
+import type { Collection, Environment, Run } from "@/types";
 
 let run: Run | undefined;
 let loading = false;
 let requestData: { id: string; name: string } | undefined;
 let requestError: unknown;
 let environments: Environment[] = [];
+let collections: Collection[] = [];
 
 vi.mock("@/queries", async () => {
 	const { isRequestNotFound } =
@@ -39,6 +40,7 @@ vi.mock("@/queries", async () => {
 		useRunQuery: () => ({ data: run, isLoading: loading }),
 		useRequestQuery: () => ({ data: requestData, error: requestError }),
 		useEnvironmentsQuery: () => ({ data: environments }),
+		useCollectionsQuery: () => ({ data: collections }),
 		isRequestNotFound,
 	};
 });
@@ -57,12 +59,31 @@ const makeRun = (extra: Partial<Run> = {}): Run => ({
 const environment = (id: string, name: string): Environment =>
 	({ id, name, variables: {} }) as unknown as Environment;
 
+const collection = (id: string, name: string): Collection => ({ id, name }) as Collection;
+
+/** A collection run, as `GET /runs/:id` returns one - the resolved manifest. */
+const scenarioRun = (collectionId: string | null): Run =>
+	makeRun({
+		type: "scenario",
+		requestId: null,
+		configSnapshot: {
+			scenario: {
+				source: "collection",
+				...(collectionId ? { collectionId } : {}),
+				recursive: false,
+				iterations: 1,
+				steps: [{ index: 0, requestId: "req_1", name: "Log in" }],
+			},
+		},
+	});
+
 beforeEach(() => {
 	run = undefined;
 	loading = false;
 	requestData = undefined;
 	requestError = undefined;
 	environments = [];
+	collections = [];
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
 
@@ -135,5 +156,59 @@ describe("RunSourceSection - the request it ran from", () => {
 	it("says the run is gone when it no longer exists", () => {
 		render(<RunSourceSection tab={TAB} />);
 		expect(screen.getByText("This run is no longer available")).toBeInTheDocument();
+	});
+});
+
+/*
+ * A collection run links no request at all - its source is the folder. Read the
+ * request way it reported "Not saved", which is true of the field and says
+ * nothing about the run; every case below is about the row naming the thing
+ * that actually ran.
+ */
+describe("RunSourceSection - the collection a scenario run ran", () => {
+	it("names the collection instead of reporting an unsaved request", () => {
+		collections = [collection("col_1", "Checkout flow")];
+		run = scenarioRun("col_1");
+		render(<RunSourceSection tab={TAB} />);
+
+		expect(screen.getByRole("button", { name: "Checkout flow" })).toBeInTheDocument();
+		expect(screen.queryByText("Not saved")).not.toBeInTheDocument();
+		expect(screen.queryByText("Request")).not.toBeInTheDocument();
+	});
+
+	it("opens the collection in its own tab, leaving the run tab open", () => {
+		collections = [collection("col_1", "Checkout flow")];
+		run = scenarioRun("col_1");
+		render(<RunSourceSection tab={TAB} />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Checkout flow" }));
+
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs.map((t) => [t.type, t.entityId])).toEqual([["collection", "col_1"]]);
+	});
+
+	it("distinguishes a deleted collection from none recorded", () => {
+		run = scenarioRun("col_gone");
+		render(<RunSourceSection tab={TAB} />);
+
+		expect(screen.getByText("col_gone (deleted)")).toBeInTheDocument();
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
+	});
+
+	it("still shows the environment the sequence ran against", () => {
+		environments = [environment("env_stage", "Staging")];
+		collections = [collection("col_1", "Checkout flow")];
+		run = { ...scenarioRun("col_1"), environmentId: "env_stage" };
+		render(<RunSourceSection tab={TAB} />);
+
+		expect(screen.getByText("Staging")).toBeInTheDocument();
+	});
+
+	it("keeps the request row on a load run whose snapshot carries no scenario", () => {
+		run = makeRun({ requestId: null });
+		render(<RunSourceSection tab={TAB} />);
+
+		expect(screen.getByText("Request")).toBeInTheDocument();
+		expect(screen.queryByText("Collection")).not.toBeInTheDocument();
 	});
 });

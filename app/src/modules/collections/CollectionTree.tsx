@@ -19,6 +19,7 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
+import RunCollectionDialog from "./RunCollectionDialog";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
 import { useTreeCrud } from "./useTreeCrud";
@@ -338,6 +339,19 @@ export default function CollectionTree() {
 					onConfirm={panel.confirmDelete}
 					isDeleting={panel.isDeleteInFlight}
 				/>
+
+				{/* Mounted only once a folder has been chosen, and unmounted when
+				    the dialog closes - so the tree costs nothing for a feature
+				    nobody has asked for, and each opening starts from the default
+				    options rather than the previous folder's (see the prop note).
+				    One dialog for the panel, never one per row: that would be a
+				    Radix portal for every folder in the tree. */}
+				{panel.runTarget && (
+					<RunCollectionDialog
+						collection={panel.runTarget}
+						onOpenChange={(open) => !open && panel.dismissRunDialog()}
+					/>
+				)}
 			</div>
 		</DrawerPanel>
 	);

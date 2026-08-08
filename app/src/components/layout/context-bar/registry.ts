@@ -83,9 +83,13 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	 * The collection tab, in the same reading order: what it contributes, what
 	 * it hands down, then how much is in it.
 	 *
-	 * There is no "last run of this collection" section. A collection has no
-	 * runs to summarise - the collection runner is #354, and until it exists
-	 * such a section could only invent a number.
+	 * There is still no "last run of this collection" section now that the
+	 * runner exists (#354). A collection's runs are not addressable: `GET /runs`
+	 * filters by `requestId`, and a collection run's row links no request, so
+	 * the only way to find one is a substring search of every stored snapshot
+	 * for the collection id. A section built on that would be a scan per open
+	 * bar for a number History already shows. It earns its slot once the runs
+	 * list can be filtered by collection - see the note on this in #354.
 	 */
 	{
 		id: "collection-variables",

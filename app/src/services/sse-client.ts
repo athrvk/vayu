@@ -8,7 +8,8 @@
 // SSE Client - Server-Sent Events for real-time load test metrics
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import type { LoadTestMetrics } from "@/types";
+import { STEP_OUTCOMES } from "@/types";
+import type { LoadTestMetrics, ScenarioStepEvent, StepOutcome } from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
 interface RawSseMetrics {
@@ -61,9 +62,36 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 	};
 }
 
+/**
+ * Narrow a raw `step` payload to the shape the step list renders, or reject it.
+ *
+ * A malformed event is dropped rather than coerced: a step rendered with
+ * `iteration` 0 because the key was missing is a row claiming to be a step the
+ * run never reported, and the list keys on `(iteration, stepIndex)`, so a
+ * defaulted pair would also collide with a real step's row.
+ */
+export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
+	if (typeof raw !== "object" || raw === null) return null;
+	const e = raw as Record<string, unknown>;
+	if (typeof e.iteration !== "number" || typeof e.stepIndex !== "number") return null;
+	if (typeof e.outcome !== "string" || !STEP_OUTCOMES.includes(e.outcome as StepOutcome)) {
+		return null;
+	}
+	return {
+		iteration: e.iteration,
+		stepIndex: e.stepIndex,
+		name: typeof e.name === "string" ? e.name : `Step ${e.stepIndex + 1}`,
+		outcome: e.outcome as StepOutcome,
+		statusCode: typeof e.statusCode === "number" ? e.statusCode : 0,
+		latencyMs: typeof e.latencyMs === "number" ? e.latencyMs : 0,
+	};
+}
+
 export type SSEMessageHandler = (metrics: LoadTestMetrics) => void;
 export type SSEErrorHandler = (error: Error) => void;
 export type SSECloseHandler = () => void;
+/** One step execution of a scenario run, from the `step` event. */
+export type SSEStepHandler = (step: ScenarioStepEvent) => void;
 
 export class SSEClient {
 	private eventSource: EventSource | null = null;
@@ -96,11 +124,21 @@ export class SSEClient {
 		};
 	}
 
+	/**
+	 * Attach to a run's live stream.
+	 *
+	 * One client for both run types, because there is one stream: a load run
+	 * publishes `metrics` ticks and a scenario run publishes `step` events, on
+	 * the same ring with the same monotonic ids, and both end with `complete`.
+	 * `onStep` is optional so a load-test caller says nothing about steps rather
+	 * than passing a handler it has no use for.
+	 */
 	connect(
 		runId: string,
 		onMessage: SSEMessageHandler,
 		onError: SSEErrorHandler,
-		onClose: SSECloseHandler
+		onClose: SSECloseHandler,
+		onStep?: SSEStepHandler
 	): void {
 		// Close existing connection
 		this.disconnect();
@@ -135,6 +173,22 @@ export class SSEClient {
 					console.error("Failed to parse metrics:", error);
 				}
 			});
+
+			// A scenario run's per-step event. Registered only when a caller
+			// asked for steps - a load run never emits one, so an unconditional
+			// listener would be dead wiring on that path.
+			if (onStep) {
+				this.eventSource.addEventListener("step", (event) => {
+					try {
+						const step = parseStepEvent(JSON.parse(event.data));
+						// A payload this client cannot read is dropped, not
+						// rendered as a defaulted step - see parseStepEvent.
+						if (step) onStep(step);
+					} catch (error) {
+						console.error("Failed to parse step:", error);
+					}
+				});
+			}
 
 			this.eventSource.addEventListener("complete", () => {
 				console.log("Load test completed");

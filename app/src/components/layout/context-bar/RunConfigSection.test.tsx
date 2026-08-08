@@ -99,6 +99,65 @@ describe("RunConfigSection", () => {
 		expect(screen.getByText("No configuration was recorded for this run")).toBeInTheDocument();
 	});
 
+	/*
+	 * A collection run's snapshot has none of the load-test keys above - no
+	 * mode, no duration, no root-level iterations - so reading it the load way
+	 * produced zero rows and the section said "No configuration was recorded"
+	 * of a run that recorded a whole plan. Mutation-check: drop the scenario
+	 * branch and the first case below reddens on that exact string.
+	 */
+	it("describes a collection run from its scenario block, not as unrecorded", () => {
+		run = makeRun("scenario", {
+			scenario: {
+				source: "collection",
+				collectionId: "col_1",
+				recursive: true,
+				iterations: 3,
+				steps: [
+					{ index: 0, name: "Log in" },
+					{ index: 1, name: "Check out" },
+				],
+			},
+		});
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(
+			screen.queryByText("No configuration was recorded for this run")
+		).not.toBeInTheDocument();
+		expect(screen.getByText("Collection run")).toBeInTheDocument();
+		expect(screen.getByText("Steps")).toBeInTheDocument();
+		expect(screen.getByText("2")).toBeInTheDocument();
+		expect(screen.getByText("3")).toBeInTheDocument();
+		expect(screen.getByText("Included")).toBeInTheDocument();
+	});
+
+	it("says sub-folders were excluded rather than leaving the row out", () => {
+		// Which requests were in the run depends on it, so "no" is an answer,
+		// and an absent row would read as neither.
+		run = makeRun("scenario", {
+			scenario: {
+				source: "collection",
+				collectionId: "col_1",
+				recursive: false,
+				iterations: 1,
+			},
+		});
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(screen.getByText("Excluded")).toBeInTheDocument();
+	});
+
+	it("does not read a load run as a collection run because a key collided", () => {
+		// `type` is what every other surface branches on. A hand-rolled POST
+		// /runs body carrying a `scenario` key the engine ignored is still a
+		// load run, and must be described as one.
+		run = makeRun("load", { mode: "constant_rps", duration: "10s", scenario: { steps: [] } });
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(screen.getByText("Constant RPS")).toBeInTheDocument();
+		expect(screen.queryByText("Collection run")).not.toBeInTheDocument();
+	});
+
 	it("waits rather than declaring the run gone while it is in flight", () => {
 		loading = true;
 		render(<RunConfigSection tab={TAB} />);
