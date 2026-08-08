@@ -1307,7 +1307,7 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
     "Content-Type": "application/json"
   },
   "body": {
-    "type": "json",
+    "mode": "json",
     "content": "{\"name\":\"John\"}"
   },
   "requestId": "req_1234567890",      // Optional, links to saved request
@@ -1564,7 +1564,7 @@ Start a load test run (Vayu Mode).
   "url": "https://api.example.com/users",
   "headers": {},
   "body": {
-    "type": "none",
+    "mode": "none",
     "content": ""
   },
   "mode": "constant_rps",    // "constant_rps", "constant_concurrency", "ramp_up", or "iterations"

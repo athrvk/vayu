@@ -1237,8 +1237,16 @@ export const TOOLS: McpTool[] = [
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
 			headers: z.record(z.string()).optional(),
-			body: z.string().optional(),
-			bodyType: z.string().optional(),
+			body: z.string().optional().describe("Request body content."),
+			// The two sibling tools have carried this text since they existed and
+			// this one carried nothing, so an agent load-testing a GraphQL endpoint
+			// had no way to discover the mode from the schema.
+			bodyType: z
+				.string()
+				.optional()
+				.describe(
+					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields."
+				),
 			auth: authInput,
 			httpVersion: z
 				.enum(HTTP_VERSIONS)

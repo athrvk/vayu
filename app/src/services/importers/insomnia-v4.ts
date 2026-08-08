@@ -16,7 +16,8 @@ import type {
 	SkippedItem,
 } from "./types";
 import { asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
-import { asString, mapKeyValues } from "./shared";
+import { asString, mapKeyValues, withRequiredContentType } from "./shared";
+import { toGraphQLEnvelope } from "@/lib/graphql/graphql-body";
 import { normalizeVars } from "./var-normalize";
 import { mapInsomniaOAuth2 } from "./oauth2-import";
 
@@ -147,8 +148,21 @@ function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 			return { mode: "json", content: normalizeVars(asString(node.text)) };
 		case "text/plain":
 			return { mode: "text", content: normalizeVars(asString(node.text)) };
+		/*
+		 * Insomnia's `application/graphql` body is usually the envelope
+		 * (`{query, variables}`), but it may be the bare query document - and a
+		 * bare document stored verbatim went on the wire as the whole HTTP body,
+		 * which is not JSON and carries no `query` a GraphQL server can read.
+		 * Nothing showed it: the editor's raw-string fallback renders a bare
+		 * document exactly as it renders a healthy one. Normalizing here, at the
+		 * one place the shape is known to be GraphQL, is what makes the panes and
+		 * the wire agree. An envelope is passed through untouched.
+		 */
 		case "application/graphql":
-			return { mode: "graphql", content: normalizeVars(asString(node.text)) };
+			return {
+				mode: "graphql",
+				content: toGraphQLEnvelope(normalizeVars(asString(node.text))),
+			};
 		case "application/x-www-form-urlencoded":
 			return {
 				mode: "x-www-form-urlencoded",
@@ -231,6 +245,7 @@ export class InsomniaV4Parser implements ImportParser {
 			requestCount += 1;
 			const label = `request "${r.name ?? r._id}"`;
 			const followRedirects = insomniaFollowRedirects(r.settingFollowRedirects);
+			const body = insomniaBody(r.body, ctx);
 			return {
 				name: r.name ?? "Untitled",
 				description: r.description ?? "",
@@ -239,8 +254,11 @@ export class InsomniaV4Parser implements ImportParser {
 				params: mapKeyValues(
 					rowsOrThrow(r.parameters, `${label}: \`parameters\``).map(kvRow)
 				),
-				headers: mapKeyValues(rowsOrThrow(r.headers, `${label}: \`headers\``).map(kvRow)),
-				body: insomniaBody(r.body, ctx),
+				headers: withRequiredContentType(
+					mapKeyValues(rowsOrThrow(r.headers, `${label}: \`headers\``).map(kvRow)),
+					body
+				),
+				body,
 				auth: insomniaAuth(r.authentication, ctx),
 				preRequestScript: opts.importScripts ? asString(r.preRequestScript) : "",
 				postRequestScript: opts.importScripts ? asString(r.afterResponseScript) : "",

@@ -26,6 +26,7 @@
  * through jsdom - which does not commit a value there.
  */
 
+import type { KeyValueEntry } from "@/types";
 import type { AutoContentType, BodyMode, KeyValueItem } from "../../../../types";
 import { generateId } from "../../../../utils/id";
 
@@ -36,7 +37,7 @@ const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
 	graphql: "application/json",
 };
 
-const isContentType = (item: KeyValueItem) =>
+const isContentType = (item: KeyValueEntry) =>
 	item.key.trim().toLowerCase() === CONTENT_TYPE.toLowerCase();
 
 /** The Content-Type a mode must be sent with, or null if it needs none. */
@@ -54,8 +55,14 @@ export function requiredContentType(mode: BodyMode): string | null {
  *
  * A disabled Content-Type row does not count as declaring one - it is not sent,
  * so the request would go out without the header.
+ *
+ * Typed on `KeyValueEntry` rather than the UI's `KeyValueItem`: the rule reads
+ * only `key` and `enabled`, and the importers ask the same question of rows
+ * that have no `id` yet. An imported GraphQL request used to reach the wire as
+ * `x-www-form-urlencoded` - libcurl's default - because this fired only on an
+ * interactive mode switch, and most GraphQL servers answer that with a 400.
  */
-export function contentTypeToAdd(mode: BodyMode, headers: KeyValueItem[]): string | null {
+export function contentTypeToAdd(mode: BodyMode, headers: KeyValueEntry[]): string | null {
 	const required = requiredContentType(mode);
 	if (!required) return null;
 	return headers.some((h) => isContentType(h) && h.enabled) ? null : required;
