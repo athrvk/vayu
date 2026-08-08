@@ -199,7 +199,7 @@ export function Dock() {
 	// show. Pressed mirrors what is visible instead - the toggle still works, and
 	// the state it reports is the state the user can see.
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
-	const contextBarVisible = contextBarOpen && contextBarHasContent(activeTab?.type);
+	const contextBarVisible = contextBarOpen && contextBarHasContent(activeTab);
 
 	// No TooltipProvider of its own. A bare nested one would reset this strip to
 	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.

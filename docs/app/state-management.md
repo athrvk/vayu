@@ -92,6 +92,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
+  contextBarCollapsedSections: string[]  // Section ids the user collapsed
   requestSplitRatio: number              // 0–1; left/request pane fraction
 }
 ```
@@ -104,6 +105,7 @@ const {
   drawerWidth, setDrawerWidth,
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
+  contextBarCollapsedSections, toggleContextBarSection,
   requestSplitRatio, setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
@@ -116,6 +118,15 @@ migration collapses them onto a single `drawerWidth`, keeping whatever
 Collections (the default view) had. Re-introducing a per-view width re-introduces
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
+
+**Context-bar sections are collapsed by exception.** The store holds the ids the
+user closed (`contextBarCollapsedSections`); anything not listed is expanded. Two
+consequences worth keeping: a section added in a later release ships *expanded*
+for existing users, because a blob written before it existed cannot name it; and
+it is an array rather than a `Set` because `persist` serializes with JSON, which
+writes a `Set` as `{}` - a collapse would survive exactly until the next launch.
+No migration was needed for the field: `persist` merges a missing key onto the
+initial state, which is `[]`.
 
 **Persistence:** `vayu.layout` (v3, with real migrations for both bumps - the one
 store in the app doing persistence versioning end to end)
@@ -802,6 +813,13 @@ into a pane that can never load on every restart.
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
+- **`queryKeys.compose.forRequest(requestId, environmentId)`** - `POST /compose`
+  for a stored request, behind an inline `useQuery` in the context bar's Code
+  section. Keyed by environment as well as request, because the same request
+  composes differently per environment and one key for both would serve the
+  wrong snippet after a switch. `staleTime: Infinity` with an explicit
+  recompose: the section is only mounted while expanded, so this is the "compose
+  on expand, not per keystroke" rule
 
 ### Query Keys & Cache Invalidation
 

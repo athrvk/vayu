@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ContextBar } from "./ContextBar";
+import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
@@ -50,31 +50,21 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ getAllVariables: () => resolved }),
 }));
 
-const layoutStore = {
-	contextBarOpen: true,
-	setContextBarOpen: vi.fn(),
-	contextBarWidth: 280,
-	setContextBarWidth: vi.fn(),
-};
-const tabsStore = {
-	openTabs: [{ id: "t1", type: "request", entityId: "req_1" }],
-	activeTabId: "t1",
-};
-
+// The section reads only the save store from `@/stores`; the real one is kept
+// so the in-flight-commit case exercises the actual registry.
 vi.mock("@/stores", async () => {
 	const saveStore =
 		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
-	return {
-		useLayoutStore: () => layoutStore,
-		useTabsStore: () => tabsStore,
-		useSaveStore: saveStore.useSaveStore,
-	};
+	return { useSaveStore: saveStore.useSaveStore };
 });
+
+/** The tab every section is handed. */
+const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
 
 // The commit reads its scope from the query cache at blur time rather than from
 // the render closure, so the stored map is seeded here rather than mocked onto a
-// query hook - see `ContextBar.commit-scope.test.tsx`.
-function renderBar() {
+// query hook - see `VariablesSection.commit-scope.test.tsx`.
+function renderSection() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	client.setQueryData(queryKeys.globals.all, {
 		id: "globals",
@@ -88,7 +78,7 @@ function renderBar() {
 	return render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<ContextBar />
+				<VariablesSection tab={TAB} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -98,7 +88,7 @@ function valueInput(): HTMLInputElement {
 	return screen.getByDisplayValue("example.com") as HTMLInputElement;
 }
 
-describe("ContextBar - a rejected variable edit", () => {
+describe("VariablesSection - a rejected variable edit", () => {
 	beforeEach(() => {
 		globalsMutate.mockReset();
 		useToastStore.setState({ toasts: [] });
@@ -113,7 +103,7 @@ describe("ContextBar - a rejected variable edit", () => {
 			}
 		);
 
-		renderBar();
+		renderSection();
 		const input = valueInput();
 
 		act(() => {
@@ -136,7 +126,7 @@ describe("ContextBar - a rejected variable edit", () => {
 		delete resolved.host;
 		resolved.missing = { value: "example.com", scope: "global" };
 
-		renderBar();
+		renderSection();
 		const input = valueInput();
 
 		act(() => {
