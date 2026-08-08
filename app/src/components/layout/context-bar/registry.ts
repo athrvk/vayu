@@ -23,7 +23,6 @@ import { AuthContextSection } from "./AuthContextSection";
 import { CodeSection } from "./CodeSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
-import { LastResultSection } from "./LastResultSection";
 import { VariablesSection } from "./VariablesSection";
 import type { ContextBarSection } from "./types";
 
@@ -31,7 +30,17 @@ const onRequestTab = (tab: Tab) => tab.type === "request";
 
 /**
  * Order is the reading order on screen: what is in scope, who you are, what
- * rides along, what happened last, and how to take it elsewhere.
+ * rides along, and how to take it elsewhere.
+ *
+ * There is deliberately no "last result" section. It would show the status,
+ * duration and age of the last send - which is exactly what `ResponseStatusBar`
+ * already paints in the response pane on the same screen, from the same
+ * `StatusCodeBadge` and the same stored run (the builder restores that run into
+ * the pane whenever nothing is in memory). A section with no state in which it
+ * says something the pane does not say better is a duplicate, not a summary.
+ * The version that would earn the slot is a *trend* across recent sends, which
+ * the pane structurally cannot show - see #380 for that and the engine change
+ * it needs first.
  */
 export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	{
@@ -46,12 +55,6 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		title: "Cookies for this host",
 		appliesTo: onRequestTab,
 		Component: CookiesSection,
-	},
-	{
-		id: "last-result",
-		title: "Last result",
-		appliesTo: onRequestTab,
-		Component: LastResultSection,
 	},
 	{ id: "code", title: "Code", appliesTo: onRequestTab, Component: CodeSection },
 	{

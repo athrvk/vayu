@@ -114,9 +114,10 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Variables in scope (`variables`) | `VariablesSection.tsx` - the resolved variables and the quick editor over them (below). |
 | Auth (`auth`) | `AuthContextSection.tsx` - the effective auth mode and where it came from, via the shared `resolveAuthSource` walk, so it cannot disagree with what is sent. For OAuth 2.0 it embeds `TokenStatusRow` (the Auth tab's own control) for token state, fetch and clear. |
 | Cookies for this host (`cookies`) | `CookiesSection.tsx` - the active environment's jar filtered to the request's host, with a per-scope clear. Host filtering is an **approximation**, stated in the UI: libcurl applies the real domain/path/secure rules at transfer time. |
-| Last result (`last-result`) | `LastResultSection.tsx` - status (`StatusCodeBadge`), duration and age of the last completed design run, from the run report's result row. |
 | Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below). |
 | Environment (`environment`) | `EnvironmentSection.tsx` - the active environment's name and a way into the Variables drawer. |
+
+**There is deliberately no "last result" section.** Status, duration and age of the last send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary. What would earn the slot is a *trend* across recent sends, which the pane structurally cannot show; that needs the paginated `GET /runs` to carry each design run's result first (today only `GET /runs/:id` attaches it), so it is tracked separately in #380.
 
 #### Variables section
 

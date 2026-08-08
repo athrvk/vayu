@@ -41,15 +41,23 @@ const OTHER_TYPES: TabType[] = [
 ];
 
 describe("the context-bar section registry", () => {
-	it("ships the six Phase 1 sections for a request tab, in reading order", () => {
+	it("ships the Phase 1 sections for a request tab, in reading order", () => {
 		expect(sectionsForTab(tab("request")).map((s) => s.id)).toEqual([
 			"variables",
 			"auth",
 			"cookies",
-			"last-result",
 			"code",
 			"environment",
 		]);
+	});
+
+	it("has no last-result section, which the response pane already is", () => {
+		// `ResponseStatusBar` paints the same status chip, duration and age in
+		// the response pane on the same screen, from the same stored run - so a
+		// section here could only ever be a poorer copy of it. Re-adding one is
+		// the regression this guards; the trend version (#380) is a different
+		// section with a different id.
+		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).not.toContain("last-result");
 	});
 
 	it("gives every section a unique id, since the id is the persisted key", () => {
