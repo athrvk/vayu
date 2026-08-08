@@ -16,9 +16,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { execIdentity, responseFromExecuteResult } from "./execute-mapping";
+import { buildExecBody, execIdentity, responseFromExecuteResult } from "./execute-mapping";
 import { createDefaultRequestState } from "./request-state";
 import type { SanityResult } from "@/types";
+import type { KeyValueItem, RequestState } from "../types";
 
 function result(overrides: Partial<SanityResult> = {}): SanityResult {
 	return {
@@ -79,5 +80,60 @@ describe("execIdentity", () => {
 
 		expect(execIdentity(request)).toEqual({});
 		expect("requestName" in execIdentity(request)).toBe(false);
+	});
+});
+
+/**
+ * The form modes are a contract with the engine, not a renderer-local
+ * convention: `deserialize_request` (engine/src/utils/json.cpp) keys off these
+ * exact strings and reads the content out of `fields`. It matched neither
+ * spelling until issue #381, and read no `fields` at all, so every form body
+ * this builder produced went out empty. These assertions are deliberately
+ * literal - a "tidier" mode string here is a silently empty request there.
+ */
+describe("buildExecBody form modes", () => {
+	const engineFormModes = ["form-data", "x-www-form-urlencoded"] as const;
+
+	function stateWith(overrides: Partial<RequestState>): RequestState {
+		return { ...createDefaultRequestState(), ...overrides };
+	}
+
+	function row(key: string, value: string, enabled = true): KeyValueItem {
+		return { id: `${key}-row`, key, value, enabled };
+	}
+
+	it.each(engineFormModes)("sends %s as fields, not content", (mode) => {
+		const rows = [row("name", "ada"), row("off", "x", false)];
+		const request = stateWith(
+			mode === "form-data"
+				? { bodyMode: mode, formData: rows }
+				: { bodyMode: mode, urlEncoded: rows }
+		);
+
+		const body = buildExecBody(request, (s) => s);
+
+		expect(body).toEqual({
+			mode,
+			// Disabled rows travel: the engine drops them at the wire, so
+			// toggling one back on needs no re-compose.
+			fields: [
+				{ key: "name", value: "ada", enabled: true },
+				{ key: "off", value: "x", enabled: false },
+			],
+		});
+		expect(body).not.toHaveProperty("content");
+	});
+
+	it("resolves variables inside field keys and values", () => {
+		const request = stateWith({
+			bodyMode: "x-www-form-urlencoded",
+			urlEncoded: [row("{{k}}", "{{v}}")],
+		});
+
+		const body = buildExecBody(request, (s) =>
+			s.replace("{{k}}", "key").replace("{{v}}", "val")
+		);
+
+		expect(body?.fields).toEqual([{ key: "key", value: "val", enabled: true }]);
 	});
 });

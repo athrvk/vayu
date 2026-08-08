@@ -23,6 +23,7 @@
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -155,8 +156,7 @@ int extract_port (const std::string& url) {
 }
 
 std::optional<Error> validate_transferable (const Request& request) {
-    const bool has_body =
-    request.body.mode != BodyMode::None && !request.body.content.empty ();
+    const bool has_body = vayu::http::has_wire_body (request.body);
     if (has_body && request.method == HttpMethod::HEAD) {
         Error error;
         error.code = ErrorCode::InvalidMethod;
@@ -177,16 +177,36 @@ Response error_response (const Error& error) {
     return response;
 }
 
-void apply_method_and_body (CURL* curl, const Request& request) {
-    const bool has_body =
-    request.body.mode != BodyMode::None && !request.body.content.empty ();
+curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
+    const bool has_body = vayu::http::has_wire_body (request.body);
+    curl_mime* mime     = nullptr;
 
-    if (has_body) {
+    if (has_body && request.body.mode == BodyMode::FormData) {
+        // Multipart: libcurl encodes the parts and generates the boundary, so
+        // the body and the Content-Type that describes it cannot disagree.
+        // Text parts only - a file part needs a source the engine does not
+        // carry yet (issue #381 defers it explicitly).
+        mime = curl_mime_init (curl);
+        for (const auto& field : vayu::http::enabled_fields (request.body.fields)) {
+            curl_mimepart* part = curl_mime_addpart (mime);
+            curl_mime_name (part, field.key.c_str ());
+            curl_mime_data (part, field.value.c_str (), field.value.size ());
+        }
+        // Like POSTFIELDS below, this switches curl's method to POST, so the
+        // method is (re-)asserted afterwards.
+        curl_easy_setopt (curl, CURLOPT_MIMEPOST, mime);
+    } else if (has_body) {
         // Setting POSTFIELDS switches curl's method to POST, so it goes first
         // and the method is (re-)asserted below.
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDS, request.body.content.c_str ());
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE,
-        static_cast<long> (request.body.content.size ()));
+        //
+        // COPYPOSTFIELDS rather than POSTFIELDS because the urlencoded body is
+        // built here and dies at the end of this scope, while POSTFIELDS keeps
+        // only a pointer that has to outlive the transfer.
+        const std::string body = request.body.mode == BodyMode::Form ?
+        vayu::http::encode_urlencoded (request.body.fields) :
+        request.body.content;
+        curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, static_cast<long> (body.size ()));
+        curl_easy_setopt (curl, CURLOPT_COPYPOSTFIELDS, body.c_str ());
     }
 
     switch (request.method) {
@@ -199,7 +219,15 @@ void apply_method_and_body (CURL* curl, const Request& request) {
             curl_easy_setopt (curl, CURLOPT_HTTPGET, 1L);
         }
         break;
-    case HttpMethod::POST: curl_easy_setopt (curl, CURLOPT_POST, 1L); break;
+    case HttpMethod::POST:
+        // CURLOPT_POST would *discard* a multipart body: it switches curl back
+        // to a POSTFIELDS-style post, and the mime attached above goes with it.
+        // MIMEPOST already makes the request a POST, so re-asserting the verb
+        // is both unnecessary and destructive here.
+        if (!mime) {
+            curl_easy_setopt (curl, CURLOPT_POST, 1L);
+        }
+        break;
     case HttpMethod::PUT:
         curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PUT");
         break;
@@ -215,6 +243,26 @@ void apply_method_and_body (CURL* curl, const Request& request) {
         curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "OPTIONS");
         break;
     }
+
+    return mime;
+}
+
+std::string body_content_type_header (const Request& request) {
+    const std::string implied = vayu::http::implied_content_type (request.body);
+    if (implied.empty ()) {
+        return {};
+    }
+    // A Content-Type the caller set wins - the same rule the request builder
+    // applies renderer-side, where "someone who typed this means it".
+    if (request.headers.contains ("Content-Type")) {
+        return {};
+    }
+    return "Content-Type: " + implied;
+}
+
+bool suppresses_request_header (const Request& request, const std::string& key) {
+    return vayu::http::content_type_is_engine_owned (request.body) &&
+    CaseInsensitiveLess::equal (key, "Content-Type");
 }
 
 void ingest_header_line (std::string_view line, Headers& headers) {
@@ -331,7 +379,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // Set method and body (shared with the single-request client - see
     // apply_method_and_body for why the two are set together and in that order)
-    apply_method_and_body (curl, request);
+    data->mime = apply_method_and_body (curl, request);
 
     // Bound what one transfer may buffer in memory. write_callback reports the
     // overrun by returning a short count, which curl turns into a failed
@@ -341,8 +389,18 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // Set headers
     for (const auto& [key, value] : request.headers) {
+        if (suppresses_request_header (request, key)) {
+            continue;
+        }
         std::string header = key + ": " + value;
         data->headers_list = curl_slist_append (data->headers_list, header.c_str ());
+    }
+
+    // The Content-Type the body mode implies, when the request declares none.
+    if (std::string content_type = body_content_type_header (request);
+        !content_type.empty ()) {
+        data->headers_list =
+        curl_slist_append (data->headers_list, content_type.c_str ());
     }
 
     // Add User-Agent if not set

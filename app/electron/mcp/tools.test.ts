@@ -724,6 +724,68 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	/**
+	 * Both these tools have offered `form-data` / `x-www-form-urlencoded` in
+	 * their `bodyType` description since they existed, while emitting
+	 * `{ mode, content }` - a shape the engine reads no fields out of, so the
+	 * request went out with an empty body (issue #381) and now is refused
+	 * outright. The string is split into the `fields` rows every other producer
+	 * builds, which is what makes the advertised mode real.
+	 */
+	test.each(["form-data", "x-www-form-urlencoded"])(
+		"run_request sends a %s body as fields",
+		async (bodyType) => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{
+					url: "https://api.example.com/users",
+					method: "POST",
+					body: "name=ada+lovelace&role=engineer",
+					bodyType,
+				},
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload.body).toEqual({
+				mode: bodyType,
+				fields: [
+					{ key: "name", value: "ada lovelace", enabled: true },
+					{ key: "role", value: "engineer", enabled: true },
+				],
+			});
+		}
+	);
+
+	test("create_request stores a form body as fields", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_request",
+			{
+				collectionId: "c1",
+				name: "New",
+				url: "https://api.example.com/x",
+				method: "POST",
+				body: "a=1&b=2",
+				bodyType: "x-www-form-urlencoded",
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({
+			body: {
+				mode: "x-www-form-urlencoded",
+				fields: [
+					{ key: "a", value: "1", enabled: true },
+					{ key: "b", value: "2", enabled: true },
+				],
+			},
+			bodyType: "x-www-form-urlencoded",
+		});
+	});
+
 	test("run_request forwards an ad-hoc pre-request script the agent supplied", async () => {
 		// Parsed through the tool's own inputSchema first, because that is the
 		// only thing standing between the agent and the engine: `registerTool`

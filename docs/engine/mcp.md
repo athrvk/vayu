@@ -264,6 +264,13 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   actually execute. `run_request` takes an agent-written `preRequestScript` /
   `postRequestScript` instead, since an ad-hoc call has no chain to compose
   from; `start_load_run` takes the same `postRequestScript` for a URL-only run.
+- **Bodies** - `body` is a string and `bodyType` names the mode
+  (`json` | `text` | `graphql` | `form-data` | `x-www-form-urlencoded`,
+  default `text`). The two form modes carry their content as **fields**, not as
+  a string, so `body` is written as `key=value&key=value` and split into the
+  `fields` rows the engine reads - see
+  [the `body` union](api-reference.md#the-request-body-union). `create_request`
+  stores the same shape. File parts are not supported.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`

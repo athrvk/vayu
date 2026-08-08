@@ -16,6 +16,12 @@ TransferData::~TransferData () {
     if (resolve_list) {
         curl_slist_free_all (resolve_list);
     }
+    // Freed after the transfer is done with the handle, which is what
+    // curl_mime_free requires; the pool's curl_easy_reset on the next acquire
+    // drops the handle's reference to it either way.
+    if (mime) {
+        curl_mime_free (mime);
+    }
 }
 
 } // namespace vayu::http::detail
