@@ -66,6 +66,9 @@ vi.mock("./LoadTestDetail", () => ({
 vi.mock("./DesignRunView", () => ({
 	default: () => <div data-testid="design-run-view" />,
 }));
+vi.mock("./ScenarioRunView", () => ({
+	default: () => <div data-testid="scenario-run-view" />,
+}));
 
 beforeEach(() => {
 	refetch.mockClear();
@@ -156,6 +159,42 @@ describe("HistoryDetail routing", () => {
 		render(<HistoryDetail />);
 
 		expect(screen.getByTestId("load-test-detail")).toBeTruthy();
+	});
+
+	/*
+	 * A scenario run's `results[]` are step executions of different requests, so
+	 * `LoadTestDetail`'s percentiles would describe a sequence as though it were
+	 * one request repeated. It also must not be gated on the report the way a
+	 * load run is: while the sequence is still executing, the live step stream
+	 * is the content, and waiting for a report would hold the tab on a skeleton
+	 * for the length of the run.
+	 */
+	it("renders the step list for a scenario run, not the load-test report", () => {
+		runQuery.data = { id: "run-1", type: "scenario", status: "completed" };
+
+		render(<HistoryDetail />);
+
+		expect(screen.getByTestId("scenario-run-view")).toBeTruthy();
+		expect(screen.queryByTestId("load-test-detail")).toBeNull();
+	});
+
+	it("does not gate a running scenario run on a report it has no reason to have", () => {
+		runQuery.data = { id: "run-1", type: "scenario", status: "running" };
+		reportQuery.data = undefined;
+		reportQuery.error = new Error("no report yet");
+
+		render(<HistoryDetail />);
+
+		expect(screen.getByTestId("scenario-run-view")).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+	});
+
+	it("names a scenario run a collection run in the header", () => {
+		runQuery.data = { id: "run-1", type: "scenario", status: "completed" };
+
+		render(<HistoryDetail />);
+
+		expect(screen.getByText(/collection run/i)).toBeTruthy();
 	});
 
 	it("shows the run id and status without repeating the URL", () => {

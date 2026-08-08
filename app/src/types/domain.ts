@@ -358,6 +358,43 @@ export interface RunConfigSnapshot {
 }
 
 /**
+ * How one step execution of a scenario run ended.
+ *
+ * `skipped` is a step the runner did not execute (flow control), and is never
+ * a pass: it asserted nothing. The four exist from the first release of the
+ * runner even though nothing produces `skipped` yet, so neither the wire shape
+ * nor a summary that counts them has to widen later.
+ */
+export type StepOutcome = "passed" | "failed" | "skipped" | "errored";
+
+/** The four outcomes as a value, in the order a run summary reads them. */
+export const STEP_OUTCOMES: readonly StepOutcome[] = [
+	"passed",
+	"failed",
+	"skipped",
+	"errored",
+] as const;
+
+/**
+ * One step execution as the live stream reports it - the `step` SSE event on
+ * `GET /runs/:runId/live`, built by `build_step_payload`
+ * (engine/src/core/scenario_runner.cpp). It carries no exchange: the stored
+ * `results` row is what the response pane restores from once the run ends.
+ */
+export interface ScenarioStepEvent {
+	/** 0-based pass over the plan. */
+	iteration: number;
+	/** 0-based position within the plan, stable for the run. */
+	stepIndex: number;
+	/** `requests.name` - the step's label, and the `setNextRequest` target. */
+	name: string;
+	outcome: StepOutcome;
+	/** `0` when the step never reached a server. */
+	statusCode: number;
+	latencyMs: number;
+}
+
+/**
  * One HTTP exchange's trace, as the engine stores it. A design-mode trace
  * (`POST /request` -> `store_result`, execution.cpp) nests the request and
  * response; a load-test trace flattens timing and status onto the object
@@ -435,6 +472,22 @@ export interface RunResultTrace {
 		 */
 		httpVersionDowngraded?: boolean;
 	};
+	/*
+	 * Step identity, stamped onto a scenario run's per-step trace by
+	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by
+	 * `scenario-steps.ts` to say which step a stored row belongs to. Only a
+	 * scenario run's rows carry them, which is why a row missing `stepIndex` is
+	 * skipped by the step list rather than shown as step 0.
+	 */
+	/** 0-based pass over the plan. */
+	iteration?: number;
+	/** 0-based position within the plan, stable for the run. */
+	stepIndex?: number;
+	/** `requests.name` at plan time - the `setNextRequest` target. */
+	stepName?: string;
+	/** The stored request this step came from. */
+	requestId?: string;
+	outcome?: StepOutcome;
 }
 
 /**
@@ -486,10 +539,11 @@ export interface RunSummary {
 export interface Run {
 	id: string;
 	/**
-	 * `scenario` is a collection run - one row per step, engine-side since the
-	 * sequential runner landed. The renderer has no runner UI yet, so a scenario
-	 * row renders through the load-run path; what it must not do is crash on a
-	 * type it was not written for, which `RunItem.run-types.test.tsx` pins.
+	 * `scenario` is a collection run - one row per step. Its tab is
+	 * `ScenarioRunView` (the step list), not the load-test report: a scenario
+	 * run's `results[]` are step executions, so the load report's percentiles
+	 * would describe a sequence as if it were one request repeated. The sidebar
+	 * row is still the non-load shape, which `RunItem.run-types.test.tsx` pins.
 	 */
 	type: "load" | "design" | "scenario";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
@@ -835,6 +889,31 @@ export interface RunReport {
 		 * capture existed.
 		 */
 		responseBodiesCaptured?: number;
+	};
+	/**
+	 * What the sequence did, present only on a scenario run's report (the engine
+	 * leaves the section out entirely for the other two types, rather than
+	 * showing a load run four zeros).
+	 *
+	 * `stepsStored` against `stepsExecuted` is the honest reading of `results[]`:
+	 * a run that filled `maxScenarioStoredSteps` reports fewer rows than it ran,
+	 * with every non-passing step among the ones kept - so a non-zero
+	 * `stepsDropped` means successes are missing, never a failure.
+	 */
+	scenario?: {
+		/** Iterations the run was asked for. */
+		iterations: number;
+		/** Iterations that finished - fewer when the run was stopped or errored. */
+		iterationsCompleted: number;
+		/** Step executions the run performed, whether or not their rows survived. */
+		stepsExecuted: number;
+		passed: number;
+		failed: number;
+		skipped: number;
+		errored: number;
+		/** Step rows the run kept - the length `results[]` should have. */
+		stepsStored: number;
+		stepsDropped: number;
 	};
 	results?: Array<{
 		/**

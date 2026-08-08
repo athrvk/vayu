@@ -46,6 +46,7 @@ import type {
 	ExecuteRequestRequest,
 	StartLoadTestRequest,
 	StartLoadTestResponse,
+	StartScenarioRunRequest,
 	GetRunReportResponse,
 	StopRunResponse,
 	GetHealthResponse,
@@ -308,6 +309,21 @@ export const apiService = {
 	/** A run's `tests` script is the same script Send runs - see executeRequest. */
 
 	async startLoadTest(data: StartLoadTestRequest): Promise<StartLoadTestResponse> {
+		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
+			...data,
+			allowScriptRequests: true,
+		});
+	},
+
+	/**
+	 * Start a collection run. The same `POST /runs` endpoint and the same
+	 * `202 {runId}` answer as a load test - the payload's `scenario` block is
+	 * what selects the sequential executor.
+	 *
+	 * `allowScriptRequests` for the same reason a load test sends it: every step
+	 * runs the pre-request and test scripts a Send of that request would run.
+	 */
+	async startScenarioRun(data: StartScenarioRunRequest): Promise<StartLoadTestResponse> {
 		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
 			...data,
 			allowScriptRequests: true,

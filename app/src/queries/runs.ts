@@ -23,7 +23,7 @@ import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
-import type { Run, RunListResponse } from "@/types";
+import type { Run, RunListResponse, StartScenarioRunRequest } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
@@ -257,6 +257,34 @@ export function useLastDesignRunQuery(requestId: string | null | undefined) {
 }
 
 // ============ Run Mutations ============
+
+/**
+ * Start a collection run.
+ *
+ * The mutation ends where the engine's answer does - at `202 {runId}`. It does
+ * **not** attach to the live stream or open a tab: the run is now the engine's,
+ * and what the app does with it is the caller's decision (`RunCollectionDialog`
+ * opens the tab and starts monitoring). Keeping those out means a caller that
+ * only wants the run - a future keyboard shortcut, a re-run button - does not
+ * inherit a tab it did not ask for.
+ *
+ * Every rejection is a `400` raised before a run row exists (an empty
+ * collection, a step that will not compose, a plan over `maxScenarioSteps`), so
+ * a failed mutation leaves nothing behind to clean up. The list is invalidated
+ * only on success for that reason.
+ */
+export function useStartScenarioRunMutation() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (payload: StartScenarioRunRequest) => apiService.startScenarioRun(payload),
+		onSuccess: () => {
+			// The new run belongs at the head of History, and the list's 5s poll
+			// is off once the user has paged it.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		},
+	});
+}
 
 /**
  * Delete a run

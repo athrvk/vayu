@@ -45,6 +45,7 @@ export {
 	useRunReportQuery,
 	useLastDesignRunQuery,
 	useDeleteRunMutation,
+	useStartScenarioRunMutation,
 	useInvalidateRuns,
 	isRunNotFound,
 } from "./runs";

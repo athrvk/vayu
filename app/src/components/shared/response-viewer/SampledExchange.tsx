@@ -42,7 +42,14 @@
  */
 
 import { type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Clock } from "lucide-react";
+import {
+	AlertCircle,
+	CheckCircle2,
+	ChevronDown,
+	ChevronRight,
+	Clock,
+	MinusCircle,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -50,9 +57,45 @@ import { StatusCodeBadge } from "./StatusCodeBadge";
 import TimingPhaseTiles from "./TimingPhaseTiles";
 import type { ResolvedTimingPhase } from "./timing-phases";
 
+/**
+ * How the row reads at a glance - the icon and the colour it carries.
+ *
+ * Normally derived from the exchange itself, which is all a load-run sample
+ * has to go on. A collection run's step knows better: `failed` there is a test
+ * assertion that did not hold over a perfectly good `200`, and `skipped` is a
+ * step that never ran at all. Deriving either from the status code would make
+ * the first read as a success and the second as a connection failure, so a
+ * caller that knows the outcome states it instead.
+ */
+export type ExchangeState = "success" | "error" | "slow" | "skipped";
+
+const STATE_ICON: Record<ExchangeState, typeof CheckCircle2> = {
+	success: CheckCircle2,
+	error: AlertCircle,
+	slow: Clock,
+	skipped: MinusCircle,
+};
+
+const STATE_TINT: Record<ExchangeState, string> = {
+	success: "text-status-success-text",
+	error: "text-destructive-text",
+	slow: "text-status-stopped-text",
+	skipped: "text-muted-foreground",
+};
+
 export interface SampledExchangeProps {
 	/** Printed as `#{label}`. The dashboard prefers the engine's request number. */
 	label: ReactNode;
+	/**
+	 * Named beside the label - a collection run's step name. Load-run samples
+	 * have nothing to put here (one request, repeated), so it stays absent.
+	 */
+	title?: ReactNode;
+	/**
+	 * Overrides the state derived from `error` / `isSlow` / `statusCode`. Pass
+	 * it only when the caller genuinely knows something the exchange does not.
+	 */
+	state?: ExchangeState;
 	statusCode: number;
 	statusText?: string;
 	latencyMs: number;
@@ -74,6 +117,8 @@ export interface SampledExchangeProps {
 
 export function SampledExchange({
 	label,
+	title,
+	state,
 	statusCode,
 	statusText,
 	latencyMs,
@@ -89,8 +134,11 @@ export function SampledExchange({
 }: SampledExchangeProps) {
 	// A connection failure has no status code to show, so the row's icon is the
 	// only thing that says "this one did not come back".
-	const isError = !!error || statusCode === 0;
-	const StatusIcon = isError ? AlertCircle : isSlow ? Clock : CheckCircle2;
+	const derived: ExchangeState =
+		error || statusCode === 0 ? "error" : isSlow ? "slow" : "success";
+	const resolved = state ?? derived;
+	const isError = resolved === "error";
+	const StatusIcon = STATE_ICON[resolved];
 	const Chevron = isExpanded ? ChevronDown : ChevronRight;
 
 	return (
@@ -103,18 +151,11 @@ export function SampledExchange({
 			>
 				<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 
-				<StatusIcon
-					className={cn(
-						"w-4 h-4 shrink-0",
-						isError
-							? "text-destructive-text"
-							: isSlow
-								? "text-status-stopped-text"
-								: "text-status-success-text"
-					)}
-				/>
+				<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
 
 				<span className="text-xs text-muted-foreground font-mono min-w-8">#{label}</span>
+
+				{title}
 
 				<StatusCodeBadge status={statusCode} statusText={statusText} className="shrink-0" />
 

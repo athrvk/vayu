@@ -249,7 +249,19 @@ contract.
 apiService.composeRequest(data): Promise<ComposedRequest>
 apiService.executeRequest(data): Promise<SanityResult>
 apiService.startLoadTest(data): Promise<StartLoadTestResponse>
+apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 ```
+
+`startLoadTest` and `startScenarioRun` are the **same `POST /runs` endpoint and
+the same `202 {runId}` answer** - the payload is what selects the executor. A
+scenario states its work as an ordered collection
+(`{scenario: {source: "collection", collectionId, recursive?, iterations?}}`), so
+it carries no `method`/`url` and no `mode`, and its iteration count lives inside
+the block rather than beside a load-test mode. Both send `allowScriptRequests`,
+for the same reason: every step runs the scripts a Send of that request would
+run. The engine resolves the whole plan before answering, so an empty
+collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
+`400` with **no run row created** - a failed start leaves nothing to clean up.
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
@@ -347,7 +359,8 @@ system browser or an embedded Electron window, then polls the engine).
 
 ## SSE Client (`services/sse-client.ts`)
 
-Server-Sent Events client for real-time load test metrics streaming.
+Server-Sent Events client for a run's live stream - load-test metrics, and a
+collection run's per-step progress.
 
 ### Features
 
@@ -358,9 +371,13 @@ Server-Sent Events client for real-time load test metrics streaming.
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
   browser's built-in `EventSource` retry. At run end the app converges on the stored report
   (`GET /runs/:id/report`) rather than reconnecting to the stream.
-- **Event Handling**: `metrics` events, `complete` event, `error` handling
+- **Event Handling**: `metrics` events, `step` events, `complete` event, `error` handling
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
+- **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
+  for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
+  on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row
+  rather than merely say nothing.
 
 ### Usage
 
@@ -369,7 +386,8 @@ sseClient.connect(
   runId: string,
   onMessage: (metrics: LoadTestMetrics) => void,
   onError: (error: Error) => void,
-  onClose: () => void
+  onClose: () => void,
+  onStep?: (step: ScenarioStepEvent) => void   // scenario runs only
 );
 
 sseClient.disconnect();
@@ -378,8 +396,12 @@ sseClient.isConnected(): boolean
 
 ### Event Types
 
-- **`metrics`**: Real-time metrics update (JSON payload)
-- **`complete`**: Load test completed
+- **`metrics`**: Real-time metrics update (JSON payload). Load runs only - a scenario run's work
+  is sequential, so a per-tick aggregate would describe one request at a time.
+- **`step`**: One step execution of a scenario run - `{iteration, stepIndex, name, outcome,
+  statusCode, latencyMs}`. Listened for only when `onStep` is passed, since a load run never
+  emits one.
+- **`complete`**: The run reached a terminal status
 - **`error`**: Connection error (triggers reconnection)
 - **`open`**: Connection established
 

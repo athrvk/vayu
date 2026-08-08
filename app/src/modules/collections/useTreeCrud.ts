@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, Trash2, Edit2, FolderPlus } from "lucide-react";
+import { Plus, Trash2, Edit2, FolderPlus, Play } from "lucide-react";
 import { useTabsStore, useSaveStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
@@ -50,6 +50,13 @@ export interface TreeCrudPanel {
 	confirmDelete: () => void;
 	/** The confirm dialog's own delete is in flight - its button spins. */
 	isDeleteInFlight: boolean;
+	/**
+	 * The collection the run dialog is pointed at, or null when it is closed.
+	 * The whole collection and not just its id: the dialog names it, and the
+	 * row that opened it already has the object.
+	 */
+	runTarget: Collection | null;
+	dismissRunDialog: () => void;
 }
 
 export interface DeleteConfirmTarget {
@@ -99,6 +106,7 @@ export function useTreeCrud({
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmTarget | null>(null);
+	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 
 	// Memoised because the callbacks below list them as dependencies: redefined
 	// each render, they would rebuild every handler that opens a tab.
@@ -471,6 +479,7 @@ export function useTreeCrud({
 	]);
 
 	const dismissDeleteConfirm = useCallback(() => setDeleteConfirm(null), []);
+	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
 
 	/**
 	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
@@ -482,6 +491,13 @@ export function useTreeCrud({
 	 */
 	const getCollectionActions = useCallback(
 		(collection: Collection): RowAction[] => [
+			{
+				// First, and above the edit actions: it is the only one here that
+				// acts on the folder's contents rather than on the folder.
+				label: "Run collection",
+				icon: Play,
+				onSelect: () => setRunTarget(collection),
+			},
 			{
 				label: "Rename",
 				icon: Edit2,
@@ -536,6 +552,8 @@ export function useTreeCrud({
 				(deleteConfirm?.type === "collection" &&
 					deletingCollectionId === deleteConfirm.id) ||
 				(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm.id),
+			runTarget,
+			dismissRunDialog,
 		}),
 		[
 			creatingCollection,
@@ -551,6 +569,8 @@ export function useTreeCrud({
 			handleConfirmDelete,
 			deletingCollectionId,
 			deletingRequestId,
+			runTarget,
+			dismissRunDialog,
 		]
 	);
 
