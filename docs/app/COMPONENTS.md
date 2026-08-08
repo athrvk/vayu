@@ -158,13 +158,15 @@ Snippets are generated from **`POST /compose`'s output** - the request with `{{v
 
 | Target | String rule | Multipart vs urlencoded |
 |---|---|---|
-| `curl` | POSIX single quotes, `'` → `'\''` | `-F` vs `--data-urlencode` |
+| `curl` | POSIX single quotes, `'` → `'\''` | `--form-string` vs `--data-urlencode` |
 | `fetch` | `JSON.stringify` (it *is* the JS literal grammar) | `FormData` vs `URLSearchParams` |
 | `python` | `JSON.stringify` - JSON's escapes are a strict subset of Python 3's | `files=` vs `data=` (a multipart body passed as `data=` is silently urlencoded) |
 | `httpie` | POSIX, shared with curl | `--multipart` vs `--form` (`--form` alone is urlencoded) |
 | `powershell` | Single quotes, `'` → `''`; a POSIX `'\''` would put a backslash in the data | `-Form` vs `-Body` |
 
-HTTPie takes headers as bare `Name:value` words and a body as `--raw`, so the composed bytes go out unchanged rather than HTTPie building a new JSON object from `key=value`. PowerShell emits `Invoke-RestMethod`, not `curl` - on Windows PowerShell `curl` is an alias for that cmdlet, so a snippet saying `curl` runs something else than the reader expects.
+HTTPie takes headers as bare `Name:value` words and a body as `--raw`, so the composed bytes go out unchanged rather than HTTPie building a new JSON object from `key=value`. PowerShell emits `Invoke-RestMethod`, not `curl` - on Windows PowerShell `curl` is an alias for that cmdlet, so a snippet saying `curl` runs something else than the reader expects, and a multipart snippet carries a `# requires PowerShell 6.1+ (-Form)` line because 5.1 has no `-Form` at all.
+
+**Quoting is not the end of it: a client can read its own argument as a path.** The bytes survive the shell and the *client* then interprets them, so curl's `-F` uploads a local file for any value starting with `@` or `<`, and HTTPie's item grammar reads `=@` the same way (plus `==` as a query parameter, and a `:` or `@` in a key as a header or a file upload). curl form fields therefore use `--form-string`, which has no such grammar, and HTTPie items escape with a backslash on the key and on a leading separator in the value. `--data-urlencode` encodes only what follows the first `=`, so the field *name* is percent-encoded here and the value is left to curl.
 
 **Secrets are masked by default in resolved output**, revealing is explicit, and masking happens *before* quoting - after it, a value containing a quote no longer matches itself. What is masked: every variable the resolver marks secret, plus the credential the auth mode carries. Jar cookies are never in a snippet (libcurl attaches them at transfer time) and the section says so.
 
