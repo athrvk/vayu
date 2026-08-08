@@ -76,7 +76,7 @@ const saveStore = {
 	setActiveContext: vi.fn(),
 	markPendingSave: vi.fn(),
 	startSaving: vi.fn(),
-	completeSave: vi.fn(),
+	completeSaveThenIdle: vi.fn(),
 	failSave: vi.fn(),
 	setStatus: vi.fn(),
 };

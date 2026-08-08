@@ -30,11 +30,29 @@ export const TIMING = {
 	 * granularity the formatter has (a minute), which is all it needs to be.
 	 */
 	RELATIVE_TIME_TICK_MS: 30_000,
-	/** How long the "Saved" indicator stays visible after a save. */
+	/**
+	 * How long the "Saved" indicator stays visible after a save.
+	 *
+	 * Read in exactly one place - `completeSaveThenIdle` in `save-store.ts`, which
+	 * is the only way a success is reported - so every saving surface in the app
+	 * shows it for the same time.
+	 */
 	SAVED_STATUS_DURATION_MS: 3000,
 
-	/** Transient status feedback (copied / saved / error chips) reset delay. */
+	/** Transient in-component status feedback (the response viewer's copy tick). */
 	STATUS_RESET_MS: 2000,
+
+	/**
+	 * How long the collection tree's typeahead buffer survives between
+	 * keystrokes before the next letter starts a fresh search.
+	 *
+	 * The WAI-ARIA practices leave the number to the implementation. 500ms is
+	 * what native tree views use: long enough to type a three-letter prefix
+	 * without hurrying, short enough that a letter pressed after a pause means
+	 * "jump to something starting with this" rather than extending a prefix the
+	 * user has forgotten they were building.
+	 */
+	TREE_TYPEAHEAD_MS: 500,
 
 	/**
 	 * Radix tooltip open delay, set once on the root `TooltipProvider` in

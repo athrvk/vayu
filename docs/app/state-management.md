@@ -257,16 +257,18 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
 raises an error toast carrying the reason. Its call sites are the collection
 tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
-`VariableTableEditor`, `useDraftSaveContext` and `ContextBar` - and doing the
-reporting here rather than at each of them means a new caller cannot forget to
-report. The last two were added because both could fail in complete silence:
-`ContextBar` fired three mutations with no `onError` at all, and the
+`VariableTableEditor`, `useDraftSaveContext` and the context bar's
+`VariablesSection` - and doing the reporting here rather than at each of them
+means a new caller cannot forget to report. The last two were added because both
+could fail in complete silence: the variables section fired three mutations with
+no `onError` at all, and the
 manual-draft editors rendered an inline callout that a quit flush has no screen
 to show.
 
-`ContextBar` also **registers a context** (`context-bar-variables`), because
-`failSave` alone only covers the failure. A variable commit is a plain mutation
-rather than a draft, so it registers one entry for the whole bar whose
+`VariablesSection` also **registers a context** (`context-bar-variables`),
+because `failSave` alone only covers the failure. A variable commit is a plain
+mutation rather than a draft, so it registers one entry for the whole section
+whose
 `hasPendingChanges` tracks whether any commit is outstanding and whose `save()`
 resolves when the last one settles - without it `flushAll` had nothing to wait
 for, and the renderer could be torn down mid-PUT with the input already showing
@@ -278,15 +280,24 @@ included mount - so merely opening Settings wiped an `error` another context had
 just published to the Dock. It now tracks whether the `pending` on screen is its
 own and leaves anything else alone.
 
-The same rule is why **`completeSaveThenIdle` exists**: it sets `saved` and
-arms the return to `idle` behind a check that the status is still the `saved` it
-set. A bare `completeSave()` followed by
-`setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS)` fires regardless of
-what happened in the meantime, so a rename that succeeded two seconds ago cleared
-the failure a delete had just published. `triggerSave` has always guarded its own
-reset this way; the collection tree now shares that one implementation rather
-than a copy of the timer. `useSaveManager`, `SettingsMain` and
-`VariableTableEditor` still hand-roll theirs - see issue #369.
+The same rule is why **`completeSaveThenIdle` is the only way to report a
+success**: it sets `saved` and arms the return to `idle` behind two checks - that
+the status is still the `saved` it set, and that no later save has re-armed the
+reset since. A bare `completeSave()` followed by
+`setTimeout(() => setStatus("idle"), …)` fires regardless of what happened in the
+meantime, so a rename that succeeded two seconds ago cleared the failure a delete
+had just published; and two saves a second apart had the first one's timer end
+the second one's indicator early. `triggerSave` has always guarded the first way,
+`useSaveManager` hand-rolled the second as a `clearTimeout` of its own timer.
+Both live in the store now, and the six call sites (`useSaveManager`,
+`SettingsMain`, `VariableTableEditor`, `VariablesSection`, both collection-tree
+renames) share that one implementation rather than five copies of the timer.
+
+`completeSave` is gone with them. It set `saved` and armed nothing, so every
+caller either paired it with a hand-rolled timer or - `VariablesSection`, the one
+non-draft commit path - left "Saved" in the Dock until something else happened to
+change it. The indicator's lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one
+place, for every surface that saves.
 
 There is no `errorMessage` field. The reason travels in the toast; the store
 holds only the status the Dock renders. The field used to exist and its sole
@@ -1316,7 +1327,7 @@ starts the engine at import time.
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
 
-    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - `ContextBar` did neither, so a rejected edit sat on screen looking committed.
+    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 
 6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 

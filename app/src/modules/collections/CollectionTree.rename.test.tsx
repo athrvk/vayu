@@ -19,9 +19,8 @@
  * already had.
  *
  * The third case is the status timer: both paths armed a bare
- * `setTimeout(() => setStatus("idle"))`, which fires two seconds later no matter
- * what happened in between - clearing a failure another surface had published to
- * the Dock.
+ * `setTimeout(() => setStatus("idle"))`, which fires no matter what happened in
+ * between - clearing a failure another surface had published to the Dock.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -181,7 +180,7 @@ describe("the status timer a rename arms", () => {
 
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("saved"));
 		await act(async () => {
-			vi.advanceTimersByTime(TIMING.STATUS_RESET_MS);
+			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
 		expect(useSaveStore.getState().status).toBe("idle");
@@ -198,7 +197,7 @@ describe("the status timer a rename arms", () => {
 		// editor's autosave. The Dock is now showing that error.
 		act(() => useSaveStore.getState().failSave("delete failed"));
 		await act(async () => {
-			vi.advanceTimersByTime(TIMING.STATUS_RESET_MS);
+			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
 		// The rename's timer used to clear it and leave the Dock saying nothing at

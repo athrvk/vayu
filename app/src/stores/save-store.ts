@@ -75,16 +75,16 @@ interface SaveState {
 	setStatus: (status: SaveStatus) => void;
 	markPendingSave: () => void;
 	startSaving: () => void;
-	completeSave: () => void;
 	/**
-	 * `completeSave`, plus the return to `idle` that every caller wants after it -
-	 * and the guard that only the context which set a status clears it.
+	 * Report a successful save: `saved`, then back to `idle` once the indicator
+	 * has been on screen for `TIMING.SAVED_STATUS_DURATION_MS`.
 	 *
-	 * A bare `setTimeout(() => setStatus("idle"))` fires two seconds later
+	 * This is the only way to report a success, because the reset is the half
+	 * every caller got wrong. A bare `setTimeout(() => setStatus("idle"))` fires
 	 * regardless of what happened in between, so it clears a failure another
 	 * surface published to the Dock, or wipes a `pending` from an edit made since.
-	 * `triggerSave` has always guarded its own reset this way; the callers that
-	 * hand-rolled the timer did not.
+	 * `triggerSave` has always guarded its own reset this way; the five callers
+	 * that hand-rolled the timer did not.
 	 */
 	completeSaveThenIdle: () => void;
 	failSave: (error: string) => void;
@@ -105,6 +105,12 @@ interface SaveState {
 }
 
 export const useSaveStore = create<SaveState>((set, get) => {
+	// Bumped by every `completeSaveThenIdle`, so an armed reset can tell whether
+	// it is still the most recent one. Module-local rather than store state: no
+	// renderer reads it, and a field nothing renders is the defect this file's
+	// history is made of.
+	let idleResetGeneration = 0;
+
 	// Internal helper - runs a save for the given context and updates store state.
 	// Caller must own the in-progress guard if needed.
 	const runSave = async (context: SaveContext) => {
@@ -134,14 +140,20 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 		startSaving: () => set({ status: "saving" }),
 
-		completeSave: () => set({ status: "saved" }),
-
 		completeSaveThenIdle: () => {
 			set({ status: "saved" });
+			const armed = ++idleResetGeneration;
 			setTimeout(() => {
-				// Only reset to idle if this "saved" is still the status on screen.
+				// Two conditions, and both are load-bearing. The status check keeps
+				// this timer off a status somebody else published meanwhile. The
+				// generation check keeps it off a *later* save's "saved": two saves
+				// a second apart would otherwise have the first timer end the second
+				// one's indicator early. `useSaveManager` hand-rolled the second half
+				// as a `clearTimeout` of its own timer; it lives here now, so every
+				// caller gets it.
+				if (armed !== idleResetGeneration) return;
 				if (get().status === "saved") get().setStatus("idle");
-			}, TIMING.STATUS_RESET_MS);
+			}, TIMING.SAVED_STATUS_DURATION_MS);
 		},
 
 		failSave: (error) => {

@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
@@ -18,6 +19,15 @@ export interface CollectionItemProps {
 	collection: Collection;
 	allCollections: Collection[];
 	depth: number;
+	/**
+	 * 1-based position among the rows this one shares a parent with, and how
+	 * many there are - child folders and requests together, since a screen
+	 * reader sees one set of treeitems per group. Required rather than
+	 * defaulted: only the renderer that maps the siblings knows them, and a
+	 * default would announce a plausible lie ("1 of 1") rather than fail.
+	 */
+	posInSet: number;
+	setSize: number;
 	expandedCollectionIds: Set<string>;
 	selectedCollectionId: string | null;
 	selectedRequestId: string | null;
@@ -42,6 +52,8 @@ export interface CollectionItemProps {
 	onStartRename: (collection: Collection) => void;
 	onDeleteRequest: (requestId: string) => Promise<void>;
 	onRequestDeleteClick?: (requestId: string, requestName: string) => void;
+	/** Opens the confirm dialog for this collection - the Delete key's target. */
+	onCollectionDeleteClick?: (collectionId: string, collectionName: string) => void;
 	onDuplicateRequest?: (request: Request) => void;
 	onSubCollectionNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
@@ -56,6 +68,8 @@ export default function CollectionItem({
 	collection,
 	allCollections,
 	depth,
+	posInSet,
+	setSize,
 	expandedCollectionIds,
 	selectedCollectionId,
 	selectedRequestId,
@@ -79,6 +93,7 @@ export default function CollectionItem({
 	onStartRename,
 	onDeleteRequest,
 	onRequestDeleteClick,
+	onCollectionDeleteClick,
 	onDuplicateRequest,
 	onSubCollectionNameChange,
 	onCreateSubfolder,
@@ -98,6 +113,31 @@ export default function CollectionItem({
 	const childCollections = allCollections
 		.filter((c) => c.parentId === collection.id)
 		.sort(compareTreeOrder);
+	// Folders and requests are one set of treeitems inside one group, so the
+	// requests continue the folders' numbering rather than restarting it.
+	const childSetSize = childCollections.length + requests.length;
+	// Ties the children's group back to this row for assistive tech - see the
+	// `aria-owns` note on the row itself.
+	const childrenId = `tree-group-${collection.id}`;
+
+	const rowRef = useRef<HTMLDivElement>(null);
+	/**
+	 * Set when the rename field is about to be closed *from the keyboard*, so
+	 * focus can be put back on the row once React has unmounted the field.
+	 *
+	 * Without it F2, Escape drops the user out of the tree entirely: the field
+	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
+	 * of the document. Blur deliberately does not set it - a blur means focus has
+	 * already gone somewhere the user chose, and yanking it back would be worse
+	 * than the bug.
+	 */
+	const returnFocusToRow = useRef(false);
+
+	useEffect(() => {
+		if (isRenaming || !returnFocusToRow.current) return;
+		returnFocusToRow.current = false;
+		rowRef.current?.focus();
+	}, [isRenaming]);
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -147,13 +187,26 @@ export default function CollectionItem({
 			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
 			    hook promotes exactly one row to 0. */}
 			<div
+				ref={rowRef}
 				role="treeitem"
 				tabIndex={-1}
 				// Lets the tree scroll a selected collection into view, the way
 				// `data-request-id` on RequestItem already does for a request.
 				data-collection-id={collection.id}
+				data-tree-label={collection.name}
 				aria-expanded={isExpanded}
 				aria-selected={isSelected}
+				// The hierarchy a screen reader announces. Without these the whole
+				// tree reads as a flat list: level is 1-based, so a root row is 1.
+				aria-level={depth + 1}
+				aria-posinset={posInSet}
+				aria-setsize={setSize}
+				// A row's children are rendered as its *sibling*, not inside it (see
+				// useRovingTreeFocus for why the DOM is that shape), so nothing
+				// connects the group to this row. `aria-owns` is the attribute-only
+				// way to say "that group belongs to me" without restructuring the
+				// DOM the roving-focus walk and the hit-area rules depend on.
+				aria-owns={isExpanded ? childrenId : undefined}
 				onClick={(e) => isRowSurface(e) && handleClick(e)}
 				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 				className={cn(
@@ -226,8 +279,10 @@ export default function CollectionItem({
 							onChange={(e) => onRenameChange(e.target.value)}
 							onKeyDown={(e) => {
 								if (e.key === "Enter") {
+									returnFocusToRow.current = true;
 									onRenameSubmit(collection.id);
 								} else if (e.key === "Escape") {
+									returnFocusToRow.current = true;
 									onRenameCancel();
 								}
 							}}
@@ -271,8 +326,12 @@ export default function CollectionItem({
 						actions={getCollectionActions(collection)}
 					/>
 				)}
-				{/* Keyboard-only rename target: F2 clicks it (see useRovingTreeFocus).
-				    Never shown; the same action lives in the row's menu. */}
+				{/* Keyboard-only rename and delete targets: F2 and Delete click them
+				    (see useRovingTreeFocus). Never shown; the same actions live in
+				    the row's menu. The delete one used to exist on request rows
+				    only, so Delete on a folder was swallowed silently - the hook
+				    preventDefaults the key either way. It opens the same confirm
+				    dialog the menu does: a cascade delete is never one keystroke. */}
 				<button
 					type="button"
 					className="hidden"
@@ -281,11 +340,22 @@ export default function CollectionItem({
 					data-tree-rename
 					onClick={() => onStartRename(collection)}
 				/>
+				<button
+					type="button"
+					className="hidden"
+					aria-hidden="true"
+					tabIndex={-1}
+					data-tree-delete
+					onClick={() => {
+						if (isDeleting) return;
+						onCollectionDeleteClick?.(collection.id, collection.name);
+					}}
+				/>
 			</div>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}
 			{isExpanded && (
-				<div className="mt-1 space-y-0.5">
+				<div id={childrenId} role="group" className="mt-1 space-y-0.5">
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
 						<div className="flex gap-2 py-1 px-2">
@@ -326,12 +396,14 @@ export default function CollectionItem({
 					)}
 
 					{/* Child Collections (Subfolders) - Recursive */}
-					{childCollections.map((childCollection) => (
+					{childCollections.map((childCollection, index) => (
 						<CollectionItem
 							key={childCollection.id}
 							collection={childCollection}
 							allCollections={allCollections}
 							depth={depth + 1}
+							posInSet={index + 1}
+							setSize={childSetSize}
 							expandedCollectionIds={expandedCollectionIds}
 							selectedCollectionId={selectedCollectionId}
 							selectedRequestId={selectedRequestId}
@@ -353,6 +425,7 @@ export default function CollectionItem({
 							onStartRename={onStartRename}
 							onDeleteRequest={onDeleteRequest}
 							onRequestDeleteClick={onRequestDeleteClick}
+							onCollectionDeleteClick={onCollectionDeleteClick}
 							onDuplicateRequest={onDuplicateRequest}
 							onSubCollectionNameChange={onSubCollectionNameChange}
 							onCreateSubfolder={onCreateSubfolder}
@@ -374,12 +447,14 @@ export default function CollectionItem({
 								Empty folder
 							</div>
 						)}
-					{requests.map((request) => (
+					{requests.map((request, index) => (
 						<RequestItem
 							key={request.id}
 							request={request}
 							collectionId={collection.id}
 							depth={depth + 1}
+							posInSet={childCollections.length + index + 1}
+							setSize={childSetSize}
 							onSelect={onRequestClick}
 							onDelete={onDeleteRequest}
 							onBeforeDelete={onRequestDeleteClick}

@@ -485,7 +485,13 @@ export interface RunSummary {
 
 export interface Run {
 	id: string;
-	type: "load" | "design";
+	/**
+	 * `scenario` is a collection run - one row per step, engine-side since the
+	 * sequential runner landed. The renderer has no runner UI yet, so a scenario
+	 * row renders through the load-run path; what it must not do is crash on a
+	 * type it was not written for, which `RunItem.run-types.test.tsx` pins.
+	 */
+	type: "load" | "design" | "scenario";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;

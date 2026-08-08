@@ -114,7 +114,15 @@ function usePendingCommits(): () => () => void {
 			// A failed commit already reported itself through `failSave`; painting
 			// "Saved" over it is the same defect `runSave` guards against in the
 			// save store.
-			if (useSaveStore.getState().status !== "error") useSaveStore.getState().completeSave();
+			//
+			// `completeSaveThenIdle`, not a success plus a hand-rolled reset timer:
+			// the store holds one status for the whole app, so a bare
+			// `setTimeout(() => setStatus("idle"))` clears whatever is current when
+			// it lands. This path armed no reset at all before #369, which left
+			// "Saved" in the Dock until something else changed it.
+			if (useSaveStore.getState().status !== "error") {
+				useSaveStore.getState().completeSaveThenIdle();
+			}
 		};
 	}, [updateContext]);
 }

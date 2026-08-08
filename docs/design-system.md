@@ -1283,23 +1283,52 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   collections, `aria-selected` for the open entity.
 - Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
 - Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
-  then moves to the parent, Enter/Space opens, **Delete** deletes, **Shift+F10 /
-  Menu** opens row actions.
+  then moves to the parent, Enter/Space opens, **F2** renames, **Delete**
+  deletes, **Shift+F10 / Menu** opens row actions, **typeahead** jumps to the
+  next row whose name starts with what you type, **`*`** expands every folder at
+  the focused row's level.
 - Every control inside a row is `tabIndex={-1}`, so Delete and Shift+F10 are the
   keyboard path to row actions - do not remove them without providing another.
+  Both row types must render every hidden control: a folder row without
+  `data-tree-delete` swallowed Delete silently for months, because the hook
+  `preventDefault`s the key whether or not it finds something to click.
 
 Rows declare behaviour through data attributes rather than props
-(`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-delete`),
-so the hook needs nothing threaded through `CollectionItem`'s prop list.
+(`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,
+`data-tree-delete`, `data-tree-label`), so the hook needs nothing threaded
+through `CollectionItem`'s prop list. `data-tree-label` is the row's name for
+typeahead and is not optional decoration: a request row's `textContent` starts
+with its method badge and a folder's ends with its child count, so matching the
+text would search a string the user never sees.
 
 **Focus is not selection.** Arrows move focus without opening anything; Enter
 opens. Keep roving focus, `aria-selected`, and the open tab in tabs-store
 distinct - conflating them is the classic treeview bug.
 
+**A rename must hand focus back.** The rename field replaces the row's label and
+then unmounts, so closing it from the keyboard (Enter or Escape) with nothing to
+catch focus drops the user to `<body>` and the next Tab restarts from the top of
+the document. Both row types refocus their own row. A *blur* deliberately does
+not - focus has already gone where the user sent it.
+
 Visible order comes from the DOM (`[role="treeitem"]` in document order), since
 collapsed subtrees are not rendered. Note a row's children are a **sibling** of
 that row inside a shared wrapper, not nested within it, so finding a parent row
 means walking up to the enclosing wrapper - not `closest()`.
+
+**That same shape is why the hierarchy has to be stated, not inferred.** A
+sibling group is not a child group, so the accessibility tree read as a flat
+list of rows. Every row carries `aria-level` (1-based), `aria-posinset` and
+`aria-setsize`; the children wrapper is `role="group"` and the folder row claims
+it with `aria-owns`, which buys the ownership without moving the DOM the
+roving-focus walk and the hit-area rules depend on. Folders and requests inside
+one group are **one** set - the requests continue the folders' numbering, or two
+adjacent rows both announce "1 of 1".
+
+`CollectionTree` also renders one polite live region (`data-tree-live`), empty.
+It ships ahead of anything that writes to it on purpose: a live region added at
+the same moment as its first message is not reliably announced (the same
+constraint `ResponseAnnouncer` carries).
 
 Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
 control and the row genuinely differ** - the history, variables and settings

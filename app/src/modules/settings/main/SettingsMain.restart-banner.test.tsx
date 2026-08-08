@@ -63,7 +63,7 @@ vi.mock("@/modules/settings/settings-store", () => ({
 vi.mock("@/stores/save-store", () => ({
 	useSaveStore: () => ({
 		startSaving: vi.fn(),
-		completeSave: vi.fn(),
+		completeSaveThenIdle: vi.fn(),
 		failSave: vi.fn(),
 		setStatus: vi.fn(),
 		markPendingSave: vi.fn(),

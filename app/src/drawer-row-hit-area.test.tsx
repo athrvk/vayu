@@ -137,6 +137,8 @@ function requestRow(): Row {
 		<RequestItem
 			request={REQUEST}
 			collectionId="col_1"
+			posInSet={1}
+			setSize={1}
 			onSelect={onSelect}
 			onDelete={vi.fn()}
 			onStartRename={onStartRename}
@@ -158,6 +160,8 @@ function collectionRow(): Row {
 			collection={COLLECTION}
 			allCollections={[COLLECTION]}
 			depth={0}
+			posInSet={1}
+			setSize={1}
 			expandedCollectionIds={new Set()}
 			selectedCollectionId={null}
 			selectedRequestId={null}

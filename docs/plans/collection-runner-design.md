@@ -22,8 +22,9 @@ arrives.
 ships, its decisions fold into `docs/engine/architecture.md` beside the Cookie
 Jar and request-composition sections, which is where rationale for *shipped*
 behaviour lives. When the last phase lands this page is deleted, the same way
-backlog entries are removed from `pending-backlog.md` once they ship. Until then
-nothing here describes behaviour the engine has. Scheduling and phase status are
+backlog entries are removed from `pending-backlog.md` once they ship. A section
+that has shipped says so and points at the docs that describe it; the rest still
+describes behaviour the engine does not have. Scheduling and phase status are
 tracked in the issues, not on this page, so that a closed issue cannot leave a
 stale line here.
 
@@ -45,6 +46,9 @@ the run finishes (`validate_scripts`, `run_manager.cpp:55`, called at `:747`), s
 even the ordering that does exist is not something a script participates in.
 
 ## The sequence model
+
+> **Shipped.** Plan resolution and the `scenario` block on `POST /runs` exist -
+> see [POST /runs](../engine/api-reference.md#the-scenario-block-collection-runs).
 
 ### A scenario is a folder, resolved once into an immutable plan
 
@@ -134,6 +138,11 @@ app picks the file, parses CSV or JSON, and sends rows. The cost is payload size
 which is what `maxScenarioDataRows` bounds.
 
 ## Design-mode execution
+
+> **Shipped.** The sequential runner exists. What it does is described in
+> [Scenario Mode](../engine/architecture.md#scenario-mode-collection-run) and
+> [Scenario runs](../engine/api-reference.md#scenario-runs); what follows is the
+> reasoning those pages summarise, kept here until the last phase lands.
 
 ### A scenario run is a third `runs.type`
 

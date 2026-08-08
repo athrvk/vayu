@@ -345,14 +345,16 @@ work - see [Add or replace a query parameter](#add-or-replace-a-query-parameter)
 
 ## Script Identity (`pm.info`)
 
-What the script is attached to, and which hook is running it. Three fields,
+What the script is attached to, and which hook is running it. Five fields,
 each **optional** - `pm.info` is always an object, but a field with no truthful
 value is absent rather than `""`, so `typeof` is how a script tests for one:
 
 ```javascript
-pm.info.requestId    // string | undefined - the saved request this send is filed under
-pm.info.requestName  // string | undefined - its name, as the client sent it
-pm.info.eventName    // 'prerequest' in a pre-request script, 'test' in a test script
+pm.info.requestId      // string | undefined - the saved request this send is filed under
+pm.info.requestName    // string | undefined - its name, as the client sent it
+pm.info.eventName      // 'prerequest' in a pre-request script, 'test' in a test script
+pm.info.iteration      // number | undefined - 0-based, in a collection run only
+pm.info.iterationCount // number | undefined - the run's iteration total
 ```
 
 `eventName` is stamped by the engine at each hook (`ScriptContext::for_prerequest`
@@ -369,12 +371,15 @@ actually running. The other two are supplied per send:
   `POST /compose` fills it in on its by-id path, so a composed payload arrives
   carrying it.
 
-**`iteration` and `iterationCount` are deliberately absent.** Vayu has no
-collection runner: a load test's test script runs once per *sampled* response
-after the run has finished, and the sample is a reservoir over the whole run
-rather than the first N iterations, so an index reported there would not be an
-iteration number. A binding that cannot fail is worse than a missing one - they
-arrive with the runner (issue #303).
+**`iteration` and `iterationCount` are set by the collection runner and by
+nothing else.** In a scenario run (`POST /runs` with a `scenario` block) every
+step's scripts read the real index - `iteration` counts from 0, and it reads as
+`0`, not as absent, on the first pass. Everywhere else both are `undefined`,
+which is the honest answer rather than an omission: a load test's test script
+runs once per *sampled* response after the run has finished, and the sample is a
+reservoir over the whole run rather than the first N iterations, so an index
+reported there would not be an iteration number. A binding that cannot fail is
+worse than a missing one.
 
 ## Environment Variables (`pm.environment`)
 
@@ -1070,6 +1075,7 @@ The **language** is current; what is missing is the **host environment**:
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
   `requestId` / `requestName` are the run's linked request when it has one. There
   is no `iteration` - the script runs per sampled response, not per iteration
+  (a collection run does report one; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now

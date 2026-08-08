@@ -178,185 +178,40 @@ nlohmann::json& json) {
     return std::nullopt;
 }
 
-// Build the trace_data JSON a design run persists for its single exchange.
-// Non-static (tested by execution_trace_test.cpp): the stored trace is a
-// contract - restore-response.ts rebuilds the response pane from it after a
-// restart, so what lands here decides what a restored tab can show.
-//
-// Timing carries all eight keys, unconditionally, the same `*Ms` set the live
-// /execute response serializes (json.cpp) and the load-mode success writer
-// stores (load_strategy.cpp). A skipped phase (reused connection, plain HTTP)
-// is stored as 0, exactly as the live response reports it. Rows written before
-// this change omitted zero phases and the three totals, so readers must keep
-// defaulting missing keys.
-nlohmann::json build_result_trace (const vayu::Request& request,
-const vayu::Response& response) {
-    nlohmann::json trace;
-    trace["request"] = { { "method", to_string (request.method) },
-        { "url", request.url }, { "headers", request.headers } };
-    if (!request.body.content.empty ()) {
-        trace["request"]["body"] = request.body.content;
-    }
-
-    if (!response.has_error ()) {
-        // "" when nothing was negotiated, not omitted - same convention as
-        // serialize(Response) in json.cpp, so restore-response.ts can't
-        // confuse "empty" with "this key doesn't exist on a stored trace".
-        trace["response"] = { { "headers", response.headers },
-            { "body", response.body }, { "httpVersion", response.http_version },
-            { "httpVersionDowngraded", response.http_version_downgraded } };
-    } else {
-        trace["error_type"]    = to_string (response.error_code);
-        trace["error_message"] = response.error_message;
-    }
-
-    const auto& timing   = response.timing;
-    trace["totalMs"]     = timing.total_ms;
-    trace["wireMs"]      = timing.wire_ms;
-    trace["queueWaitMs"] = timing.queue_wait_ms;
-    trace["dnsMs"]       = timing.dns_ms;
-    trace["connectMs"]   = timing.connect_ms;
-    trace["tlsMs"]       = timing.tls_ms;
-    trace["firstByteMs"] = timing.first_byte_ms;
-    trace["downloadMs"]  = timing.download_ms;
-
-    return trace;
-}
-
-// The variable scopes a design run's scripts read. The collection scope is the
-// request's own collection *chain* - the same walk `{{variable}}` composition
-// does (`collection_chain`) - so a name an ancestor collection defines answers
-// the same in a script as it does in the URL (issue #234). Only the leaf is
-// handed over writable; ancestors ride along read-only, which is what keeps a
-// script's `set()` from copying inherited variables down into the leaf on the
-// next persist.
-ScriptVariableScopes
-load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run) {
-    ScriptVariableScopes scopes;
-
-    if (run.environment_id.has_value ()) {
-        if (auto db_env = db.get_environment (*run.environment_id)) {
-            scopes.environment = vayu::json::parse_variables (db_env->variables);
-        }
-    }
-
-    if (auto db_globals = db.get_globals ()) {
-        scopes.globals = vayu::json::parse_variables (db_globals->variables);
-    }
-
-    if (run.request_id.has_value ()) {
-        if (auto db_request = db.get_request (*run.request_id)) {
-            if (!db_request->collection_id.empty ()) {
-                auto chain = vayu::http::collection_chain (db, db_request->collection_id);
-                if (!chain.empty ()) {
-                    scopes.collection =
-                    vayu::json::parse_variables (chain.back ().variables);
-                    scopes.collection_ancestors.reserve (chain.size () - 1);
-                    for (size_t i = 0; i + 1 < chain.size (); ++i) {
-                        scopes.collection_ancestors.push_back (
-                        vayu::json::parse_variables (chain[i].variables));
-                    }
-                }
-            }
-        }
-    }
-
-    return scopes;
-}
-
-// Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
-//
-// A scope is rewritten only when a script actually changed one of its
-// variables. Before this, every Send rewrote all three scopes unconditionally,
-// which bumped each scope's `updated_at` for a run that touched nothing and,
-// worse, pushed every variable through the serializer - so any field the
-// serializer did not know about was erased from disk by merely sending a
-// request (issue #135). Comparing the parsed on-disk blob with the in-memory
-// one is what makes "no script wrote a variable" mean "no write at all".
-void persist_script_variables (vayu::db::Database& db,
-const vayu::db::Run& run,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables) {
-    if (run.environment_id.has_value ()) {
-        try {
-            if (auto db_env = db.get_environment (*run.environment_id)) {
-                if (vayu::json::parse_variables (db_env->variables) != env) {
-                    vayu::db::Environment updated = *db_env;
-                    updated.variables  = vayu::json::serialize_variables (env);
-                    updated.updated_at = now_ms ();
-                    db.save_environment (updated);
-                }
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Persist environment variables failed: " + std::string (e.what ()));
-        }
-    }
-
+/**
+ * @brief Replace a scenario run's raw `scenario` block with its step manifest.
+ *
+ * `sanitize_config_snapshot` strips credentials out of `auth` and keeps
+ * everything else, which is not enough here: the block as sent carries the
+ * `data` rows, which are user data of unknown sensitivity and are deliberately
+ * never snapshotted (only their count survives, on the manifest). The manifest
+ * also records the **stored** URL per step rather than the composed one, so a
+ * step whose auth is `apikey` with `in: "query"` cannot put a live key in the
+ * run store.
+ *
+ * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
+ * verbatim) is left alone rather than being rebuilt from nothing - there is no
+ * request in it to describe.
+ *
+ * Non-static: run_row_seed_test.cpp drives it directly, because "the composed
+ * plan is never persisted" is a security property and deserves a test that does
+ * not need a run to exist.
+ */
+std::string scenario_snapshot (const std::string& sanitized, const nlohmann::json& manifest) {
+    nlohmann::json parsed;
     try {
-        if (auto db_globals = db.get_globals ()) {
-            if (vayu::json::parse_variables (db_globals->variables) != globals) {
-                vayu::db::Globals updated = *db_globals;
-                updated.variables  = vayu::json::serialize_variables (globals);
-                updated.updated_at = now_ms ();
-                db.save_globals (updated);
-            }
-        }
-    } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "Persist globals failed: " + std::string (e.what ()));
+        parsed = nlohmann::json::parse (sanitized);
+    } catch (const std::exception&) {
+        return sanitized;
     }
-
-    if (run.request_id.has_value ()) {
-        try {
-            if (auto db_request = db.get_request (*run.request_id)) {
-                if (!db_request->collection_id.empty ()) {
-                    if (auto db_collection =
-                        db.get_collection (db_request->collection_id)) {
-                        if (vayu::json::parse_variables (db_collection->variables) !=
-                        collectionVariables) {
-                            vayu::db::Collection updated = *db_collection;
-                            updated.variables =
-                            vayu::json::serialize_variables (collectionVariables);
-                            updated.updated_at = now_ms ();
-                            db.create_collection (updated);
-                        }
-                    }
-                }
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Persist collection variables failed: " + std::string (e.what ()));
-        }
+    if (!parsed.is_object ()) {
+        return sanitized;
     }
+    parsed["scenario"] = manifest;
+    return parsed.dump ();
 }
 
 namespace {
-
-// Execute a script and handle exceptions uniformly
-vayu::ScriptResult execute_script (vayu::runtime::ScriptEngine& engine,
-const std::string& script,
-vayu::runtime::ScriptContext& ctx,
-const std::string& script_type) {
-    vayu::ScriptResult result;
-    if (script.empty ()) {
-        return result;
-    }
-
-    try {
-        result = engine.execute (script, ctx);
-        if (!result.success) {
-            vayu::utils::log_warning (script_type + " script failed: " + result.error_message);
-        }
-    } catch (const std::exception& e) {
-        result.success       = false;
-        result.error_message = std::string ("Script exception: ") + e.what ();
-        vayu::utils::log_error (
-        script_type + " script exception: " + std::string (e.what ()));
-    }
-    return result;
-}
 
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
@@ -712,11 +567,9 @@ void register_execution_routes (RouteContext& ctx) {
 
         vayu::runtime::ScriptEngine script_engine (script_config);
 
-        // Load variables
-        auto scopes                = load_script_variable_scopes (ctx.db, run);
-        vayu::Environment& env     = scopes.environment;
-        vayu::Environment& globals = scopes.globals;
-        vayu::Environment& collectionVariables = scopes.collection;
+        // Load variables. Mutated in place by both scripts, then persisted
+        // once below.
+        auto scopes = load_script_variable_scopes (ctx.db, run);
 
         // Take the request built above. Auth is already resolved into its
         // headers/url, so pm.request reflects the real outgoing set - and
@@ -749,71 +602,33 @@ void register_execution_routes (RouteContext& ctx) {
         const std::string cookie_scope =
         run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
-        // Where each script's `pm.cookies.jar()` writes are staged. The
-        // pre-request script's ride the send below and are persisted by its
-        // capture; the post-request script's have no transfer left to carry
-        // them, so the route applies them. Either way exactly once - see
-        // cookie_jar.hpp.
-        std::vector<vayu::http::CookieWrite> pre_cookie_writes;
-        std::vector<vayu::http::CookieWrite> post_cookie_writes;
-
-        // Execute pre-request script. `for_prerequest` is what makes its
-        // pm.request edits reach the wire; everything below this line - the
-        // send, the stored trace, the raw request the app shows - reads the
-        // post-script request.
-        auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
-        pre_ctx.cookie_jar          = &ctx.cookie_jar;
-        pre_ctx.cookie_scope        = cookie_scope;
-        pre_ctx.cookie_writes       = &pre_cookie_writes;
-        pre_ctx.environment         = &env;
-        pre_ctx.globals             = &globals;
-        pre_ctx.collectionVariables = &collectionVariables;
-        pre_ctx.collectionAncestors = &scopes.collection_ancestors;
-        pre_ctx.request_id          = run.request_id;
-        pre_ctx.request_name        = script_request_name;
-        auto pre_script_result =
-        execute_script (script_engine, pre_request_script, pre_ctx, "Pre-request");
-
-        // Send HTTP request
-        vayu::http::ClientConfig config;
-        config.verbose       = ctx.verbose;
-        config.cookie_jar    = &ctx.cookie_jar;
-        config.cookie_scope  = cookie_scope;
-        config.cookie_writes = std::move (pre_cookie_writes);
-        vayu::http::Client client (config);
-        const auto response = client.send (request).value ();
+        // Pre-request script, send, test script - the sequence a scenario step
+        // performs too, which is why it lives in request_exchange.cpp rather
+        // than here (issue #353). `iteration` is left unset: a single Send has
+        // no iteration index, and a binding that cannot fail is worse than a
+        // missing one (issue #300).
+        ExchangeInputs inputs;
+        inputs.request      = std::move (request);
+        inputs.pre_script   = pre_request_script;
+        inputs.post_script  = post_request_script;
+        inputs.request_id   = run.request_id;
+        inputs.request_name = script_request_name;
+        auto exchange       = execute_exchange (script_engine, ctx.cookie_jar,
+        cookie_scope, scopes, std::move (inputs), ctx.verbose);
 
         // Store result to database (non-blocking, errors logged)
-        store_result (ctx.db, run_id, request, response);
-
-        // Execute post-request script
-        auto post_ctx = vayu::runtime::ScriptContext::for_test (request, response);
-        post_ctx.cookie_jar          = &ctx.cookie_jar;
-        post_ctx.cookie_scope        = cookie_scope;
-        post_ctx.cookie_writes       = &post_cookie_writes;
-        post_ctx.environment         = &env;
-        post_ctx.globals             = &globals;
-        post_ctx.collectionVariables = &collectionVariables;
-        post_ctx.collectionAncestors = &scopes.collection_ancestors;
-        post_ctx.request_id          = run.request_id;
-        post_ctx.request_name        = script_request_name;
-        auto post_script_result =
-        execute_script (script_engine, post_request_script, post_ctx, "Post-request");
-
-        // The post-request script's jar writes: the transfer has already
-        // captured, so there is nothing left to carry them and the route is
-        // where they land. A write its own `pm.sendRequest` already carried is
-        // not in here - that call drains the queue.
-        ctx.cookie_jar.apply (cookie_scope, post_cookie_writes);
+        store_result (ctx.db, run_id, exchange.request, exchange.response);
 
         // Persist script-set variables (design mode only; best-effort)
-        persist_script_variables (ctx.db, run, env, globals, collectionVariables);
+        persist_script_variables (
+        ctx.db, run, scopes.environment, scopes.globals, scopes.collection);
 
         // Build and send response
         // Engine returns 200 - the server's status is in the response body
         res.status = 200;
-        res.set_content (
-        build_response_json (response, pre_script_result, post_script_result).dump (2),
+        res.set_content (build_response_json (exchange.response,
+        exchange.pre_script_result, exchange.post_script_result)
+        .dump (2),
         "application/json");
     };
     ctx.server.Post ("/execute", execute_request);
@@ -892,16 +707,15 @@ void register_execution_routes (RouteContext& ctx) {
         // Resolve the scenario block here, with the rest of the pre-row
         // validation: an unknown collection, an empty sequence or a step that
         // cannot be composed must leave no run behind, and resolution is what
-        // finds all three. Nothing executes a plan yet, so this returns 501
-        // rather than starting a run - a loud placeholder in place of a run
-        // that would silently do nothing.
+        // finds all three.
         //
-        // The 501 is returned *before* `create_run` on purpose: a row written
-        // for a run no executor will ever pick up would sit `pending` until a
-        // restart's `reconcile_orphaned_runs` failed it. The sequential runner
-        // replaces this block with the create_run/start_run pair below, and
-        // writes `build_scenario_manifest`'s object into `config_snapshot` in
-        // place of the raw `scenario` block.
+        // Resolution happens exactly once, before the first send: a collection
+        // edited mid-run must not change the sequence underneath itself, and
+        // the load-mode executor (phase 6) cannot query SQLite per step per
+        // virtual user. The resolved plan is then shared immutably with the
+        // run's worker and lives in memory for the run's life and nowhere else.
+        std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
+        nlohmann::json scenario_manifest;
         if (is_scenario) {
             vayu::core::ScenarioResolveOptions options;
             if (auto it = json.find ("environmentId");
@@ -927,27 +741,31 @@ void register_execution_routes (RouteContext& ctx) {
                 return;
             }
 
-            vayu::utils::log_info (
-            "POST /runs - Scenario resolved: collection=" + resolved.request.collection_id +
-            ", steps=" + std::to_string (resolved.plan.steps.size ()) +
-            ", iterations=" + std::to_string (resolved.request.iterations));
-            send_error (res, 501,
-            "Scenario runs are not executed yet. The plan resolved to " +
-            std::to_string (resolved.plan.steps.size ()) + " step(s) over " +
-            std::to_string (resolved.request.iterations) +
-            " iteration(s); the sequential runner that executes it is not in "
-            "this build.",
-            "scenario_not_implemented");
-            return;
+            scenario_manifest =
+            vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
+
+            auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
+            execution->request = std::move (resolved.request);
+            execution->plan    = std::move (resolved.plan);
+            scenario_execution = std::move (execution);
+
+            vayu::utils::log_info ("POST /runs - Scenario: collection=" +
+            scenario_execution->request.collection_id +
+            ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
+            ", iterations=" + std::to_string (scenario_execution->request.iterations));
         }
 
         // Create run record
         std::string run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
-        run.id              = run_id;
-        run.type            = vayu::RunType::Load;
-        run.status          = vayu::RunStatus::Pending;
+        run.id     = run_id;
+        run.type   = is_scenario ? vayu::RunType::Scenario : vayu::RunType::Load;
+        run.status = vayu::RunStatus::Pending;
         run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+        if (is_scenario) {
+            run.config_snapshot =
+            scenario_snapshot (run.config_snapshot, scenario_manifest);
+        }
         seed_run_times (run, now_ms ());
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
@@ -967,6 +785,13 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
+        if (is_scenario) {
+            vayu::utils::log_info ("POST /runs - Collection run: run_id=" + run_id +
+            ", collection=" + scenario_execution->request.collection_id +
+            ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
+            ", iterations=" + std::to_string (scenario_execution->request.iterations) +
+            ", environment_id=" + run.environment_id.value_or ("none"));
+        } else {
         vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
         ", mode=" + json.value ("mode", "unspecified") +
         ", method=" + json.value ("method", "UNKNOWN") +
@@ -976,20 +801,27 @@ void register_execution_routes (RouteContext& ctx) {
         ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
         ", request_id=" + run.request_id.value_or ("none") +
         ", environment_id=" + run.environment_id.value_or ("none"));
+        }
 
         // Pre-flight auth: reject an unauthorizable run before creating it, and
-        // warm the token cache so the worker's apply_auth is a cache hit.
-        auto preflight =
-        vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
-        if (!preflight.ok) {
-            vayu::utils::log_warning ("POST /runs - Auth pre-flight failed: " +
-            preflight.message);
-            res.status =
-            (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
-            res.set_content (
-            error_body (res.status, preflight.message, preflight.detail_code).dump (),
-            "application/json");
-            return;
+        // warm the token cache so the worker's apply_auth is a cache hit. A
+        // scenario payload carries no run-level `auth` - each step's auth was
+        // resolved at plan time, and a step that could not be authorized
+        // already failed resolution with a 400 - so this is the single-request
+        // path's check alone.
+        if (!is_scenario) {
+            auto preflight =
+            vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+            if (!preflight.ok) {
+                vayu::utils::log_warning ("POST /runs - Auth pre-flight failed: " +
+                preflight.message);
+                res.status =
+                (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
+                res.set_content (
+                error_body (res.status, preflight.message, preflight.detail_code).dump (),
+                "application/json");
+                return;
+            }
         }
 
         try {
@@ -1004,7 +836,11 @@ void register_execution_routes (RouteContext& ctx) {
         // Start run via RunManager. A refusal means the daemon is draining its
         // workers for shutdown; the row exists but nothing will ever run it, so
         // say so rather than returning a 202 for a run that never starts.
-        if (!ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose)) {
+        const bool started = is_scenario ?
+        ctx.run_manager.start_scenario_run (run_id, json, scenario_execution,
+        ctx.db, ctx.cookie_jar, ctx.verbose) :
+        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose);
+        if (!started) {
             send_error (res, 503, "Engine is shutting down");
             return;
         }
@@ -1012,7 +848,7 @@ void register_execution_routes (RouteContext& ctx) {
         nlohmann::json response;
         response["runId"]   = run_id;
         response["status"]  = to_string (vayu::RunStatus::Pending);
-        response["message"] = "Load test started";
+        response["message"] = is_scenario ? "Collection run started" : "Load test started";
 
         res.status = 202;
         res.set_content (response.dump (), "application/json");

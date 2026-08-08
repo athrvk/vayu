@@ -266,6 +266,7 @@ add_library(vayu_core STATIC
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
     src/http/script_parts.cpp
+    src/http/request_exchange.cpp
     src/http/set_cookie.cpp
     src/http/cookie_jar.cpp
     src/utils/json.cpp
@@ -275,6 +276,7 @@ add_library(vayu_core STATIC
     src/db/database.cpp
     src/core/load_strategy.cpp
     src/core/scenario_plan.cpp
+    src/core/scenario_runner.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
@@ -461,6 +463,7 @@ if(VAYU_BUILD_TESTS)
         tests/http_version_test.cpp
         tests/request_composer_test.cpp
         tests/scenario_plan_test.cpp
+        tests/scenario_runner_test.cpp
         tests/tree_order_test.cpp
         tests/reorder_route_test.cpp
         src/http/routes/import.cpp

@@ -560,12 +560,21 @@ using Environment = std::map<std::string, Variable>;
 // Database Enums
 // ============================================================================
 
-enum class RunType { Design, Load };
+/**
+ * @brief What kind of work a `runs` row records.
+ *
+ * `Scenario` is not a flavour of `Design`: a design run has exactly one
+ * `results` row and `GET /runs/:runId` serves it as `result` on that assumption
+ * (`attach_design_result`, `utils/json.cpp`), while a scenario run writes one
+ * row per step execution. Overloading `design` would break that reader.
+ */
+enum class RunType { Design, Load, Scenario };
 
 inline const char* to_string (RunType type) {
     switch (type) {
     case RunType::Design: return "design";
     case RunType::Load: return "load";
+    case RunType::Scenario: return "scenario";
     }
     return "unknown";
 }
@@ -575,6 +584,8 @@ inline std::optional<RunType> parse_run_type (const std::string& str) {
         return RunType::Design;
     if (str == "load")
         return RunType::Load;
+    if (str == "scenario")
+        return RunType::Scenario;
     return std::nullopt;
 }
 
@@ -697,7 +708,7 @@ struct Run {
     std::string id;
     std::optional<std::string> request_id; // Linked request (if design mode)
     std::optional<std::string> environment_id; // Environment used
-    RunType type;                              // "design" or "load"
+    RunType type;                              // "design", "load" or "scenario"
     RunStatus status;            // "pending", "running", "completed", "failed"
     std::string config_snapshot; // JSON string (Full copy of request/env)
     int64_t start_time;

@@ -130,6 +130,12 @@ Manages the lifecycle of load test runs:
   destroy. A run started while the drain is in progress is refused with a `503`.
 - **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
   its handle outlives it until another thread collects it.
+- **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
+  plus its metrics thread, `start_scenario_run` spawns the sequential collection
+  runner. Both go through the same `spawn_run` registration - the
+  shutting-down check, the reap and the handle insert all happen under one lock,
+  and a copy of that reasoning per run kind is exactly how a worker outlives a
+  drain that already declared its state safe to destroy.
 
 ### Metrics Collector
 
@@ -372,6 +378,67 @@ Both passes are best-effort: a failure is logged and never blocks startup.
    ↓
 8. Return response with test results
 ```
+
+### Scenario Mode (Collection Run)
+
+A third `runs.type`, `scenario`: an ordered sequence rather than a single
+request. `POST /runs` with a `scenario` block resolves the collection into an
+immutable, fully composed plan **before the run row exists**, then answers
+`202 {runId}` and runs it on a worker thread.
+
+```
+1. POST /runs  (with a "scenario" block)
+   ↓
+2. Resolve the collection into an ordered ScenarioPlan - every step composed
+   through the POST /compose path, once, before anything is sent. Any failure
+   here is a 400 and leaves no run row behind
+   ↓
+3. Create Run record (type: Scenario). config_snapshot carries the step
+   manifest, never the composed plan (see db-schema.md)
+   ↓
+4. Start worker thread (execute_scenario_run). No event loop, no metrics thread
+   ↓
+5. Load the variable scopes once; build one script engine for the run
+   ↓
+6. Per iteration, per step: the design-mode exchange (pre-request script → send
+   through the environment cookie jar → test script), then a step result and a
+   `step` SSE event on the same retained tick topic a load run publishes into
+   ↓
+7. On completion: persist script-set variables once, batch-write the bounded
+   step results, write the scenario summary, reach a terminal status, retain
+```
+
+**The plan is shared with the load path; the executor is not.** Steps go through
+`http::Client`, not the event loop, because design-mode fidelity needs the
+cookie jar and inline per-step scripts and the event loop deliberately has
+neither. Step 6 is literally the `POST /execute` handler's body - both call
+`execute_exchange` (`http/request_exchange.cpp`) - so a step and a Send of the
+same request cannot drift apart.
+
+**What the sequence carries between steps:**
+
+- **Variables** mutate in memory across every step and iteration, and are
+  written back **once, at run end**, through the same diff-based persist a Send
+  uses. Per-step persistence would be N x M diff-and-write cycles against the DB
+  mutex for a value only this run's later steps read.
+- **Cookies** are the environment's jar, unchanged - which is what makes "log in
+  on step 1, reuse the session on step 2" free.
+- **Nothing else.** There is no scenario-scoped variable bag: a fourth scope
+  would need precedence rules, a persistence story and a UI, to hold what the
+  environment scope already holds for the run's lifetime.
+
+Because the plan is composed once, a `{{variable}}` a script sets mid-run does
+**not** appear in a later step's URL - it reaches later steps through
+`pm.environment.get` in a script. Resolving once is what keeps a collection
+edited mid-run from changing the sequence underneath itself, and it is what will
+make the load-mode executor (a per-VU state machine) possible without SQLite on
+its hot path.
+
+A step's outcome is `passed`, `failed`, `skipped` or `errored`, counted
+separately everywhere - a skipped step counted as a pass is the false-pass class
+this project has already spent an issue eliminating. An `errored` step ends its
+iteration; the next iteration still runs, and the run still reaches
+`completed`. A stop is honoured **between steps**.
 
 ### Load Test Mode
 

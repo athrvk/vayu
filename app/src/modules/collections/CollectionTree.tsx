@@ -337,6 +337,13 @@ export default function CollectionTree() {
 		setRenameValue(collection.name);
 	}, []);
 
+	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete`
+	// control (the Delete key's target) open the very same dialog rather than
+	// being two copies of one object literal that can drift apart.
+	const handleCollectionDeleteClick = useCallback((id: string, name: string) => {
+		setDeleteConfirm({ type: "collection", id, name });
+	}, []);
+
 	const handleRenameSubmit = async (collectionId: string) => {
 		const trimmedValue = renameValue.trim();
 		// Enter submits and then blur submits again, because the field is still
@@ -438,12 +445,7 @@ export default function CollectionTree() {
 				label: "Delete",
 				icon: Trash2,
 				destructive: true,
-				onSelect: () =>
-					setDeleteConfirm({
-						type: "collection",
-						id: collection.id,
-						name: collection.name,
-					}),
+				onSelect: () => handleCollectionDeleteClick(collection.id, collection.name),
 			},
 		],
 		// Honest deps, which is only possible now that both handlers are memoised
@@ -451,7 +453,7 @@ export default function CollectionTree() {
 		// expanded set. The suppression that used to sit here hid two callbacks
 		// captured from whichever render last rebuilt this - benign only by
 		// accident, and this is the seam the drag-and-drop work extends.
-		[expandCollection, handleCreateRequest, handleRenameCollection]
+		[expandCollection, handleCreateRequest, handleRenameCollection, handleCollectionDeleteClick]
 	);
 
 	const handleDeleteCollection = useCallback(
@@ -736,12 +738,14 @@ export default function CollectionTree() {
 							onFocus={treeFocus.onFocus}
 							className="space-y-0.5"
 						>
-							{rootCollections.map((collection) => (
+							{rootCollections.map((collection, index) => (
 								<CollectionItem
 									key={collection.id}
 									collection={collection}
 									allCollections={collections}
 									depth={0}
+									posInSet={index + 1}
+									setSize={rootCollections.length}
 									expandedCollectionIds={expandedCollectionIds}
 									selectedCollectionId={selectedCollectionId}
 									selectedRequestId={selectedRequestId}
@@ -772,12 +776,37 @@ export default function CollectionTree() {
 									onRequestRenameCancel={handleRequestRenameCancel}
 									onStartRequestRename={handleStartRequestRename}
 									onRequestDeleteClick={handleRequestDeleteClick}
+									onCollectionDeleteClick={handleCollectionDeleteClick}
 									onDuplicateRequest={handleDuplicateRequest}
 								/>
 							))}
 						</div>
 					</div>
 				)}
+
+				{/*
+				 * The tree's live region, and it ships empty on purpose.
+				 *
+				 * A live region has to already be in the DOM for a change to it to
+				 * be observed - mounting one alongside its first message is the
+				 * classic way to ship an announcer that never announces (see
+				 * ResponseAnnouncer, which carries the same constraint and the same
+				 * markup). Keyboard move announcements are the first thing that will
+				 * write here; until then the region exists and says nothing.
+				 *
+				 * Outside `role="tree"`: a tree's children are treeitems and groups,
+				 * and this is neither.
+				 */}
+				<div
+					role="status"
+					aria-live="polite"
+					// Explicit rather than left to role="status"'s implicit true -
+					// one utterance of the whole message is what a single-line region
+					// wants, and the Toaster shipped once assuming the wrong default.
+					aria-atomic="true"
+					className="sr-only"
+					data-tree-live
+				/>
 
 				<DeleteConfirmDialog
 					open={!!deleteConfirm}
