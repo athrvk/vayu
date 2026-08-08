@@ -434,6 +434,7 @@ if(VAYU_BUILD_TESTS)
         tests/set_cookie_test.cpp
         tests/cookie_jar_test.cpp
         tests/form_body_test.cpp
+        tests/graphql_body_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/execution_http_version_test.cpp

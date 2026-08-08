@@ -15,7 +15,15 @@ import type {
 	SkippedItem,
 } from "./types";
 import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
-import { asString, joinExec, mapKeyValues, mapPostmanAuth, rawBody, toVarRecord } from "./shared";
+import {
+	asString,
+	joinExec,
+	mapKeyValues,
+	mapPostmanAuth,
+	rawBody,
+	toVarRecord,
+	withRequiredContentType,
+} from "./shared";
 import { normalizeVars } from "./var-normalize";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
@@ -202,14 +210,15 @@ function pmRequest(item: JsonRecord, ctx: Ctx): RequestDraft {
 	const events = pmEvents(item);
 	const pre = events.find((e) => e.listen === "prerequest");
 	const post = events.find((e) => e.listen === "test");
+	const body = pmBody(rq.body, ctx);
 	return {
 		name: item.name == null ? "Untitled" : asString(item.name),
 		description: asStr(rq.description) ?? asStr(prop(rq.description, "content")) ?? "",
 		method: toMethod(rq.method),
 		url,
 		params,
-		headers: mapKeyValues(rq.header),
-		body: pmBody(rq.body, ctx),
+		headers: withRequiredContentType(mapKeyValues(rq.header), body),
+		body,
 		auth,
 		preRequestScript: ctx.opts.importScripts ? joinExec(pre) : "",
 		postRequestScript: ctx.opts.importScripts ? joinExec(post) : "",
