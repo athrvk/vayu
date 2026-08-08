@@ -92,6 +92,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
+  contextBarCollapsedSections: string[]  // Section ids the user collapsed
   requestSplitRatio: number              // 0–1; left/request pane fraction
 }
 ```
@@ -104,6 +105,7 @@ const {
   drawerWidth, setDrawerWidth,
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
+  contextBarCollapsedSections, toggleContextBarSection,
   requestSplitRatio, setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
@@ -116,6 +118,15 @@ migration collapses them onto a single `drawerWidth`, keeping whatever
 Collections (the default view) had. Re-introducing a per-view width re-introduces
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
+
+**Context-bar sections are collapsed by exception.** The store holds the ids the
+user closed (`contextBarCollapsedSections`); anything not listed is expanded. Two
+consequences worth keeping: a section added in a later release ships *expanded*
+for existing users, because a blob written before it existed cannot name it; and
+it is an array rather than a `Set` because `persist` serializes with JSON, which
+writes a `Set` as `{}` - a collapse would survive exactly until the next launch.
+No migration was needed for the field: `persist` merges a missing key onto the
+initial state, which is `[]`.
 
 **Persistence:** `vayu.layout` (v3, with real migrations for both bumps - the one
 store in the app doing persistence versioning end to end)
@@ -246,16 +257,18 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
 raises an error toast carrying the reason. Its call sites are the collection
 tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
-`VariableTableEditor`, `useDraftSaveContext` and `ContextBar` - and doing the
-reporting here rather than at each of them means a new caller cannot forget to
-report. The last two were added because both could fail in complete silence:
-`ContextBar` fired three mutations with no `onError` at all, and the
+`VariableTableEditor`, `useDraftSaveContext` and the context bar's
+`VariablesSection` - and doing the reporting here rather than at each of them
+means a new caller cannot forget to report. The last two were added because both
+could fail in complete silence: the variables section fired three mutations with
+no `onError` at all, and the
 manual-draft editors rendered an inline callout that a quit flush has no screen
 to show.
 
-`ContextBar` also **registers a context** (`context-bar-variables`), because
-`failSave` alone only covers the failure. A variable commit is a plain mutation
-rather than a draft, so it registers one entry for the whole bar whose
+`VariablesSection` also **registers a context** (`context-bar-variables`),
+because `failSave` alone only covers the failure. A variable commit is a plain
+mutation rather than a draft, so it registers one entry for the whole section
+whose
 `hasPendingChanges` tracks whether any commit is outstanding and whose `save()`
 resolves when the last one settles - without it `flushAll` had nothing to wait
 for, and the renderer could be torn down mid-PUT with the input already showing
@@ -277,11 +290,11 @@ had just published; and two saves a second apart had the first one's timer end
 the second one's indicator early. `triggerSave` has always guarded the first way,
 `useSaveManager` hand-rolled the second as a `clearTimeout` of its own timer.
 Both live in the store now, and the six call sites (`useSaveManager`,
-`SettingsMain`, `VariableTableEditor`, `ContextBar`, both collection-tree
+`SettingsMain`, `VariableTableEditor`, `VariablesSection`, both collection-tree
 renames) share that one implementation rather than five copies of the timer.
 
 `completeSave` is gone with them. It set `saved` and armed nothing, so every
-caller either paired it with a hand-rolled timer or - `ContextBar`, the one
+caller either paired it with a hand-rolled timer or - `VariablesSection`, the one
 non-draft commit path - left "Saved" in the Dock until something else happened to
 change it. The indicator's lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one
 place, for every surface that saves.
@@ -811,6 +824,13 @@ into a pane that can never load on every restart.
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
+- **`queryKeys.compose.forRequest(requestId, environmentId)`** - `POST /compose`
+  for a stored request, behind an inline `useQuery` in the context bar's Code
+  section. Keyed by environment as well as request, because the same request
+  composes differently per environment and one key for both would serve the
+  wrong snippet after a switch. `staleTime: Infinity` with an explicit
+  recompose: the section is only mounted while expanded, so this is the "compose
+  on expand, not per keystroke" rule
 
 ### Query Keys & Cache Invalidation
 
@@ -891,7 +911,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here |
-| `environment` | `environments.all` | Variables are read through the detail cache as well as the list |
+| `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
 | `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` when the call named one | The history list polls, but Settings' count and a request tab's restored response do not |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
@@ -1335,7 +1355,7 @@ starts the engine at import time.
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
 
-    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - `ContextBar` did neither, so a rejected edit sat on screen looking committed.
+    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 
 6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 

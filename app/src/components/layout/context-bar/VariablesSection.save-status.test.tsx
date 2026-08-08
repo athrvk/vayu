@@ -11,7 +11,8 @@
 /**
  * A committed variable used to leave "Saved" in the Dock forever.
  *
- * The context bar is the app's one non-draft commit path: it fires the mutation
+ * The context bar's variables section is the app's one non-draft commit path: it
+ * fires the mutation
  * on blur and reported success with a bare `completeSave()` - `saved`, and no
  * reset armed at all. Nothing else was going to clear it, so the Dock kept
  * claiming a save that had happened minutes ago until some unrelated surface
@@ -19,7 +20,7 @@
  * like every other saving surface, which also means it cannot stomp a failure
  * that arrives in the two seconds after.
  *
- * The harness is `ContextBar.save-error.test.tsx`'s.
+ * The harness is `VariablesSection.save-error.test.tsx`'s.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -27,7 +28,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { TIMING } from "@/config/timing";
-import { ContextBar } from "./ContextBar";
+import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useSaveStore } from "@/stores/save-store";
@@ -56,28 +57,18 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ getAllVariables: () => resolved }),
 }));
 
-const layoutStore = {
-	contextBarOpen: true,
-	setContextBarOpen: vi.fn(),
-	contextBarWidth: 280,
-	setContextBarWidth: vi.fn(),
-};
-const tabsStore = {
-	openTabs: [{ id: "t1", type: "request", entityId: "req_1" }],
-	activeTabId: "t1",
-};
-
+// The section reads only the save store from `@/stores`; the real one is kept so
+// this exercises the actual status transitions.
 vi.mock("@/stores", async () => {
 	const saveStore =
 		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
-	return {
-		useLayoutStore: () => layoutStore,
-		useTabsStore: () => tabsStore,
-		useSaveStore: saveStore.useSaveStore,
-	};
+	return { useSaveStore: saveStore.useSaveStore };
 });
 
-function renderBar() {
+/** The tab every section is handed. */
+const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
+
+function renderSection() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	client.setQueryData(queryKeys.globals.all, {
 		id: "globals",
@@ -89,7 +80,7 @@ function renderBar() {
 	return render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<ContextBar />
+				<VariablesSection tab={TAB} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -97,7 +88,7 @@ function renderBar() {
 
 /** Commit an edit to the one variable on screen. */
 function commitOnce() {
-	renderBar();
+	renderSection();
 	const input = screen.getByDisplayValue("example.com") as HTMLInputElement;
 	act(() => {
 		fireEvent.change(input, { target: { value: "example.org" } });
@@ -107,7 +98,7 @@ function commitOnce() {
 	expect(useSaveStore.getState().status).toBe("saved");
 }
 
-describe("the status a context-bar commit publishes", () => {
+describe("the status a variables-section commit publishes", () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		globalsMutate.mockClear();

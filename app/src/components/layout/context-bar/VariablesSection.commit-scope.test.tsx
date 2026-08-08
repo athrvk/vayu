@@ -31,7 +31,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ContextBar } from "./ContextBar";
+import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
@@ -59,26 +59,16 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ getAllVariables: () => resolved }),
 }));
 
-const layoutStore = {
-	contextBarOpen: true,
-	setContextBarOpen: vi.fn(),
-	contextBarWidth: 280,
-	setContextBarWidth: vi.fn(),
-};
-const tabsStore = {
-	openTabs: [{ id: "t1", type: "request", entityId: "req_1" }],
-	activeTabId: "t1",
-};
-
+// The section reads only the save store from `@/stores`; the real one is kept
+// so the in-flight-commit case exercises the actual registry.
 vi.mock("@/stores", async () => {
 	const saveStore =
 		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
-	return {
-		useLayoutStore: () => layoutStore,
-		useTabsStore: () => tabsStore,
-		useSaveStore: saveStore.useSaveStore,
-	};
+	return { useSaveStore: saveStore.useSaveStore };
 });
+
+/** The tab every section is handed. */
+const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
 
 const def = (value: string, extra: Partial<VariableValue> = {}): VariableValue => ({
 	value,
@@ -140,7 +130,7 @@ function seed(client: QueryClient) {
 	client.setQueryData(queryKeys.collections.list(), collections);
 }
 
-function renderBar() {
+function renderSection() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	seed(client);
 	// The header's close button is a `TooltipIconButton`, which needs the provider
@@ -148,7 +138,7 @@ function renderBar() {
 	const view = render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<ContextBar />
+				<VariablesSection tab={TAB} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -175,11 +165,11 @@ beforeEach(() => {
 	resolved = {};
 });
 
-describe("ContextBar - the commit target is the resolver's winner", () => {
+describe("VariablesSection - the commit target is the resolver's winner", () => {
 	it("writes a global edit into the globals map", () => {
 		resolved = { host: { value: "example.com", scope: "global" } };
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("example.com"), "example.org");
 
 		expect(globalsMutate).toHaveBeenCalledTimes(1);
@@ -191,7 +181,7 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 		// session's active environment - the two are the same id only by luck.
 		resolved = { token: { value: "b-token", scope: "environment", sourceId: "env_b" } };
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("b-token"), "b-token-2");
 
 		expect(environmentMutate).toHaveBeenCalledTimes(1);
@@ -206,7 +196,7 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 		// non-secret input overwrite a secret one in another collection.
 		resolved = { apiKey: { value: "leaf-key", scope: "collection", sourceId: "col_leaf" } };
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("leaf-key"), "leaf-key-2");
 
 		expect(collectionMutate).toHaveBeenCalledTimes(1);
@@ -219,7 +209,7 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 	it("refuses out loud when the source environment is gone", () => {
 		resolved = { token: { value: "b-token", scope: "environment", sourceId: "env_deleted" } };
 
-		renderBar();
+		renderSection();
 		const input = inputFor("b-token");
 		editAndBlur(input, "b-token-2");
 
@@ -231,7 +221,7 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 	it("refuses out loud when the source collection no longer holds the name", () => {
 		resolved = { ghost: { value: "gone", scope: "collection", sourceId: "col_leaf" } };
 
-		renderBar();
+		renderSection();
 		const input = inputFor("gone");
 		editAndBlur(input, "still-here");
 
@@ -245,7 +235,7 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 		// the commit must refuse rather than pick something.
 		resolved = { token: { value: "b-token", scope: "environment" } };
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("b-token"), "b-token-2");
 
 		expect(environmentMutate).not.toHaveBeenCalled();
@@ -256,20 +246,22 @@ describe("ContextBar - the commit target is the resolver's winner", () => {
 		// `buildLeafFirstChain` re-implemented `buildCollectionChain` without its
 		// cycle guard, so a bad database froze the window on the first blur. The
 		// fix is that the component walks nothing at all - it is handed the winner.
-		const source = readFileSync(join(__dirname, "ContextBar.tsx"), "utf8");
+		// The guard reads the file it names: a scan of an empty string passes
+		// vacuously, which is how one of these shipped green for weeks.
+		const source = readFileSync(join(__dirname, "VariablesSection.tsx"), "utf8");
 		expect(source.length).toBeGreaterThan(1000);
 		expect(source).not.toContain("parentId");
 	});
 });
 
-describe("ContextBar - the commit payload", () => {
+describe("VariablesSection - the commit payload", () => {
 	it("carries untouched siblings verbatim and changes only the edited value", () => {
 		resolved = {
 			host: { value: "example.com", scope: "global" },
 			port: { value: "8080", scope: "global" },
 		};
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("example.com"), "example.org");
 
 		const sent = globalsMutate.mock.calls[0][0].variables;
@@ -286,7 +278,7 @@ describe("ContextBar - the commit payload", () => {
 			port: { value: "8080", scope: "global" },
 		};
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("example.com"), "example.org");
 		editAndBlur(inputFor("8080"), "9090");
 
@@ -302,7 +294,7 @@ describe("ContextBar - the commit payload", () => {
 			port: { value: "8080", scope: "global" },
 		};
 
-		const { client } = renderBar();
+		const { client } = renderSection();
 		globalsMutate.mockImplementation((_payload: unknown, handlers: Handlers) => {
 			handlers.onError(new Error("value must not be empty"));
 			handlers.onSettled();
@@ -321,11 +313,11 @@ describe("ContextBar - the commit payload", () => {
 	});
 });
 
-describe("ContextBar - the input itself", () => {
+describe("VariablesSection - the input itself", () => {
 	it("discards on Escape and commits on Enter", () => {
 		resolved = { host: { value: "example.com", scope: "global" } };
 
-		renderBar();
+		renderSection();
 		const input = inputFor("example.com");
 
 		act(() => {
@@ -349,7 +341,7 @@ describe("ContextBar - the input itself", () => {
 			apiKey: { value: "leaf-key", scope: "collection", sourceId: "col_leaf", secret: true },
 		};
 
-		renderBar();
+		renderSection();
 		const masked = screen.getByDisplayValue("••••••") as HTMLInputElement;
 
 		expect(masked.readOnly).toBe(true);
@@ -365,14 +357,14 @@ describe("ContextBar - the input itself", () => {
 		// Same displayed string, different source: on a value-only key the DOM node
 		// survived and the next blur wrote into whichever definition had just won.
 		resolved = { token: { value: "same", scope: "environment", sourceId: "env_a" } };
-		const { rerender, client } = renderBar();
+		const { rerender, client } = renderSection();
 		const before = inputFor("same");
 
 		resolved = { token: { value: "same", scope: "environment", sourceId: "env_b" } };
 		rerender(
 			<QueryClientProvider client={client}>
 				<TooltipProvider>
-					<ContextBar />
+					<VariablesSection tab={TAB} />
 				</TooltipProvider>
 			</QueryClientProvider>
 		);
@@ -381,7 +373,7 @@ describe("ContextBar - the input itself", () => {
 	});
 });
 
-describe("ContextBar - an in-flight commit and the save store", () => {
+describe("VariablesSection - an in-flight commit and the save store", () => {
 	it("is awaited by the quit-time flush and reports through the Dock status", async () => {
 		resolved = { host: { value: "example.com", scope: "global" } };
 
@@ -390,7 +382,7 @@ describe("ContextBar - an in-flight commit and the save store", () => {
 			settle = handlers.onSettled;
 		});
 
-		renderBar();
+		renderSection();
 		editAndBlur(inputFor("example.com"), "example.org");
 
 		expect(useSaveStore.getState().status).toBe("saving");

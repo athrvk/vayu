@@ -39,7 +39,17 @@ describe("invalidateForMcpEvent", () => {
 
 	test("an environment change invalidates the list and the details", () => {
 		const { keys } = keysFor({ entity: "environment" });
-		expect(keys).toEqual([queryKeys.environments.all]);
+		expect(keys).toContainEqual(queryKeys.environments.all);
+	});
+
+	test("an environment change also drops every composed request", () => {
+		// `POST /compose` substitutes environment variables, so an MCP write to
+		// them leaves every cached composition - and the curl/fetch snippet the
+		// context bar builds from one - describing the pre-write values. Compose is
+		// never refetched on its own, so without this the snippet stays wrong until
+		// the tab is reopened.
+		const { keys } = keysFor({ entity: "environment" });
+		expect(keys).toContainEqual(queryKeys.compose.all);
 	});
 
 	test("a run invalidates both list families", () => {

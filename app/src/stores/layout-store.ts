@@ -27,6 +27,17 @@ interface LayoutState {
 	// Context bar (right panel for request tabs)
 	contextBarOpen: boolean;
 	contextBarWidth: number;
+	/**
+	 * Section ids the user has collapsed, by exception - a section not named
+	 * here is expanded.
+	 *
+	 * An array rather than a Set because `persist` serializes with JSON, which
+	 * writes a Set as `{}` and reads it back as one, so every collapse would
+	 * survive exactly until the next launch. Storing the collapsed ones rather
+	 * than the expanded ones also means a section added in a later release
+	 * ships expanded for existing users instead of invisible.
+	 */
+	contextBarCollapsedSections: string[];
 
 	// Request / response split ratio (0–1, fraction for the left/request pane)
 	requestSplitRatio: number;
@@ -42,6 +53,7 @@ interface LayoutState {
 	setContextBarOpen: (open: boolean) => void;
 	toggleContextBar: () => void;
 	setContextBarWidth: (width: number) => void;
+	toggleContextBarSection: (id: string) => void;
 
 	setRequestSplitRatio: (ratio: number) => void;
 }
@@ -54,6 +66,7 @@ export const useLayoutStore = create<LayoutState>()(
 			drawerWidth: DEFAULT_DRAWER_WIDTH,
 			contextBarOpen: false,
 			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
+			contextBarCollapsedSections: [],
 			requestSplitRatio: 0.5,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -73,6 +86,12 @@ export const useLayoutStore = create<LayoutState>()(
 				set({
 					contextBarWidth: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)),
 				}),
+			toggleContextBarSection: (id) =>
+				set((s) => ({
+					contextBarCollapsedSections: s.contextBarCollapsedSections.includes(id)
+						? s.contextBarCollapsedSections.filter((s2) => s2 !== id)
+						: [...s.contextBarCollapsedSections, id],
+				})),
 
 			setRequestSplitRatio: (ratio) =>
 				set({ requestSplitRatio: Math.max(0.2, Math.min(0.8, ratio)) }),
@@ -105,6 +124,7 @@ export const useLayoutStore = create<LayoutState>()(
 				drawerWidth: state.drawerWidth,
 				contextBarOpen: state.contextBarOpen,
 				contextBarWidth: state.contextBarWidth,
+				contextBarCollapsedSections: state.contextBarCollapsedSections,
 				requestSplitRatio: state.requestSplitRatio,
 			}),
 		}

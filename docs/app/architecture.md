@@ -167,11 +167,32 @@ The app uses a dual-state management approach:
    - Runs, Health checks
    - Automatic caching, refetching, and optimistic updates
 
+#### The context bar's section registry
+
+The right-hand context bar renders a list rather than a component tree it owns:
+`components/layout/context-bar/registry.ts` holds one ordered array of
+`{ id, title, appliesTo(tab), Component }`, and both the bar (what to draw) and
+the Dock's toggle (whether the button has anything to light up for) read it
+through the same `sectionsForTab` / `contextBarHasContent` pair. Keeping those
+two answers in one place is the point: they were a hardcoded tab type in one file
+and a `return null` in another, and they drifted.
+
+A section is a leaf component over the ordinary query layer - no bar-wide shared
+state - and is **mounted only while its section is expanded**, so a collapsed
+section registers no queries. That is what makes it safe for the bar to stay open
+on every request tab. See `docs/app/COMPONENTS.md` for the sections themselves.
+
 #### Services Layer
 
 - **`api.ts`**: HTTP client wrapper for all engine API endpoints
   - Transforms between frontend (snake_case) and backend (camelCase) formats
   - Handles error transformation and user-friendly messages
+
+- **`codegen/`**: Snippet generation (curl, JS fetch, Python requests, HTTPie,
+  PowerShell) - the outbound half of the
+  symmetry `services/curl/` opens by parsing curl in. Pure functions over a
+  `SnippetRequest`, fed `POST /compose`'s output, so a generated snippet is what
+  Vayu would actually send rather than the template it was written as
 
 - **`sse-client.ts`**: Server-Sent Events client for real-time metrics
   - Connects to `/runs/:runId/live` (replayable tick topic - no attach race)

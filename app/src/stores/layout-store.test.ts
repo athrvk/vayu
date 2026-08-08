@@ -89,3 +89,43 @@ describe("layout-store drawer width", () => {
 		expect(STORAGE_KEYS.LAYOUT_STORE).toBe("vayu.layout");
 	});
 });
+
+/**
+ * Context-bar sections are collapsed by exception: the store holds the ids the
+ * user closed, and anything not listed is open.
+ *
+ * Storing the closed ones rather than the open ones is what makes a section
+ * added in a later release ship expanded for existing users instead of
+ * invisible - a blob written before it existed cannot name it.
+ */
+describe("layout-store context-bar sections", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({ contextBarCollapsedSections: [] });
+	});
+
+	it("starts with every section expanded", () => {
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual([]);
+	});
+
+	it("toggles one section without touching the others", () => {
+		const { toggleContextBarSection } = useLayoutStore.getState();
+
+		toggleContextBarSection("code");
+		toggleContextBarSection("cookies");
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual(["code", "cookies"]);
+
+		toggleContextBarSection("code");
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual(["cookies"]);
+	});
+
+	it("survives a restart, which a Set would not", () => {
+		useLayoutStore.getState().toggleContextBarSection("code");
+
+		// `persist` serializes with JSON: a Set writes as `{}` and reads back as
+		// one, so every collapse would last exactly until the next launch. Reading
+		// what actually reached storage is the only assertion that catches that -
+		// the in-memory state looks right either way.
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		expect(stored.state.contextBarCollapsedSections).toEqual(["code"]);
+	});
+});

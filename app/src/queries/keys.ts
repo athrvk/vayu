@@ -108,6 +108,16 @@ export const queryKeys = {
 		all: ["scriptCompletions"] as const,
 	},
 
+	// `POST /compose` for a stored request - what will actually be sent, with
+	// variables substituted and `inherit` auth walked. Keyed by environment as
+	// well as request: the same request composes differently per environment,
+	// and one key for both would serve the wrong snippet after a switch.
+	compose: {
+		all: ["compose"] as const,
+		forRequest: (requestId: string, environmentId: string | null) =>
+			[...queryKeys.compose.all, requestId, environmentId] as const,
+	},
+
 	// OAuth 2.0 token cache
 	oauth: {
 		all: ["oauth2"] as const,

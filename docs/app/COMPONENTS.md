@@ -33,7 +33,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
     │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
-    ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; request tabs only; push ≥1200px / overlay <1200px
+    ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; sections from context-bar/registry.ts; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
 
@@ -94,14 +94,56 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 ### `ContextBar` (`components/layout/ContextBar.tsx`)
 
-252px panel (fixed width, request-tab–only) showing variables in scope for the active request.
+252px panel showing a stack of collapsible sections about the active tab. It owns the frame - landmark, resize handle, header, scroll container, per-section collapse state - and nothing about what any section shows.
 
 - **Push mode** (≥1200px): adjacent to main content, takes layout space.
 - **Overlay mode** (<1200px): floats over main content, top-right (absolute positioned, shadow, z-10).
-- **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`. The button's pressed state is "open **and** the active tab has content for the bar" (`contextBarHasContent`, shared with the bar itself) - `contextBarOpen` alone lit the button up on the six tab types the bar renders nothing for.
-- **Structure:** an `<aside>` landmark ("Context sidebar"), like the Drawer facing it. The resize handle and the header are direct children; the scroll lives on an inner wrapper, so the drag strip and the close button stay put while the variables list scrolls. The left edge is the handle's own 1px hairline - the panel draws no `border-l` of its own.
-- **Content:** resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; each row shows the name (`TruncatedText`), its winning scope (`VariableScopeBadge`) and the value (secrets masked). Value inputs are named `Value of <name>`.
-- **Editing:** a blur (or Enter) commits the value back to the definition the resolver picked - looked up by `ResolvedVariable.sourceId`, not re-derived (see [variable resolution](./variable-resolution.md#getvariableoriginsname)). The payload is read from the query cache at commit time and patched into it optimistically, so a second blur before the first mutation settles cannot re-send the first one's old value. Commits register with the save store, so a quit flush waits for one in flight.
+- **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`. The button's pressed state is "open **and** the active tab has content for the bar" (`contextBarHasContent`, shared with the bar itself) - `contextBarOpen` alone lit the button up on tab types the bar renders nothing for.
+- **Structure:** an `<aside>` landmark ("Context sidebar"), like the Drawer facing it. The resize handle and the header are direct children; the scroll lives on an inner wrapper, so the drag strip and the close button stay put while the sections scroll. The left edge is the handle's own 1px hairline - the panel draws no `border-l` of its own.
+
+#### The section registry (`components/layout/context-bar/registry.ts`)
+
+`CONTEXT_BAR_SECTIONS` is one ordered list of `{ id, title, appliesTo(tab), Component }`. `sectionsForTab(tab)` filters it, and `contextBarHasContent(tab)` is `sectionsForTab(tab).length > 0` - so the bar's visibility and the Dock toggle's pressed state read the same list and cannot drift. Adding a section for another tab type is one entry here and nothing else.
+
+**A section's component is mounted only while its section is expanded** (`context-bar/Section.tsx`), which is the whole cost model: the bar is open on every request tab, so a collapsed section must register no queries. Collapse state persists per section id in `layout-store` (`contextBarCollapsedSections`, collapsed-by-exception).
+
+Sections are leaf components over the existing query layer - no bar-wide shared state - each with its own loading and empty body (`SectionEmpty`, `SectionLoading`).
+
+| Section (`id`) | What it shows |
+|---|---|
+| Variables in scope (`variables`) | `VariablesSection.tsx` - the resolved variables and the quick editor over them (below). |
+| Auth (`auth`) | `AuthContextSection.tsx` - the effective auth mode and where it came from, via the shared `resolveAuthSource` walk, so it cannot disagree with what is sent. For OAuth 2.0 it embeds `TokenStatusRow` (the Auth tab's own control) for token state, fetch and clear. |
+| Cookies for this host (`cookies`) | `CookiesSection.tsx` - the active environment's jar filtered to the request's host, with a per-scope clear. Host filtering is an **approximation**, stated in the UI: libcurl applies the real domain/path/secure rules at transfer time. |
+| Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below). |
+| Environment (`environment`) | `EnvironmentSection.tsx` - the active environment's name and a way into the Variables drawer. |
+
+**There is deliberately no "last result" section.** Status, duration and age of the last send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary. What would earn the slot is a *trend* across recent sends, which the pane structurally cannot show; that needs the paginated `GET /runs` to carry each design run's result first (today only `GET /runs/:id` attaches it), so it is tracked separately in #380.
+
+#### Variables section
+
+Resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; each row shows the name (`TruncatedText`), its winning scope (`VariableScopeBadge`) and the value (secrets masked). Value inputs are named `Value of <name>`.
+
+**Editing:** a blur (or Enter) commits the value back to the definition the resolver picked - looked up by `ResolvedVariable.sourceId`, not re-derived (see [variable resolution](./variable-resolution.md#getvariableoriginsname)). The payload is read from the query cache at commit time and patched into it optimistically, so a second blur before the first mutation settles cannot re-send the first one's old value. Commits register with the save store, so a quit flush waits for one in flight.
+
+#### Code section and `services/codegen/`
+
+Snippets are generated from **`POST /compose`'s output** - the request with `{{variables}}` substituted and `inherit` auth walked by the engine that will send it - so what you paste is what Vayu would put on the wire. A **Templated** mode generates from the stored request instead, references intact, for pasting into a bug report. Composing happens on expand and on an explicit recompose, never per keystroke (the section only mounts while expanded, and the query is `staleTime: Infinity`).
+
+`services/codegen/` holds the generators, closing the symmetry with `services/curl/`, which parses curl *in* and generated nothing out. Each target is a pure function of a `SnippetRequest`; `CODE_TARGETS` is the registry, and adding a target is one entry plus one function. Auth is flattened into headers/query/`-u` in `prepare.ts` rather than per target, because the engine keeps `auth` beside the request and applies it at send time: a snippet built from the composed *headers* alone would authenticate in Vayu and 401 in a terminal. Modes no static command can reproduce (OAuth 2.0, digest, AWS, NTLM) produce a note instead of a silent drop.
+
+**Quoting is per target, never a flag on another one** - that is why PowerShell is its own generator rather than "curl with different quotes". Each language's escape rule and its form-body switch differ in ways that fail silently:
+
+| Target | String rule | Multipart vs urlencoded |
+|---|---|---|
+| `curl` | POSIX single quotes, `'` → `'\''` | `-F` vs `--data-urlencode` |
+| `fetch` | `JSON.stringify` (it *is* the JS literal grammar) | `FormData` vs `URLSearchParams` |
+| `python` | `JSON.stringify` - JSON's escapes are a strict subset of Python 3's | `files=` vs `data=` (a multipart body passed as `data=` is silently urlencoded) |
+| `httpie` | POSIX, shared with curl | `--multipart` vs `--form` (`--form` alone is urlencoded) |
+| `powershell` | Single quotes, `'` → `''`; a POSIX `'\''` would put a backslash in the data | `-Form` vs `-Body` |
+
+HTTPie takes headers as bare `Name:value` words and a body as `--raw`, so the composed bytes go out unchanged rather than HTTPie building a new JSON object from `key=value`. PowerShell emits `Invoke-RestMethod`, not `curl` - on Windows PowerShell `curl` is an alias for that cmdlet, so a snippet saying `curl` runs something else than the reader expects.
+
+**Secrets are masked by default in resolved output**, revealing is explicit, and masking happens *before* quoting - after it, a value containing a quote no longer matches itself. What is masked: every variable the resolver marks secret, plus the credential the auth mode carries. Jar cookies are never in a snippet (libcurl attaches them at transfer time) and the section says so.
 
 ### `Dock` (`components/layout/Dock.tsx`)
 

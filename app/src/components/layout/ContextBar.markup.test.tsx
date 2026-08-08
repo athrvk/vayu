@@ -9,15 +9,20 @@
  */
 
 /**
- * What the context bar *is* on screen, as opposed to where its edits land
- * (`ContextBar.commit-scope.test.tsx`).
+ * The bar's frame, and what it does with a section list.
  *
- * Every case here pins a defect the bar shipped with: unnamed value inputs, a
- * scope visible only in a mouse-only `title`, a 14px close target, an anonymous
- * `<div>` where the facing Drawer is a labelled landmark, a doubled 1px left
- * edge, and a root that was simultaneously the scroll container and the resize
- * handle's positioning context - so scrolling the list carried the drag strip
- * and the header out of view.
+ * The frame cases each pin a defect the bar shipped with: a 14px close target,
+ * an anonymous `<div>` where the facing Drawer is a labelled landmark, a doubled
+ * 1px left edge, and a root that was simultaneously the scroll container and the
+ * resize handle's positioning context - so scrolling carried the drag strip and
+ * the header out of view.
+ *
+ * The registry is mocked to two stub sections on purpose. This file is about the
+ * *frame*: which sections exist is `context-bar/registry.test.tsx`, and what each
+ * one shows is its own test. Stubbing also makes the mount-gating assertion
+ * exact - a section's component is a spy, so "a collapsed section runs no
+ * queries" becomes "the component was never called", which is the mechanism
+ * rather than a proxy for it.
  *
  * The structural cases assert `className`, not geometry: jsdom has no layout and
  * reports 0 for every measurement, so an `offsetHeight` or `scrollTop` guard
@@ -25,58 +30,29 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ContextBar } from "./ContextBar";
 import { TooltipProvider } from "@/components/ui";
-import { queryKeys } from "@/queries/keys";
-import type { ResolvedVariable } from "@/types";
+import { useLayoutStore, useTabsStore } from "@/stores";
 
-vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: { id: "req_1", collectionId: "col_1" } }),
-	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
+const alphaBody = vi.fn(() => <input aria-label="Alpha input" defaultValue="alpha" />);
+const betaBody = vi.fn(() => <p>beta body</p>);
+
+vi.mock("./context-bar/registry", () => ({
+	sectionsForTab: (tab: { type: string } | undefined) =>
+		tab?.type === "request"
+			? [
+					{ id: "alpha", title: "Alpha", appliesTo: () => true, Component: alphaBody },
+					{ id: "beta", title: "Beta", appliesTo: () => true, Component: betaBody },
+				]
+			: [],
 }));
-
-let resolved: Record<string, ResolvedVariable> = {};
-
-vi.mock("@/hooks/useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => resolved }),
-}));
-
-const layoutStore = {
-	contextBarOpen: true,
-	setContextBarOpen: vi.fn(),
-	contextBarWidth: 280,
-	setContextBarWidth: vi.fn(),
-};
-const tabsStore = {
-	openTabs: [{ id: "t1", type: "request", entityId: "req_1" }],
-	activeTabId: "t1",
-};
-
-vi.mock("@/stores", async () => {
-	const saveStore =
-		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
-	return {
-		useLayoutStore: () => layoutStore,
-		useTabsStore: () => tabsStore,
-		useSaveStore: saveStore.useSaveStore,
-	};
-});
 
 function renderBar(mode?: "push" | "overlay") {
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	client.setQueryData(queryKeys.globals.all, { id: "globals", updatedAt: "", variables: {} });
-	client.setQueryData(queryKeys.environments.list(), []);
-	client.setQueryData(queryKeys.collections.list(), []);
 	return render(
-		<QueryClientProvider client={client}>
-			<TooltipProvider>
-				<ContextBar mode={mode} />
-			</TooltipProvider>
-		</QueryClientProvider>
+		<TooltipProvider>
+			<ContextBar mode={mode} />
+		</TooltipProvider>
 	);
 }
 
@@ -85,30 +61,84 @@ function bar(): HTMLElement {
 	return screen.getByRole("complementary", { name: "Context sidebar" });
 }
 
+function sectionToggle(title: string): HTMLElement {
+	return screen.getByRole("button", { name: title });
+}
+
 beforeEach(() => {
-	resolved = {};
+	alphaBody.mockClear();
+	betaBody.mockClear();
+	useLayoutStore.setState({
+		contextBarOpen: true,
+		contextBarWidth: 280,
+		contextBarCollapsedSections: [],
+	});
+	useTabsStore.setState({
+		openTabs: [{ id: "t1", type: "request", entityId: "req_1" }],
+		activeTabId: "t1",
+	});
+});
+
+describe("ContextBar - the sections it is given", () => {
+	it("renders one collapsible per section, in registry order", () => {
+		renderBar();
+		const titles = screen.getAllByRole("button").map((b) => b.textContent);
+		expect(titles).toEqual(expect.arrayContaining(["Alpha", "Beta"]));
+		expect(titles.indexOf("Alpha")).toBeLessThan(titles.indexOf("Beta"));
+		expect(screen.getByText("beta body")).toBeInTheDocument();
+	});
+
+	it("renders nothing at all on a tab type with no sections", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "settings", entityId: null }],
+			activeTabId: "t1",
+		});
+		const { container } = renderBar();
+		// Not an empty frame: the toggle's pressed state reads the same predicate,
+		// so a bar that rendered a chrome-only shell here would light the button
+		// over nothing.
+		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("renders nothing when the bar is closed", () => {
+		useLayoutStore.setState({ contextBarOpen: false });
+		const { container } = renderBar();
+		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("does not mount a collapsed section's component", () => {
+		useLayoutStore.setState({ contextBarCollapsedSections: ["beta"] });
+		renderBar();
+
+		// The whole cost model of the bar: it is open on every request tab, so a
+		// section the user collapsed must not be running its queries. Mounting the
+		// component is what registers them, so not mounting it is the guarantee.
+		expect(alphaBody).toHaveBeenCalled();
+		expect(betaBody).not.toHaveBeenCalled();
+		expect(screen.queryByText("beta body")).not.toBeInTheDocument();
+		// The header is still there - a collapsed section is collapsed, not gone.
+		expect(sectionToggle("Beta")).toBeInTheDocument();
+	});
+
+	it("collapsing a section persists it, and expanding removes it", () => {
+		renderBar();
+
+		fireEvent.click(sectionToggle("Alpha"));
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual(["alpha"]);
+
+		fireEvent.click(sectionToggle("Alpha"));
+		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual([]);
+	});
+
+	it("states each section's expanded state for a screen reader", () => {
+		useLayoutStore.setState({ contextBarCollapsedSections: ["beta"] });
+		renderBar();
+		expect(sectionToggle("Alpha")).toHaveAttribute("aria-expanded", "true");
+		expect(sectionToggle("Beta")).toHaveAttribute("aria-expanded", "false");
+	});
 });
 
 describe("ContextBar - naming what a screen reader reads", () => {
-	it("names the editable value input after the variable it edits", () => {
-		resolved = { host: { value: "example.com", scope: "global" } };
-		renderBar();
-
-		// Was an unnamed textbox: "textbox, blank", with a blur that silently
-		// persisted the edit.
-		expect(screen.getByRole("textbox", { name: "Value of host" })).toHaveValue("example.com");
-	});
-
-	it("names the masked input of a secret the same way", () => {
-		resolved = { apiKey: { value: "s3cret", scope: "collection", secret: true } };
-		renderBar();
-
-		const input = screen.getByRole("textbox", { name: "Value of apiKey" });
-		expect(input).toHaveAttribute("readonly");
-		expect(input).toHaveValue("••••••");
-		expect(screen.queryByDisplayValue("s3cret")).not.toBeInTheDocument();
-	});
-
 	it("is a labelled landmark, like the Drawer facing it", () => {
 		renderBar();
 		// An anonymous <div> could not be jumped to; the left panel could.
@@ -127,38 +157,8 @@ describe("ContextBar - naming what a screen reader reads", () => {
 	});
 });
 
-describe("ContextBar - the scope is visible, not hover-only", () => {
-	it("badges each row with the scope the winner came from", () => {
-		resolved = {
-			host: { value: "example.com", scope: "global" },
-			base: { value: "/v1", scope: "collection", sourceId: "col_1" },
-			token: { value: "t", scope: "environment", sourceId: "env_1" },
-		};
-		renderBar();
-
-		// The compact letters `VariableScopeBadge` renders - the primitive the
-		// variable popover already uses, rather than a hand-rolled copy.
-		expect(screen.getByText("G")).toBeInTheDocument();
-		expect(screen.getByText("C")).toBeInTheDocument();
-		expect(screen.getByText("E")).toBeInTheDocument();
-	});
-
-	it("does not hand-write an unconditional title on the name", () => {
-		resolved = { host: { value: "example.com", scope: "global" } };
-		renderBar();
-
-		// `TruncatedText` supplies the title only while the text is clipped -
-		// jsdom never clips, so a title here means the old `truncate` + literal
-		// `title` pattern came back.
-		const name = screen.getByText("host");
-		expect(name.className).toContain("truncate");
-		expect(name).not.toHaveAttribute("title");
-	});
-});
-
 describe("ContextBar - the frame stays put while the list scrolls", () => {
 	it("puts the overflow on an inner wrapper, not on the root", () => {
-		resolved = { host: { value: "example.com", scope: "global" } };
 		renderBar();
 
 		const root = bar();
@@ -175,10 +175,8 @@ describe("ContextBar - the frame stays put while the list scrolls", () => {
 		expect(scroller!.contains(screen.getByRole("button", { name: "Close context bar" }))).toBe(
 			false
 		);
-		// …and the variables list is inside it.
-		expect(scroller!.contains(screen.getByRole("textbox", { name: "Value of host" }))).toBe(
-			true
-		);
+		// …and the sections are inside it.
+		expect(scroller!.contains(screen.getByRole("textbox", { name: "Alpha input" }))).toBe(true);
 	});
 
 	it("paints one left edge, not two", () => {
