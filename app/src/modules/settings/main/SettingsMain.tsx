@@ -104,7 +104,7 @@ export default function SettingsMain() {
 		useEngineStore();
 	const {
 		startSaving,
-		completeSave,
+		completeSaveThenIdle,
 		failSave,
 		setStatus,
 		markPendingSave,
@@ -217,15 +217,12 @@ export default function SettingsMain() {
 					}
 					return next;
 				});
-				completeSave();
+				completeSaveThenIdle();
 
 				// Track restart-required configs
 				for (const key of restartKeys) {
 					addRestartRequiredKey(key);
 				}
-
-				// Reset to idle after showing "saved" status
-				setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 			} catch (err) {
 				console.error("Failed to save settings:", err);
 				failSave(err instanceof Error ? err.message : "Failed to save settings");
@@ -235,9 +232,8 @@ export default function SettingsMain() {
 			configResponse,
 			updateConfigMutation,
 			startSaving,
-			completeSave,
+			completeSaveThenIdle,
 			failSave,
-			setStatus,
 			addRestartRequiredKey,
 		]
 	);

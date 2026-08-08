@@ -86,7 +86,7 @@ vi.mock("@/stores/save-store", () => ({
 	// one it calls, which is easy to mistake for a defect in the component.
 	useSaveStore: () => ({
 		startSaving: vi.fn(),
-		completeSave: vi.fn(),
+		completeSaveThenIdle: vi.fn(),
 		failSave: vi.fn(),
 		setStatus: vi.fn(),
 		markPendingSave: vi.fn(),

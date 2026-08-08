@@ -82,7 +82,7 @@ const setStatus = vi.fn();
 vi.mock("@/stores/save-store", () => ({
 	useSaveStore: () => ({
 		startSaving: vi.fn(),
-		completeSave: vi.fn(),
+		completeSaveThenIdle: vi.fn(),
 		failSave: vi.fn(),
 		setStatus: (...args: unknown[]) => setStatus(...args),
 		markPendingSave: vi.fn(),
