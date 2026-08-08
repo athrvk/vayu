@@ -14,19 +14,34 @@
  * another, and keeping them in step by hand is exactly the "config one branch
  * defines and another re-derives inline" defect the repo keeps finding.
  *
- * Phase 1 is the request tab. Phase 2's collection and run sections are entries
- * in this array and nothing else - which is the point of the registry.
+ * The collection and run sections arrived as entries in this array and nothing
+ * else - no framework change, which is what the registry was for.
  */
 
 import type { Tab } from "@/stores";
 import { AuthContextSection } from "./AuthContextSection";
 import { CodeSection } from "./CodeSection";
+import { CollectionAuthSection } from "./CollectionAuthSection";
+import { CollectionContentsSection } from "./CollectionContentsSection";
+import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
+import { RunConfigSection } from "./RunConfigSection";
+import { RunSourceSection } from "./RunSourceSection";
 import { VariablesSection } from "./VariablesSection";
 import type { ContextBarSection } from "./types";
 
 const onRequestTab = (tab: Tab) => tab.type === "request";
+
+/**
+ * A collection or run tab with no entity is a tab with no subject: `Shell`
+ * renders nothing for one, and every section below would have nothing to query.
+ * Testing the entity as well as the type is why `appliesTo` takes the whole tab
+ * - it also keeps the Dock's toggle dark rather than lighting it for an empty
+ * bar.
+ */
+const onCollectionTab = (tab: Tab) => tab.type === "collection" && tab.entityId !== null;
+const onRunTab = (tab: Tab) => tab.type === "run" && tab.entityId !== null;
 
 /**
  * Order is the reading order on screen: what is in scope, who you are, what
@@ -63,6 +78,37 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		appliesTo: onRequestTab,
 		Component: EnvironmentSection,
 	},
+
+	/*
+	 * The collection tab, in the same reading order: what it contributes, what
+	 * it hands down, then how much is in it.
+	 *
+	 * There is no "last run of this collection" section. A collection has no
+	 * runs to summarise - the collection runner is #354, and until it exists
+	 * such a section could only invent a number.
+	 */
+	{
+		id: "collection-variables",
+		title: "Variables in this collection",
+		appliesTo: onCollectionTab,
+		Component: CollectionVariablesSection,
+	},
+	{
+		id: "collection-auth",
+		title: "Auth",
+		appliesTo: onCollectionTab,
+		Component: CollectionAuthSection,
+	},
+	{
+		id: "collection-contents",
+		title: "Contents",
+		appliesTo: onCollectionTab,
+		Component: CollectionContentsSection,
+	},
+
+	/* The run tab: what was asked for, and what it was asked of. */
+	{ id: "run-config", title: "Run config", appliesTo: onRunTab, Component: RunConfigSection },
+	{ id: "run-source", title: "Source", appliesTo: onRunTab, Component: RunSourceSection },
 ];
 
 /** The sections that have something to say about this tab, in registry order. */

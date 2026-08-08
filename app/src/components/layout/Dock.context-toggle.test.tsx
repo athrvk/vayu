@@ -11,13 +11,13 @@
 /**
  * The context-bar toggle reports what is on screen, not what is stored.
  *
- * The Dock button and Ctrl/Cmd+I flip `contextBarOpen` on every tab type, while
- * the bar renders null off a request tab - so on six of the seven types the
- * button lit up and nothing appeared, and because the flag is persisted the bar
- * then popped out later on the next request tab.
+ * The Dock button and Ctrl/Cmd+I flipped `contextBarOpen` on every tab type
+ * while the bar rendered null wherever it had no sections - so the button lit
+ * up and nothing appeared, and because the flag is persisted the bar then
+ * popped out later on the next request tab.
  *
  * Mutation-check: drive `active` from `contextBarOpen` alone again and the
- * non-request cases redden.
+ * section-less cases redden.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -37,9 +37,11 @@ function renderDock() {
 	);
 }
 
-function openTabOfType(type: TabType) {
+const ENTITY_TYPES: TabType[] = ["request", "collection", "run"];
+
+function openTabOfType(type: TabType, entityId = ENTITY_TYPES.includes(type) ? `${type}_1` : null) {
 	useTabsStore.setState({
-		openTabs: [{ id: "t1", type, entityId: type === "request" ? "req_1" : null }],
+		openTabs: [{ id: "t1", type, entityId }],
 		activeTabId: "t1",
 	});
 }
@@ -66,7 +68,29 @@ describe("Dock - the context-bar toggle's pressed state", () => {
 		expect(toggle()).toHaveAttribute("aria-pressed", "false");
 	});
 
-	it.each<TabType>(["welcome", "collection", "dashboard", "run", "variables", "settings"])(
+	// `collection` and `run` moved out of this list when they grew sections, and
+	// the Dock was not touched to make that happen - which is the derivation
+	// working. Put a hardcoded `type === "request"` back in
+	// `contextBarHasContent` and the two cases below redden.
+	it.each<TabType>(["collection", "run"])(
+		"is pressed on a %s tab with the bar open, off the registry alone",
+		(type) => {
+			openTabOfType(type);
+			renderDock();
+			expect(toggle()).toHaveAttribute("aria-pressed", "true");
+		}
+	);
+
+	it.each<TabType>(["collection", "run"])(
+		"is not pressed on a %s tab that is not open on an entity",
+		(type) => {
+			openTabOfType(type, null);
+			renderDock();
+			expect(toggle()).toHaveAttribute("aria-pressed", "false");
+		}
+	);
+
+	it.each<TabType>(["welcome", "dashboard", "variables", "settings"])(
 		"is not pressed on a %s tab even with the flag set",
 		(type) => {
 			openTabOfType(type);
