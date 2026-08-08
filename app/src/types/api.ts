@@ -398,6 +398,37 @@ export interface StartLoadTestResponse {
 	message?: string;
 }
 
+/**
+ * StartScenarioRunRequest - the other shape `POST /runs` accepts.
+ *
+ * A scenario states its work as an ordered collection instead of a single
+ * request, so it carries no `method`/`url` and no `mode`: the block replaces
+ * them, and `iterations` lives inside it rather than beside a load-test mode.
+ * The engine resolves the collection into a plan before answering, so every
+ * rejection (empty collection, a step that will not compose, a plan over
+ * `maxScenarioSteps`) is a `400` and no run row is created.
+ *
+ * The response is a load run's - `202 {runId}` - because the lifecycle is a
+ * load run's; only the executor differs.
+ */
+export interface StartScenarioRunRequest {
+	scenario: {
+		/**
+		 * The discriminator for a future stored scenario. `"collection"` is the
+		 * only value the engine accepts today, and an unknown one is a 400
+		 * rather than a fall-through to the collection path.
+		 */
+		source: "collection";
+		collectionId: string;
+		/** Descend into sub-collections, depth-first. Default false. */
+		recursive?: boolean;
+		/** Passes over the plan. Whole number, 1 or more; default 1. */
+		iterations?: number;
+	};
+	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
+	environmentId?: string;
+}
+
 // Run Management API
 export interface ListRunsParams {
 	request_id?: string;

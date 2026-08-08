@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { mapSseMetrics } from "./sse-client";
+import { mapSseMetrics, parseStepEvent } from "./sse-client";
 
 describe("mapSseMetrics", () => {
 	it("maps bytes and the full status-code map", () => {
@@ -28,5 +28,68 @@ describe("mapSseMetrics", () => {
 		expect(m.bytes_sent).toBe(0);
 		expect(m.bytes_received).toBe(0);
 		expect(m.status_codes).toBeUndefined();
+	});
+});
+
+describe("parseStepEvent", () => {
+	it("reads a scenario run's step event", () => {
+		expect(
+			parseStepEvent({
+				iteration: 1,
+				stepIndex: 0,
+				name: "Log in",
+				outcome: "passed",
+				statusCode: 200,
+				latencyMs: 42.7,
+			})
+		).toEqual({
+			iteration: 1,
+			stepIndex: 0,
+			name: "Log in",
+			outcome: "passed",
+			statusCode: 200,
+			latencyMs: 42.7,
+		});
+	});
+
+	it("accepts each of the four outcomes", () => {
+		for (const outcome of ["passed", "failed", "skipped", "errored"]) {
+			const step = parseStepEvent({ iteration: 0, stepIndex: 0, outcome });
+			expect(step?.outcome).toBe(outcome);
+		}
+	});
+
+	/*
+	 * The rejections below all exist for one reason: the step list keys on
+	 * `(iteration, stepIndex)`. A payload defaulted to `0:0` would not merely be
+	 * a row saying nothing - it would collide with the real first step's row.
+	 */
+	it("rejects a payload with no step identity", () => {
+		expect(parseStepEvent({ outcome: "passed" })).toBeNull();
+		expect(parseStepEvent({ iteration: 0, outcome: "passed" })).toBeNull();
+		expect(parseStepEvent({ stepIndex: 0, outcome: "passed" })).toBeNull();
+	});
+
+	it("rejects an identity that is not numeric", () => {
+		expect(parseStepEvent({ iteration: "0", stepIndex: 0, outcome: "passed" })).toBeNull();
+	});
+
+	it("rejects an outcome outside the four", () => {
+		expect(parseStepEvent({ iteration: 0, stepIndex: 0, outcome: "unknown" })).toBeNull();
+		expect(parseStepEvent({ iteration: 0, stepIndex: 0 })).toBeNull();
+	});
+
+	it("rejects a non-object payload", () => {
+		expect(parseStepEvent(null)).toBeNull();
+		expect(parseStepEvent("step")).toBeNull();
+	});
+
+	it("names an unnamed step by its position rather than leaving it blank", () => {
+		const step = parseStepEvent({ iteration: 0, stepIndex: 3, outcome: "passed" });
+		expect(step?.name).toBe("Step 4");
+		// A missing status code is "never reached a server", which is what 0
+		// means everywhere else in the app.
+		expect(step?.statusCode).toBe(0);
+		expect(step?.latencyMs).toBe(0);
 	});
 });

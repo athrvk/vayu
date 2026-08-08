@@ -195,10 +195,11 @@ on every tab the registry has entries for - request, collection and run. See
   `SnippetRequest`, fed `POST /compose`'s output, so a generated snippet is what
   Vayu would actually send rather than the template it was written as
 
-- **`sse-client.ts`**: Server-Sent Events client for real-time metrics
+- **`sse-client.ts`**: Server-Sent Events client for a run's live stream
   - Connects to `/runs/:runId/live` (replayable tick topic - no attach race)
   - No custom reconnect loop: the engine sends an explicit `complete` event, so `CLOSED` is terminal and transient errors are left to the browser's `EventSource` retry
-  - Parses and forwards metrics to dashboard store
+  - **Two event types, one client and one stream.** A load run publishes `metrics` ticks; a scenario (collection) run publishes `step` events, on the same ring with the same monotonic ids, and both end with `complete`. The `step` listener is registered only when a caller passes `onStep` - a load run never emits one, so an unconditional listener would be dead wiring. `parseStepEvent` narrows the payload and **drops** a malformed one rather than defaulting it: the step list keys on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row rather than merely say nothing.
+  - Metrics go to `dashboard-store` (via `loadTestService`); steps go to `scenario-run-store` (via `scenarioRunService`)
 
 - **`http-client.ts`**: Low-level fetch wrapper
   - Request/response transformation
@@ -232,6 +233,14 @@ on every tab the registry has entries for - request, collection and run. See
 5. `loadTestService.startMonitoring(runId)` connects to the `/runs/:runId/live` SSE endpoint
 6. Metrics stream in real-time and update dashboard
 7. When test completes, final report is fetched via `GET /runs/:id/report`
+
+### Collection Run Flow
+
+1. User picks **Run collection** in a collection row's ⋯ menu and confirms `RunCollectionDialog` (Recursive, Iterations)
+2. `useStartScenarioRunMutation()` sends a `scenario` block to the same `POST /runs`; the engine resolves the whole plan first, so an empty collection or a step that will not compose comes back as a `400` with no run created
+3. Engine returns `runId` (`202`), and the dialog attaches `scenarioRunService.startMonitoring(runId)` and opens the run's tab
+4. `step` events stream into `scenario-run-store` and `ScenarioRunView` renders them live
+5. On `complete` the service invalidates the run and fetches `GET /runs/:id/report`; the view switches to the stored per-step rows, which are the ones carrying an exchange to expand
 
 ### Variable Resolution Flow
 

@@ -32,6 +32,7 @@ import { Badge, Button } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
+import ScenarioRunView from "./ScenarioRunView";
 
 export default function HistoryDetail() {
 	const { openTabs, activeTabId, closeTab } = useTabsStore();
@@ -48,14 +49,25 @@ export default function HistoryDetail() {
 	} = useRunQuery(selectedRunId);
 
 	const isDesignRun = run?.type === "design";
+	const isScenarioRun = run?.type === "scenario";
 
-	// Only a load run has a report worth asking for.
+	/*
+	 * Only a **load** run's report is fetched here, and gated on below.
+	 *
+	 * A scenario run has a report too, but this pane must not wait for it: while
+	 * the sequence is still executing, the live `step` stream is the content, and
+	 * blocking on a report that does not describe a finished run yet would leave
+	 * the tab on a skeleton for the length of the run. `ScenarioRunView` asks for
+	 * the report itself, through the same query key, and renders around whatever
+	 * has arrived.
+	 */
+	const isLoadRun = !!run && !isDesignRun && !isScenarioRun;
 	const {
 		data: report,
 		isLoading: loadingReport,
 		error: reportError,
 		refetch: refetchReport,
-	} = useRunReportQuery(run && !isDesignRun ? selectedRunId : null);
+	} = useRunReportQuery(isLoadRun ? selectedRunId : null);
 
 	// No run selected
 	if (!selectedRunId) {
@@ -71,7 +83,7 @@ export default function HistoryDetail() {
 	// Loading state. A skeleton rather than a spinner, matching every other
 	// detail pane: it holds the shape of the header that is about to land
 	// instead of only saying "busy".
-	if (loadingRun || (!isDesignRun && run && loadingReport)) {
+	if (loadingRun || (isLoadRun && loadingReport)) {
 		return <DetailSkeleton label="Loading run report" rows={5} />;
 	}
 
@@ -114,7 +126,7 @@ export default function HistoryDetail() {
 		);
 	}
 
-	if (!isDesignRun && (reportError || !report)) {
+	if (isLoadRun && (reportError || !report)) {
 		const detail = reportError instanceof Error ? reportError.message : null;
 		return (
 			<ErrorState
@@ -137,7 +149,11 @@ export default function HistoryDetail() {
 				<div className="flex items-center gap-3">
 					<div className="flex-1 min-w-0 flex items-center gap-2">
 						<h1 className="text-sm font-semibold text-foreground shrink-0">
-							{isDesignRun ? "Design run" : "Load test"}
+							{isDesignRun
+								? "Design run"
+								: isScenarioRun
+									? "Collection run"
+									: "Load test"}
 						</h1>
 						<span className="text-xs text-muted-foreground font-mono truncate">
 							{selectedRunId}
@@ -169,6 +185,8 @@ export default function HistoryDetail() {
 			<div className="flex-1 min-h-0 overflow-hidden">
 				{isDesignRun ? (
 					<DesignRunView run={run} />
+				) : isScenarioRun ? (
+					<ScenarioRunView run={run} />
 				) : (
 					<LoadTestDetail report={report!} runId={selectedRunId} />
 				)}

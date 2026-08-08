@@ -17,12 +17,20 @@
  * between the two kinds of run tab would be the worse answer. Names come from
  * `loadTestModeLabel` / `formatConcurrency`, the same helpers that strip uses,
  * so the two cannot word the same run differently.
+ *
+ * A **collection run** states its work in a `scenario` block instead of a mode
+ * and a target, and every load-test key above is absent from its snapshot - so
+ * reading it the load way produced no rows at all and the section said "No
+ * configuration was recorded", of a run that recorded plenty. Its rows come
+ * from that block, and the step list itself stays in `ScenarioRunView`: this is
+ * what was asked for, not what happened.
  */
 
 import { useRunQuery } from "@/queries";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { SectionEmpty, SectionLoading } from "./Section";
+import { scenarioFromSnapshot } from "./run-scenario";
 import type { ContextBarSectionProps } from "./types";
 import type { ReactNode } from "react";
 
@@ -42,6 +50,41 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 	if (!run) return <SectionEmpty>This run is no longer available</SectionEmpty>;
 
 	const config = run.configSnapshot;
+	const scenario = scenarioFromSnapshot(run);
+
+	if (scenario) {
+		const rows: ReactNode[] = [
+			<Row key="mode" label="Mode">
+				Collection run
+			</Row>,
+		];
+		if (scenario.steps) {
+			rows.push(
+				<Row key="steps" label="Steps">
+					{scenario.steps.length}
+				</Row>
+			);
+		}
+		if (scenario.iterations != null) {
+			rows.push(
+				<Row key="iterations" label="Iterations">
+					{scenario.iterations}
+				</Row>
+			);
+		}
+		// Both values, not just the true one: whether the run descended into
+		// sub-folders is what decides which requests were in it, so "No" is as
+		// much of an answer as "Yes" and a missing row would read as neither.
+		if (scenario.recursive != null) {
+			rows.push(
+				<Row key="recursive" label="Sub-folders">
+					{scenario.recursive ? "Included" : "Excluded"}
+				</Row>
+			);
+		}
+		return <div className="space-y-1">{rows}</div>;
+	}
+
 	// A design run's snapshot carries no `mode` key - there is no strategy to
 	// record for one send. Naming it here rather than leaving the row out keeps
 	// the section from reading as "nothing was recorded" on every design run.

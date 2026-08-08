@@ -469,6 +469,32 @@ the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
 
+#### `scenario-run-store.ts` - Live Collection-Run Steps
+
+The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes each `step` SSE event in here and `ScenarioRunView` reads it, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
+
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addStep` drops an event that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
+
+**State:**
+```typescript
+{
+  runId: string | null       // The run being streamed, or null
+  steps: ScenarioStepRow[]   // Reported so far, in plan order
+  isStreaming: boolean
+  error: string | null       // A transport failure on the stream
+}
+```
+
+Steps are folded in by `appendStepEvent` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. It returns the same array reference when a replayed event changes nothing, so an idempotent replay does not re-render the list.
+
+Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy.
+
+**That report fetch carries `staleTime: 0`, and the feature rides on it.** The tab mounts the moment the run *starts* and asks for the report immediately, when the engine has written no step rows yet - they go to SQLite in one batch at the end - so the cache holds a report with an empty `results[]`, seconds old. Under the hook's own five-minute `RUNS_STALE_TIME_MS` that entry reads as fresh and `fetchQuery` resolves from it without a request, which left the step list on the live rows for the life of the tab and made every step expand into an empty panel, since only a stored row carries the exchange. This is the one fetch in the app that *knows* the data just changed, so it is the one that must not honour the cache. The engine writes the rows, then the summary, then the terminal status, and publishes `complete` after all three, so the refetch cannot race the write it exists to pick up.
+
+There is deliberately no `stopMonitoring` on the service and no `clear` on the store: the stream ends on its own when the engine sends `complete`, and nothing in the app stops a collection run mid-flight yet. Both belong with the stop control that would need them.
+
+**Non-persisted** (fresh per session).
+
 #### `import-modal-store.ts` - Import Modal UI
 
 Simple modal state for the collection import dialog.

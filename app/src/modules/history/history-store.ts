@@ -11,7 +11,13 @@
 import { create } from "zustand";
 import type { Run } from "@/types";
 
-export type FilterType = "all" | "load" | "design";
+/**
+ * The values are `Run["type"]` plus `"all"`, and `filterRuns` compares them to
+ * `run.type` directly - so a run type the filter cannot name is a type the list
+ * can only ever show under "All". `scenario` (a collection run) was exactly
+ * that until the runner shipped.
+ */
+export type FilterType = "all" | Run["type"];
 export type FilterStatus = "all" | "pending" | "running" | "completed" | "stopped" | "failed";
 type SortBy = "newest" | "oldest";
 

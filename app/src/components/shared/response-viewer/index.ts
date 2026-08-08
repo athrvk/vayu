@@ -59,7 +59,7 @@ export type { TimingPhaseTilesProps } from "./TimingPhaseTiles";
 // the history detail's stored one. See the file header for what the two shells
 // had drifted into before they shared this.
 export { SampledExchange } from "./SampledExchange";
-export type { SampledExchangeProps } from "./SampledExchange";
+export type { SampledExchangeProps, ExchangeState } from "./SampledExchange";
 
 // Utilities
 export {
