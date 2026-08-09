@@ -23,6 +23,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
 import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
+import RequestBreadcrumb from "./RequestBreadcrumb";
 import UrlBar from "./UrlBar";
 import RequestTabs from "./RequestTabs";
 import ResponseAnnouncer from "./ResponseAnnouncer";
@@ -108,8 +109,11 @@ export default function RequestBuilderLayout() {
 			 */}
 			<ResponseAnnouncer />
 
-			{/* URL Bar - the whole header now. The description used to draw a
-			    second band here, permanently, whether or not one existed. */}
+			{/* Where this request lives, then the URL bar. The crumb renders
+			    nothing at all for a request with no collection and no name, so
+			    the header does not grow a permanent empty line - the mistake the
+			    description band made here before it became the Info tab. */}
+			<RequestBreadcrumb />
 			<UrlBar />
 
 			{/* Main content area with resizable panels */}

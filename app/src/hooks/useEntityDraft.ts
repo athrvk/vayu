@@ -10,9 +10,14 @@
  *
  * Two save models exist in this app. `useSaveManager` is the autosave one the
  * request builder uses. This is the other one: an editable draft, a Save button
- * gated on `isDirty`, and a Reset that throws the draft away. The collection
- * tabs use it because a collection edit is a deliberate act with a button, not
- * a keystroke that persists itself.
+ * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
+ * `ScriptTab` use it because a credential or a script is a deliberate act with
+ * a button, not a keystroke that persists itself.
+ *
+ * `InfoTab` no longer does. Its name and description commit on blur like the
+ * request builder's, so it takes the draft, the resync and the mutation reset
+ * from here and simply never renders a Save button - which is why `reset` has
+ * one caller fewer than `draft` does.
  *
  * The mechanism was hand-rolled once per tab (`AuthTab`, `InfoTab`,
  * `ScriptTab`) with the same five moving parts each time, and the copies had
