@@ -288,6 +288,10 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   actually execute. `run_request` takes an agent-written `preRequestScript` /
   `postRequestScript` instead, since an ad-hoc call has no chain to compose
   from; `start_load_run` takes the same `postRequestScript` for a URL-only run.
+  Those two are supplied per call and are not stored - `create_request` and
+  `update_request` take the same two names to write a script onto the saved
+  request itself, which is what lets an agent-authored script outlive the call
+  that wrote it (see *Storing a request's scripts* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
   (`json` | `text` | `graphql` | `form-data` | `x-www-form-urlencoded`,
   default `text`). The two form modes carry their content as **fields**, not as
@@ -322,6 +326,19 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   fixed order and the first non-blank wins; they are never merged. MCP still
   shows the agent a single name (see *One validation script, one name* above) -
   that is now a courtesy rather than a translation the wire depends on.
+- **Storing a request's scripts** - `create_request` and `update_request` both
+  take `preRequestScript` and `postRequestScript` (strings, optional), written
+  through to the engine's own field names on the request row, so the app's
+  **Pre-request** and **Tests** tabs open on exactly what the agent wrote.
+  `update_request` merge-patches them like every other field: **leave one out
+  and the stored script is kept; pass an empty string and it is cleared.** The
+  `tests` alias is deliberately absent here - it is the engine's spelling for an
+  *ad-hoc run body*, and a stored field answering to two names is a second name
+  to keep in step. Storing a script adds persistence, not execution capability:
+  an agent could already run arbitrary scripts through `run_request`, and a
+  stored one runs only when the request is later sent. Both tools already
+  declare `invalidates: ["request"]`, so the renderer refetches the row and
+  picks the scripts up without a further entity.
 - **Load-testing a saved request** - `start_load_run` with a `requestId`
   composes it by id, exactly as `run_collection_smoke` and the app do:
   variables resolved, stored auth applied through the collection chain, and the

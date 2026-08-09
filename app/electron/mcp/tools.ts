@@ -648,6 +648,36 @@ const validationScriptAliasInput = z
 	);
 
 /**
+ * A saved request's stored scripts, as `create_request` and `update_request`
+ * write them - the two fields the engine keeps on the row
+ * (`preRequestScript` / `postRequestScript`) and the app's **Pre-request** and
+ * **Tests** tabs edit.
+ *
+ * One name per script here, deliberately. The `tests` alias exists on the *run*
+ * tools because the engine spells an ad-hoc run body that way
+ * (`readValidationScript`); a second name for a stored field would be a second
+ * name to keep in step and a second way for an agent to half-write a script.
+ *
+ * `clearable` appends the merge-patch rule, which is `update_request`'s alone -
+ * on a create there is no stored script to keep.
+ */
+function storedScriptInput(which: "pre" | "post", clearable: boolean) {
+	const what =
+		which === "pre"
+			? "JavaScript stored on the request and run before it is sent - the app's Pre-request tab. Use it to sign or otherwise rewrite the request through pm.request."
+			: "JavaScript stored on the request and run after its response arrives - the app's Tests tab. Use pm.test(...) for assertions. Same script `run_request` takes under this name, but persisted onto the request rather than supplied per call.";
+	return z
+		.string()
+		.optional()
+		.describe(
+			`${what} Read the \`vayu://scripting/completions\` resource for the sandbox's surface rather than assuming what exists.` +
+				(clearable
+					? " Leave it out to keep the stored script; pass an empty string to clear it."
+					: "")
+		);
+}
+
+/**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
  * (read via list_requests). The engine applies it - bearer/basic/apikey and
  * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
@@ -1299,7 +1329,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Create a saved request inside a collection (stores it; does not send it). GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed.",
+			"Create a saved request inside a collection (stores it; does not send it), optionally with its pre-request and test scripts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent.",
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -1320,6 +1350,8 @@ export const TOOLS: McpTool[] = [
 					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported here - a multipart file part names a path on the user's machine, which an agent cannot choose for them; author it in the app."
 				),
 			description: z.string().optional(),
+			preRequestScript: storedScriptInput("pre", false),
+			postRequestScript: storedScriptInput("post", false),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
@@ -1342,8 +1374,12 @@ export const TOOLS: McpTool[] = [
 				payload.body = bodyPayload(bodyType, body);
 				payload.bodyType = bodyType;
 			}
-			const description = str(args, "description");
-			if (description !== undefined) payload.description = description;
+			// Pass-through strings: absent leaves the engine's own default (empty),
+			// so only what the caller actually named is sent.
+			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
+				const value = str(args, field);
+				if (value !== undefined) payload[field] = value;
+			}
 			return callEngine(() => ctx.client.createRequest(payload, signal));
 		},
 	},
@@ -1352,7 +1388,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body or description. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value, including the request's auth and its pre/post-request scripts. Passing `headers` replaces the whole header list, so send every header the request should end up with.",
+			"Correct a saved request: its name, URL, method, headers, body, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value, including the request's auth. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing a script replaces that script, and an empty string clears it.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -1377,6 +1413,8 @@ export const TOOLS: McpTool[] = [
 					"Body type for `body`: json, text, graphql, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
+			preRequestScript: storedScriptInput("pre", true),
+			postRequestScript: storedScriptInput("post", true),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
@@ -1389,7 +1427,16 @@ export const TOOLS: McpTool[] = [
 			 * `method: "GET"` filler would silently rewrite the stored verb.
 			 */
 			const payload: Record<string, unknown> = {};
-			for (const field of ["name", "url", "method", "description"] as const) {
+			for (const field of [
+				"name",
+				"url",
+				"method",
+				"description",
+				// An empty string is a value here, not an omission: the engine's
+				// merge-patch stores it, which is how a script gets cleared.
+				"preRequestScript",
+				"postRequestScript",
+			] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
@@ -1412,7 +1459,7 @@ export const TOOLS: McpTool[] = [
 			}
 			if (Object.keys(payload).length === 0) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body or description)."
+					"Pass at least one field to change (name, url, method, headers, body, description, preRequestScript or postRequestScript)."
 				);
 			}
 			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));
