@@ -116,6 +116,25 @@ nlohmann::json get_script_completions () {
     "Near-zero for single-shot sends." },
     { "sortText", "1_pm_response_time_queue" } });
 
+    completions.push_back ({ { "label", "pm.response.errorCode" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.errorCode" }, { "detail", "string | undefined" },
+    { "documentation",
+    "Why the send failed before a response arrived - TIMEOUT, "
+    "CONNECTION_FAILED, "
+    "DNS_ERROR, SSL_ERROR and friends. Absent when the request reached the "
+    "server, so its presence is the test for a transport failure; the status "
+    "code in that case is the synthetic 0.\n\nExample:\nif "
+    "(pm.response.errorCode) { console.log('never sent: ' + "
+    "pm.response.errorCode); }" },
+    { "sortText", "1_pm_response_errorCode" } });
+
+    completions.push_back ({ { "label", "pm.response.errorMessage" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.errorMessage" }, { "detail", "string | undefined" },
+    { "documentation",
+    "The transport failure in words, alongside errorCode. Absent for the same "
+    "reason errorCode is - a response that arrived did not fail." },
+    { "sortText", "1_pm_response_errorMessage" } });
+
     completions.push_back ({ { "label", "pm.response.headers" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",
@@ -423,9 +442,10 @@ nlohmann::json get_script_completions () {
     "What this script is attached to and which hook it is running in. Every "
     "field is optional - an ad-hoc request has no id, and an unsaved one has a "
     "name no stored request carries - so test with typeof rather than assuming "
-    "a value.\n\niteration / iterationCount are deliberately absent: Vayu runs "
-    "a load test's Tests script once per sampled response, not once per "
-    "iteration, so there is no iteration number to report." },
+    "a value.\n\niteration / iterationCount are set by the collection runner "
+    "and by nothing else. A load test's Tests script runs once per sampled "
+    "response rather than once per iteration, so it has no iteration number to "
+    "report and reads undefined for both." },
     { "sortText", "0_pm_info" } });
 
     completions.push_back ({ { "label", "pm.info.requestId" }, { "kind", KIND_FIELD },
@@ -452,6 +472,66 @@ nlohmann::json get_script_completions () {
     "from.\n\nExample:\nif (pm.info.eventName === 'prerequest') { /* sign the "
     "request */ }" },
     { "sortText", "1_pm_info_eventName" } });
+
+    completions.push_back ({ { "label", "pm.info.iteration" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.iteration" }, { "detail", "number | undefined" },
+    { "documentation",
+    "Which pass of a collection run this step belongs to, 0-based. undefined "
+    "everywhere else - a single Send and a load run's Tests script have no "
+    "iteration to report.\n\nExample:\nif (pm.info.iteration === 0) { /* "
+    "first pass only */ }" },
+    { "sortText", "1_pm_info_iteration" } });
+
+    completions.push_back ({ { "label", "pm.info.iterationCount" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.iterationCount" }, { "detail", "number | undefined" },
+    { "documentation",
+    "How many passes the collection run will make in total. undefined outside "
+    "a collection run, and set by the runner alone.\n\nExample:\nconsole.log("
+    "'pass ' + (pm.info.iteration + 1) + ' of ' + pm.info.iterationCount);" },
+    { "sortText", "1_pm_info_iterationCount" } });
+
+    // ========================================
+    // pm.iterationData - this iteration's data row (#356)
+    // ========================================
+    completions.push_back ({ { "label", "pm.iterationData" },
+    { "kind", KIND_VARIABLE }, { "insertText", "pm.iterationData" },
+    { "detail", "This iteration's data row | undefined" },
+    { "documentation",
+    "The row a data-driven collection run bound to this iteration - row "
+    "i % rows for iteration i - read through get() and "
+    "toObject().\n\nundefined "
+    "wherever there is no row: a single Send, a load run's Tests script, and a "
+    "collection run started without a data set. That is the opposite treatment "
+    "to pm.execution, and it is deliberate - a row is data, so \"this run is "
+    "not data-driven\" is a fact a script may branch on.\n\nExample:\nconst "
+    "user = pm.iterationData ? pm.iterationData.get('username') : "
+    "'default-user';\n\nRead-only: set, unset and clear throw. To put the row "
+    "into the request itself, use a {{data.column}} token instead." },
+    { "sortText", "0_pm_iterationData" } });
+
+    completions.push_back ({ { "label", "pm.iterationData.get" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.iterationData.get(\"${1:column}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.iterationData.get(column: string): any" },
+    { "documentation",
+    "This iteration's value for that column. A column the row does not carry "
+    "returns undefined, as every other pm scope reader does.\n\nValues keep "
+    "their JSON type: a JSON file's 3 arrives as a number, a CSV column "
+    "arrives as a string.\n\nOnly inside a data-driven collection run - "
+    "elsewhere pm.iterationData is undefined, so guard with it before "
+    "calling.\n\nExample:\nconst user = pm.iterationData.get('username');" },
+    { "sortText", "1_pm_iterationData_get" } });
+
+    completions.push_back ({ { "label", "pm.iterationData.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.iterationData.toObject()" },
+    { "detail", "pm.iterationData.toObject(): object" },
+    { "documentation",
+    "The whole row as a plain object, for spreading into a body or logging "
+    "the iteration's inputs.\n\nOnly inside a data-driven collection run - "
+    "elsewhere pm.iterationData is undefined, so guard with it before "
+    "calling.\n\nExample:\npm.request.body = "
+    "JSON.stringify(pm.iterationData.toObject());" },
+    { "sortText", "1_pm_iterationData_toObject" } });
 
     // ========================================
     // pm.environment - Environment variables

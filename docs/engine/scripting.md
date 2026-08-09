@@ -140,7 +140,14 @@ pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
 pm.response.cookies           // Set-Cookie, parsed - see below
                               // (the stored session is pm.cookies)
+pm.response.errorCode         // string | undefined - TIMEOUT, DNS_ERROR, ...
+pm.response.errorMessage      // string | undefined - the same failure in words
 ```
+
+`errorCode` and `errorMessage` are present **only when the send failed before a
+response arrived**, so `if (pm.response.errorCode)` is the test for a transport
+failure - the status code in that case is vayu's synthetic `0`. A response that
+reached the script from a server carries neither.
 
 `reason()` reports the reason phrase from the status line. Where none was
 received it falls back to the canonical text for the code, so a client-side

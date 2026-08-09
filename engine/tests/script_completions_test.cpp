@@ -19,6 +19,7 @@
 #include <cctype>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -599,6 +600,179 @@ TEST (ScriptCompletions, TheContentTypeSnippetPassesAgainstAJsonResponse) {
     EXPECT_TRUE (result.tests[0].passed)
     << "the offered Content-Type snippet fails against a JSON response: "
     << result.tests[0].error_message;
+}
+
+// ---------------------------------------------------------------------------
+// The general callable-implies-offered guard (#418).
+//
+// Every guard above this line is either offered-implies-callable, or the
+// reverse for one named surface (the cookie jar's write half, the variable
+// scopes, the expect matchers). So a whole new `pm.*` surface could be bound
+// and listed nowhere and nothing failed - which is exactly what happened to
+// `pm.iterationData`: shipped by #356, documented in scripting.md, and absent
+// from all 126 completion entries. The #337 closure verification predicted it
+// in those words, and the very next surface fell through.
+//
+// This closes the direction rather than the instance. It asks the *runtime*
+// what it bound rather than comparing against a list written out here, because
+// a hand-maintained list of expected names is a second copy that drifts the
+// same way the completions did - a new surface would have to be added to it
+// too, and forgetting that fails nothing again.
+// ---------------------------------------------------------------------------
+
+// A context with every optional surface populated, so the enumeration below
+// sees the *largest* `pm` the runtime ever builds. Several members are bound
+// conditionally - `pm.iterationData` only with a data row, `pm.info.iteration`
+// only in a scenario run, `pm.response.errorCode` only on a transport failure -
+// and a guard run against a bare context would silently not check them.
+struct FullyBoundContext {
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    vayu::Environment globals;
+    vayu::Environment collection_variables;
+    nlohmann::json row = nlohmann::json{ { "username", "ada" }, { "id", 7 } };
+    vayu::runtime::ScriptContext ctx;
+
+    FullyBoundContext () {
+        request.method  = vayu::HttpMethod::GET;
+        request.url     = "https://api.example.com/users";
+        request.headers = { { "Authorization", "Bearer t" } };
+
+        response.status_code = 200;
+        response.headers     = { { "content-type", "application/json" },
+                { "set-cookie", "session=abc; Path=/" } };
+        response.body        = R"({"ok": true})";
+        // Binds pm.response.errorCode / errorMessage, which exist only here.
+        response.error_code    = vayu::ErrorCode::Timeout;
+        response.error_message = "timed out";
+
+        ctx.request             = &request;
+        ctx.response            = &response;
+        ctx.environment         = &env;
+        ctx.globals             = &globals;
+        ctx.collectionVariables = &collection_variables;
+        ctx.iteration           = 0;
+        ctx.iteration_count     = 4;
+        ctx.iteration_data      = &row;
+        ctx.in_scenario         = true;
+    }
+};
+
+// Members the runtime binds and the editor must not offer, each with the reason
+// it is not a completion. Anything not on this list has to be in the list the
+// endpoint serves.
+bool is_deliberately_uncompletable (const std::string& name) {
+    return
+    // Bound only to throw, naming the three real scopes - offering it would be
+    // suggesting a call that cannot work.
+    name == "pm.variables.set" ||
+    // Bound only to throw: the rows are a run input, not a scope, so a write
+    // has nowhere to land (#356). Same reasoning as pm.variables.set.
+    name == "pm.iterationData.set" || name == "pm.iterationData.unset" ||
+    name == "pm.iterationData.clear" ||
+    // The assertion chain root and everything hanging off it. It is offered as
+    // the terminal `pm.response.to.be.*` labels instead, which is what an
+    // author types and what EveryOfferedResponseStatusClassExistsInTheRuntime
+    // checks; `pm.response.to` on its own asserts nothing, so a completion for
+    // it would suggest an expression with no effect.
+    name == "pm.response.to" || name.rfind ("pm.response.to.", 0) == 0;
+}
+
+// Objects whose members are *data*, not API: the header maps carry one property
+// per header on the wire, so descending into them would demand a completion
+// entry for `Authorization`. Their accessors are guarded by
+// EveryOfferedHeaderMemberIsCallableInTheRuntime above.
+bool is_data_map (const std::string& name) {
+    return name == "pm.request.headers" || name == "pm.response.headers" ||
+    name == "pm.response.cookies";
+}
+
+TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
+    const auto completions = get_script_completions ();
+
+    FullyBoundContext bound;
+    vayu::runtime::ScriptEngine engine;
+
+    // Walk `pm` two levels deep and report what is there. Two levels is what
+    // the surfaces are shaped like - `pm.<namespace>.<member>` - and going
+    // deeper reaches only the header maps and the assertion chain, both
+    // excluded above and both guarded separately.
+    auto enumerated = engine.execute (R"JS(
+        var names = [];
+        var top = Object.getOwnPropertyNames(pm).sort();
+        for (var i = 0; i < top.length; i++) {
+            var key = top[i];
+            names.push('pm.' + key);
+            var value = pm[key];
+            if (value === null || typeof value !== 'object') continue;
+            var members = Object.getOwnPropertyNames(value).sort();
+            for (var j = 0; j < members.length; j++) {
+                names.push('pm.' + key + '.' + members[j]);
+            }
+        }
+        pm.environment.set('bound', names.join(','));
+    )JS",
+    bound.ctx);
+    ASSERT_TRUE (enumerated.success) << enumerated.error_message;
+
+    const std::string bound_names = bound.env["bound"].value;
+    ASSERT_FALSE (bound_names.empty ())
+    << "the runtime enumeration found nothing, so this guard proved nothing";
+
+    std::vector<std::string> missing;
+    int checked = 0;
+    for (size_t start = 0; start <= bound_names.size ();) {
+        const size_t comma = bound_names.find (',', start);
+        const std::string name = bound_names.substr (
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+        if (!name.empty () && !is_deliberately_uncompletable (name) && !is_data_map (name)) {
+            checked++;
+            if (find_by_label (completions, name) == nullptr) {
+                missing.push_back (name);
+            }
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+
+    EXPECT_GT (checked, 40)
+    << "far fewer pm members than the runtime binds - the walk above is broken, "
+       "not the completion list";
+
+    std::string report;
+    for (const auto& name : missing) {
+        report += (report.empty () ? "" : ", ") + name;
+    }
+    EXPECT_TRUE (missing.empty ())
+    << "the runtime binds these but the completion list never offers them, so "
+       "no user can discover them in the editor: "
+    << report;
+}
+
+// The named half of the same check. The guard above reads the runtime, so a
+// surface deleted from both sides at once would pass it; this pins the entries
+// #418 requires by name, the way the cookie jar's write half is pinned.
+TEST (ScriptCompletions, TheIterationDataAccessorsAreOffered) {
+    const auto completions = get_script_completions ();
+
+    for (const char* expected : { "pm.iterationData", "pm.iterationData.get",
+         "pm.iterationData.toObject" }) {
+        const auto* item = find_by_label (completions, expected);
+        ASSERT_NE (item, nullptr) << expected << " is bound by the runtime but not offered";
+        // A completion that does not say so would promise a row in a plain
+        // request script, where pm.iterationData is undefined (#300/#356).
+        const std::string documentation = item->value ("documentation", std::string{});
+        EXPECT_NE (documentation.find ("undefined"), std::string::npos)
+        << expected << " does not say it is absent outside a data-driven run: " << documentation;
+    }
+
+    // `has` is not offered because the runtime does not bind it - the row
+    // accessors are get / toObject. Offering it would be the #182 defect.
+    EXPECT_EQ (find_by_label (completions, "pm.iterationData.has"), nullptr)
+    << "pm.iterationData.has is offered but the runtime binds only get/toObject";
 }
 
 } // namespace

@@ -119,6 +119,22 @@ TEST (ScriptTypesTest, TerminalAssertionGettersAreVoid) {
     EXPECT_TRUE (contains (dts, "exist: void;"));
 }
 
+// An optional field is `T | undefined` for any T the reader knows, not for the
+// one pair someone happened to list. The list form carried `string | undefined`
+// alone, so `pm.info.iteration` - documented as `number | undefined` - was
+// declared `void`, and `pm.info.iteration + 1` was an error in the editor for a
+// script the runtime runs happily.
+TEST (ScriptTypesTest, OptionalFieldsKeepTheirUnderlyingType) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "iteration: number | undefined;"));
+    EXPECT_TRUE (contains (dts, "iterationCount: number | undefined;"));
+    // The pair that already worked must not regress on the way through.
+    EXPECT_TRUE (contains (dts, "requestId: string | undefined;"));
+    EXPECT_TRUE (contains (dts, "errorCode: string | undefined;"));
+    // Prose is still not a type, and `void | undefined` is not one either.
+    EXPECT_FALSE (contains (dts, "void | undefined"));
+}
+
 TEST (ScriptTypesTest, ReadsReturnTypesFromTheDetailString) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "get(name: string): string | undefined;"));
