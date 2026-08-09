@@ -792,7 +792,7 @@ const std::string& run_id) {
 
 void register_run_routes (RouteContext& ctx) {
     /**
-     * GET /runs?limit=&offset=&type=&status=&requestId=&q=
+     * GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
      * first. Rows carry a compact `summary` (url/method/mode/duration/
      * concurrency/comment/httpVersion/followRedirects/maxRedirects) instead of
@@ -807,6 +807,10 @@ void register_run_routes (RouteContext& ctx) {
      * - type: "design" | "load" (invalid -> ignored)
      * - status: RunStatus string (invalid -> ignored)
      * - requestId: exact match
+     * - collectionId: exact match against a scenario run's stored
+     *   `scenario.collectionId`. Only a collection run records one, so a design
+     *   or load run never matches; an id nothing ran is an empty page, not an
+     *   error.
      * - q: case-insensitive substring over the stored config_snapshot text
      *
      * Back-compat (removed next minor): a request with *no* query params at all
@@ -816,7 +820,8 @@ void register_run_routes (RouteContext& ctx) {
     ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const bool wants_envelope = req.has_param ("limit") || req.has_param ("offset") ||
         req.has_param ("type") || req.has_param ("status") ||
-        req.has_param ("requestId") || req.has_param ("q");
+        req.has_param ("requestId") || req.has_param ("collectionId") ||
+        req.has_param ("q");
 
         if (!wants_envelope) {
             // Legacy no-param path: today's bare array, byte-shape-identical.
@@ -867,6 +872,8 @@ void register_run_routes (RouteContext& ctx) {
             filter.status = vayu::parse_run_status (req.get_param_value ("status"));
         if (req.has_param ("requestId"))
             filter.request_id = req.get_param_value ("requestId");
+        if (req.has_param ("collectionId"))
+            filter.collection_id = req.get_param_value ("collectionId");
         if (req.has_param ("q"))
             filter.q = req.get_param_value ("q");
 

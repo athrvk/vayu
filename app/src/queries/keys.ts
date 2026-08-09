@@ -57,6 +57,15 @@ export const queryKeys = {
 		recentDesigns: () => [...queryKeys.runs.all, "recentDesign"] as const,
 		recentDesign: (requestId: string) =>
 			[...queryKeys.runs.recentDesigns(), requestId] as const,
+		// The most recent collection run of one collection, for the context
+		// bar's Last run section. Its own family for the third time and the same
+		// reason as the two above: it caches a plain `RunListResponse`, and the
+		// delete-run patch walks everything under `lists()` as `InfiniteData`.
+		// `lastCollectionRuns()` is the prefix to invalidate when the run set
+		// changes without a known collection (a delete, a history clear).
+		lastCollectionRuns: () => [...queryKeys.runs.all, "lastCollectionRun"] as const,
+		lastCollectionRun: (collectionId: string) =>
+			[...queryKeys.runs.lastCollectionRuns(), collectionId] as const,
 		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,

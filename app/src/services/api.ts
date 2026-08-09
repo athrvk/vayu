@@ -330,9 +330,17 @@ export const apiService = {
 	 * the first page and pages older runs in on demand.
 	 */
 	async listRuns(params: RunListParams = {}): Promise<RunListResponse> {
-		const { limit = RUNS_PAGE_LIMIT, offset = 0, type, status, requestId, q } = params;
+		const {
+			limit = RUNS_PAGE_LIMIT,
+			offset = 0,
+			type,
+			status,
+			requestId,
+			collectionId,
+			q,
+		} = params;
 		return await httpClient.get<RunListResponse>(
-			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, q })
+			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, collectionId, q })
 		);
 	},
 

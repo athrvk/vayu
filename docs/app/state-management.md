@@ -487,7 +487,7 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 
 Steps are folded in by `appendStepEvent` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. It returns the same array reference when a replayed event changes nothing, so an idempotent replay does not re-render the list.
 
-Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy.
+Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy. It also invalidates `runs.lists()` (the History row still says "running") and `runs.lastCollectionRuns()` (the context bar's Last run section says it too, from its own family, and is not polled at all).
 
 **That report fetch carries `staleTime: 0`, and the feature rides on it.** The tab mounts the moment the run *starts* and asks for the report immediately, when the engine has written no step rows yet - they go to SQLite in one batch at the end - so the cache holds a report with an empty `results[]`, seconds old. Under the hook's own five-minute `RUNS_STALE_TIME_MS` that entry reads as fresh and `fetchQuery` resolves from it without a request, which left the step list on the live rows for the life of the tab and made every step expand into an empty panel, since only a stored row carries the exchange. This is the one fetch in the app that *knows* the data just changed, so it is the one that must not honour the cache. The engine writes the rows, then the summary, then the terminal status, and publishes `complete` after all three, so the refetch cannot race the write it exists to pick up.
 
@@ -828,6 +828,18 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
   the MCP `run` event, `useDeleteRunMutation` and `useInvalidateRuns` (Settings'
   *Clear run history*) each invalidate it, and a new run-writing path has to as
   well or the section keeps showing the sends from before it.
+- **`useLastCollectionRunQuery(collectionId)`** - The most recent run of one
+  collection, behind the context bar's **Last run** section. One filtered call
+  (`?collectionId=&limit=1`) over the engine's `collectionId` filter, which
+  matches a scenario snapshot's own `scenario.collectionId` as JSON rather than
+  its text - the lookup that did not exist, which is why the section was
+  deferred twice (#377 → PR #394 → PR #400 → #422). Unfiltered by status for the
+  same reason `useRecentDesignRunsQuery` is: a failed run is the one worth
+  surfacing. Own key family (`queryKeys.runs.lastCollectionRun(collectionId)`)
+  under the `lastCollectionRuns()` prefix, outside `runs.lists()`, for the third
+  time and the same shape reason. Invalidated by
+  `useStartScenarioRunMutation` (the new run *is* the last run),
+  `useDeleteRunMutation` and `useInvalidateRuns`.
 - **`useRunQuery(runId)`** / **`runDetailOptions(runId)`** - Fetch a single run
   (full `configSnapshot`). Same 404 contract as `requestDetailOptions`: only an
   `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it
@@ -856,9 +868,10 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
   variant in place (drops the row, decrements the mirrored `total`) plus the
   all-runs cache, and evicts the run's report. The list updater shape-guards
   (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces. The
-  `recentDesigns()` family is **invalidated rather than patched**: a deleted run
-  gives no way back to the request its section is keyed by, and refetching five
-  rows beats carrying a run-to-request map to patch them.
+  `recentDesigns()` and `lastCollectionRuns()` families are **invalidated rather
+  than patched**: a deleted run gives no way back to the request or collection
+  their sections are keyed by, and refetching a few rows beats carrying a
+  run-to-owner map to patch them.
 
 **Deleting a run closes its tabs.** Both delete flows - `HistoryList`'s row
 delete and Settings' *Clear run history* - call
@@ -923,6 +936,8 @@ runs: {
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
   recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],
+  lastCollectionRuns: () => ["runs", "lastCollectionRun"], // prefix: invalidate every collection's row
+  lastCollectionRun: (collectionId) => ["runs", "lastCollectionRun", collectionId],
   allRuns: () => ["runs", "allRuns"],
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -934,9 +949,9 @@ runs: {
 ```
 
 The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
-query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` and
-`runs.recentDesign` sit under `runs.all` but deliberately **not** under
-`runs.lists()` - see below.
+query is keyed on is `list()` / `detail(id)`. `runs.lastDesign`,
+`runs.recentDesign` and `runs.lastCollectionRun` sit under `runs.all` but
+deliberately **not** under `runs.lists()` - see below.
 
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)

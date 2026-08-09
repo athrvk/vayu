@@ -27,12 +27,19 @@ namespace vayu::db {
  * wildcard - it does not constrain the query. `q` is a case-insensitive
  * substring matched against the stored `config_snapshot` text (via SQL LIKE);
  * it may over-match JSON keys/structure, which is acceptable for a search box.
+ *
+ * `collection_id` is the exact opposite of `q` and deliberately so: it reads
+ * `scenario.collectionId` out of the snapshot as JSON, so it matches the field
+ * and never the text around it. Only a scenario run's snapshot carries that
+ * path, which is what makes design and load runs unmatchable rather than merely
+ * unlikely to match.
  */
 struct RunFilter {
     std::optional<RunType> type;
     std::optional<RunStatus> status;
     std::optional<std::string> request_id;
     std::optional<std::string> q;
+    std::optional<std::string> collection_id;
 };
 
 /**

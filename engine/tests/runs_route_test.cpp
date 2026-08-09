@@ -5,8 +5,8 @@
  *
  * Focus: the list must return the `{data, pagination}` envelope with compact
  * per-row `summary` objects (not the full config_snapshot), honour each filter
- * (type / status / requestId / q), clamp limit/offset, and never 500 on a
- * malformed snapshot. The legacy no-param path (a bare array of full
+ * (type / status / requestId / collectionId / q), clamp limit/offset, and never
+ * 500 on a malformed snapshot. The legacy no-param path (a bare array of full
  * configSnapshot rows) is preserved by vayu::json::serialize(Run), asserted
  * here too so a change to the row shape cannot silently break external scripts.
  *
@@ -373,6 +373,139 @@ TEST_F (RunsRouteTest, FilterByQSubstringOverSnapshot) {
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_orders");
+}
+
+// The scenario snapshot a collection run stores. Only the key the filter reads
+// matters here, so the rest is the smallest thing that still parses as one.
+std::string scenario_snapshot (const std::string& collection_id) {
+    return R"({"scenario":{"collectionId":")" + collection_id + R"(","iterations":1}})";
+}
+
+TEST_F (RunsRouteTest, FilterByCollectionIdMatchesOnlyThatCollectionsRuns) {
+    seed ({ .id = "run_mine", .type = vayu::RunType::Scenario,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "run_theirs", .type = vayu::RunType::Scenario, .start_time = 1,
+    .config_snapshot = scenario_snapshot ("col_B") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
+    EXPECT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "run_mine");
+    EXPECT_EQ (body["pagination"]["total"], 1);
+}
+
+// The filter reads the field, not the text around it: a design run whose URL
+// happens to contain the collection id is what a substring search would have
+// returned, and is the reason this is not `q`.
+TEST_F (RunsRouteTest, NonScenarioRunsNeverMatchACollectionId) {
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 1,
+    .config_snapshot = R"({"url":"https://api/col_A","method":"GET"})" });
+    seed ({ .id = "run_load", .type = vayu::RunType::Load, .start_time = 2,
+    .config_snapshot = R"({"url":"https://api/x","comment":"col_A"})" });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "run_scenario");
+}
+
+// An id nothing ran is a legitimate question with an empty answer - a
+// collection that has never been run is the section's ordinary first state.
+TEST_F (RunsRouteTest, UnknownCollectionIdIsAnEmptyPageNotAnError) {
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
+    .config_snapshot = scenario_snapshot ("col_A") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_ghost";
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["data"].size (), 0u);
+    EXPECT_EQ (body["pagination"]["total"], 0);
+    EXPECT_EQ (body["pagination"]["hasMore"], false);
+}
+
+// A snapshot that is not JSON is stored verbatim (sanitize_config_snapshot), so
+// the JSON read has to survive one. Without the CASE guard in run_filter_where
+// this is a SQL error and the whole page 500s - including for the rows that are
+// perfectly readable.
+TEST_F (RunsRouteTest, AMalformedSnapshotDoesNotBreakTheCollectionFilter) {
+    seed ({ .id = "run_bad", .config_snapshot = "not valid json {{{" });
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .start_time = 1,
+    .config_snapshot = scenario_snapshot ("col_A") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
+    EXPECT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "run_scenario");
+}
+
+// The filter is one term among the others, not a mode that replaces them.
+TEST_F (RunsRouteTest, CollectionIdComposesWithTypeStatusAndLimit) {
+    seed ({ .id = "keep", .type = vayu::RunType::Scenario,
+    .status = vayu::RunStatus::Completed, .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "wrong_status", .type = vayu::RunType::Scenario,
+    .status = vayu::RunStatus::Failed, .start_time = 1,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "wrong_collection", .type = vayu::RunType::Scenario,
+    .status = vayu::RunStatus::Completed, .start_time = 2,
+    .config_snapshot = scenario_snapshot ("col_B") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    f.type          = vayu::RunType::Scenario;
+    f.status        = vayu::RunStatus::Completed;
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "keep");
+    EXPECT_EQ (body["pagination"]["total"], 1);
+}
+
+// `limit=1` off a DESC-ordered list is how the context bar asks for "the last
+// run of this collection", so the newest row has to be the one it gets.
+TEST_F (RunsRouteTest, CollectionIdKeepsNewestFirstSoLimitOneIsTheLastRun) {
+    seed ({ .id = "older", .type = vayu::RunType::Scenario, .start_time = 100,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "newest", .type = vayu::RunType::Scenario, .start_time = 300,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "middle", .type = vayu::RunType::Scenario, .start_time = 200,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    // Newest of all, and not ours: an unfiltered `limit=1` returns this one, so
+    // the assertion below fails on a filter that does not filter.
+    seed ({ .id = "newest_elsewhere", .type = vayu::RunType::Scenario, .start_time = 400,
+    .config_snapshot = scenario_snapshot ("col_B") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "newest");
+    // The page is one row of three, not one row of one.
+    EXPECT_EQ (body["pagination"]["total"], 3);
+    EXPECT_EQ (body["pagination"]["hasMore"], true);
+}
+
+// count_runs and get_runs_paginated read the same WHERE - a filter that only
+// one of them understood would page correctly and report a wrong total.
+TEST_F (RunsRouteTest, DbCountAgreesWithTheCollectionFilter) {
+    seed ({ .id = "a", .type = vayu::RunType::Scenario,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "b", .type = vayu::RunType::Scenario, .start_time = 1,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "c", .type = vayu::RunType::Scenario, .start_time = 2,
+    .config_snapshot = scenario_snapshot ("col_B") });
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    EXPECT_EQ (db_->count_runs (f), 2);
+    EXPECT_EQ (db_->get_runs_paginated (f, 50, 0).size (), 2u);
+    EXPECT_EQ (db_->count_runs ({}), 3); // unset -> still a wildcard
 }
 
 TEST_F (RunsRouteTest, FiltersCombine) {
