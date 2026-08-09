@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -263,6 +264,10 @@ const ScenarioResolveOptions& options) {
         " (raise the 'maxScenarioSteps' setting to allow more)");
     }
 
+    // A `data` array that is present and empty was already refused above, so an
+    // empty `data_rows` here means the payload carried no `data` block at all.
+    const bool has_data = !resolution.data_rows.empty ();
+
     resolution.plan.steps.reserve (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
         const auto& row = rows[index];
@@ -285,6 +290,24 @@ const ScenarioResolveOptions& options) {
         if (!built.ok || built.parse_failed) {
             return invalid ("Cannot compose " + describe_step (index, row) +
             ": " + built.error_message);
+        }
+
+        // A `{{data.*}}` token with no data set behind it can never bind. The
+        // namespace is reserved, so composition deliberately left the token
+        // written as it stands, and a run without rows has nothing to
+        // substitute it from - it would reach the wire as the literal text
+        // `{{data.id}}`, which is not a request anyone meant to send. Refused
+        // here, beside every other unrunnable scenario and before a run row
+        // exists, rather than rediscovered per step per iteration once it has
+        // started (issue #415).
+        if (!has_data) {
+            if (auto token = find_data_token (built.request)) {
+                return invalid (describe_step (index, row) + " carries " + *token +
+                ", but this run has no 'scenario.data' set. A data token has "
+                "no row to bind to and would reach the wire written as it "
+                "stands - run the collection with a data file, or remove the "
+                "token from the request.");
+            }
         }
 
         ScenarioStep step;

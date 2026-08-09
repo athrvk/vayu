@@ -58,6 +58,13 @@ written, and appears unresolved in the UI, which is the honest reading: there
 is no row. `{{data.}}` with nothing after the dot names no column and follows
 the ordinary unknown-name rule (resolves to `""`) instead.
 
+A **collection run** is the one place that reading is not left to the user: a
+run started without a data file whose plan still carries a `data.*` token is
+refused with a `400` naming the step and the token, rather than sending the
+literal text once per iteration (issue #415). The single Send above keeps its
+behaviour - a token someone typed into a request they are editing is not yet a
+run.
+
 The conformance fixture pins all three cases, so the two resolvers cannot
 drift on them. See
 [api-reference.md](../engine/api-reference.md#scenario-runs) for what the
