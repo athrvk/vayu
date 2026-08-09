@@ -53,6 +53,19 @@ std::string percent_decode (std::string value) {
     return out;
 }
 
+// The filename the server is told this part carries. Mirrors what the transfer
+// setup hands libcurl (`curl_mime_filedata` declares the basename, an explicit
+// `curl_mime_filename` overrides it), so a rendering cannot name one thing while
+// the send names another. Separators for both platforms because the path is
+// whatever the client on this machine wrote.
+std::string declared_file_name (const FormField& field) {
+    if (!field.file_name.empty ()) {
+        return field.file_name;
+    }
+    const auto slash = field.src.find_last_of ("/\\");
+    return slash == std::string::npos ? field.src : field.src.substr (slash + 1);
+}
+
 } // namespace
 
 bool is_form_mode (BodyMode mode) {
@@ -82,6 +95,32 @@ std::string encode_urlencoded (const std::vector<FormField>& fields) {
         out += percent_encode (field.key);
         out += '=';
         out += percent_encode (field.value);
+    }
+    return out;
+}
+
+std::string render_form_data_parts (const std::vector<FormField>& fields) {
+    std::string out;
+    for (const auto& field : fields) {
+        if (!field.enabled) {
+            continue;
+        }
+        if (!out.empty ()) {
+            out += '&';
+        }
+        out += percent_encode (field.key);
+        out += '=';
+        if (field.type == FormFieldType::File) {
+            // Unescaped, so it cannot be produced by a text part's value.
+            // A part with no file selected renders a bare `@`, which is still
+            // distinct from an empty text value - it is refused before the
+            // transfer (`unsendable_file_part`), but a pre-request script runs
+            // first and reads the body as it stands.
+            out += '@';
+            out += percent_encode (declared_file_name (field));
+        } else {
+            out += percent_encode (field.value);
+        }
     }
     return out;
 }

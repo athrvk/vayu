@@ -58,6 +58,29 @@ namespace vayu::http {
 [[nodiscard]] std::string encode_urlencoded (const std::vector<FormField>& fields);
 
 /**
+ * @brief Enabled parts rendered as a string, with file parts named.
+ *
+ * The multipart counterpart to `encode_urlencoded`, and a *rendering* rather
+ * than an encoding: multipart bytes belong to libcurl (see `wire_body_bytes`),
+ * so this exists only for the surfaces that must show a form-data body as a
+ * string - today `pm.request.body`.
+ *
+ * A text part reads exactly as `encode_urlencoded` writes it. A **file part**
+ * reads `key=@filename`, borrowing curl's own `-F` spelling: it carries its
+ * content in `src` rather than `value`, so encoding it as a pair rendered
+ * `avatar=` - indistinguishable from a text part whose value is empty, which is
+ * the one case where the rendering lost information a reader could not recover
+ * (issue #411).
+ *
+ * The filename is the one the *server* is told (`file_name`, else the basename
+ * of `src`), not the path: a path discloses this machine's layout to anything a
+ * script logs, and adds nothing the request itself sends. The `@` cannot be
+ * confused with a text value that starts with one, because percent-encoding
+ * escapes `@` to `%40` in a value and this marker is written unescaped.
+ */
+[[nodiscard]] std::string render_form_data_parts (const std::vector<FormField>& fields);
+
+/**
  * @brief `key=value&…` parsed back into fields - the inverse of the encoder.
  *
  * Decoding is libcurl's `curl_easy_unescape` for the same reason the encoder

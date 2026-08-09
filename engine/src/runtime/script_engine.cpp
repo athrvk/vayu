@@ -3076,11 +3076,20 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
  * generates at transfer time, so no faithful string exists before the send.
  * Reading `content` alone - which is what this replaced - handed every form
  * body `""`, indistinguishable from a request with no body at all.
+ *
+ * The two form modes take different renderers because only one of them is
+ * reversible: the urlencoded view *is* the wire body and parses straight back
+ * through `parse_urlencoded`, so it must stay a plain `key=value` list, while
+ * form-data names its file parts (`key=@filename`) because encoding one as a
+ * pair loses it (issue #411). A file part is only ever valid under form-data,
+ * so this split costs the urlencoded body nothing.
  */
 std::string script_body_view (const Body& body) {
-    return vayu::http::is_form_mode (body.mode) ?
-    vayu::http::encode_urlencoded (body.fields) :
-    body.content;
+    if (body.mode == BodyMode::FormData) {
+        return vayu::http::render_form_data_parts (body.fields);
+    }
+    return body.mode == BodyMode::Form ? vayu::http::encode_urlencoded (body.fields) :
+                                         body.content;
 }
 
 void setup_pm_request (JSContext* ctx, JSValue pm) {

@@ -271,8 +271,16 @@ fields rather than text. A form body reads as its **enabled** fields encoded
 |---|---|---|
 | `json` / `text` / `xml` / `graphql` / … | the content, as stored | replaces it |
 | `x-www-form-urlencoded` | the encoded fields - **exactly** the bytes sent | parses back into the fields |
-| `form-data` | the encoded fields - a *rendering*, not the bytes sent | refused with a named error |
+| `form-data` | the encoded fields, file parts as `key=@filename` - a *rendering*, not the bytes sent | refused with a named error |
 | none | the property is absent (`undefined`) | sends that string as raw text |
+
+A **file part** reads `avatar=@portrait.png`, borrowing curl's `-F` spelling,
+because it carries its content in a path rather than a value - encoded as a pair
+it would read `avatar=`, indistinguishable from a text part whose value happens
+to be empty. The name shown is the one the server is told (the part's declared
+filename, else the basename of the chosen file), never the local path. A text
+value starting with `@` cannot be confused with it: percent-encoding escapes
+that to `%40`, and the marker is written unescaped.
 
 The `form-data` split is not an oversight: a multipart body carries a boundary
 libcurl generates at transfer time, so no faithful string exists before the send.
