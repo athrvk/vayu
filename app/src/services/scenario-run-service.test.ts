@@ -104,7 +104,7 @@ describe("ScenarioRunService", () => {
 		expect(queryClient.getQueryData(queryKeys.runs.report("run_2"))).toEqual(storedReport);
 	});
 
-	it("marks the run and the history list stale so both leave 'running'", async () => {
+	it("marks the run, the history list and the collection's Last run stale so all leave 'running'", async () => {
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 		vi.mocked(apiService.getRunReport).mockResolvedValue(
 			storedReport as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>
@@ -116,6 +116,11 @@ describe("ScenarioRunService", () => {
 		expect(mockSetStreaming).toHaveBeenCalledWith(false);
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail("run_3") });
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.lists() });
+		// Its own family, outside `lists()`, and not polled - so the section
+		// would sit on "Running" for the rest of the session without this.
+		expect(invalidate).toHaveBeenCalledWith({
+			queryKey: queryKeys.runs.lastCollectionRuns(),
+		});
 		invalidate.mockRestore();
 	});
 

@@ -127,6 +127,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Variables in this collection (`collection-variables`) | `CollectionVariablesSection.tsx` - the definitions this collection owns (not a resolved set), editable through the same commit path as the request tab's list. A disabled definition is shown and marked `off` rather than hidden. |
 | Auth (`collection-auth`) | `CollectionAuthSection.tsx` - the mode this collection is set to, and what a descendant set to Inherit would pick up: the same `resolveAuthSource` walk, so a collection set to plain No Auth names the ancestor that answers instead. |
 | Contents (`collection-contents`) | `CollectionContentsSection.tsx` - direct child counts (requests, sub-collections), matching what the tree shows under the folder. |
+| Last run (`collection-last-run`) | `CollectionLastRunSection.tsx` - how this collection's most recent run went: the outcome word in its status colour, the plan's size (`3 steps`, `× 2` only when more than one pass ran), and the age, opening that run in a History tab. One `GET /runs?collectionId=&limit=1` call and no report fetch - the server's `start_time DESC` makes the single row the answer. A run still going reads "Running" rather than an outcome, and a run stored before the engine sent the `scenario` descriptor shows no size rather than "0 steps". |
 
 **Run tab**
 
@@ -142,7 +143,7 @@ happened to carry a `scenario` the engine ignored is never described as one.
 
 The collection and run sections gate on `tab.entityId` as well as the type: a tab open on nothing renders no pane either, and a section there would query nothing while lighting the Dock toggle over an empty bar.
 
-**There is deliberately no "last run" section on a collection tab**, still, now that the runner exists (#354). A collection's runs are not addressable: `GET /runs` filters by `requestId`, and a collection run's row links no request, so finding one means a substring search of every stored snapshot for the collection id - a scan per open bar, for a number History already shows. It earns the slot once the runs list can be filtered by collection.
+**`collection-last-run` was deferred twice before it landed** (specced in #377, deferred in PR #394 as "no runs exist until #354", re-deferred in PR #400 once the runner existed), each time for the same reason: a collection's runs were not addressable. `GET /runs` filtered by `requestId`, a collection run links none, and the only route to the row was a substring search of every stored snapshot for the collection id - a scan per open bar. #422 added `GET /runs?collectionId=`, which matches the scenario snapshot's own field as JSON rather than its text, and the section is one filtered query for exactly the row it shows.
 
 **There is still deliberately no "last result" section**, and `recent-sends` is not one. Status, duration and age of the *last* send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary, which is why the specced one was built and removed in #344. What the pane structurally cannot show is *more than one send*, and that is the whole content of `recent-sends`: if it ever narrows to the latest run it is the removed section again. Its id is new rather than reused, so the `last-result` guard in `registry.test.tsx` keeps guarding.
 
@@ -335,6 +336,8 @@ Three rules the list holds, each pinned by a mutation-checked test:
 - **`skipped` is never `passed`.** It has its own count and its own row treatment (`SampledExchange`'s `state` prop, below). Nothing produces `skipped` until flow control lands, so it is built to render correctly before it can occur.
 - **Thinned results say so.** A run that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every non-passing step among the ones kept - so a non-zero `stepsDropped` means *successes* are missing. `ScenarioRunView` discloses the three numbers rather than letting `results[]` read as the whole run.
 
+A live run can be **stopped** from this tab (`StopRunButton`, below), which matters most for a data-driven run of hundreds of iterations. The control is shown while `isStreaming || run.status is running|pending` - two signals rather than one, because a tab reopened onto a run that is still executing (after a relaunch, or from History) has no stream at all, and is exactly the case where waiting the run out hurts most. It calls `POST /runs/:id/stop`, which needs nothing new engine-side: the scenario runner already checks `should_stop` per *step*, settles the run to `Stopped` and closes the SSE topic, so the streaming tab flips to the stored rows through the same `complete` a normal finish takes. The handler also invalidates the run and its report itself, because a tab that is not the streaming one never receives that event.
+
 `components/ScenarioStepCard.tsx` renders one step on the shared `SampledExchange`, restoring the response through `restore-response.ts` - the same path a design run's response pane uses, not a second reading of `trace_data`. `SampledExchange` gained an optional `state` (`success | error | slow | skipped`) and a `title` slot for this: its state is otherwise derived from the status code, which would read a `failed` assertion over a `200` as a success and a `skipped` step as a connection failure.
 
 The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a collection row's ⋯ menu. Three options - Recursive, Iterations and a data file - because the scenario **is** the folder: the sequence is the tree's own ordering, and a step list authored here would be a second source of truth for it. Invalid iterations are refused in the dialog; the engine's own rejection (which names the step that would not compose) is shown in place rather than as a toast that scrolls away.
@@ -398,6 +401,20 @@ the user took, including save failures (see `save-store.failSave`). Four
 variants - `info`, `success`, `warning`, `error` - each carried by an icon and a
 left rail rather than colour alone; tokens and durations in
 `docs/design-system.md` -> Toasts.
+
+## Stop Run Button (`components/shared/StopRunButton.tsx`)
+
+"Stop the run that is happening right now", in the one treatment, for the two
+places a run can be cancelled: the load dashboard header and the collection-run
+tab. A primitive rather than markup each view repeats, because the treatment is
+not a `Button` variant - a destructive *outline* over `ghost`, which no variant
+paints, plus the in-flight swap to a spinner and "Stopping…". The label is
+`destructive-text`, never the bare `destructive` fill.
+
+The caller owns the request and the failure path: both call sites `await
+apiService.stopRun(runId)` and, on failure, raise an **error toast with a Try
+again action** rather than a Callout - the run is still generating work, so the
+retry is the reason for saying anything.
 
 ## Sample Retention Note (`components/shared/SampleRetentionNote.tsx`)
 

@@ -46,6 +46,7 @@ export {
 	useLastDesignRunQuery,
 	useRecentDesignRunsQuery,
 	RECENT_DESIGN_RUN_LIMIT,
+	useLastCollectionRunQuery,
 	useDeleteRunMutation,
 	useStartScenarioRunMutation,
 	useInvalidateRuns,

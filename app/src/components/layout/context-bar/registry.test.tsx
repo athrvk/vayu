@@ -63,6 +63,7 @@ describe("the context-bar section registry", () => {
 			"collection-variables",
 			"collection-auth",
 			"collection-contents",
+			"collection-last-run",
 		]);
 	});
 
@@ -77,10 +78,13 @@ describe("the context-bar section registry", () => {
 		expect(sectionsForTab(entitylessTab("run"))).toEqual([]);
 	});
 
-	it("has no collection-run section, which nothing in the app can answer yet", () => {
-		// A collection has no runs of its own until the collection runner (#354)
-		// exists; a section claiming one could only invent it.
-		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).not.toContain("collection-last-run");
+	it("has the collection-run section, now that a collection's runs are addressable", () => {
+		// The inverse of what this case asserted while the section was deferred:
+		// it was absent because `GET /runs` could not be filtered by collection
+		// (#422), and it is present because it now can. Deleting the section
+		// without deleting the engine filter is the regression, so the id is
+		// pinned here rather than only in the ordering case above.
+		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).toContain("collection-last-run");
 	});
 
 	it("has no last-result section, which the response pane already is", () => {

@@ -45,6 +45,9 @@ export * from "./TruncatedText";
 // Shared frame for the drawer views
 export * from "./DrawerPanel";
 
+// The one way to cancel a run in flight (load dashboard, collection runner)
+export * from "./StopRunButton";
+
 // The one way to say "there is nothing here yet"
 export * from "./EmptyState";
 

@@ -667,9 +667,15 @@ export interface RunListResponse {
 export interface RunListParams {
 	limit?: number;
 	offset?: number;
-	type?: "load" | "design";
+	type?: Run["type"];
 	status?: Run["status"];
 	requestId?: string;
+	/**
+	 * Which collection's runs. Matched against a scenario run's stored
+	 * `scenario.collectionId` as JSON, so only collection runs can match - a
+	 * design or load run that merely mentions the id does not.
+	 */
+	collectionId?: string;
 	q?: string;
 }
 

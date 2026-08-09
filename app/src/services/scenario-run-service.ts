@@ -53,9 +53,11 @@ class ScenarioRunService {
 	/*
 	 * There is deliberately no `stopMonitoring` here, unlike `LoadTestService`.
 	 * The stream ends on its own - the engine sends `complete` when the run
-	 * reaches a terminal status - and nothing in the app stops a collection run
-	 * mid-flight yet. A detach method with no caller is surface that cannot be
-	 * verified; it belongs with the stop control that needs it.
+	 * reaches a terminal status - and that holds for a *stopped* run too: the
+	 * scenario runner observes `should_stop` per step, settles the run to
+	 * `Stopped` and closes the topic, so the runner tab's Stop control gets its
+	 * terminal event through the same path a run that finished normally does.
+	 * A detach method with no caller is surface that cannot be verified.
 	 */
 
 	private handleError(error: Error): void {
@@ -108,6 +110,11 @@ class ScenarioRunService {
 		// The run's row in History still says "running" until the next 5s poll,
 		// and once the user has paged the list that poll is off.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		// The context bar's Last run section says the same thing, from its own
+		// key family (`lastCollectionRuns`), which the prefix above does not
+		// reach - and it is not polled at all, so without this it stays on
+		// "Running" for the rest of the session.
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 	}
 }
 

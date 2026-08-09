@@ -11,11 +11,11 @@
  * Compact 52px single-row header with status, method, URL, config info, and stop button
  */
 
-import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
-import { Button, TooltipIconButton } from "@/components/ui";
+import { ArrowLeft } from "lucide-react";
+import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
 import type { DashboardHeaderProps } from "../types";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 
 function formatElapsed(ms: number): string {
@@ -115,27 +115,7 @@ export default function DashboardHeader({
 			)}
 
 			{/* Stop button */}
-			{mode === "running" && (
-				<Button
-					size="sm"
-					variant="ghost"
-					onClick={onStop}
-					disabled={isStopping}
-					className="h-7 px-2.5 text-xs text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0"
-				>
-					{isStopping ? (
-						<>
-							<Loader2 className="w-3 h-3 animate-spin mr-1.5" />
-							Stopping…
-						</>
-					) : (
-						<>
-							<StopCircle className="w-3 h-3 mr-1.5" />
-							Stop
-						</>
-					)}
-				</Button>
-			)}
+			{mode === "running" && <StopRunButton onStop={onStop} isStopping={isStopping} />}
 		</div>
 	);
 }

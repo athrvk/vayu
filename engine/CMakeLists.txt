@@ -303,6 +303,15 @@ target_link_libraries(vayu_core PUBLIC
     vayu_sanitizers
 )
 
+# sqlite_orm hides its json_extract/json_valid wrappers behind this macro, which
+# describes the *library* build rather than being defined by it. Our sqlite3
+# comes from vcpkg with the json1 feature on (declared in vcpkg.json, and built
+# in unconditionally by SQLite itself since 3.38), so the functions are there -
+# the header just will not declare them until it is told. PUBLIC so every
+# translation unit that pulls in sqlite_orm sees the same header.
+# Reader: GET /runs?collectionId= (db/database.cpp, run_filter_where).
+target_compile_definitions(vayu_core PUBLIC SQLITE_ENABLE_JSON1)
+
 # Windows-specific libraries
 if(WIN32)
     target_link_libraries(vayu_core PUBLIC ws2_32 winmm)

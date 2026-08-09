@@ -16,6 +16,8 @@
  *   its start_time DESC order - no download-the-whole-list-and-filter.
  * - `useRecentDesignRunsQuery` asks the same way for the last few, and
  *   deliberately without the status filter - see its case below.
+ * - `useLastCollectionRunQuery` is the same shape again for a collection, over
+ *   the `collectionId` filter (#422) that made the lookup possible at all.
  * - `useRunsQuery` is an infinite query over the `{data, pagination}` envelope:
  *   `fetchNextPage` advances the offset, and `flattenRunPages` de-dupes rows
  *   that a head insertion can momentarily place in two refetched pages.
@@ -28,6 +30,8 @@ import type { ReactNode } from "react";
 import {
 	useLastDesignRunQuery,
 	useRecentDesignRunsQuery,
+	useLastCollectionRunQuery,
+	useStartScenarioRunMutation,
 	RECENT_DESIGN_RUN_LIMIT,
 	useRunsQuery,
 	flattenRunPages,
@@ -45,6 +49,7 @@ const listRuns = vi.fn();
 const getRunReport = vi.fn();
 const getRun = vi.fn();
 const deleteRun = vi.fn();
+const startScenarioRun = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
@@ -52,6 +57,7 @@ vi.mock("@/services/api", () => ({
 		getRunReport: (...a: unknown[]) => getRunReport(...a),
 		getRun: (...a: unknown[]) => getRun(...a),
 		deleteRun: (...a: unknown[]) => deleteRun(...a),
+		startScenarioRun: (...a: unknown[]) => startScenarioRun(...a),
 	},
 }));
 
@@ -84,6 +90,7 @@ beforeEach(() => {
 	getRunReport.mockReset();
 	getRun.mockReset();
 	deleteRun.mockReset();
+	startScenarioRun.mockReset();
 });
 
 function runRow(id: string) {
@@ -152,6 +159,65 @@ describe("useRecentDesignRunsQuery", () => {
 		// cannot linger in a section keyed by a request the delete never saw.
 		const family = queryKeys.runs.recentDesigns() as readonly unknown[];
 		expect(recent.slice(0, family.length)).toEqual([...family]);
+	});
+});
+
+describe("useLastCollectionRunQuery", () => {
+	it("issues one filtered single-row call for the collection, not a full-list scan", async () => {
+		// The scan is what the section was deferred over twice: before the
+		// `collectionId` filter the only route to this row was paging every run
+		// and searching its snapshot text.
+		listRuns.mockResolvedValue(
+			page([{ id: "run_9", type: "scenario", status: "completed", startTime: 5, endTime: 6 }])
+		);
+
+		const { result } = renderHook(() => useLastCollectionRunQuery("col_1"), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.data?.data[0].id).toBe("run_9"));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		// No `status`: a failed run is the one worth surfacing, and `status`
+		// takes a single value.
+		expect(listRuns).toHaveBeenCalledWith({ collectionId: "col_1", limit: 1 });
+	});
+
+	it("does not fetch when the tab is on no collection", () => {
+		renderHook(() => useLastCollectionRunQuery(null), { wrapper: wrapper(makeClient()) });
+		expect(listRuns).not.toHaveBeenCalled();
+	});
+
+	it("keys itself outside the infinite-list prefix, like the other single-row lookups", () => {
+		const lists = queryKeys.runs.lists() as readonly unknown[];
+		const last = queryKeys.runs.lastCollectionRun("col_1") as readonly unknown[];
+		expect(last.slice(0, lists.length)).not.toEqual([...lists]);
+		// ...but inside its own family, so a delete or a history clear reaches it.
+		const family = queryKeys.runs.lastCollectionRuns() as readonly unknown[];
+		expect(last.slice(0, family.length)).toEqual([...family]);
+	});
+
+	it("is refetched when a collection run starts, since that run is now the last one", async () => {
+		// The `lists()` invalidation cannot reach this family - that is the point
+		// of it having its own - so the mutation has to name it, or an open
+		// context bar keeps showing the run before this one.
+		const client = makeClient();
+		listRuns.mockResolvedValue(page([runRow("r1")]));
+		const section = renderHook(() => useLastCollectionRunQuery("col_1"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(section.result.current.data?.data[0].id).toBe("r1"));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+
+		startScenarioRun.mockResolvedValue({ runId: "r2" });
+		const { result } = renderHook(() => useStartScenarioRunMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync({
+			scenario: { source: "collection", collectionId: "col_1" },
+		});
+
+		await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+		expect(listRuns).toHaveBeenLastCalledWith({ collectionId: "col_1", limit: 1 });
 	});
 });
 

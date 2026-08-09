@@ -23,6 +23,7 @@ import { AuthContextSection } from "./AuthContextSection";
 import { CodeSection } from "./CodeSection";
 import { CollectionAuthSection } from "./CollectionAuthSection";
 import { CollectionContentsSection } from "./CollectionContentsSection";
+import { CollectionLastRunSection } from "./CollectionLastRunSection";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
@@ -88,16 +89,16 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	},
 
 	/*
-	 * The collection tab, in the same reading order: what it contributes, what
-	 * it hands down, then how much is in it.
+	 * The collection tab, in the same reading order as the request tab above:
+	 * what it contributes, what it hands down, how much is in it, and what
+	 * happened last time.
 	 *
-	 * There is still no "last run of this collection" section now that the
-	 * runner exists (#354). A collection's runs are not addressable: `GET /runs`
-	 * filters by `requestId`, and a collection run's row links no request, so
-	 * the only way to find one is a substring search of every stored snapshot
-	 * for the collection id. A section built on that would be a scan per open
-	 * bar for a number History already shows. It earns its slot once the runs
-	 * list can be filtered by collection - see the note on this in #354.
+	 * `collection-last-run` closes the deferral this comment used to record.
+	 * It was held back twice because a collection's runs were not addressable -
+	 * `GET /runs` filtered by `requestId` and a collection run links none, so
+	 * the only route to the row was a substring search of every stored snapshot,
+	 * a scan per open bar. `GET /runs?collectionId=&limit=1` (#422) makes it one
+	 * server query for exactly the row shown.
 	 */
 	{
 		id: "collection-variables",
@@ -116,6 +117,12 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		title: "Contents",
 		appliesTo: onCollectionTab,
 		Component: CollectionContentsSection,
+	},
+	{
+		id: "collection-last-run",
+		title: "Last run",
+		appliesTo: onCollectionTab,
+		Component: CollectionLastRunSection,
 	},
 
 	/* The run tab: what was asked for, and what it was asked of. */
