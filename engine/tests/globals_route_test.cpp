@@ -20,13 +20,13 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
 using nlohmann::json;
@@ -57,9 +57,7 @@ class GlobalsRouteTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     /** The variables blob as it actually sits in the database. */

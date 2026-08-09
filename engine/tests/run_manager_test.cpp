@@ -2,9 +2,9 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <filesystem>
 #include <thread>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 
@@ -257,8 +257,7 @@ TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
 // keeps ticking and stays open until is_running goes false.
 TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     const std::string db_path = "test_collect_metrics_drain.db";
-    for (const char* s : { "", "-wal", "-shm", ".bak" })
-        std::filesystem::remove (db_path + s);
+    vayu::tests::remove_database_files (db_path);
 
     vayu::db::Database db (db_path);
     db.init ();
@@ -292,8 +291,7 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
 
     EXPECT_TRUE (ctx->closed.load ());
     ctx->event_loop.reset ();
-    for (const char* s : { "", "-wal", "-shm", ".bak" })
-        std::filesystem::remove (db_path + s);
+    vayu::tests::remove_database_files (db_path);
 }
 
 // The window is only useful if the run actually reads it. collect_metrics must
@@ -301,8 +299,7 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
 // every run keeps the built-in default however the user configured it.
 TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     const std::string db_path = "test_collect_metrics_window.db";
-    for (const char* s : { "", "-wal", "-shm", ".bak" })
-        std::filesystem::remove (db_path + s);
+    vayu::tests::remove_database_files (db_path);
 
     vayu::db::Database db (db_path);
     db.init ();
@@ -335,8 +332,7 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     ctx->is_running = false;
     metrics.join ();
     ctx->event_loop.reset ();
-    for (const char* s : { "", "-wal", "-shm", ".bak" })
-        std::filesystem::remove (db_path + s);
+    vayu::tests::remove_database_files (db_path);
 }
 
 TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {

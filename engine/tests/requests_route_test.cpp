@@ -16,12 +16,12 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <string>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
 using nlohmann::json;
@@ -50,9 +50,7 @@ class RequestsRouteTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* s : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + s);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     // Persist a minimal request under a known collection and return its id.

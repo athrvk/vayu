@@ -18,11 +18,11 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
 namespace vayu::db {
@@ -50,9 +50,7 @@ class DatabaseConcurrencyTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* s : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + s);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     std::unique_ptr<Database> db_;
