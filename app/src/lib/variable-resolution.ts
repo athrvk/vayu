@@ -24,6 +24,8 @@
  *    malformed counts as enabled (D17 - matches the importers and the engine)
  *  - a non-string stored `value` reads as "" (D17)
  *  - unknown plain name resolves to ""; unknown `$name` keeps its braces
+ *  - a `data.*` name keeps its braces too: it addresses the reserved data
+ *    namespace (issue #402), which only a scenario run's iteration can bind
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
  *  - single pass, no recursion; the raw string, never the typed value
@@ -88,11 +90,30 @@ export function buildVariableValues(scopes: {
 }
 
 /**
- * Substitute `{{name}}` occurrences in one pass: scopes first, then the
- * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
- * a generator; an unknown `$name` keeps its braces (issue #186); an ordinary
- * unknown name becomes "". Replacements are never rescanned, so a value
- * containing `{{other}}` stays literal.
+ * The reserved prefix for the data namespace (issue #402). `{{data.column}}`
+ * addresses a column of a collection run's data set, never a variable.
+ */
+export const DATA_NAMESPACE_PREFIX = "data.";
+
+/**
+ * True for a name inside the reserved `data.*` namespace.
+ *
+ * The namespace sits *outside* the tier order rather than above it, so a
+ * variable someone happens to name `data.id` and the column `{{data.id}}` are
+ * different names and cannot collide. The prefix alone (`{{data.}}`) names no
+ * column, so it is not reserved - it follows the ordinary unknown-name rule.
+ */
+export function isDataVariableName(name: string): boolean {
+	return name.length > DATA_NAMESPACE_PREFIX.length && name.startsWith(DATA_NAMESPACE_PREFIX);
+}
+
+/**
+ * Substitute `{{name}}` occurrences in one pass: the reserved `data.*`
+ * namespace first (kept verbatim), then scopes, then the dynamic-variable
+ * table. A defined name (even one spelled `$guid`) wins over a generator; an
+ * unknown `$name` keeps its braces (issue #186); an ordinary unknown name
+ * becomes "". Replacements are never rescanned, so a value containing
+ * `{{other}}` stays literal.
  */
 export function resolveTemplate(
 	input: string,
@@ -101,6 +122,11 @@ export function resolveTemplate(
 	if (!input || typeof input !== "string") return input;
 	return input.replace(VARIABLE_PATTERN, (match, rawName: string) => {
 		const name = rawName.trim();
+		// Before the lookup, not after: the namespace is disjoint from the
+		// scopes, so a variable named `data.id` must not answer for the column.
+		// Only a scenario run's iteration can bind one, and the engine's
+		// composer leaves it written as it stands for exactly that reason.
+		if (isDataVariableName(name)) return match;
 		const defined = lookup(name);
 		if (defined !== undefined) return defined;
 		if (isDynamicVariableName(name)) return resolveDynamicVariable(name) ?? match;

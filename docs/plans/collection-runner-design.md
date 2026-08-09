@@ -139,8 +139,22 @@ set that binds nothing is a mistake, not an empty run.
 filesystem access by design, and giving the daemon a user-supplied path is a new
 trust boundary - traversal, arbitrary reads - bought for a parsing job the app
 already does well, since it owns the Postman/Insomnia/OpenAPI import parsers. The
-app picks the file, parses CSV or JSON, and sends rows. The cost is payload size,
-which is what `maxScenarioDataRows` bounds.
+app picks the file, parses CSV, TSV, JSON or JSONL, and sends rows. The cost is
+payload size, which is what `maxScenarioDataRows` and `maxScenarioDataBytes`
+bound - the second because a row count alone does not bound a payload one row
+may fill.
+
+**The row reaches the request through `{{data.column}}`, a reserved namespace**
+(issue #402). `pm.iterationData` binds the row for *scripts*, and that is not
+enough on its own: a script reads the row after the step's request was already
+composed, so it cannot change where the request goes. The namespace closes that
+gap - composition leaves a `data.*` token written as it stands, and the runner
+substitutes it per iteration, immediately before the send. It is deliberately
+*disjoint* from the globals/collection/environment order rather than a tier
+above it, so a data set can neither shadow nor be shadowed by a variable and
+adding one to an existing collection is safe. A token naming a column the row
+does not carry errors the step before it sends; substituting `""` would be the
+silently-wrong request the namespace exists to prevent.
 
 ## Design-mode execution
 

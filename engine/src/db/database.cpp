@@ -1479,6 +1479,17 @@ void Database::seed_default_config () {
     "general_engine", std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS),
     "1", "1000000", std::nullopt, now });
 
+    upsert_config (ConfigEntry{ "maxScenarioDataBytes",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer",
+    "Maximum Scenario Data Size",
+    "Largest data set one collection run may carry, measured in bytes of JSON. "
+    "The row limit alone does not bound the payload - one row is free to hold a "
+    "megabyte in a single cell - and the HTTP body cap above this would drop "
+    "the connection instead of explaining itself. A larger data set is rejected "
+    "with a message naming this setting.",
+    "general_engine", std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES),
+    "1024", "104857600", std::nullopt, now });
+
     upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS), "integer",
     "Maximum Stored Scenario Steps",

@@ -276,6 +276,7 @@ add_library(vayu_core STATIC
     src/utils/id.cpp
     src/db/database.cpp
     src/core/load_strategy.cpp
+    src/core/scenario_data.cpp
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
     src/core/run_manager.cpp
@@ -466,6 +467,7 @@ if(VAYU_BUILD_TESTS)
         tests/http_version_support_test.cpp
         tests/http_version_test.cpp
         tests/request_composer_test.cpp
+        tests/scenario_data_test.cpp
         tests/scenario_plan_test.cpp
         tests/scenario_runner_test.cpp
         tests/tree_order_test.cpp

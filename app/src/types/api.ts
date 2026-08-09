@@ -422,8 +422,28 @@ export interface StartScenarioRunRequest {
 		collectionId: string;
 		/** Descend into sub-collections, depth-first. Default false. */
 		recursive?: boolean;
-		/** Passes over the plan. Whole number, 1 or more; default 1. */
+		/**
+		 * Passes over the plan. Whole number, 1 or more.
+		 *
+		 * Default 1 - or, with `data` present and this absent, the row count.
+		 * Omit it rather than sending the row count: the engine owns that rule
+		 * (`parse_scenario_request`), and a client computing its own would be a
+		 * second copy of it.
+		 */
 		iterations?: number;
+		/**
+		 * The data set, one object per row, driving `{{data.column}}` and
+		 * `pm.iterationData` (issue #402).
+		 *
+		 * Inline on the payload because the engine never opens a file: the
+		 * script sandbox has no filesystem access and a user-supplied path
+		 * would be a new trust boundary. The app parses CSV/TSV/JSON/JSONL
+		 * (`services/data-files`) and sends the rows; the engine bounds them
+		 * with `maxScenarioDataRows` and `maxScenarioDataBytes` and rejects a
+		 * present-but-empty array. Rows are never persisted on either side -
+		 * the run snapshot records their count alone.
+		 */
+		data?: Record<string, unknown>[];
 	};
 	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
 	environmentId?: string;

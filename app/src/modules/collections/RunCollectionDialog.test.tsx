@@ -193,3 +193,99 @@ describe("opening it again", () => {
 		});
 	});
 });
+
+/*
+ * The data file (issue #402). The engine bounds and rejects a bad set, but by
+ * then the run has been asked for - so the contract asserted here is that what
+ * the dialog *shows* and what it *sends* come from one parse, and that a file
+ * which will not parse produces neither.
+ */
+describe("a data file", () => {
+	/**
+	 * Drive the hidden <input type="file"> the way the browser would. Queried
+	 * off `document`, not the render container: `DialogContent` portals.
+	 */
+	async function pickFile(name: string, text: string) {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		expect(input).toBeTruthy();
+		fireEvent.change(input, { target: { files: [new File([text], name)] } });
+		// FileReader resolves on a task, not synchronously.
+		await waitFor(() => expect(screen.queryByText(name)).toBeTruthy());
+	}
+
+	it("sends the previewed rows and omits iterations so the row count decides", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("users.csv", "user,id\nada,1\ngrace,2");
+
+		// The preview is the parsed file, not a re-read of the text.
+		expect(screen.getByText("ada")).toBeTruthy();
+		expect(screen.getByText("grace")).toBeTruthy();
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario).toEqual({
+			source: "collection",
+			collectionId: "col_1",
+			recursive: false,
+			data: [
+				{ user: "ada", id: "1" },
+				{ user: "grace", id: "2" },
+			],
+		});
+		// Omitted, not computed: the engine owns "absent means one pass per row".
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+	});
+
+	it("keeps an explicit iteration count and says how many rows go unused", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("users.csv", "user\nada\ngrace\nalan");
+		fireEvent.change(screen.getByRole("spinbutton", { name: /iterations/i }), {
+			target: { value: "1" },
+		});
+
+		// The surprise this preview exists to remove: three rows, one pass.
+		expect(screen.getByText(/2 of the 3 rows will not be used/i)).toBeTruthy();
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.iterations).toBe(1);
+		expect(mutate.mock.calls[0][0].scenario.data).toHaveLength(3);
+	});
+
+	it("refuses a file that will not parse, naming the row, and sends nothing", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [new File(["user,id\nada"], "ragged.csv")] },
+		});
+
+		await waitFor(() => expect(screen.getByText(/Row 1 has 1 value/i)).toBeTruthy());
+		// Nothing half-chosen: no preview, and Run is refused.
+		expect(screen.queryByText("ragged.csv")).toBeNull();
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate).not.toHaveBeenCalled();
+	});
+
+	it("returns to a plain run when the file is removed", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("users.csv", "user\nada\ngrace");
+		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("data");
+		// The blanked field goes back to 1, so the run is still valid.
+		expect(mutate.mock.calls[0][0].scenario.iterations).toBe(1);
+	});
+
+	it("shows only the first ten rows but sends all of them", async () => {
+		const rows = Array.from({ length: 12 }, (_, i) => `user-${i}`).join("\n");
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("many.csv", `user\n${rows}`);
+
+		expect(screen.getByText(/first 10 of 12 rows/i)).toBeTruthy();
+		expect(screen.queryByText("user-9")).toBeTruthy();
+		expect(screen.queryByText("user-10")).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toHaveLength(12);
+	});
+});

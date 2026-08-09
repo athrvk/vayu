@@ -164,6 +164,11 @@ std::vector<nlohmann::json>& rows_out) {
             " (raise the 'maxScenarioDataRows' setting to allow more)";
         }
         rows_out.reserve (data->size ());
+        // Accumulated row by row rather than dumping the whole array: an
+        // oversized set is refused as soon as it crosses the bound, so the
+        // check never materializes a second copy of a payload that is already
+        // too big to want one.
+        size_t data_bytes = 0;
         for (size_t i = 0; i < data->size (); ++i) {
             if (!(*data)[i].is_object ()) {
                 // A rejected set leaves no rows behind - never the ones before
@@ -172,6 +177,15 @@ std::vector<nlohmann::json>& rows_out) {
                 return "'scenario.data' row " + std::to_string (i) +
                 " must be an object of name/value pairs (got " +
                 std::string ((*data)[i].type_name ()) + ")";
+            }
+            data_bytes += (*data)[i].dump ().size ();
+            if (data_bytes > limits.max_data_bytes) {
+                rows_out.clear ();
+                return "'scenario.data' is larger than the limit of " +
+                std::to_string (limits.max_data_bytes) +
+                " bytes (raise the 'maxScenarioDataBytes' setting to allow "
+                "more). The row count is within its own limit - a data set can "
+                "exceed this one with few but large rows.";
             }
             rows_out.push_back ((*data)[i]);
         }

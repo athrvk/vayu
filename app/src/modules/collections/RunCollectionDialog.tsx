@@ -20,6 +20,11 @@
  * come back as a `400` with no run created. That message is shown here rather
  * than as a toast: it names the step that failed, which is the thing the user
  * has to go and fix.
+ *
+ * A data file is the third option (issue #402), and it changes what Iterations
+ * means: with rows and no explicit count, the run is one pass per row. The rows
+ * ride the payload and are dropped when this dialog unmounts - they are user
+ * data of unknown sensitivity, so nothing persists them, here or engine-side.
  */
 
 import { useState } from "react";
@@ -41,6 +46,7 @@ import { useStartScenarioRunMutation } from "@/queries";
 import { useSessionStore, useTabsStore } from "@/stores";
 import { scenarioRunService } from "@/services";
 import type { Collection } from "@/types";
+import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
 export interface RunCollectionDialogProps {
 	/**
@@ -70,20 +76,49 @@ export default function RunCollectionDialog({
 
 	const [recursive, setRecursive] = useState(false);
 	const [iterations, setIterations] = useState("1");
+	const [dataFile, setDataFile] = useState<SelectedDataFile | null>(null);
+	const [dataFileError, setDataFileError] = useState<string | null>(null);
 
-	const parsedIterations = Number(iterations);
+	/*
+	 * Empty is a meaningful value only with a data file: it means "one pass per
+	 * row", which is the engine's own default when `iterations` is absent from
+	 * the payload. Without a file there is no row count to fall back to, so an
+	 * empty field is simply invalid.
+	 */
+	const iterationsBlank = iterations.trim() === "";
+	const explicitIterations = iterationsBlank ? undefined : Number(iterations);
 	const iterationsValid =
-		Number.isInteger(parsedIterations) && parsedIterations >= MIN_ITERATIONS;
+		explicitIterations === undefined
+			? !!dataFile
+			: Number.isInteger(explicitIterations) && explicitIterations >= MIN_ITERATIONS;
+	const canRun = iterationsValid && !dataFileError;
+
+	/*
+	 * Picking a file clears an untouched `1`, so the field shows what the run
+	 * will do (one pass per row) instead of quietly contradicting the preview
+	 * above it. A count the user typed is theirs and is left alone.
+	 */
+	const handleSelectDataFile = (next: SelectedDataFile | null) => {
+		setDataFile(next);
+		if (next && iterations === "1") setIterations("");
+		if (!next && iterationsBlank) setIterations("1");
+	};
 
 	const handleRun = () => {
-		if (!iterationsValid) return;
+		if (!canRun) return;
 		startRun.mutate(
 			{
 				scenario: {
 					source: "collection",
 					collectionId: collection.id,
 					recursive,
-					iterations: parsedIterations,
+					// Omitted, not sent as the row count: the engine resolves the
+					// default, and a client that computed its own would be a
+					// second copy of a rule only one side can enforce.
+					...(explicitIterations !== undefined ? { iterations: explicitIterations } : {}),
+					// The parsed rows themselves - the same array the preview
+					// showed, never a re-parse.
+					...(dataFile ? { data: dataFile.parsed.rows } : {}),
 				},
 				// The environment the rest of the app sends against - a run that
 				// resolved `{{variables}}` against a different one than Send does
@@ -135,7 +170,9 @@ export default function RunCollectionDialog({
 						<Label htmlFor="run-collection-iterations" className="leading-snug">
 							Iterations
 							<span className="block text-xs font-normal text-muted-foreground">
-								How many times to run the whole sequence.
+								{dataFile
+									? "How many times to run the whole sequence. Leave empty for one pass per row."
+									: "How many times to run the whole sequence."}
 							</span>
 						</Label>
 						<Input
@@ -144,6 +181,7 @@ export default function RunCollectionDialog({
 							min={MIN_ITERATIONS}
 							step={1}
 							value={iterations}
+							placeholder={dataFile ? String(dataFile.parsed.rows.length) : undefined}
 							onChange={(e) => setIterations(e.target.value)}
 							className="w-24 shrink-0"
 							aria-invalid={!iterationsValid}
@@ -158,6 +196,15 @@ export default function RunCollectionDialog({
 							Enter a whole number of 1 or more.
 						</Callout>
 					)}
+
+					<DataFilePicker
+						selected={dataFile}
+						onSelect={handleSelectDataFile}
+						error={dataFileError}
+						onError={setDataFileError}
+						iterations={explicitIterations}
+						disabled={startRun.isPending}
+					/>
 
 					{error && (
 						<Callout severity="blocking" title="Could not start the run">
@@ -174,7 +221,7 @@ export default function RunCollectionDialog({
 					>
 						Cancel
 					</Button>
-					<Button onClick={handleRun} disabled={!iterationsValid || startRun.isPending}>
+					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
 						{startRun.isPending ? (
 							<Loader2 className="w-4 h-4 mr-2 animate-spin" />
 						) : (
