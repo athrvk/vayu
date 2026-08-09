@@ -83,14 +83,20 @@ export function SchemaExplorer({
 
 	const expanded = useMemo(() => new Set(view?.expanded ?? []), [view?.expanded]);
 
+	/*
+	 * Built once per schema, not once per keystroke. It is a full pass over the
+	 * type map, which is cheap for the fixture and is a hitch per character on
+	 * the schema size this pane was designed for.
+	 */
+	const searchIndex = useMemo(() => (schema ? buildSearchIndex(schema) : null), [schema]);
+
 	const rows = useMemo(() => {
 		if (!schema) return [];
-		if (search.trim()) {
-			const matches = searchSchema(buildSearchIndex(schema), search);
-			return matches.map((m) => ({ node: m.node, depth: 0 }));
+		if (search.trim() && searchIndex) {
+			return searchSchema(searchIndex, search).map((m) => ({ node: m.node, depth: 0 }));
 		}
 		return visibleRows(schema, expanded);
-	}, [schema, search, expanded]);
+	}, [schema, searchIndex, search, expanded]);
 
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(rows.length, ROW_WINDOW);
 
