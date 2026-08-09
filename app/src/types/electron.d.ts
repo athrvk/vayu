@@ -89,6 +89,12 @@ interface ElectronAPI {
 
 	// Interface scale (page zoom)
 	setZoomFactor: (factor: number) => void;
+	/**
+	 * View-menu zoom. The menu nudges the renderer's persisted interface-scale
+	 * setting rather than zooming Chromium directly, so the accelerators, the
+	 * Appearance panel and the window can never disagree.
+	 */
+	onZoomCommand: (callback: (command: "in" | "out" | "reset") => void) => () => void;
 
 	// Open one of the app's own doc links in the system browser
 	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;

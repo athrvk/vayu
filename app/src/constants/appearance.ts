@@ -9,11 +9,11 @@
  * Interface preferences - UI font and interface scale.
  *
  * Both are pure renderer preferences (no OS/Electron theme involvement),
- * persisted to localStorage and applied to the document. These arrays are the
- * single source of truth: types, the settings picker, and the runtime guards
- * all derive from them. Font stacks reference faces already loaded by
- * index.html (Space Grotesk, JetBrains Mono) or system fonts, so switching
- * never triggers a network fetch.
+ * persisted to localStorage and applied to the document. This file is the
+ * single source of truth: types, the settings controls, and the runtime guards
+ * all derive from the arrays (font, radius) and the scale range below. Font
+ * stacks reference faces already loaded by index.html (Space Grotesk, JetBrains
+ * Mono) or system fonts, so switching never triggers a network fetch.
  */
 
 export interface FontOption {
@@ -103,27 +103,63 @@ export const DEFAULT_MONO_FONT: MonoFont = "jetbrains";
 /** A preset face, or "custom" - a user-typed family (see {@link customMonoStack}). */
 export type MonoFontChoice = MonoFont | "custom";
 
-export interface ScaleOption {
-	readonly value: string;
-	readonly label: string;
-	readonly description: string;
-	readonly factor: number;
+/**
+ * Interface scale - a page-zoom factor (webFrame in Electron), stored as the
+ * number itself rather than a preset name. It replaced three fixed steps
+ * (Compact 0.9 / Default 1 / Comfortable 1.1), which topped out below the
+ * 125-150% accessibility band and left the View menu's Ctrl+/- compounding on
+ * top of a setting that then disagreed with the window.
+ *
+ * The range is stepped, not free: every path that changes it (the settings
+ * slider, the menu nudge, a stored value being read back) goes through
+ * {@link clampScale}, so the value is always on the grid and inside the bounds.
+ */
+export const UI_SCALE_MIN = 0.8;
+export const UI_SCALE_MAX = 2;
+export const UI_SCALE_STEP = 0.1;
+export const DEFAULT_UI_SCALE = 1;
+
+/**
+ * The three preset names this setting used to store, mapped to the factors they
+ * applied. A stored preset migrates to its factor on read and is rewritten as a
+ * number by the next change - a Map, not an object, so a stored `"constructor"`
+ * cannot reach `Object.prototype`.
+ */
+const LEGACY_UI_SCALES = new Map<string, number>([
+	["compact", 0.9],
+	["default", 1],
+	["comfortable", 1.1],
+]);
+
+/**
+ * Snap a factor onto the step grid and clamp it to the range. The multiply/
+ * round is not cosmetic: repeated `+= 0.1` nudges drift (0.7999999999999999),
+ * and the drift reaches both the stored string and the zoom factor.
+ */
+export function clampScale(factor: number): number {
+	if (!Number.isFinite(factor)) return DEFAULT_UI_SCALE;
+	const stepped = Math.round(factor / UI_SCALE_STEP) * UI_SCALE_STEP;
+	const clamped = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, stepped));
+	return Math.round(clamped * 100) / 100;
 }
 
-export const UI_SCALES = [
-	{ value: "compact", label: "Compact", description: "90% - fit more on screen", factor: 0.9 },
-	{ value: "default", label: "Default", description: "100%", factor: 1 },
-	{
-		value: "comfortable",
-		label: "Comfortable",
-		description: "110% - larger and easier",
-		factor: 1.1,
-	},
-] as const satisfies readonly ScaleOption[];
+/** Read a stored value: a numeric factor, a legacy preset name, or garbage. */
+export function parseScale(saved: string | null): number {
+	if (saved === null) return DEFAULT_UI_SCALE;
+	const legacy = LEGACY_UI_SCALES.get(saved);
+	if (legacy !== undefined) return legacy;
+	return clampScale(Number.parseFloat(saved));
+}
 
-/** Interface scale, applied as a page zoom factor (webFrame in Electron). */
-export type UiScale = (typeof UI_SCALES)[number]["value"];
-export const DEFAULT_UI_SCALE: UiScale = "default";
+/** Move `steps` grid positions from `current`, holding at either end. */
+export function nudgeScale(current: number, steps: number): number {
+	return clampScale(current + steps * UI_SCALE_STEP);
+}
+
+/** The factor as the percentage every surface shows it as. */
+export function formatScale(factor: number): string {
+	return `${Math.round(factor * 100)}%`;
+}
 
 export interface RadiusOption {
 	readonly value: string;
@@ -145,15 +181,10 @@ export const DEFAULT_UI_RADIUS: UiRadius = "default";
 
 const FONT_VALUES = new Set<string>(UI_FONTS.map((f) => f.value));
 const MONO_FONT_VALUES = new Set<string>(MONO_FONTS.map((f) => f.value));
-const SCALE_VALUES = new Set<string>(UI_SCALES.map((s) => s.value));
 const RADIUS_VALUES = new Set<string>(UI_RADII.map((r) => r.value));
 
 export function isUiFont(value: unknown): value is UiFont {
 	return typeof value === "string" && FONT_VALUES.has(value);
-}
-
-export function isUiScale(value: unknown): value is UiScale {
-	return typeof value === "string" && SCALE_VALUES.has(value);
 }
 
 export function isUiRadius(value: unknown): value is UiRadius {
@@ -196,8 +227,4 @@ export function customMonoStack(family: string): string {
 /** Custom UI (sans) stack, falling back to the default sans faces. */
 export function customSansStack(family: string): string {
 	return customFontStack(family, "Inter, system-ui, sans-serif");
-}
-
-export function scaleFactor(scale: UiScale): number {
-	return (UI_SCALES.find((s) => s.value === scale) ?? UI_SCALES[1]).factor;
 }
