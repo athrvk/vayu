@@ -176,9 +176,9 @@ class PersistScriptVariablesTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        std::filesystem::remove (DB_PATH);
-        std::filesystem::remove (std::string (DB_PATH) + "-wal");
-        std::filesystem::remove (std::string (DB_PATH) + "-shm");
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
+            std::filesystem::remove (std::string (DB_PATH) + suffix);
+        }
     }
 
     std::string stored_collection_variables () {
@@ -368,9 +368,9 @@ class ScriptVariableScopesTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        std::filesystem::remove (DB_PATH);
-        std::filesystem::remove (std::string (DB_PATH) + "-wal");
-        std::filesystem::remove (std::string (DB_PATH) + "-shm");
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
+            std::filesystem::remove (std::string (DB_PATH) + suffix);
+        }
     }
 
     void add_collection (const std::string& id,

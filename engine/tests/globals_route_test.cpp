@@ -57,9 +57,9 @@ class GlobalsRouteTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        std::filesystem::remove (DB_PATH);
-        std::filesystem::remove (std::string (DB_PATH) + "-wal");
-        std::filesystem::remove (std::string (DB_PATH) + "-shm");
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
+            std::filesystem::remove (std::string (DB_PATH) + suffix);
+        }
     }
 
     /** The variables blob as it actually sits in the database. */

@@ -76,7 +76,9 @@ class ScriptRequestNameTest : public ::testing::Test {
 
     static void cleanup () {
         std::error_code ec;
-        std::filesystem::remove (DB_PATH, ec);
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
+            std::filesystem::remove (std::string (DB_PATH) + suffix, ec);
+        }
     }
 
     std::unique_ptr<vayu::db::Database> db_;
