@@ -202,6 +202,36 @@ export function serializeGraphQLBody(parts: GraphQLBodyParts): string {
  * mixing anonymous with named - so "more than one name here" is exactly the
  * condition under which `operationName` has to be on the wire.
  */
+/** One operation in the document, as an outline row would show it. */
+export interface DocumentOperation {
+	kind: "query" | "mutation" | "subscription";
+	/** The operation's name, or null for the anonymous (shorthand) form. */
+	name: string | null;
+}
+
+/**
+ * Every operation the document defines, in source order, named or not.
+ *
+ * Separate from `operationNames`, which answers a narrower question - "which
+ * names may be sent as `operationName`" - and therefore drops both the kind and
+ * the anonymous operation. An outline that dropped the anonymous one would show
+ * nothing at all for the most common single-query document.
+ */
+export function documentOutline(query: string): DocumentOperation[] {
+	if (!query.trim()) return [];
+	try {
+		return parseGraphQLDocument(query)
+			.definitions.filter((d) => d.kind === Kind.OPERATION_DEFINITION)
+			.map((d) =>
+				d.kind === Kind.OPERATION_DEFINITION
+					? { kind: d.operation, name: d.name?.value ?? null }
+					: { kind: "query" as const, name: null }
+			);
+	} catch {
+		return [];
+	}
+}
+
 export function operationNames(query: string): string[] {
 	if (!query.trim()) return [];
 	try {

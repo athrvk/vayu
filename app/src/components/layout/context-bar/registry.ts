@@ -27,6 +27,7 @@ import { CollectionLastRunSection } from "./CollectionLastRunSection";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
+import { GraphQLSection } from "./GraphQLSection";
 import { RecentSendsSection } from "./RecentSendsSection";
 import { RunConfigSection } from "./RunConfigSection";
 import { RunSourceSection } from "./RunSourceSection";
@@ -81,6 +82,15 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		appliesTo: onRequestTab,
 		Component: EnvironmentSection,
 	},
+	/*
+	 * `appliesTo` is a function of the *tab*, and a tab carries only a type and
+	 * an entity id - nothing that says which body mode the request uses. So this
+	 * applies to every request tab and says "not a GraphQL body" for the rest,
+	 * the same shape `cookies` already has for a host with no cookies. Narrowing
+	 * it properly would mean the registry could read a query, which is the
+	 * framework change the registry exists to avoid.
+	 */
+	{ id: "graphql", title: "GraphQL", appliesTo: onRequestTab, Component: GraphQLSection },
 	{
 		id: "recent-sends",
 		title: "Recent sends",

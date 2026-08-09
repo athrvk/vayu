@@ -54,6 +54,7 @@ describe("the context-bar section registry", () => {
 			"cookies",
 			"code",
 			"environment",
+			"graphql",
 			"recent-sends",
 		]);
 	});

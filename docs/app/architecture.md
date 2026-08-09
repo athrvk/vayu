@@ -117,7 +117,7 @@ src/
 │   ├── shared/         # Cross-feature shared components
 │   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries
-│   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema
+│   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema, explorer tree + insertion
 │   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (imported once in main.tsx)
 │   └── utils.ts        # General utilities (cn, etc.)
 ├── modules/            # Feature modules
@@ -160,6 +160,7 @@ The app uses a dual-state management approach:
    - `save-store.ts`: Auto-save orchestration and progress
    - `import-modal-store.ts`: Import dialog visibility and state
    - `lib/graphql/schema-cache.ts`: Introspected GraphQL schemas, keyed by resolved endpoint URL + collection + environment + a digest of the **resolved** credentials (so an upstream auth or variable edit is a different entry, not a stale hit). LRU-bounded, and a failed refresh keeps the last good schema
+   - `lib/graphql/explorer-store.ts`: The schema explorer's view - whether the pane is open, and per schema identity the search text, expanded rows and scroll position. Read-only over the schema cache: the explorer renders whatever that store holds and triggers no introspection of its own beyond its Refresh button
    - Module-local stores (e.g., `modules/collections/collections-store.ts`) co-locate with their feature
 
 2. **TanStack Query** (`queries/`): Server state, caching, synchronization
