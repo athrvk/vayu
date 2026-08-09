@@ -803,6 +803,7 @@ reads:
 
 ```javascript
 pm.iterationData.get('username');  // this iteration's value for that column
+pm.iterationData.has('coupon');    // whether the row carries that column
 pm.iterationData.toObject();       // the whole row as a plain object
 ```
 
@@ -810,6 +811,11 @@ pm.iterationData.toObject();       // the whole row as a plain object
 `pm` scope reader does. Values keep their JSON type: a JSON file's `3` arrives
 as a number, and a CSV column arrives as a string, because that is what the
 file said.
+
+`has` answers presence, the same way `pm.environment.has` and its siblings do.
+A column whose value is `null` is `true` - the row carries it - which is the
+fact `get` alone cannot state without the reader knowing that an absent column
+comes back as `undefined` while a null one comes back as `null`.
 
 **`pm.iterationData` is `undefined` where there is no row** - a single Send, a
 load run's deferred `tests` script, and a collection run started without a data
