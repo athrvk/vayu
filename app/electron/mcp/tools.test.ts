@@ -249,6 +249,95 @@ describe("data-write tools", () => {
 	});
 
 	/*
+	 * Stored pre/post-request scripts through the CRUD tools (#419). An agent
+	 * could already *run* a script ad hoc through `run_request` but could not
+	 * persist one onto the request it had just created, so scripts travelled in
+	 * the description for a human to paste into the Pre-request or Tests tab.
+	 *
+	 * These are the whole contract: written verbatim on create, patched one at a
+	 * time on update, and cleared by an explicit empty string - which works only
+	 * because the engine's merge-patch tells absent and `""` apart. Drop the
+	 * field mapping and every one of them reddens.
+	 */
+	test("create_request stores the pre-request and test scripts verbatim", async () => {
+		const client = fakeClient();
+		const pre = "pm.request.headers.add({ key: 'X-Sig', value: pm.variables.get('sig') });";
+		const post = "pm.test('ok', () => pm.response.to.have.status(200));";
+		const res = await dispatchTool(
+			"create_request",
+			{
+				collectionId: "c1",
+				name: "Signed",
+				url: "https://api.example.com/x",
+				preRequestScript: pre,
+				postRequestScript: post,
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({ preRequestScript: pre, postRequestScript: post });
+	});
+
+	test("create_request sends no script key when the caller named none", async () => {
+		// The engine defaults an absent field to empty on a create; sending `""`
+		// anyway would make the payload claim the agent asked for a blank script.
+		const client = fakeClient();
+		await dispatchTool(
+			"create_request",
+			{ collectionId: "c1", name: "Plain", url: "https://api.example.com/x" },
+			ctxWith(client, { allowWrites: true })
+		);
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(Object.keys(payload as object)).not.toContain("preRequestScript");
+		expect(Object.keys(payload as object)).not.toContain("postRequestScript");
+	});
+
+	test("update_request patches one script and keeps the other stored", async () => {
+		const client = fakeClient();
+		const post = "pm.test('created', () => pm.response.to.have.status(201));";
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", postRequestScript: post },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		// Absent keeps: a `preRequestScript: ""` filler here would blank a signing
+		// script the caller never mentioned. Also proves a script alone satisfies
+		// the empty-patch refusal, which counts the payload's keys.
+		expect(payload).toEqual({ postRequestScript: post });
+	});
+
+	test("update_request clears a script when passed an empty string", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", preRequestScript: "" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		// `""` is a value the merge-patch stores, not an omission - the difference
+		// between "leave my script alone" and "delete it".
+		expect(payload).toEqual({ preRequestScript: "" });
+	});
+
+	test("the CRUD tools name a stored script once, without the run tools' alias", () => {
+		// `tests` is the engine's spelling for an ad-hoc run body; a second name
+		// for a stored field would be a second name to keep in step.
+		const byName = new Map(TOOLS.map((t) => [t.name, t]));
+		for (const name of ["create_request", "update_request"]) {
+			const schema = byName.get(name)?.inputSchema;
+			expect(schema, name).toBeDefined();
+			expect(Object.keys(schema!), name).toEqual(
+				expect.arrayContaining(["preRequestScript", "postRequestScript"])
+			);
+			expect(Object.keys(schema!), name).not.toContain("tests");
+		}
+	});
+
+	/*
 	 * Collection + request CRUD (#378). The write surface used to be create-only,
 	 * so an agent could file a request into a collection a human had made and
 	 * could never correct or remove it. These cover the two things that make the
