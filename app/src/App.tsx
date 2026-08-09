@@ -10,7 +10,6 @@ import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
 import Toaster from "./components/shared/Toaster";
-import { useEngineStore } from "./stores";
 import {
 	useConfigQuery,
 	useHealthQuery,
@@ -30,8 +29,6 @@ import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
-	const { isEngineConnected } = useEngineStore();
-
 	// Sync theme with OS/Electron settings
 	useElectronTheme();
 
@@ -88,11 +85,6 @@ function App() {
 			await useSaveStore.getState().flushAll();
 		});
 	}, []);
-
-	// Log connection status for debugging
-	if (isEngineConnected) {
-		console.log("App: Engine connected, data queries active");
-	}
 
 	return (
 		<div className="flex flex-col h-full">

@@ -130,9 +130,7 @@ export const apiService = {
 
 	// Collections
 	async listCollections(): Promise<Collection[]> {
-		console.log("API: Fetching collections from", API_ENDPOINTS.COLLECTIONS);
 		const response = await httpClient.get<RawCollection[]>(API_ENDPOINTS.COLLECTIONS);
-		console.log("API: Received collections:", response);
 		return response.map(CollectionTransformer.toFrontend);
 	},
 
@@ -166,21 +164,16 @@ export const apiService = {
 		const queryParams = params?.collectionId
 			? { collectionId: params.collectionId }
 			: undefined;
-		console.log("API: Fetching requests from", API_ENDPOINTS.REQUESTS, queryParams);
 		const response = await httpClient.get<RawRequest[]>(API_ENDPOINTS.REQUESTS, queryParams);
-		console.log("API: Received requests:", response);
 		return response.map(RequestTransformer.toFrontend);
 	},
 
 	async getRequest(id: string): Promise<Request> {
-		console.log("API: Fetching request from", API_ENDPOINTS.REQUEST_BY_ID(id));
 		const response = await httpClient.get<RawRequest>(API_ENDPOINTS.REQUEST_BY_ID(id));
-		console.log("API: Received request:", response);
 		return RequestTransformer.toFrontend(response);
 	},
 
 	async createRequest(data: CreateRequestRequest): Promise<Request> {
-		console.log("Creating request with data:", data);
 		const response = await httpClient.post<RawRequest>(API_ENDPOINTS.REQUESTS, withoutId(data));
 		return RequestTransformer.toFrontend(response);
 	},

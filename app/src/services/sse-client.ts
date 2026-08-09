@@ -152,7 +152,6 @@ export class SSEClient {
 
 		const endpoint = API_ENDPOINTS.METRICS_LIVE(runId);
 		const url = `${API_ENDPOINTS.BASE_URL}${endpoint}`;
-		console.log("Connecting to live endpoint:", url);
 
 		try {
 			this.eventSource = new EventSource(url);
@@ -194,7 +193,6 @@ export class SSEClient {
 			}
 
 			this.eventSource.addEventListener("complete", () => {
-				console.log("Load test completed");
 				// Send final metrics before closing
 				onMessage({ ...this.currentMetrics });
 				this.disconnect();
@@ -216,15 +214,16 @@ export class SSEClient {
 				// canonical recovery is to converge on `GET /runs/:id/report`, which
 				// the load-test service does in its onClose handler.
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
-					console.log("SSE connection closed unexpectedly - treating as terminal");
+					// A warn, not chatter: the stream ended without the engine's
+					// `complete`, so the metrics shown are whatever arrived before
+					// the drop and the caller is about to converge on the stored
+					// report. That is the one SSE lifecycle state worth a line in
+					// the console.
+					console.warn("SSE connection closed unexpectedly - treating as terminal");
 					this.disconnect();
 					onClose();
 				}
 				// For CONNECTING state errors, wait - the browser will retry.
-			});
-
-			this.eventSource.addEventListener("open", () => {
-				console.log("SSE connection established");
 			});
 		} catch (error) {
 			onError(error instanceof Error ? error : new Error("Failed to connect to SSE"));
