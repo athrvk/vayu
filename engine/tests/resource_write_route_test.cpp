@@ -41,7 +41,6 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
@@ -49,6 +48,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -112,10 +112,7 @@ class ResourceWriteRouteTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::error_code ec;
-            std::filesystem::remove (std::string (DB_PATH) + suffix, ec);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     /** Creates a collection and returns its id - the parent most tests need. */

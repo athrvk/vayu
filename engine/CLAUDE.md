@@ -23,6 +23,10 @@ engine/
 - Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
 - vcpkg manages all C++ dependencies - do not add one without updating
   `engine/vcpkg.json`
+- A fixture that opens a scratch `Database` cleans up with
+  `vayu::tests::remove_database_files` (`engine/tests/temp_database.hpp`) - never
+  a hand-written suffix list. An opened database writes six files, not the four
+  the old copies listed, and eight of those twenty-two copies were wrong (#413).
 
 ## HTTP API
 

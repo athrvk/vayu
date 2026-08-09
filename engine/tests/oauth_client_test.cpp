@@ -8,7 +8,6 @@
 #include <httplib.h>
 
 #include <chrono>
-#include <filesystem>
 #include <map>
 #include <string>
 #include <thread>
@@ -16,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
@@ -133,9 +133,7 @@ class OAuthClientTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     json cc_config (const MockTokenServer& idp, const std::string& path = "/token") {

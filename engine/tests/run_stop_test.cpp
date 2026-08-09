@@ -20,7 +20,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -30,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include "mock_server.hpp"
+#include "temp_database.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -199,15 +199,13 @@ class RunStopAccountingTest : public EventLoopStopTest {
 
     void SetUp () override {
         EventLoopStopTest::SetUp ();
-        std::filesystem::remove (DB_PATH);
+        vayu::tests::remove_database_files (DB_PATH);
         db = std::make_unique<vayu::db::Database> (DB_PATH);
         db->init ();
     }
     void TearDown () override {
         db.reset ();
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
         EventLoopStopTest::TearDown ();
     }
 
@@ -339,9 +337,7 @@ class DeleteRunTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     void seed (const std::string& id, vayu::RunStatus status) {

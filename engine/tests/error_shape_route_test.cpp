@@ -23,13 +23,13 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
 
@@ -75,9 +75,7 @@ class ErrorShapeRouteTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     /**
