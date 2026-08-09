@@ -1,0 +1,84 @@
+{
+	"description": "The recursive run order, read by both suites (issue #431). A folder's sub-collections and its requests are two separately ordered blocks - `tree-order-conformance.json` pins each block, this pins the sequence the two blocks produce when a folder holding both is run recursively. The rule is the sidebar's: every subfolder's whole subtree runs before the folder's own requests, subfolders by `collections.order` and requests by `requests.order`, each under the `order, createdAt, id` tiebreak. Engine side: engine/tests/scenario_plan_test.cpp seeds each case's rows and reads `resolve_scenario`'s step ids, so the real SQL and the real walk are what is asserted. Renderer side: app/src/modules/collections/CollectionTree.run-order.conformance.test.tsx renders the same tree fully expanded and reads the request rows top to bottom out of the DOM, so the real render is what is asserted. A rule that changes on one side and not the other fails here or in ctest, never in a user's run. `collections` is listed parent-first so a case reads as a tree; neither consumer depends on that order, and `expected` names every request in the tree, so a row a reader forgets to seed fails rather than passes.",
+	"cases": [
+		{
+			"name": "the deepest subtree runs first and the root's own requests last",
+			"rootId": "top",
+			"collections": [
+				{ "id": "top", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "mid", "parentId": "top", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "leaf", "parentId": "mid", "order": 0, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "top_r", "collectionId": "top", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "mid_r", "collectionId": "mid", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "leaf_r", "collectionId": "leaf", "order": 0, "createdAt": 1700000005000 }
+			],
+			"expected": ["leaf_r", "mid_r", "top_r"]
+		},
+		{
+			"name": "two subfolders in collections.order, then the parent's own requests in requests.order",
+			"rootId": "root",
+			"collections": [
+				{ "id": "root", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "child_a", "parentId": "root", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "child_b", "parentId": "root", "order": 1, "createdAt": 1700000002000 },
+				{ "id": "grandchild", "parentId": "child_a", "order": 0, "createdAt": 1700000003000 }
+			],
+			"requests": [
+				{ "id": "root_a", "collectionId": "root", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "root_b", "collectionId": "root", "order": 1, "createdAt": 1700000005000 },
+				{ "id": "a_1", "collectionId": "child_a", "order": 0, "createdAt": 1700000006000 },
+				{ "id": "b_1", "collectionId": "child_b", "order": 0, "createdAt": 1700000007000 },
+				{ "id": "g_1", "collectionId": "grandchild", "order": 0, "createdAt": 1700000008000 }
+			],
+			"expected": ["g_1", "a_1", "b_1", "root_a", "root_b"]
+		},
+		{
+			"name": "colliding orders across the two blocks (the post-densify shape) do not interleave",
+			"rootId": "acme",
+			"collections": [
+				{ "id": "acme", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "billing", "parentId": "acme", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "shipping", "parentId": "acme", "order": 1, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "ping", "collectionId": "acme", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "pong", "collectionId": "acme", "order": 1, "createdAt": 1700000004000 },
+				{ "id": "invoice", "collectionId": "billing", "order": 0, "createdAt": 1700000005000 },
+				{ "id": "label", "collectionId": "shipping", "order": 0, "createdAt": 1700000006000 }
+			],
+			"expected": ["invoice", "label", "ping", "pong"]
+		},
+		{
+			"name": "all-zero orders in both blocks fall to createdAt, block by block",
+			"rootId": "legacy",
+			"collections": [
+				{ "id": "legacy", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "zeta", "parentId": "legacy", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "alpha", "parentId": "legacy", "order": 0, "createdAt": 1700000001000 }
+			],
+			"requests": [
+				{ "id": "later", "collectionId": "legacy", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "earlier", "collectionId": "legacy", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "in_zeta", "collectionId": "zeta", "order": 0, "createdAt": 1700000005000 },
+				{ "id": "in_alpha", "collectionId": "alpha", "order": 0, "createdAt": 1700000006000 }
+			],
+			"expected": ["in_alpha", "in_zeta", "earlier", "later"]
+		},
+		{
+			"name": "an empty subfolder contributes nothing and shifts nothing",
+			"rootId": "orders",
+			"collections": [
+				{ "id": "orders", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "drafts", "parentId": "orders", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "archive", "parentId": "orders", "order": 1, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "list_orders", "collectionId": "orders", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "list_archive", "collectionId": "archive", "order": 0, "createdAt": 1700000004000 }
+			],
+			"expected": ["list_archive", "list_orders"]
+		}
+	]
+}

@@ -54,7 +54,9 @@ even the ordering that does exist is not something a script participates in.
 
 A scenario is not a new stored entity. It is a *resolution* of one that exists: a
 collection, its direct requests ordered by `requests.order`, optionally including
-descendant collections ordered by `collections.order`, depth-first.
+descendant collections ordered by `collections.order`, depth-first - each
+sub-collection's subtree ahead of its parent's own requests, because that is the
+order the sidebar renders (issue #431).
 
 At run start the engine resolves that into a **scenario plan**: an ordered,
 immutable vector of fully composed steps. Each step is the payload

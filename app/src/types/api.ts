@@ -420,7 +420,10 @@ export interface StartScenarioRunRequest {
 		 */
 		source: "collection";
 		collectionId: string;
-		/** Descend into sub-collections, depth-first. Default false. */
+		/**
+		 * Descend into sub-collections, depth-first, each subtree ahead of its
+		 * parent's own requests - the order the sidebar shows. Default false.
+		 */
 		recursive?: boolean;
 		/**
 		 * Passes over the plan. Whole number, 1 or more.
