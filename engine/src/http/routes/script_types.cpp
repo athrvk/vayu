@@ -36,6 +36,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vayu/http/routes.hpp"
@@ -305,14 +306,33 @@ std::string field_type (const std::string& detail) {
     if (paren != std::string::npos) {
         base = trim (base.substr (0, paren));
     }
-    if (base == "number" || base == "string" || base == "boolean" ||
-    base == "any" || base == "string | undefined") {
-        return base;
+
+    // `T | undefined` is T, optional - so the suffix is split off and put back
+    // rather than every pair being listed. The list form had `string |
+    // undefined` and not `number | undefined`, which silently declared
+    // `pm.info.iteration` as `void` and made `pm.info.iteration + 1` an error
+    // in the editor.
+    static constexpr std::string_view OPTIONAL_SUFFIX = " | undefined";
+    bool optional                                     = false;
+    if (base.size () > OPTIONAL_SUFFIX.size () &&
+    base.compare (base.size () - OPTIONAL_SUFFIX.size (),
+    OPTIONAL_SUFFIX.size (), OPTIONAL_SUFFIX) == 0) {
+        optional = true;
+        base = trim (base.substr (0, base.size () - OPTIONAL_SUFFIX.size ()));
     }
-    if (base == "object") {
-        return ANY_OBJECT;
+
+    std::string resolved;
+    if (base == "number" || base == "string" || base == "boolean" || base == "any") {
+        resolved = base;
+    } else if (base == "object") {
+        resolved = ANY_OBJECT;
+    } else {
+        // Prose rather than a type - an assertion getter restating its own
+        // name, or a description. `void` is the honest answer, and
+        // `void | undefined` is not a type, so the suffix goes with it.
+        return "void";
     }
-    return "void";
+    return optional ? resolved + std::string (OPTIONAL_SUFFIX) : resolved;
 }
 
 void append_doc (std::string& out, const TypeNode& node, const std::string& indent) {
