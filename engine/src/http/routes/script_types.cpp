@@ -312,12 +312,13 @@ std::string field_type (const std::string& detail) {
     // undefined` and not `number | undefined`, which silently declared
     // `pm.info.iteration` as `void` and made `pm.info.iteration + 1` an error
     // in the editor.
-    static constexpr std::string_view OPTIONAL = " | undefined";
-    bool optional                              = false;
-    if (base.size () > OPTIONAL.size () &&
-    base.compare (base.size () - OPTIONAL.size (), OPTIONAL.size (), OPTIONAL) == 0) {
+    static constexpr std::string_view OPTIONAL_SUFFIX = " | undefined";
+    bool optional                                     = false;
+    if (base.size () > OPTIONAL_SUFFIX.size () &&
+    base.compare (base.size () - OPTIONAL_SUFFIX.size (),
+    OPTIONAL_SUFFIX.size (), OPTIONAL_SUFFIX) == 0) {
         optional = true;
-        base     = trim (base.substr (0, base.size () - OPTIONAL.size ()));
+        base = trim (base.substr (0, base.size () - OPTIONAL_SUFFIX.size ()));
     }
 
     std::string resolved;
@@ -331,7 +332,7 @@ std::string field_type (const std::string& detail) {
         // `void | undefined` is not a type, so the suffix goes with it.
         return "void";
     }
-    return optional ? resolved + std::string (OPTIONAL) : resolved;
+    return optional ? resolved + std::string (OPTIONAL_SUFFIX) : resolved;
 }
 
 void append_doc (std::string& out, const TypeNode& node, const std::string& indent) {
