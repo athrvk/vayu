@@ -15,7 +15,7 @@
  * the source of silent data loss. Flat headers are only built for HTTP execution.
  */
 
-import type { KeyValueEntry } from "@/types";
+import type { FormFieldEntry } from "@/types";
 import type { KeyValueItem } from "../types";
 import { generateId } from "./id";
 import { createDefaultSystemHeaders } from "./system-headers";
@@ -45,9 +45,18 @@ export const createEmptyKeyValue = (): KeyValueItem => ({
  */
 export const withTrailingBlank = (items: KeyValueItem[]): KeyValueItem[] => {
 	const last = items[items.length - 1];
-	const lastIsBlank = last && !last.key.trim() && !last.value.trim();
-	return lastIsBlank ? items : [...items, createEmptyKeyValue()];
+	return last && isBlankRow(last) ? items : [...items, createEmptyKeyValue()];
 };
+
+/**
+ * Nothing typed and no file chosen.
+ *
+ * A file part keeps its content in `src`, not in `value`, so a row holding only
+ * a picked file reads as blank to a key/value test - it would have been treated
+ * as the trailing spare row and dropped on save.
+ */
+const isBlankRow = (item: KeyValueItem): boolean =>
+	!item.key.trim() && !item.value.trim() && !item.src?.trim();
 
 /**
  * Convert domain KeyValueEntry[] to UI KeyValueItem[].
@@ -55,7 +64,7 @@ export const withTrailingBlank = (items: KeyValueItem[]): KeyValueItem[] => {
  * When `withSystemHeaders` is true, injects managed system headers at the top.
  */
 export const toKeyValueItems = (
-	entries: KeyValueEntry[] | undefined,
+	entries: FormFieldEntry[] | undefined,
 	withSystemHeaders = false
 ): KeyValueItem[] => {
 	const items: KeyValueItem[] = [];
@@ -80,13 +89,17 @@ export const toKeyValueItems = (
 };
 
 /**
- * Convert UI KeyValueItem[] back to domain KeyValueEntry[].
+ * Convert UI KeyValueItem[] back to domain entries.
  * Strips the ephemeral `id` and `system` fields.
- * Empty trailing rows (no key AND no value) are omitted.
+ * Blank trailing rows are omitted (see `isBlankRow`).
+ *
+ * The result is typed as `FormFieldEntry[]` - a superset of `KeyValueEntry`
+ * whose extra members are all optional - so a form-data row keeps its file
+ * part on the way to storage while headers and params are unaffected.
  */
-export const toKeyValueEntries = (items: KeyValueItem[]): KeyValueEntry[] => {
+export const toKeyValueEntries = (items: KeyValueItem[]): FormFieldEntry[] => {
 	return items
-		.filter((item) => item.key.trim() || item.value.trim())
+		.filter((item) => !isBlankRow(item))
 		.map(({ id: _id, system: _sys, ...entry }) => entry);
 };
 

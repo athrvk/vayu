@@ -294,7 +294,11 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   a string, so `body` is written as `key=value&key=value` and split into the
   `fields` rows the engine reads - see
   [the `body` union](api-reference.md#the-request-body-union). `create_request`
-  stores the same shape. File parts are not supported.
+  stores the same shape. Every field an agent writes is a **text** part: a
+  `form-data` [file part](api-reference.md#file-parts-form-data-only) names a
+  path on the user's machine, which an agent cannot choose for them or verify,
+  so the tools state the limit rather than inventing a shape for it. A stored
+  file part is left alone unless `body` replaces the whole body.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`

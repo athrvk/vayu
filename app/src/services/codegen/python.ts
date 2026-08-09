@@ -65,7 +65,25 @@ export function generatePython(
 		callArgs.push("    data=data,");
 	} else if (prepared.body) {
 		const name = prepared.body.kind === "form-data" ? "files" : "data";
-		lines.push(`${name} = {`, ...dictLiteral(prepared.body.fields), "}", "");
+		const entries = dictLiteral(prepared.body.fields);
+		if (prepared.body.kind === "form-data") {
+			// requests spells a file part as a tuple: (filename, fileobj, type).
+			// The handles are deliberately not closed - a pasted snippet is one
+			// call, and a `with` block per file would bury the request in
+			// scaffolding. Said out loud rather than left to be noticed.
+			for (const file of prepared.body.files) {
+				const parts = [
+					pythonString(file.fileName || file.key),
+					`open(${pythonString(file.path)}, "rb")`,
+					...(file.contentType ? [pythonString(file.contentType)] : []),
+				];
+				entries.push(`    ${pythonString(file.key)}: (${parts.join(", ")}),`);
+			}
+			if (prepared.body.files.length > 0) {
+				notes.push("File handles are opened inline and left for the interpreter to close.");
+			}
+		}
+		lines.push(`${name} = {`, ...entries, "}", "");
 		// `files=` is what makes requests send multipart; `data=` with a dict is
 		// urlencoded. A multipart body passed as `data=` is silently urlencoded,
 		// which is the mistake this branch exists to avoid.

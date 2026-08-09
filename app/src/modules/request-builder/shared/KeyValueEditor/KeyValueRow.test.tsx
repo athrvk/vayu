@@ -61,6 +61,8 @@ function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 				allowDisable={true}
 				readOnly={false}
 				onUpdate={() => {}}
+				onPickFile={() => {}}
+				onToggleKind={() => {}}
 				onRemove={() => {}}
 				{...overrides}
 			/>

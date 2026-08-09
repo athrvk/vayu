@@ -156,11 +156,52 @@ describe("parseCommand - curl", () => {
 		);
 	});
 
-	test("-F form data, skipping file uploads", () => {
-		const r = parseCommand(`curl https://x.com -F 'name=joe' -F 'avatar=@pic.png'`)!;
+	test("-F form data, with a file part", () => {
+		const r = parseCommand(`curl https://x.com -F 'name=joe' -F 'avatar=@/tmp/pic.png'`)!;
 		expect(r.method).toBe("POST");
 		expect(r.bodyMode).toBe("form-data");
-		expect(r.formData).toEqual(kv([{ key: "name", value: "joe" }]));
+		// The file row is the half issue #393 added: before it, `avatar` imported
+		// as a text field whose value was the literal "@/tmp/pic.png".
+		expect(r.formData.map(({ id: _id, ...row }) => row)).toEqual([
+			{ key: "name", value: "joe", enabled: true },
+			{
+				key: "avatar",
+				value: "",
+				enabled: true,
+				type: "file",
+				src: "/tmp/pic.png",
+				fileName: "pic.png",
+				unresolved: true,
+			},
+		]);
+	});
+
+	test("-F reads curl's per-part type and filename modifiers", () => {
+		const r = parseCommand(
+			`curl https://x.com -F 'dataset=@/tmp/a.bin;type=text/csv;filename=people.csv'`
+		)!;
+		expect(r.formData.map(({ id: _id, ...row }) => row)).toEqual([
+			{
+				key: "dataset",
+				value: "",
+				enabled: true,
+				type: "file",
+				src: "/tmp/a.bin",
+				fileName: "people.csv",
+				contentType: "text/csv",
+				unresolved: true,
+			},
+		]);
+	});
+
+	test("--form-string keeps a leading @ as text", () => {
+		// The flag exists precisely so `@` is not a file reference, and Vayu's own
+		// curl snippet emits it for every text part - so this is the round trip.
+		const r = parseCommand(`curl https://x.com --form-string 'handle=@ada'`)!;
+		expect(r.bodyMode).toBe("form-data");
+		expect(r.formData.map(({ id: _id, ...row }) => row)).toEqual([
+			{ key: "handle", value: "@ada", enabled: true },
+		]);
 	});
 
 	test("-u basic auth", () => {

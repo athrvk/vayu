@@ -15,14 +15,18 @@
  * `collectionId`, `preRequestScript`, `testScript`) are deliberately never
  * included - curl can't express them, so the caller keeps its own.
  *
- * Files referenced with `@path` (e.g. `-d @body.json`, `-F field=@file`) can't
- * be read from a pasted command, so those entries are skipped rather than
- * mis-mapped.
+ * A body read from a file (`-d @body.json`) is still skipped: the contents are
+ * the body, and a pasted command cannot supply them. A **form file part**
+ * (`-F field=@file`) is different - the engine opens the file at send time, so
+ * only its path has to survive, and it imports as a file row marked unresolved
+ * (issue #393). Before that it landed as a text field whose value was the
+ * literal `@path`.
  */
 
 import type { HttpMethod } from "@/types";
 import type { BodyMode, KeyValueItem, RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/modules/request-builder/utils/id";
+import { fileBaseName } from "@/lib/file-path";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { tokenize } from "./tokenize";
 
@@ -82,7 +86,7 @@ interface Builder {
 	headers: Array<{ key: string; value: string }>;
 	dataParts: string[]; // -d / --data*
 	urlEncodeParts: string[]; // --data-urlencode
-	formParts: Array<{ key: string; value: string }>; // -F (non-file)
+	formParts: FormPart[]; // -F
 	forceGet: boolean; // -G
 	jsonShortcut: boolean; // curl --json
 	uploadFile: boolean; // curl -T (implies PUT)
@@ -106,7 +110,7 @@ function newBuilder(): Builder {
 	};
 }
 
-/** Is the value a file reference we can't read (`@path`)? */
+/** Is the value a file reference whose *contents* we cannot read (`@path`)? */
 function isFileRef(value: string): boolean {
 	return value.startsWith("@");
 }
@@ -130,6 +134,71 @@ function setBasicAuth(b: Builder, raw: string): void {
 
 function toItems(pairs: Array<{ key: string; value: string }>): KeyValueItem[] {
 	return pairs.map(({ key, value }) => ({ id: generateId(), key, value, enabled: true }));
+}
+
+/**
+ * One `-F` part. A file part is `name=@path`, optionally with curl's per-part
+ * `;type=` and `;filename=` modifiers - the same three things Vayu's own file
+ * row carries, which is why the command round-trips.
+ */
+interface FormPart {
+	key: string;
+	value: string;
+	src?: string;
+	fileName?: string;
+	contentType?: string;
+}
+
+/**
+ * `-F name=@path;type=image/png;filename=avatar.png` → a file part.
+ *
+ * Before issue #393 this was skipped as unreadable and the row landed as the
+ * literal text `@path`: a command that uploaded a file imported as one that
+ * posts a path string. The path is kept as written - it names a file on
+ * whoever's machine the command came from - and the row is marked unresolved so
+ * the editor says so.
+ *
+ * `<path` (curl's "read the file as the value" form) is deliberately NOT a file
+ * part: it means the file's *contents* become the field value, which is a text
+ * part whose text this parser cannot read. It stays skipped.
+ */
+function formPart(key: string, raw: string): FormPart | null {
+	if (!raw.startsWith("@")) return { key, value: raw };
+	// Modifiers are `;name=value` after the path. A `;` inside a quoted path is
+	// not something curl supports either, so splitting on it is faithful.
+	const [pathPart, ...modifiers] = raw.slice(1).split(";");
+	const src = pathPart.trim();
+	if (!src) return null;
+	const part: FormPart = { key, value: "", src };
+	for (const modifier of modifiers) {
+		const eq = modifier.indexOf("=");
+		if (eq === -1) continue;
+		const name = modifier.slice(0, eq).trim().toLowerCase();
+		const setting = modifier.slice(eq + 1).trim();
+		if (name === "type") part.contentType = setting;
+		if (name === "filename") part.fileName = setting;
+	}
+	part.fileName ??= fileBaseName(src);
+	return part;
+}
+
+/** `-F` parts as editor rows, files included. */
+function toFormItems(parts: FormPart[]): KeyValueItem[] {
+	return parts.map((part) => ({
+		id: generateId(),
+		key: part.key,
+		value: part.value,
+		enabled: true,
+		...(part.src
+			? {
+					type: "file" as const,
+					src: part.src,
+					fileName: part.fileName,
+					...(part.contentType ? { contentType: part.contentType } : {}),
+					unresolved: true,
+				}
+			: {}),
+	}));
 }
 
 function findHeader(b: Builder, name: string): string | undefined {
@@ -191,7 +260,7 @@ function resolve(b: Builder): ParsedRequest {
 
 	if (hasForm) {
 		bodyMode = "form-data";
-		formData = toItems(b.formParts);
+		formData = toFormItems(b.formParts);
 	} else if (b.urlEncodeParts.length > 0) {
 		bodyMode = "x-www-form-urlencoded";
 		urlEncoded = toItems(parseFormPairs(b.urlEncodeParts));
@@ -383,10 +452,16 @@ function parseCurl(args: string[]): ParsedRequest {
 				const v = value();
 				const idx = v.indexOf("=");
 				if (idx !== -1) {
-					const fv = v.slice(idx + 1);
-					// Skip file uploads (field=@file) - can't read the file.
-					if (!isFileRef(fv)) b.formParts.push({ key: v.slice(0, idx), value: fv });
+					const part = formPart(v.slice(0, idx), v.slice(idx + 1));
+					if (part) b.formParts.push(part);
 				}
+				break;
+			}
+			case "--form-string": {
+				// Always literal, `@` included - that is the whole point of the flag.
+				const v = value();
+				const idx = v.indexOf("=");
+				if (idx !== -1) b.formParts.push({ key: v.slice(0, idx), value: v.slice(idx + 1) });
 				break;
 			}
 			case "-G":

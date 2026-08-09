@@ -375,6 +375,11 @@ const FORM_BODY_MODES = new Set(["form-data", "x-www-form-urlencoded"]);
  * #381 that meant an empty body on the wire, and now it is a refusal. Either
  * way the mode was documented and unusable; splitting here makes the schema's
  * promise true.
+ *
+ * Every field produced here is a **text** part. A `form-data` file part
+ * (issue #393) names a path on the user's machine, which an agent has no way to
+ * choose on their behalf and no way to verify - so MCP states the limit in the
+ * two `bodyType` descriptions rather than inventing a shape for it.
  */
 function bodyPayload(bodyType: string, content: string): Record<string, unknown> {
 	if (!FORM_BODY_MODES.has(bodyType)) return { mode: bodyType, content };
@@ -1312,7 +1317,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields."
+					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported here - a multipart file part names a path on the user's machine, which an agent cannot choose for them; author it in the app."
 				),
 			description: z.string().optional(),
 		},
@@ -1369,7 +1374,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, form-data, x-www-form-urlencoded. Only meaningful alongside `body`."
+					"Body type for `body`: json, text, graphql, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
 		},
@@ -1695,7 +1700,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields."
+					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported here - a multipart file part names a path on the user's machine, which an agent cannot choose for them; author it in the app."
 				),
 			auth: authInput,
 			httpVersion: z

@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HttpMethod, RequestAuth, RequestBody, VariableValue } from "@/types";
+import type { FormFieldEntry, HttpMethod, RequestAuth, RequestBody, VariableValue } from "@/types";
 import type {
 	CollectionDraft,
 	EnvironmentDraft,
@@ -16,7 +16,7 @@ import type {
 	SkippedItem,
 } from "./types";
 import { asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
-import { asString, mapKeyValues, withRequiredContentType } from "./shared";
+import { asString, importedFilePart, mapKeyValues, withRequiredContentType } from "./shared";
 import { toGraphQLEnvelope } from "@/lib/graphql/graphql-body";
 import { normalizeVars } from "./var-normalize";
 import { mapInsomniaOAuth2 } from "./oauth2-import";
@@ -135,6 +135,32 @@ function insomniaBearer(auth: JsonRecord): RequestAuth {
 	return { mode: "bearer", token };
 }
 
+/**
+ * Insomnia's multipart params, files included.
+ *
+ * A file param keeps its path in `fileName` - the field is the *path* on the
+ * exporting machine, not a declared part name - and its `value` is empty. One
+ * with no path names no file, so it stays counted as skipped rather than
+ * importing a part that could never be sent.
+ */
+function multipartFields(rows: unknown[], ctx: Ctx): FormFieldEntry[] {
+	const out: FormFieldEntry[] = [];
+	for (const row of rows) {
+		if (prop(row, "type") !== "file") {
+			out.push(...mapKeyValues([kvRow(row)]));
+			continue;
+		}
+		const entry = mapKeyValues([kvRow(row)])[0];
+		const path = asStr(prop(row, "fileName")) ?? "";
+		if (!entry || path === "") {
+			ctx.fileBody += 1;
+			continue;
+		}
+		out.push(importedFilePart(entry, path));
+	}
+	return out;
+}
+
 function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 	if (body == null) return { mode: "none" };
 	const node = asRecord(body);
@@ -170,11 +196,7 @@ function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 			};
 		case "multipart/form-data": {
 			const rows = rowsOrThrow(node.params, "`body.params`");
-			const text = rows.filter((p) => prop(p, "type") !== "file");
-			// Vayu has no file part; count the drop so the preview can show it (parity
-			// with the Postman parser's `skippedFileBody`).
-			ctx.fileBody += rows.length - text.length;
-			return { mode: "form-data", fields: mapKeyValues(text.map(kvRow)) };
+			return { mode: "form-data", fields: multipartFields(rows, ctx) };
 		}
 		default:
 			return unlistedBody(node, ctx);

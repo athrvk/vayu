@@ -20,6 +20,7 @@
  */
 
 import { shellQuote } from "./curl";
+import { fileBaseName as baseName } from "@/lib/file-path";
 import { prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
@@ -55,6 +56,7 @@ export function generateHttpie(
 	options: CodegenOptions = {}
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
+	const notes = [...prepared.notes];
 	const args: string[] = [`http ${prepared.method} ${shellQuote(prepared.url)}`];
 
 	const isFormData = prepared.body?.kind === "form-data";
@@ -83,7 +85,27 @@ export function generateHttpie(
 		for (const [key, value] of prepared.body.fields) {
 			args.push(shellQuote(httpieItem(key, value)));
 		}
+		if (prepared.body.kind === "form-data") {
+			for (const file of prepared.body.files) {
+				// `key@path` is HTTPie's file item - the separator this key is
+				// escaped against everywhere else, used deliberately. HTTPie sends
+				// the basename and sniffs the type; a part whose declared name or
+				// type differs cannot be expressed, so it is said rather than
+				// quietly changed.
+				args.push(shellQuote(`${file.key.replace(/[\\:=@]/g, "\\$&")}@${file.path}`));
+				const declared = file.fileName && file.fileName !== baseName(file.path);
+				if (declared || file.contentType) {
+					notes.push(
+						`HTTPie names the part after the file on disk: ${file.key} is sent as ${baseName(file.path)}${
+							file.contentType
+								? ", and its Content-Type is sniffed rather than set"
+								: ""
+						}.`
+					);
+				}
+			}
+		}
 	}
 
-	return { code: args.join(" \\\n  "), notes: prepared.notes, masked: prepared.masked };
+	return { code: args.join(" \\\n  "), notes, masked: prepared.masked };
 }

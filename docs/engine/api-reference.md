@@ -237,7 +237,8 @@ string; `value` defaults to `""` and a non-boolean `enabled` reads as enabled.
 A form mode carrying no `fields` array is a `400`, as is a `fields` on a mode
 whose content is a string. Rows with `enabled: false` are stored and returned
 but never sent, so switching one back on needs no re-compose; `{{variables}}`
-resolve inside both `key` and `value` during composition.
+resolve inside `key`, `value`, and a file part's `src` / `fileName` /
+`contentType` during composition.
 
 Two Content-Type rules follow from the encoding:
 
@@ -248,9 +249,55 @@ Two Content-Type rules follow from the encoding:
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
 
-`form-data` supports text parts only. A file part has no representation in the
-payload yet - importers count file parts as skipped rather than importing them
-as empty text fields.
+#### File parts (`form-data` only)
+
+A `form-data` row with `"type": "file"` uploads a file from the machine running
+the engine. It carries a path rather than bytes:
+
+```json
+{
+  "mode": "form-data",
+  "fields": [
+    { "key": "caption", "value": "my avatar", "enabled": true },
+    {
+      "key": "avatar",
+      "type": "file",
+      "src": "/home/ada/portrait.png",
+      "fileName": "profile.png",
+      "contentType": "image/png",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Member | Meaning |
+|---|---|
+| `type` | `"text"` (default) or `"file"`. Any other value is a `400`. |
+| `src` | Path the engine opens at transfer time. Required for a file part. |
+| `fileName` | Name the part declares. Defaults to the basename of `src`. |
+| `contentType` | Per-part Content-Type. Defaults to libcurl's guess. |
+
+Rules, all of them refusals rather than silent omissions:
+
+- A file part in an `x-www-form-urlencoded` body is a `400` - that media type's
+  wire form is a string of pairs and has no file form.
+- A `src` on a part that is not `"type": "file"` is a `400`: it names a file
+  nothing would send.
+- An **enabled** file part whose `src` is empty, or whose file this process
+  cannot read, fails the request before it is sent - `statusCode: 0`,
+  `errorCode: INTERNAL_ERROR`, and a message naming the field and the path.
+  Identical on `POST /execute` and `POST /runs`. A **disabled** file part is
+  neither sent nor opened.
+- In a load run the file is read from disk on **every iteration** (libcurl
+  streams it during the transfer), and the readability check above costs one
+  open per request. A body with no file part pays neither.
+
+MCP has no file-part surface: `run_request` / `create_request` /
+`update_request` describe a body as a string, and a path on the user's machine
+is not something an agent can choose for them - see
+[MCP](mcp.md). The renderer authors file parts in the form-data editor, and the
+Postman and Insomnia importers map them to file rows.
 
 The older mode spellings `form` (for `x-www-form-urlencoded`) and `formdata`
 (for `form-data`) are still accepted on input; responses always use the long

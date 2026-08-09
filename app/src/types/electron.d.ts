@@ -112,6 +112,14 @@ interface ElectronAPI {
 		dbPath: string;
 	}>;
 
+	/**
+	 * Absolute path of a picked `File`, for a multipart file part. Synchronous
+	 * (Electron's `webUtils`, not IPC) and `""` when the object has no path on
+	 * this machine. Absent outside Electron, which is what the browser-hosted
+	 * test environment sees.
+	 */
+	getFilePath: (file: File) => string;
+
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }

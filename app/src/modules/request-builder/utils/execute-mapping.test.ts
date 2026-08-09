@@ -124,6 +124,80 @@ describe("buildExecBody form modes", () => {
 		expect(body).not.toHaveProperty("content");
 	});
 
+	it("sends a file part as its path, never as a value", () => {
+		const request = stateWith({
+			bodyMode: "form-data",
+			formData: [
+				row("caption", "hi"),
+				{
+					id: "file-row",
+					key: "avatar",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/a.png",
+					fileName: "profile.png",
+					contentType: "image/png",
+					// An editor annotation about where the path came from - the
+					// engine's answer to a path it cannot open is the same either
+					// way, so it must not ride along on the payload.
+					unresolved: true,
+				},
+			],
+		});
+
+		const body = buildExecBody(request, (s) => s);
+
+		expect(body?.fields).toEqual([
+			{ key: "caption", value: "hi", enabled: true },
+			{
+				key: "avatar",
+				value: "",
+				enabled: true,
+				type: "file",
+				src: "/tmp/a.png",
+				fileName: "profile.png",
+				contentType: "image/png",
+			},
+		]);
+	});
+
+	it("resolves variables inside a file part's path, name and type", () => {
+		const request = stateWith({
+			bodyMode: "form-data",
+			formData: [
+				{
+					id: "file-row",
+					key: "avatar",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "{{dir}}/a.{{ext}}",
+					fileName: "a.{{ext}}",
+					contentType: "image/{{ext}}",
+				},
+			],
+		});
+
+		// Plain substitution, not a pattern: `variable-pattern-single-source`
+		// guards against a second `{{`-matching regex anywhere in the tree.
+		const body = buildExecBody(request, (s) =>
+			s.split("{{dir}}").join("/data").split("{{ext}}").join("png")
+		);
+
+		expect(body?.fields).toEqual([
+			{
+				key: "avatar",
+				value: "",
+				enabled: true,
+				type: "file",
+				src: "/data/a.png",
+				fileName: "a.png",
+				contentType: "image/png",
+			},
+		]);
+	});
+
 	it("resolves variables inside field keys and values", () => {
 		const request = stateWith({
 			bodyMode: "x-www-form-urlencoded",

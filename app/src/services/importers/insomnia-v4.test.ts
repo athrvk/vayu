@@ -194,7 +194,7 @@ describe("InsomniaV4Parser", () => {
 		expect(result.meta.skipped.find((s) => s.kind === "file_body")?.count).toBe(1);
 	});
 
-	it("counts dropped multipart file parts as file_body and keeps the text ones", () => {
+	it("imports a multipart file part as an unresolved file row", () => {
 		const result = p.parse(
 			doc({
 				_id: "r",
@@ -214,10 +214,46 @@ describe("InsomniaV4Parser", () => {
 			"",
 			opts
 		);
+		// Insomnia keeps the *path* in `fileName`. Before issue #393 the part was
+		// dropped and counted, so the request imported as one that uploads nothing.
 		expect(result.collections[0].requests[0].body).toEqual({
 			mode: "form-data",
-			fields: [{ key: "note", value: "hi", enabled: true }],
+			fields: [
+				{ key: "note", value: "hi", enabled: true },
+				{
+					key: "avatar",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/a.png",
+					fileName: "a.png",
+					unresolved: true,
+				},
+			],
 		});
+		expect(result.meta.skipped.some((s) => s.kind === "file_body")).toBe(false);
+	});
+
+	it("still counts a multipart file param that names no file", () => {
+		const result = p.parse(
+			doc({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "Form",
+				method: "post",
+				url: "https://x",
+				body: {
+					mimeType: "multipart/form-data",
+					params: [{ name: "avatar", type: "file" }],
+				},
+			}),
+			"",
+			opts
+		);
+		// Nothing to point at: importing it would produce a part the engine
+		// refuses, so it stays reported in the preview instead.
+		expect(result.collections[0].requests[0].body).toEqual({ mode: "form-data", fields: [] });
 		expect(result.meta.skipped.find((s) => s.kind === "file_body")?.count).toBe(1);
 	});
 

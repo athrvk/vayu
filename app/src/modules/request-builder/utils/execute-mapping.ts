@@ -31,7 +31,26 @@ import { toKeyValueEntries } from "./key-value";
 export interface ExecBody {
 	mode: string;
 	content?: string;
-	fields?: Array<{ key: string; value: string; enabled: boolean }>;
+	fields?: ExecField[];
+}
+
+/**
+ * One form field on the wire payload. A file part sends its path and what the
+ * part should declare about itself - never bytes: the engine opens the file, so
+ * a renderer that read it would be copying the upload through two processes.
+ *
+ * `unresolved` is deliberately absent - it is an editor annotation about where
+ * a path came from, and the engine's answer to a path it cannot open is the
+ * same either way.
+ */
+export interface ExecField {
+	key: string;
+	value: string;
+	enabled: boolean;
+	type?: "text" | "file";
+	src?: string;
+	fileName?: string;
+	contentType?: string;
 }
 
 /**
@@ -50,11 +69,23 @@ export function buildExecBody(
 	if (request.bodyMode === "form-data") {
 		return {
 			mode: "form-data",
-			fields: toKeyValueEntries(request.formData).map((e) => ({
-				key: resolveString(e.key),
-				value: resolveString(e.value),
-				enabled: e.enabled,
-			})),
+			fields: toKeyValueEntries(request.formData).map((e): ExecField => {
+				const field: ExecField = {
+					key: resolveString(e.key),
+					value: resolveString(e.value),
+					enabled: e.enabled,
+				};
+				if (e.type !== "file") return field;
+				// A file part's path, declared name and type are as templatable
+				// as its key - a fixture directory is what an environment
+				// variable holds - and the engine resolves the same three.
+				field.type = "file";
+				field.value = "";
+				field.src = resolveString(e.src ?? "");
+				if (e.fileName) field.fileName = resolveString(e.fileName);
+				if (e.contentType) field.contentType = resolveString(e.contentType);
+				return field;
+			}),
 		};
 	}
 

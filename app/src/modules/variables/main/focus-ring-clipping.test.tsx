@@ -146,6 +146,8 @@ function renderKeyValueCheckbox(): Element {
 				showResolved={false}
 				readOnly={false}
 				onUpdate={vi.fn()}
+				onPickFile={vi.fn()}
+				onToggleKind={vi.fn()}
 				onRemove={vi.fn()}
 				allowDisable
 				canDisable

@@ -53,7 +53,7 @@ Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `ins
 
 **Skip counting nuance.** Only the five `_type`s listed above (`grpc_request`, `websocket_request`, `api_spec`, `unit_test`, `unit_test_suite`) are tallied in `skippedCounts` by the tree walk, and only when they appear as a **direct child of a workspace or request_group**. A dropped resource parented under something else (or any other `_type`) does not increment `meta.skipped`. When emitting `SkippedItem[]`, the raw keys are remapped: `grpc_request → "grpc"`, `websocket_request → "websocket"`, `unit_test_suite → "unit_test"`; `unit_test` and `api_spec` pass through unchanged. Because `unit_test` and `unit_test_suite` both map to `"unit_test"` but are aggregated by their raw key first, an export containing both can yield **two** separate `SkippedItem` entries with `kind: "unit_test"`.
 
-A sixth kind, `file_body`, does not come from a resource `_type` at all: it counts bodies Vayu cannot store (binary bodies and `multipart/form-data` file parts - see [Body mapping](#body-mapping)) and is appended once, after the walk, when the count is non-zero.
+A sixth kind, `file_body`, does not come from a resource `_type` at all: it counts bodies Vayu cannot store - binary bodies, and a `multipart/form-data` file param that names no path (a file *part* with a path imports as a file row; see [Body mapping](#body-mapping)) - and is appended once, after the walk, when the count is non-zero.
 
 ## Field mapping
 
@@ -111,7 +111,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | `text/plain` | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. |
 | `application/graphql` | `{ mode: "graphql", content }` | `content = toGraphQLEnvelope(normalizeVars(body.text))` - a bare query document is wrapped into `{query}`, an envelope passes through (see below). The request also gains a `Content-Type`. |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `mapKeyValues` (`name → key`, `disabled` honored). |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. Each dropped file part increments the `file_body` count in `meta.skipped` (parity with the Postman parser's `skippedFileBody`). |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` through `mapKeyValues`, except that a `type: "file"` param becomes a **file row**: Insomnia keeps the path in `param.fileName`, which becomes `src` (and its basename the declared `fileName`), and the row is marked `unresolved` since the path is from the exporting machine. Only a file param naming no path increments the `file_body` count in `meta.skipped`. |
 | anything else carrying text (`application/xml`, `application/yaml`, `text/csv`, Insomnia's "Other") | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. Reserved for a non-empty **string** `body.text`; the sibling Postman parser's `rawBody()` fallback behaves the same way. No JSON sniffing happens here - Insomnia states the mime, so an XML body stays `text`. |
 | anything else with no text (binary / file-only: `body.fileName` set) | `{ mode: "none" }` | Counted as `file_body` in `meta.skipped` - Vayu has no file body mode, and the file lives outside the export anyway. |
 | missing or empty body | `{ mode: "none" }` | Nothing was lost, so nothing is counted. |
@@ -170,7 +170,7 @@ Each variable is produced by `toEnvVars`: keys come straight from the env `data`
 Lossy / dropped, summary:
 
 - gRPC, WebSocket, API spec, unit test, and unit-test-suite resources are dropped and counted in `meta.skipped` (only when encountered as direct children of a workspace/request_group during the tree walk; see counting nuance above).
-- `multipart/form-data` file parts and binary bodies are dropped and counted as `file_body` in `meta.skipped`.
+- Binary bodies, and `multipart/form-data` file params that name no path, are dropped and counted as `file_body` in `meta.skipped`. A file param **with** a path imports as an unresolved file row.
 - Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
 - Nunjucks tags and filtered template expressions are preserved as literal text.
 - request_group inline environments and resource `_id`s are not carried into the draft model.

@@ -428,12 +428,92 @@ describe("PostmanV21Parser", () => {
 				{ key: "b", value: "2", enabled: false },
 			],
 		});
-		// File parts have no engine-side representation yet, so they are counted
-		// as skipped rather than imported as empty text fields.
+		// A file part imports as a file row (issue #393). It used to be counted as
+		// skipped, which turned an upload into a request that posted nothing.
 		expect(requests[1].body).toEqual({
 			mode: "form-data",
-			fields: [{ key: "note", value: "hi", enabled: true }],
+			fields: [
+				{ key: "note", value: "hi", enabled: true },
+				{
+					key: "avatar",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/a.png",
+					fileName: "a.png",
+					// The path is from whoever exported the collection - it almost
+					// never exists here, and the editor says so until a file is picked.
+					unresolved: true,
+				},
+			],
 		});
+	});
+
+	it("splits a file field carrying several paths into one part each", () => {
+		// Postman lets one formdata field hold an array of paths. A multipart body
+		// repeats the field name rather than nesting, which is what Postman sends,
+		// so each path becomes its own part.
+		const body = parse(
+			collectionOf([
+				{
+					name: "Multi",
+					request: {
+						method: "POST",
+						url: "https://x/multi",
+						body: {
+							mode: "formdata",
+							formdata: [
+								{ key: "shots", type: "file", src: ["/tmp/a.png", "/tmp/b.png"] },
+							],
+						},
+					},
+				},
+			])
+		).collections[0].requests[0].body;
+
+		expect(body).toEqual({
+			mode: "form-data",
+			fields: [
+				{
+					key: "shots",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/a.png",
+					fileName: "a.png",
+					unresolved: true,
+				},
+				{
+					key: "shots",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/b.png",
+					fileName: "b.png",
+					unresolved: true,
+				},
+			],
+		});
+	});
+
+	it("still counts a file field that names no path", () => {
+		const result = parse(
+			collectionOf([
+				{
+					name: "Empty file field",
+					request: {
+						method: "POST",
+						url: "https://x/multi",
+						body: { mode: "formdata", formdata: [{ key: "avatar", type: "file" }] },
+					},
+				},
+			])
+		);
+
+		// Nothing to point at, so importing it would produce a part the engine
+		// refuses - it stays reported in the preview instead.
+		expect(result.collections[0].requests[0].body).toEqual({ mode: "form-data", fields: [] });
+		expect(result.meta.skipped.find((s) => s.kind === "file_body")?.count).toBe(1);
 	});
 
 	it("leaves a literal single-brace value alone", () => {
