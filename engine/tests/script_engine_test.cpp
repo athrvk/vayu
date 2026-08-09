@@ -1520,6 +1520,109 @@ TEST_F (ScriptEngineTest, ScriptWritingAFormDataBodyIsRefusedRatherThanDropped) 
     EXPECT_TRUE (request.body.content.empty ());
 }
 
+// ---------------------------------------------------------------------------
+// File parts through the script bridge (#411). The rendering is unit-tested in
+// form_body_test.cpp; these pin what a *script* can actually tell, which is the
+// defect - an upload read as an empty field and nothing else in the sandbox
+// exposed the parts.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Body form_data_body_with_a_file (const std::string& src) {
+    Body body    = form_data_body ();
+    body.fields  = { { "caption", "my avatar", true } };
+    FormField up;
+    up.key  = "avatar";
+    up.type = FormFieldType::File;
+    up.src  = src;
+    body.fields.push_back (up);
+    return body;
+}
+
+} // namespace
+
+TEST_F (ScriptEngineTest, ScriptTellsAFilePartFromAnEmptyTextField) {
+    request.body = form_data_body_with_a_file ("/home/ada/portrait.png");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // Before this, the upload rendered `avatar=` - the same string the empty
+    // text part below produces, so a script could not tell them apart.
+    EXPECT_EQ (request.headers["X-Seen-Body"], "caption=my%20avatar&avatar=@portrait.png");
+
+    Request text_request     = request;
+    text_request.headers     = {};
+    text_request.body        = form_data_body ();
+    text_request.body.fields = { { "caption", "my avatar", true }, { "avatar", "", true } };
+
+    auto text_result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    text_request, env);
+
+    EXPECT_TRUE (text_result.success) << text_result.error_message;
+    EXPECT_EQ (text_request.headers["X-Seen-Body"], "caption=my%20avatar&avatar=");
+    EXPECT_NE (request.headers["X-Seen-Body"], text_request.headers["X-Seen-Body"]);
+}
+
+TEST_F (ScriptEngineTest, ScriptSeesTheFilenameAndNotTheLocalPath) {
+    request.body = form_data_body_with_a_file ("/home/ada/private/portrait.png");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Has-Path'] = String(pm.request.body.indexOf('/home/ada') !== -1);
+        pm.request.headers['X-Has-Name'] = String(pm.request.body.indexOf('portrait.png') !== -1);
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    // The filename is what the server is told; the path is this machine's and
+    // would end up in anything the script logs.
+    EXPECT_EQ (request.headers["X-Has-Path"], "false");
+    EXPECT_EQ (request.headers["X-Has-Name"], "true");
+}
+
+TEST_F (ScriptEngineTest, ReadingABodyWithAFilePartRewritesNothing) {
+    request.body      = form_data_body_with_a_file ("/home/ada/portrait.png");
+    const Body before = request.body;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Seen-Body'] = pm.request.body;
+    )JS",
+    request, env);
+
+    // The write-back measures the string it gets back against the same view, so
+    // a script that only *looked* leaves the parts exactly as they stood - the
+    // file part included, which is the one a parse-it-back would have dropped.
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (request.body.fields.size (), before.fields.size ());
+    EXPECT_EQ (request.body.fields[1].type, FormFieldType::File);
+    EXPECT_EQ (request.body.fields[1].src, before.fields[1].src);
+    EXPECT_TRUE (request.body.fields[1].value.empty ());
+}
+
+TEST_F (ScriptEngineTest, AssigningABodyWithAFilePartIsStillRefused) {
+    request.body = form_data_body_with_a_file ("/home/ada/portrait.png");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = 'caption=my%20avatar&avatar=@other.png';
+    )JS",
+    request, env);
+
+    // Naming the file in the view does not make the view applicable: parsing it
+    // back would turn the upload into a text part reading "@other.png".
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("form-data"), std::string::npos)
+    << result.error_message;
+    ASSERT_EQ (request.body.fields.size (), 2u);
+    EXPECT_EQ (request.body.fields[1].type, FormFieldType::File);
+    EXPECT_EQ (request.body.fields[1].src, "/home/ada/portrait.png");
+}
+
 TEST_F (ScriptEngineTest, ScriptDeletingAFormDataBodySendsNoBody) {
     request.body = form_data_body ();
 

@@ -431,6 +431,52 @@ TEST (FormBodyRules, EncodesEnabledFieldsOnly) {
     EXPECT_EQ (encode_urlencoded ({ { "empty", "", true } }), "empty=");
 }
 
+// ---------------------------------------------------------------------------
+// The form-data rendering (#411). A file part carries its content in `src`, so
+// encoding it as a pair rendered `avatar=` - the same string an empty text part
+// produces, which is the ambiguity these pin shut.
+// ---------------------------------------------------------------------------
+
+TEST (FormBodyRules, RendersAFilePartDistinguishablyFromAnEmptyTextPart) {
+    EXPECT_EQ (render_form_data_parts ({ { "caption", "my avatar", true },
+               file_field ("avatar", "/home/ada/portrait.png") }),
+    "caption=my%20avatar&avatar=@portrait.png");
+
+    // The string the defect produced, still produced by the text part alone -
+    // so the two are now different strings rather than the same one.
+    EXPECT_EQ (render_form_data_parts ({ { "avatar", "", true } }), "avatar=");
+}
+
+TEST (FormBodyRules, RendersTheDeclaredFilenameRatherThanThePath) {
+    // Only the basename, because that is what the server is told and a path
+    // discloses this machine's layout to anything the script logs.
+    EXPECT_EQ (render_form_data_parts ({ file_field ("f", "/home/ada/secret-dir/report.pdf") }),
+    "f=@report.pdf");
+    EXPECT_EQ (
+    render_form_data_parts ({ file_field ("f", "C:\\Users\\ada\\report.pdf") }), "f=@report.pdf");
+    // An explicit name overrides the basename, exactly as curl_mime_filename
+    // overrides what curl_mime_filedata declared.
+    EXPECT_EQ (render_form_data_parts ({ file_field ("f", "/tmp/tmp123.bin", "report.pdf") }),
+    "f=@report.pdf");
+}
+
+TEST (FormBodyRules, TheFileMarkerCannotBeForgedByATextValue) {
+    // `@` is unreserved-adjacent but not unreserved, so a value starting with
+    // one is escaped and can never render as the marker.
+    EXPECT_EQ (render_form_data_parts ({ { "f", "@portrait.png", true } }), "f=%40portrait.png");
+}
+
+TEST (FormBodyRules, RenderFormDataSkipsDisabledPartsAndNamesUnchosenFiles) {
+    FormField off = file_field ("off", "/home/ada/portrait.png");
+    off.enabled   = false;
+    EXPECT_EQ (render_form_data_parts ({ { "on", "1", true }, off }), "on=1");
+
+    // A part authored but never pointed at a file. `unsendable_file_part`
+    // refuses it before the transfer, but a pre-request script runs first and
+    // reads the body as it stands - and a bare `@` is still not `chosen=`.
+    EXPECT_EQ (render_form_data_parts ({ file_field ("chosen", "") }), "chosen=@");
+}
+
 TEST (FormBodyRules, ParsesUrlencodedBackIntoFields) {
     const auto fields = parse_urlencoded ("a=1&b=two");
     ASSERT_EQ (fields.size (), 2u);
