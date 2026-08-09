@@ -77,6 +77,7 @@ export const API_ENDPOINTS = {
 		type?: string;
 		status?: string;
 		requestId?: string;
+		collectionId?: string;
 		q?: string;
 	}) => {
 		const qs = new URLSearchParams();
@@ -85,6 +86,7 @@ export const API_ENDPOINTS = {
 		if (params.type) qs.set("type", params.type);
 		if (params.status) qs.set("status", params.status);
 		if (params.requestId) qs.set("requestId", params.requestId);
+		if (params.collectionId) qs.set("collectionId", params.collectionId);
 		if (params.q) qs.set("q", params.q);
 		const s = qs.toString();
 		return s ? `/runs?${s}` : `/runs`;

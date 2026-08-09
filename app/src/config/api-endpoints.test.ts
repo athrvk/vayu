@@ -40,6 +40,10 @@ describe("API_ENDPOINTS canonical routes", () => {
 			})
 		).toBe("/runs?limit=1&type=design&status=completed&requestId=req_1");
 		expect(API_ENDPOINTS.RUNS_LIST({ q: "users api" })).toBe("/runs?q=users+api");
+		// The context bar's "Last run" lookup - one collection, one row.
+		expect(API_ENDPOINTS.RUNS_LIST({ collectionId: "col_1", limit: 1 })).toBe(
+			"/runs?limit=1&collectionId=col_1"
+		);
 		// No params -> bare /runs, which the engine treats as the legacy array.
 		expect(API_ENDPOINTS.RUNS_LIST({})).toBe("/runs");
 	});

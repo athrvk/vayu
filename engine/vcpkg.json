@@ -15,7 +15,12 @@
     "nlohmann-json",
     "cpp-httplib",
     "gtest",
-    "sqlite3",
+    {
+      "name": "sqlite3",
+      "features": [
+        "json1"
+      ]
+    },
     "sqlite-orm"
   ],
   "builtin-baseline": "cea592f4772491abdb7c483387a59ea89889f4be"

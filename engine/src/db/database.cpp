@@ -939,21 +939,47 @@ namespace {
 // the filter is unset - so an unset field is a wildcard and the same compiled
 // expression serves every filter combination (no per-combination branching).
 // `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+//
+// `collection_id` reads the snapshot as JSON instead. `json_extract` raises a
+// SQL error - not NULL - on text that is not JSON, and `sanitize_config_snapshot`
+// stores an unparseable body verbatim, so handing it the column directly would
+// turn one malformed row into a 500 for the whole page. The CASE is the guard:
+// SQLite evaluates only the branch it selects, so `json_extract` is never
+// applied to anything but valid JSON. A boolean `json_valid(...) AND ...` guard
+// would rely on the planner's evaluation order for the same protection, which
+// is not ours to depend on.
+//
+// A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
+// id, so design and load runs (and a scenario run stored before the snapshot
+// carried the key) fall out of the result rather than erroring.
 auto run_filter_where (const RunFilter& filter) {
-    const bool no_type   = !filter.type.has_value ();
-    const bool no_status = !filter.status.has_value ();
-    const bool no_req    = !filter.request_id.has_value ();
-    const bool no_q      = !filter.q.has_value () || filter.q->empty ();
+    const bool no_type       = !filter.type.has_value ();
+    const bool no_status     = !filter.status.has_value ();
+    const bool no_req        = !filter.request_id.has_value ();
+    const bool no_q          = !filter.q.has_value () || filter.q->empty ();
+    const bool no_collection = !filter.collection_id.has_value ();
 
-    const RunType type_val     = filter.type.value_or (RunType::Design);
-    const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
-    const std::string req_val  = filter.request_id.value_or ("");
-    const std::string q_pat    = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+    const RunType type_val           = filter.type.value_or (RunType::Design);
+    const RunStatus status_val       = filter.status.value_or (RunStatus::Pending);
+    const std::string req_val        = filter.request_id.value_or ("");
+    const std::string q_pat          = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+    const std::string collection_val = filter.collection_id.value_or ("");
+
+    // The snapshot when it is JSON, an empty object when it is not - the guard
+    // described above, so json_extract below is always handed valid JSON.
+    const auto snapshot_json = case_<std::string> ()
+                               .when (json_valid (&Run::config_snapshot),
+                               then (&Run::config_snapshot))
+                               .else_ (std::string{ "{}" })
+                               .end ();
 
     return where ((c (&Run::type) == type_val || no_type) &&
     (c (&Run::status) == status_val || no_status) &&
     (c (&Run::request_id) == req_val || no_req) &&
-    (like (&Run::config_snapshot, q_pat) || no_q));
+    (like (&Run::config_snapshot, q_pat) || no_q) &&
+    (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) ==
+     collection_val ||
+    no_collection));
 }
 } // namespace
 

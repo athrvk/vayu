@@ -108,6 +108,11 @@ class ScenarioRunService {
 		// The run's row in History still says "running" until the next 5s poll,
 		// and once the user has paged the list that poll is off.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+		// The context bar's Last run section says the same thing, from its own
+		// key family (`lastCollectionRuns`), which the prefix above does not
+		// reach - and it is not polled at all, so without this it stays on
+		// "Running" for the rest of the session.
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 	}
 }
 

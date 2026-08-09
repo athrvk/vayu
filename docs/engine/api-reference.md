@@ -2293,9 +2293,19 @@ stays cheap as history grows.
 - `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
 - `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
 - `requestId` - exact match on the run's linked request.
+- `collectionId` - exact match on a **collection run's** stored
+  `scenario.collectionId`, read out of the snapshot as JSON. This is the
+  deliberate opposite of `q` below: it matches the field, never the text around
+  it, so a design run whose URL happens to contain the id does not come back.
+  Only a collection run records the path, so `type: "design"` and `type: "load"`
+  runs can never match; an id nothing has run is an empty page, not an error. A
+  collection's most recent run is `?collectionId=<id>&limit=1`, since the list
+  is already `start_time DESC`.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
+
+Every parameter composes with every other; each one left out is a wildcard.
 
 **`summary`** carries exactly these nine keys: `url`, `method`, `mode`,
 `duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and

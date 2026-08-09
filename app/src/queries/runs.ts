@@ -292,6 +292,34 @@ export function useRecentDesignRunsQuery(requestId: string | null | undefined) {
 	});
 }
 
+/**
+ * The most recent run of one collection - the row behind the context bar's
+ * Last run section.
+ *
+ * **One filtered call, one row.** `collectionId` is matched engine-side against
+ * the scenario snapshot's own field, so the server's `start_time DESC` order
+ * makes `limit: 1` the answer directly. The alternative this replaces is why the
+ * section did not exist: without the filter, finding a collection's last run
+ * meant paging the whole history and searching each snapshot's text for the id.
+ *
+ * Deliberately **unfiltered by status**, for the same reason `useRecentDesignRunsQuery`
+ * is: a run that failed is the one worth surfacing, and `status` takes a single
+ * value. A run still in flight comes back too; the section says so rather than
+ * calling it an outcome.
+ */
+export function useLastCollectionRunQuery(collectionId: string | null | undefined) {
+	return useQuery({
+		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.lastCollectionRuns`.
+		queryKey: queryKeys.runs.lastCollectionRun(collectionId ?? ""),
+		queryFn: () =>
+			apiService.listRuns({
+				collectionId: collectionId!,
+				limit: 1,
+			}),
+		enabled: !!collectionId,
+	});
+}
+
 // ============ Run Mutations ============
 
 /**
@@ -318,6 +346,13 @@ export function useStartScenarioRunMutation() {
 			// The new run belongs at the head of History, and the list's 5s poll
 			// is off once the user has paged it.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+			// ...and it is now the collection's last run. That family is its own
+			// (see `queryKeys.runs.lastCollectionRuns`), so `lists()` does not
+			// reach it and an open context bar would keep showing the run before
+			// this one.
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.runs.lastCollectionRuns(),
+			});
 		},
 	});
 }
@@ -373,14 +408,21 @@ export function useDeleteRunMutation() {
 			// rather than patched. Refetching a five-row list is cheaper than
 			// carrying a run-to-request map just to patch it.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
+			// Same for the per-collection Last run caches: deleting a collection's
+			// most recent run changes what that section says, and the deleted id
+			// gives no way back to the collection.
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.runs.lastCollectionRuns(),
+			});
 		},
 	});
 }
 
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
- * all-runs Settings query, and the per-request Recent sends lists, which are
- * their own family and would otherwise survive a cleared history.
+ * all-runs Settings query, and the per-request Recent sends and per-collection
+ * Last run lists, which are their own families and would otherwise survive a
+ * cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();
@@ -389,5 +431,6 @@ export function useInvalidateRuns() {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 	};
 }
