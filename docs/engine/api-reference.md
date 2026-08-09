@@ -227,7 +227,8 @@ so a body that round-trips through storage sends the same bytes.
 | `mode` | Carries | On the wire |
 |---|---|---|
 | `none` | nothing | no body |
-| `json` / `text` / `graphql` | `content` (string) | `content`, verbatim |
+| `json` / `text` | `content` (string) | `content`, verbatim |
+| `graphql` | `content` (string) | the GraphQL-over-HTTP envelope (see below) |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
 
@@ -240,14 +241,41 @@ but never sent, so switching one back on needs no re-compose; `{{variables}}`
 resolve inside `key`, `value`, and a file part's `src` / `fileName` /
 `contentType` during composition.
 
-Two Content-Type rules follow from the encoding:
+Three Content-Type rules follow from the encoding:
 
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
+- `graphql` sets `Content-Type: application/json` under the same rule - a
+  Content-Type the caller wrote wins.
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
+
+#### The `graphql` envelope
+
+A GraphQL server reads its query out of a JSON object, so a `graphql` body is
+enveloped on its way to the wire rather than sent as typed. `content` may be
+either shape and the engine normalizes both:
+
+| `content` | Sent as |
+|---|---|
+| a JSON object with a string `query` | itself, **byte for byte** |
+| anything else (a bare document, JSON that is not an envelope) | `{"query": <content>}` |
+
+The pass-through is byte-exact deliberately: the envelope also carries
+`operationName`, `variables` and whatever else a server has agreed with its
+clients, and re-serializing it would reorder keys the caller never edited. The
+app's request builder writes the envelope itself, so its requests take the
+first row; MCP and raw callers can hand over the document alone and take the
+second.
+
+One case is neither: `content` that *looks* like a JSON object (`{` then a
+quoted key) but does not parse - an envelope whose `{{token}}` went unresolved,
+or a mistyped one - is passed through unchanged rather than wrapped. Wrapping a
+body the engine could not read would turn a broken envelope into a valid
+request carrying the wrong query. A bare GraphQL document cannot take that
+shape, so nothing legitimate falls into it.
 
 #### File parts (`form-data` only)
 

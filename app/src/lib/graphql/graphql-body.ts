@@ -38,6 +38,17 @@
  * Genuinely broken text is still dropped (that decision is PR #399's and stands);
  * what changed is that the pane now says which of the two you have -
  * `classifyVariables` is what it reads.
+ *
+ * **The engine envelopes too, and that is deliberate - not a duplicate.** This
+ * file exists because the *editor* is two panes and the wire is one object; the
+ * engine's `graphql_wire_body` (`engine/src/http/graphql_body.cpp`) exists
+ * because a `graphql` body can also arrive from MCP or a raw `POST /execute`
+ * as a bare document, and those clients have no editor to split. Issue #417 is
+ * what happens when only this half exists: the renderer sent valid GraphQL and
+ * every other client sent a bare query under the wrong Content-Type. The engine
+ * is the backstop under all of them, and what this file produces passes through
+ * it byte-identical - it is already an envelope, which is the one shape the
+ * engine leaves alone.
  */
 
 import { Kind, parse as parseGraphQLDocument } from "graphql";

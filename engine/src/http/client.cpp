@@ -304,17 +304,22 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
         raw_req << key << ": " << value << "\r\n";
     }
 
+    // The bytes the transfer would have carried, not `body.content` - for a
+    // form or graphql body those are two different strings, and a view that
+    // showed the second would describe a request nothing ever sent.
+    const std::string body = vayu::http::wire_body_bytes (request.body);
+
     // Add Content-Length for body
-    if (!request.body.content.empty ()) {
-        raw_req << "Content-Length: " << request.body.content.size () << "\r\n";
+    if (!body.empty ()) {
+        raw_req << "Content-Length: " << body.size () << "\r\n";
     }
 
     // End of headers
     raw_req << "\r\n";
 
     // Body
-    if (!request.body.content.empty ()) {
-        raw_req << request.body.content;
+    if (!body.empty ()) {
+        raw_req << body;
     }
 
     return raw_req.str ();
@@ -576,7 +581,8 @@ Result<Response> Client::send (const Request& request) {
     // back to the composed request, which is all that ever existed for it.
     response.raw_request = transfer_debug.last_header_out.empty () ?
     synthesize_raw_request (request, response) :
-    raw_request_from_wire (transfer_debug.last_header_out, request.body.content);
+    raw_request_from_wire (transfer_debug.last_header_out,
+    vayu::http::wire_body_bytes (request.body));
 
     // Check for errors
     if (res != CURLE_OK) {
