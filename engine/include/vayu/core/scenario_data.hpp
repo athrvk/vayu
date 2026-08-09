@@ -30,10 +30,17 @@
  * request with a silently blank field is the failure mode this namespace
  * exists to remove. The runner turns that into an errored step, before the
  * request is sent.
+ *
+ * A run started with **no data set at all** is the same failure one step
+ * earlier, and is refused one step earlier too: plan resolution scans the
+ * composed steps through `find_data_token` and returns a `400` rather than
+ * starting a run whose every iteration would send the literal token (issue
+ * #415).
  */
 
 #include <cstddef>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 #include "vayu/types.hpp"
@@ -75,5 +82,24 @@ struct DataBindResult {
  */
 [[nodiscard]] DataBindResult
 bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index);
+
+/**
+ * The first `{{data.column}}` token still standing in a composed @p request,
+ * written back with its braces (`{{data.id}}`), or `nullopt` for a request that
+ * carries none (issue #415).
+ *
+ * This is what lets plan resolution refuse a run whose steps carry data tokens
+ * and whose payload has no `data` set: nothing would bind them, so they would
+ * reach the wire written as they stand.
+ *
+ * It walks **exactly** the fields `bind_data_row` substitutes, because it is
+ * that walk driven against no row at all. A separate scanner would be a second
+ * copy of the field list, and a field only one of the two covered would be a
+ * token that passes the scan and still goes out literal. The request is copied
+ * for it - the walk rewrites in place - which is affordable because plan
+ * resolution runs once per run, before the first send, over a plan already
+ * bounded by `maxScenarioSteps`.
+ */
+[[nodiscard]] std::optional<std::string> find_data_token (const vayu::Request& request);
 
 } // namespace vayu::core

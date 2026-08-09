@@ -1739,6 +1739,7 @@ as a smaller one:
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the transport's own body cap would drop the connection instead of explaining itself. |
+| A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -1813,8 +1814,14 @@ A token naming a column the bound row does not carry **errors the step before
 anything is sent**, with a message naming the token, the row index and the
 columns the row does have. Substituting an empty string would send a request
 quietly pointing somewhere else, which is the failure this namespace exists to
-remove. Outside a run with `data`, nothing binds the token and it reaches the
-wire as written - visible, rather than silently blank.
+remove.
+
+A run sent **without a `data` set at all** whose plan still carries a `data.*`
+token is refused outright, before any run row exists: nothing would bind the
+token, so every iteration would send the literal text `{{data.id}}`. The `400`
+names the step and the token. Starting such a collection as a quick smoke check
+means running it with a data file - a one-row set is enough - because the run
+this refuses would not have exercised the endpoint either.
 
 **Each step execution writes one `results` row** carrying the design-mode trace
 plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -

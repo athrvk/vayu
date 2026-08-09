@@ -110,13 +110,17 @@ class ScenarioPlanTest : public ::testing::Test {
     const std::string& url         = "https://example.test/{{path}}",
     const std::string& auth        = "",
     const std::string& post_script = "",
-    int64_t created_at             = 1) {
+    int64_t created_at             = 1,
+    const std::string& headers     = "",
+    const std::string& body        = "") {
         vayu::db::Request r;
         r.id                  = id;
         r.collection_id       = collection_id;
         r.name                = "Request " + id;
         r.method              = vayu::HttpMethod::GET;
         r.url                 = url;
+        r.headers             = headers;
+        r.body                = body;
         r.auth                = auth;
         r.post_request_script = post_script;
         r.order               = order;
@@ -635,6 +639,82 @@ TEST_F (ScenarioPlanTest, ADataBlockInsideTheByteBoundResolves) {
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (resolved.data_rows.size (), 1u);
+}
+
+// --- A data token with no data set (issue #415) -------------------------------
+
+TEST_F (ScenarioPlanTest, ADataTokenWithNoDataSetIsRefusedNamingTheStepAndTheToken) {
+    // Composition leaves `{{data.id}}` written as it stands on purpose, so a run
+    // started without rows has nothing to bind it and would put the literal text
+    // on the wire. Revert the scan in `resolve_scenario` and this resolves,
+    // which is the shipped-through-to-the-server behaviour the issue reports.
+    seed_collection ("col", "");
+    seed_request ("clean", "col", /*order=*/0, "https://example.test/health");
+    seed_request ("bound", "col", /*order=*/1, "https://example.test/u/{{data.id}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    EXPECT_FALSE (resolved.ok);
+    // The step it names is the offending one, not the first one composed.
+    EXPECT_NE (resolved.error.find ("step 1"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("Request bound"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("scenario.data"), std::string::npos) << resolved.error;
+    // No partial plan, exactly as every other resolution failure leaves none.
+    EXPECT_TRUE (resolved.plan.steps.empty ());
+}
+
+TEST_F (ScenarioPlanTest, TheSameCollectionResolvesWhenTheRunCarriesADataSet) {
+    // The other half of the rule: the refusal is about the *absent* data set, not
+    // about the token. A run with rows still resolves, and the token still
+    // survives composition - the runner binds it per iteration, not here.
+    seed_collection ("col", "");
+    seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "id", "7" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    EXPECT_NE (resolved.plan.steps[0].request.url.find ("{{data.id}}"), std::string::npos)
+    << resolved.plan.steps[0].request.url;
+}
+
+TEST_F (ScenarioPlanTest, ADataTokenOutsideTheUrlIsRefusedToo) {
+    // The scan walks what `bind_data_row` substitutes, so every field the binder
+    // would have bound must be a field the refusal sees. One field per case, so a
+    // hole names itself instead of hiding behind the URL.
+    const auto refused = [&] (const std::string& headers, const std::string& body) {
+        reset_database ();
+        seed_collection ("col", "");
+        seed_request ("req", "col", /*order=*/0, "https://example.test/ok",
+        /*auth=*/"", /*post_script=*/"", /*created_at=*/1, headers, body);
+
+        const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+        EXPECT_FALSE (resolved.ok) << headers << " | " << body;
+        EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos) << resolved.error;
+    };
+
+    refused (R"([{"key":"X-Id","value":"{{data.id}}","enabled":true}])", "");
+    refused (R"([{"key":"{{data.id}}","value":"x","enabled":true}])", "");
+    refused ("", R"({"mode":"json","content":"{\"id\":\"{{data.id}}\"}"})");
+    refused ("",
+    R"({"mode":"form-data","fields":[{"key":"id","value":"{{data.id}}","enabled":true}]})");
+}
+
+TEST_F (ScenarioPlanTest, ThePrefixAloneDoesNotBlockARunWithoutData) {
+    // `{{data.}}` names no column, so composition resolves it to "" like any
+    // other unknown name and nothing survives for the scan to find. Refusing it
+    // would block a run over a token that never reaches the wire.
+    seed_collection ("col", "");
+    seed_request ("req", "col", /*order=*/0, "https://example.test/u/{{data.}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://example.test/u/");
 }
 
 TEST_F (ScenarioPlanTest, AnUnknownSourceDoesNotFallThroughToTheCollectionPath) {

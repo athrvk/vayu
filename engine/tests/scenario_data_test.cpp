@@ -193,3 +193,76 @@ TEST (ScenarioDataBindTest, ASubstitutedValueIsNeverRescanned) {
     ASSERT_TRUE (result.ok) << result.error;
     EXPECT_EQ (request.url, "https://api.test/{{data.b}}");
 }
+
+// ---------------------------------------------------------------------------
+// The pre-run scan: a token nothing can bind (issue #415)
+// ---------------------------------------------------------------------------
+
+TEST (ScenarioDataScanTest, ARequestWithNoDataTokenScansClean) {
+    auto request = request_with_url ("https://api.test/{{host}}/users");
+    request.headers["Accept"] = "application/json";
+    request.body.mode         = vayu::BodyMode::Json;
+    request.body.content      = R"({"n":1})";
+    request.body.fields       = { { "k", "v", true } };
+
+    EXPECT_FALSE (vayu::core::find_data_token (request).has_value ());
+}
+
+TEST (ScenarioDataScanTest, EveryFieldTheBinderSubstitutesIsAFieldTheScanSees) {
+    // The pairing that matters: a field the binder would bind and the scan
+    // would miss is a token that survives the refusal and reaches the wire.
+    // Each case seeds exactly one field, so a hole names itself.
+    const auto seen = [] (const vayu::Request& request) {
+        return vayu::core::find_data_token (request).value_or ("<none>");
+    };
+
+    EXPECT_EQ (seen (request_with_url ("https://api.test/{{data.id}}")), "{{data.id}}");
+
+    {
+        auto request = request_with_url ("https://api.test/");
+        request.headers["X-{{data.hn}}"] = "plain";
+        EXPECT_EQ (seen (request), "{{data.hn}}");
+    }
+    {
+        auto request                = request_with_url ("https://api.test/");
+        request.headers["X-Tenant"] = "{{data.token}}";
+        EXPECT_EQ (seen (request), "{{data.token}}");
+    }
+    {
+        auto request         = request_with_url ("https://api.test/");
+        request.body.content = R"({"email":"{{data.email}}"})";
+        EXPECT_EQ (seen (request), "{{data.email}}");
+    }
+    {
+        auto request        = request_with_url ("https://api.test/");
+        request.body.fields = { { "{{data.field}}", "v", true } };
+        EXPECT_EQ (seen (request), "{{data.field}}");
+    }
+    {
+        auto request        = request_with_url ("https://api.test/");
+        request.body.fields = { { "k", "{{data.value}}", true } };
+        EXPECT_EQ (seen (request), "{{data.value}}");
+    }
+}
+
+TEST (ScenarioDataScanTest, TheScanLeavesTheRequestAlone) {
+    // It answers a question; it must not be a substitution pass with no row.
+    auto request = request_with_url ("https://api.test/{{data.id}}");
+    request.headers["X-{{data.hn}}"] = "{{data.token}}";
+    request.body.content             = "{{data.body}}";
+    const auto before                = request.url;
+
+    EXPECT_TRUE (vayu::core::find_data_token (request).has_value ());
+    EXPECT_EQ (request.url, before);
+    EXPECT_EQ (request.headers.at ("X-{{data.hn}}"), "{{data.token}}");
+    EXPECT_EQ (request.body.content, "{{data.body}}");
+}
+
+TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
+    // `{{data.}}` names no column, so composition already resolved it to "" and
+    // there is nothing left to send literally. Refusing it would block a run
+    // over a token that never reaches the wire.
+    EXPECT_FALSE (vayu::core::find_data_token (
+    request_with_url ("https://api.test/{{data.}}"))
+                  .has_value ());
+}

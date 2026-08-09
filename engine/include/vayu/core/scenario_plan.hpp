@@ -174,7 +174,9 @@ struct ScenarioResolution {
  * `collectionId`, an empty sequence, a step whose composition fails, a plan
  * over `limits.max_steps`, a `data` array that is present and empty or over
  * `limits.max_data_rows` or `limits.max_data_bytes`, and any `source` other
- * than `"collection"`.
+ * than `"collection"`. A step carrying a `{{data.*}}` token in a run sent
+ * *without* `data` joins that list (issue #415): nothing would bind it, so it
+ * would be sent as the literal token.
  */
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
