@@ -59,7 +59,7 @@ function toRow(row: ConformanceCase["rows"][number]): OrderedTreeRow {
 
 describe("tree-order conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
-		expect(fixture.cases.length).toBeGreaterThanOrEqual(5);
+		expect(fixture.cases.length).toBeGreaterThanOrEqual(12);
 		for (const c of fixture.cases) {
 			expect(c.rows.length).toBeGreaterThan(1);
 			expect(c.expected).toHaveLength(c.rows.length);

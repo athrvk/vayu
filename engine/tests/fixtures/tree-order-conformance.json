@@ -1,5 +1,5 @@
 {
-	"description": "The one sidebar/scenario ordering rule, read by both suites. Rows sort by `order` ascending, ties by `createdAt` ascending, remaining ties by `id` ascending under byte-wise (SQLite BINARY) comparison. Engine side: engine/tests/tree_order_test.cpp inserts each case's rows into the collections and the requests table and reads them back through Database::get_collections / get_requests_in_collection, so the SQL ORDER BY is what is being asserted. Renderer side: app/src/types/tree-order.conformance.test.ts sorts the same rows with compareTreeOrder. A rule that changes on one side and not the other fails here or in ctest, never in a user's sidebar.",
+	"description": "The one sidebar/scenario ordering rule, read by both suites. Rows sort by `order` ascending, ties by `createdAt` ascending, remaining ties by `id` ascending under byte-wise (SQLite BINARY) comparison. Engine side: engine/tests/tree_order_test.cpp inserts each case's rows into the collections and the requests table and reads them back through Database::get_collections / get_requests_in_collection, so the SQL ORDER BY is what is being asserted. Renderer side: app/src/types/tree-order.conformance.test.ts sorts the same rows with compareTreeOrder. A rule that changes on one side and not the other fails here or in ctest, never in a user's sidebar. The first seven cases are the pre-drag ordering contract (#360); the rest are shapes drag-and-drop actually produces (#364/#426), each derived from app/src/modules/collections/reorder-math.ts and the renumber in engine/src/http/routes/reorder.cpp rather than invented - a drop leaves the block dense with distinct orders, so what these pin is that the two former tiebreaks stop mattering on exactly the rows a drag rewrote. A case holds one block: subfolders and requests are separately ordered, so the `order` column never interleaves them.",
 	"cases": [
 		{
 			"name": "explicit order wins over both creation time and id",
@@ -59,6 +59,57 @@
 				{ "id": "row-3", "order": 7, "createdAt": 1700000003000 }
 			],
 			"expected": ["row-2", "row-3", "row-1"]
+		},
+		{
+			"name": "post-drag: an adjacent swap leaves the block dense, with creation time out of sequence",
+			"comment": "Dragging req-third from index 2 to index 1 in a dense block. planRequestMove writes only the run between the two indices - req-third to 1, req-second to 2 - so the block stays 0..n-1 while createdAt no longer ascends with it. Sorting on creation time would give first, second, third.",
+			"rows": [
+				{ "id": "req-first", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "req-third", "order": 1, "createdAt": 1700000003000 },
+				{ "id": "req-second", "order": 2, "createdAt": 1700000002000 }
+			],
+			"expected": ["req-first", "req-third", "req-second"]
+		},
+		{
+			"name": "pre-drag: the display order a first drop has to renumber into, all three keys at once",
+			"comment": "The input side of normalization, which is the half that has to agree: normalize_scope renumbers in the order get_requests_in_collection returns, while the renderer plans against its own compareTreeOrder-sorted list. If the two disagreed, a normalized drop would land where the user did not point. A legacy all-zeros block with a createdAt tie inside it exercises order, createdAt and id in one case.",
+			"rows": [
+				{ "id": "leg-zulu", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "leg-bravo", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "leg-alpha", "order": 0, "createdAt": 1700000002000 }
+			],
+			"expected": ["leg-zulu", "leg-alpha", "leg-bravo"]
+		},
+		{
+			"name": "post-drag: the same legacy block once the first drop renumbered it, both former tiebreaks now inert",
+			"comment": "Normalization materializes the case above as zulu 0, alpha 1, bravo 2; the drop of leg-bravo onto index 0 then writes bravo 0, zulu 1, alpha 2 and wins over the renumber. Creation time would put leg-zulu first and the id tiebreak would put leg-alpha first, so both legs are pinned as inert at once.",
+			"rows": [
+				{ "id": "leg-bravo", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "leg-zulu", "order": 1, "createdAt": 1700000001000 },
+				{ "id": "leg-alpha", "order": 2, "createdAt": 1700000002000 }
+			],
+			"expected": ["leg-bravo", "leg-zulu", "leg-alpha"]
+		},
+		{
+			"name": "post-drag: a cross-parent landing, where the destination opened a slot for a row newer than every sibling",
+			"comment": "A row moved in from another parent at toIndex 1: the destination's rows from that index shift up (dst-1 to 2, dst-2 to 3) and the arrival takes 1. A moved row keeps its own createdAt, which here is newer than every row it lands among - the one shape where the pre-drag world's creation-time order is guaranteed wrong.",
+			"rows": [
+				{ "id": "dst-0", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "moved-in", "order": 1, "createdAt": 1700000009000 },
+				{ "id": "dst-1", "order": 2, "createdAt": 1700000002000 },
+				{ "id": "dst-2", "order": 3, "createdAt": 1700000003000 }
+			],
+			"expected": ["dst-0", "moved-in", "dst-1", "dst-2"]
+		},
+		{
+			"name": "post-drag: the source block after a second drag, the gap closed and creation time still scrambled",
+			"comment": "Two drags deep, which is what \"after any sequence of drags\" means. The block was already src-a, src-d, src-b, src-c from an earlier swap; src-b then leaves for another parent, so the rows past it close the gap (src-c to 2) and the block is dense again with creation time in neither ascending nor descending order.",
+			"rows": [
+				{ "id": "src-a", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "src-d", "order": 1, "createdAt": 1700000004000 },
+				{ "id": "src-c", "order": 2, "createdAt": 1700000003000 }
+			],
+			"expected": ["src-a", "src-d", "src-c"]
 		}
 	]
 }

@@ -159,7 +159,7 @@ TEST_F (TreeOrderTest, ConformanceFixtureIsNonEmpty) {
     // Guards the scan itself: a fixture that failed to load would otherwise make
     // every case below vacuously pass.
     ASSERT_TRUE (fixture.contains ("cases"));
-    EXPECT_GE (fixture["cases"].size (), 5u);
+    EXPECT_GE (fixture["cases"].size (), 12u);
 }
 
 TEST_F (TreeOrderTest, RequestsFollowTheConformanceOrder) {
@@ -187,7 +187,7 @@ TEST_F (TreeOrderTest, RequestsFollowTheConformanceOrder) {
             db_->delete_request (row["id"].get<std::string> ());
         }
     }
-    EXPECT_GE (cases_run, 5u) << "the fixture loop asserted nothing";
+    EXPECT_GE (cases_run, 12u) << "the fixture loop asserted nothing";
 }
 
 TEST_F (TreeOrderTest, CollectionsFollowTheConformanceOrder) {
@@ -211,7 +211,7 @@ TEST_F (TreeOrderTest, CollectionsFollowTheConformanceOrder) {
             db_->delete_collection (row["id"].get<std::string> ());
         }
     }
-    EXPECT_GE (cases_run, 5u) << "the fixture loop asserted nothing";
+    EXPECT_GE (cases_run, 12u) << "the fixture loop asserted nothing";
 }
 
 // --- Stability across an edit (the rowid-churn mutation check) -----------------
