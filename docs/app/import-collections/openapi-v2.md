@@ -135,7 +135,7 @@ Swagger 2.0 has **no `requestBody` object** (unlike v3). Request bodies are expr
 | `query` | push to `params` | `{ key, value: "", enabled: true, description? }`; `description` only when present |
 | `header` | push to `headers` | `{ key, value: "", enabled: true }`; skipped when `name.toLowerCase()` is `authorization` or `content-type` |
 | `body` | set `body` | `sample = param.schema ? sampleSchema(param.schema, resolveRef) : {}`; serialized with `JSON.stringify(sample, null, 2)`. Mode is JSON or text per `consumes` (below). |
-| `formData` | collect into `formFields` | `{ key: name, value: "", enabled: true }` per field |
+| `formData` | collect into `formFields` | `{ key: name, value: "", enabled: true }` per field; a `type: file` parameter becomes a **file part** instead (see [`type: file` fields](#type-file-fields)) |
 | (anything else) | ignored | no `default` case action |
 
 After the loop, **form data wins**: if any `formData` fields were collected, `body` is unconditionally replaced with `{ mode: formMode, fields: formFields }` - overriding any body set by an `in: "body"` parameter. (A spec mixing both would be unusual, but the code resolves it in favor of the form.) `formMode` comes from `consumes`, below.
@@ -172,7 +172,17 @@ Swagger 2.0 ties `formData` encoding to `consumes`, and `application/x-www-form-
 | lists **both** | `form-data` - only multipart can carry a `type: file` field |
 | absent, or names neither | `form-data` (the historical default is preserved) |
 
-Entries are compared on the media type alone, so a `charset`/`boundary` parameter (`application/x-www-form-urlencoded; charset=utf-8`) still matches. `type: file` fields themselves are not imported as files - a `formData` parameter always becomes an empty-value text row.
+Entries are compared on the media type alone, so a `charset`/`boundary` parameter (`application/x-www-form-urlencoded; charset=utf-8`) still matches.
+
+One case overrides the table: **a form carrying a file part is always `form-data`**, whatever `consumes` says. Only multipart has a file form on the wire, so a spec that declares `type: file` under a urlencoded-only `consumes` contradicts itself, and multipart is the half of the contradiction that can carry the field.
+
+#### `type: file` fields
+
+A `formData` parameter with `type: file` imports as a **file part** - `{ key, value: "", enabled: true, type: "file", src: "" }` - not as a text row. Until this landed it became an ordinary empty-value text row, so an operation documenting an upload produced a request that looked healthy and sent nothing (the silent-loss class fixed for the other importers by the [file-part mapping](./postman.md), and on the wire before that).
+
+The part carries **no path**: a spec documents *that* a field is an upload, never *which* file it uploads. The user picks the file in the request editor, and the engine refuses the send by field name until they do (`Form field 'avatar' is a file part with no file selected`). The row is deliberately **not** marked `unresolved` - that flag warns that a path came from somewhere else and was never verified here, and there is no path to warn about; the row reads "Choose file", exactly like one a user turned into a file part by hand.
+
+The import preview counts these as `N file parts need a file`, beside the skip counters, so a spec full of uploads says so before the import rather than one failed send at a time.
 
 ## `$ref` & schema sampling
 
@@ -196,7 +206,7 @@ Body schemas are turned into stub values by `sampleSchema(schema, resolveRef)` (
   | `array` | `[ sample(items) ]` if `items` is present, else `[]` (one element) |
   | `object` (or no/unknown `type`) | walks each entry of `properties`, producing `{ key: sample }`; `{}` if no `properties` |
 
-`sampleSchema` is shared verbatim with the v3 parser - same depth cap, cycle guard, and branch handling. Its `schemaFieldNames` companion is v3-only: Swagger 2.0 form fields come from `formData` parameters, not from a schema.
+`sampleSchema` is shared verbatim with the v3 parser - same depth cap, cycle guard, and branch handling. Its `schemaFormFields` companion is v3-only: Swagger 2.0 form fields come from `formData` parameters, not from a schema, so this parser reads `param.type === "file"` where v3 reads `format: binary`.
 
 ## `collectionFormat` for array query params
 
@@ -248,10 +258,9 @@ Dropped / not represented:
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Path parameters as params:** not emitted (path params live in the URL only).
 - **Multi-tag grouping:** only the first tag groups an operation.
-- **`type: file` form fields:** imported as ordinary empty-value rows, not as file parts.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), and `skipped` from the shared `SkipTally` - `malformed_spec` is the only kind this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec` is the only kind this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 
@@ -265,6 +274,7 @@ See [OpenAPI v3](./openapi-v3.md) for the v3 reference. Key contrasts:
 | Body content-type decision | `consumes` (op → spec → JSON default) | media-type keys of `requestBody.content` |
 | Text/non-JSON body | sampled schema serialized as JSON text | `text/plain` → empty string |
 | Form bodies | `in: "formData"` params → urlencoded or multipart per `consumes` (overrides body param) | `multipart/form-data` / `x-www-form-urlencoded` from `content`, field names resolved through the sampler |
+| File parts | `type: "file"` formData parameter | `format: "binary"` (or an array of it) property under `multipart/form-data` |
 | Unsupported methods | none - Swagger 2.0 defines no `trace` | `trace` counted as `unsupported_method` |
 | `$ref` namespace | `#/definitions/...` | `#/components/schemas/...` (resolver is generic in both) |
 | Auth schemes | `securityDefinitions` (`basic`, `apiKey`, `oauth2`) | `components.securitySchemes` (`http`/bearer/basic, `apiKey`, `oauth2`) |

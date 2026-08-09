@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { sampleSchema, schemaFieldNames } from "./schema-sampler";
+import { sampleSchema, schemaFormFields } from "./schema-sampler";
+
+/** The field names alone - what most of these cases are about. */
+const names = (schema: unknown, resolve = resolver): string[] =>
+	schemaFormFields(schema, resolve).map((f) => f.name);
 
 const resolver = (ref: string): unknown =>
 	({
@@ -77,33 +81,93 @@ describe("sampleSchema", () => {
 	});
 });
 
-describe("schemaFieldNames", () => {
+describe("schemaFormFields", () => {
 	it("resolves a $ref'd form schema to its property names", () => {
-		expect(schemaFieldNames({ $ref: "#/components/schemas/Pet" }, resolver)).toEqual([
+		expect(names({ $ref: "#/components/schemas/Pet" })).toEqual(["id", "name", "tags"]);
+	});
+	it("reads an inline schema's own properties, in order", () => {
+		expect(
+			names({ type: "object", properties: { grant_type: {}, username: {}, password: {} } })
+		).toEqual(["grant_type", "username", "password"]);
+	});
+	it("follows the first allOf branch, as JSON bodies do", () => {
+		expect(names({ allOf: [{ $ref: "#/components/schemas/Pet" }, {}] })).toEqual([
 			"id",
 			"name",
 			"tags",
 		]);
 	});
-	it("reads an inline schema's own properties, in order", () => {
-		expect(
-			schemaFieldNames(
-				{ type: "object", properties: { grant_type: {}, username: {}, password: {} } },
-				resolver
-			)
-		).toEqual(["grant_type", "username", "password"]);
-	});
-	it("follows the first allOf branch, as JSON bodies do", () => {
-		expect(
-			schemaFieldNames({ allOf: [{ $ref: "#/components/schemas/Pet" }, {}] }, resolver)
-		).toEqual(["id", "name", "tags"]);
-	});
-	it("has no field names for a missing schema or one that samples to a non-object", () => {
-		expect(schemaFieldNames(undefined, resolver)).toEqual([]);
-		expect(schemaFieldNames({ type: "string" }, resolver)).toEqual([]);
-		expect(schemaFieldNames({ type: "array", items: { type: "string" } }, resolver)).toEqual(
+	it("has no fields for a missing schema or one that samples to a non-object", () => {
+		expect(schemaFormFields(undefined, resolver)).toEqual([]);
+		expect(schemaFormFields({ type: "string" }, resolver)).toEqual([]);
+		expect(schemaFormFields({ type: "array", items: { type: "string" } }, resolver)).toEqual(
 			[]
 		);
-		expect(schemaFieldNames({ example: "not an object" }, resolver)).toEqual([]);
+		expect(schemaFormFields({ example: "not an object" }, resolver)).toEqual([]);
+	});
+
+	it("marks a `format: binary` property as a file and leaves text fields alone", () => {
+		expect(
+			schemaFormFields(
+				{
+					type: "object",
+					properties: {
+						caption: { type: "string" },
+						avatar: { type: "string", format: "binary" },
+					},
+				},
+				resolver
+			)
+		).toEqual([
+			{ name: "caption", file: false },
+			{ name: "avatar", file: true },
+		]);
+	});
+
+	it("marks an array of binary items as a file - one row for a multi-file field", () => {
+		expect(
+			schemaFormFields(
+				{
+					type: "object",
+					properties: {
+						pages: { type: "array", items: { type: "string", format: "binary" } },
+						tags: { type: "array", items: { type: "string" } },
+					},
+				},
+				resolver
+			)
+		).toEqual([
+			{ name: "pages", file: true },
+			{ name: "tags", file: false },
+		]);
+	});
+
+	it("sees a binary property through a $ref and through the first allOf branch", () => {
+		const resolve = (ref: string): unknown =>
+			({
+				"#/components/schemas/Upload": {
+					type: "object",
+					properties: { doc: { $ref: "#/components/schemas/Binary" } },
+				},
+				"#/components/schemas/Binary": { type: "string", format: "binary" },
+			})[ref];
+		expect(schemaFormFields({ $ref: "#/components/schemas/Upload" }, resolve)).toEqual([
+			{ name: "doc", file: true },
+		]);
+		expect(
+			schemaFormFields({ allOf: [{ $ref: "#/components/schemas/Upload" }] }, resolve)
+		).toEqual([{ name: "doc", file: true }]);
+	});
+
+	it("reads no file out of an `example`, which carries no property schemas", () => {
+		expect(schemaFormFields({ example: { avatar: "" } }, resolver)).toEqual([
+			{ name: "avatar", file: false },
+		]);
+	});
+
+	it("survives a cyclic $ref rather than recursing forever", () => {
+		expect(schemaFormFields({ $ref: "#/components/schemas/Node" }, resolver)).toEqual([
+			{ name: "next", file: false },
+		]);
 	});
 });

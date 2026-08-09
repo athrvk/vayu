@@ -202,6 +202,70 @@ describe("OpenApiV3Parser", () => {
 		});
 	});
 
+	const uploadSpec = (contentType: string) => ({
+		openapi: "3.0.0",
+		paths: {
+			"/avatar": {
+				post: {
+					summary: "Upload avatar",
+					requestBody: {
+						content: {
+							[contentType]: {
+								schema: {
+									type: "object",
+									properties: {
+										caption: { type: "string" },
+										avatar: { type: "string", format: "binary" },
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	});
+
+	it("imports a `format: binary` multipart property as a file part, not an empty text row", () => {
+		const spec = uploadSpec("multipart/form-data");
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.collections[0].requests[0].body).toEqual({
+			mode: "form-data",
+			fields: [
+				{ key: "caption", value: "", enabled: true },
+				// No path: a spec documents the upload, never the file. Not `unresolved`
+				// either - there is no path here that could have gone unverified.
+				{ key: "avatar", value: "", enabled: true, type: "file", src: "" },
+			],
+		});
+		expect(result.meta.unattachedFileParts).toBe(1);
+	});
+
+	it("leaves a binary property under urlencoded as text - that wire form has no file", () => {
+		const spec = uploadSpec("application/x-www-form-urlencoded");
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		expect(result.collections[0].requests[0].body).toEqual({
+			mode: "x-www-form-urlencoded",
+			fields: [
+				{ key: "caption", value: "", enabled: true },
+				{ key: "avatar", value: "", enabled: true },
+			],
+		});
+		expect(result.meta.unattachedFileParts).toBe(0);
+	});
+
+	it("counts unattached file parts across tagged and untagged operations", () => {
+		const upload = uploadSpec("multipart/form-data").paths["/avatar"].post;
+		const spec = {
+			openapi: "3.0.0",
+			paths: {
+				"/avatar": { post: upload },
+				"/docs": { post: { ...upload, summary: "Upload doc", tags: ["docs"] } },
+			},
+		};
+		expect(p.parse(spec, JSON.stringify(spec), opts).meta.unattachedFileParts).toBe(2);
+	});
+
 	it("records a TRACE operation as an unsupported method instead of omitting it", () => {
 		const spec = {
 			openapi: "3.0.0",

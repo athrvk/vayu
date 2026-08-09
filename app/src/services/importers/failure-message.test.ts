@@ -67,6 +67,7 @@ function result(): ImportResult {
 			globalCount: 0,
 			skipped: [],
 			nonExecutableAuth: 0,
+			unattachedFileParts: 0,
 		},
 	};
 }

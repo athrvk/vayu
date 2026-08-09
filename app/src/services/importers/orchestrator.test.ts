@@ -120,6 +120,7 @@ function fixture(): ImportResult {
 			globalCount: 0,
 			skipped: [],
 			nonExecutableAuth: 0,
+			unattachedFileParts: 0,
 		},
 	});
 }
@@ -241,6 +242,7 @@ describe("ImportOrchestrator", () => {
 				globalCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
+				unattachedFileParts: 0,
 			},
 		};
 		await expect(new ImportOrchestrator(api).run(result, opts)).rejects.toThrow(
@@ -264,6 +266,7 @@ describe("ImportOrchestrator", () => {
 					globalCount: Object.keys(globals).length,
 					skipped: [],
 					nonExecutableAuth: 0,
+					unattachedFileParts: 0,
 				},
 			});
 		}

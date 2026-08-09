@@ -72,6 +72,46 @@ describe("ImportModal", () => {
 		expect(screen.queryByText(/file_body/)).not.toBeInTheDocument();
 	});
 
+	/**
+	 * An OpenAPI upload imports as a file part with nothing attached (#425). The
+	 * request looks complete in the preview tree, so the count is the only place
+	 * that says the user still has to pick files before those requests can be sent.
+	 */
+	it("counts file parts that still need a file", async () => {
+		const spec = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Upload API" },
+			paths: {
+				"/avatar": {
+					post: {
+						summary: "Upload avatar",
+						requestBody: {
+							content: {
+								"multipart/form-data": {
+									schema: {
+										type: "object",
+										properties: {
+											avatar: { type: "string", format: "binary" },
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		});
+
+		renderModal();
+		selectTab(/Paste JSON/i);
+		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: spec } });
+		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+
+		await waitFor(() =>
+			expect(screen.getByText(/1 file part needs a file/i)).toBeInTheDocument()
+		);
+	});
+
 	it("renders the File drop zone when open", () => {
 		renderModal();
 		expect(screen.getByText(/Drop a file here/i)).toBeInTheDocument();

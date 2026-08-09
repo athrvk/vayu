@@ -84,6 +84,7 @@ export class PostmanEnvironmentParser implements ImportParser {
 				globalCount: Object.keys(globals).length,
 				skipped: [],
 				nonExecutableAuth: 0,
+				unattachedFileParts: 0, // an environment export carries no requests
 			},
 		};
 	}

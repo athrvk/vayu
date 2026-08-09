@@ -12,6 +12,7 @@ import type {
 	RequestBody,
 	VariableValue,
 } from "@/types";
+import type { CollectionDraft } from "./types";
 import { asArray, asRecord, asStr, prop } from "@/lib/json-node";
 import { fileBaseName } from "@/lib/file-path";
 import { normalizeVars } from "./var-normalize";
@@ -71,12 +72,19 @@ export function mapKeyValues(rows: unknown): KeyValueEntry[] {
 /**
  * An imported multipart part that uploads a file.
  *
- * The path is kept exactly as the source file wrote it, and the row is marked
- * **unresolved**: it names a file on whoever's machine produced the export, so
- * it will usually not exist here. That flag is what the editor's warning reads;
- * picking a file clears it. Dropping the part instead - which both importers
- * did until issue #393 - turned an upload into a request that silently posted
- * nothing.
+ * The path is kept exactly as the source file wrote it, and a row that has one
+ * is marked **unresolved**: it names a file on whoever's machine produced the
+ * export, so it will usually not exist here. That flag is what the editor's
+ * warning reads; picking a file clears it. Dropping the part instead - which
+ * both importers did until issue #393 - turned an upload into a request that
+ * silently posted nothing.
+ *
+ * A source that declares a file part *without* naming a file - an OpenAPI spec
+ * documents the upload, never the path (#425) - passes `src: ""`, and that row
+ * is **not** unresolved: the flag warns that something which looks filled in
+ * cannot be sent, and a row showing "Choose file" makes no such claim. It is
+ * the same shape the editor produces when a user turns a row into a file part,
+ * which is exactly what this is: an upload the user still has to complete.
  *
  * `value` is cleared because a file part has no typed value; whatever the
  * source stored in that slot (Insomnia leaves it "") is not sent.
@@ -93,8 +101,29 @@ export function importedFilePart(
 		src,
 		...(fileBaseName(src) ? { fileName: fileBaseName(src) } : {}),
 		...(contentType ? { contentType } : {}),
-		unresolved: true,
+		...(src ? { unresolved: true } : {}),
 	};
+}
+
+/**
+ * File parts the import produced that name no file yet, counted for the preview.
+ *
+ * Derived from the drafts rather than tallied while building them: the count and
+ * the rows cannot then disagree, and a parser that starts emitting such a row
+ * gets a truthful number without remembering to increment anything. Only the
+ * OpenAPI parsers produce any today - Postman and Insomnia file rows always
+ * carry a path, and one without is skipped as a `file_body` instead.
+ */
+export function unattachedFileParts(collections: CollectionDraft[]): number {
+	let count = 0;
+	for (const collection of collections) {
+		for (const request of collection.requests) {
+			if (request.body.mode !== "form-data") continue;
+			count += request.body.fields.filter((f) => f.type === "file" && !f.src).length;
+		}
+		count += unattachedFileParts(collection.children);
+	}
+	return count;
 }
 
 /** Read a Postman auth detail array/object into a flat {key:value} map (handles v2.1 + v2.0). */

@@ -48,6 +48,16 @@ export interface ImportMeta {
 	// letting items silently vanish. See ImportModal Preview state.
 	skipped: SkippedItem[];
 	nonExecutableAuth: number;
+	/**
+	 * Form-data file parts that arrived without a file to send. An OpenAPI spec
+	 * documents that a field is an upload and never which file it uploads, so the
+	 * row imports complete-but-empty and the user attaches the file. Surfaced in
+	 * the preview beside the skip counters: a row the user must finish is honest,
+	 * a field that looks filled in and sends nothing is the defect (#425).
+	 * Required rather than optional so every parser states its answer - all of
+	 * them get it from `unattachedFileParts`, which reads the drafts.
+	 */
+	unattachedFileParts: number;
 }
 
 export interface RequestDraft {
