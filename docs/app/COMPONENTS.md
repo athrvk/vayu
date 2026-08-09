@@ -336,6 +336,8 @@ Three rules the list holds, each pinned by a mutation-checked test:
 - **`skipped` is never `passed`.** It has its own count and its own row treatment (`SampledExchange`'s `state` prop, below). Nothing produces `skipped` until flow control lands, so it is built to render correctly before it can occur.
 - **Thinned results say so.** A run that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every non-passing step among the ones kept - so a non-zero `stepsDropped` means *successes* are missing. `ScenarioRunView` discloses the three numbers rather than letting `results[]` read as the whole run.
 
+A live run can be **stopped** from this tab (`StopRunButton`, below), which matters most for a data-driven run of hundreds of iterations. The control is shown while `isStreaming || run.status is running|pending` - two signals rather than one, because a tab reopened onto a run that is still executing (after a relaunch, or from History) has no stream at all, and is exactly the case where waiting the run out hurts most. It calls `POST /runs/:id/stop`, which needs nothing new engine-side: the scenario runner already checks `should_stop` per *step*, settles the run to `Stopped` and closes the SSE topic, so the streaming tab flips to the stored rows through the same `complete` a normal finish takes. The handler also invalidates the run and its report itself, because a tab that is not the streaming one never receives that event.
+
 `components/ScenarioStepCard.tsx` renders one step on the shared `SampledExchange`, restoring the response through `restore-response.ts` - the same path a design run's response pane uses, not a second reading of `trace_data`. `SampledExchange` gained an optional `state` (`success | error | slow | skipped`) and a `title` slot for this: its state is otherwise derived from the status code, which would read a `failed` assertion over a `200` as a success and a `skipped` step as a connection failure.
 
 The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a collection row's ⋯ menu. Three options - Recursive, Iterations and a data file - because the scenario **is** the folder: the sequence is the tree's own ordering, and a step list authored here would be a second source of truth for it. Invalid iterations are refused in the dialog; the engine's own rejection (which names the step that would not compose) is shown in place rather than as a toast that scrolls away.
@@ -399,6 +401,20 @@ the user took, including save failures (see `save-store.failSave`). Four
 variants - `info`, `success`, `warning`, `error` - each carried by an icon and a
 left rail rather than colour alone; tokens and durations in
 `docs/design-system.md` -> Toasts.
+
+## Stop Run Button (`components/shared/StopRunButton.tsx`)
+
+"Stop the run that is happening right now", in the one treatment, for the two
+places a run can be cancelled: the load dashboard header and the collection-run
+tab. A primitive rather than markup each view repeats, because the treatment is
+not a `Button` variant - a destructive *outline* over `ghost`, which no variant
+paints, plus the in-flight swap to a spinner and "Stopping…". The label is
+`destructive-text`, never the bare `destructive` fill.
+
+The caller owns the request and the failure path: both call sites `await
+apiService.stopRun(runId)` and, on failure, raise an **error toast with a Try
+again action** rather than a Callout - the run is still generating work, so the
+retry is the reason for saying anything.
 
 ## Sample Retention Note (`components/shared/SampleRetentionNote.tsx`)
 

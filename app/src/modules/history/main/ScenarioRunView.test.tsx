@@ -11,17 +11,18 @@
 /**
  * The collection-run tab.
  *
- * Four things are worth pinning here and none of them are layout: that a live
+ * Five things are worth pinning here and none of them are layout: that a live
  * `step` event reaches the list, that all four outcomes render distinctly and
  * `skipped` is counted apart from `passed`, that a stored step's response comes
  * back through the shared restore path rather than a second reading of the
- * trace, and that a run whose step store filled says so.
+ * trace, that a run whose step store filled says so, and that a live run can be
+ * stopped from here while a finished one offers nothing to stop.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within, fireEvent, act } from "@testing-library/react";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import ScenarioRunView from "./ScenarioRunView";
-import { useScenarioRunStore } from "@/stores";
+import { useScenarioRunStore, useToastStore } from "@/stores";
 import type { Run, RunReport, StepOutcome } from "@/types";
 
 const reportQuery = {
@@ -31,6 +32,14 @@ const reportQuery = {
 
 vi.mock("@/queries", () => ({
 	useRunReportQuery: () => reportQuery,
+}));
+
+const stopRun = vi.fn<(id: string) => Promise<unknown>>();
+
+vi.mock("@/services/api", () => ({
+	apiService: {
+		stopRun: (id: string) => stopRun(id),
+	},
 }));
 
 // Monaco under the response body is irrelevant to every question here and
@@ -95,7 +104,15 @@ beforeEach(() => {
 	reportQuery.data = undefined;
 	reportQuery.isLoading = false;
 	useScenarioRunStore.setState({ runId: null, steps: [], isStreaming: false, error: null });
+	stopRun.mockReset();
+	stopRun.mockResolvedValue({});
+	useToastStore.setState({ toasts: [] });
 });
+
+/** The Stop control, or null when the tab is not offering one. */
+function stopButton(): HTMLElement | null {
+	return screen.queryByRole("button", { name: /^stop/i });
+}
 
 describe("live progress", () => {
 	it("advances the list as step events arrive", () => {
@@ -390,6 +407,93 @@ describe("thinned results", () => {
 		render(<ScenarioRunView run={RUN} />);
 
 		expect(screen.queryByText(/bounded step storage/i)).toBeNull();
+	});
+});
+
+describe("stopping a live run", () => {
+	it("stops the run this tab is streaming", async () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		act(() => {
+			useScenarioRunStore.getState().startRun("run-1");
+		});
+
+		await act(async () => {
+			fireEvent.click(stopButton()!);
+		});
+
+		expect(stopRun).toHaveBeenCalledWith("run-1");
+	});
+
+	it("stops a running run this tab never attached a stream to", async () => {
+		// The relaunch case: the engine is still executing, the tab was reopened
+		// from History, and there is no stream to read "live" from. Gate the
+		// control on the stream alone and this run becomes uncancellable -
+		// which is the case the issue is actually about.
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		expect(useScenarioRunStore.getState().isStreaming).toBe(false);
+		await act(async () => {
+			fireEvent.click(stopButton()!);
+		});
+
+		expect(stopRun).toHaveBeenCalledWith("run-1");
+	});
+
+	it("offers nothing to stop once the run is terminal", () => {
+		reportQuery.data = report({ results: [storedStep(0, 0, "passed", { name: "Done" })] });
+
+		render(<ScenarioRunView run={{ ...RUN, status: "completed" }} />);
+
+		expect(stopButton()).toBeNull();
+	});
+
+	it("disables itself and says so while the stop is in flight", async () => {
+		let settle: () => void = () => {};
+		stopRun.mockImplementation(
+			() =>
+				new Promise<unknown>((resolve) => {
+					settle = () => resolve({});
+				})
+		);
+
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		fireEvent.click(stopButton()!);
+
+		// A second click while the first is unanswered would send a second stop.
+		const pending = stopButton()!;
+		expect(pending.textContent).toContain("Stopping");
+		expect((pending as HTMLButtonElement).disabled).toBe(true);
+
+		await act(async () => {
+			settle();
+		});
+	});
+
+	it("reports a failed stop as a retryable toast rather than silently", async () => {
+		stopRun.mockRejectedValue(new Error("Engine unreachable"));
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		await act(async () => {
+			fireEvent.click(stopButton()!);
+		});
+
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+		const toast = useToastStore.getState().toasts[0];
+		expect(toast.variant).toBe("error");
+		expect(toast.message).toContain("Engine unreachable");
+
+		// The run is still sending requests, so the retry is the point of the
+		// toast - not the message.
+		stopRun.mockResolvedValue({});
+		await act(async () => {
+			toast.action!.onClick();
+		});
+		expect(stopRun).toHaveBeenCalledTimes(2);
+
+		// And the button is back, so the failure did not leave the tab stuck on
+		// "Stopping…" with nothing to click.
+		expect((stopButton() as HTMLButtonElement).disabled).toBe(false);
 	});
 });
 

@@ -53,9 +53,11 @@ class ScenarioRunService {
 	/*
 	 * There is deliberately no `stopMonitoring` here, unlike `LoadTestService`.
 	 * The stream ends on its own - the engine sends `complete` when the run
-	 * reaches a terminal status - and nothing in the app stops a collection run
-	 * mid-flight yet. A detach method with no caller is surface that cannot be
-	 * verified; it belongs with the stop control that needs it.
+	 * reaches a terminal status - and that holds for a *stopped* run too: the
+	 * scenario runner observes `should_stop` per step, settles the run to
+	 * `Stopped` and closes the topic, so the runner tab's Stop control gets its
+	 * terminal event through the same path a run that finished normally does.
+	 * A detach method with no caller is surface that cannot be verified.
 	 */
 
 	private handleError(error: Error): void {
