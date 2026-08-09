@@ -48,6 +48,15 @@ export const queryKeys = {
 		// tab. Its own family keeps the two apart at the root.
 		lastDesign: (requestId: string) =>
 			[...queryKeys.runs.all, "lastDesign", requestId] as const,
+		// The last N design runs of one request, for the context bar's Recent
+		// sends section. Its own family for the same reason `lastDesign` has
+		// one: it caches a plain `RunListResponse`, and the delete-run patch
+		// walks everything under `lists()` as `InfiniteData`. `recentDesigns()`
+		// is the prefix to invalidate when the run set changes without a known
+		// request (a delete, a history clear).
+		recentDesigns: () => [...queryKeys.runs.all, "recentDesign"] as const,
+		recentDesign: (requestId: string) =>
+			[...queryKeys.runs.recentDesigns(), requestId] as const,
 		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,

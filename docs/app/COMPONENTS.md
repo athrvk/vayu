@@ -118,6 +118,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Cookies for this host (`cookies`) | `CookiesSection.tsx` - the active environment's jar filtered to the request's host, with a per-scope clear. Host filtering is an **approximation**, stated in the UI: libcurl applies the real domain/path/secure rules at transfer time. |
 | Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below). |
 | Environment (`environment`) | `EnvironmentSection.tsx` - the active environment's name and a way into the Variables drawer. |
+| Recent sends (`recent-sends`) | `RecentSendsSection.tsx` - the last five design runs of this request, newest first: status chip, latency and age, each row opening that run in a History tab. One `GET /runs` call and no report fetch - status and latency ride on each row as `resultSummary` (see below). A run with no stored result reads "Sending…" or "No result" rather than a status-0 chip, which the wire uses for "reached no server". |
 
 **Collection tab**
 
@@ -143,7 +144,11 @@ The collection and run sections gate on `tab.entityId` as well as the type: a ta
 
 **There is deliberately no "last run" section on a collection tab**, still, now that the runner exists (#354). A collection's runs are not addressable: `GET /runs` filters by `requestId`, and a collection run's row links no request, so finding one means a substring search of every stored snapshot for the collection id - a scan per open bar, for a number History already shows. It earns the slot once the runs list can be filtered by collection.
 
-**There is deliberately no "last result" section.** Status, duration and age of the last send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary. What would earn the slot is a *trend* across recent sends, which the pane structurally cannot show; that needs the paginated `GET /runs` to carry each design run's result first (today only `GET /runs/:id` attaches it), so it is tracked separately in #380.
+**There is still deliberately no "last result" section**, and `recent-sends` is not one. Status, duration and age of the *last* send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary, which is why the specced one was built and removed in #344. What the pane structurally cannot show is *more than one send*, and that is the whole content of `recent-sends`: if it ever narrows to the latest run it is the removed section again. Its id is new rather than reused, so the `last-result` guard in `registry.test.tsx` keeps guarding.
+
+That section is affordable because the paginated `GET /runs` now carries each design run's outcome on its row (`resultSummary`: `statusCode` + `latencyMs`), added for it in #380. Before that, N rows meant N `GET /runs/:id/report` calls, and that path loads and JSON-parses every result's `trace_data`. Load and collection runs carry no `resultSummary` - their results are unbounded - and the engine's query cannot read them even if asked.
+
+**Freshness is wiring, not polling.** `runs.recentDesign(requestId)` is its own key family (like `runs.lastDesign`, and for the same `InfiniteData` shape-clash reason), so nothing under `runs.lists()` refreshes it: the builder's send path, the run view's replay, the MCP `run` event and the delete/clear-history paths each invalidate it explicitly. A new invalidation point for runs needs to touch it too, or the section silently shows the sends from before.
 
 #### Variables section
 

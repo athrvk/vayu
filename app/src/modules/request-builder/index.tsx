@@ -264,6 +264,14 @@ export default function RequestBuilder() {
 					);
 				}
 
+				// This send is a new design run, and the context bar's Recent
+				// sends list is not polled - without this it would keep showing
+				// the sends from before this one for as long as the tab is open.
+				// The history list has its own 5s poll and needs nothing here.
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
+				});
+
 				// Refresh variables so script-set values (e.g. pm.environment.set)
 				// appear in the UI - post-request scripts write them too, see the
 				// helper's note.

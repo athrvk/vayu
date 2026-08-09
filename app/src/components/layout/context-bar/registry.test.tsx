@@ -47,13 +47,14 @@ const entitylessTab = (type: TabType): Tab => ({ id: "t1", type, entityId: null 
 const OTHER_TYPES: TabType[] = ["welcome", "dashboard", "variables", "settings"];
 
 describe("the context-bar section registry", () => {
-	it("ships the Phase 1 sections for a request tab, in reading order", () => {
+	it("ships the request-tab sections, in reading order", () => {
 		expect(sectionsForTab(tab("request")).map((s) => s.id)).toEqual([
 			"variables",
 			"auth",
 			"cookies",
 			"code",
 			"environment",
+			"recent-sends",
 		]);
 	});
 
@@ -86,9 +87,13 @@ describe("the context-bar section registry", () => {
 		// `ResponseStatusBar` paints the same status chip, duration and age in
 		// the response pane on the same screen, from the same stored run - so a
 		// section here could only ever be a poorer copy of it. Re-adding one is
-		// the regression this guards; the trend version (#380) is a different
-		// section with a different id.
-		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).not.toContain("last-result");
+		// the regression this guards; `recent-sends` (#380) is a different
+		// section with a different id, and its own entry keeps this one honest -
+		// renaming it back to `last-result` fails here rather than silently
+		// retiring the guard.
+		const ids = CONTEXT_BAR_SECTIONS.map((s) => s.id);
+		expect(ids).not.toContain("last-result");
+		expect(ids).toContain("recent-sends");
 	});
 
 	it("gives every section a unique id, since the id is the persisted key", () => {

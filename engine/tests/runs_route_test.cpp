@@ -85,6 +85,20 @@ class RunsRouteTest : public ::testing::Test {
         db_->create_run (run);
     }
 
+    /// One stored exchange for @p run_id. `trace_data` is deliberately large:
+    /// the list must never read this column, and a row that does shows up as a
+    /// payload, not as a failure.
+    void seed_result (const std::string& run_id, int status_code, double latency_ms) {
+        vayu::db::Result result;
+        result.run_id      = run_id;
+        result.timestamp   = 1000;
+        result.status_code = status_code;
+        result.status_text = "OK";
+        result.latency_ms  = latency_ms;
+        result.trace_data = R"({"response":{"body":")" + std::string (4096, 'x') + R"("}})";
+        db_->add_result (result);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -234,6 +248,75 @@ TEST_F (RunsRouteTest, SummaryOmitsScenarioOnANonScenarioRun) {
 
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
     EXPECT_FALSE (body["data"][0]["summary"].contains ("scenario"));
+}
+
+// A design run is one exchange, so its row says what came back. Without this a
+// reader wanting a status code per row had to fetch a report per row, which
+// loads and parses every result's trace_data - the cost that kept this off the
+// list (#380).
+TEST_F (RunsRouteTest, DesignRowCarriesItsStatusCodeAndLatency) {
+    seed ({ .id = "run_design", .type = vayu::RunType::Design });
+    seed_result ("run_design", 503, 42.5);
+
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    EXPECT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+
+    const auto& row = body["data"][0];
+    ASSERT_TRUE (row.contains ("resultSummary"));
+    EXPECT_EQ (row["resultSummary"]["statusCode"], 503);
+    EXPECT_DOUBLE_EQ (row["resultSummary"]["latencyMs"].get<double> (), 42.5);
+    // The two numbers, not the exchange: `result` (with its trace) stays on
+    // GET /runs/:id, where one row's worth of bodies is one row's worth.
+    EXPECT_FALSE (row.contains ("result"));
+    EXPECT_FALSE (row["resultSummary"].contains ("trace"));
+    EXPECT_EQ (row["resultSummary"].size (), 2u);
+}
+
+// Each design row gets its own outcome - the page is one query, so a wrong key
+// here would show one run's status against another's row.
+TEST_F (RunsRouteTest, EachDesignRowGetsItsOwnOutcome) {
+    seed ({ .id = "run_first", .type = vayu::RunType::Design, .start_time = 1 });
+    seed ({ .id = "run_second", .type = vayu::RunType::Design, .start_time = 2 });
+    seed_result ("run_first", 200, 10.0);
+    seed_result ("run_second", 404, 20.0);
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_EQ (body["data"][0]["id"], "run_second");
+    EXPECT_EQ (body["data"][0]["resultSummary"]["statusCode"], 404);
+    EXPECT_EQ (body["data"][1]["id"], "run_first");
+    EXPECT_EQ (body["data"][1]["resultSummary"]["statusCode"], 200);
+}
+
+// The load-run guard, at the level that enforces it. A load run's results are
+// unbounded (one row per error), so they must not be read to be discarded - and
+// that is a property of the statement, not of the caller remembering to filter:
+// asking for a load run's outcome by id returns nothing.
+TEST_F (RunsRouteTest, LoadRowCarriesNoOutcomeAndItsResultsAreNeverRead) {
+    seed ({ .id = "run_load", .type = vayu::RunType::Load });
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .start_time = 1 });
+    seed_result ("run_load", 500, 99.0);
+    seed_result ("run_load", 500, 98.0);
+    seed_result ("run_scenario", 200, 5.0);
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_FALSE (body["data"][0].contains ("resultSummary"));
+    EXPECT_FALSE (body["data"][1].contains ("resultSummary"));
+
+    EXPECT_TRUE (
+    db_->get_design_result_outcomes ({ "run_load", "run_scenario" }).empty ());
+}
+
+// Still running, or a result whose write failed: absent, not `statusCode: 0`,
+// which is the wire's own way of saying "the request never reached a server".
+TEST_F (RunsRouteTest, DesignRowWithNoStoredResultOmitsTheKey) {
+    seed ({ .id = "run_running", .type = vayu::RunType::Design, .status = vayu::RunStatus::Running });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_FALSE (body["data"][0].contains ("resultSummary"));
 }
 
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {

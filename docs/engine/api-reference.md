@@ -2216,6 +2216,19 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
+**`resultSummary`** is what a **design run's** row says about the exchange:
+`statusCode` and `latencyMs`, and nothing else. A design run is one request and
+one response, so its outcome fits on the row and a page of them costs one extra
+query; a load or collection run's results are many and unbounded, so its row
+carries no `resultSummary` at all and its result rows are never read to build
+one - the same split [GET /runs/:runId](#get-runsrunid) draws when it attaches
+`result`. The two numbers rather than that whole `result`: it carries the
+exchange's `trace`, request and response bodies included, which is a per-row
+cost a list cannot take. A design run with no stored result - still running, or
+one whose result write failed - **omits the key** rather than reporting
+`statusCode: 0`, which is the wire's own way of saying the request never reached
+a server.
+
 **Response (envelope):**
 ```json
 {
@@ -2239,6 +2252,17 @@ four keys is omitted when the stored snapshot has no such key.
         "maxRedirects": 10,
         "httpVersion": "auto"
       }
+    },
+    {
+      "id": "run_1234567891",
+      "requestId": "req_1234567890",
+      "environmentId": null,
+      "type": "design",
+      "status": "completed",
+      "startTime": 1234567892,
+      "endTime": 1234567893,
+      "summary": { "url": "https://api.example.com/users", "method": "GET", "httpVersion": "auto" },
+      "resultSummary": { "statusCode": 200, "latencyMs": 34.2 }
     }
   ],
   "pagination": { "total": 812, "limit": 50, "offset": 0, "hasMore": true, "returned": 50 }

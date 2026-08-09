@@ -66,6 +66,11 @@ export {
 	detectBodyType,
 	formatBody,
 	formatSize,
+	// The response pane's own latency wording ("34 ms", "5.00 s"). Exported so a
+	// surface outside the viewer - the context bar's Recent sends rows - states
+	// a latency the way the pane states it, instead of growing a second rule for
+	// when milliseconds become seconds.
+	formatResponseTime,
 	getMonacoLanguage,
 	buildRawRequest,
 	buildRawResponse,
