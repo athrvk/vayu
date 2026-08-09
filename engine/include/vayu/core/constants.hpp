@@ -256,6 +256,13 @@ constexpr size_t MAX_STEPS = 200;
 /// owns file parsing and the script sandbox has no filesystem access; this is
 /// what bounds the payload that decision costs.
 constexpr size_t MAX_DATA_ROWS = 1000;
+/// Largest serialized size of that inline `data` array (config key
+/// `maxScenarioDataBytes`). The row bound alone does not bound the payload -
+/// one row with a megabyte in a cell is within it - and the transport's own
+/// ceiling is cpp-httplib's 100MB body cap, which would surface as a reset
+/// connection rather than as a message naming what was wrong. This is the
+/// engine-authored bound that answers first.
+constexpr size_t MAX_DATA_BYTES = 16 * 1024 * 1024;
 /// Largest number of per-step `results` rows one scenario run stores (config
 /// key `maxScenarioStoredSteps`; 0 = unlimited). `Database::get_results` loads
 /// every row of a run with no limit and the report parses each `trace_data`,

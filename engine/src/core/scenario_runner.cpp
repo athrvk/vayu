@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
@@ -398,12 +399,34 @@ RunManager& manager) {
                 // everywhere else, because nowhere else has a sequence to
                 // redirect (issue #355).
                 inputs.in_scenario = true;
+
+                // The data pass, per iteration and before the send: composition
+                // left every `{{data.column}}` written as it stands, because
+                // only this loop knows which row is bound. A token naming a
+                // column the row does not carry ends the step here rather than
+                // sending a request with a hole in it.
+                std::string data_bind_error;
                 if (data_row_index) {
                     inputs.iteration_data = &data_rows[*data_row_index];
+                    auto bound            = bind_data_row (
+                    inputs.request, data_rows[*data_row_index], *data_row_index);
+                    if (!bound.ok) {
+                        data_bind_error = std::move (bound.error);
+                    }
                 }
 
-                auto exchange = vayu::http::routes::execute_exchange (script_engine,
-                *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+                vayu::http::routes::ExchangeOutcome exchange;
+                if (data_bind_error.empty ()) {
+                    exchange = vayu::http::routes::execute_exchange (script_engine,
+                    *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+                } else {
+                    // Nothing was sent and no script ran. The partially bound
+                    // request is kept anyway: the trace is where the user sees
+                    // the `{{data.*}}` token that had no column, which is the
+                    // thing they have to go and fix.
+                    exchange.request = std::move (inputs.request);
+                    exchange.sent    = false;
+                }
 
                 ++steps_this_iteration;
                 recent_steps.push_back (step.name);
@@ -417,10 +440,19 @@ RunManager& manager) {
                 record.step_index     = step.index;
                 record.step_name      = step.name;
                 record.request_id     = step.request_id;
-                record.outcome        = classify_step (exchange, record.error);
-                record.status_code    = exchange.response.status_code;
-                record.status_text    = exchange.response.status_text;
-                record.latency_ms     = exchange.response.timing.total_ms;
+                // A row that could not bind is this step's failure and is not
+                // classifiable from the exchange - there is no exchange. It
+                // errors rather than skipping: a skip is a script's decision,
+                // this is a request that could not be built.
+                if (!data_bind_error.empty ()) {
+                    record.outcome = StepOutcome::Errored;
+                    record.error   = data_bind_error;
+                } else {
+                    record.outcome = classify_step (exchange, record.error);
+                }
+                record.status_code = exchange.response.status_code;
+                record.status_text = exchange.response.status_text;
+                record.latency_ms  = exchange.response.timing.total_ms;
 
                 // Where this iteration goes next, decided before the row is
                 // written: an instruction that cannot be honoured is this

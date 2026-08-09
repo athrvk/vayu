@@ -32,6 +32,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -110,12 +111,14 @@ class ScenarioPlanTest : public ::testing::Test {
     }
 
     // Generous bounds unless a test is about a bound.
-    static vayu::core::ScenarioResolveOptions
-    options (size_t max_steps = 200, size_t max_data_rows = 1000) {
+    static vayu::core::ScenarioResolveOptions options (size_t max_steps = 200,
+    size_t max_data_rows  = 1000,
+    size_t max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES) {
         vayu::core::ScenarioResolveOptions opts;
-        opts.timeout_ms           = 30000;
-        opts.limits.max_steps     = max_steps;
-        opts.limits.max_data_rows = max_data_rows;
+        opts.timeout_ms            = 30000;
+        opts.limits.max_steps      = max_steps;
+        opts.limits.max_data_rows  = max_data_rows;
+        opts.limits.max_data_bytes = max_data_bytes;
         return opts;
     }
 
@@ -504,6 +507,45 @@ TEST_F (ScenarioPlanTest, ANonObjectDataRowIsRejectedByIndex) {
     const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
     EXPECT_FALSE (resolved.ok);
     EXPECT_NE (resolved.error.find ("row 1"), std::string::npos) << resolved.error;
+}
+
+TEST_F (ScenarioPlanTest, AnOversizedDataBlockIsRejectedByItsByteBound) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    // Two rows - comfortably inside `maxScenarioDataRows` - carrying far more
+    // than the byte bound between them. The row count cannot catch this, which
+    // is the whole reason the byte bound exists: without it the payload runs
+    // into the transport's own body cap and the user gets a dropped connection
+    // instead of a sentence.
+    json scenario = block ("col");
+    scenario["data"] = json::array ({ json{ { "blob", std::string (400, 'x') } },
+    json{ { "blob", std::string (400, 'y') } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario,
+    options (/*max_steps=*/200, /*max_data_rows=*/1000, /*max_data_bytes=*/500));
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("500 bytes"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("maxScenarioDataBytes"), std::string::npos)
+    << resolved.error;
+    // A rejected set leaves nothing behind, exactly as a ragged one does.
+    EXPECT_TRUE (resolved.data_rows.empty ());
+    EXPECT_TRUE (resolved.plan.steps.empty ());
+}
+
+TEST_F (ScenarioPlanTest, ADataBlockInsideTheByteBoundResolves) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario,
+    options (/*max_steps=*/200, /*max_data_rows=*/1000, /*max_data_bytes=*/500));
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.data_rows.size (), 1u);
 }
 
 TEST_F (ScenarioPlanTest, AnUnknownSourceDoesNotFallThroughToTheCollectionPath) {

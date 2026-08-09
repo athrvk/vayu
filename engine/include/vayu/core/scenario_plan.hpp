@@ -123,6 +123,9 @@ struct ScenarioExecution {
 struct ScenarioLimits {
     size_t max_steps     = 0;
     size_t max_data_rows = 0;
+    /// Serialized size of the whole `data` array. Bounds what the row count
+    /// cannot: a single row is free to carry a megabyte in one cell.
+    size_t max_data_bytes = 0;
 };
 
 /**
@@ -166,7 +169,8 @@ struct ScenarioResolution {
  * Every failure below is loud, never a silently smaller run: an unknown
  * `collectionId`, an empty sequence, a step whose composition fails, a plan
  * over `limits.max_steps`, a `data` array that is present and empty or over
- * `limits.max_data_rows`, and any `source` other than `"collection"`.
+ * `limits.max_data_rows` or `limits.max_data_bytes`, and any `source` other
+ * than `"collection"`.
  */
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,

@@ -826,6 +826,9 @@ void register_execution_routes (RouteContext& ctx) {
             options.limits.max_data_rows =
             static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataRows",
             static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
+            options.limits.max_data_bytes =
+            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
+            static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
 
             auto resolved =
             vayu::core::resolve_scenario (ctx.db, json["scenario"], options);

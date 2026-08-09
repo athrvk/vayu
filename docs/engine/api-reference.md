@@ -1698,17 +1698,19 @@ as a smaller one:
 | `data` present and empty | A data set that binds nothing is a mistake - omit the field to run without one. |
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
+| A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the transport's own body cap would drop the connection instead of explaining itself. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
 
-**Four settings bound a scenario** (all in the `general_engine` category, see
+**Five settings bound a scenario** (all in the `general_engine` category, see
 [GET /config](#get-config)):
 
 | Key                   | Default | Range      | Effect |
 |-----------------------|---------|------------|--------|
 | `maxScenarioSteps`    | `200`   | 1-10000    | Largest plan one run may resolve to. The sequence is composed up front and held in memory, and a load-mode scenario allocates a latency histogram per step, so this bounds memory rather than expressing a preference. |
-| `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/JSON file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
+| `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/TSV/JSON/JSONL file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
+| `maxScenarioDataBytes` | `16777216` | 1024-104857600 | Largest inline `data` array measured in bytes of JSON. The row bound alone does not bound the payload, since one row may hold a megabyte in a single cell. |
 | `maxScenarioStoredSteps` | `5000` | 0-1000000 | Per-step `results` rows one run stores; `0` stores every step. Steps that did not pass are kept first, successes fill the rest, and what was thinned is reported in the run summary. |
 | `maxStepsPerIteration` | `0` | 0-1000000 | How many steps one iteration may execute before it is cut off. `pm.execution.setNextRequest` can send an iteration backwards, so a cycle would otherwise run forever. `0` derives the bound from the plan - ten times its step count, never below 100 - so a straight-through iteration can never trip it. |
 
@@ -1735,6 +1737,9 @@ the same request does, and the two cannot drift apart.
 > API - `pm.environment.get(...)` in a pre-request script, which may then edit
 > `pm.request`. This is the price of resolving once, and resolving once is what
 > keeps a collection edited mid-run from changing the sequence underneath it.
+>
+> The one exception is the reserved `{{data.*}}` namespace below, which
+> composition deliberately leaves alone so the runner can bind it per iteration.
 
 **Scripts** additionally read `pm.info.iteration` (0-based) and
 `pm.info.iterationCount`. No other caller sets them - see
@@ -1748,6 +1753,28 @@ both given the explicit count wins and the index wraps. The rows reach the run's
 worker and nowhere else: they are not persisted, and the snapshot records
 `dataRowCount` only. The full contract is in
 [scripting.md](scripting.md#data-rows-pmiterationdata).
+
+**`{{data.column}}` puts the row into the request itself.** `pm.iterationData`
+is read *after* a step's request was built, so it cannot change where the
+request goes; the `data.*` namespace can. A step whose URL, header or body
+carries `{{data.email}}` has it substituted with that iteration's row, per
+iteration, immediately before the send.
+
+The namespace is **reserved and disjoint from the variable tiers** - not a
+fourth, higher tier. `{{data.id}}` and `{{id}}` are different names, so a data
+set can neither shadow nor be shadowed by a global, collection or environment
+variable, and adding a data file to an existing collection cannot change what
+its other tokens resolve to. Composition (`POST /compose`, and the plan
+resolution that shares it) leaves a `data.*` token written exactly as it stands
+for that reason; `{{data.}}` with no column after it names nothing and follows
+the ordinary unknown-name rule instead.
+
+A token naming a column the bound row does not carry **errors the step before
+anything is sent**, with a message naming the token, the row index and the
+columns the row does have. Substituting an empty string would send a request
+quietly pointing somewhere else, which is the failure this namespace exists to
+remove. Outside a run with `data`, nothing binds the token and it reaches the
+wire as written - visible, rather than silently blank.
 
 **Each step execution writes one `results` row** carrying the design-mode trace
 plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -

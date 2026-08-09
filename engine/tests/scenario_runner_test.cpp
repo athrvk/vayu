@@ -35,6 +35,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/scenario_runner.hpp"
@@ -51,6 +52,9 @@ namespace {
 /// One request the mock server saw, in the order it saw them.
 struct SeenRequest {
     std::string path;
+    /// Path *and* query string, which is where a `{{data.column}}` in a URL
+    /// lands - `path` alone drops it.
+    std::string target;
     std::string cookie;
     std::string marker; // the X-Marker header, which the tests' scripts set
 };
@@ -67,8 +71,8 @@ class ScenarioMockServer {
 
         const auto record = [this] (const httplib::Request& req) {
             std::lock_guard<std::mutex> lock (mtx);
-            seen.push_back ({ req.path, req.get_header_value ("Cookie"),
-            req.get_header_value ("X-Marker") });
+            seen.push_back ({ req.path, req.target,
+            req.get_header_value ("Cookie"), req.get_header_value ("X-Marker") });
         };
 
         svr.Get ("/ok", [record] (const httplib::Request& req, httplib::Response& res) {
@@ -185,13 +189,15 @@ class ScenarioRunnerTest : public ::testing::Test {
     const std::string& pre_script   = "",
     const std::string& post_script  = "",
     const std::string& absolute_url = "",
-    const std::string& name         = "") {
+    const std::string& name         = "",
+    const std::string& headers      = "") {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = "col_1";
         r.name          = name.empty () ? "Step " + id : name;
         r.method        = vayu::HttpMethod::GET;
-        r.url = absolute_url.empty () ? server_->url (path) : absolute_url;
+        r.url     = absolute_url.empty () ? server_->url (path) : absolute_url;
+        r.headers = headers;
         r.pre_request_script  = pre_script;
         r.post_request_script = post_script;
         r.order               = order;
@@ -231,6 +237,7 @@ class ScenarioRunnerTest : public ::testing::Test {
         options.environment_id       = environment_id;
         options.limits.max_steps     = 200;
         options.limits.max_data_rows = 1000;
+        options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
 
         auto resolved = vayu::core::resolve_scenario (*db_, scenario, options);
         EXPECT_TRUE (resolved.ok) << resolved.error;
@@ -1023,6 +1030,73 @@ TEST_F (ScenarioRunnerTest, ARunWithoutDataStampsNoRowIndexAndBindsNothing) {
     for (const auto& row : rows) {
         EXPECT_FALSE (json::parse (row.trace_data).contains ("dataRowIndex"));
     }
+}
+
+// ============================================================================
+// `{{data.column}}` - the row reaching the request itself (issue #402)
+// ============================================================================
+
+// The headline case: the row drives where the request goes, without a script.
+// `pm.iterationData` cannot do this - it is read after the request was built.
+TEST_F (ScenarioRunnerTest, ADataTokenInTheUrlResolvesPerIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "", "", "", server_->url ("/ok?user={{data.user}}"));
+
+    const auto run_id = start_with_data (
+    json::array ({ { { "user", "ada" } }, { { "user", "grace" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    // Two halves, and reverting either one fails this: without the reserved
+    // namespace the token is eaten at composition and both read `user=`;
+    // without the runner's pass the literal `{{data.user}}` reaches the wire.
+    EXPECT_EQ (seen[0].target, "/ok?user=ada");
+    EXPECT_EQ (seen[1].target, "/ok?user=grace");
+}
+
+TEST_F (ScenarioRunnerTest, ADataTokenInAHeaderResolvesPerIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", "", "", "",
+    R"([{"key":"X-Marker","value":"{{data.marker}}","enabled":true}])");
+
+    const auto run_id = start_with_data (
+    json::array ({ { { "marker", "row-0" } }, { { "marker", "row-1" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].marker, "row-0");
+    EXPECT_EQ (seen[1].marker, "row-1");
+}
+
+// A token naming a column the row does not carry never reaches the wire. The
+// alternative - substituting "" - is a request quietly pointing somewhere else,
+// which is precisely what a data-driven run must not do.
+TEST_F (ScenarioRunnerTest, ATokenNamingAnAbsentColumnErrorsTheStepWithoutSending) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "", "", "", server_->url ("/ok?user={{data.absent}}"));
+
+    const auto run_id = start_with_data (json::array ({ { { "user", "ada" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "the step must not have sent";
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 0u);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_NE (rows[0].error.find ("{{data.absent}}"), std::string::npos)
+    << rows[0].error;
+    // The row kept the request so the unbound token is visible in the step's
+    // expanded view, and dropped the response, because there was none.
+    auto trace = json::parse (rows[0].trace_data);
+    EXPECT_FALSE (trace.contains ("response"));
+    EXPECT_NE (
+    trace["request"]["url"].get<std::string> ().find ("{{data.absent}}"), std::string::npos);
 }
 
 // The test script reads the same row its request was built from: asserting a

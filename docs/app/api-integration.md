@@ -257,9 +257,12 @@ apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 `startLoadTest` and `startScenarioRun` are the **same `POST /runs` endpoint and
 the same `202 {runId}` answer** - the payload is what selects the executor. A
 scenario states its work as an ordered collection
-(`{scenario: {source: "collection", collectionId, recursive?, iterations?}}`), so
-it carries no `method`/`url` and no `mode`, and its iteration count lives inside
-the block rather than beside a load-test mode. Both send `allowScriptRequests`,
+(`{scenario: {source: "collection", collectionId, recursive?, iterations?, data?}}`),
+so it carries no `method`/`url` and no `mode`, and its iteration count lives
+inside the block rather than beside a load-test mode. `data` is the parsed rows
+of a data file (`services/data-files/`), sent inline because the engine never
+opens a file; `iterations` is **omitted** when the user left it blank, so the
+engine's "absent means one pass per row" rule stays in one place. Both send `allowScriptRequests`,
 for the same reason: every step runs the scripts a Send of that request would
 run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a

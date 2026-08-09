@@ -40,6 +40,29 @@ Globals  <  Collection chain (root → leaf)  <  Active environment
 A variable set in the active environment always wins over a collection variable, which
 always wins over a global.
 
+### `data.*` is reserved, and sits outside this order
+
+`{{data.column}}` addresses a column of a collection run's data file (issue
+#402), and it is **not a fourth tier above the three**. It is a reserved
+namespace, disjoint from them: `{{data.id}}` and `{{id}}` are different names,
+so a data set can neither shadow nor be shadowed by a variable, and attaching a
+data file to a collection cannot change what its other tokens resolve to. That
+is what dissolves the precedence question rather than answering it.
+
+Nothing in the tables above resolves such a token. Both resolvers - the
+engine's `resolve_template` and the renderer's `resolveTemplate` - leave it
+written exactly as it stands, because only a scenario run's iteration knows
+which row is bound; the run's worker substitutes it immediately before each
+send. A `data.*` token in an ordinary Send therefore reaches the wire as
+written, and appears unresolved in the UI, which is the honest reading: there
+is no row. `{{data.}}` with nothing after the dot names no column and follows
+the ordinary unknown-name rule (resolves to `""`) instead.
+
+The conformance fixture pins all three cases, so the two resolvers cannot
+drift on them. See
+[api-reference.md](../engine/api-reference.md#scenario-runs) for what the
+engine does with the token once a row exists.
+
 ---
 
 ## Layers

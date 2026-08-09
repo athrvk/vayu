@@ -153,6 +153,14 @@ bool is_dynamic_variable_name (const std::string& name) {
     return !name.empty () && name.front () == '$';
 }
 
+bool is_data_variable_name (const std::string& name) {
+    // The prefix alone is not a column reference: `{{data.}}` names nothing, so
+    // it falls through to the ordinary unknown-name rule rather than surviving
+    // composition as a token no iteration could ever bind.
+    return name.size () > DATA_NAMESPACE_PREFIX.size () &&
+    name.compare (0, DATA_NAMESPACE_PREFIX.size (), DATA_NAMESPACE_PREFIX) == 0;
+}
+
 std::optional<std::string> resolve_dynamic_variable (const std::string& name) {
     for (const auto& v : DYNAMIC_VARIABLES) {
         if (name == v.name) {
@@ -193,7 +201,8 @@ const vayu::Environment& environment) {
     return values;
 }
 
-std::string resolve_template (const std::string& input, const VariableValues& vars) {
+std::string substitute_tokens (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve) {
     if (input.empty ()) {
         return input;
     }
@@ -211,21 +220,33 @@ std::string resolve_template (const std::string& input, const VariableValues& va
     for (; it != end; ++it) {
         const auto& match = *it;
         out.append (input, last, static_cast<size_t> (match.position ()) - last);
-        const std::string name = trim (match[1].str ());
-        if (auto defined = vars.find (name); defined != vars.end ()) {
-            out += defined->second;
-        } else if (is_dynamic_variable_name (name)) {
-            if (auto generated = resolve_dynamic_variable (name)) {
-                out += *generated;
-            } else {
-                out += match.str (); // unknown $name keeps its braces (#186)
-            }
+        if (auto replacement = resolve (trim (match[1].str ()))) {
+            out += *replacement;
+        } else {
+            out += match.str (); // left written as it stands
         }
-        // Ordinary unknown name: append nothing (resolves to "").
         last = static_cast<size_t> (match.position () + match.length ());
     }
     out.append (input, last, input.size () - last);
     return out;
+}
+
+std::string resolve_template (const std::string& input, const VariableValues& vars) {
+    return substitute_tokens (
+    input, [&vars] (const std::string& name) -> std::optional<std::string> {
+        // Before the scopes, not after: the namespace is disjoint from them, so
+        // a variable someone named `data.id` must not answer for the column.
+        if (is_data_variable_name (name)) {
+            return std::nullopt; // bound per iteration, or not at all (#402)
+        }
+        if (auto defined = vars.find (name); defined != vars.end ()) {
+            return defined->second;
+        }
+        if (is_dynamic_variable_name (name)) {
+            return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
+        }
+        return std::string{}; // ordinary unknown name resolves to ""
+    });
 }
 
 nlohmann::json resolve_json_strings (const nlohmann::json& value, const VariableValues& vars) {

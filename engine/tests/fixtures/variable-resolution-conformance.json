@@ -119,6 +119,24 @@
       "expected": "id={{$notAGenerator}}"
     },
     {
+      "name": "a data.* name keeps its braces - only a scenario iteration binds it (issue #402)",
+      "scopes": { "environment": { "known": { "value": "x", "enabled": true } } },
+      "input": "https://api.test/{{data.id}}?k={{known}}",
+      "expected": "https://api.test/{{data.id}}?k=x"
+    },
+    {
+      "name": "a variable named data.id does not answer for the reserved column (issue #402)",
+      "scopes": { "environment": { "data.id": { "value": "shadowed", "enabled": true } } },
+      "input": "{{data.id}}",
+      "expected": "{{data.id}}"
+    },
+    {
+      "name": "the data. prefix alone names no column and follows the unknown-name rule",
+      "scopes": {},
+      "input": "a{{data.}}b{{data}}c",
+      "expected": "abc"
+    },
+    {
       "name": "a user-defined variable named $guid beats the generator",
       "scopes": { "environment": { "$guid": { "value": "pinned-guid", "enabled": true } } },
       "input": "{{$guid}}",

@@ -29,6 +29,8 @@
  *
  * The behavioural contracts (issue #226, "Behaviour that must not change"):
  *  - unknown plain name resolves to ""; unknown `$name` keeps its braces
+ *  - a `data.*` name keeps its braces too: it addresses the reserved data
+ *    namespace (issue #402), which only a scenario run's iteration can bind
  *  - precedence: environment > collection chain (leaf over root) > globals
  *  - only enabled definitions participate; a definition whose `enabled` is
  *    absent counts as enabled (D17), and a non-string stored `value` reads as
@@ -43,10 +45,12 @@
  *    whose configs differ only through `{{vars}}` cannot share a token)
  */
 
+#include <functional>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -72,6 +76,40 @@ const vayu::Environment& environment);
 bool is_dynamic_variable_name (const std::string& name);
 
 /**
+ * The reserved prefix for the data namespace: `{{data.column}}` addresses a
+ * column of the run's data set, never a variable from any scope.
+ */
+inline constexpr std::string_view DATA_NAMESPACE_PREFIX = "data.";
+
+/**
+ * True for a name inside the reserved `data.*` namespace (issue #402).
+ *
+ * The namespace sits *outside* the globals/collection/environment tier order
+ * rather than above it, which is what dissolves the precedence question: a
+ * variable someone happens to name `data.id` and the column `{{data.id}}` are
+ * different names, so they cannot collide. Composition therefore leaves such a
+ * token written as it stands - it has no value to substitute, because only a
+ * scenario run's iteration knows which row is bound
+ * (`core::bind_data_row`).
+ */
+bool is_data_variable_name (const std::string& name);
+
+/**
+ * Scan `{{name}}` occurrences left to right in one pass over @p input and
+ * replace each through @p resolve, which receives the trimmed name.
+ *
+ * `nullopt` leaves that occurrence written exactly as it stands; any string -
+ * including an empty one - replaces it. Nested braces never match, and a
+ * replacement is never rescanned, so a substituted value containing `{{b}}`
+ * stays literal.
+ *
+ * This is the one scanner: `resolve_template` and the scenario runner's data
+ * pass both drive it, so the two cannot disagree about what a token *is*.
+ */
+std::string substitute_tokens (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve);
+
+/**
  * Generate a value for a dynamic variable name (including the `$`), or
  * `nullopt` when the table does not have it - the caller leaves an unknown
  * `{{$typo}}` written as it stands (issue #186's contract).
@@ -87,10 +125,10 @@ std::optional<std::string> resolve_dynamic_variable (const std::string& name);
 const std::vector<std::string>& dynamic_variable_names ();
 
 /**
- * Substitute `{{name}}` occurrences in one pass. Scopes first, then the
- * dynamic-variable table; an ordinary unknown name becomes "", an unknown
- * `$name` keeps its braces. Nested braces never match and replacements are
- * never rescanned.
+ * Substitute `{{name}}` occurrences in one pass. The reserved `data.*`
+ * namespace first (kept verbatim), then scopes, then the dynamic-variable
+ * table; an ordinary unknown name becomes "", an unknown `$name` keeps its
+ * braces. Nested braces never match and replacements are never rescanned.
  */
 std::string resolve_template (const std::string& input, const VariableValues& vars);
 
