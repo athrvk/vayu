@@ -803,6 +803,20 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
   open request tab, and the delete-run patch walks that prefix as
   `InfiniteData`. Keeping the two shapes apart at the root is the rule - a
   prefix patch must never meet a cache shape it did not write.
+- **`useRecentDesignRunsQuery(requestId)`** - The last `RECENT_DESIGN_RUN_LIMIT`
+  (5) design runs of a request, newest first, behind the context bar's **Recent
+  sends** section. One filtered call (`?requestId=&type=design&limit=5`) and
+  **no report fetch**: each row carries its own `resultSummary` (`statusCode` +
+  `latencyMs`) from the engine, and the report path would load and JSON-parse
+  every result's `trace_data`, per row. Deliberately **unfiltered by status**,
+  unlike `useLastDesignRunQuery` - `status` takes one value, so filtering to
+  `completed` would hide every failed send, which is most of what a trend is
+  read for. Own key family (`queryKeys.runs.recentDesign(requestId)`) under the
+  `recentDesigns()` prefix, outside `runs.lists()`, for the same shape reason as
+  `lastDesign`. Not polled: the builder's send path, `DesignRunView`'s replay,
+  the MCP `run` event, `useDeleteRunMutation` and `useInvalidateRuns` (Settings'
+  *Clear run history*) each invalidate it, and a new run-writing path has to as
+  well or the section keeps showing the sends from before it.
 - **`useRunQuery(runId)`** / **`runDetailOptions(runId)`** - Fetch a single run
   (full `configSnapshot`). Same 404 contract as `requestDetailOptions`: only an
   `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it
@@ -830,7 +844,10 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
 - **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
   variant in place (drops the row, decrements the mirrored `total`) plus the
   all-runs cache, and evicts the run's report. The list updater shape-guards
-  (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces.
+  (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces. The
+  `recentDesigns()` family is **invalidated rather than patched**: a deleted run
+  gives no way back to the request its section is keyed by, and refetching five
+  rows beats carrying a run-to-request map to patch them.
 
 **Deleting a run closes its tabs.** Both delete flows - `HistoryList`'s row
 delete and Settings' *Clear run history* - call
@@ -893,6 +910,8 @@ runs: {
   lists: () => ["runs", "list"],
   list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q)
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
+  recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list
+  recentDesign: (requestId) => ["runs", "recentDesign", requestId],
   allRuns: () => ["runs", "allRuns"],
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -904,8 +923,9 @@ runs: {
 ```
 
 The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
-query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` sits under
-`runs.all` but deliberately **not** under `runs.lists()` - see below.
+query is keyed on is `list()` / `detail(id)`. `runs.lastDesign` and
+`runs.recentDesign` sit under `runs.all` but deliberately **not** under
+`runs.lists()` - see below.
 
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
@@ -946,7 +966,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
 | `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
-| `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` when the call named one | The history list polls, but Settings' count and a request tab's restored response do not |
+| `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` and `runs.recentDesign(requestId)` when the call named one | The history list polls, but Settings' count, a request tab's restored response and its Recent sends list do not |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
 

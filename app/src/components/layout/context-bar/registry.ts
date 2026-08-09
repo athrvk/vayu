@@ -26,6 +26,7 @@ import { CollectionContentsSection } from "./CollectionContentsSection";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
+import { RecentSendsSection } from "./RecentSendsSection";
 import { RunConfigSection } from "./RunConfigSection";
 import { RunSourceSection } from "./RunSourceSection";
 import { VariablesSection } from "./VariablesSection";
@@ -45,17 +46,18 @@ const onRunTab = (tab: Tab) => tab.type === "run" && tab.entityId !== null;
 
 /**
  * Order is the reading order on screen: what is in scope, who you are, what
- * rides along, and how to take it elsewhere.
+ * rides along, how to take it elsewhere, and what happened last time.
  *
- * There is deliberately no "last result" section. It would show the status,
- * duration and age of the last send - which is exactly what `ResponseStatusBar`
- * already paints in the response pane on the same screen, from the same
- * `StatusCodeBadge` and the same stored run (the builder restores that run into
- * the pane whenever nothing is in memory). A section with no state in which it
- * says something the pane does not say better is a duplicate, not a summary.
- * The version that would earn the slot is a *trend* across recent sends, which
- * the pane structurally cannot show - see #380 for that and the engine change
- * it needs first.
+ * There is still deliberately no "last result" section. It would show the
+ * status, duration and age of the last send - which is exactly what
+ * `ResponseStatusBar` already paints in the response pane on the same screen,
+ * from the same `StatusCodeBadge` and the same stored run (the builder restores
+ * that run into the pane whenever nothing is in memory). A section with no
+ * state in which it says something the pane does not say better is a duplicate,
+ * not a summary. `recent-sends` below is the version that earns the slot: a
+ * *trend* across several sends, which the pane structurally cannot show. It is
+ * a different section with a different id, and the guard against the old one
+ * stays.
  */
 export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	{
@@ -77,6 +79,12 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		title: "Environment",
 		appliesTo: onRequestTab,
 		Component: EnvironmentSection,
+	},
+	{
+		id: "recent-sends",
+		title: "Recent sends",
+		appliesTo: onRequestTab,
+		Component: RecentSendsSection,
 	},
 
 	/*

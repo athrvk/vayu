@@ -256,6 +256,42 @@ export function useLastDesignRunQuery(requestId: string | null | undefined) {
 	};
 }
 
+/**
+ * How many recent sends the context bar's trend shows. Small on purpose: the
+ * section answers "has this been failing, is it getting slower" at a glance,
+ * and History is where a longer list belongs.
+ */
+export const RECENT_DESIGN_RUN_LIMIT = 5;
+
+/**
+ * The last few design runs of one request, newest first - the rows behind the
+ * context bar's Recent sends section.
+ *
+ * **One list call and no report fetch.** Each row carries its own
+ * `resultSummary` (status code + latency) from the engine, which is the change
+ * that made this section affordable: the alternative was one `GET /runs/:id/report`
+ * per row, and that path loads and parses every result's `trace_data`.
+ *
+ * Deliberately **unfiltered by status**, unlike {@link useLastDesignRunQuery}:
+ * a failed send is exactly what a trend is for, and `status` takes one value,
+ * so filtering to `completed` would hide every failure. A run still in flight
+ * comes back too, with no `resultSummary`; the section renders its status
+ * rather than inventing an outcome for it.
+ */
+export function useRecentDesignRunsQuery(requestId: string | null | undefined) {
+	return useQuery({
+		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.recentDesigns`.
+		queryKey: queryKeys.runs.recentDesign(requestId ?? ""),
+		queryFn: () =>
+			apiService.listRuns({
+				requestId: requestId!,
+				type: "design",
+				limit: RECENT_DESIGN_RUN_LIMIT,
+			}),
+		enabled: !!requestId,
+	});
+}
+
 // ============ Run Mutations ============
 
 /**
@@ -332,13 +368,19 @@ export function useDeleteRunMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.runs.report(deletedId),
 			});
+			// The Recent sends caches are keyed by request, and a deleted run
+			// gives no way back to one - so the whole family is invalidated
+			// rather than patched. Refetching a five-row list is cheaper than
+			// carrying a run-to-request map just to patch it.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		},
 	});
 }
 
 /**
- * Invalidate every runs list (trigger refetch) - both the polled infinite list
- * and the all-runs Settings query.
+ * Invalidate every runs list (trigger refetch) - the polled infinite list, the
+ * all-runs Settings query, and the per-request Recent sends lists, which are
+ * their own family and would otherwise survive a cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();
@@ -346,5 +388,6 @@ export function useInvalidateRuns() {
 	return () => {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 	};
 }

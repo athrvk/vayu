@@ -317,7 +317,9 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
  * default 50, capped at 500; offset floored at 0); `filter` holds the already
  * validated type/status/requestId/q constraints. Rows carry the compact
  * `summary` (nine keys) instead of the full `config_snapshot`, wrapped in the
- * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86).
+ * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86); a
+ * design run's row also carries `resultSummary` (statusCode + latencyMs), which
+ * is what a reader would otherwise fetch a report per row to learn.
  *
  * Extracted so the envelope shape, clamping and filtering are covered without
  * an in-process HTTP server - see runs_route_test.cpp. Exceptions propagate to
@@ -328,9 +330,27 @@ const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
     const int64_t total = db.count_runs (filter);
     auto runs           = db.get_runs_paginated (filter, limit, offset);
 
+    // A design run is one exchange, so its outcome fits on its row and the page
+    // pays one extra query for all of them (get_design_result_outcomes). A load
+    // or scenario run's results are many and unbounded, so its row carries none
+    // - the same split GET /runs/:id draws with attach_design_result, and the
+    // reason `resultSummary` is the two numbers rather than the exchange.
+    std::vector<std::string> design_run_ids;
+    for (const auto& run : runs) {
+        if (run.type == vayu::RunType::Design) {
+            design_run_ids.push_back (run.id);
+        }
+    }
+    const auto outcomes = db.get_design_result_outcomes (design_run_ids);
+
     nlohmann::json data = nlohmann::json::array ();
     for (const auto& run : runs) {
-        data.push_back (serialize_run_row (run));
+        auto row = serialize_run_row (run);
+        if (const auto found = outcomes.find (run.id); found != outcomes.end ()) {
+            row["resultSummary"]["statusCode"] = found->second.status_code;
+            row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
+        }
+        data.push_back (std::move (row));
     }
 
     nlohmann::json response;
@@ -778,7 +798,8 @@ void register_run_routes (RouteContext& ctx) {
      * concurrency/comment/httpVersion/followRedirects/maxRedirects) instead of
      * the full config_snapshot, wrapped in the `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
-     * with it.
+     * with it. A design run's row also carries `resultSummary`
+     * (statusCode + latencyMs); see get_runs_response.
      *
      * Query params:
      * - limit: page size, default 50, capped at 500

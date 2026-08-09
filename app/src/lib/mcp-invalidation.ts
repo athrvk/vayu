@@ -95,10 +95,11 @@ const INVALIDATORS: Record<
 
 	/*
 	 * The history list polls on its own, so this is about immediacy there - but
-	 * `allRuns` (Settings' count) and `lastDesign` (a request tab's restored
-	 * response) are not polled at all, and an MCP-run request left both stale
-	 * indefinitely. Reports and time series are keyed per run and describe runs
-	 * that already existed, so they are deliberately not touched.
+	 * `allRuns` (Settings' count), `lastDesign` (a request tab's restored
+	 * response) and `recentDesign` (its Recent sends section) are not polled at
+	 * all, and an MCP-run request left them stale indefinitely. Reports and time
+	 * series are keyed per run and describe runs that already existed, so they
+	 * are deliberately not touched.
 	 */
 	run: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
@@ -106,6 +107,9 @@ const INVALIDATORS: Record<
 		if (event.requestId) {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.runs.lastDesign(event.requestId),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.runs.recentDesign(event.requestId),
 			});
 		}
 	},

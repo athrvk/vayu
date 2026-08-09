@@ -14,6 +14,8 @@
  * - `useLastDesignRunQuery` must ask the server for exactly one row
  *   (`requestId` + `type=design` + `status=completed` + `limit=1`) and trust
  *   its start_time DESC order - no download-the-whole-list-and-filter.
+ * - `useRecentDesignRunsQuery` asks the same way for the last few, and
+ *   deliberately without the status filter - see its case below.
  * - `useRunsQuery` is an infinite query over the `{data, pagination}` envelope:
  *   `fetchNextPage` advances the offset, and `flattenRunPages` de-dupes rows
  *   that a head insertion can momentarily place in two refetched pages.
@@ -25,6 +27,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
 	useLastDesignRunQuery,
+	useRecentDesignRunsQuery,
+	RECENT_DESIGN_RUN_LIMIT,
 	useRunsQuery,
 	flattenRunPages,
 	runsPollInterval,
@@ -110,6 +114,44 @@ describe("useLastDesignRunQuery", () => {
 	it("does not fetch when there is no request id", () => {
 		renderHook(() => useLastDesignRunQuery(null), { wrapper: wrapper(makeClient()) });
 		expect(listRuns).not.toHaveBeenCalled();
+	});
+});
+
+describe("useRecentDesignRunsQuery", () => {
+	it("asks for one page of this request's design runs, with no status filter", async () => {
+		// No `status`: it takes one value, so filtering to `completed` would
+		// hide every failed send - which is most of what a trend is read for.
+		listRuns.mockResolvedValue(page([runRow("run_9")]));
+
+		const { result } = renderHook(() => useRecentDesignRunsQuery("req_1"), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.data?.data[0].id).toBe("run_9"));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		expect(listRuns).toHaveBeenCalledWith({
+			requestId: "req_1",
+			type: "design",
+			limit: RECENT_DESIGN_RUN_LIMIT,
+		});
+	});
+
+	it("does not fetch when there is no request id", () => {
+		renderHook(() => useRecentDesignRunsQuery(null), { wrapper: wrapper(makeClient()) });
+		expect(listRuns).not.toHaveBeenCalled();
+	});
+
+	it("keys itself outside the infinite-list prefix, like the last-design lookup", () => {
+		// It caches a plain `RunListResponse`, and the delete-run patch walks
+		// everything under `lists()` as `InfiniteData` - the exact shape clash
+		// that made `lastDesign` its own family.
+		const lists = queryKeys.runs.lists() as readonly unknown[];
+		const recent = queryKeys.runs.recentDesign("req_1") as readonly unknown[];
+		expect(recent.slice(0, lists.length)).not.toEqual([...lists]);
+		// ...and under the prefix a delete *does* invalidate, so a deleted run
+		// cannot linger in a section keyed by a request the delete never saw.
+		const family = queryKeys.runs.recentDesigns() as readonly unknown[];
+		expect(recent.slice(0, family.length)).toEqual([...family]);
 	});
 });
 

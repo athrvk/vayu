@@ -602,6 +602,29 @@ export interface Run {
 	environmentId?: string | null;
 	/** The exchange, present only for a design run once it has completed or failed. */
 	result?: RunResult;
+	/**
+	 * What a **design run's** list row says about its exchange - see
+	 * {@link RunResultSummary}. Never present on a load or collection run's row,
+	 * and never on `GET /runs/:id`, which attaches the whole {@link result}.
+	 */
+	resultSummary?: RunResultSummary;
+}
+
+/**
+ * The outcome of a design run's single exchange, carried by its **list row**
+ * from the paginated `GET /runs` (`get_runs_response`,
+ * `engine/src/http/routes/runs.cpp`).
+ *
+ * Two numbers rather than the whole {@link RunResult}: that one carries the
+ * exchange's `trace` - request and response bodies included - which is a
+ * per-row cost a list cannot take. A row with no outcome recorded (a send still
+ * in flight, or a result whose write failed) has **no `resultSummary` at all**,
+ * which is not the same as `statusCode: 0` - the wire uses that for a request
+ * that never reached a server.
+ */
+export interface RunResultSummary {
+	statusCode: number;
+	latencyMs: number;
 }
 
 /** The `{data, pagination}` envelope the paginated `GET /runs` returns. */

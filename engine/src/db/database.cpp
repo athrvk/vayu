@@ -1216,6 +1216,32 @@ std::vector<Result> Database::get_results (const std::string& run_id) {
     return impl_->storage.get_all<Result> (where (c (&Result::run_id) == run_id));
 }
 
+std::unordered_map<std::string, DesignResultOutcome>
+Database::get_design_result_outcomes (const std::vector<std::string>& run_ids) {
+    std::unordered_map<std::string, DesignResultOutcome> outcomes;
+    if (run_ids.empty ()) {
+        return outcomes; // No statement at all rather than `IN ()`.
+    }
+
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // The design-run subquery is inside the statement on purpose: it is what
+    // makes "a load run's results are never read" a property of the query
+    // rather than of every caller passing the right ids. Three columns, so a
+    // page of rows costs no trace_data.
+    auto rows = impl_->storage.select (
+    columns (&Result::run_id, &Result::status_code, &Result::latency_ms),
+    where (in (&Result::run_id, run_ids) &&
+    in (&Result::run_id, select (&Run::id, where (c (&Run::type) == RunType::Design)))));
+
+    for (const auto& row : rows) {
+        // A design run has exactly one result; keep the first if a row ever
+        // duplicates rather than letting the last write win silently.
+        outcomes.emplace (std::get<0> (row),
+        DesignResultOutcome{ std::get<1> (row), std::get<2> (row) });
+    }
+    return outcomes;
+}
+
 // ============================================================================
 // Captured response bodies - read only by GET /runs/:id/samples
 // ============================================================================

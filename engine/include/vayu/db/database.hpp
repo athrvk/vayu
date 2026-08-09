@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <sqlite_orm/sqlite_orm.h>
@@ -32,6 +33,20 @@ struct RunFilter {
     std::optional<RunStatus> status;
     std::optional<std::string> request_id;
     std::optional<std::string> q;
+};
+
+/**
+ * The narrow outcome of a design run's single exchange: what came back and how
+ * long it took, and nothing else.
+ *
+ * Deliberately not `Result`. The paginated GET /runs list reads this for a
+ * whole page of rows at once, and a `Result` carries `trace_data` - the entire
+ * exchange, request and response bodies included - which would turn a list page
+ * into megabytes for a readout of two numbers.
+ */
+struct DesignResultOutcome {
+    int status_code;
+    double latency_ms;
 };
 
 /**
@@ -224,6 +239,27 @@ class Database {
     void add_results_batch (const std::vector<Result>& results,
     const std::vector<PendingResultBody>& bodies = {});
     std::vector<Result> get_results (const std::string& run_id);
+    /**
+     * @brief Status code and latency for a page of **design** runs, in one query.
+     *
+     * The paginated GET /runs list attaches each design run's outcome to its
+     * row (`resultSummary`), the way GET /runs/:id attaches the whole exchange.
+     * Three properties make that affordable, and all three are why this is not
+     * `get_results` in a loop:
+     *
+     * - Two columns, so `trace_data` is never read.
+     * - One statement for the whole page, so a page of 50 is one query.
+     * - The statement itself only ever matches results whose run is a design
+     *   run, so a load run's unbounded error rows cannot be pulled - by the
+     *   query, not by the caller remembering to filter (the guard at
+     *   GET /runs/:id is a caller-side one, and it has to be).
+     *
+     * A run with no result row yet (still running, or one whose write failed)
+     * is absent from the map rather than present with zeroes - "no outcome
+     * recorded" and "HTTP 0 in 0ms" are different answers.
+     */
+    std::unordered_map<std::string, DesignResultOutcome>
+    get_design_result_outcomes (const std::vector<std::string>& run_ids);
 
     // Captured response bodies for a run's sampled results. Deliberately not
     // reachable from get_results: the report path loads and parses every

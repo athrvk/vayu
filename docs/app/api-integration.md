@@ -274,6 +274,13 @@ and instead carries `summary.scenario`
 only; the history row reads it because a collection run has no `url` or `method`
 for the ordinary row to show.
 
+A **design run's** list row carries one thing the detail route says at greater
+length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single
+exchange. `GET /runs/:id` attaches the whole `result` instead, trace and bodies
+included, which is why the list carries the two numbers rather than that - and
+why the context bar's Recent sends section is one list call and no report fetch.
+Load and collection runs carry no `resultSummary`: their results are unbounded.
+
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
 unchanged - every send site composes first, so nothing is interpolated twice.
