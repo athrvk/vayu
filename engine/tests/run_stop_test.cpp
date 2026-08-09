@@ -205,7 +205,7 @@ class RunStopAccountingTest : public EventLoopStopTest {
     }
     void TearDown () override {
         db.reset ();
-        for (const char* suffix : { "", "-wal", "-shm" }) {
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
             std::filesystem::remove (std::string (DB_PATH) + suffix);
         }
         EventLoopStopTest::TearDown ();
@@ -339,7 +339,7 @@ class DeleteRunTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm" }) {
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
             std::filesystem::remove (std::string (DB_PATH) + suffix);
         }
     }

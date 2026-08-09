@@ -50,6 +50,15 @@ coverage/
 # DB
 db/vayu.*
 
+# Scratch databases the test suite writes into the working directory of the
+# test binary: build/ under `ctest --preset <os>-dev`, and engine/ itself when
+# the binary is run by hand from here. Every fixture names its file test_*.db;
+# SQLite leaves -wal/-shm beside it and Database's open-time backup leaves .bak.
+test_*.db
+test_*.db-wal
+test_*.db-shm
+test_*.db.bak
+
 
 # Logs
 logs/

@@ -59,7 +59,7 @@ class RunShutdownTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm" }) {
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
             std::filesystem::remove (std::string (DB_PATH) + suffix);
         }
     }

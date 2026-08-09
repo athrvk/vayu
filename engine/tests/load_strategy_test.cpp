@@ -36,14 +36,20 @@ class LoadStrategyTest : public ::testing::Test {
     protected:
     void SetUp () override {
         vayu::http::global_init ();
-        std::remove (TEST_DB_PATH.c_str ());
+        cleanup ();
         mock_server = std::make_unique<SlowMockServer> ();
     }
 
     void TearDown () override {
         mock_server.reset ();
         vayu::http::global_cleanup ();
-        std::remove (TEST_DB_PATH.c_str ());
+        cleanup ();
+    }
+
+    static void cleanup () {
+        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
+            std::remove ((TEST_DB_PATH + suffix).c_str ());
+        }
     }
 
     std::unique_ptr<SlowMockServer> mock_server;
