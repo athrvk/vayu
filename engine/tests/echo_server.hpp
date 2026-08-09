@@ -34,6 +34,15 @@ namespace vayu::tests {
 /// part it can read is a part a real server can read.
 class EchoServer {
     public:
+    /// What a multipart part declared about itself, beside its bytes. A file
+    /// part is only distinguishable from a text one by these - a part sent
+    /// without its filename arrives as an ordinary field.
+    struct Part {
+        std::string content;
+        std::string filename;
+        std::string content_type;
+    };
+
     EchoServer () {
         auto record = [this] (const httplib::Request& req, httplib::Response& res) {
             {
@@ -41,8 +50,16 @@ class EchoServer {
                 body_         = req.body;
                 content_type_ = req.get_header_value ("Content-Type");
                 parts_.clear ();
+                // httplib splits a multipart body in two: a part that declares
+                // a filename is a *file* and lands in `files`, everything else
+                // in `fields`. Both are parts of the same body here - which
+                // half a part lands in is itself an assertion the file tests
+                // make, through `Part::filename`.
                 for (const auto& [name, field] : req.form.fields) {
-                    parts_[name] = field.content;
+                    parts_[name] = Part{ field.content, "", "" };
+                }
+                for (const auto& [name, file] : req.form.files) {
+                    parts_[name] = Part{ file.content, file.filename, file.content_type };
                 }
             }
             res.set_content ("{}", "application/json");
@@ -77,7 +94,7 @@ class EchoServer {
     }
 
     /// The multipart parts, by field name. Empty for every other body.
-    std::map<std::string, std::string> parts () const {
+    std::map<std::string, Part> parts () const {
         std::lock_guard<std::mutex> lock (mutex_);
         return parts_;
     }
@@ -89,7 +106,7 @@ class EchoServer {
     mutable std::mutex mutex_;
     std::string body_;
     std::string content_type_;
-    std::map<std::string, std::string> parts_;
+    std::map<std::string, Part> parts_;
 };
 
 } // namespace vayu::tests

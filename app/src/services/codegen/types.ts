@@ -24,7 +24,16 @@
 export interface SnippetBody {
 	mode: string;
 	content?: string;
-	fields?: Array<{ key: string; value: string; enabled?: boolean }>;
+	fields?: Array<{
+		key: string;
+		value: string;
+		enabled?: boolean;
+		/** `form-data` file parts (issue #393): the path the engine uploads. */
+		type?: "text" | "file";
+		src?: string;
+		fileName?: string;
+		contentType?: string;
+	}>;
 }
 
 export interface SnippetRequest {

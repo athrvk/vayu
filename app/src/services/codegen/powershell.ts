@@ -85,6 +85,21 @@ export function generatePowerShell(
 		for (const [key, value] of prepared.body.fields) {
 			lines.push(`    ${powerShellQuote(key)} = ${powerShellQuote(value)}`);
 		}
+		if (prepared.body.kind === "form-data") {
+			for (const file of prepared.body.files) {
+				// `-Form` uploads a FileInfo as a file part; `Get-Item` is how the
+				// docs produce one. `-LiteralPath` so a path containing `[` or `]`
+				// is not read as a wildcard and silently matches nothing.
+				lines.push(
+					`    ${powerShellQuote(file.key)} = Get-Item -LiteralPath ${powerShellQuote(file.path)}`
+				);
+			}
+			if (prepared.body.files.length > 0) {
+				notes.push(
+					"Invoke-RestMethod names each file part after the file on disk and sets its Content-Type itself."
+				);
+			}
+		}
 		lines.push("}", "");
 	}
 

@@ -449,6 +449,9 @@ export default function BodyPanel() {
 					valuePlaceholder="Value"
 					showResolved={true}
 					allowDisable={true}
+					// Only multipart can carry a file: urlencoded's wire body is a
+					// string of pairs, and the engine refuses a file part there.
+					allowFiles={request.bodyMode === "form-data"}
 				/>
 			)}
 		</div>

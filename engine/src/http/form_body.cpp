@@ -9,6 +9,10 @@
 
 #include <curl/curl.h>
 
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+
 namespace vayu::http {
 
 namespace {
@@ -130,6 +134,53 @@ std::string implied_content_type (const Body& body) {
 
 bool content_type_is_engine_owned (const Body& body) {
     return body.mode == BodyMode::FormData && has_wire_body (body);
+}
+
+bool has_file_parts (const Body& body) {
+    if (body.mode != BodyMode::FormData) {
+        return false;
+    }
+    for (const auto& field : body.fields) {
+        if (field.enabled && field.type == FormFieldType::File) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<std::string> unsendable_file_part (const Body& body) {
+    if (!has_file_parts (body)) {
+        return std::nullopt;
+    }
+    for (const auto& field : enabled_fields (body.fields)) {
+        if (field.type != FormFieldType::File) {
+            continue;
+        }
+        const std::string name =
+        field.key.empty () ? std::string{ "(unnamed)" } : field.key;
+        if (field.src.empty ()) {
+            return "Form field '" + name + "' is a file part with no file selected - choose a file or remove the part";
+        }
+        // fopen rather than a stat: the question is whether *this* process can
+        // read the bytes, which permissions and a dangling symlink both answer
+        // differently from mere existence. A directory opens on some platforms
+        // and fails to read, so it is rejected on the read attempt below.
+        std::FILE* handle = std::fopen (field.src.c_str (), "rb");
+        if (!handle) {
+            return "Form field '" + name + "': cannot read file '" + field.src +
+            "' (" + std::strerror (errno) + ")";
+        }
+        char probe           = 0;
+        const size_t read    = std::fread (&probe, 1, 1, handle);
+        const bool readable  = read == 1 || std::feof (handle) != 0;
+        const int read_errno = errno;
+        std::fclose (handle);
+        if (!readable) {
+            return "Form field '" + name + "': cannot read file '" + field.src +
+            "' (" + std::strerror (read_errno) + ")";
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace vayu::http

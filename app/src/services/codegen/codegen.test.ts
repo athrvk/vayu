@@ -159,6 +159,88 @@ describe("form bodies", () => {
 		expect(notes.join(" ")).toContain("boundary");
 	});
 
+	/**
+	 * A file part is a path the engine opens at send time (issue #393), so every
+	 * generator has to say something about it: four of these clients can express
+	 * one, and `fetch` cannot open a local path at all. Before this, a file part
+	 * arrived here as a field with an empty value and each snippet posted a part
+	 * that was silently not the file.
+	 */
+	describe("a file part", () => {
+		const withFile: SnippetRequest = {
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "caption", value: "hi" },
+					{
+						key: "avatar",
+						value: "",
+						type: "file",
+						src: "/tmp/a.png",
+						fileName: "profile.png",
+						contentType: "image/png",
+					},
+				],
+			},
+		};
+
+		it("curl uploads it with -F, the inverse of what parseCurl reads", () => {
+			const { code } = generateCurl(withFile);
+			expect(code).toContain(`-F 'avatar=@/tmp/a.png;type=image/png;filename=profile.png'`);
+			// The text part still goes through --form-string, where a leading `@`
+			// is not a file reference.
+			expect(code).toContain(`--form-string 'caption=hi'`);
+		});
+
+		it("httpie uploads it with the file item and names what it cannot carry", () => {
+			const { code, notes } = generateHttpie(withFile);
+			expect(code).toContain("'avatar@/tmp/a.png'");
+			// HTTPie names the part after the file on disk, so a declared name that
+			// differs from the basename is stated rather than silently changed.
+			expect(notes.join(" ")).toContain("is sent as a.png");
+		});
+
+		it("python opens the file in the files dict", () => {
+			const { code } = generatePython(withFile);
+			expect(code).toContain(
+				`"avatar": ("profile.png", open("/tmp/a.png", "rb"), "image/png"),`
+			);
+			expect(code).toContain("files=files,");
+		});
+
+		it("powershell hands -Form a FileInfo", () => {
+			const { code } = generatePowerShell(withFile);
+			expect(code).toContain("'avatar' = Get-Item -LiteralPath '/tmp/a.png'");
+			expect(code).toContain("-Form $body");
+		});
+
+		it("fetch says it cannot read a path rather than dropping the part", () => {
+			const { code, notes } = generateFetch(withFile);
+			expect(code).toContain("/tmp/a.png");
+			expect(notes.join(" ")).toContain("avatar");
+			expect(notes.join(" ")).toContain("File or Blob");
+		});
+
+		it("hides a secret that appears inside the path", () => {
+			const { code, masked } = generateCurl(
+				{
+					...withFile,
+					body: {
+						mode: "form-data",
+						fields: [
+							{ key: "avatar", value: "", type: "file", src: "/home/s3cr3t/a.png" },
+						],
+					},
+				},
+				{ mask: true, secrets: ["s3cr3t"] }
+			);
+			expect(code).not.toContain("s3cr3t");
+			expect(masked).toBe(true);
+		});
+	});
+
 	it("urlencodes rather than raw-posting the x-www-form-urlencoded mode", () => {
 		const urlencoded: SnippetRequest = {
 			...GET,

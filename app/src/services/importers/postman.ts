@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HttpMethod, RequestAuth, RequestBody } from "@/types";
+import type { FormFieldEntry, HttpMethod, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
 	ImportOptions,
@@ -17,6 +17,7 @@ import type {
 import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
 import {
 	asString,
+	importedFilePart,
 	joinExec,
 	mapKeyValues,
 	mapPostmanAuth,
@@ -90,6 +91,39 @@ function graphqlContent(graphql: unknown): string {
 	return JSON.stringify(out);
 }
 
+/**
+ * Postman's `formdata` rows, files included.
+ *
+ * A file row names its path in `src`, which is **either a string or an array**:
+ * Postman lets one field carry several files. Each becomes its own part, since
+ * a multipart body repeats the field name rather than nesting - which is also
+ * what Postman sends. A file row with no usable `src` has nothing to point at,
+ * so it stays counted as skipped rather than importing a part that could never
+ * be sent.
+ */
+function formdataFields(rows: unknown, ctx: Ctx): FormFieldEntry[] {
+	const out: FormFieldEntry[] = [];
+	for (const row of asArray(rows)) {
+		if (prop(row, "type") !== "file") {
+			out.push(...mapKeyValues([row]));
+			continue;
+		}
+		const entry = mapKeyValues([row])[0];
+		const src = prop(row, "src");
+		const paths = (Array.isArray(src) ? src : [src])
+			.map((p) => (typeof p === "string" ? p : ""))
+			.filter((p) => p !== "");
+		if (!entry || paths.length === 0) {
+			ctx.skippedFileBody += 1;
+			continue;
+		}
+		for (const path of paths) {
+			out.push(importedFilePart(entry, path, asStr(prop(row, "contentType"))));
+		}
+	}
+	return out;
+}
+
 function pmBody(body: unknown, ctx: Ctx): RequestBody {
 	const node = asRecord(body);
 	if (!node || !node.mode) return { mode: "none" };
@@ -101,12 +135,8 @@ function pmBody(body: unknown, ctx: Ctx): RequestBody {
 			);
 		case "urlencoded":
 			return { mode: "x-www-form-urlencoded", fields: mapKeyValues(node.urlencoded) };
-		case "formdata": {
-			const formdata = asArray(node.formdata);
-			const textFields = formdata.filter((f) => prop(f, "type") !== "file");
-			ctx.skippedFileBody += formdata.length - textFields.length;
-			return { mode: "form-data", fields: mapKeyValues(textFields) };
-		}
+		case "formdata":
+			return { mode: "form-data", fields: formdataFields(node.formdata, ctx) };
 		case "graphql":
 			return { mode: "graphql", content: graphqlContent(node.graphql) };
 		case "file":

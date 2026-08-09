@@ -33,6 +33,7 @@ import { useCallback } from "react";
 import type { KeyValueItem, KeyValueEditorProps } from "../../types";
 import { withTrailingBlank } from "../../utils/key-value";
 import KeyValueRow from "./KeyValueRow";
+import type { PickedFile } from "./FilePartCell";
 
 // Re-exported here so a panel takes the table and its text form from one place.
 export { BulkEditor } from "./BulkEditor";
@@ -47,6 +48,7 @@ export default function KeyValueEditor({
 	allowDisable = true,
 	readOnly = false,
 	keySuggestions,
+	allowFiles = false,
 	canEdit = () => true, // Default: allow editing all items
 	canRemove = () => true, // Default: allow removing all items
 	canDisable = () => true, // Default: allow disabling all items
@@ -75,6 +77,73 @@ export default function KeyValueEditor({
 		[items, onChange, canEdit, canDisable]
 	);
 
+	/**
+	 * A pick writes the whole file part at once.
+	 *
+	 * Four `handleUpdate` calls would each rebuild the list from a stale
+	 * `items`, so only the last would survive - and it also has to *clear*
+	 * `unresolved`, since choosing the file here is the one event that proves
+	 * the path exists on this machine. Outside Electron there is no path to
+	 * take (`src: ""`), and that row stays unresolved: the filename alone is
+	 * not something the engine can open, and it says so rather than pretending.
+	 */
+	const handlePickFile = useCallback(
+		(id: string, file: PickedFile) => {
+			const target = items.find((item) => item.id === id);
+			if (!target || !canEdit(target, "value")) return;
+			onChange(
+				withTrailingBlank(
+					items.map((item) =>
+						item.id === id
+							? {
+									...item,
+									type: "file" as const,
+									value: "",
+									src: file.src,
+									fileName: file.fileName,
+									contentType: file.contentType || undefined,
+									unresolved: file.src ? undefined : true,
+								}
+							: item
+					)
+				)
+			);
+		},
+		[items, onChange, canEdit]
+	);
+
+	/**
+	 * Switching a row between text and file.
+	 *
+	 * Going back to text drops the file members rather than parking them: a
+	 * text row that still carried a `src` is a body the engine refuses (it
+	 * would mean a file the user pointed at and nothing sends), and keeping
+	 * them invisible is how that shape would arrive.
+	 */
+	const handleToggleKind = useCallback(
+		(id: string, kind: "text" | "file") => {
+			const target = items.find((item) => item.id === id);
+			if (!target || !canEdit(target, "value")) return;
+			onChange(
+				withTrailingBlank(
+					items.map((item) => {
+						if (item.id !== id) return item;
+						if (kind === "file") return { ...item, type: "file" as const, value: "" };
+						return {
+							...item,
+							type: "text" as const,
+							src: undefined,
+							fileName: undefined,
+							contentType: undefined,
+							unresolved: undefined,
+						};
+					})
+				)
+			);
+		},
+		[items, onChange, canEdit]
+	);
+
 	return (
 		<div className="space-y-1.5">
 			{/*
@@ -84,12 +153,19 @@ export default function KeyValueEditor({
 			 * below it. The placeholder is the one that has to name the thing,
 			 * because it is the one still visible once you start typing.
 			 */}
-			<div className="grid gap-2 grid-cols-[24px_1fr_1fr_20px_28px] px-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground">
+			<div
+				className={`grid gap-2 ${
+					allowFiles
+						? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
+						: "grid-cols-[24px_1fr_1fr_20px_28px]"
+				} px-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground`}
+			>
 				<div />
 				<div>Key</div>
 				<div>Value</div>
 				<div />
 				<div />
+				{allowFiles && <div />}
 			</div>
 
 			<div className="space-y-0.5">
@@ -103,7 +179,10 @@ export default function KeyValueEditor({
 						allowDisable={allowDisable}
 						readOnly={readOnly}
 						keySuggestions={keySuggestions}
+						allowFiles={allowFiles}
 						onUpdate={handleUpdate}
+						onPickFile={handlePickFile}
+						onToggleKind={handleToggleKind}
 						onRemove={handleRemove}
 						canRemove={canRemove(item)}
 						/*

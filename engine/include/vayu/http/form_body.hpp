@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,10 @@
  * Multipart is *not* encoded here: its body carries a boundary, which libcurl
  * generates as part of `curl_mime`, so the encoder and the Content-Type that
  * describes it stay together inside libcurl. See `content_type_is_engine_owned`.
+ *
+ * The one question a *file* part adds - "is this file actually sendable?" - is
+ * answered here too, because it has to be answered identically by both drivers
+ * and before either of them starts a transfer. See `unsendable_file_part`.
  */
 
 namespace vayu::http {
@@ -98,5 +103,30 @@ namespace vayu::http {
  * does for multipart (`services/codegen/prepare.ts`).
  */
 [[nodiscard]] bool content_type_is_engine_owned (const Body& body);
+
+/**
+ * @brief True when this body has at least one enabled file part.
+ *
+ * The cheap gate every hot-path caller checks first: a body without one pays
+ * nothing for the filesystem check below, which is one `stat` per transfer.
+ */
+[[nodiscard]] bool has_file_parts (const Body& body);
+
+/**
+ * @brief Why this body's file parts cannot be sent, if any of them cannot.
+ *
+ * A part with no `src` (a row authored but never pointed at a file, or one
+ * imported from another machine) and a part naming a file this process cannot
+ * read are both failures of the *request*, not of the transfer, and both are
+ * answered here rather than left to libcurl: curl reports an unreadable file as
+ * a generic read error naming nothing, and the failure mode this whole feature
+ * exists to remove is a part that disappears without a word.
+ *
+ * The returned message names the field and the path. `std::nullopt` means every
+ * enabled file part is readable *right now* - the file can still vanish between
+ * this check and the send, which libcurl then reports on its own terms; this is
+ * the loud, attributable answer for the case that is actually common.
+ */
+[[nodiscard]] std::optional<std::string> unsendable_file_part (const Body& body);
 
 } // namespace vayu::http

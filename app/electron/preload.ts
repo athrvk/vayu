@@ -11,7 +11,7 @@
 // script is loaded as CommonJS in the isolated world, so an ESM `import` here
 // fails at runtime. That is the boundary the rule below cannot see.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { contextBridge, ipcRenderer, webFrame } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
@@ -162,6 +162,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		logsPath: string;
 		dbPath: string;
 	}> => ipcRenderer.invoke("app:getPaths"),
+
+	// The absolute path of a `File` the user picked, for a multipart file part:
+	// the engine opens the file itself, so the renderer needs its path and never
+	// its bytes. `File.path` was removed in Electron 32 and `webUtils` is the
+	// replacement - it is synchronous and local to the preload, so this is not
+	// an IPC channel and grants the renderer no ability to name paths of its
+	// own. Empty when the object is not a real file (a drag-and-drop of remote
+	// content), which the caller reports rather than sending a phantom path.
+	getFilePath: (file: File): string => {
+		try {
+			return webUtils.getPathForFile(file);
+		} catch {
+			return "";
+		}
+	},
 
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.

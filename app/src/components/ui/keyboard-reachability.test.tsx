@@ -133,6 +133,8 @@ describe("key/value row delete button", () => {
 					allowDisable
 					readOnly={false}
 					onUpdate={() => {}}
+					onPickFile={() => {}}
+					onToggleKind={() => {}}
 					onRemove={() => {}}
 				/>
 			</RequestBuilderContext.Provider>

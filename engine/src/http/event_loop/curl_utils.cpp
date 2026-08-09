@@ -164,6 +164,16 @@ std::optional<Error> validate_transferable (const Request& request) {
         "HEAD requests cannot carry a body - remove the body or use GET";
         return error;
     }
+    // A file part that cannot be read is refused here rather than encoded and
+    // left to fail on the wire: libcurl would report a read error naming
+    // nothing, and an omitted part is the silence this feature exists to end.
+    // Costs one open per transfer, and only for a body that has a file part.
+    if (auto problem = vayu::http::unsendable_file_part (request.body)) {
+        Error error;
+        error.code    = ErrorCode::InternalError;
+        error.message = *problem;
+        return error;
+    }
     return std::nullopt;
 }
 
@@ -184,13 +194,32 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
     if (has_body && request.body.mode == BodyMode::FormData) {
         // Multipart: libcurl encodes the parts and generates the boundary, so
         // the body and the Content-Type that describes it cannot disagree.
-        // Text parts only - a file part needs a source the engine does not
-        // carry yet (issue #381 defers it explicitly).
+        //
+        // A file part is `curl_mime_filedata`, which means libcurl reads the
+        // file *during the transfer* - so a load run re-reads it once per
+        // iteration (the page cache absorbs that; slurping it into memory at
+        // plan time would trade a bounded read for an unbounded allocation and
+        // a snapshot that goes stale). Readability was already checked by
+        // `validate_transferable`, so a failure here is a file that vanished
+        // between the two, which libcurl reports on its own.
         mime = curl_mime_init (curl);
         for (const auto& field : vayu::http::enabled_fields (request.body.fields)) {
             curl_mimepart* part = curl_mime_addpart (mime);
             curl_mime_name (part, field.key.c_str ());
-            curl_mime_data (part, field.value.c_str (), field.value.size ());
+            if (field.type == FormFieldType::File) {
+                curl_mime_filedata (part, field.src.c_str ());
+                // filedata already declares the basename; an explicit name
+                // overrides it, which is how an imported part keeps the
+                // filename the exporting app recorded.
+                if (!field.file_name.empty ()) {
+                    curl_mime_filename (part, field.file_name.c_str ());
+                }
+            } else {
+                curl_mime_data (part, field.value.c_str (), field.value.size ());
+            }
+            if (!field.content_type.empty ()) {
+                curl_mime_type (part, field.content_type.c_str ());
+            }
         }
         // Like POSTFIELDS below, this switches curl's method to POST, so the
         // method is (re-)asserted afterwards.

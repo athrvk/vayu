@@ -38,7 +38,13 @@
  * older run saves fewer fields" visible rather than surprising.
  */
 
-import type { KeyValueEntry, Request, RequestBody, UpdateRequestRequest } from "@/types";
+import type {
+	FormFieldEntry,
+	KeyValueEntry,
+	Request,
+	RequestBody,
+	UpdateRequestRequest,
+} from "@/types";
 import type { KeyValueItem, RequestState } from "@/modules/request-builder/types";
 import { toKeyValueEntries } from "@/modules/request-builder/utils/key-value";
 import { SYSTEM_HEADER_KEYS } from "@/modules/request-builder/utils/system-headers";
@@ -182,7 +188,7 @@ export function isLegacyRun(seed: DesignRunSeed): boolean {
 	return seed.legacyPreScript !== undefined || seed.legacyPostScript !== undefined;
 }
 
-function items(value: KeyValueItem[] | undefined): KeyValueEntry[] {
+function items(value: KeyValueItem[] | undefined): FormFieldEntry[] {
 	return toKeyValueEntries(value ?? []);
 }
 

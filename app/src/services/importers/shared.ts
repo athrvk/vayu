@@ -5,8 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { KeyValueEntry, RequestAuth, RequestBody, VariableValue } from "@/types";
+import type {
+	FormFieldEntry,
+	KeyValueEntry,
+	RequestAuth,
+	RequestBody,
+	VariableValue,
+} from "@/types";
 import { asArray, asRecord, asStr, prop } from "@/lib/json-node";
+import { fileBaseName } from "@/lib/file-path";
 import { normalizeVars } from "./var-normalize";
 import { mapPostmanOAuth2 } from "./oauth2-import";
 import {
@@ -59,6 +66,35 @@ export function mapKeyValues(rows: unknown): KeyValueEntry[] {
 		});
 	}
 	return out;
+}
+
+/**
+ * An imported multipart part that uploads a file.
+ *
+ * The path is kept exactly as the source file wrote it, and the row is marked
+ * **unresolved**: it names a file on whoever's machine produced the export, so
+ * it will usually not exist here. That flag is what the editor's warning reads;
+ * picking a file clears it. Dropping the part instead - which both importers
+ * did until issue #393 - turned an upload into a request that silently posted
+ * nothing.
+ *
+ * `value` is cleared because a file part has no typed value; whatever the
+ * source stored in that slot (Insomnia leaves it "") is not sent.
+ */
+export function importedFilePart(
+	entry: KeyValueEntry,
+	src: string,
+	contentType?: string
+): FormFieldEntry {
+	return {
+		...entry,
+		value: "",
+		type: "file",
+		src,
+		...(fileBaseName(src) ? { fileName: fileBaseName(src) } : {}),
+		...(contentType ? { contentType } : {}),
+		unresolved: true,
+	};
 }
 
 /** Read a Postman auth detail array/object into a flat {key:value} map (handles v2.1 + v2.0). */

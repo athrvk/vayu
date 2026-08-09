@@ -25,7 +25,11 @@ import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
 import { parseImport } from "@/services/importers/factory";
-import { UnrecognisedFormatError, type ImportResult } from "@/services/importers/types";
+import {
+	UnrecognisedFormatError,
+	type ImportResult,
+	type SkippedItem,
+} from "@/services/importers/types";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import { MethodBadge } from "@/components/shared";
 
@@ -515,7 +519,7 @@ function PreviewView({
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
 					{[
-						...meta.skipped.map((s) => `${s.count} ${s.kind}`),
+						...meta.skipped.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
 						...(meta.nonExecutableAuth > 0
 							? [`${meta.nonExecutableAuth} auth not executed`]
 							: []),
@@ -528,6 +532,35 @@ function PreviewView({
 
 function varCountLabel(n: number): string {
 	return `${n} ${n === 1 ? "variable" : "variables"}`;
+}
+
+/**
+ * What a skipped item is, in words.
+ *
+ * The kinds are slugs - the line read "3 file_body · 1 malformed_item", which
+ * names the parser's counter rather than what the user lost. `file_body` in
+ * particular no longer means "a file part was dropped" (issue #393 imports
+ * those): it is now only a *whole-body* file - Postman's `file` mode, an
+ * Insomnia binary body - which Vayu has no shape for, so the wording has to say
+ * which of the two the reader is looking at.
+ */
+const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: string]> = {
+	websocket: ["WebSocket request", "WebSocket requests"],
+	grpc: ["gRPC request", "gRPC requests"],
+	api_spec: ["API spec document", "API spec documents"],
+	unit_test: ["unit-test block", "unit-test blocks"],
+	file_body: ["file body (not supported)", "file bodies (not supported)"],
+	malformed_item: ["malformed item", "malformed items"],
+	unsupported_method: ["unsupported method", "unsupported methods"],
+	malformed_spec: ["malformed spec section", "malformed spec sections"],
+};
+
+function skippedLabel(kind: SkippedItem["kind"], count: number): string {
+	const label = SKIPPED_LABELS[kind];
+	// A kind with no entry still says something rather than nothing - the union
+	// is exhaustive today, and a new kind must not silently print `undefined`.
+	if (!label) return kind;
+	return count === 1 ? label[0] : label[1];
 }
 
 function TreeNode({

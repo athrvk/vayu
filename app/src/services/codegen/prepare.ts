@@ -27,9 +27,18 @@ import {
 	type SnippetRequest,
 } from "./types";
 
+/** A multipart part that uploads a file - its path, and what it declares. */
+export interface PreparedFilePart {
+	key: string;
+	path: string;
+	fileName?: string;
+	contentType?: string;
+}
+
 export type PreparedBody =
 	| { kind: "raw"; content: string }
-	| { kind: "form-data" | "urlencoded"; fields: Array<[string, string]> };
+	| { kind: "form-data"; fields: Array<[string, string]>; files: PreparedFilePart[] }
+	| { kind: "urlencoded"; fields: Array<[string, string]> };
 
 export interface PreparedRequest {
 	method: string;
@@ -108,14 +117,45 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 	if (shape.mode === "none") return undefined;
 
 	if (shape.mode === "form-data" || shape.mode === "x-www-form-urlencoded") {
-		const fields = (shape.fields ?? [])
-			.filter((f) => f.enabled !== false)
+		const enabled = (shape.fields ?? []).filter((f) => f.enabled !== false);
+		// urlencoded has no file form on the wire, so a stray file row there is
+		// not a part any snippet could express - the engine refuses it too.
+		const isMultipart = shape.mode === "form-data";
+		const files: PreparedFilePart[] = isMultipart
+			? enabled
+					.filter((f) => f.type === "file")
+					.map((f) => ({
+						key: f.key,
+						path: f.src ?? "",
+						fileName: f.fileName,
+						contentType: f.contentType,
+					}))
+			: [];
+		const fields = enabled
+			.filter((f) => !(isMultipart && f.type === "file"))
 			.map((f): [string, string] => [f.key, f.value]);
-		if (fields.length === 0) return undefined;
-		return { kind: shape.mode === "form-data" ? "form-data" : "urlencoded", fields };
+		if (fields.length === 0 && files.length === 0) return undefined;
+		if (!isMultipart) return { kind: "urlencoded", fields };
+		return { kind: "form-data", fields, files };
 	}
 
 	return shape.content ? { kind: "raw", content: shape.content } : undefined;
+}
+
+/**
+ * The body with every string a secret could sit in run through the masker - a
+ * file part's path included, since a `{{token}}`-built path would otherwise
+ * print the secret the rest of the snippet hides.
+ */
+function maskedBody(body: PreparedBody, mask: (text: string) => string): PreparedBody {
+	if (body.kind === "raw") return { kind: "raw", content: mask(body.content) };
+	const fields = body.fields.map(([k, v]): [string, string] => [k, mask(v)]);
+	if (body.kind === "urlencoded") return { kind: "urlencoded", fields };
+	return {
+		kind: "form-data",
+		fields,
+		files: body.files.map((file) => ({ ...file, path: mask(file.path) })),
+	};
 }
 
 /**
@@ -177,14 +217,7 @@ export function prepareRequest(
 		url: masker.apply(url),
 		headers: headers.map(([k, v]): [string, string] => [k, masker.apply(v)]),
 		basicAuth: maskedBasic,
-		body: body
-			? body.kind === "raw"
-				? { kind: "raw", content: masker.apply(body.content) }
-				: {
-						kind: body.kind,
-						fields: body.fields.map(([k, v]): [string, string] => [k, masker.apply(v)]),
-					}
-			: undefined,
+		body: body ? maskedBody(body, masker.apply) : undefined,
 		notes,
 		masked: masker.wasUsed(),
 	};

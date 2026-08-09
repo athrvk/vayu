@@ -58,13 +58,37 @@ export interface VariableValue {
 }
 
 /**
+ * One part of a `form-data` body: typed text, or a file read from disk when the
+ * request is sent.
+ *
+ * A file part names a path in `src` instead of carrying bytes in `value` - the
+ * engine opens it at send time, so nothing here (and nothing in storage) holds
+ * the contents. `fileName` and `contentType` override what the part declares
+ * about itself; absent means the engine lets libcurl derive them from the path.
+ *
+ * `unresolved` marks a path this app never chose: an import carries the path
+ * from whoever exported the collection, and that path usually does not exist on
+ * this machine. It is what the editor's warning reads, and it is cleared the
+ * moment the user picks a file. `x-www-form-urlencoded` has no file form, so a
+ * file part is only ever valid under `form-data`.
+ */
+export interface FormFieldEntry extends KeyValueEntry {
+	type?: "text" | "file";
+	src?: string;
+	fileName?: string;
+	contentType?: string;
+	unresolved?: boolean;
+}
+
+/**
  * Request body as a discriminated union.
  * `body_type` on the domain `Request` is a denormalized mirror of `body.mode`.
  */
 export type RequestBody =
 	| { mode: "none" }
 	| { mode: "json" | "text" | "graphql"; content: string }
-	| { mode: "form-data" | "x-www-form-urlencoded"; fields: KeyValueEntry[] };
+	| { mode: "form-data"; fields: FormFieldEntry[] }
+	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] };
 
 /**
  * Auth configuration for requests.

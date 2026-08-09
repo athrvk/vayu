@@ -61,6 +61,16 @@ export function generateCurl(
 			// contained. `--form-string` takes the value literally, always.
 			args.push(`--form-string ${shellQuote(`${key}=${value}`)}`);
 		}
+		for (const file of prepared.body.files) {
+			// A file part is the one case where `-F` is right: `@path` is exactly
+			// what it means here, and the two modifiers carry the part's declared
+			// name and type. This is the inverse of what `parseCurl` reads back.
+			const modifiers = [
+				file.contentType ? `;type=${file.contentType}` : "",
+				file.fileName ? `;filename=${file.fileName}` : "",
+			].join("");
+			args.push(`-F ${shellQuote(`${file.key}=@${file.path}${modifiers}`)}`);
+		}
 	} else if (prepared.body?.kind === "urlencoded") {
 		for (const [key, value] of prepared.body.fields) {
 			// curl encodes only what follows the first `=`, so the field *name* has

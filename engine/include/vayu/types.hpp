@@ -124,15 +124,46 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 enum class BodyMode { None, Json, Text, Form, FormData, Binary, GraphQL };
 
 /**
+ * @brief What a `form-data` part carries: typed text, or a file from disk.
+ *
+ * `x-www-form-urlencoded` has no file form - its wire encoding is a string of
+ * pairs - so a `File` part is only ever valid under `BodyMode::FormData`, and
+ * `parse_form_fields` refuses it anywhere else.
+ */
+enum class FormFieldType { Text, File };
+
+/**
  * @brief One entry of a form body.
  *
  * Mirrors the renderer's `KeyValueEntry`: a disabled row is stored and
  * round-tripped, and dropped only when the body is put on the wire.
+ *
+ * A **file part** (`type == FormFieldType::File`) names a path in `src` rather
+ * than carrying bytes in `value`: libcurl reads the file at transfer time, so
+ * nothing here holds the contents. `file_name` and `content_type` override what
+ * the part declares about itself; empty means "let libcurl derive it" (the
+ * basename, and `application/octet-stream`). A file part whose `src` is empty
+ * or unreadable is refused before the transfer starts - see
+ * `vayu::http::unsendable_file_part`.
  */
 struct FormField {
+    FormField () = default;
+    /// A text part, which is what three positional values have always meant.
+    /// Written out rather than left to aggregate initialization so that adding
+    /// the file members below does not turn every `{key, value, enabled}` in
+    /// the tree into a `-Wmissing-field-initializers` warning.
+    FormField (std::string field_key, std::string field_value, bool is_enabled = true)
+    : key (std::move (field_key)), value (std::move (field_value)),
+      enabled (is_enabled) {
+    }
+
     std::string key;
     std::string value;
-    bool enabled = true;
+    bool enabled       = true;
+    FormFieldType type = FormFieldType::Text;
+    std::string src;          // file parts only - a path on this machine
+    std::string file_name;    // declared filename; empty = basename of `src`
+    std::string content_type; // per-part Content-Type; empty = libcurl's guess
 };
 
 /**

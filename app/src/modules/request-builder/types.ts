@@ -19,9 +19,9 @@ import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
+	FormFieldEntry,
 	HttpMethod,
 	HttpVersion,
-	KeyValueEntry,
 	RequestAuth,
 	ResolvedVariable,
 	ResponseTiming,
@@ -38,8 +38,13 @@ import type {
  * UI-layer extension of KeyValueEntry with a stable React key (`id`).
  * The `id` is ephemeral - it is NOT persisted to the backend.
  * Strip it with `toKeyValueEntries()` before sending to the API.
+ *
+ * It extends `FormFieldEntry` rather than `KeyValueEntry` because one table
+ * serves params, headers and both form modes, and only `form-data` rows carry
+ * the file members - all optional, so a header row is unchanged. The editor
+ * only offers them where `allowFiles` says it may.
  */
-export interface KeyValueItem extends KeyValueEntry {
+export interface KeyValueItem extends FormFieldEntry {
 	id: string;
 	system?: boolean; // true = row is managed by the system (e.g. X-Request-ID)
 }
@@ -365,6 +370,13 @@ export interface KeyValueEditorProps {
 	allowDisable?: boolean;
 	readOnly?: boolean;
 	keySuggestions?: string[];
+	/**
+	 * Offer each row a file part (`form-data` only). Off everywhere else,
+	 * because a header, a query param and a urlencoded field have no file form
+	 * on the wire - the engine refuses one - so the affordance would promise
+	 * something that cannot be sent.
+	 */
+	allowFiles?: boolean;
 	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
 	canRemove?: (item: KeyValueItem) => boolean;
 	canDisable?: (item: KeyValueItem) => boolean;

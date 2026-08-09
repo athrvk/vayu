@@ -70,6 +70,25 @@ export function generateFetch(
 		for (const [key, value] of prepared.body.fields) {
 			lines.push(`body.append(${jsString(key)}, ${jsString(value)});`);
 		}
+		if (prepared.body.kind === "form-data") {
+			for (const file of prepared.body.files) {
+				// A path is not something `fetch` can open - the browser has no
+				// filesystem, and Node needs `openAsBlob`. So the part is a
+				// commented placeholder naming the file, never a silently absent
+				// one, and the note says the snippet is incomplete without it.
+				lines.push(
+					`// ${file.key}: attach ${file.path} as a File/Blob before sending`,
+					`// body.append(${jsString(file.key)}, fileBlob, ${jsString(file.fileName || file.key)});`
+				);
+			}
+			if (prepared.body.files.length > 0) {
+				notes.push(
+					`fetch cannot read a local path: ${prepared.body.files
+						.map((f) => f.key)
+						.join(", ")} must be attached as a File or Blob.`
+				);
+			}
+		}
 		lines.push("");
 		bodyExpression = "body";
 	}

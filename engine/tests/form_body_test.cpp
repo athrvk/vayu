@@ -17,6 +17,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -41,6 +44,50 @@ Request form_request (const std::string& url, BodyMode mode, std::vector<FormFie
     request.body.fields = std::move (fields);
     return request;
 }
+
+/// A file part, spelled out - the aggregate has enough members now that a
+/// positional initializer at each call site would be unreadable.
+FormField file_field (std::string key,
+std::string src,
+std::string file_name    = {},
+std::string content_type = {}) {
+    FormField field;
+    field.key          = std::move (key);
+    field.type         = FormFieldType::File;
+    field.src          = std::move (src);
+    field.file_name    = std::move (file_name);
+    field.content_type = std::move (content_type);
+    return field;
+}
+
+/// A real file on disk for the duration of a test - a file part is only
+/// meaningful against one, and the engine reads it rather than being handed
+/// bytes.
+class TempFile {
+    public:
+    explicit TempFile (const std::string& name, const std::string& contents) {
+        static std::atomic<int> counter{ 0 };
+        path_ = std::filesystem::temp_directory_path () /
+        ("vayu-form-body-" + std::to_string (counter.fetch_add (1)) + "-" + name);
+        std::ofstream out (path_, std::ios::binary);
+        out << contents;
+    }
+
+    ~TempFile () {
+        std::error_code ignored;
+        std::filesystem::remove (path_, ignored);
+    }
+
+    TempFile (const TempFile&)            = delete;
+    TempFile& operator= (const TempFile&) = delete;
+
+    std::string path () const {
+        return path_.string ();
+    }
+
+    private:
+    std::filesystem::path path_;
+};
 
 class FormBodyWireTest : public ::testing::Test {
     protected:
@@ -119,8 +166,8 @@ TEST_F (FormBodyWireTest, MultipartBodyReachesTheWire) {
 
     const auto parts = server_->parts ();
     ASSERT_EQ (parts.size (), 2u);
-    EXPECT_EQ (parts.at ("name"), "ada");
-    EXPECT_EQ (parts.at ("note"), "hello world");
+    EXPECT_EQ (parts.at ("name").content, "ada");
+    EXPECT_EQ (parts.at ("note").content, "hello world");
 }
 
 TEST_F (FormBodyWireTest, MultipartOmitsDisabledFields) {
@@ -189,6 +236,96 @@ TEST_F (FormBodyWireTest, FormBodyKeepsANonPostMethod) {
 }
 
 // ---------------------------------------------------------------------------
+// File parts (issue #393). A part that names a file has to arrive as a file:
+// with its bytes, its filename, and - when the request states one - its own
+// Content-Type. Text and file parts mix in one body.
+// ---------------------------------------------------------------------------
+
+TEST_F (FormBodyWireTest, FilePartUploadsTheFileBesideTextParts) {
+    TempFile file ("avatar.png", "\x89PNG\r\n binary-ish bytes");
+
+    auto request = form_request (server_->url (), BodyMode::FormData,
+    { { "caption", "my avatar", true }, file_field ("avatar", file.path ()) });
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 200);
+
+    const auto parts = server_->parts ();
+    ASSERT_EQ (parts.size (), 2u);
+    EXPECT_EQ (parts.at ("caption").content, "my avatar");
+    EXPECT_EQ (parts.at ("avatar").content, "\x89PNG\r\n binary-ish bytes");
+    // The basename, which is what libcurl declares when nothing overrides it -
+    // a part with no filename is indistinguishable from a text field server-side.
+    EXPECT_EQ (parts.at ("avatar").filename,
+    std::filesystem::path (file.path ()).filename ().string ());
+    EXPECT_EQ (parts.at ("caption").filename, "");
+}
+
+TEST_F (FormBodyWireTest, FilePartHonoursAnExplicitNameAndContentType) {
+    TempFile file ("upload.bin", "id,name\n1,ada\n");
+
+    auto request = form_request (server_->url (), BodyMode::FormData,
+    { file_field ("dataset", file.path (), "people.csv", "text/csv") });
+
+    ASSERT_TRUE (client_->send (request).is_ok ());
+    const auto parts = server_->parts ();
+    ASSERT_EQ (parts.count ("dataset"), 1u);
+    // Not the basename on disk: an imported part keeps the filename the
+    // exporting app recorded, and a per-part type is the only way to say what
+    // the bytes are.
+    EXPECT_EQ (parts.at ("dataset").filename, "people.csv");
+    EXPECT_EQ (parts.at ("dataset").content_type, "text/csv");
+    EXPECT_EQ (parts.at ("dataset").content, "id,name\n1,ada\n");
+}
+
+TEST_F (FormBodyWireTest, ADisabledFilePartIsNeitherSentNorRead) {
+    // The row is off, so its (nonexistent) file must not even be opened - a
+    // disabled part that still refused the request would make the checkbox
+    // useless for exactly the row that needs it.
+    auto request = form_request (server_->url (), BodyMode::FormData,
+    { { "kept", "1", true }, file_field ("gone", "/nonexistent/vayu/file.png") });
+    request.body.fields[1].enabled = false;
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 200);
+    EXPECT_EQ (server_->parts ().count ("gone"), 0u);
+}
+
+// The failure the issue names: a file that is not there must fail the request
+// with a message naming it, never a part that quietly does not go out.
+// Mutation-check: drop the unsendable_file_part call from validate_transferable
+// and this reaches the server as a 200 with the part missing.
+TEST_F (FormBodyWireTest, AMissingFileFailsTheRequestByName) {
+    const std::string missing =
+    (std::filesystem::temp_directory_path () / "vayu-no-such-file.png").string ();
+    auto request = form_request (
+    server_->url (), BodyMode::FormData, { file_field ("avatar", missing) });
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ())
+    << "a refusal is a failed response, not an Error";
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_EQ (result.value ().error_code, ErrorCode::InternalError);
+    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
+    << result.value ().error_message;
+    EXPECT_NE (result.value ().error_message.find (missing), std::string::npos)
+    << result.value ().error_message;
+}
+
+TEST_F (FormBodyWireTest, AFilePartWithNoFileChosenFailsTheRequest) {
+    auto request =
+    form_request (server_->url (), BodyMode::FormData, { file_field ("avatar", "") });
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
+    << result.value ().error_message;
+}
+
+// ---------------------------------------------------------------------------
 // The wire, through the event loop - the driver every load run uses. Both
 // drivers share apply_method_and_body; this proves the sharing is real rather
 // than assumed, and that a load run sends the same bytes a Send does.
@@ -223,7 +360,46 @@ TEST_F (FormBodyWireTest, LoadDriverSendsTheSameMultipartBody) {
     EXPECT_TRUE (
     server_->content_type ().starts_with ("multipart/form-data; boundary="))
     << server_->content_type ();
-    EXPECT_EQ (server_->parts ().at ("name"), "ada");
+    EXPECT_EQ (server_->parts ().at ("name").content, "ada");
+}
+
+// A load run uploads the file too, and re-reads it per iteration (libcurl reads
+// the file during the transfer, so the second send carries the same bytes
+// rather than a consumed stream).
+TEST_F (FormBodyWireTest, LoadDriverUploadsAFilePartOnEveryIteration) {
+    TempFile file ("payload.txt", "iteration payload");
+    EventLoop loop;
+    loop.start ();
+
+    for (int i = 0; i < 2; ++i) {
+        auto request = form_request (server_->url (), BodyMode::FormData,
+        { file_field ("blob", file.path (), "payload.txt", "text/plain") });
+        auto result  = loop.submit_async (request).future.get ();
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        EXPECT_EQ (server_->parts ().at ("blob").content, "iteration payload");
+        EXPECT_EQ (server_->parts ().at ("blob").filename, "payload.txt");
+    }
+
+    loop.stop ();
+}
+
+// The refusal is the same on the load path - both drivers gate on
+// validate_transferable, and a load run that silently dropped the file would
+// measure a request nobody asked for.
+TEST_F (FormBodyWireTest, LoadDriverRefusesAMissingFileByName) {
+    EventLoop loop;
+    loop.start ();
+
+    auto request = form_request (server_->url (), BodyMode::FormData,
+    { file_field ("avatar", "/nonexistent/vayu/avatar.png") });
+    auto result  = loop.submit_async (request).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ())
+    << "a refusal is a failed response, not an Error";
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_NE (result.value ().error_message.find ("avatar"), std::string::npos)
+    << result.value ().error_message;
 }
 
 // The multipart body is attached to a pooled handle and freed with the
@@ -239,7 +415,7 @@ TEST_F (FormBodyWireTest, MultipartSurvivesHandleReuse) {
         { { "n", std::to_string (i), true } });
         auto result  = loop.submit_async (request).future.get ();
         ASSERT_TRUE (result.is_ok ()) << result.error ().message;
-        EXPECT_EQ (server_->parts ().at ("n"), std::to_string (i));
+        EXPECT_EQ (server_->parts ().at ("n").content, std::to_string (i));
     }
 
     loop.stop ();
@@ -333,6 +509,52 @@ TEST (FormBodyRules, HasWireBodyIsModeAware) {
     EXPECT_FALSE (has_wire_body (form));
     form.fields = { { "a", "1", true } };
     EXPECT_TRUE (has_wire_body (form));
+}
+
+TEST (FormBodyRules, FilePartDetectionIsModeAndRowAware) {
+    Body text;
+    text.mode   = BodyMode::FormData;
+    text.fields = { { "a", "1", true } };
+    EXPECT_FALSE (has_file_parts (text));
+    EXPECT_FALSE (unsendable_file_part (text).has_value ());
+
+    Body with_file;
+    with_file.mode = BodyMode::FormData;
+    FormField file;
+    file.key         = "avatar";
+    file.type        = FormFieldType::File;
+    file.src         = "/nonexistent/vayu/avatar.png";
+    with_file.fields = { file };
+    EXPECT_TRUE (has_file_parts (with_file));
+
+    // Off means off: neither counted nor opened.
+    with_file.fields[0].enabled = false;
+    EXPECT_FALSE (has_file_parts (with_file));
+    EXPECT_FALSE (unsendable_file_part (with_file).has_value ());
+}
+
+TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
+    Body body;
+    body.mode = BodyMode::FormData;
+    FormField file;
+    file.key    = "avatar";
+    file.type   = FormFieldType::File;
+    file.src    = "/nonexistent/vayu/avatar.png";
+    body.fields = { file };
+
+    const auto missing = unsendable_file_part (body);
+    ASSERT_TRUE (missing.has_value ());
+    EXPECT_NE (missing->find ("avatar"), std::string::npos) << *missing;
+    EXPECT_NE (missing->find ("/nonexistent/vayu/avatar.png"), std::string::npos)
+    << *missing;
+
+    // No file chosen at all is its own message - "cannot read ''" would point
+    // the user at a path that does not exist because they never named one.
+    body.fields[0].src = "";
+    const auto unset   = unsendable_file_part (body);
+    ASSERT_TRUE (unset.has_value ());
+    EXPECT_NE (unset->find ("avatar"), std::string::npos) << *unset;
+    EXPECT_NE (unset->find ("no file selected"), std::string::npos) << *unset;
 }
 
 TEST (FormBodyRules, ContentTypeOwnership) {
@@ -434,6 +656,100 @@ TEST (FormBodyPayload, RejectsAMalformedFormBody) {
     // would otherwise be read by nothing.
     message_for ({ { "mode", "json" }, { "content", "{}" },
     { "fields", vayu::json::Json::array () } });
+}
+
+TEST (FormBodyPayload, ParsesAFilePart) {
+    vayu::json::Json json = { { "method", "POST" }, { "url", "http://x" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        { { { "key", "caption" }, { "value", "hi" } },
+        { { "key", "avatar" }, { "type", "file" }, { "src", "/tmp/a.png" },
+        { "fileName", "profile.png" }, { "contentType", "image/png" } },
+        // The explicit text spelling is accepted and means what the default means.
+        { { "key", "note" }, { "value", "n" }, { "type", "text" } } } } } } };
+
+    auto parsed = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+
+    const auto& fields = parsed.value ().body.fields;
+    ASSERT_EQ (fields.size (), 3u);
+    EXPECT_EQ (fields[0].type, FormFieldType::Text);
+    EXPECT_EQ (fields[1].type, FormFieldType::File);
+    EXPECT_EQ (fields[1].src, "/tmp/a.png");
+    EXPECT_EQ (fields[1].file_name, "profile.png");
+    EXPECT_EQ (fields[1].content_type, "image/png");
+    EXPECT_EQ (fields[2].type, FormFieldType::Text);
+}
+
+// A file part that cannot be understood must not degrade into a text part
+// carrying nothing - that is the silent-drop failure this issue removes, one
+// layer earlier.
+TEST (FormBodyPayload, RejectsAMalformedFilePart) {
+    const auto message_for = [] (const vayu::json::Json& body) {
+        vayu::json::Json json = { { "method", "POST" }, { "url", "http://x" },
+            { "body", body } };
+        auto parsed           = vayu::json::deserialize_request (json);
+        EXPECT_TRUE (parsed.is_error ()) << body.dump ();
+        return parsed.is_error () ? parsed.error ().message : std::string{};
+    };
+
+    // An unknown or non-string discriminator.
+    EXPECT_NE (message_for ({ { "mode", "form-data" },
+                            { "fields", { { { "key", "a" }, { "type", "binary" } } } } })
+               .find ("type"),
+    std::string::npos);
+    message_for (
+    { { "mode", "form-data" }, { "fields", { { { "key", "a" }, { "type", 7 } } } } });
+
+    // urlencoded has no file form - its wire body is a string of pairs.
+    EXPECT_NE (
+    message_for ({ { "mode", "x-www-form-urlencoded" },
+                 { "fields", { { { "key", "a" }, { "type", "file" }, { "src", "/tmp/a" } } } } })
+    .find ("form-data"),
+    std::string::npos);
+
+    // A path on a text part: the caller pointed at a file nothing would send.
+    EXPECT_NE (message_for ({ { "mode", "form-data" },
+                            { "fields", { { { "key", "a" }, { "src", "/tmp/a" } } } } })
+               .find ("src"),
+    std::string::npos);
+
+    // The file members have to be strings.
+    message_for ({ { "mode", "form-data" },
+    { "fields", { { { "key", "a" }, { "type", "file" }, { "src", 3 } } } } });
+    message_for ({ { "mode", "form-data" },
+    { "fields",
+    { { { "key", "a" }, { "type", "file" }, { "src", "/tmp/a" }, { "fileName", 3 } } } } });
+}
+
+TEST (FormBodyPayload, RoundTripsAFilePartThroughSerialization) {
+    vayu::Request request;
+    request.method    = HttpMethod::POST;
+    request.url       = "http://x";
+    request.body.mode = BodyMode::FormData;
+    FormField file;
+    file.key            = "avatar";
+    file.type           = FormFieldType::File;
+    file.src            = "/tmp/a.png";
+    file.file_name      = "profile.png";
+    file.content_type   = "image/png";
+    request.body.fields = { { "caption", "hi", true }, file };
+
+    const vayu::json::Json json = vayu::json::serialize (request);
+    // A text row keeps exactly the three keys it always had - a stored body
+    // with no file part must serialize to the same bytes it used to.
+    EXPECT_EQ (json["body"]["fields"][0].size (), 3u);
+    EXPECT_EQ (json["body"]["fields"][1]["type"], "file");
+
+    auto parsed = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+    const auto& fields = parsed.value ().body.fields;
+    ASSERT_EQ (fields.size (), 2u);
+    EXPECT_EQ (fields[1].type, FormFieldType::File);
+    EXPECT_EQ (fields[1].src, "/tmp/a.png");
+    EXPECT_EQ (fields[1].file_name, "profile.png");
+    EXPECT_EQ (fields[1].content_type, "image/png");
 }
 
 TEST (FormBodyPayload, RoundTripsThroughSerialization) {

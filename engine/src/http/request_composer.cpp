@@ -567,13 +567,18 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
                         if (!field.is_object ()) {
                             continue;
                         }
-                        if (auto k = field.find ("key");
-                            k != field.end () && k->is_string ()) {
-                            *k = resolve_template (k->get<std::string> (), vars);
-                        }
-                        if (auto v = field.find ("value");
-                            v != field.end () && v->is_string ()) {
-                            *v = resolve_template (v->get<std::string> (), vars);
+                        // Every string a form field carries, including a file
+                        // part's path: a fixture directory is exactly the kind
+                        // of thing an environment variable holds, and an
+                        // unresolved `{{...}}` reaching the transfer would be
+                        // opened as a literal filename.
+                        for (const char* name :
+                        { "key", "value", "src", "fileName", "contentType" }) {
+                            if (auto entry = field.find (name);
+                                entry != field.end () && entry->is_string ()) {
+                                *entry =
+                                resolve_template (entry->get<std::string> (), vars);
+                            }
                         }
                     }
                 }

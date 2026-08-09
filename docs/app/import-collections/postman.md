@@ -114,9 +114,9 @@ Postman path-segment variables, host arrays, and port are not separately consume
 |---------------------|--------------------|-------|
 | `raw` | `rawBody(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)` |
-| `formdata` | `{ mode: "form-data", fields }` | only entries with `type !== "file"` kept; each dropped file entry adds to `ctx.skippedFileBody` |
+| `formdata` | `{ mode: "form-data", fields }` | text entries via `mapKeyValues`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. Only a file entry naming no path adds to `ctx.skippedFileBody`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
-| `file` | `{ mode: "none" }` | adds 1 to `ctx.skippedFileBody` |
+| `file` | `{ mode: "none" }` | adds 1 to `ctx.skippedFileBody` - a whole-body file is a shape Vayu has no mode for (unlike a multipart file *part*, which imports) |
 | anything else | `{ mode: "none" }` | |
 
 **GraphQL `variables` (`graphqlContent`):** Postman stores `body.graphql` as `{ query, variables }` where `variables` is the *text* of the Variables pane - a JSON-encoded string. Vayu's own `serializeGraphQLBody` writes `variables` as an object, and the engine sends the stored content verbatim, so the string is parsed here; embedding it as-is put `"variables": "{\"limit\": 10}"` on the wire (spec-invalid) and showed a double-escaped blob in the Variables pane. Two deliberate fallbacks: a variables string that is **not valid JSON is kept as text** (the pane text is the only copy of the user's work, so an import that deletes it is worse than one that shows it unparsed - and the pane now shows a string-typed `variables` verbatim rather than as an escaped blob, converting it to an object once an edit makes it parse), and an **empty or whitespace-only** string drops the key entirely, which is what Vayu writes for an empty pane. Every other key on the object rides along untouched.

@@ -17,12 +17,13 @@
  */
 
 import { memo } from "react";
-import { Trash2, Sigma } from "lucide-react";
+import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { KeyValueItem } from "../../types";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import VariableInput from "../VariableInput";
+import FilePartCell, { type PickedFile } from "./FilePartCell";
 
 interface KeyValueRowProps {
 	item: KeyValueItem;
@@ -32,7 +33,12 @@ interface KeyValueRowProps {
 	allowDisable: boolean;
 	readOnly: boolean;
 	keySuggestions?: string[];
+	/** `form-data` only: rows may be switched between a text value and a file. */
+	allowFiles?: boolean;
 	onUpdate: (id: string, field: keyof KeyValueItem, value: string | boolean) => void;
+	/** Sets the file members of one row together - a pick is one edit, not four. */
+	onPickFile: (id: string, file: PickedFile) => void;
+	onToggleKind: (id: string, kind: "text" | "file") => void;
 	onRemove: (id: string) => void;
 	canRemove?: boolean;
 	/** Per field - see the note at the call site in KeyValueEditor. */
@@ -86,7 +92,10 @@ function KeyValueRow({
 	allowDisable,
 	readOnly,
 	keySuggestions,
+	allowFiles = false,
 	onUpdate,
+	onPickFile,
+	onToggleKind,
 	onRemove,
 	canRemove = true,
 	canEditKey = true,
@@ -107,12 +116,18 @@ function KeyValueRow({
 	const keyReadOnly = readOnly || !canEditKey;
 	const valueReadOnly = readOnly || !canEditValue;
 	const isProtected = !canEditKey || !canEditValue || !canRemove || !canDisable;
+	// A row is a file part only where files are offered: a stored `type: "file"`
+	// on a urlencoded row (which the engine refuses) must not paint a picker
+	// that cannot be sent.
+	const isFileRow = allowFiles && item.type === "file";
 
 	return (
 		<div
 			className={cn(
 				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
-				"grid-cols-[24px_1fr_1fr_20px_28px]",
+				allowFiles
+					? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
+					: "grid-cols-[24px_1fr_1fr_20px_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
@@ -150,17 +165,63 @@ function KeyValueRow({
 				className="h-8"
 			/>
 
-			<VariableInput
-				value={item.value}
-				onChange={(v) => onUpdate(item.id, "value", v)}
-				placeholder={valuePlaceholder}
-				disabled={valueReadOnly || !item.enabled}
-				className="h-8"
-			/>
+			{isFileRow ? (
+				<FilePartCell
+					fileName={item.fileName}
+					src={item.src}
+					unresolved={item.unresolved}
+					disabled={valueReadOnly || !item.enabled}
+					onPick={(file) => onPickFile(item.id, file)}
+				/>
+			) : (
+				<VariableInput
+					value={item.value}
+					onChange={(v) => onUpdate(item.id, "value", v)}
+					placeholder={valuePlaceholder}
+					disabled={valueReadOnly || !item.enabled}
+					className="h-8"
+				/>
+			)}
+
+			{/*
+			 * The kind switch, in its own column so it never takes the resolved
+			 * marker's place - a form-data row can hold `{{vars}}` and want both.
+			 * Only `form-data` gets this column at all (`allowFiles`): headers,
+			 * params and urlencoded have no file form on the wire.
+			 */}
+			{allowFiles && (
+				<div className="flex items-center justify-center">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								size="icon"
+								variant="ghost"
+								onClick={() => onToggleKind(item.id, isFileRow ? "text" : "file")}
+								disabled={valueReadOnly || !item.enabled}
+								aria-label={
+									isFileRow
+										? `Send ${item.key || "this part"} as text`
+										: `Send ${item.key || "this part"} as a file`
+								}
+								className="h-6 w-5 rounded-md text-subtle-foreground hover:text-primary-text"
+							>
+								{isFileRow ? (
+									<Type className="h-3 w-3" />
+								) : (
+									<Paperclip className="h-3 w-3" />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="left">
+							{isFileRow ? "Send as text instead" : "Send a file instead"}
+						</TooltipContent>
+					</Tooltip>
+				</div>
+			)}
 
 			{/* Empty on an ordinary row; the column keeps the grid aligned. */}
 			<div className="flex items-center justify-center">
-				{showResolved && item.enabled && hasVariables && (
+				{showResolved && item.enabled && hasVariables && !isFileRow && (
 					<ResolvedPeek
 						label={item.key || "this row"}
 						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}

@@ -53,11 +53,25 @@ std::optional<Json> try_parse_body (const std::string& body) {
 
 namespace {
 
+// A text field serializes exactly as it always did - the file members are
+// emitted only for a file part, so a stored body that has none round-trips
+// byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
-        out.push_back (Json{ { "key", field.key }, { "value", field.value },
-        { "enabled", field.enabled } });
+        Json entry{ { "key", field.key }, { "value", field.value },
+            { "enabled", field.enabled } };
+        if (field.type == FormFieldType::File) {
+            entry["type"] = "file";
+            entry["src"]  = field.src;
+            if (!field.file_name.empty ()) {
+                entry["fileName"] = field.file_name;
+            }
+            if (!field.content_type.empty ()) {
+                entry["contentType"] = field.content_type;
+            }
+        }
+        out.push_back (std::move (entry));
     }
     return out;
 }
@@ -445,6 +459,48 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
         if (const auto enabled = item.find ("enabled");
             enabled != item.end () && enabled->is_boolean ()) {
             field.enabled = enabled->get<bool> ();
+        }
+
+        // The file half. `type` is the discriminator and the D17 leniency stops
+        // here: an unreadable spelling would silently become a text part
+        // carrying an empty value - a part that is on the wire and yet is not
+        // the file that was asked for - so anything but the two known values is
+        // refused, as is a file part in a mode whose wire form has no file.
+        if (const auto type = item.find ("type"); type != item.end () && !type->is_null ()) {
+            if (!type->is_string ()) {
+                return Error{ ErrorCode::InternalError, "Body field 'type' must be the string \"text\" or \"file\"" };
+            }
+            const auto spelling = type->get<std::string> ();
+            if (spelling == "file") {
+                field.type = FormFieldType::File;
+            } else if (spelling != "text") {
+                return Error{ ErrorCode::InternalError,
+                    "Body field 'type' must be \"text\" or \"file\", got \"" + spelling + "\"" };
+            }
+        }
+        if (field.type == FormFieldType::File && mode != BodyMode::FormData) {
+            return Error{ ErrorCode::InternalError,
+                "A file part is only valid in a 'form-data' body - "
+                "'x-www-form-urlencoded' has no file form" };
+        }
+        for (const auto& [name, target] :
+        { std::pair<const char*, std::string*>{ "src", &field.src },
+        { "fileName", &field.file_name }, { "contentType", &field.content_type } }) {
+            const auto entry = item.find (name);
+            if (entry == item.end () || entry->is_null ()) {
+                continue;
+            }
+            if (!entry->is_string ()) {
+                return Error{ ErrorCode::InternalError,
+                    std::string{ "Body field '" } + name + "' must be a string" };
+            }
+            *target = entry->get<std::string> ();
+        }
+        // A text part carrying a file's source is ambiguous in the one direction
+        // that matters: the caller pointed at a file and nothing would send it.
+        if (field.type == FormFieldType::Text && !field.src.empty ()) {
+            return Error{ ErrorCode::InternalError,
+                "Body field '" + field.key + "' has a 'src' but is not a file part - set 'type' to \"file\"" };
         }
         fields.push_back (std::move (field));
     }

@@ -389,6 +389,35 @@ TEST_F (RequestComposerTest, ResolvesVariablesInsideFormFields) {
     EXPECT_EQ (payload["body"]["fields"][1]["enabled"], false);
 }
 
+// A file part's path is as templatable as any other field - a fixture
+// directory is exactly what an environment variable holds - and an unresolved
+// `{{...}}` reaching the transfer would be opened as a literal filename and
+// refused. The declared filename and per-part Content-Type resolve with it.
+TEST_F (RequestComposerTest, ResolvesVariablesInsideAFilePart) {
+    seed_environment ("env_1", R"({"fixtures":{"value":"/data/fixtures","enabled":true},
+                                   "ext":{"value":"png","enabled":true}})");
+
+    const json body = {
+        { "request",
+        { { "method", "post" }, { "url", "https://x.test/upload" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "avatar" }, { "type", "file" },
+        { "src", "{{fixtures}}/avatar.{{ext}}" }, { "fileName", "avatar.{{ext}}" },
+        { "contentType", "image/{{ext}}" }, { "enabled", true } } }) } } } } },
+        { "environmentId", "env_1" }
+    };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    const auto& field = payload["body"]["fields"][0];
+    EXPECT_EQ (field["src"], "/data/fixtures/avatar.png");
+    EXPECT_EQ (field["fileName"], "avatar.png");
+    EXPECT_EQ (field["contentType"], "image/png");
+    EXPECT_EQ (field["type"], "file");
+}
+
 TEST_F (RequestComposerTest, InlineOverlayReplacesStoredFieldsAndStillResolves) {
     seed_collection ("col", "", R"({"host":{"value":"stored.test","enabled":true}})");
     auto r = make_request ("req_1", "col");
