@@ -16,7 +16,13 @@ import type {
 	SkippedItem,
 } from "./types";
 import { asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
-import { asString, importedFilePart, mapKeyValues, withRequiredContentType } from "./shared";
+import {
+	asString,
+	importedFilePart,
+	mapKeyValues,
+	unattachedFileParts,
+	withRequiredContentType,
+} from "./shared";
 import { toGraphQLEnvelope } from "@/lib/graphql/graphql-body";
 import { normalizeVars } from "./var-normalize";
 import { mapInsomniaOAuth2 } from "./oauth2-import";
@@ -395,6 +401,7 @@ export class InsomniaV4Parser implements ImportParser {
 				globalCount: 0,
 				skipped,
 				nonExecutableAuth: ctx.nonExec,
+				unattachedFileParts: unattachedFileParts(collections),
 			},
 		};
 	}

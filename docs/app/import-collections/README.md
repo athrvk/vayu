@@ -161,7 +161,14 @@ app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
-`environmentCount`, `globalCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`.
+`environmentCount`, `globalCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`,
+`unattachedFileParts: number`.
+
+`unattachedFileParts` counts form-data file rows the import produced with no file attached -
+an OpenAPI spec documents *that* a field is an upload, never *which* file, so those rows
+import complete-but-empty and the user picks the file. Every parser gets it from
+`unattachedFileParts(collections)` in `shared.ts`, which reads the finished drafts rather
+than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec", count }`.
@@ -304,10 +311,12 @@ used to build request-body stubs. It is **bounded and resilient**, not a naive o
   `false`, `null` → `null`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands
   `properties` recursively (else `{}`).
 
-`schemaFieldNames(schema, resolveRef)` in the same module returns the sampled stub's own keys
-(`[]` when it samples to a non-object). It is how the v3 parser reads urlencoded / multipart
-field names, so a form schema behind `$ref` or `allOf` resolves as far as a JSON body does
-instead of reading a `properties` key that isn't there.
+`schemaFormFields(schema, resolveRef)` in the same module returns the sampled stub's own keys
+(`[]` when it samples to a non-object), each flagged `file` or not. It is how the v3 parser
+reads urlencoded / multipart field names, so a form schema behind `$ref` or `allOf` resolves
+as far as a JSON body does instead of reading a `properties` key that isn't there. The `file`
+flag comes from the property schema (`format: binary`, or an array of it) rather than the
+sampled value, which flattens a binary string to `""` and cannot be told from a text field.
 
 (`schema-sampler.ts`)
 
@@ -322,6 +331,7 @@ instead of reading a `properties` key that isn't there.
    **most-specific-first** position so its `detect()` doesn't shadow (or get shadowed by)
    another format.
 4. Populate `meta.skipped` / `meta.nonExecutableAuth` for anything Vayu can't execute or
-   represent, so the Preview can warn the user.
+   represent, and `meta.unattachedFileParts` (via the `shared.ts` helper) for uploads the
+   user still has to attach, so the Preview can warn the user.
 5. Add a `docs/app/import-collections/<format>.md` following the structure of the existing
    per-format docs, and a row in the table at the top of this file.

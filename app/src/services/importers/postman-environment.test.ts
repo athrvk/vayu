@@ -89,6 +89,7 @@ describe("PostmanEnvironmentParser", () => {
 				globalCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
+				unattachedFileParts: 0,
 			});
 		});
 
@@ -144,6 +145,7 @@ describe("PostmanEnvironmentParser", () => {
 				globalCount: 4,
 				skipped: [],
 				nonExecutableAuth: 0,
+				unattachedFileParts: 0,
 			});
 		});
 

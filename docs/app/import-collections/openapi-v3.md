@@ -109,13 +109,23 @@ Both lists go through `SkipTally.params` (`openapi-shared.ts`) first. `parameter
 |----------------------|--------------------|-------------------------|
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
 | `text/plain` | `{ mode: "text", content: "" }` | empty string (the schema is not sampled for text bodies) |
-| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field name from `schemaFieldNames(schema)` |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded |
+| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
 | no `content`, or none of the above | `{ mode: "none" }` | |
 
-JSON is preferred: `findJsonMedia` is checked first and takes precedence over text/form variants. The `x-www-form-urlencoded` / `multipart/form-data` branch only reads property **names** - property schemas, `required`, and nested structure are not sampled into form fields.
+### File parts
 
-**Form field names resolve `$ref` and `allOf`, exactly as far as a JSON body does.** `schemaFieldNames(schema, resolveRef)` (`schema-sampler.ts`) samples the schema and returns the stub's own keys, rather than reading `schema.properties` directly. That key does not exist on a schema written as `{"$ref": "#/components/schemas/TokenRequest"}` or as an `allOf` - the shape generators emit - which used to yield the right body mode with an **empty** field list and no warning anywhere. Consequences of going through the sampler: composition follows the **first** branch only (the same rule JSON bodies get, not an `allOf` merge), and a schema that samples to a non-object (a scalar, an array, or an `example` that is not an object) contributes no field names.
+A multipart property declared `format: "binary"` - OpenAPI 3's only spelling of "a file" - imports as a **file part**: `{ key, value: "", enabled: true, type: "file", src: "" }`. `type: array` of binary items (the multi-file field) maps to one file row, since Vayu's model is one file per row; one file the user can attach beats a text row that sends nothing. Until this landed both became ordinary empty-value text rows, so an operation documenting an upload produced a request that looked healthy and sent nothing.
+
+The part carries **no path**: a spec documents *that* a field is an upload, never *which* file it uploads. The user picks the file in the request editor, and the engine refuses the send by field name until they do (`Form field 'avatar' is a file part with no file selected`). The row is deliberately **not** marked `unresolved` - that flag warns that a path came from somewhere else and was never verified here, and there is no path to warn about; the row reads "Choose file", exactly like one a user turned into a file part by hand.
+
+Only under `multipart/form-data`. `application/x-www-form-urlencoded` has no file form on the wire, so a `format: binary` property there is a spec that cannot mean what it says; the field stays a text row rather than becoming a part the body could never carry.
+
+The import preview counts these as `N file parts need a file`, beside the skip counters, so a spec full of uploads says so before the import rather than one failed send at a time.
+
+JSON is preferred: `findJsonMedia` is checked first and takes precedence over text/form variants. The `x-www-form-urlencoded` / `multipart/form-data` branch reads property **names**, plus each property's `format` to tell an upload from a text field - `required`, defaults and nested structure are not sampled into form fields.
+
+**Form field names resolve `$ref` and `allOf`, exactly as far as a JSON body does.** `schemaFormFields(schema, resolveRef)` (`schema-sampler.ts`) samples the schema and returns the stub's own keys, rather than reading `schema.properties` directly. That key does not exist on a schema written as `{"$ref": "#/components/schemas/TokenRequest"}` or as an `allOf` - the shape generators emit - which used to yield the right body mode with an **empty** field list and no warning anywhere. Consequences of going through the sampler: composition follows the **first** branch only (the same rule JSON bodies get, not an `allOf` merge), and a schema that samples to a non-object (a scalar, an array, or an `example` that is not an object) contributes no field names.
 
 ### `sampleSchema` (schema → stub value)
 
@@ -142,7 +152,7 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
   The `object`/default branch is the same fallback used for untyped schemas - a node with `properties` but no `type` is still expanded.
 
-`schemaFieldNames(schema, resolveRef)` is the form-body wrapper over this: it samples the schema and returns `Object.keys()` of the result (`[]` for a non-object sample). See [Request body generation](#request-body-generation).
+`schemaFormFields(schema, resolveRef)` is the form-body wrapper over this: it samples the schema, returns `Object.keys()` of the result (`[]` for a non-object sample), and marks each field text or file. The file flag is read off the **property schema**, not the sampled value: the sampler turns a `format: binary` string into `""`, which no longer says anything about the field. See [Request body generation](#request-body-generation).
 
 > Older notes claimed sampling was "one level only" and "`oneOf` → `{}`". That is **not** what the code does: sampling recurses to depth 6, resolves and cycle-guards `$ref`s, honors `example`, and follows the first branch of `oneOf`/`anyOf`/`allOf`.
 
@@ -182,9 +192,10 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
-- **Form-field property schemas:** only field **names** are imported; `required`, types, and nested structure are not.
+- **Form-field property schemas:** only field **names** and whether the field is a file (`format: binary`) are imported; `required`, other types, and nested structure are not.
+- **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and nothing is counted - unlike a multipart file part, which imports (see [File parts](#file-parts)).
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), and `skipped` from the `SkipTally`:
+`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
 
 | `SkippedItem.kind` | Counted when |
 |--------------------|--------------|
@@ -199,10 +210,11 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 |--------|--------|--------------------|
 | [`normalizeVars`](./README.md#normalizevars) | `var-normalize.ts` | convert OpenAPI `{param}` path templates → Vayu `{{param}}` in request URLs |
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from a request `schema` (bounded, ref-resolving) |
-| `schemaFieldNames` | `schema-sampler.ts` | field names for an urlencoded / multipart body, resolved through the sampler |
+| `schemaFormFields` | `schema-sampler.ts` | field names for an urlencoded / multipart body, resolved through the sampler, each flagged text or file |
+| `importedFilePart`, `unattachedFileParts` | `shared.ts` | build a file form row; count the rows that still need a file, for `meta` |
 | `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
 
-This parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
+This parser does **not** use the Postman/Insomnia-shaped helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 
 ## Related
 

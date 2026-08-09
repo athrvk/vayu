@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
+import type { FormFieldEntry, HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
 	ImportOptions,
@@ -18,6 +18,7 @@ import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
 import { resolvePathItem, SkipTally } from "./openapi-shared";
+import { importedFilePart, unattachedFileParts } from "./shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -140,6 +141,7 @@ export class OpenApiV2Parser implements ImportParser {
 				globalCount: 0,
 				skipped: tally.items(),
 				nonExecutableAuth: 0,
+				unattachedFileParts: unattachedFileParts([root]),
 			},
 		};
 	}
@@ -157,7 +159,7 @@ function buildSwaggerOp(
 	const params: KeyValueEntry[] = [];
 	const headers: KeyValueEntry[] = [];
 	let body: RequestBody = { mode: "none" };
-	const formFields: KeyValueEntry[] = [];
+	const formFields: FormFieldEntry[] = [];
 
 	const consumes = (Array.isArray(op.consumes) ? op.consumes : asArray(spec.consumes)).map(
 		(c) => asStr(c) ?? ""
@@ -211,12 +213,23 @@ function buildSwaggerOp(
 					: { mode: "text", content: JSON.stringify(sample, null, 2) };
 				break;
 			}
-			case "formData":
-				formFields.push({ key: name, value: "", enabled: true });
+			case "formData": {
+				const entry = { key: name, value: "", enabled: true };
+				// A spec names the upload, never the file - the part imports with no
+				// path and the user attaches one. Left as a text row (what this did
+				// until #425) it looked like a healthy field and sent nothing.
+				formFields.push(param.type === "file" ? importedFilePart(entry, "") : entry);
 				break;
+			}
 		}
 	}
-	if (formFields.length > 0) body = { mode: formMode, fields: formFields };
+	if (formFields.length > 0) {
+		// A file part has no urlencoded wire form, so a spec that declares one under
+		// a urlencoded-only `consumes` contradicts itself; multipart is the half of
+		// that contradiction which can carry the field.
+		const mode = formFields.some((f) => f.type === "file") ? "form-data" : formMode;
+		body = { mode, fields: formFields };
+	}
 
 	return {
 		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,

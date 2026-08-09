@@ -78,6 +78,7 @@ const COLLECTION_ONLY: ImportResult = {
 		globalCount: 0,
 		skipped: [],
 		nonExecutableAuth: 0,
+		unattachedFileParts: 0,
 	},
 };
 
@@ -114,6 +115,7 @@ describe("useImportMutation", () => {
 				globalCount: 1,
 				skipped: [],
 				nonExecutableAuth: 0,
+				unattachedFileParts: 0,
 			},
 		};
 		await result.current.mutateAsync({

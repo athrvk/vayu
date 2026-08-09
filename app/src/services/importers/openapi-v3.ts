@@ -14,10 +14,11 @@ import type {
 	RequestDraft,
 } from "./types";
 import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
-import { sampleSchema, schemaFieldNames } from "./schema-sampler";
+import { sampleSchema, schemaFormFields } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 import { resolvePathItem, SkipTally } from "./openapi-shared";
+import { importedFilePart, unattachedFileParts } from "./shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -126,6 +127,7 @@ export class OpenApiV3Parser implements ImportParser {
 				globalCount: 0,
 				skipped: tally.items(),
 				nonExecutableAuth: 0,
+				unattachedFileParts: unattachedFileParts([root]),
 			},
 		};
 	}
@@ -222,15 +224,17 @@ function buildBody(requestBody: unknown, resolveRef: (r: string) => unknown): Re
 	if (content["text/plain"]) return { mode: "text", content: "" };
 	for (const ct of ["application/x-www-form-urlencoded", "multipart/form-data"] as const) {
 		if (content[ct]) {
-			const fields = schemaFieldNames(prop(content[ct], "schema"), resolveRef).map((k) => ({
-				key: k,
-				value: "",
-				enabled: true,
-			}));
-			return {
-				mode: ct === "multipart/form-data" ? "form-data" : "x-www-form-urlencoded",
-				fields,
-			};
+			const multipart = ct === "multipart/form-data";
+			const fields = schemaFormFields(prop(content[ct], "schema"), resolveRef).map((f) => {
+				const entry = { key: f.name, value: "", enabled: true };
+				// A spec names the upload, never the file - the part imports with no
+				// path and the user attaches one. Left as a text row (what this did
+				// until #425) it looked like a healthy field and sent nothing.
+				// Only under multipart: urlencoded has no file form on the wire, so a
+				// `format: binary` there is a spec that cannot mean what it says.
+				return multipart && f.file ? importedFilePart(entry, "") : entry;
+			});
+			return { mode: multipart ? "form-data" : "x-www-form-urlencoded", fields };
 		}
 	}
 	return { mode: "none" };

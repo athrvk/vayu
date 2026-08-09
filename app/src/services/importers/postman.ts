@@ -23,6 +23,7 @@ import {
 	mapPostmanAuth,
 	rawBody,
 	toVarRecord,
+	unattachedFileParts,
 	withRequiredContentType,
 } from "./shared";
 import { normalizeVars } from "./var-normalize";
@@ -324,6 +325,7 @@ function parsePostman(parsed: unknown, opts: ImportOptions, formatName: string):
 			globalCount: 0,
 			skipped,
 			nonExecutableAuth: ctx.nonExecutableAuth,
+			unattachedFileParts: unattachedFileParts([root]),
 		},
 	};
 }

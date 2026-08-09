@@ -515,13 +515,26 @@ function PreviewView({
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
-			{(meta.skipped.length > 0 || meta.nonExecutableAuth > 0) && (
+			{(meta.skipped.length > 0 ||
+				meta.nonExecutableAuth > 0 ||
+				meta.unattachedFileParts > 0) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
 					{[
 						...meta.skipped.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
 						...(meta.nonExecutableAuth > 0
 							? [`${meta.nonExecutableAuth} auth not executed`]
+							: []),
+						// An OpenAPI upload imports as a file row with nothing attached -
+						// the user has to pick the file before the request can be sent, so
+						// the preview says how many are waiting rather than letting them be
+						// discovered one 400 at a time.
+						...(meta.unattachedFileParts > 0
+							? [
+									`${meta.unattachedFileParts} file ${
+										meta.unattachedFileParts === 1 ? "part needs" : "parts need"
+									} a file`,
+								]
 							: []),
 					].join(" · ")}
 				</p>

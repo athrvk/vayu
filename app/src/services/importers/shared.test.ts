@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { toVarRecord, mapPostmanAuth, rawBody, joinExec, asString, mapKeyValues } from "./shared";
+import type { CollectionDraft } from "./types";
+import {
+	toVarRecord,
+	mapPostmanAuth,
+	rawBody,
+	joinExec,
+	asString,
+	mapKeyValues,
+	importedFilePart,
+	unattachedFileParts,
+} from "./shared";
 
 describe("toVarRecord", () => {
 	it("builds a VariableValue record, stringifying values, defaulting enabled", () => {
@@ -135,6 +145,77 @@ describe("asString", () => {
 		expect(asString(true)).toBe("true");
 		expect(asString({ a: 1 })).toBe('{"a":1}');
 		expect(asString([1, 2])).toBe("[1,2]");
+	});
+});
+
+describe("importedFilePart", () => {
+	const entry = { key: "avatar", value: "leftover", enabled: true };
+
+	it("marks a part that carries a path as unresolved, and names the file", () => {
+		expect(importedFilePart(entry, "/home/other/avatar.png", "image/png")).toEqual({
+			key: "avatar",
+			value: "",
+			enabled: true,
+			type: "file",
+			src: "/home/other/avatar.png",
+			fileName: "avatar.png",
+			contentType: "image/png",
+			unresolved: true,
+		});
+	});
+
+	it("leaves a part with no path unmarked - nothing there could be unverified", () => {
+		const part = importedFilePart(entry, "");
+		expect(part).toEqual({ key: "avatar", value: "", enabled: true, type: "file", src: "" });
+		// Not `unresolved: false` either: the editor's warning reads the flag's
+		// presence, and a row showing "Choose file" claims nothing to warn about.
+		expect("unresolved" in part).toBe(false);
+	});
+});
+
+describe("unattachedFileParts", () => {
+	const collection = (requests: CollectionDraft["requests"]): CollectionDraft => ({
+		name: "c",
+		description: "",
+		variables: {},
+		auth: { mode: "none" },
+		preRequestScript: "",
+		postRequestScript: "",
+		children: [],
+		requests,
+	});
+	const request = (body: CollectionDraft["requests"][number]["body"]) => ({
+		name: "r",
+		description: "",
+		method: "POST" as const,
+		url: "https://x",
+		params: [],
+		headers: [],
+		body,
+		auth: { mode: "inherit" as const },
+		preRequestScript: "",
+		postRequestScript: "",
+	});
+
+	it("counts only form-data file rows with no file, at every depth", () => {
+		const withUpload = request({
+			mode: "form-data",
+			fields: [
+				{ key: "caption", value: "", enabled: true },
+				importedFilePart({ key: "a", value: "", enabled: true }, ""),
+				// A part that names a path is the user's to re-point, not to attach.
+				importedFilePart({ key: "b", value: "", enabled: true }, "/tmp/b.png"),
+			],
+		});
+		const nested = collection([withUpload]);
+		const root = collection([withUpload, request({ mode: "json", content: "{}" })]);
+		root.children = [nested];
+		expect(unattachedFileParts([root])).toBe(2);
+	});
+
+	it("is zero for an import with no form bodies at all", () => {
+		expect(unattachedFileParts([collection([request({ mode: "none" })])])).toBe(0);
+		expect(unattachedFileParts([])).toBe(0);
 	});
 });
 

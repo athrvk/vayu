@@ -205,6 +205,54 @@ describe("OpenApiV2Parser", () => {
 		expect(p.parse(parsed, raw, opts).meta.skipped).toEqual([]);
 	});
 
+	const uploadSpec = (consumes?: string[]) => ({
+		swagger: "2.0",
+		info: { title: "Upload API" },
+		paths: {
+			"/avatar": {
+				post: {
+					summary: "Upload avatar",
+					...(consumes ? { consumes } : {}),
+					parameters: [
+						{ name: "caption", in: "formData", type: "string" },
+						{ name: "avatar", in: "formData", type: "file" },
+					],
+				},
+			},
+		},
+	});
+
+	const uploadResult = (consumes?: string[]) => {
+		const spec = uploadSpec(consumes);
+		return p.parse(spec, JSON.stringify(spec), opts);
+	};
+
+	it("imports a `type: file` formData param as a file part, not an empty text row", () => {
+		const result = uploadResult(["multipart/form-data"]);
+		expect(result.collections[0].requests[0].body).toEqual({
+			mode: "form-data",
+			fields: [
+				{ key: "caption", value: "", enabled: true },
+				// No path: a spec documents the upload, never the file. Not `unresolved`
+				// either - there is no path here that could have gone unverified.
+				{ key: "avatar", value: "", enabled: true, type: "file", src: "" },
+			],
+		});
+		expect(result.meta.unattachedFileParts).toBe(1);
+	});
+
+	it("forces multipart for a file param a urlencoded-only consumes contradicts", () => {
+		// Only multipart has a file form on the wire, so the encoding follows the part.
+		expect(
+			uploadResult(["application/x-www-form-urlencoded"]).collections[0].requests[0].body
+		).toMatchObject({ mode: "form-data" });
+	});
+
+	it("counts no unattached file part for a spec whose form is all text", () => {
+		const spec = formSpec(["multipart/form-data"]);
+		expect(p.parse(spec, JSON.stringify(spec), opts).meta.unattachedFileParts).toBe(0);
+	});
+
 	it("treats charset json consume as json body", () => {
 		const spec = {
 			swagger: "2.0",
