@@ -87,7 +87,8 @@ struct ScenarioRequest {
     /// than falling through to the collection path.
     std::string source;
     std::string collection_id;
-    /// Descend into sub-collections, depth-first by `collections.order`.
+    /// Descend into sub-collections, depth-first by `collections.order`, each
+    /// subtree ahead of the parent's own requests - the sidebar's order.
     bool recursive = false;
     /// Resolved: an explicit count wins, otherwise the data row count, else 1.
     size_t iterations     = 1;
@@ -160,10 +161,13 @@ struct ScenarioResolution {
 /**
  * Validate a `scenario` block and resolve it into a plan.
  *
- * Ordering is a collection's direct requests by `requests.order`, then - when
- * `recursive` is set - descendant collections by `collections.order`,
- * depth-first. The `collections` tree is not constraint-enforced, so the walk
- * carries a visited set exactly as `Database::delete_collection`'s BFS does: a
+ * Ordering is the order the sidebar displays, top to bottom. A collection's
+ * direct requests run by `requests.order`; with `recursive` set, each
+ * sub-collection's whole subtree runs *before* the parent's own requests,
+ * sub-collections themselves by `collections.order`, depth-first - because the
+ * tree renders every subfolder above every request at each depth (issue #431).
+ * The `collections` tree is not constraint-enforced, so the walk carries a
+ * visited set exactly as `Database::delete_collection`'s BFS does: a
  * `parent_id` cycle terminates instead of growing forever under the DB mutex.
  *
  * Every failure below is loud, never a silently smaller run: an unknown

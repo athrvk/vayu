@@ -9,11 +9,12 @@
  * RunCollectionDialog
  *
  * Starts a collection run. Two options and nothing else, because the scenario
- * *is* the folder: the sequence is `requests.order` (then, with Recursive,
- * descendant collections by `collections.order`, depth-first), which is the
- * order the sidebar already shows. There is no step list to author here, and
- * inventing one would be a second source of truth for an ordering the tree
- * already owns.
+ * *is* the folder: the sequence is `requests.order` (and, with Recursive,
+ * descendant collections by `collections.order`, depth-first, each subfolder's
+ * subtree ahead of its parent's own requests), which is the order the sidebar
+ * already shows - top to bottom, subfolders above requests at every depth. There
+ * is no step list to author here, and inventing one would be a second source of
+ * truth for an ordering the tree already owns.
  *
  * The engine resolves the whole plan before it answers, so a collection with no
  * requests, a step that will not compose, or a plan over `maxScenarioSteps` all
@@ -156,7 +157,8 @@ export default function RunCollectionDialog({
 						<Label htmlFor="run-collection-recursive" className="leading-snug">
 							Include sub-folders
 							<span className="block text-xs font-normal text-muted-foreground">
-								Descend into nested collections, depth-first.
+								Descend into nested collections. Each sub-folder runs before this
+								folder&apos;s own requests, top to bottom as the sidebar shows them.
 							</span>
 						</Label>
 						<Switch

@@ -73,30 +73,49 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
         }
     }
 
+    // Two entry kinds share one stack. `Descend` queues a collection's subtree,
+    // `Emit` appends that collection's own requests - and because the marker is
+    // pushed *underneath* the children, every subfolder's subtree is emitted
+    // before the folder's own requests. That is the sidebar's order, which
+    // renders `childCollections` above `requests` at every depth
+    // (`CollectionItem.tsx`), and a recursive run has to execute in the order
+    // the user is looking at (issue #431, the #360 rule one level up).
+    enum class Step { Descend, Emit };
+    struct Entry {
+        Step step;
+        std::string id;
+    };
+
     std::vector<vayu::db::Request> ordered;
     std::unordered_set<std::string> visited;
-    std::vector<std::string> stack{ root_id };
+    std::vector<Entry> stack{ { Step::Descend, root_id } };
     while (!stack.empty ()) {
-        const std::string id = std::move (stack.back ());
+        const Entry entry = std::move (stack.back ());
         stack.pop_back ();
-        // The visited set is what makes a corrupted `parent_id` (a self-parent,
-        // or an A -> B -> A loop written before write-time validation existed)
-        // terminate rather than grow `ordered` forever under the DB mutex -
-        // the same guard `Database::delete_collection`'s BFS carries.
-        if (!visited.insert (id).second) {
+
+        if (entry.step == Step::Emit) {
+            for (auto& row : db.get_requests_in_collection (entry.id)) {
+                ordered.push_back (std::move (row));
+            }
             continue;
         }
 
-        for (auto& row : db.get_requests_in_collection (id)) {
-            ordered.push_back (std::move (row));
+        // The visited set is what makes a corrupted `parent_id` (a self-parent,
+        // or an A -> B -> A loop written before write-time validation existed)
+        // terminate rather than grow `ordered` forever under the DB mutex -
+        // the same guard `Database::delete_collection`'s BFS carries. An `Emit`
+        // is only queued past this point, so a cycle cannot double-emit either.
+        if (!visited.insert (entry.id).second) {
+            continue;
         }
+        stack.push_back ({ Step::Emit, entry.id });
 
-        if (auto it = children.find (id); it != children.end ()) {
-            // Reversed, so the stack pops them in `collections.order`: a
-            // pre-order descent visits a collection's own requests, then its
-            // first child's whole subtree, then its second child's.
+        if (auto it = children.find (entry.id); it != children.end ()) {
+            // Reversed, so the stack pops them in `collections.order`: the
+            // first child's whole subtree, then the second's, then - last -
+            // this collection's own requests.
             for (auto child = it->second.rbegin (); child != it->second.rend (); ++child) {
-                stack.push_back (child->id);
+                stack.push_back ({ Step::Descend, child->id });
             }
         }
     }

@@ -713,6 +713,17 @@ engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
 `types/tree-order.conformance.test.ts` and by the engine's `tree_order_test.cpp`
 - change one side and the other suite fails.
 
+That rule orders **one block**. A folder's sub-collections and its requests are
+two separately ordered blocks, so their `order` values can collide, and where the
+blocks sit relative to each other is the render's rule: `CollectionItem` puts
+every subfolder above every request, at every depth
+(`CollectionTree.folders-first.test.tsx`). A recursive collection run has to
+execute in that same sequence - each subfolder's whole subtree, then the folder's
+own requests - which is pinned across the render and the engine's plan by
+`engine/tests/fixtures/recursive-run-order-conformance.json`, read by
+`modules/collections/CollectionTree.run-order.conformance.test.tsx` and by the
+engine's `scenario_plan_test.cpp` (issue #431).
+
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)

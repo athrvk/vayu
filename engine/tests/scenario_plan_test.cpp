@@ -6,9 +6,14 @@
  * Three contracts are pinned here, and each of them is one a later phase builds
  * on rather than a detail of this one:
  *
- *  - **Ordering.** Direct requests by `requests.order`, then descendant
- *    collections by `collections.order`, depth-first - and a `parent_id` cycle
- *    terminates instead of hanging the DB mutex.
+ *  - **Ordering.** The order the sidebar displays: direct requests by
+ *    `requests.order`, and - recursively - each sub-collection's whole subtree
+ *    ahead of its parent's own requests, sub-collections by `collections.order`,
+ *    depth-first. Driven case by case from
+ *    `fixtures/recursive-run-order-conformance.json`, which the renderer's
+ *    `CollectionTree.run-order.conformance.test.tsx` reads as well, so the run
+ *    and the tree cannot disagree without one of the two suites failing (issue
+ *    #431). A `parent_id` cycle terminates instead of hanging the DB mutex.
  *  - **No second copy of composition.** A step's request and joined scripts
  *    equal what `POST /compose` returns for the same `requestId`, so a Send and
  *    a scenario step cannot drift apart.
@@ -25,6 +30,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,11 +49,27 @@ using nlohmann::json;
 
 namespace {
 
+json load_run_order_fixture () {
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "recursive-run-order-conformance.json";
+    std::ifstream in (path);
+    EXPECT_TRUE (in.good ()) << "fixture missing: " << path;
+    return json::parse (in);
+}
+
 class ScenarioPlanTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_scenario_plan.db";
 
     void SetUp () override {
+        reset_database ();
+    }
+    /// A fresh database on one path. The old handle is closed *before* the
+    /// files are removed and the new one opens, so a test that needs a clean
+    /// tree mid-run (the fixture loop, whose cases repeat ids) cannot end up
+    /// with two connections to a file one of them has already deleted.
+    void reset_database () {
+        db_.reset ();
         cleanup ();
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
         db_->init ();
@@ -59,11 +82,14 @@ class ScenarioPlanTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
     }
 
+    // `created_at` is the second sort key, so only a test about a tie needs to
+    // state it; everything else shares one timestamp and sorts on `order`.
     void seed_collection (const std::string& id,
     const std::string& parent_id,
     int order                     = 0,
     const std::string& auth       = "",
-    const std::string& pre_script = "") {
+    const std::string& pre_script = "",
+    int64_t created_at            = 1) {
         vayu::db::Collection col;
         col.id = id;
         if (!parent_id.empty ()) {
@@ -73,8 +99,8 @@ class ScenarioPlanTest : public ::testing::Test {
         col.auth               = auth;
         col.pre_request_script = pre_script;
         col.order              = order;
-        col.created_at         = 1;
-        col.updated_at         = 1;
+        col.created_at         = created_at;
+        col.updated_at         = created_at;
         db_->create_collection (col);
     }
 
@@ -83,7 +109,8 @@ class ScenarioPlanTest : public ::testing::Test {
     int order                      = 0,
     const std::string& url         = "https://example.test/{{path}}",
     const std::string& auth        = "",
-    const std::string& post_script = "") {
+    const std::string& post_script = "",
+    int64_t created_at             = 1) {
         vayu::db::Request r;
         r.id                  = id;
         r.collection_id       = collection_id;
@@ -93,8 +120,8 @@ class ScenarioPlanTest : public ::testing::Test {
         r.auth                = auth;
         r.post_request_script = post_script;
         r.order               = order;
-        r.created_at          = 1;
-        r.updated_at          = 1;
+        r.created_at          = created_at;
+        r.updated_at          = created_at;
         db_->save_request (r);
     }
 
@@ -154,11 +181,18 @@ TEST_F (ScenarioPlanTest, DirectRequestsAreOrderedByRequestOrder) {
     }
 }
 
-TEST_F (ScenarioPlanTest, RecursiveDescentIsDepthFirstByCollectionOrder) {
+TEST_F (ScenarioPlanTest, RecursiveDescentRunsEachSubtreeBeforeTheFoldersOwnRequests) {
     //   root            [root_a, root_b]
     //     child_b (order 1)  [b_1]
     //     child_a (order 0)  [a_1]
     //       grandchild       [g_1]
+    //
+    // The sidebar renders every subfolder above every request at each depth
+    // (`CollectionItem.tsx`), so `g_1` (deepest) is the first row a user sees
+    // under `root` and the root's own requests are the last two. The walk used
+    // to be pre-order - `root_a, root_b, a_1, g_1, b_1` - which is an order the
+    // tree never showed (issue #431). Mutation check: restore the pre-order push
+    // in `collect_requests` and this reddens, along with every fixture case.
     seed_collection ("root", "");
     seed_collection ("child_b", "root", /*order=*/1);
     seed_collection ("child_a", "root", /*order=*/0);
@@ -173,7 +207,60 @@ TEST_F (ScenarioPlanTest, RecursiveDescentIsDepthFirstByCollectionOrder) {
     *db_, block ("root", /*recursive=*/true), options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (step_ids (resolved.plan),
-    (std::vector<std::string>{ "root_a", "root_b", "a_1", "g_1", "b_1" }));
+    (std::vector<std::string>{ "g_1", "a_1", "b_1", "root_a", "root_b" }));
+}
+
+// --- The cross-consumer order (fixture-driven) --------------------------------
+
+TEST_F (ScenarioPlanTest, RunOrderConformanceFixtureIsNonEmpty) {
+    // Guards the scan itself: a fixture that failed to load would make every
+    // case below vacuously pass.
+    const json fixture = load_run_order_fixture ();
+    ASSERT_TRUE (fixture.contains ("cases"));
+    EXPECT_GE (fixture["cases"].size (), 5u);
+}
+
+TEST_F (ScenarioPlanTest, RecursiveRunFollowsTheSidebarOrderInEveryFixtureCase) {
+    // The other half of this fixture is
+    // app/src/modules/collections/CollectionTree.run-order.conformance.test.tsx,
+    // which renders the same trees and reads the request rows out of the DOM. A
+    // rule that changes on one side only fails there or here.
+    //
+    // Named, not subscripted inline: `load_run_order_fixture ()["cases"]`
+    // returns a reference into a temporary the full expression destroys, so
+    // the loop would walk freed memory - and in practice walk nothing.
+    // `cases_run` guards against exactly that.
+    const json fixture = load_run_order_fixture ();
+    size_t cases_run   = 0;
+    for (const auto& c : fixture["cases"]) {
+        const std::string name = c["name"].get<std::string> ();
+        reset_database (); // Ids repeat across cases.
+
+        for (const auto& col : c["collections"]) {
+            seed_collection (col["id"].get<std::string> (),
+            col["parentId"].is_null () ? "" : col["parentId"].get<std::string> (),
+            col["order"].get<int> (), /*auth=*/"", /*pre_script=*/"",
+            col["createdAt"].get<int64_t> ());
+        }
+        for (const auto& req : c["requests"]) {
+            seed_request (req["id"].get<std::string> (),
+            req["collectionId"].get<std::string> (), req["order"].get<int> (),
+            /*url=*/"https://example.test/", /*auth=*/"", /*post_script=*/"",
+            req["createdAt"].get<int64_t> ());
+        }
+
+        std::vector<std::string> expected;
+        for (const auto& id : c["expected"]) {
+            expected.push_back (id.get<std::string> ());
+        }
+
+        const auto resolved = vayu::core::resolve_scenario (*db_,
+        block (c["rootId"].get<std::string> (), /*recursive=*/true), options ());
+        ASSERT_TRUE (resolved.ok) << "case: " << name << ": " << resolved.error;
+        EXPECT_EQ (step_ids (resolved.plan), expected) << "case: " << name;
+        ++cases_run;
+    }
+    EXPECT_GE (cases_run, 5u) << "the fixture loop asserted nothing";
 }
 
 TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
@@ -222,7 +309,11 @@ TEST_F (ScenarioPlanTest, ParentIdCycleTerminatesAndVisitsEachCollectionOnce) {
     const auto resolved =
     vayu::core::resolve_scenario (*db_, block ("a", /*recursive=*/true), options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    EXPECT_EQ (step_ids (resolved.plan), (std::vector<std::string>{ "in_a", "in_b" }));
+    // What is pinned is termination and each collection contributing once. The
+    // sequence follows from the subfolders-first rule - "b" is a child of "a",
+    // so its request runs first - and a cycle has no displayed order to agree
+    // with, since the sidebar renders such a row as an orphaned root.
+    EXPECT_EQ (step_ids (resolved.plan), (std::vector<std::string>{ "in_b", "in_a" }));
 }
 
 TEST_F (ScenarioPlanTest, SelfParentingCollectionTerminates) {
