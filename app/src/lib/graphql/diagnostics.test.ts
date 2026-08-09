@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSchema } from "graphql";
 import { computeGraphqlDiagnostics } from "./diagnostics";
+import { fixtureSchema } from "@/test/graphql-schema-fixture";
 
 const schema = buildSchema(`
   type Query { user(id: ID!): User }
@@ -36,5 +37,64 @@ describe("computeGraphqlDiagnostics", () => {
 
 	it("returns no diagnostics for empty text", () => {
 		expect(computeGraphqlDiagnostics("", schema)).toEqual([]);
+	});
+
+	/*
+	 * The conversion from LSP's 0-based ranges to Monaco's 1-based ones is four
+	 * `+ 1`s, and a suite that only asserts ">= 1" survives deleting any of them.
+	 * These pin all four against a marker whose position is known by counting.
+	 */
+	it("converts LSP 0-based positions to Monaco 1-based ones, on both ends", () => {
+		const markers = computeGraphqlDiagnostics("query {\n  user(id: 1) { nope }\n}", schema);
+		const nope = markers.find((m) => /nope/.test(m.message));
+		expect(nope).toBeDefined();
+		expect(nope?.startLineNumber).toBe(2);
+		expect(nope?.startColumn).toBe(17);
+		expect(nope?.endLineNumber).toBe(2);
+		expect(nope?.endColumn).toBe(22);
+	});
+
+	it("keeps a deprecation as a warning rather than an error", () => {
+		// severity 2 is the only non-error the language service emits; mapping it
+		// to "error" would paint every deprecation red.
+		const markers = computeGraphqlDiagnostics(
+			"query { user(id: 1) { nickname } }",
+			fixtureSchema()
+		);
+		expect(markers).toHaveLength(1);
+		expect(markers[0].severity).toBe("warning");
+		expect(markers[0].message).toMatch(/deprecated/i);
+	});
+});
+
+describe("`{{variable}}` tokens", () => {
+	it("are not an error in an argument the schema types as something else", () => {
+		expect(
+			computeGraphqlDiagnostics("query { user(id: {{userId}}) { name } }", fixtureSchema())
+		).toEqual([]);
+	});
+
+	it("are not a syntax error where a selection set is expected", () => {
+		expect(computeGraphqlDiagnostics("query { user(id: 1) { {{fields}} } }", null)).toEqual([]);
+	});
+
+	/*
+	 * The half a "no markers" assertion cannot see. An unmasked token is a *parse*
+	 * failure, so the rest of the document is never validated at all - suppressing
+	 * markers without masking would look identical here and silently switch off
+	 * checking for every query that mentions a variable.
+	 */
+	it("still leave the rest of the document validated", () => {
+		const markers = computeGraphqlDiagnostics(
+			"query { user(id: {{userId}}) { nope } }",
+			fixtureSchema()
+		);
+		expect(markers).toHaveLength(1);
+		expect(markers[0].message).toMatch(/nope/);
+	});
+
+	it("do not hide a syntax error somewhere else in the document", () => {
+		const markers = computeGraphqlDiagnostics("query { user(id: {{a}}) { name }", null);
+		expect(markers.length).toBeGreaterThan(0);
 	});
 });

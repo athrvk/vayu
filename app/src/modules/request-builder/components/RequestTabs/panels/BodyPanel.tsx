@@ -33,7 +33,7 @@
  * alongside, so the two share one full-width surface.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	Select,
@@ -56,7 +56,7 @@ import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
-import { switchBody } from "../../../utils/body-drafts";
+import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },
@@ -156,6 +156,8 @@ export default function BodyPanel() {
 		resolveString,
 		getBodyDrafts,
 		setBodyDrafts,
+		getVariablesDraft,
+		setVariablesDraft,
 		getAutoContentType,
 		setAutoContentType,
 		resolvedAuth,
@@ -164,6 +166,16 @@ export default function BodyPanel() {
 	// the builder's Send path passes.
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const [showResolved, setShowResolved] = useState(false);
+
+	/*
+	 * The GraphQL Variables pane's text, held by the provider so it outlives this
+	 * panel - Radix unmounts it on every glance at another tab. Stable identity,
+	 * because `GraphQLBody` re-syncs the pane in an effect that depends on it.
+	 */
+	const handleVariablesDraftChange = useCallback(
+		(text: string) => setVariablesDraft({ requestId: request.id ?? null, text }),
+		[setVariablesDraft, request.id]
+	);
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
 	const {
@@ -406,6 +418,11 @@ export default function BodyPanel() {
 							onBodyChange={(b) => updateField("body", b)}
 							schemaTarget={gqlSchemaTarget}
 							onEditorMount={handleEditorMount}
+							variablesDraft={ownVariablesDraft(
+								getVariablesDraft(),
+								request.id ?? null
+							)}
+							onVariablesDraftChange={handleVariablesDraftChange}
 						/>
 					</div>
 					<ResizeHandle

@@ -18,6 +18,7 @@
 
 import { describe, expect, test } from "vitest";
 import {
+	classifyVariables,
 	operationNames,
 	parseGraphQLBody,
 	serializeGraphQLBody,
@@ -180,5 +181,97 @@ describe("toGraphQLEnvelope", () => {
 
 	test("produces an envelope for an empty body", () => {
 		expect(JSON.parse(toGraphQLEnvelope(""))).toEqual({ query: "" });
+	});
+});
+
+describe("variables that are not strict JSON", () => {
+	/*
+	 * The reported defect: `{"limit": {{n}}}` is the idiom the engine's template
+	 * resolution exists for, and the serializer dropped it as "mid-edit invalid
+	 * JSON" - the request went out with no variables and nothing said so.
+	 */
+	test("a templated variables object reaches the wire verbatim", () => {
+		const body = serializeGraphQLBody({
+			query: "query ($n: Int) { a(n: $n) }",
+			variables: '{"limit": {{n}}}',
+			operationName: "",
+			extras: {},
+		});
+		expect(body).toBe('{"query":"query ($n: Int) { a(n: $n) }","variables":{"limit":{{n}}}}');
+	});
+
+	test("round-trips back into the pane through parse", () => {
+		const parts = parseGraphQLBody('{"query":"q","variables":{"limit":{{n}},"tag":"{{t}}"}}');
+		expect(parts.query).toBe("q");
+		// Pretty-printed, so compare without the layout: the tokens are back in the
+		// pane as the user typed them, not as placeholders.
+		expect(parts.variables.replace(/\s+/g, "")).toBe('{"limit":{{n}},"tag":"{{t}}"}');
+		// And back out again unchanged, so an edit elsewhere does not rewrite it.
+		expect(serializeGraphQLBody(parts)).toBe(
+			'{"query":"q","variables":{"limit":{{n}},"tag":"{{t}}"}}'
+		);
+	});
+
+	test("genuinely broken text is still dropped, not written", () => {
+		// PR #399's decision, and it stands: the query pane must keep saving while
+		// the variables pane has an unclosed brace.
+		expect(
+			serializeGraphQLBody({
+				query: "q",
+				variables: '{"limit": ',
+				operationName: "",
+				extras: {},
+			})
+		).toBe('{"query":"q"}');
+	});
+
+	test("a body whose template sits outside `variables` is left as a raw query", () => {
+		// The placeholder would survive into `extras` and be written back as a
+		// placeholder. Refusing is what master already does with this body.
+		const body = '{"query":"q","extensions":{"x":{{y}}}}';
+		expect(parseGraphQLBody(body)).toEqual({
+			query: body,
+			variables: "",
+			operationName: "",
+			extras: {},
+		});
+	});
+});
+
+describe("classifyVariables", () => {
+	test.each([
+		["", "empty"],
+		["   ", "empty"],
+		['{"a":1}', "json"],
+		['{"a":"{{token}}"}', "json"],
+		['{"a": {{token}}}', "templated"],
+		['{"a": ', "invalid"],
+		["not json at all", "invalid"],
+	])("%j is %s", (text, form) => {
+		expect(classifyVariables(text)).toBe(form);
+	});
+});
+
+describe("a string-typed `variables`", () => {
+	/*
+	 * The shape the Postman importer deliberately preserves. Pretty-printing it
+	 * rendered `{"id":1}` as the escaped blob `"{\"id\":1}"` in the pane - correct
+	 * JSON, unreadable, and un-editable without deleting the escapes by hand.
+	 */
+	test("shows verbatim in the pane rather than as an escaped blob", () => {
+		const parts = parseGraphQLBody(JSON.stringify({ query: "q", variables: '{"id": 1}' }));
+		expect(parts.variables).toBe('{"id": 1}');
+	});
+
+	test("becomes an object once the pane's text parses", () => {
+		const parts = parseGraphQLBody(JSON.stringify({ query: "q", variables: '{"id": 1}' }));
+		expect(JSON.parse(serializeGraphQLBody(parts))).toEqual({
+			query: "q",
+			variables: { id: 1 },
+		});
+	});
+
+	test("an empty string variables value leaves the pane empty", () => {
+		expect(parseGraphQLBody(JSON.stringify({ query: "q", variables: "" })).variables).toBe("");
 	});
 });

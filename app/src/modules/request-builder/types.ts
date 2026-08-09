@@ -15,7 +15,7 @@
 
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
-import type { BodyDrafts } from "./utils/body-drafts";
+import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
@@ -264,6 +264,8 @@ export interface RequestBuilderContextValue {
 	 */
 	getBodyDrafts: () => BodyDrafts;
 	setBodyDrafts: (drafts: BodyDrafts) => void;
+	getVariablesDraft: () => VariablesDraft | null;
+	setVariablesDraft: (draft: VariablesDraft) => void;
 
 	/**
 	 * The Content-Type row `BodyPanel` wrote when a mode required one, so that

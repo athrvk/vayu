@@ -12,18 +12,41 @@
  */
 
 import type * as Monaco from "monaco-editor";
-import { parse, print } from "graphql";
 import {
+	CompletionItemKind,
 	getAutocompleteSuggestions,
 	getHoverInformation,
 	Position,
 } from "graphql-language-service";
 import { computeGraphqlDiagnostics } from "./diagnostics";
+import { formatGraphqlDocument } from "./format";
 import { useSchemaCache } from "./schema-cache";
 import { TIMING } from "@/config/timing";
 
 const MARKER_OWNER = "graphql";
 const DEBOUNCE_MS = TIMING.GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS;
+
+/**
+ * LSP completion kind -> the name Monaco knows it by.
+ *
+ * Derived from the enum rather than written out, because the two enumerations
+ * agree on every name and disagree on every number: a hand-copied table is 25
+ * chances to transpose two of them, and one transposition is a wrong icon that
+ * no test would think to check. `graphql-language-service` classifies every
+ * suggestion it returns - fields, arguments, enum values, variables, directives
+ * - and all of that was being flattened to `Field` before it reached the widget.
+ */
+const LSP_KIND_NAMES = new Map<number, string>(
+	Object.entries(CompletionItemKind).map(([name, value]) => [value as number, name])
+);
+
+export function toMonacoCompletionKind(monaco: typeof Monaco, lspKind: number | undefined): number {
+	const kinds = monaco.languages.CompletionItemKind as unknown as Record<string, number>;
+	const name = lspKind === undefined ? undefined : LSP_KIND_NAMES.get(lspKind);
+	// `Field` is what every suggestion used to get, so it stays the fallback: an
+	// unmapped kind is no worse than before, never a missing icon.
+	return name !== undefined && name in kinds ? kinds[name] : kinds.Field;
+}
 
 export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	const toSeverity = (s: "error" | "warning") =>
@@ -78,11 +101,19 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	});
 
 	monaco.languages.registerCompletionItemProvider("graphql", {
-		// Structural triggers only - NOT space/newline. Triggering on "\n" popped
-		// the suggestion widget after every Enter, so a second Enter (meant as a
-		// newline) accepted the first suggestion instead. Typing a field name still
-		// shows suggestions via Monaco's quick-suggest.
-		triggerCharacters: [":", "(", "{", "@", "$", " "],
+		/*
+		 * Structural triggers only - NOT space/newline. Triggering on "\n" popped
+		 * the suggestion widget after every Enter, so a second Enter (meant as a
+		 * newline) accepted the first suggestion instead. Typing a field name still
+		 * shows suggestions via Monaco's quick-suggest.
+		 *
+		 * `" "` was in this list while the comment above said it must not be, and
+		 * it is the same bug one keystroke earlier: space popped the widget, so the
+		 * Enter that followed accepted a suggestion instead of breaking the line.
+		 * A space carries no structure in GraphQL - after `field ` the useful
+		 * completions are the ones `{` and `(` already trigger.
+		 */
+		triggerCharacters: [":", "(", "{", "@", "$"],
 		provideCompletionItems(model, position) {
 			const schema = useSchemaCache.getState().getActiveSchema();
 			if (!schema) return { suggestions: [] };
@@ -101,7 +132,7 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 			return {
 				suggestions: items.map((it) => ({
 					label: it.label,
-					kind: monaco.languages.CompletionItemKind.Field,
+					kind: toMonacoCompletionKind(monaco, it.kind),
 					insertText: it.insertText ?? it.label,
 					detail: it.detail,
 					documentation:
@@ -126,15 +157,17 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 		},
 	});
 
-	// Enables the "Format Document" command (palette / Shift+Alt+F / right-click)
-	// for GraphQL by pretty-printing the parsed AST. No-ops on unparseable input.
+	/*
+	 * Enables the "Format Document" command (palette / Shift+Alt+F / right-click)
+	 * for GraphQL. No-ops on unparseable input, and on a model that changed while
+	 * the formatter was loading - that edit would land at stale offsets.
+	 */
 	monaco.languages.registerDocumentFormattingEditProvider("graphql", {
-		provideDocumentFormattingEdits(model) {
-			try {
-				return [{ range: model.getFullModelRange(), text: print(parse(model.getValue())) }];
-			} catch {
-				return [];
-			}
+		async provideDocumentFormattingEdits(model) {
+			const source = model.getValue();
+			const formatted = await formatGraphqlDocument(source);
+			if (formatted === null || model.isDisposed() || model.getValue() !== source) return [];
+			return [{ range: model.getFullModelRange(), text: formatted }];
 		},
 	});
 }

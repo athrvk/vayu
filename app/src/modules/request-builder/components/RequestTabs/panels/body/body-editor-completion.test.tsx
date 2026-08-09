@@ -64,6 +64,8 @@ function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> = {}) {
 		// BodyPanel stashes through these on a mode change.
 		getBodyDrafts: () => emptyDrafts(request.id),
 		setBodyDrafts: () => {},
+		getVariablesDraft: () => null,
+		setVariablesDraft: () => {},
 		resolveString: (s: string) => s,
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
