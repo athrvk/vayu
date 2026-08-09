@@ -9,12 +9,12 @@
 #include <httplib.h>
 
 #include <chrono>
-#include <filesystem>
 #include <string>
 #include <thread>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 
 using nlohmann::json;
@@ -82,8 +82,7 @@ class OAuthAuthorizeTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* s : { "", "-wal", "-shm", ".bak" })
-            std::filesystem::remove (std::string (DB_PATH) + s);
+        vayu::tests::remove_database_files (DB_PATH);
     }
     // db_ declared before the manager is used in each test so the manager (with
     // any live listener capturing db_) is torn down first.

@@ -18,7 +18,6 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -26,6 +25,7 @@
 #include <nlohmann/json.hpp>
 
 #include "mock_server.hpp"
+#include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -59,9 +59,7 @@ class RunShutdownTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     // A row for the run, so the worker's status writes have something to land

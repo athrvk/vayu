@@ -40,6 +40,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
 using nlohmann::json;
@@ -86,9 +87,7 @@ class TreeOrderTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* s : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + s);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     void seed_collection (const std::string& id,

@@ -21,7 +21,6 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
@@ -29,6 +28,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
 
@@ -81,9 +81,7 @@ class ResponseCaptureTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     void seed_run (const std::string& id) {

@@ -270,6 +270,7 @@ add_library(vayu_core STATIC
     src/http/set_cookie.cpp
     src/http/cookie_jar.cpp
     src/http/form_body.cpp
+    src/http/graphql_body.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp

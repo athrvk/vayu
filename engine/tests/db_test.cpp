@@ -13,42 +13,21 @@
 #include <utility>
 #include <vector>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
 namespace vayu::db {
 namespace {
 const std::string TEST_DB_PATH = "test_vayu.db";
-const std::string TEST_DB_BACKUP_PATH = "test_vayu.db.bak";
 
 class DatabaseTest : public ::testing::Test {
     protected:
     void SetUp () override {
-        // Ensure clean state
-        if (std::filesystem::exists (TEST_DB_PATH)) {
-            std::filesystem::remove (TEST_DB_PATH);
-        }
-        if (std::filesystem::exists (TEST_DB_PATH + "-wal")) {
-            std::filesystem::remove (TEST_DB_PATH + "-wal");
-        }
-        if (std::filesystem::exists (TEST_DB_PATH + "-shm")) {
-            std::filesystem::remove (TEST_DB_PATH + "-shm");
-        }
+        vayu::tests::remove_database_files (TEST_DB_PATH);
     }
 
     void TearDown () override {
-        // Cleanup
-        if (std::filesystem::exists (TEST_DB_PATH)) {
-            std::filesystem::remove (TEST_DB_PATH);
-        }
-        if (std::filesystem::exists (TEST_DB_PATH + "-wal")) {
-            std::filesystem::remove (TEST_DB_PATH + "-wal");
-        }
-        if (std::filesystem::exists (TEST_DB_PATH + "-shm")) {
-            std::filesystem::remove (TEST_DB_PATH + "-shm");
-        }
-        if (std::filesystem::exists (TEST_DB_BACKUP_PATH)) {
-            std::filesystem::remove (TEST_DB_BACKUP_PATH);
-        }
+        vayu::tests::remove_database_files (TEST_DB_PATH);
     }
 };
 
@@ -1051,6 +1030,58 @@ TEST_F (DatabaseTest, UpdateRunSummaryForMissingRunIsIgnored) {
     // A run deleted while its worker was finishing must not create a row or throw.
     EXPECT_NO_THROW (db.update_run_summary ("run_gone", R"({"total_requests":1})"));
     EXPECT_FALSE (db.get_run ("run_gone").has_value ());
+}
+
+// ==================== Scratch-file cleanup ====================
+
+// `remove_database_files` is the single definition of what a scratch Database
+// leaves on disk, replacing ~22 hand-copied suffix lists of which eight were
+// wrong (#379, #413). Nothing else would notice if it drifted: a fixture with
+// an incomplete list still passes, it just leaks - and `engine/.gitignore` now
+// keeps those leaks out of `git status`, so the previous tell is gone too.
+//
+// The assertion deliberately does *not* name the suffixes - a second copy of
+// the list is the defect this fixes. It scans the directory instead, so a
+// Database that grows a new sidecar fails here rather than leaking quietly.
+TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
+    namespace fs = std::filesystem;
+
+    // A directory of its own, so "everything named like the database" is an
+    // unambiguous question and a stray file cannot be mistaken for a leak.
+    const fs::path dir  = "test_scratch_cleanup_dir";
+    const fs::path stem = dir / "test_scratch.db";
+    fs::remove_all (dir);
+    fs::create_directories (dir);
+
+    auto leftovers = [&] {
+        std::set<std::string> names;
+        for (const auto& entry : fs::directory_iterator (dir))
+            names.insert (entry.path ().filename ().string ());
+        return names;
+    };
+
+    // Opened twice: the backup is written from an *existing* database, so a
+    // single open would not produce the `.bak` this is here to catch.
+    for (int i = 0; i < 2; ++i) {
+        Database db (stem.string ());
+        db.init ();
+    }
+
+    // The scan must have seen something, or "nothing left over" below is
+    // vacuously true - the failure mode CLAUDE.md calls out for source guards.
+    const auto written = leftovers ();
+    ASSERT_FALSE (written.empty ()) << "the database wrote nothing; the test proves nothing";
+    EXPECT_TRUE (written.count ("test_scratch.db.bak"))
+    << "no backup was written, so this run would not catch a missing `.bak`";
+
+    vayu::tests::remove_database_files (stem.string ());
+
+    const auto remaining = leftovers ();
+    EXPECT_TRUE (remaining.empty ())
+    << "remove_database_files left " << remaining.size ()
+    << " file(s) behind, starting with " << *remaining.begin ();
+
+    fs::remove_all (dir);
 }
 
 } // namespace

@@ -21,6 +21,7 @@
 #include <thread>
 
 #include "mock_server.hpp"
+#include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -47,9 +48,7 @@ class LoadStrategyTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::remove ((TEST_DB_PATH + suffix).c_str ());
-        }
+        vayu::tests::remove_database_files (TEST_DB_PATH);
     }
 
     std::unique_ptr<SlowMockServer> mock_server;

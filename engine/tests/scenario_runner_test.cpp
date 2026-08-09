@@ -23,7 +23,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -35,6 +34,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -147,9 +147,7 @@ class ScenarioRunnerTest : public ::testing::Test {
         cleanup ();
     }
     static void cleanup () {
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     void seed_collection (const std::string& id, const std::string& variables = "") {

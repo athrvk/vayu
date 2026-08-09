@@ -17,12 +17,12 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
+#include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
@@ -75,10 +75,7 @@ class ScriptRequestNameTest : public ::testing::Test {
     }
 
     static void cleanup () {
-        std::error_code ec;
-        for (const char* suffix : { "", "-wal", "-shm", ".bak" }) {
-            std::filesystem::remove (std::string (DB_PATH) + suffix, ec);
-        }
+        vayu::tests::remove_database_files (DB_PATH);
     }
 
     std::unique_ptr<vayu::db::Database> db_;
