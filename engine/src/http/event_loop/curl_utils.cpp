@@ -228,12 +228,10 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // Setting POSTFIELDS switches curl's method to POST, so it goes first
         // and the method is (re-)asserted below.
         //
-        // COPYPOSTFIELDS rather than POSTFIELDS because the urlencoded body is
-        // built here and dies at the end of this scope, while POSTFIELDS keeps
-        // only a pointer that has to outlive the transfer.
-        const std::string body = request.body.mode == BodyMode::Form ?
-        vayu::http::encode_urlencoded (request.body.fields) :
-        request.body.content;
+        // COPYPOSTFIELDS rather than POSTFIELDS because the body is built here
+        // and dies at the end of this scope, while POSTFIELDS keeps only a
+        // pointer that has to outlive the transfer.
+        const std::string body = vayu::http::wire_body_bytes (request.body);
         curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, static_cast<long> (body.size ()));
         curl_easy_setopt (curl, CURLOPT_COPYPOSTFIELDS, body.c_str ());
     }

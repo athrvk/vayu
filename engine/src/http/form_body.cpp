@@ -9,6 +9,8 @@
 
 #include <curl/curl.h>
 
+#include "vayu/http/graphql_body.hpp"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -125,11 +127,28 @@ bool has_wire_body (const Body& body) {
     return !body.content.empty ();
 }
 
-std::string implied_content_type (const Body& body) {
-    if (body.mode == BodyMode::Form && has_wire_body (body)) {
-        return "application/x-www-form-urlencoded";
+std::string wire_body_bytes (const Body& body) {
+    if (!has_wire_body (body)) {
+        return {};
     }
-    return {};
+    switch (body.mode) {
+    case BodyMode::Form: return encode_urlencoded (body.fields);
+    // Multipart is libcurl's to encode - see the header.
+    case BodyMode::FormData: return {};
+    case BodyMode::GraphQL: return graphql_wire_body (body.content);
+    default: return body.content;
+    }
+}
+
+std::string implied_content_type (const Body& body) {
+    if (!has_wire_body (body)) {
+        return {};
+    }
+    switch (body.mode) {
+    case BodyMode::Form: return "application/x-www-form-urlencoded";
+    case BodyMode::GraphQL: return "application/json";
+    default: return {};
+    }
 }
 
 bool content_type_is_engine_owned (const Body& body) {

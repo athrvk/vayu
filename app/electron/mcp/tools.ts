@@ -1047,7 +1047,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported."
+					'Body type: json, text, graphql, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported. For graphql, a bare query document is enveloped as `{"query": ...}` and sent as application/json; an envelope you write yourself is sent unchanged.'
 				),
 			auth: authInput,
 			httpVersion: z

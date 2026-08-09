@@ -83,13 +83,34 @@ namespace vayu::http {
 [[nodiscard]] bool has_wire_body (const Body& body);
 
 /**
+ * @brief The bytes this body puts in the request's body frame.
+ *
+ * The one answer to "what actually goes on the wire", because it is not
+ * `body.content` for three of the six modes: the form modes carry their
+ * content as fields, and a `graphql` body is enveloped on the way out. Both
+ * HTTP drivers read it, and so does the raw-request view - a view that
+ * rebuilt the body itself would show something the transfer did not send.
+ *
+ * Empty for a body with nothing to send (`has_wire_body` is false) and empty
+ * for **multipart**, whose bytes belong to libcurl: it encodes the parts and
+ * generates the boundary, so no faithful string exists outside the transfer.
+ */
+[[nodiscard]] std::string wire_body_bytes (const Body& body);
+
+/**
  * @brief The Content-Type this body implies when the request declares none.
  *
- * Empty for every mode but `x-www-form-urlencoded`. The engine has never
- * derived a Content-Type for json/text/graphql - clients own that header, and
- * the request builder writes it - so adding one here would take a header away
- * from the user who typed it. The form modes are different: their encoding is
- * chosen engine-side, so nothing else can name it.
+ * Two modes have one. `x-www-form-urlencoded` because its encoding is chosen
+ * engine-side, so nothing else can name it; `graphql` because the engine is
+ * what writes its envelope (see `graphql_body.hpp`), and a body the engine
+ * shaped into JSON cannot be left to libcurl's `x-www-form-urlencoded`
+ * default. Empty for json/text/binary - those clients own the header and the
+ * request builder writes it, so deriving one would take a header away from the
+ * user who typed it.
+ *
+ * Only ever a *default*: a Content-Type the caller set wins in both cases
+ * (`body_content_type_header`), which is how an explicit
+ * `application/graphql` still reaches the server.
  */
 [[nodiscard]] std::string implied_content_type (const Body& body);
 
