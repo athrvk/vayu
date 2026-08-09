@@ -54,6 +54,11 @@ export function logError(
 			console.warn("[WARN]", logEntry);
 			break;
 		case "low":
+			// The bottom rung of a severity ladder, not debug chatter: this branch
+			// exists so a low entry does not shout as a warning. Raising it to
+			// `console.warn` to satisfy `no-console` would erase the distinction
+			// the switch is here to make.
+			// eslint-disable-next-line no-console
 			console.info("[INFO]", logEntry);
 			break;
 	}

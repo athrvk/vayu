@@ -51,6 +51,13 @@ export default [
 			// it only produces false positives. Disabling it is the typescript-eslint
 			// recommendation. (Enabled globally via js.configs.recommended above.)
 			"no-undef": "off",
+			// Debug logging is not a renderer feature. 21 `console.log` calls had
+			// accumulated before anyone counted (#428), three of them dumping whole
+			// stored requests - auth headers, tokens and scripts - into DevTools.
+			// `warn`/`error` stay: they report states a user may need to report
+			// back. The rule flags calls, not string literals, so the `console.log`
+			// inside a generated code snippet (services/codegen) is unaffected.
+			"no-console": ["error", { allow: ["warn", "error"] }],
 			"react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
 			"@typescript-eslint/no-unused-vars": [
 				"error",
@@ -74,6 +81,19 @@ export default [
 		},
 		rules: {
 			"no-undef": "off",
+		},
+	},
+
+	// Main process: its console IS the app's log. `electron/` runs in Node and
+	// writes to the terminal the user launched Vayu from - the sidecar's engine
+	// lifecycle, the lock-file recovery, the updater's disabled-in-dev line.
+	// That output is diagnosed from, not left-over debug chatter, so `no-console`
+	// is off here rather than suppressed 35 times. The renderer keeps the rule:
+	// its console is DevTools, which nobody reads and everybody ships.
+	{
+		files: ["electron/**/*.{ts,tsx}"],
+		rules: {
+			"no-console": "off",
 		},
 	},
 

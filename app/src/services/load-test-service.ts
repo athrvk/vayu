@@ -39,17 +39,14 @@ class LoadTestService {
 	startMonitoring(runId: string): void {
 		// If already monitoring this run, do nothing
 		if (this.activeRunId === runId && this.isConnected) {
-			console.log(`[LoadTestService] Already monitoring run ${runId}`);
 			return;
 		}
 
 		// If monitoring a different run, stop it first
 		if (this.activeRunId && this.activeRunId !== runId) {
-			console.log(`[LoadTestService] Switching from run ${this.activeRunId} to ${runId}`);
 			this.stopMonitoring();
 		}
 
-		console.log(`[LoadTestService] Starting monitoring for run ${runId}`);
 		this.activeRunId = runId;
 		this.isConnected = true;
 
@@ -89,7 +86,6 @@ class LoadTestService {
 		}
 		this.pendingBuffer = [];
 		this.lastMetricsPushTime = 0;
-		console.log(`[LoadTestService] Stopping monitoring for run ${this.activeRunId}`);
 		this.activeRunId = null;
 		this.isConnected = false;
 		sseClient.disconnect();
@@ -147,7 +143,6 @@ class LoadTestService {
 	}
 
 	private async handleClose(): Promise<void> {
-		console.log("[LoadTestService] SSE closed - converging on stored report");
 		const runId = this.activeRunId;
 		if (this.throttleTimer) {
 			clearTimeout(this.throttleTimer);

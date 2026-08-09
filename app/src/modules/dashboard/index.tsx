@@ -83,14 +83,10 @@ export default function LoadTestDashboard() {
 						const status = report.metadata.status;
 						if (status === "completed" || status === "stopped" || status === "failed") {
 							// Run finished while we were away - update state
-							console.log(
-								`Run ${currentRunId} finished while away (status: ${status})`
-							);
 							setFinalReport(report);
 							loadTestService.stopMonitoring();
 						} else if (!loadTestService.isMonitoring(currentRunId)) {
 							// Run is still running but service is not connected - reconnect
-							console.log(`Reconnecting to run ${currentRunId}`);
 							loadTestService.startMonitoring(currentRunId);
 						}
 					}
@@ -115,7 +111,6 @@ export default function LoadTestDashboard() {
 		if (mode !== "running" || isStreaming || !currentRunId || finalReport) return;
 		// Streaming stopped but mode is still "running" - the test completed naturally
 		// Fetch the final report to get the actual completion status
-		console.log("Streaming stopped, fetching final report...");
 		// The fetch runs from its own async function, not the effect body: the
 		// loading flag and the result then land as callbacks (what the sibling
 		// report-retry effect below already does), and the cancel flag keeps a
@@ -171,9 +166,6 @@ export default function LoadTestDashboard() {
 							setFinalReport(report);
 							loadAttemptRef.current = 0;
 						} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
-							console.log(
-								`Report has zero data, retrying... (attempt ${loadAttemptRef.current + 1})`
-							);
 							loadAttemptRef.current++;
 							setIsLoadingReport(false);
 						} else {

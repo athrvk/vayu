@@ -107,10 +107,16 @@ The app will:
 **Renderer Process (React):**
 - Open DevTools: `mainWindow.webContents.openDevTools()` in `main.ts`
 - Or use React DevTools extension
+- `console.log()` is a lint error under `app/src` (`no-console`, `warn` and
+  `error` allowed): it is for reading while you work, not for committing, and
+  the calls that accumulated this way were dumping stored requests with their
+  auth headers into DevTools. Delete the call before you commit, or keep it as
+  a `console.warn` if the state it reports is genuinely abnormal.
 
 **Main Process (Electron):**
 - Use VS Code debugger with launch configuration
-- Or use `console.log()` (outputs to terminal)
+- Or use `console.log()` (outputs to terminal) - the rule above is renderer-only,
+  because the main process console is the log the user actually reads
 
 **Engine:**
 - Engine logs appear in Electron main process console
