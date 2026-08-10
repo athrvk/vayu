@@ -11,11 +11,19 @@ import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import {
 	insertField,
 	insertFragment,
+	insertionForNode,
 	isRefusal,
 	mergeVariables,
 	type DocumentInsertion,
 	type InsertResult,
 } from "./insert-skeleton";
+import {
+	buildSearchIndex,
+	childNodes,
+	schemaBranches,
+	searchSchema,
+	type SchemaTreeNode,
+} from "./schema-tree";
 
 const schema: GraphQLSchema = fixtureSchema();
 
@@ -305,6 +313,72 @@ describe("insertFragment", () => {
 	it("refuses a type a fragment cannot be written on", () => {
 		const result = insertFragment(schema, "", "Ranking");
 		expect(isRefusal(result)).toBe(true);
+	});
+});
+
+/**
+ * The two kinds the search index gained: browsable in the tree, and now
+ * findable by name. Neither is reachable from a root operation type, so both
+ * arrive with a null `rootPath` - and the refusal has to be asserted rather
+ * than assumed, because a search result is the one way into this module that
+ * does not come from expanding a row.
+ */
+describe("insertionForNode - a row found by search", () => {
+	const index = buildSearchIndex(schema);
+
+	/** The node the search box would hand the pane for this name. */
+	function searched(name: string): SchemaTreeNode {
+		const found = searchSchema(index, name).find((m) => m.node.name === name);
+		if (!found) throw new Error(`search did not find ${name}`);
+		return found.node;
+	}
+
+	/** The same row reached the way a user browses to it: Types -> owner -> row. */
+	function browsed(typeName: string, name: string): SchemaTreeNode {
+		const types = schemaBranches(schema).find((b) => b.branch === "types");
+		if (!types) throw new Error("no types branch");
+		const owner = childNodes(schema, types).find((t) => t.name === typeName);
+		if (!owner) throw new Error(`no type ${typeName}`);
+		const found = childNodes(schema, owner).find((c) => c.name === name);
+		if (!found) throw new Error(`no ${name} on ${typeName}`);
+		return found;
+	}
+
+	it("refuses an enum value out loud, naming it", () => {
+		const result = insertionForNode(schema, searched("RELEVANCE"), "", 0);
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) {
+			expect(result.reason).toContain("RELEVANCE");
+			expect(result.reason).toContain("part of an argument");
+		}
+	});
+
+	it("refuses an input-object field out loud, naming it", () => {
+		const result = insertionForNode(schema, searched("authorId"), "", 0);
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) expect(result.reason).toContain("authorId");
+	});
+
+	it("refuses with the same words the Types branch gets, from either route", () => {
+		/*
+		 * The contract this issue turns on: a search result must not be a second
+		 * way in with its own answer. If the search node ever gained a rootPath,
+		 * this row would insert instead of refusing and these would diverge.
+		 */
+		for (const [owner, name] of [
+			["Ranking", "RELEVANCE"],
+			["PostFilter", "authorId"],
+		]) {
+			const fromSearch = insertionForNode(schema, searched(name), "", 0);
+			const fromTree = insertionForNode(schema, browsed(owner, name), "", 0);
+			expect(fromSearch).toEqual(fromTree);
+		}
+	});
+
+	it("still inserts a root field found by search, so the refusal is not blanket", () => {
+		const result = inserted(insertionForNode(schema, searched("search"), "", 0)!);
+		expect(result.text).toContain("query Search");
+		expectValid(result.text);
 	});
 });
 
