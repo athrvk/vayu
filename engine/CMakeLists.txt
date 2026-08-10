@@ -286,6 +286,7 @@ add_library(vayu_core STATIC
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
     src/core/threshold_eval.cpp
+    src/core/capacity_controller.cpp
     ${PLATFORM_SOURCES}
 )
 
@@ -460,6 +461,7 @@ if(VAYU_BUILD_TESTS)
         tests/sample_capture_test.cpp
         tests/load_pacing_test.cpp
         tests/threshold_eval_test.cpp
+        tests/capacity_controller_test.cpp
         tests/run_manager_test.cpp
         tests/run_route_test.cpp
         tests/run_stop_test.cpp

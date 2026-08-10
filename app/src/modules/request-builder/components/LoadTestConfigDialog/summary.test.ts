@@ -15,6 +15,8 @@ const base = {
 	iterations: 1000,
 	rampDuration: 30,
 	startConcurrency: 1,
+	stepDuration: 5,
+	sloMs: 200,
 };
 
 describe("summarise", () => {
@@ -58,5 +60,16 @@ describe("summarise", () => {
 		expect(summarise({ ...base, mode: "iterations", iterations: 1, concurrency: 1 })).toContain(
 			"exactly 1 request using 1 connection"
 		);
+	});
+
+	it("describes the capacity search's shape, its budget and its ceiling", () => {
+		const s = summarise({ ...base, mode: "capacity", startConcurrency: 4, concurrency: 256 });
+		expect(s).toContain("Steps up from 4 connections");
+		expect(s).toContain("holding each level for 5s");
+		expect(s).toContain("p99 passes 200ms");
+		expect(s).toContain("256 connections");
+		// The count no field shows is exactly the count nothing can predict
+		// here - how many levels the search holds is the target's answer.
+		expect(s).not.toMatch(/in total/);
 	});
 });

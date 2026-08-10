@@ -14,17 +14,31 @@
  * the mapping lives in exactly one place (Plan 4 code-quality gate #5).
  */
 
+import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
 import type { LoadTestMode } from "@/types";
 
 /** Dashboard-facing alias of the canonical {@link LoadTestMode}. */
 export type LoadMode = LoadTestMode;
 
-const KNOWN_MODES: ReadonlySet<LoadMode> = new Set<LoadMode>([
-	"constant_rps",
-	"constant_concurrency",
-	"iterations",
-	"ramp_up",
-]);
+/**
+ * Derived from `LOAD_TEST_MODES`, not hand-listed.
+ *
+ * This was a third copy of the mode vocabulary - after the `LoadTestMode` union
+ * and `LOAD_TEST_MODES` itself - and a hand-written `Set<LoadMode>` literal is
+ * invisible to the type checker when a member is *missing*, only when one is
+ * spurious. So `capacity` shipped in the union, in the picker and in both
+ * mode-adaptive rows while this set still had four entries: `resolveMode`
+ * normalised it to `constant_rps`, and every `case "capacity"` arm downstream
+ * was dead code that rendered open-loop cards for a closed-loop search.
+ *
+ * Deriving it makes that unrepresentable. A mode a user can *start* is now by
+ * construction a mode the dashboard can *render*, and `LOAD_TEST_MODES` is
+ * already pinned to the union by `load-test-modes.test.ts`, so the whole chain
+ * has one guard rather than three lists to keep in step.
+ */
+const KNOWN_MODES: ReadonlySet<LoadMode> = new Set<LoadMode>(
+	LOAD_TEST_MODES.map((mode) => mode.value)
+);
 
 /**
  * Normalise a raw run-config mode string into a {@link LoadMode}.

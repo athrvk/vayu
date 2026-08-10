@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateRampDuration } from "./loadTestValidation";
+import { validateCapacityRange, validateRampDuration } from "./loadTestValidation";
 
 describe("validateRampDuration", () => {
 	it("returns null for non-ramp_up modes regardless of durations", () => {
@@ -21,5 +21,26 @@ describe("validateRampDuration", () => {
 		expect(msg).not.toBeNull();
 		expect(msg).toContain("6");
 		expect(msg).toContain("10");
+	});
+});
+
+describe("validateCapacityRange", () => {
+	it("rejects a search whose start is already at its ceiling", () => {
+		// The engine runs it - one level, then `cap_reached` - which is exactly
+		// the run the profile does not exist to do.
+		expect(validateCapacityRange("capacity", 64, 64)).toContain("one level");
+		expect(validateCapacityRange("capacity", 100, 64)).toContain("one level");
+	});
+
+	it("accepts a start below the ceiling", () => {
+		expect(validateCapacityRange("capacity", 4, 256)).toBeNull();
+	});
+
+	it("says nothing about any other mode", () => {
+		// `ramp_up` allows a start above its target on purpose - that is a ramp
+		// down - so this rule must not reach it.
+		expect(validateCapacityRange("ramp_up", 100, 10)).toBeNull();
+		expect(validateCapacityRange("constant_concurrency", 100, 10)).toBeNull();
+		expect(validateCapacityRange(undefined, 100, 10)).toBeNull();
 	});
 });

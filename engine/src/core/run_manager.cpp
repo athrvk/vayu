@@ -980,6 +980,9 @@ RunManager& manager) {
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests     = validation.run;
+            // Written by the capacity strategy before its execute() returned,
+            // so it is already final here; absent for every other mode.
+            inputs.capacity  = context->capacity;
             inputs.retention = read_retention (*context->metrics_collector);
             // Read only now, after the drain above: a completion callback can
             // still be advancing a VU while the strategy's own frame has
@@ -1203,6 +1206,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
             { "passed", inputs.thresholds->passed },
             { "failed", inputs.thresholds->failed } };
     }
+    // What a capacity run's search found, level by level. Omitted for every
+    // other mode - a fixed-target run measured a point, not a curve, and has
+    // no knee to report.
+    if (inputs.capacity.has_value ()) {
+        summary["capacity"] = build_capacity_summary_payload (*inputs.capacity);
+    }
     // A scenario load run's sequence tallies, under the same key and in the
     // same shape the design-mode runner writes - one report section, two
     // executors. Omitted for a single-request load run, which has no sequence.
@@ -1296,6 +1305,12 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         stats["timestamp"]        = now_wall_ms;
         stats["requestsSent"]     = requests_sent;
         stats["requestsExpected"] = requests_expected;
+
+        // Publish the same numbers to the strategies' feedback path, before
+        // the SSE payload rather than after: a capacity search polls this every
+        // tick, and the serialize-and-append below is the slower half.
+        context->publish_live_tick ({ 0, win_p50, win_p95, win_p99, live_current_rps,
+        backpressure, window.count });
 
         size_t offset = context->published_count.load ();
         context->append_tick (build_tick_payload (stats, offset));

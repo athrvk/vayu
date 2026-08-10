@@ -686,7 +686,12 @@ export interface RunListParams {
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
-export type LoadTestMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+export type LoadTestMode =
+	| "constant_rps"
+	| "constant_concurrency"
+	| "iterations"
+	| "ramp_up"
+	| "capacity";
 
 /**
  * Pass/fail budgets a run declares up front, so the engine can judge it rather
@@ -729,6 +734,15 @@ export interface LoadTestConfig {
 	max_in_flight?: number;
 	/** Absent when the run declared no budgets - never an empty object. */
 	thresholds?: RunThresholds;
+	/**
+	 * Capacity only: the p99 budget the search looks for the edge of, in ms.
+	 * Prefilled from the client-side `sloThresholdMs` setting, so the number
+	 * the dashboard already annotates its charts with becomes the number the
+	 * search is steered by rather than a second, unrelated one.
+	 */
+	slo_ms?: number;
+	/** Capacity only: how long each concurrency level is held before it is judged. */
+	step_duration_seconds?: number;
 }
 
 /**
@@ -1058,6 +1072,29 @@ export interface RunReport {
 		refreshes: { atSeconds: number }[];
 		refreshFailures: number;
 		lastError?: string;
+	};
+	/**
+	 * What a capacity run's adaptive search found: the highest concurrency the
+	 * service held inside its latency budget, the level it gave out at, and the
+	 * per-level audit trail behind both.
+	 *
+	 * `undefined` for every other mode - a fixed-target run measured a point,
+	 * not a curve, so there is no knee to show. `maxHealthy*` is absent when the
+	 * very first level already breached (the search found no sustainable
+	 * capacity) and `knee*` when the search ended for a reason other than
+	 * latency, so neither can be read as a measured zero. `stopReason` is typed
+	 * loosely for the same reason `thresholdValidation.metric` is: a newer
+	 * sidecar may stop for a reason this build has no words for.
+	 */
+	capacity?: {
+		sloMs: number;
+		stopReason: string;
+		maxHealthyConcurrency?: number;
+		maxHealthyRps?: number;
+		p99AtMaxHealthyMs?: number;
+		kneeConcurrency?: number;
+		kneeP99Ms?: number;
+		levels: { concurrency: number; rps: number; p99Ms: number }[];
 	};
 	/**
 	 * How many records each of the run's bounded stores thinned away.

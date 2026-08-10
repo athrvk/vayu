@@ -124,4 +124,24 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText(/≤ 0%/)).toBeInTheDocument();
 		expect(screen.getByText("0%")).toBeInTheDocument();
 	});
+
+	it("paints the verdict chip through the Badge primitive, radius included", () => {
+		// Rendered and read off `className`, not source-scanned: the colour
+		// arrives in a variable, and a box with *no* radius class is exactly
+		// what no scan can see (app/CLAUDE.md). Mutation check: revert the
+		// `<Badge variant="chip">` to the hand-rolled `<span>` this used to be
+		// and the radius assertion fails - the box was pinned square for anyone
+		// on the Rounded setting.
+		render(<ThresholdVerdict verdict={verdict({ failed: 1, passed: 0, verdict: "failed" })} />);
+		const chip = screen.getByText("Failed");
+		expect(chip.className).toMatch(/\brounded-(sm|md|lg)\b/);
+		// The tint plus a `-text` token, never the bare indicator fill as a
+		// foreground - the three-token rule the status guards enforce.
+		expect(chip.className).toContain("text-destructive-text");
+		// Lookahead, not a bare word boundary: `-` is a word boundary, so
+		// `\btext-destructive\b` matches the prefix of `text-destructive-text`
+		// and the assertion would fail on the correct token.
+		expect(chip.className).not.toMatch(/\btext-destructive(?!-text)\b/);
+		cleanup();
+	});
 });

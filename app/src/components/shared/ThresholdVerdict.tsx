@@ -20,7 +20,7 @@
  * is the reason a run without budgets renders exactly as it did before.
  */
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { RunReport } from "@/types/domain";
 
@@ -58,21 +58,32 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle className="text-base">Pass/fail budgets</CardTitle>
 				{/*
-				 * Text, not a solid chip: `--status-*` is an indicator token and
-				 * fails contrast as a label, so the three-token rule sends the
-				 * word to `-text` and leaves the fill to the tint behind it
+				 * `Badge variant="chip"`, not a hand-rolled span. `chip` is the
+				 * one variant that lets a caller own the background without
+				 * inheriting a `hover:bg-*` it cannot override - `cn()` is
+				 * tailwind-merge, which replaces `bg-*` but treats `hover:bg-*`
+				 * as a different group - and going through the primitive is also
+				 * what supplies the radius. A box with *no* radius class at all
+				 * is pinned square for a user who chose the Rounded setting, and
+				 * no source scan can flag that (app/CLAUDE.md, "No bare
+				 * `rounded`").
+				 *
+				 * Text on a tint, never the bare fill as a foreground:
+				 * `--status-*` is an indicator token and fails contrast as a
+				 * label, so the three-token rule sends the word to `-text`
 				 * (docs/design-system.md, "Status tokens").
 				 */}
-				<span
+				<Badge
+					variant="chip"
 					className={cn(
-						"px-2 py-0.5 text-xs font-medium",
+						"font-medium",
 						failed
 							? "bg-destructive/10 text-destructive-text"
 							: "bg-status-success/10 text-status-success-text"
 					)}
 				>
 					{failed ? "Failed" : "Passed"}
-				</span>
+				</Badge>
 			</CardHeader>
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground">

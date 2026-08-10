@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "vayu/core/auth_refresh.hpp"
+#include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -249,6 +250,63 @@ struct RunContext {
         refill_cv.notify_one ();
     }
 
+    // ---- Published metric tick (the strategies' one feedback path) --------
+    /**
+     * The numbers of the most recent live tick, as the dashboard sees them.
+     *
+     * The capacity strategy needs windowed percentiles to steer by, and it must
+     * NOT call `MetricsCollector::sample_window_percentiles()` for them: that
+     * call is documented single-reader and *resets* the window on read, and the
+     * metrics thread already consumes it once per tick in `emit_live_tick`. A
+     * second consumer would silently halve both readers' sample counts.
+     *
+     * So the producer publishes what it already computed, and the strategy
+     * copies it out. One writer (the metrics thread), cheap reads, and the
+     * controller steers by exactly the figures the live chart is drawing.
+     */
+    struct LiveTick {
+        /// Monotonic per run, starting at 1. A reader compares it against the
+        /// last one it saw to tell a fresh tick from a re-read of the same one;
+        /// a wall-clock timestamp cannot, since two ticks can share a
+        /// millisecond and the clock can step.
+        uint64_t sequence     = 0;
+        double latency_p50_ms = 0.0;
+        double latency_p95_ms = 0.0;
+        double latency_p99_ms = 0.0;
+        double current_rps    = 0.0;
+        size_t in_flight      = 0;
+        /// Completions the percentiles above were computed over. Zero means an
+        /// idle window, whose percentiles are zeros and must not be read as a
+        /// service answering instantly.
+        size_t latency_samples = 0;
+    };
+    mutable std::mutex live_tick_mtx;
+    std::optional<LiveTick> live_tick_; // live_tick_mtx
+
+    /// Publish this tick's numbers. Called once per tick by the metrics thread
+    /// and by nothing else.
+    void publish_live_tick (const LiveTick& tick) {
+        std::lock_guard<std::mutex> lock (live_tick_mtx);
+        LiveTick published = tick;
+        published.sequence = live_tick_ ? live_tick_->sequence + 1 : 1;
+        live_tick_         = published;
+    }
+
+    /// The most recently published tick, or `nullopt` before the first one.
+    [[nodiscard]] std::optional<LiveTick> latest_live_tick () const {
+        std::lock_guard<std::mutex> lock (live_tick_mtx);
+        return live_tick_;
+    }
+
+    /**
+     * What a capacity run's search found, written by `CapacityLoadStrategy`
+     * once its loop ends and read by `execute_load_test` when it builds the
+     * summary - both on the worker thread, after the strategy's frame has
+     * returned, so it needs no lock of its own. Absent for every other mode,
+     * which is what keeps the report's `capacity` section out.
+     */
+    std::optional<CapacitySummary> capacity;
+
     // Legacy accessors for backward compatibility (delegate to metrics_collector)
     [[nodiscard]] size_t total_requests () const {
         return metrics_collector ? metrics_collector->total_requests () : 0;
@@ -471,6 +529,10 @@ struct RunSummaryInputs {
     // rather than reporting a run that passed zero checks. Sibling of `tests`,
     // and the aggregate answer a per-response script structurally cannot give.
     std::optional<ThresholdOutcome> thresholds;
+    // What a capacity run's adaptive search found. Absent for every other mode,
+    // which keeps the report's `capacity` section out rather than showing a
+    // fixed-target run a knee it never looked for.
+    std::optional<CapacitySummary> capacity;
     SamplingRetention retention;
     // A scenario load run's sequence tallies and per-step breakdown, stored
     // under the summary's `scenario` key. Absent for a single-request load run,

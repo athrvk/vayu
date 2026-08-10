@@ -564,7 +564,7 @@ is fast-forwarded to the oldest retained tick rather than replaying from 0.
 
 ## Load Test Strategies
 
-Four load test modes are supported (`LoadTestType` in `types.hpp`). Three are **closed-loop** -
+Five load test modes are supported (`LoadTestType` in `types.hpp`). Four are **closed-loop** -
 the engine holds in-flight requests at a target and issues a new request as each completes, so
 throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open-loop**.
 
@@ -605,12 +605,56 @@ run end.
 { "mode": "iterations", "concurrency": 10, "iterations": 1000 }
 ```
 
+### 5. `capacity` (closed-loop, adaptive)
+
+Steps the concurrency target up while latency holds, and stops itself at the
+knee. It answers "what can this service sustain" without a human bisecting
+concurrency by hand.
+
+```json
+{ "mode": "capacity", "startConcurrency": 1, "concurrency": 512,
+  "sloMs": 200, "stepDuration": "5s", "duration": "5m" }
+```
+
+Each level is held for `stepDuration`, then judged on the mean of that window's
+windowed p99 and throughput. Healthy levels step up 25% (at least +1); a single
+breaching window **holds** the level and re-measures rather than ending the
+search. The stop reasons are `slo_exceeded` (two consecutive breaching windows),
+`plateau` (two step-ups bought under 5% more throughput), `cap_reached`,
+`deadline` and `stopped`, and the report's `capacity` section names which fired.
+
 ### Closed-loop controller
 
-`constant_concurrency`, `ramp_up`, and `iterations` share a `maintain_concurrency` loop driven by
-a pure `compute_refill_deficit` primitive: each tick, refill exactly `target − in_flight` new
-requests (where `in_flight = requests_sent − completed`). On stop the controller is notified for
-prompt cancellation rather than waiting for in-flight requests to drain.
+`constant_concurrency`, `ramp_up`, `iterations` and `capacity` share a `maintain_concurrency`
+loop driven by a pure `compute_refill_deficit` primitive: each tick, refill exactly
+`target − in_flight` new requests (where `in_flight = requests_sent − completed`). On stop the
+controller is notified for prompt cancellation rather than waiting for in-flight requests to drain.
+
+**The `target_fn` invariant, restated.** Every mode but `capacity` passes a
+`target_fn` that is a pure function of `elapsed_ms` and constants fixed when the
+run started - which is what makes a ramp reproducible and a constant run flat.
+`capacity` is the deliberate exception: its target is a function of what the run
+has *measured*, so the invariant is now "the target depends only on elapsed time
+**and the published metric tick**", and nothing else.
+
+That feedback path has exactly one shape, and it matters which. The strategy
+must **not** call `MetricsCollector::sample_window_percentiles()`: that call is
+single-reader and *resets* the rolling window on read, and the metrics thread
+already consumes it once per tick in `emit_live_tick`. A second consumer would
+silently halve both readers' sample counts, and neither the live chart nor the
+search would look wrong. So the metrics thread publishes what it already
+computed - `RunContext::publish_live_tick()`, one writer - and the strategy
+copies it out through `latest_live_tick()`. The controller therefore steers by
+exactly the numbers the dashboard is drawing. A guard in
+`capacity_controller_test.cpp` pins the single production caller, because the
+wrong version still runs; it just measures less.
+
+The tick carries a `latency_samples` count for the same reason: an idle window's
+percentiles are zeros, and averaging those in with real ones would read "nothing
+completed" as "answered instantly" and climb straight past the limit the search
+exists to find. The controller's policy itself lives in
+`core/capacity_controller.hpp` as pure functions over a level history - no clock,
+no collector, no run context - so it is unit-tested without a server.
 
 ### Scenario load runs - the virtual-user state machine
 
