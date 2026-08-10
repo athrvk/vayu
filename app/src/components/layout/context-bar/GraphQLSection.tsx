@@ -24,6 +24,12 @@
  * the section would not be worth it - the outline answers "what is in this
  * request", which does not change per keystroke.
  *
+ * **A row scrolls the editor to its operation** by writing a command to
+ * `lib/graphql/reveal-store.ts`, which `GraphQLBody` consumes and clears. The
+ * row sends the operation's *name* rather than the line it drew, because the
+ * two copies of the document differ by whatever has not autosaved yet - see
+ * `findOperationLine`.
+ *
  * Like every section, this introspects nothing of its own: it renders whatever
  * the schema cache holds, and its Refresh is the store's own `refreshSchema` on
  * the target the request builder registered.
@@ -34,6 +40,7 @@ import { useRequestQuery } from "@/queries";
 import { TooltipIconButton } from "@/components/ui";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
+import { useRevealStore } from "@/lib/graphql/reveal-store";
 import { formatRelativeTime } from "@/utils/helpers";
 import { cn } from "@/lib/utils";
 import { SectionEmpty, SectionLoading } from "./Section";
@@ -51,6 +58,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 	const { data: request, isLoading } = useRequestQuery(tab.entityId);
 	const entry = useSchemaCache((s) => s.getActiveEntry());
 	const activeTarget = useSchemaCache((s) => s.activeTarget);
+	const revealOperation = useRevealStore((s) => s.revealOperation);
 
 	if (isLoading) return <SectionLoading />;
 	if (!request || request.bodyType !== "graphql") {
@@ -117,20 +125,37 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 				</p>
 				<ul className="list-none p-0 m-0 space-y-0.5">
 					{operations.map((operation, index) => (
-						<li
-							key={`${operation.kind}:${operation.name ?? ""}:${index}`}
-							className="text-[11px] font-mono truncate"
-						>
-							<span className="text-muted-foreground">{operation.kind} </span>
-							{/* An anonymous operation is the shorthand `{ … }` form,
-							    which is legal exactly when it is the only one. */}
-							<span
-								className={
-									operation.name ? "text-foreground" : "text-muted-foreground"
+						<li key={`${operation.kind}:${operation.name ?? ""}:${index}`}>
+							{/*
+							 * A real button, so Enter and Space come with it: the rows
+							 * were plain text carrying no affordance at all, and a
+							 * div with an onClick would have been the keyboard-only
+							 * user losing the feature instead.
+							 */}
+							<button
+								type="button"
+								onClick={() =>
+									revealOperation({
+										requestId: request.id ?? null,
+										name: operation.name,
+										index,
+									})
 								}
+								aria-label={`Go to ${operation.kind} ${operation.name ?? "(anonymous)"} in the editor`}
+								className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-[11px] font-mono transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							>
-								{operation.name ?? "(anonymous)"}
-							</span>
+								<span className="text-muted-foreground">{operation.kind}</span>
+								{/* An anonymous operation is the shorthand `{ … }` form,
+								    which is legal exactly when it is the only one. */}
+								<span
+									className={cn(
+										"truncate",
+										operation.name ? "text-foreground" : "text-muted-foreground"
+									)}
+								>
+									{operation.name ?? "(anonymous)"}
+								</span>
+							</button>
 						</li>
 					))}
 				</ul>

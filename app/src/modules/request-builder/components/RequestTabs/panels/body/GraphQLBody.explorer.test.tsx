@@ -27,96 +27,14 @@ import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import { schemaCacheKey, useSchemaCache, type SchemaTarget } from "@/lib/graphql/schema-cache";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import { parseGraphQLBody } from "@/lib/graphql/graphql-body";
-
-/** The latest value each mocked editor was rendered with, by language. */
-const values = new Map<string, string>();
-/** The caret each mocked editor was last moved to, by language. */
-const positions = new Map<string, { lineNumber: number; column: number }>();
-
-function offsetAt(text: string, position: { lineNumber: number; column: number }): number {
-	const lines = text.split("\n");
-	let offset = 0;
-	for (let i = 0; i < position.lineNumber - 1; i++) offset += lines[i].length + 1;
-	return offset + position.column - 1;
-}
-
-function positionAt(text: string, offset: number) {
-	const before = text.slice(0, offset).split("\n");
-	return { lineNumber: before.length, column: before[before.length - 1].length + 1 };
-}
-
-/**
- * Enough of a Monaco editor for the caret round trip: a model whose offsets are
- * computed against whatever the component last rendered, so an offset into the
- * *new* document is only correct if the component waited for it to arrive.
- */
-function fakeEditor(language: string) {
-	const text = () => values.get(language) ?? "";
-	const model = {
-		getOffsetAt: (p: { lineNumber: number; column: number }) => offsetAt(text(), p),
-		getPositionAt: (o: number) => positionAt(text(), o),
-		uri: { toString: () => `inmemory://${language}` },
-		// The rest is what `attachVariablesDiagnostics` needs of the pane's
-		// model to hang its masked twin off it.
-		getValue: text,
-		setValue: () => {},
-		isDisposed: () => false,
-		onDidChangeContent: () => ({ dispose: () => {} }),
-		onWillDispose: () => ({ dispose: () => {} }),
-	};
-	return {
-		getModel: () => model,
-		getPosition: () => positions.get(language) ?? { lineNumber: 1, column: 1 },
-		setPosition: (p: { lineNumber: number; column: number }) => positions.set(language, p),
-		revealPositionInCenterIfOutsideViewport: () => {},
-		focus: () => {},
-	};
-}
-
-/**
- * The Monaco surface the variables pane's mount touches: the JSON language
- * defaults `applyVariablesSchema` writes to, and the model registry
- * `attachVariablesDiagnostics` creates its masked twin in. Mounting the editor
- * is what makes both run, so a stub that lacks either fails every case in this
- * file rather than the one it belongs to.
- */
-function monacoStub() {
-	const models = new Map<string, { isDisposed: () => boolean; dispose: () => void }>();
-	return {
-		Uri: { parse: (uri: string) => ({ toString: () => uri }) },
-		json: {
-			jsonDefaults: {
-				diagnosticsOptions: { schemas: [] as unknown[] },
-				setDiagnosticsOptions: () => {},
-			},
-		},
-		editor: {
-			createModel: (value: string, _language: string, uri: { toString: () => string }) => {
-				let disposed = false;
-				let text = value;
-				const model = {
-					uri,
-					getValue: () => text,
-					setValue: (next: string) => {
-						text = next;
-					},
-					isDisposed: () => disposed,
-					onDidChangeContent: () => ({ dispose: () => {} }),
-					onWillDispose: () => ({ dispose: () => {} }),
-					dispose: () => {
-						disposed = true;
-					},
-				};
-				models.set(uri.toString(), model);
-				return model;
-			},
-			getModel: (uri: { toString: () => string }) => models.get(uri.toString()) ?? null,
-			getModelMarkers: () => [],
-			setModelMarkers: () => {},
-			onDidChangeMarkers: () => ({ dispose: () => {} }),
-		},
-	};
-}
+import {
+	editorPositions as positions,
+	editorValues as values,
+	fakeEditor,
+	monacoStub,
+	offsetAt,
+	resetEditorStubs,
+} from "@/test/monaco-editor-stub";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
@@ -170,6 +88,7 @@ function Harness({ initialBody, onBody }: { initialBody: string; onBody: (b: str
 					setBody(b);
 					onBody(b);
 				}}
+				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
 				variablesDraft={draft}
@@ -204,8 +123,7 @@ function insert(branch: string, field: string) {
 
 beforeEach(() => {
 	vi.stubGlobal("IntersectionObserver", StubObserver);
-	values.clear();
-	positions.clear();
+	resetEditorStubs();
 	useExplorerStore.setState({ open: true, byKey: {}, lru: [] });
 	/*
 	 * A schema already in hand, so mounting introspects nothing: `ensureSchema`

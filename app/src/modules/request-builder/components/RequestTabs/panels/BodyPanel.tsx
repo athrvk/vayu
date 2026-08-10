@@ -416,6 +416,7 @@ export default function BodyPanel() {
 						<GraphQLBody
 							body={request.body || ""}
 							onBodyChange={(b) => updateField("body", b)}
+							requestId={request.id ?? null}
 							schemaTarget={gqlSchemaTarget}
 							onEditorMount={handleEditorMount}
 							variablesDraft={ownVariablesDraft(

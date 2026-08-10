@@ -31,6 +31,7 @@ import {
 	useLastDesignRunQuery,
 } from "@/queries";
 import { useSessionStore, useResponseStore } from "@/stores";
+import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
 	AutoContentType,
@@ -180,6 +181,38 @@ export default function RequestBuilderProvider({
 
 	// UI state
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");
+
+	/*
+	 * The context bar's GraphQL outline scrolls the query editor, and the editor
+	 * only exists while the Body tab is on screen - Radix unmounts the rest. So a
+	 * click from a hidden Body tab brings the tab forward and `GraphQLBody`
+	 * serves the command on mount; revealing into an editor nobody can see is the
+	 * silent-failure alternative.
+	 *
+	 * This end only opens the tab. `GraphQLBody` owns consuming and clearing,
+	 * because it is the one that knows whether the operation is still there - and
+	 * clearing here would race it to the slot. What this end does clear is a
+	 * command nothing under it can ever serve: another request's, or one for a
+	 * request that no longer sends a GraphQL body. Left in the slot, it would be
+	 * replayed at the next GraphQL body that mounts.
+	 */
+	const clearReveal = useRevealStore((s) => s.clearReveal);
+	const requestId = request.id ?? null;
+	const bodyMode = request.bodyMode;
+	useEffect(() => {
+		const serve = (command: OperationRevealCommand | null) => {
+			if (!command) return;
+			if (command.requestId !== requestId || bodyMode !== "graphql") {
+				clearReveal();
+				return;
+			}
+			setActiveTab("body");
+		};
+		// Read as well as subscribed to, so a command that outlived the request it
+		// was written for is dropped when this provider is handed the next one.
+		serve(useRevealStore.getState().pending);
+		return useRevealStore.subscribe((s) => serve(s.pending));
+	}, [requestId, bodyMode, clearReveal]);
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 

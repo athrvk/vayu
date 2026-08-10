@@ -207,6 +207,12 @@ export interface DocumentOperation {
 	kind: "query" | "mutation" | "subscription";
 	/** The operation's name, or null for the anonymous (shorthand) form. */
 	name: string | null;
+	/**
+	 * The 1-based line the operation starts on, which is what a code editor
+	 * reveals by. Read by `findOperationLine` below, so that an outline row
+	 * rendered from one copy of the document can scroll a second copy of it.
+	 */
+	line: number;
 }
 
 /**
@@ -224,12 +230,50 @@ export function documentOutline(query: string): DocumentOperation[] {
 			.definitions.filter((d) => d.kind === Kind.OPERATION_DEFINITION)
 			.map((d) =>
 				d.kind === Kind.OPERATION_DEFINITION
-					? { kind: d.operation, name: d.name?.value ?? null }
-					: { kind: "query" as const, name: null }
+					? {
+							kind: d.operation,
+							name: d.name?.value ?? null,
+							// `parse` carries locations unless asked not to; the fallback
+							// is the first line, which is where a document with a single
+							// operation starts anyway.
+							line: d.loc?.startToken.line ?? 1,
+						}
+					: { kind: "query" as const, name: null, line: 1 }
 			);
 	} catch {
 		return [];
 	}
+}
+
+/** Which operation an outline row stands for, in terms that outlive a re-parse. */
+export interface OperationRef {
+	/** The operation's name, or null for the anonymous (shorthand) form. */
+	name: string | null;
+	/** Its position among the document's operations, in source order. */
+	index: number;
+}
+
+/**
+ * The line `ref` sits on in `query`, or null when this document no longer has
+ * that operation.
+ *
+ * The two copies are not the same text: an outline drawn from the *stored*
+ * request scrolls the editor's *live* buffer, which is a keystroke or two ahead
+ * of it. So the row is resolved by name against the buffer rather than carrying
+ * a line across - a line taken from the stored copy points at whatever the live
+ * one happens to have there.
+ *
+ * The index is the anonymous document's answer, since `{ … }` has no name to
+ * match on; it is only trusted when the operation it lands on is anonymous too,
+ * so a rename does not silently reveal the operation that took its place.
+ */
+export function findOperationLine(query: string, ref: OperationRef): number | null {
+	const operations = documentOutline(query);
+	if (ref.name !== null) {
+		return operations.find((o) => o.name === ref.name)?.line ?? null;
+	}
+	const positional = operations[ref.index];
+	return positional && positional.name === null ? positional.line : null;
 }
 
 export function operationNames(query: string): string[] {

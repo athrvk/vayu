@@ -19,6 +19,8 @@
 import { describe, expect, test } from "vitest";
 import {
 	classifyVariables,
+	documentOutline,
+	findOperationLine,
 	operationNames,
 	parseGraphQLBody,
 	serializeGraphQLBody,
@@ -273,5 +275,63 @@ describe("a string-typed `variables`", () => {
 
 	test("an empty string variables value leaves the pane empty", () => {
 		expect(parseGraphQLBody(JSON.stringify({ query: "q", variables: "" })).variables).toBe("");
+	});
+});
+
+describe("documentOutline", () => {
+	const TWO = ["", "query Users {", "  me { id }", "}", "", "mutation Add {", "  add", "}"].join(
+		"\n"
+	);
+
+	test("carries the line each operation starts on", () => {
+		expect(documentOutline(TWO)).toEqual([
+			{ kind: "query", name: "Users", line: 2 },
+			{ kind: "mutation", name: "Add", line: 6 },
+		]);
+	});
+
+	test("keeps the anonymous shorthand, which has no name to match on", () => {
+		expect(documentOutline("\n{ me { id } }")).toEqual([
+			{ kind: "query", name: null, line: 2 },
+		]);
+	});
+
+	test("says nothing about a document mid-edit", () => {
+		expect(documentOutline("query Broken { me(")).toEqual([]);
+	});
+});
+
+/*
+ * The two ends of the outline's click-to-scroll hold *different copies* of the
+ * document - the context bar reads the stored request, the editor holds the
+ * live buffer - so the row is resolved by name here rather than carrying a line
+ * across. These cases are that difference.
+ */
+describe("findOperationLine", () => {
+	const BUFFER = ["mutation Add {", "  add", "}", "", "query Users {", "  me { id }", "}"].join(
+		"\n"
+	);
+
+	test("finds the operation by name wherever the buffer has moved it", () => {
+		// The stored copy had `Users` first; the buffer has it second.
+		expect(findOperationLine(BUFFER, { name: "Users", index: 0 })).toBe(5);
+	});
+
+	test("does not find an operation the buffer has renamed away", () => {
+		expect(findOperationLine(BUFFER, { name: "Members", index: 1 })).toBeNull();
+	});
+
+	test("falls back to the position for the anonymous operation", () => {
+		expect(findOperationLine("\n\n{ me { id } }", { name: null, index: 0 })).toBe(3);
+	});
+
+	test("will not hand an anonymous row the named operation that took its place", () => {
+		// Trusting the index alone would scroll to `Users` for a row that stood
+		// for a shorthand document the buffer no longer has.
+		expect(findOperationLine(BUFFER, { name: null, index: 0 })).toBeNull();
+	});
+
+	test("finds nothing in a document that does not parse", () => {
+		expect(findOperationLine("query Users { me(", { name: "Users", index: 0 })).toBeNull();
 	});
 });
