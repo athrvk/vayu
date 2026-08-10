@@ -25,6 +25,19 @@ namespace vayu::http {
 
 namespace {
 
+/**
+ * The one `{{name}}` pattern, shared by every reader of a token in this file.
+ *
+ * Same as the clients' VARIABLE_PATTERN: no nested braces, no escape hatch.
+ * Matches are consumed left to right over the *original* string only, which is
+ * what makes both readers below a single pass - a replacement is never
+ * rescanned, so `{{a}}` whose value contains `{{b}}` stays literal.
+ */
+const std::regex& token_pattern () {
+    static const std::regex pattern (R"(\{\{([^{}]+)\}\})");
+    return pattern;
+}
+
 // --- Dynamic variables -------------------------------------------------------
 //
 // The C++ twin of the renderer's `lib/dynamic-variables.ts` table. The *names*
@@ -206,11 +219,7 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
     if (input.empty ()) {
         return input;
     }
-    // Same pattern as the clients' VARIABLE_PATTERN: no nested braces, no
-    // escape hatch. Matches are consumed left to right over the *original*
-    // string only, which is what makes this a single pass - a replacement is
-    // never rescanned, so `{{a}}` whose value contains `{{b}}` stays literal.
-    static const std::regex pattern (R"(\{\{([^{}]+)\}\})");
+    const std::regex& pattern = token_pattern ();
 
     std::string out;
     out.reserve (input.size ());
@@ -229,6 +238,40 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
     }
     out.append (input, last, input.size () - last);
     return out;
+}
+
+TokenSplit split_tokens (const std::string& input,
+const std::function<bool (const std::string&)>& keep) {
+    TokenSplit split;
+    // The literal being accumulated. A rejected token is appended to it rather
+    // than opening a hole, so "not ours" and "no token here" produce the same
+    // text - which is what lets one namespace split a field the other scopes
+    // have already had their turn at.
+    std::string literal;
+
+    if (!input.empty ()) {
+        auto it = std::sregex_iterator (input.begin (), input.end (), token_pattern ());
+        const auto end = std::sregex_iterator ();
+        size_t last    = 0;
+        for (; it != end; ++it) {
+            const auto& match = *it;
+            literal.append (input, last, static_cast<size_t> (match.position ()) - last);
+            std::string name = trim (match[1].str ());
+            if (keep (name)) {
+                split.literals.push_back (std::move (literal));
+                literal.clear ();
+                split.names.push_back (std::move (name));
+            } else {
+                literal += match.str (); // left written as it stands
+            }
+            last = static_cast<size_t> (match.position () + match.length ());
+        }
+        literal.append (input, last, input.size () - last);
+    }
+
+    // Always one more literal than names, including for a string with none.
+    split.literals.push_back (std::move (literal));
+    return split;
 }
 
 std::string resolve_template (const std::string& input, const VariableValues& vars) {

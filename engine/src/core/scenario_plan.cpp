@@ -292,6 +292,11 @@ const ScenarioResolveOptions& options) {
             ": " + built.error_message);
         }
 
+        // Split once, here, so no executor re-scans this step per iteration -
+        // the load-mode one binds a row per iteration per virtual user, which
+        // is a scan of every field of every step at the run's full rate.
+        auto data_template = tokenize_data_fields (built.request);
+
         // A `{{data.*}}` token with no data set behind it can never bind. The
         // namespace is reserved, so composition deliberately left the token
         // written as it stands, and a run without rows has nothing to
@@ -301,7 +306,7 @@ const ScenarioResolveOptions& options) {
         // exists, rather than rediscovered per step per iteration once it has
         // started (issue #415).
         if (!has_data) {
-            if (auto token = find_data_token (built.request)) {
+            if (auto token = data_template.first_token ()) {
                 return invalid (describe_step (index, row) + " carries " + *token +
                 ", but this run has no 'scenario.data' set. A data token has "
                 "no row to bind to and would reach the wire written as it "
@@ -311,13 +316,14 @@ const ScenarioResolveOptions& options) {
         }
 
         ScenarioStep step;
-        step.index       = index;
-        step.request_id  = row.id;
-        step.name        = row.name;
-        step.request     = std::move (built.request);
-        step.pre_script  = vayu::http::read_pre_request_script (payload);
-        step.post_script = vayu::http::read_post_request_script (payload);
-        step.stored_url  = row.url;
+        step.index         = index;
+        step.request_id    = row.id;
+        step.name          = row.name;
+        step.request       = std::move (built.request);
+        step.pre_script    = vayu::http::read_pre_request_script (payload);
+        step.post_script   = vayu::http::read_post_request_script (payload);
+        step.stored_url    = row.url;
+        step.data_template = std::move (data_template);
         resolution.plan.steps.push_back (std::move (step));
     }
 

@@ -28,6 +28,7 @@
 
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -77,6 +78,14 @@ class ScenarioMockServer {
                 res.set_content ("{}", "application/json");
             });
         }
+
+        // A `{{data.*}}` token substitutes into the path, so the row a virtual
+        // user bound is readable off the wire rather than inferred from a
+        // counter the test also owns.
+        svr.Get (R"(/row/(.*))", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/row/" + req.matches[1].str ());
+            res.set_content ("{}", "application/json");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -198,6 +207,18 @@ class ScenarioLoadTest : public ::testing::Test {
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
         context_ = context;
         return state;
+    }
+
+    /// Tokenise every step of @p execution the way plan resolution does, and
+    /// give the run @p rows. Going through `tokenize_data_fields` rather than
+    /// hand-building a template is deliberate: a test that built its own would
+    /// pass against a splitter the resolver never uses.
+    static void with_data (vayu::core::ScenarioExecution& execution,
+    const std::vector<json>& rows) {
+        for (auto& step : execution.plan.steps) {
+            step.data_template = vayu::core::tokenize_data_fields (step.request);
+        }
+        execution.data_rows = rows;
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -479,6 +500,184 @@ TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScripts) {
     << "a scenario load run must not acquire a run-level test script";
     EXPECT_EQ (context_->metrics_collector->response_samples ().size (), 0u)
     << "responses were sampled for a script validation pass that cannot run";
+}
+
+// ============================================================================
+// Data rows in load mode (issue #449)
+// ============================================================================
+
+// The cursor is shared across the whole run and wraps: 5 iterations over a
+// 3-row set bind 0,1,2,0,1. One VU, so the recorded order is the claim order.
+TEST_F (ScenarioLoadTest, TheSharedRowCursorWrapsWhenTheRowsRunOut) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{data.id}}") });
+    with_data (execution,
+    { json{ { "id", "0" } }, json{ { "id", "1" } }, json{ { "id", "2" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 5 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    std::vector<std::string> paths;
+    for (const auto& hit : server.hits ()) {
+        paths.push_back (hit.path);
+    }
+    EXPECT_EQ (paths,
+    (std::vector<std::string>{ "/row/0", "/row/1", "/row/2", "/row/0", "/row/1" }));
+}
+
+// Two virtual users running concurrently bind *different* rows. Make the cursor
+// per-VU and this fails - which is the whole reason it is one run-wide counter:
+// two users of a credentials file must not both be user 0.
+TEST_F (ScenarioLoadTest, ConcurrentVirtualUsersBindDifferentRows) {
+    // The rendezvous holds both VUs inside step 0 at once, so "concurrently" is
+    // an assertion rather than a race the test hopes to win.
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution =
+    plan_over ({ server.url ("/login"), server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "0" } }, json{ { "id", "1" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    std::vector<std::string> rows;
+    for (const auto& hit : server.hits ()) {
+        if (hit.path.rfind ("/row/", 0) == 0) {
+            rows.push_back (hit.path);
+        }
+    }
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_NE (rows[0], rows[1])
+    << "both virtual users bound the same row - the row cursor is per-VU "
+       "rather than shared across the run";
+}
+
+// Every step of one iteration binds the same row: a checkout that used a
+// different row than its login is not a user.
+TEST_F (ScenarioLoadTest, EveryStepOfAnIterationBindsTheSameRow) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{data.id}}"),
+    server.url ("/row/{{data.id}}"), server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "0" } }, json{ { "id", "1" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    std::vector<std::string> paths;
+    for (const auto& hit : server.hits ()) {
+        paths.push_back (hit.path);
+    }
+    EXPECT_EQ (paths,
+    (std::vector<std::string>{ "/row/0", "/row/0", "/row/0", "/row/1", "/row/1", "/row/1" }));
+}
+
+// The zero-cost claim, where the executor reads it: a step with no data token
+// carries an empty template, which is what it tests before joining anything.
+TEST_F (ScenarioLoadTest, AStepWithoutADataTokenCarriesNoTemplate) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "0" } } });
+
+    EXPECT_TRUE (execution.plan.steps[0].data_template.empty ())
+    << "a step with no {{data.*}} token must do no per-iteration join work";
+    EXPECT_FALSE (execution.plan.steps[1].data_template.empty ());
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), 1u)
+    << "the untemplated step was still sent unchanged";
+}
+
+// A token naming a column the bound row does not carry fails the step loudly:
+// nothing goes on the wire, the step's own error count moves, and the run's
+// error list carries the sentence that names the token, the row and the columns.
+TEST_F (ScenarioLoadTest, AnAbsentColumnErrorsTheStepInsteadOfSendingIt) {
+    ScenarioMockServer server;
+    // The bad token sits in the middle, so "the iteration ended here" is
+    // visible as the last step never being reached.
+    auto execution = plan_over (
+    { server.url ("/s0"), server.url ("/row/{{data.missing}}"), server.url ("/s2") });
+    with_data (execution, { json{ { "id", "0" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), 2u)
+    << "the virtual user was stranded by a step that never reached the wire";
+    EXPECT_EQ (server.hits_for ("/s2").size (), 0u);
+    for (const auto& hit : server.hits ()) {
+        EXPECT_NE (hit.path.rfind ("/row/", 0), 0u)
+        << "a request with an unbound token reached the wire: " << hit.path;
+    }
+
+    EXPECT_EQ (state->steps.errors (1), 2u)
+    << "the failure was not attributed to the step that could not bind";
+    EXPECT_EQ (state->steps.completed (1), 2u);
+    EXPECT_EQ (state->steps_errored.load (), 2u);
+    EXPECT_EQ (state->iterations_abandoned.load (), 2u);
+    EXPECT_EQ (context_->in_flight (), 0u)
+    << "a step that was never sent left an in-flight slot leaked";
+
+    // Loud: the message reaches the run's error store, naming what to fix.
+    const auto& errors = context_->metrics_collector->errors ();
+    ASSERT_FALSE (errors.empty ());
+    EXPECT_NE (errors[0].error_message.find ("{{data.missing}}"), std::string::npos)
+    << errors[0].error_message;
+    EXPECT_NE (errors[0].error_message.find ("step1"), std::string::npos)
+    << "the message does not name the step it failed on: " << errors[0].error_message;
+}
+
+// A recorded result carries the row it was bound to, so a failure under load is
+// attributable to a row rather than only to a step.
+TEST_F (ScenarioLoadTest, ARecordedResultCarriesItsDataRowIndex) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "0" } }, json{ { "id", "1" } } });
+
+    // Every completion retained as a sampled trace, so the assertion is about
+    // what a record carries rather than about which budget claimed it.
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 }, { "slow_threshold_ms", 0 } };
+    run (config, execution);
+
+    const auto results = context_->metrics_collector->success_results ();
+    ASSERT_FALSE (results.empty ());
+    std::vector<int> rows;
+    for (const auto& result : results) {
+        const auto trace = json::parse (result.trace_data, nullptr, false);
+        ASSERT_FALSE (trace.is_discarded ()) << result.trace_data;
+        ASSERT_TRUE (trace.contains ("dataRowIndex"))
+        << "a sampled load result carries no row: " << result.trace_data;
+        rows.push_back (trace["dataRowIndex"].get<int> ());
+    }
+    std::sort (rows.begin (), rows.end ());
+    EXPECT_EQ (rows, (std::vector<int>{ 0, 1 }));
+}
+
+// A run sent without `data` carries no row at all - the record must not gain a
+// zero that reads like row 0.
+TEST_F (ScenarioLoadTest, ARunWithoutRowsRecordsNoDataRowIndex) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/s0") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 }, { "slow_threshold_ms", 0 } };
+    run (config, execution);
+
+    const auto results = context_->metrics_collector->success_results ();
+    ASSERT_FALSE (results.empty ());
+    for (const auto& result : results) {
+        const auto trace = json::parse (result.trace_data, nullptr, false);
+        ASSERT_FALSE (trace.is_discarded ());
+        EXPECT_FALSE (trace.contains ("dataRowIndex")) << result.trace_data;
+    }
 }
 
 // `concurrency` is the number of virtual users, and in-flight is bounded by it

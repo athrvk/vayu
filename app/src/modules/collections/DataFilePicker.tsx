@@ -64,8 +64,22 @@ export interface DataFilePickerProps {
 	 * The dialog's `iterations` field, or undefined when the user has not set
 	 * one. Only the resolved count is shown - the arithmetic is the engine's
 	 * (`resolveIterationCount` mirrors it), not this component's.
+	 *
+	 * Ignored when {@link DataFilePickerProps.loadTest} is set: a load run is
+	 * bounded by its duration, so there is no pass count to resolve against.
 	 */
 	iterations: number | undefined;
+	/**
+	 * Whether the run this file is for is a load test (issue #449).
+	 *
+	 * It changes what a row *means*, which is why the copy cannot be shared: in
+	 * design mode a row is an iteration and the file's length is the run's
+	 * length. Under load the rows are claimed from one cursor shared by every
+	 * virtual user and wrap for as long as the duration lasts, so "12 rows" says
+	 * nothing about how long the run is - only that no two users hold the same
+	 * row at once.
+	 */
+	loadTest?: boolean;
 	disabled?: boolean;
 }
 
@@ -86,6 +100,7 @@ export default function DataFilePicker({
 	error,
 	onError,
 	iterations,
+	loadTest,
 	disabled,
 }: DataFilePickerProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -134,8 +149,17 @@ export default function DataFilePicker({
 				<Label htmlFor="run-collection-data-file" className="leading-snug">
 					Data file
 					<span className="block text-xs font-normal text-muted-foreground">
-						One iteration per row. Columns read as {"{{data.column}}"} and
-						pm.iterationData.
+						{loadTest ? (
+							<>
+								One row per iteration, shared across virtual users so no two hold
+								the same row at once. Columns read as {"{{data.column}}"}.
+							</>
+						) : (
+							<>
+								One iteration per row. Columns read as {"{{data.column}}"} and
+								pm.iterationData.
+							</>
+						)}
 					</span>
 				</Label>
 				{selected ? (
@@ -190,12 +214,18 @@ export default function DataFilePicker({
 						</span>
 					</div>
 
+					{/* A load run has no pass count to resolve against - it repeats for
+					    its duration - so the resolved-iterations sentence would be
+					    arithmetic about a number that does not exist. What it says
+					    instead is the property the shared cursor buys. */}
 					<p className="text-xs text-muted-foreground">
-						{resolved === rowCount
-							? `${resolved} ${resolved === 1 ? "iteration" : "iterations"}, one per row.`
-							: resolved < rowCount
-								? `${resolved} ${resolved === 1 ? "iteration" : "iterations"} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
-								: `${resolved} iterations over ${rowCount} ${rowCount === 1 ? "row" : "rows"} - the rows repeat from the top once they run out.`}
+						{loadTest
+							? `${rowCount} ${rowCount === 1 ? "row" : "rows"}, bound one per iteration across every virtual user - they repeat from the top once they run out.`
+							: resolved === rowCount
+								? `${resolved} ${resolved === 1 ? "iteration" : "iterations"}, one per row.`
+								: resolved < rowCount
+									? `${resolved} ${resolved === 1 ? "iteration" : "iterations"} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
+									: `${resolved} iterations over ${rowCount} ${rowCount === 1 ? "row" : "rows"} - the rows repeat from the top once they run out.`}
 					</p>
 
 					{/* The grid scrolls rather than widening the dialog: a file

@@ -109,6 +109,33 @@ bool is_data_variable_name (const std::string& name);
 std::string substitute_tokens (const std::string& input,
 const std::function<std::optional<std::string> (const std::string& name)>& resolve);
 
+/** One string split around the `{{name}}` occurrences a caller kept. */
+struct TokenSplit {
+    /// `literals.size() == names.size() + 1`, always - a string with no kept
+    /// token is one literal, and the join is
+    /// `literals[0] + <names[0]> + literals[1] + ... + literals[n]`.
+    std::vector<std::string> literals;
+    /// The trimmed names, in the order they appear.
+    std::vector<std::string> names;
+};
+
+/**
+ * The same left-to-right pass as `substitute_tokens`, *reported* rather than
+ * applied: @p input split into its literal text and the names of the `{{name}}`
+ * occurrences @p keep accepts. A token @p keep rejects stays part of the
+ * surrounding literal, written exactly as it stands.
+ *
+ * Through the same pattern as `substitute_tokens`, so the two cannot disagree
+ * about what a token *is* - a splitter with its own regex would be the second
+ * copy that lets a token pass one and not the other.
+ *
+ * This exists for the load path, which cannot re-scan every field of every
+ * request per iteration: a field is split once, when the plan is resolved, and
+ * only joined per row afterwards (`core::tokenize_data_fields`).
+ */
+[[nodiscard]] TokenSplit split_tokens (const std::string& input,
+const std::function<bool (const std::string& name)>& keep);
+
 /**
  * Generate a value for a dynamic variable name (including the `$`), or
  * `nullopt` when the table does not have it - the caller leaves an unknown

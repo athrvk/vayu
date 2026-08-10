@@ -320,6 +320,23 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															</div>
 														)}
 
+														{/* The data row this result bound (issue #449).
+														    A scenario load run stores no per-step
+														    `results` rows, so this is the only thing
+														    that says which row of the file produced
+														    the sample - and for a failure it is the
+														    row the reader has to go and look at. */}
+														{trace.dataRowIndex !== undefined && (
+															<div className="flex gap-4 text-sm">
+																<span className="text-muted-foreground">
+																	Data Row:
+																</span>
+																<span className="font-mono">
+																	{trace.dataRowIndex}
+																</span>
+															</div>
+														)}
+
 														{/* Per-test validation failures (`validate_scripts` in
 														    run_manager.cpp). Before #111 the summary row showed
 														    only the opaque `ERR` chip and a count - never which

@@ -360,6 +360,45 @@ describe("running the sequence as a load test", () => {
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ type: "dashboard" });
 	});
 
+	/*
+	 * Data rows in load mode (issue #449). The rows always rode the payload -
+	 * before the engine bound them the picker was describing a file the run
+	 * ignored, which is the failure this pair pins from the app side: they must
+	 * still be sent, and the copy must describe the semantics a load run
+	 * actually has.
+	 */
+	it("still sends the rows, which a load run now binds one per iteration", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [new File(["user\nada\ngrace"], "users.csv")] },
+		});
+		await waitFor(() => expect(screen.queryByText("users.csv")).toBeTruthy());
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada" }, { user: "grace" }]);
+		// The pass count still has nothing to say about a duration-bounded run.
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+	});
+
+	it("describes the rows as a load run binds them, not as iterations", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [new File(["user\nada\ngrace"], "users.csv")] },
+		});
+		await waitFor(() => expect(screen.queryByText("users.csv")).toBeTruthy());
+
+		// "2 iterations, one per row" is design-mode arithmetic: a load run
+		// repeats for its duration, so the row count says nothing about length.
+		expect(screen.queryByText(/2 iterations, one per row/i)).toBeNull();
+		expect(screen.getByText(/bound one per iteration across every virtual user/i)).toBeTruthy();
+	});
+
 	it("refuses a virtual-user count or a duration the engine would reject", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();

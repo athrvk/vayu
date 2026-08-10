@@ -26,6 +26,10 @@
  * means: with rows and no explicit count, the run is one pass per row. The rows
  * ride the payload and are dropped when this dialog unmounts - they are user
  * data of unknown sensitivity, so nothing persists them, here or engine-side.
+ * A **load** run binds the same rows differently - one per iteration, from a
+ * cursor every virtual user shares, wrapping for as long as the duration lasts
+ * (issue #449) - which is why the picker is told which run it is for rather
+ * than describing one of the two and being wrong about the other.
  *
  * **Load test** is the fourth (issue #357), and it is a different *executor*
  * over the same plan: `concurrency` virtual users each walking the sequence with
@@ -254,8 +258,8 @@ export default function RunCollectionDialog({
 							Load test
 							<span className="block text-xs font-normal text-muted-foreground">
 								Run the sequence as a load test: each virtual user walks it
-								independently, with its own cookies, for the duration. Scripts do
-								not run.
+								independently, with its own cookies and its own data row, for the
+								duration. Scripts do not run.
 							</span>
 						</Label>
 						<Switch
@@ -363,6 +367,7 @@ export default function RunCollectionDialog({
 						error={dataFileError}
 						onError={setDataFileError}
 						iterations={explicitIterations}
+						loadTest={loadTest}
 						disabled={startRun.isPending}
 					/>
 

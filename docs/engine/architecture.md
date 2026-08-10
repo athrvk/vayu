@@ -616,6 +616,23 @@ row exists - and the executor is the only thing that differs.
   plan's step count - which is what `maxScenarioSteps` bounds. They reach the
   report as `summary.scenario.steps`; a scenario load run stores no per-step
   `results` rows, so that breakdown is the only per-step record it keeps.
+- **Data rows bind per iteration, from one shared cursor.** A run sent with
+  `scenario.data` claims a row per virtual-user iteration off a single run-wide
+  cursor, wrapping when the rows run out, and every step of that iteration binds
+  the same row - a checkout that used a different row than its login is not a
+  user. Shared rather than per-VU is what makes distinct credentials per user
+  work: two VUs must not both be handed row 0. It is k6's `iterationInTest` /
+  JMeter's "All threads" parity, and it costs one increment per *iteration* on
+  the producer thread, which is the only thread that claims.
+  Each step's `{{data.column}}` tokens are **split once, at plan resolution**
+  (`ScenarioStep::data_template`) and only joined per row afterwards, so a plan
+  carrying no data tokens does no per-iteration work at all. A token naming a
+  column its bound row does not carry **fails that step loudly** - nothing is
+  sent, the step's `errors` count moves, and the run's error list carries the
+  sentence naming the token, the row and the row's columns
+  (`DATA_BINDING_FAILED`). Every retained result carries its `dataRowIndex`,
+  which is what makes a failure attributable to a row when no per-step `results`
+  rows exist.
 - **Scripts stay deferred**, and none run: `pm.execution` throws in a load run
   for the reason the flow-control section gives. There is deliberately no
   inline-script path on the load hot path.

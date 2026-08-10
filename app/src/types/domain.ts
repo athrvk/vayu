@@ -523,6 +523,12 @@ export interface RunResultTrace {
 	 * set. Present so the wrap is visible: with `iterations` above the row
 	 * count, iteration 4 of a 3-row set reads row 1, and the iteration number
 	 * alone cannot say that.
+	 *
+	 * A scenario **load** run writes it too (issue #449), on every retained
+	 * result, and there it is the *only* record of the row: that executor stores
+	 * no per-step `results` rows, so without it a failure is attributable to a
+	 * step but never to a row. It arrives on a flat load trace rather than
+	 * beside the `stepIndex` keys above, which is why it sits outside them.
 	 */
 	dataRowIndex?: number;
 }

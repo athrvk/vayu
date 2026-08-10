@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 #include "vayu/db/database.hpp"
@@ -59,6 +60,22 @@ const std::function<bool (int64_t)>& should_continue);
 duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms);
 
 /**
+ * @brief Facts about a completion that only the executor knows, attached to
+ *        whatever record the completion produces.
+ *
+ * A scenario load run binds a data row per iteration (issue #449); without the
+ * row on the record, a failure is unattributable - "which row produced this
+ * 400" is the question a data-driven run exists to answer. A struct rather than
+ * a parameter, so a second such fact does not move every call site again.
+ */
+struct ResultAnnotations {
+    /// Absent for every single-request run, and for a scenario run sent without
+    /// `data` - the record then carries no `dataRowIndex` at all rather than a
+    /// zero that reads like row 0.
+    std::optional<size_t> data_row_index;
+};
+
+/**
  * @brief Record a completed transfer into the run's in-memory MetricsCollector.
  *
  * Every completion - success, a Response carrying a client-side error, and a
@@ -71,10 +88,13 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  *
  * @param db Unused, kept for API compatibility - metrics are batch-written
  *           to the database after the run completes, not from here.
+ * @param annotations Reaches the stored record only where one is stored: an
+ *           unsampled success keeps no trace, so there is nothing to annotate.
  */
 void handle_result (std::shared_ptr<RunContext> context,
 vayu::db::Database& db,
-vayu::Result<vayu::Response> result);
+vayu::Result<vayu::Response> result,
+const ResultAnnotations& annotations = {});
 
 /**
  * @brief Interface for load testing strategies

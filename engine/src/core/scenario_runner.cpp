@@ -408,8 +408,12 @@ RunManager& manager) {
                 std::string data_bind_error;
                 if (data_row_index) {
                     inputs.iteration_data = &data_rows[*data_row_index];
-                    auto bound            = bind_data_row (
-                    inputs.request, data_rows[*data_row_index], *data_row_index);
+                    // Through the step's own template rather than re-splitting
+                    // the request here: one binder for both executors, so a
+                    // step cannot bind differently depending on which one ran
+                    // it.
+                    auto bound = apply_data_template (inputs.request,
+                    step.data_template, data_rows[*data_row_index], *data_row_index);
                     if (!bound.ok) {
                         data_bind_error = std::move (bound.error);
                     }
