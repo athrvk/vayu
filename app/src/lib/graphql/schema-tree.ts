@@ -352,13 +352,26 @@ export interface SchemaSearchIndex {
 }
 
 /**
- * Every field and type in the schema, flattened once.
+ * Every row the tree can show, flattened once.
  *
  * Fields are indexed under the type that owns them, and a field reachable from a
  * root operation type carries its one-step path - so searching for `search` and
  * pressing Enter inserts a working operation, exactly as expanding Query and
  * clicking it would. A field on a non-root type has no path, and inserting it
  * from the results is refused the same way it is from the Types branch.
+ *
+ * **Every kind `childNodes` can produce is indexed, including the two leaf kinds
+ * that lead nowhere.** An enum value and an input-object field are rows the user
+ * can reach by expanding, so a search that skips them contradicts the reason
+ * this index exists at all - it would answer "Nothing matches" for a name the
+ * pane will happily show one click later. Both are named in a schema the way a
+ * field is (`RELEVANCE`, `authorId`) and are exactly what someone filling in an
+ * argument is looking for.
+ *
+ * Both carry a null `rootPath`, because neither is reachable from a root
+ * operation type - and `insertionForNode` refuses both by kind, so a search hit
+ * lands on the same refusal a Types-branch row does rather than guessing a
+ * route through the graph.
  */
 export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 	const entries: IndexEntry[] = [];
@@ -372,6 +385,8 @@ export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 		if (type.name.startsWith("__")) continue;
 		const branch = rootBranch.get(type.name);
 		if (!branch) entries.push(entry(typeNode("search", type)));
+		// A root operation type is always an object type, so the branches below
+		// are mutually exclusive with `branch` being set.
 		if (isObjectType(type) || isInterfaceType(type)) {
 			for (const field of Object.values(type.getFields())) {
 				entries.push(
@@ -385,6 +400,14 @@ export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 						)
 					)
 				);
+			}
+		} else if (isInputObjectType(type)) {
+			for (const field of Object.values(type.getFields())) {
+				entries.push(entry(inputFieldNode(`search:${type.name}`, type, field)));
+			}
+		} else if (isEnumType(type)) {
+			for (const value of type.getValues()) {
+				entries.push(entry(enumValueNode(`search:${type.name}`, type, value.name, value)));
 			}
 		}
 	}
@@ -419,6 +442,16 @@ function entry(node: SchemaTreeNode): IndexEntry {
  *
  * Both offsets are reported whatever tier the row landed in, so a row whose
  * name *and* description mention the term marks both.
+ *
+ * **Inside the name tier, the closest match wins** - earliest offset first, and
+ * among equal offsets the shortest name. An exact match needs no special case:
+ * it is the degenerate one of offset 0 and no characters left over. Without it
+ * the tier is in type-map declaration order and the `limit` cuts it arbitrarily,
+ * which stopped being survivable once enum values and input fields joined the
+ * index: on a schema declaring 60 enums of `POST_*` values before the `Post`
+ * type, `post` returned 200 leaf rows and neither `Post` nor `Query.post`. The
+ * other two tiers keep declaration order, having no offset into the name to sort
+ * on and no measured overflow.
  */
 export function searchSchema(
 	index: SchemaSearchIndex,
@@ -439,9 +472,17 @@ export function searchSchema(
 		if (matchStart >= 0) byName.push(match);
 		else if (item.signature.includes(needle)) bySignature.push(match);
 		else if (descriptionStart >= 0) byDescription.push(match);
-
-		if (byName.length >= limit) break;
 	}
+
+	/*
+	 * The whole index is scanned before this, rather than stopping at `limit`
+	 * name matches: a better match than the first 200 is routinely declared
+	 * after them, which is the bug above. The scan is two `indexOf` calls per
+	 * entry over an index built once per schema, so it is a keystroke's worth of
+	 * work on a schema of any size the pane can render.
+	 */
+	byName.sort((a, b) => a.matchStart - b.matchStart || a.node.name.length - b.node.name.length);
+
 	return [...byName, ...bySignature, ...byDescription].slice(0, limit);
 }
 

@@ -255,6 +255,101 @@ describe("searchSchema", () => {
 		const first = searchSchema(index, "e", 5);
 		expect(first.every((m) => m.matchStart >= 0)).toBe(true);
 	});
+
+	it("finds an enum value, which is browsable in the tree and was unfindable", () => {
+		// `RELEVANCE` is a value of the `Ranking` enum. Expanding Types ->
+		// Ranking shows it; before it was indexed, typing its name answered
+		// "Nothing matches" for a row the pane draws one click later.
+		const found = searchSchema(index, "RELEVANCE").find((m) => m.node.name === "RELEVANCE");
+		expect(found?.node.kind).toBe("enum-value");
+		expect(found?.node.ownerTypeName).toBe("Ranking");
+		expect(found?.matchStart).toBe(0);
+	});
+
+	it("finds an input-object field, the other kind the index skipped", () => {
+		const found = searchSchema(index, "authorId").find((m) => m.node.name === "authorId");
+		expect(found?.node.kind).toBe("input-field");
+		expect(found?.node.ownerTypeName).toBe("PostFilter");
+		expect(found?.node.signature).toBe(": ID");
+	});
+
+	it("indexes an input field of every input object, not just the first", () => {
+		// `title` is only on `CreatePostInput`; `tags` is on both input objects,
+		// so a loop that stopped at one type would show one row here.
+		expect(searchSchema(index, "title").map((m) => m.node.ownerTypeName)).toContain(
+			"CreatePostInput"
+		);
+		const tags = searchSchema(index, "tags").filter((m) => m.node.kind === "input-field");
+		expect(tags.map((m) => m.node.ownerTypeName).sort()).toEqual([
+			"CreatePostInput",
+			"PostFilter",
+		]);
+	});
+
+	it("gives both new kinds a null root path - neither is a route from a root", () => {
+		const enumValue = searchSchema(index, "RECENCY").find((m) => m.node.name === "RECENCY");
+		const inputField = searchSchema(index, "authorId").find((m) => m.node.name === "authorId");
+
+		expect(enumValue?.node.rootPath).toBeNull();
+		expect(inputField?.node.rootPath).toBeNull();
+	});
+
+	it("carries a deprecated enum value's reason through the index", () => {
+		const legacy = searchSchema(index, "LEGACY").find((m) => m.node.kind === "enum-value");
+		expect(legacy?.node.deprecationReason).toBe("Use RELEVANCE.");
+	});
+
+	it("gives every indexed row a unique id, so the results can be keyed", () => {
+		const ids = buildSearchIndex(schema).entries.map((e) => e.node.id);
+		expect(new Set(ids).size).toBe(ids.length);
+	});
+
+	it("ranks the closest name match first, whatever order the schema declares", () => {
+		/*
+		 * The regression the leaf kinds forced. 60 enums of `POST_*` values and
+		 * 30 input objects of `post*` fields are declared *before* the `Post`
+		 * type, and together they are 330 name matches - more than the limit.
+		 * In declaration order the limit cut before `Post` was ever reached, so
+		 * searching `post` returned 200 rows and neither the type nor the field
+		 * the user meant. Remove the sort and this reddens.
+		 */
+		const parts: string[] = [];
+		for (let i = 0; i < 60; i++) {
+			parts.push(`enum Kind${i} { POST_CREATED, POST_UPDATED, POST_DELETED, POST_ARCHIVED }`);
+		}
+		for (let i = 0; i < 30; i++) {
+			parts.push(`input In${i} { postId: ID, postBody: String, postTags: [String!] }`);
+		}
+		parts.push("type Post { id: ID! }");
+		parts.push("type Query { post: Post }");
+
+		const crowded = searchSchema(buildSearchIndex(buildSchema(parts.join("\n"))), "post");
+		expect(crowded).toHaveLength(200);
+		expect(
+			crowded
+				.slice(0, 2)
+				.map((m) => m.node.name)
+				.sort()
+		).toEqual(["Post", "post"]);
+	});
+
+	it("puts a shorter name above a longer one that matches at the same offset", () => {
+		// Both match at 0; `posts` is the closer answer to `post` than
+		// `postArchivedAt` is, because less of it is left over.
+		const ordered = buildSchema(`
+			type Query { postArchivedAt: String, posts: [String!] }
+		`);
+		const names = searchSchema(buildSearchIndex(ordered), "post").map((m) => m.node.name);
+		expect(names.indexOf("posts")).toBeLessThan(names.indexOf("postArchivedAt"));
+	});
+
+	it("still ranks a later-declared prefix match above an earlier substring one", () => {
+		const ordered = buildSchema(`
+			type Query { legacySearch: String, search: String }
+		`);
+		const names = searchSchema(buildSearchIndex(ordered), "search").map((m) => m.node.name);
+		expect(names.indexOf("search")).toBeLessThan(names.indexOf("legacySearch"));
+	});
 });
 
 describe("splitAtMatch", () => {
