@@ -165,6 +165,16 @@ constexpr int64_t SLO_MS = 200;
 /// windowed percentiles to settle at the stock 100ms tick cadence, short enough
 /// that a search over tens of levels finishes inside a normal run duration.
 constexpr int64_t STEP_DURATION_MS = 5000;
+/// Deadline for the whole search when the run config names no `duration`.
+///
+/// Deliberately **not** the 60s every other mode falls back to: at the default
+/// step this mode walks a level every 5s, so a minute is a dozen levels and a
+/// search that almost always ends `deadline` rather than finding anything. It
+/// is a named constant rather than a literal because the MCP duration cap has
+/// to know it - a guard assuming one default for every mode let a capacity run
+/// past a cap it was under - and `safety.test.ts` reads this line to stay in
+/// step.
+constexpr int64_t DEADLINE_MS = 300000;
 /// Ticks discarded at the start of each level: the in-flight count is still
 /// climbing to the new target, so those windows measure the transition rather
 /// than the level. At the stock cadence this is the first 300ms of every step.

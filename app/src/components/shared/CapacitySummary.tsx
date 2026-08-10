@@ -21,7 +21,7 @@
  * none.
  */
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { RunReport } from "@/types/domain";
 
@@ -81,30 +81,53 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 
 	const stop = STOP_REASONS[capacity.stopReason];
 	const sustained = capacity.maxHealthyConcurrency !== undefined;
+	// A search can end before its first level closed - `stepDuration` longer
+	// than `duration`, or a run stopped seconds after it started - and the
+	// engine reports the section anyway, because "judged nothing" is itself the
+	// finding that says to lengthen the run or shorten the step. Absent levels
+	// and absent `maxHealthy*` are therefore two different states, and only this
+	// flag separates them: without it the "no level met the budget" sentence
+	// below claims a measurement at the lowest concurrency that was never taken,
+	// directly contradicting the "Ran out of time" badge beside it.
+	const judgedNothing = capacity.levels.length === 0;
 
 	return (
 		<Card className={className}>
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle className="text-base">Capacity</CardTitle>
 				{/*
-				 * Text on a tint, never the bare `--status-*` fill as a
-				 * foreground - the three-token rule (docs/design-system.md,
-				 * "Status tokens").
+				 * `Badge variant="chip"`, not a hand-rolled span. The variant is
+				 * the one that lets a caller own the colour without inheriting a
+				 * `hover:bg-*` it cannot override, and going through the
+				 * primitive is also what supplies the radius: a box with no
+				 * radius class at all is pinned square for a user who chose the
+				 * Rounded setting (app/CLAUDE.md, "No bare `rounded`").
+				 *
+				 * The colour is a tint plus a `-text` token, never the bare
+				 * `--status-*` fill as a foreground - the three-token rule
+				 * (docs/design-system.md, "Status tokens").
 				 */}
-				<span
+				<Badge
+					variant="chip"
 					className={cn(
-						"px-2 py-0.5 text-xs font-medium",
+						"font-medium",
 						stop?.degraded
 							? "bg-warning/10 text-warning-text"
 							: "bg-status-success/10 text-status-success-text"
 					)}
 				>
 					{stop?.label ?? capacity.stopReason}
-				</span>
+				</Badge>
 			</CardHeader>
 			<CardContent>
 				<p className="text-sm text-foreground">
-					{sustained ? (
+					{judgedNothing ? (
+						<>
+							The search ended before it finished measuring a single level, so it has
+							nothing to report about this target. Give the run longer than one step,
+							or shorten the step.
+						</>
+					) : sustained ? (
 						<>
 							Sustained{" "}
 							<span className="font-mono font-semibold">

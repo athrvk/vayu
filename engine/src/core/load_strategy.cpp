@@ -700,7 +700,8 @@ class CapacityLoadStrategy : public LoadStrategy {
     const vayu::Request& request) override {
         const auto& config = context->config;
 
-        const int64_t deadline_ms = duration_field_ms (config, "duration", 300000);
+        const int64_t deadline_ms =
+        duration_field_ms (config, "duration", constants::capacity::DEADLINE_MS);
         const int64_t step_ms = duration_field_ms (config, "stepDuration",
         constants::capacity::STEP_DURATION_MS);
         const CapacityConfig capacity_config =

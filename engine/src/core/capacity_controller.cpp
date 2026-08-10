@@ -189,11 +189,21 @@ int64_t deadline_ms) {
 
     out.slo_ms = number ("sloMs", static_cast<double> (defaults::SLO_MS));
 
-    const double start = number ("startConcurrency", 1.0);
-    const double cap   = number ("concurrency", static_cast<double> (defaults::MAX_CONCURRENCY));
+    // Clamped to the route's own connection guard *before* the cast, not after.
+    // Narrowing a double past `SIZE_MAX` to `size_t` is undefined behaviour, and
+    // finite-and-positive is not enough to rule it out: a hand-edited snapshot
+    // carrying `1e30` clears both checks and then converts to 0 or to some
+    // arbitrary huge value depending on the platform, so the search would run at
+    // a garbage level. The route rejects such a value with a 400, but this
+    // function is documented total over stored snapshots no route ever saw.
+    auto concurrency_level = [&number] (const char* key, double fallback) -> size_t {
+        constexpr double kGuard = static_cast<double> (constants::run_config::MAX_CONCURRENCY);
+        return static_cast<size_t> (std::min (number (key, fallback), kGuard));
+    };
 
-    out.start_concurrency = static_cast<size_t> (start);
-    out.max_concurrency   = static_cast<size_t> (cap);
+    out.start_concurrency = concurrency_level ("startConcurrency", 1.0);
+    out.max_concurrency =
+    concurrency_level ("concurrency", static_cast<double> (defaults::MAX_CONCURRENCY));
     // A cap below the start is a search with nowhere to go; it runs the one
     // level and stops `cap_reached` rather than climbing past the ceiling.
     out.max_concurrency = std::max (out.max_concurrency, out.start_concurrency);

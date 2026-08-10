@@ -124,6 +124,33 @@ describe("CapacitySummary", () => {
 		cleanup();
 	});
 
+	it("claims no measurement when the search judged nothing", () => {
+		// `stepDuration` longer than `duration` - both accepted by the dialog and
+		// the engine - ends the run before the first level closes. The engine
+		// still reports the section (that the search judged nothing is itself
+		// the finding), with `levels: []` and no `maxHealthy*`. Falling into the
+		// "no level met the budget" branch would claim the target breached at
+		// the lowest concurrency tried, contradicting the badge beside it.
+		render(
+			<CapacitySummary
+				capacity={capacity({
+					stopReason: "deadline",
+					maxHealthyConcurrency: undefined,
+					maxHealthyRps: undefined,
+					p99AtMaxHealthyMs: undefined,
+					kneeConcurrency: undefined,
+					kneeP99Ms: undefined,
+					levels: [],
+				})}
+			/>
+		);
+		expect(screen.getByText(/nothing to report about this target/)).toBeTruthy();
+		expect(screen.queryByText(/No level met/)).toBeNull();
+		expect(screen.queryByText(/Sustained/)).toBeNull();
+		expect(screen.getByText("Ran out of time")).toBeTruthy();
+		cleanup();
+	});
+
 	it("marks only the levels that broke the budget", () => {
 		const { container } = render(<CapacitySummary capacity={capacity()} />);
 		const cells = Array.from(container.querySelectorAll("td"));

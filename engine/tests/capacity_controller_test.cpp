@@ -242,6 +242,25 @@ TEST (CapacityControllerTest, ACapBelowTheStartBecomesASingleLevelSearch) {
     EXPECT_STREQ (decision.stop_reason, stop::CAP_REACHED);
 }
 
+TEST (CapacityControllerTest, AnAbsurdConcurrencyIsClampedRatherThanCastPastSizeMax) {
+    // Reachable only from a hand-edited config snapshot - the route rejects it -
+    // but this function is documented total over stored snapshots. `1e30` is
+    // finite and positive, so the type guard passes it through; narrowing it to
+    // `size_t` is undefined behaviour, and in practice yields 0 or an arbitrary
+    // huge value depending on the platform. Either way the search would run at a
+    // level nobody asked for.
+    const nlohmann::json config = { { "startConcurrency", 1e30 }, { "concurrency", 1e30 } };
+    const auto parsed = vayu::core::capacity_config_from (config, 5000, 60000);
+
+    const auto guard =
+    static_cast<size_t> (vayu::core::constants::run_config::MAX_CONCURRENCY);
+    EXPECT_EQ (parsed.start_concurrency, guard);
+    EXPECT_EQ (parsed.max_concurrency, guard);
+    // The point of the clamp: a usable level, not a zero the search would spin
+    // at forever nor a number no allocator can honour.
+    EXPECT_GT (parsed.start_concurrency, 0u);
+}
+
 TEST (CapacityControllerTest, AnUnusableSloFallsBackToTheDefault) {
     const nlohmann::json config = { { "sloMs", "fast" } };
     EXPECT_DOUBLE_EQ (vayu::core::capacity_config_from (config, 5000, 60000).slo_ms,

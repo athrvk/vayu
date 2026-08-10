@@ -2185,6 +2185,13 @@ ending the search), when two step-ups buy under 5% more throughput
 (`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
 runs out (`deadline`), or when the operator stops the run (`stopped`).
 
+An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
+60 seconds every other mode falls back to: this mode walks a level every
+`stepDuration`, so a minute is a dozen levels and a search that almost always
+ends `deadline` rather than finding anything. Any client enforcing its own
+duration ceiling has to account for that per-mode default rather than assuming
+one number - the MCP tool's cap does.
+
 The search steers by the published metric tick - the same numbers `GET
 /runs/:id/live` streams - rather than sampling the collector itself, so the
 controller and the dashboard cannot disagree about a level. Windows in which

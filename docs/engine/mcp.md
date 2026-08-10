@@ -170,7 +170,10 @@ Notes:
   search's *ceiling* (`concurrency`) and its starting level
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
-  `get_run_report` returns the search's findings under `capacity`. `get_live_metrics` is a **bounded snapshot** (SSE
+  `get_run_report` returns the search's findings under `capacity`. The duration
+  cap accounts for the mode's own engine-side default deadline (5 minutes, not
+  the 60s other modes fall back to), so a cap between those two values still
+  injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under

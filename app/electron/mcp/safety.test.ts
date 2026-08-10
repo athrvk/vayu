@@ -5,6 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
 	extractHost,
@@ -277,5 +280,48 @@ describe("capacity discovery", () => {
 		// takes no duration cap at all.
 		const tight = resolveSafetyConfig({ maxDurationSeconds: 30 });
 		expect(defaultDurationUnderCap({ mode: "capacity" }, tight)).toBe("30s");
+	});
+
+	test("caps an omitted duration against this mode's own engine default", () => {
+		// The regression: `capacity` falls back to 300s engine-side, not the 60s
+		// every other mode uses. A 120s cap is *above* 60 and *below* 300, so a
+		// guard keyed on one default injected nothing and let the search run
+		// 2.5x over the ceiling. `checkLoadCaps` cannot catch it either - with
+		// `duration` omitted there is nothing for it to check.
+		const cap = resolveSafetyConfig({ maxDurationSeconds: 120 });
+		expect(defaultDurationUnderCap({ mode: "capacity" }, cap)).toBe("120s");
+		// The same cap over a 60s-default mode still needs no field.
+		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, cap)).toBeNull();
+	});
+
+	test("supplies nothing once the cap clears the capacity default", () => {
+		const roomy = resolveSafetyConfig({ maxDurationSeconds: 600 });
+		expect(defaultDurationUnderCap({ mode: "capacity" }, roomy)).toBeNull();
+	});
+
+	test("mirrors the engine's own capacity deadline", () => {
+		// A drift guard, not a restatement: the number above is only a cap if it
+		// is the number the engine actually falls back to, and nothing else
+		// connects the two files. Same pattern as
+		// `src/constants/load-test.engine-parity.test.ts`.
+		const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+		const constantsHpp = readFileSync(
+			join(repoRoot, "engine", "include", "vayu", "core", "constants.hpp"),
+			"utf8"
+		);
+		// CLAUDE.md's documented failure mode: a source scan reading "" passes.
+		expect(constantsHpp.length).toBeGreaterThan(0);
+
+		const match = constantsHpp.match(/constexpr\s+int64_t\s+DEADLINE_MS\s*=\s*(\d+);/);
+		expect(match, "capacity::DEADLINE_MS not found in constants.hpp").not.toBeNull();
+		const engineSeconds = Number(match![1]) / 1000;
+
+		// Read through the exported behaviour rather than the private table: a
+		// cap one second under the engine's default must produce a field, and a
+		// cap exactly at it must not.
+		const under = resolveSafetyConfig({ maxDurationSeconds: engineSeconds - 1 });
+		const at = resolveSafetyConfig({ maxDurationSeconds: engineSeconds });
+		expect(defaultDurationUnderCap({ mode: "capacity" }, under)).toBe(`${engineSeconds - 1}s`);
+		expect(defaultDurationUnderCap({ mode: "capacity" }, at)).toBeNull();
 	});
 });
