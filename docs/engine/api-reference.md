@@ -1714,7 +1714,9 @@ collection edited mid-run therefore cannot change the sequence underneath
 itself, and no execution path re-reads the database for request data.
 
 **A valid block answers `202 {runId}`** and creates a run with
-`type: "scenario"`, exactly as a load run does. The lifecycle is a load run's -
+`type: "scenario"` - unless a load `mode` sits beside it, which makes it a
+[scenario load run](#scenario-load-runs) with `type: "load"` instead. The
+lifecycle is a load run's either way -
 the run is registered, streams over
 [`GET /runs/:runId/live`](#get-runsrunidlive), stops through
 [`POST /runs/:runId/stop`](#post-runsrunidstop) and reports through
@@ -1858,6 +1860,72 @@ its row count - plus `{index, requestId, name, method, url}` per step, where
 `url` is the **stored, uncomposed** one. The composed plan carries resolved
 `Authorization` headers and, for an `apikey` auth with `in: "query"`, a live key
 in the URL; it lives in memory for the run's life and nowhere else.
+
+#### Scenario load runs
+
+Adding a load **`mode`** beside the `scenario` block runs the same plan as a
+load test: `concurrency` virtual users, each walking the sequence on its own,
+closed-loop on the event loop. The absence of `mode` is what still means a
+design-mode collection run, so a payload written before this existed keeps its
+meaning exactly.
+
+```json
+{ "mode": "constant_concurrency", "concurrency": 50, "duration": "60s",
+  "scenario": { "source": "collection", "collectionId": "col_1" } }
+```
+
+| Field | Meaning here |
+|-------|--------------|
+| `concurrency` | **The number of virtual users** - what k6 and JMeter mean by it. Each holds its own position in the plan and its own cookies. |
+| `duration` | Wall-clock length, for `constant_concurrency` and `ramp_up`. Virtual users keep starting iterations until it is up. |
+| `iterations` (top level) | `mode: "iterations"` only: total passes over the plan across all virtual users. Distinct from `scenario.iterations`, which the design-mode runner reads. |
+| `startConcurrency` / `rampUpDuration` | `ramp_up` only, as for a single-request run. |
+
+**Rejected with a `400` (`error.code: "invalid_run_config"`)**, before any run
+row exists:
+
+| Input | Rejected because |
+|-------|------------------|
+| `mode: "constant_rps"` with a `scenario` | An open-loop arrival rate over a multi-step sequence is an arrival-rate executor, which Vayu does not implement. Refused rather than silently run closed-loop. |
+| `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
+| An unknown `mode` | |
+
+`maxInFlight` is **moot** and is ignored with a warning: in-flight requests are
+bounded by the virtual-user count by construction, so `concurrency` is the only
+knob.
+
+**What differs from a design-mode collection run:**
+
+- The run's `type` is **`load`**, not `scenario`. It publishes `metrics` ticks
+  over `GET /runs/:runId/live` (not `step` events) and reports RPS and
+  percentiles like any load run.
+- **Cookies are per virtual user**, empty at the start of each iteration, and
+  the environment jar is untouched. One session shared between 1,000 virtual
+  users is not the thing being measured.
+- **Scripts do not run.** They stay deferred, as on every load path, and
+  `pm.execution` therefore throws - a script that has already run against a
+  recorded response cannot redirect a sequence that already happened.
+  Flow control is design-mode only.
+- **An errored step ends its iteration** and its virtual user starts the next
+  one. It is never stranded.
+- **No per-step `results` rows are stored** - one row per step per iteration per
+  virtual user is what a load run exists not to keep. The report's
+  `scenario.steps` breakdown is the per-step record instead:
+
+```json
+"scenario": {
+  "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
+  "stepsExecuted": 1422, "errored": 6, "virtualUsers": 50,
+  "steps": [
+    { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
+      "executed": 480, "errors": 0,
+      "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 } }
+  ]
+}
+```
+
+One histogram is allocated per plan step at run start, which is the other thing
+`maxScenarioSteps` bounds.
 
 **Response:**
 ```json

@@ -222,3 +222,52 @@ describe("RunItem run types", () => {
 		expect(new Set(glyphs).size).toBe(glyphs.length);
 	});
 });
+
+/*
+ * A scenario *load* run (issue #357) is `type: "load"` - it publishes ticks and
+ * reports percentiles like any load run - but it has no url and no method, for
+ * the same reason a collection run has none. Gating the descriptor on the run
+ * type would leave its row a bare status and a timestamp, which is the exact
+ * emptiness `summary.scenario` exists to fill.
+ */
+describe("a scenario load run's row", () => {
+	function scenarioLoadRun(): Run {
+		return {
+			id: "run_3",
+			type: "load",
+			status: "completed",
+			startTime: 1_750_000_000_000,
+			endTime: 1_750_000_003_000,
+			requestId: null,
+			environmentId: null,
+			summary: {
+				mode: "constant_concurrency",
+				concurrency: 25,
+				duration: "45s",
+				scenario: { collectionId: "col_7", stepCount: 4 },
+			},
+		} as Run;
+	}
+
+	it("names the collection it ran even though it is a load run", () => {
+		render(
+			<RunItem
+				run={scenarioLoadRun()}
+				onSelect={noop}
+				onDelete={noop}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
+		);
+
+		expect(screen.getByText("Checkout flow")).toBeTruthy();
+	});
+
+	it("falls back to the collection id when the folder is gone", () => {
+		render(
+			<RunItem run={scenarioLoadRun()} onSelect={noop} onDelete={noop} isDeleting={false} />
+		);
+
+		expect(screen.getByText("col_7")).toBeTruthy();
+	});
+});

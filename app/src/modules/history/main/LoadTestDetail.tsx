@@ -19,6 +19,7 @@ import {
 	BarChart3,
 	Settings2,
 	AlertTriangle,
+	ListOrdered,
 } from "lucide-react";
 import {
 	Badge,
@@ -37,7 +38,7 @@ import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore } from "@/stores";
-import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
+import { OverviewTab, PerformanceTab, SamplesTab, ScenarioStepsTab } from "./components";
 import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
@@ -55,6 +56,28 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// not distinguish them (see the field's doc in types/domain.ts), and neither
 	// should draw a warning, so `undefined` folding into 0 loses nothing.
 	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
+
+	/*
+	 * A scenario load run: `type: "load"` (it publishes ticks and reports
+	 * percentiles like any load run), but its target is a sequence, so it has no
+	 * single method or URL and reports its per-step numbers as a breakdown
+	 * rather than as `results[]` rows.
+	 *
+	 * Detected by the breakdown's presence rather than by a run-type flag,
+	 * because that is what this pane actually needs to render: a report without
+	 * one has nothing to put in the tab, whatever the run called itself.
+	 */
+	const scenarioSteps = report.scenario?.steps;
+	const isScenarioLoad = !!scenarioSteps?.length;
+	// `TruncatedText` measures one string, so the sentence is built rather than
+	// composed out of nodes it would have to flatten.
+	const virtualUsers = report.scenario?.virtualUsers;
+	const sequenceLabel = isScenarioLoad
+		? `${scenarioSteps.length} step${scenarioSteps.length === 1 ? "" : "s"} per iteration` +
+			(virtualUsers === undefined
+				? ""
+				: ` - ${virtualUsers} virtual user${virtualUsers === 1 ? "" : "s"}`)
+		: "";
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
 	// stat cards (breakpoint / saturation, derived below) and the Performance tab
@@ -108,14 +131,29 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		<div className="flex flex-col h-full bg-background">
 			{/* Fixed Header */}
 			<div className="border-b bg-card px-6 py-4">
-				{/* Request Info Bar */}
+				{/* Request Info Bar. A scenario load run has no single method or URL -
+				    its target is a sequence - so it says what the sequence was instead
+				    of claiming a "GET Unknown URL" that never existed. */}
 				<div className="flex items-center gap-3 bg-muted/50 p-3 mb-3">
-					<Badge variant="outline" className="font-mono font-bold shrink-0">
-						{report.metadata?.requestMethod || "GET"}
-					</Badge>
-					<TruncatedText className="text-sm font-mono text-foreground flex-1">
-						{report.metadata?.requestUrl || "Unknown URL"}
-					</TruncatedText>
+					{isScenarioLoad ? (
+						<>
+							<Badge variant="outline" className="font-mono font-bold shrink-0">
+								SEQUENCE
+							</Badge>
+							<TruncatedText className="text-sm text-foreground flex-1">
+								{sequenceLabel}
+							</TruncatedText>
+						</>
+					) : (
+						<>
+							<Badge variant="outline" className="font-mono font-bold shrink-0">
+								{report.metadata?.requestMethod || "GET"}
+							</Badge>
+							<TruncatedText className="text-sm font-mono text-foreground flex-1">
+								{report.metadata?.requestUrl || "Unknown URL"}
+							</TruncatedText>
+						</>
+					)}
 				</div>
 
 				{/* Load test config used for this run. Gated on protocolLabel too, not
@@ -253,6 +291,16 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						<TrendingUp className="w-3.5 h-3.5" />
 						<TabLabel>Performance</TabLabel>
 					</TabsTrigger>
+					{/* Only for a run that has a sequence. A single-request load run
+					    would get an empty tab, and the breakdown is the *only* place a
+					    scenario load run says what each step did - it stores no
+					    per-step results rows. */}
+					{isScenarioLoad && (
+						<TabsTrigger value="steps">
+							<ListOrdered className="w-3.5 h-3.5" />
+							<TabLabel>Steps</TabLabel>
+						</TabsTrigger>
+					)}
 					<TabsTrigger value="samples">
 						<Activity className="w-3.5 h-3.5" />
 						<TabLabel>Sampled Requests</TabLabel>
@@ -276,6 +324,17 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								progress={seriesProgress}
 							/>
 						</TabsContent>
+
+						{isScenarioLoad && (
+							<TabsContent value="steps" className="mt-0 space-y-4">
+								<ScenarioStepsTab
+									steps={scenarioSteps}
+									virtualUsers={report.scenario?.virtualUsers}
+									iterationsCompleted={report.scenario?.iterationsCompleted}
+									iterationsAbandoned={report.scenario?.iterationsAbandoned}
+								/>
+							</TabsContent>
+						)}
 
 						<TabsContent value="samples" className="mt-0 space-y-4">
 							<SamplesTab report={report} derived={derived} />

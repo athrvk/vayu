@@ -410,8 +410,43 @@ export interface StartLoadTestResponse {
  *
  * The response is a load run's - `202 {runId}` - because the lifecycle is a
  * load run's; only the executor differs.
+ *
+ * Adding a load `mode` beside the block turns it into a **scenario load run**
+ * (issue #357): the same plan, driven by `concurrency` virtual users on the
+ * event loop rather than one sequence through the client. The absence of `mode`
+ * is what still means design mode, so a payload written before load-mode
+ * scenarios existed keeps its meaning exactly.
  */
 export interface StartScenarioRunRequest {
+	/**
+	 * Load mode, for a scenario *load* run. Omit for a design-mode collection
+	 * run.
+	 *
+	 * `constant_rps` is a `400` here, not a silent downgrade: an open-loop
+	 * arrival rate over a multi-step sequence is an arrival-rate executor,
+	 * which Vayu does not implement. So is any non-zero `rps`/`targetRps`,
+	 * which is what would select that path regardless of the declared mode.
+	 */
+	mode?: "constant_concurrency" | "ramp_up" | "iterations";
+	/** Wall-clock length, e.g. `"60s"`. Read by the two duration-bounded modes. */
+	duration?: string;
+	/**
+	 * The number of **virtual users** - which is what `concurrency` means for a
+	 * scenario, and what k6 and JMeter mean by it. Each walks the plan on its
+	 * own, with its own cookies, and in-flight requests are bounded by this
+	 * count by construction (so `maxInFlight` has nothing to do for this run).
+	 */
+	concurrency?: number;
+	/** `ramp_up` only: the virtual-user count the ramp starts from. */
+	startConcurrency?: number;
+	/** `ramp_up` only: how long the ramp takes, e.g. `"10s"`. */
+	rampUpDuration?: string;
+	/**
+	 * `mode: "iterations"` only: total passes over the plan across all virtual
+	 * users. Distinct from `scenario.iterations`, which is the design-mode
+	 * runner's per-run pass count - a load run reads this one.
+	 */
+	iterations?: number;
 	scenario: {
 		/**
 		 * The discriminator for a future stored scenario. `"collection"` is the
