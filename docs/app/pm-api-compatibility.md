@@ -616,6 +616,25 @@ entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first 
 Narrow that suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
 
+#### Every `pm.*` example on this page is compiled against those declarations
+
+`script-typedefs.docs-compile.test.ts` takes the 54 `pm.*` blocks in this page and
+[`docs/engine/scripting.md`](../engine/scripting.md), compiles each against the generated
+`.d.ts`, and requires zero errors - with `SCRIPT_COMPILER_OPTIONS` and
+`SUPPRESSED_DIAGNOSTICS` read from `useScriptTypeDefinitions.ts` rather than restated, so
+it checks them the way the editor does. Four defects had survived the engine's
+substring-based guards, because a declaration can carry every right name and still not
+type-check (#463).
+
+The declarations reach it as `engine/tests/fixtures/script-typedefs.d.ts`, checked in and
+pinned to the generator by the engine suite - vitest cannot run the C++ generator, and
+ctest has no TypeScript compiler, so the two halves meet at one artifact. See
+[`api-reference.md`](../engine/api-reference.md#the-declarations-are-compiled-not-just-grepped)
+for the regeneration command.
+
+A consequence worth knowing before editing either page: a `pm.*` example here is now
+**checked**, so an example that is wrong fails CI rather than misleading a reader.
+
 #### Optional members, and why the editor states them without enforcing them
 
 A completion entry says a member may be absent by ending its `detail` in
@@ -686,6 +705,8 @@ reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" 
 | `pm` runtime (QuickJS bindings) | `engine/src/runtime/script_engine.cpp`                                                                                                                  |
 | Completion metadata endpoint    | `engine/src/http/routes/scripting.cpp`                                                                                                                  |
 | Type declaration generator      | `engine/src/http/routes/script_types.cpp`                                                                                                               |
+| Generated declarations (pinned) | `engine/tests/fixtures/script-typedefs.d.ts`                                                                                                            |
+| Docs-compile guard              | `app/src/hooks/script-typedefs.docs-compile.test.ts`                                                                                                    |
 | Type declaration fetch + cache  | `app/src/queries/script-types.ts`                                                                                                                       |
 | Monaco type registration        | `app/src/hooks/useScriptTypeDefinitions.ts`                                                                                                             |
 | Completion fetch + cache        | `app/src/queries/script-completions.ts`                                                                                                                 |
