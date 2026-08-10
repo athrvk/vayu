@@ -132,6 +132,16 @@ struct ReportExtras {
     int tests_sampled  = 0;
     int tests_passed   = 0;
     int tests_failed   = 0;
+    // The run's verdict against its declared budgets. `has_thresholds` false is
+    // a run that declared none (or one recorded before budgets existed), which
+    // leaves thresholdValidation out entirely - a run that declared nothing did
+    // not pass zero checks, it was never judged.
+    bool has_thresholds = false;
+    size_t thresholds_passed = 0;
+    size_t thresholds_failed = 0;
+    // Per-budget rows verbatim from the summary, already in the report's
+    // camelCase shape - the evaluator writes the wire keys.
+    nlohmann::json threshold_checks = nlohmann::json::array ();
     // What the run's bounded stores thinned away. `has_sampling` false is a
     // run recorded before retention was reported, which is not the same as a
     // run that dropped nothing - so the section is left out rather than shown
@@ -302,6 +312,20 @@ ReportExtras& extras) {
         read_number (summary["tests"], "sampled", extras.tests_sampled);
         read_number (summary["tests"], "passed", extras.tests_passed);
         read_number (summary["tests"], "failed", extras.tests_failed);
+    }
+
+    if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
+        const auto& thresholds = summary["thresholds"];
+        // The checks are the section: a stored object with no readable rows
+        // says nothing a reader can act on, so it is treated as absent rather
+        // than reported as a run that passed and failed nothing.
+        if (thresholds.contains ("checks") && thresholds["checks"].is_array () &&
+        !thresholds["checks"].empty ()) {
+            extras.has_thresholds    = true;
+            extras.threshold_checks  = thresholds["checks"];
+            read_number (thresholds, "passed", extras.thresholds_passed);
+            read_number (thresholds, "failed", extras.thresholds_failed);
+        }
     }
 }
 
@@ -592,7 +616,7 @@ const std::string& run_id) {
         report.failed_requests     = 0;
         report.errors_by_status_code.clear ();
         for (const auto& [code, count] : report.status_codes) {
-            if (code >= 200 && code < 400) {
+            if (vayu::is_success_status (code)) {
                 report.successful_requests += count;
             } else {
                 report.failed_requests += count;
@@ -781,6 +805,15 @@ const std::string& run_id) {
             (static_cast<double> (extras.tests_passed) * 100.0 /
             static_cast<double> (extras.tests_passed + extras.tests_failed)) :
             0.0 } };
+    }
+
+    // The aggregate verdict, beside the per-response one. `verdict` is derived
+    // rather than stored so it cannot contradict the counts printed next to it.
+    if (extras.has_thresholds) {
+        json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
+            { "passed", extras.thresholds_passed },
+            { "failed", extras.thresholds_failed },
+            { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
     }
 
     // Include sample of request/response results

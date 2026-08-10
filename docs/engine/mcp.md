@@ -159,7 +159,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:

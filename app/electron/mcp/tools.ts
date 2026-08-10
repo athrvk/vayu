@@ -1811,6 +1811,25 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					`In-flight cap (constant_rps only), 1-${MAX_IN_FLIGHT_BOUND}. Default max(targetRps * 10, 1000).`
 				),
+			// Pass/fail budgets for the whole run. The bounds mirror the
+			// engine's, so a value this schema accepts is one POST /runs
+			// accepts; an empty object is rejected there rather than starting a
+			// run nothing will judge, so it is rejected here too, by name.
+			thresholds: z
+				.object({
+					latencyP50Ms: z.number().positive().max(86_400_000).optional(),
+					latencyP95Ms: z.number().positive().max(86_400_000).optional(),
+					latencyP99Ms: z.number().positive().max(86_400_000).optional(),
+					maxErrorRatePct: z.number().min(0).max(100).optional(),
+					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
+				})
+				.refine((t) => Object.keys(t).length > 0, {
+					message: "Declare at least one budget, or omit `thresholds` entirely.",
+				})
+				.optional()
+				.describe(
+					"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
+				),
 			requestId: z
 				.string()
 				.optional()
@@ -1873,6 +1892,12 @@ export const TOOLS: McpTool[] = [
 			for (const key of ["duration", "rampUpDuration"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
+			}
+			// Forwarded verbatim - the keys are the engine's own metric names,
+			// and they come back unchanged in `get_run_report`'s
+			// `thresholdValidation`. Zod has already bounded every value.
+			if (args.thresholds && typeof args.thresholds === "object") {
+				payload.thresholds = args.thresholds;
 			}
 			// An omitted duration is 60s engine-side, not "unbounded" and not
 			// "capped" - so a cap under 60s has to be sent as an explicit field

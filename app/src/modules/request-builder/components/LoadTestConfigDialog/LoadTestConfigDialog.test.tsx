@@ -404,3 +404,73 @@ describe("ceilings from Settings", () => {
 		expect(Number(connections().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
 });
+
+/**
+ * Budgets are the dialog's only control whose *absence* is meaningful: a run
+ * with none is measured and not judged, exactly as every run was before them.
+ * These pin both directions, plus the one place the feature reuses a setting
+ * the user already has rather than adding a second notion of "too slow".
+ */
+describe("pass/fail budgets", () => {
+	const openBudgets = () => fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+	const p99 = () => screen.getByLabelText(/p99 latency/i) as HTMLInputElement;
+
+	it("prefills the p99 budget from the capacity SLO rather than inventing a default", () => {
+		// `sloThresholdMs` existed as a chart annotation and never reached the
+		// engine. If this stopped reading it the setting would be written and
+		// never read - the defect class this codebase repeats most.
+		useClientSettingsStore.getState().setSloThresholdMs(345);
+		const { onStart } = open();
+		openBudgets();
+		expect(p99().value).toBe("345");
+		expect(started(onStart).thresholds).toEqual({ latencyP99Ms: 345 });
+	});
+
+	it("sends no thresholds at all once every budget is cleared", () => {
+		const { onStart } = open();
+		openBudgets();
+		fireEvent.change(p99(), { target: { value: "" } });
+		// Not `{}`: POST /runs rejects an empty object rather than starting a
+		// run nothing will judge, so the key has to be absent.
+		expect(started(onStart).thresholds).toBeUndefined();
+	});
+
+	it("sends every declared budget under the engine's own key", () => {
+		const { onStart } = open();
+		openBudgets();
+		fireEvent.change(p99(), { target: { value: "50" } });
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
+		expect(started(onStart).thresholds).toEqual({
+			latencyP99Ms: 50,
+			maxErrorRatePct: 0.1,
+			minThroughputRps: 1000,
+		});
+	});
+
+	it("blocks Start on an out-of-range budget instead of dropping the field", () => {
+		const { onStart } = open();
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart).not.toHaveBeenCalled();
+		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
+	});
+
+	it("keeps a cleared budget cleared across dialog opens", () => {
+		// The prefill seeds a first run only. Re-seeding from the setting every
+		// time would undo the user's decision to run without a latency budget,
+		// silently, on the next run.
+		useClientSettingsStore.getState().setSloThresholdMs(200);
+		const first = open();
+		openBudgets();
+		fireEvent.change(p99(), { target: { value: "" } });
+		expect(started(first.onStart).thresholds).toBeUndefined();
+
+		cleanup();
+		const second = open();
+		openBudgets();
+		expect(p99().value).toBe("");
+		expect(started(second.onStart).thresholds).toBeUndefined();
+	});
+});

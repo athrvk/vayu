@@ -1442,6 +1442,53 @@ describe("dispatchTool", () => {
 		expect(payload.postRequestScript).toBeUndefined();
 	});
 
+	test("start_load_run forwards thresholds under the engine's own metric keys", async () => {
+		// The keys travel verbatim to POST /runs and come back in the report's
+		// thresholdValidation, so a rename anywhere on this path is a budget
+		// the engine rejects - or worse, one it accepts and never judges.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				thresholds: { latencyP99Ms: 50, maxErrorRatePct: 0.1 },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.thresholds).toEqual({ latencyP99Ms: 50, maxErrorRatePct: 0.1 });
+	});
+
+	test("start_load_run sends no thresholds key when none were declared", () => {
+		// An empty object is a 400 from POST /runs, so "no budgets" has to be
+		// an absent key rather than an empty one.
+		const parsed = parseArgs("start_load_run", { url: "https://api.example.com" });
+		expect(parsed.thresholds).toBeUndefined();
+		expect(() =>
+			parseArgs("start_load_run", { url: "https://api.example.com", thresholds: {} })
+		).toThrow(/at least one budget/i);
+	});
+
+	test("start_load_run rejects a budget the engine would reject", () => {
+		// The schema's bounds mirror the engine's so the agent is told which
+		// field is wrong, rather than meeting an HTTP 400 with no field named.
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				thresholds: { maxErrorRatePct: 150 },
+			})
+		).toThrow();
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				thresholds: { latencyP99Ms: 0 },
+			})
+		).toThrow();
+	});
+
 	test("start_load_run still accepts the engine's own `tests` spelling", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(

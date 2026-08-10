@@ -27,6 +27,9 @@ export * from "./callout-severity";
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 
+// "p99 was 47ms against a 50ms budget" - wherever a run's verdict is shown
+export * from "./ThresholdVerdict";
+
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";
 

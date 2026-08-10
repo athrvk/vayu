@@ -15,6 +15,7 @@ import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
+import { ThresholdVerdict } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import type { TabProps } from "../../types";
@@ -28,6 +29,11 @@ export default function OverviewTab({ report, derived }: TabProps) {
 			    always-visible header strip, so no separate "Test Configuration" card here. */}
 			<HeroRow d={derived} />
 			<ModeStatsRow d={derived} />
+
+			{/* Directly under the numbers it judges - the verdict is the first
+			    question a stored run is opened to answer. Absent for a run that
+			    declared no budgets, which is every run recorded before them. */}
+			<ThresholdVerdict verdict={report.thresholdValidation} />
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (

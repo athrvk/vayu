@@ -681,9 +681,25 @@ await apiService.startLoadTest({
   concurrency: 50,
   requestId: "req_123",
   environmentId: "env_456",
-  comment: "Stress test"
+  comment: "Stress test",
+  // Optional pass/fail budgets. Omitted entirely when none were declared - the
+  // engine rejects an empty object rather than starting an unjudged run.
+  thresholds: { latencyP99Ms: 50, maxErrorRatePct: 0.1 }
 });
 ```
+
+**Budgets and the verdict.** `LoadTestConfig.thresholds` (`RunThresholds`) rides
+through to `POST /runs` under the engine's own camelCase metric names, and the
+report comes back with `thresholdValidation` - one check per budget plus a
+`verdict` of `"passed"` / `"failed"` - which `ThresholdVerdict`
+(`components/shared`) renders on the dashboard report and the history Overview.
+It is the aggregate counterpart to `testValidation`: a `pm.test` script sees one
+response at a time and cannot assert a p99 or an error rate, so a run whose
+every assertion passed can still have missed its budget. `undefined` is a run
+that declared none - not a run that passed nothing - so a report without the
+section renders exactly as it did before budgets existed. The dialog seeds its
+p99 field from the client `sloThresholdMs` setting, which until then only
+annotated a chart.
 
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under

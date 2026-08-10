@@ -24,6 +24,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 
@@ -443,6 +444,11 @@ struct RunSummaryInputs {
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
+    // The verdict on the budgets this run's config declared. Absent when it
+    // declared none, which keeps the report's thresholdValidation section out
+    // rather than reporting a run that passed zero checks. Sibling of `tests`,
+    // and the aggregate answer a per-response script structurally cannot give.
+    std::optional<ThresholdOutcome> thresholds;
     SamplingRetention retention;
     // A scenario load run's sequence tallies and per-step breakdown, stored
     // under the summary's `scenario` key. Absent for a single-request load run,

@@ -23,6 +23,7 @@ import type {
 	LoadTestMode,
 	ScriptPart,
 	HttpVersion,
+	RunThresholds,
 } from "./domain";
 
 // API Response wrapper
@@ -390,6 +391,12 @@ export interface StartLoadTestRequest {
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	tests?: ScriptPart[];
+
+	// Pass/fail budgets for the whole run. camelCase because these are the
+	// engine's own metric names, which come back unchanged in the report's
+	// `thresholdValidation`. Omitted entirely when none were declared - the
+	// engine rejects an empty object rather than starting an unjudged run.
+	thresholds?: RunThresholds;
 }
 
 export interface StartLoadTestResponse {

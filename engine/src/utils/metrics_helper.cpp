@@ -56,7 +56,7 @@ double duration_s) {
         report.total_requests++;
         report.status_codes[result.status_code]++;
 
-        if (result.status_code >= 200 && result.status_code < 400) {
+        if (vayu::is_success_status (result.status_code)) {
             report.successful_requests++;
         } else {
             report.failed_requests++;

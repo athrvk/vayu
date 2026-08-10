@@ -245,12 +245,21 @@ default, so `sync_schema()` can
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
                "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
-  "tests": { "sampled": 10, "passed": 9, "failed": 1 }
+  "tests": { "sampled": 10, "passed": 9, "failed": 1 },
+  "thresholds": {
+    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
+    "passed": 1, "failed": 0
+  }
 }
 ```
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
-report's `testValidation` section absent rather than reporting zero tests. The writer is
+report's `testValidation` section absent rather than reporting zero tests. `thresholds` follows
+the same rule and for the same reason: absent when the run declared no
+[budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
+`thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
+keys are the wire names the payload declared, carried through unchanged; the report derives
+`verdict` from `failed` rather than storing it, so the two cannot contradict. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.

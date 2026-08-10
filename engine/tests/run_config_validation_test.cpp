@@ -396,3 +396,32 @@ TEST (RunConfigValidation, ZeroSlowThresholdIsAcceptedAsDisabled) {
     config["slow_threshold_ms"] = 0;
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
+
+// --- 7. Thresholds: the one nested object the route gates ------------------
+//
+// The rule itself is `vayu::core::validate_thresholds` and is tested against
+// every metric in threshold_eval_test.cpp. What matters here is that the run
+// route reaches it at all: an unusable budget must be a 400 before a run row
+// exists, not a run that completes carrying a verdict nobody can compute.
+
+TEST (RunConfigValidation, AConfigWithoutThresholdsIsStillValid) {
+    EXPECT_FALSE (validate_run_config (valid_config ()).has_value ());
+}
+
+TEST (RunConfigValidation, AValidThresholdsObjectIsAccepted) {
+    auto config          = valid_config ();
+    config["thresholds"] = { { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 } };
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, AnUnknownThresholdKeyIsRejectedByTheRunRoute) {
+    auto config          = valid_config ();
+    config["thresholds"] = { { "latencyP42Ms", 50 } };
+    expect_rejected (config, "latencyP42Ms");
+}
+
+TEST (RunConfigValidation, AnEmptyThresholdsObjectIsRejectedByTheRunRoute) {
+    auto config          = valid_config ();
+    config["thresholds"] = nlohmann::json::object ();
+    expect_rejected (config, "thresholds");
+}

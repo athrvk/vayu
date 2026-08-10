@@ -57,6 +57,13 @@ import { cn } from "@/lib/utils";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
+import {
+	BUDGET_FIELDS,
+	type BudgetDraft,
+	budgetError,
+	buildThresholds,
+	emptyBudgetDraft,
+} from "./budgets";
 
 interface SavedLoadTestConfig {
 	mode: LoadTestConfig["mode"];
@@ -70,6 +77,13 @@ interface SavedLoadTestConfig {
 	sampleRate: number;
 	slowThreshold: number;
 	saveTimingBreakdown: boolean;
+	/**
+	 * Budgets are memoed as typed, blanks included, so a cleared field stays
+	 * cleared. A restored draft is also what tells the p99 prefill it has
+	 * already had its turn - without it, declining the SLO budget once would be
+	 * undone by the next dialog open.
+	 */
+	budgets: BudgetDraft;
 }
 
 function loadSavedConfig(): Partial<SavedLoadTestConfig> {
@@ -231,6 +245,22 @@ export default function LoadTestConfigDialog({
 	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(
 		saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN
 	);
+	/**
+	 * Pass/fail budgets. The p99 field is seeded from the capacity SLO the user
+	 * already set (Settings -> `sloThresholdMs`), which until now only annotated
+	 * a chart - so the setting becomes the run's default budget rather than a
+	 * second, parallel notion of "too slow". Seeded only on a first run: once a
+	 * draft has been memoed, a cleared p99 stays cleared.
+	 */
+	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	const [budgets, setBudgets] = useState<BudgetDraft>(
+		() =>
+			saved.budgets ?? {
+				...emptyBudgetDraft(),
+				latencyP99Ms: String(sloThresholdMs),
+			}
+	);
+	const [budgetsOpen, setBudgetsOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
 	const [oauthGated, setOauthGated] = useState(false);
 	const [recordingOpen, setRecordingOpen] = useState(false);
@@ -248,7 +278,8 @@ export default function LoadTestConfigDialog({
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
-	const blockingError = rampDurationError ?? startConcurrencyError;
+	const budgetsError = budgetError(budgets);
+	const blockingError = rampDurationError ?? startConcurrencyError ?? budgetsError;
 
 	const notices = useMemo(() => {
 		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
@@ -260,6 +291,18 @@ export default function LoadTestConfigDialog({
 				node: (
 					<Callout severity="blocking" title="Ramp is longer than the run">
 						{rampDurationError}
+					</Callout>
+				),
+			});
+		}
+
+		if (budgetsError) {
+			list.push({
+				key: "budgets",
+				severity: "blocking",
+				node: (
+					<Callout severity="blocking" title="A budget is out of range">
+						{budgetsError}
 					</Callout>
 				),
 			});
@@ -307,7 +350,13 @@ export default function LoadTestConfigDialog({
 		return list.sort(
 			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 		);
-	}, [rampDurationError, startConcurrencyError, hasPreRequestScript, hasDynamicVariables]);
+	}, [
+		rampDurationError,
+		startConcurrencyError,
+		budgetsError,
+		hasPreRequestScript,
+		hasDynamicVariables,
+	]);
 
 	const handleStart = () => {
 		if (blockingError) return;
@@ -326,6 +375,7 @@ export default function LoadTestConfigDialog({
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
+			budgets,
 		});
 
 		const config: LoadTestConfig = {
@@ -337,6 +387,9 @@ export default function LoadTestConfigDialog({
 			slow_threshold_ms: slowThreshold,
 			save_timing_breakdown: saveTimingBreakdown,
 			comment: comment || undefined,
+			// Absent when nothing was declared - the engine rejects an empty
+			// object rather than starting a run no verdict can be computed for.
+			thresholds: buildThresholds(budgets),
 		};
 
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
@@ -600,6 +653,49 @@ export default function LoadTestConfigDialog({
 									className="h-9 text-sm"
 								/>
 							</div>
+						</CollapsibleContent>
+					</Collapsible>
+
+					{/*
+					 * Budgets, in the same card treatment as "Recording & limits"
+					 * above and for the same reason - a disclosure whose contents
+					 * sit on the dialog background reads as loose fields rather
+					 * than as the section that revealed them.
+					 */}
+					<Collapsible
+						open={budgetsOpen}
+						onOpenChange={setBudgetsOpen}
+						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+					>
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
+							<span>Pass/fail budgets</span>
+							<span className="text-[11px] font-normal text-muted-foreground">
+								{budgetsOpen ? "Hide" : "Show"}
+							</span>
+						</CollapsibleTrigger>
+						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
+							<p className="text-[11px] leading-relaxed text-muted-foreground">
+								The run is judged against whatever you declare here and reports a
+								verdict. Leave a field blank to skip that budget; leave them all
+								blank and the run is measured but not judged, as before.
+							</p>
+							{BUDGET_FIELDS.map((field) => (
+								<NumberField
+									key={field.key}
+									id={field.id}
+									label={field.label}
+									unit={field.unit}
+									optional
+									value={budgets[field.key]}
+									onChange={(raw) =>
+										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
+									}
+									min={field.min}
+									max={field.max}
+									placeholder="No budget"
+									hint={field.hint}
+								/>
+							))}
 						</CollapsibleContent>
 					</Collapsible>
 

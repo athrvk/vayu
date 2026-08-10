@@ -967,6 +967,12 @@ RunManager& manager) {
                 attach_step_test_totals (*inputs.scenario, validation.steps);
             }
 
+            // Judged last, off the filled inputs rather than off the collector:
+            // the verdict has to be computed from the same numbers the summary
+            // is about to store, or a report could print a p99 its own verdict
+            // disagrees with. A run stopped early is judged on what it measured.
+            inputs.thresholds = evaluate_thresholds (context->config, inputs);
+
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
         } catch (const std::exception& e) {
@@ -1148,6 +1154,20 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.tests.has_value ()) {
         summary["tests"] = { { "sampled", inputs.tests->sampled },
             { "passed", inputs.tests->passed }, { "failed", inputs.tests->failed } };
+    }
+    // The run's verdict against the budgets it declared. Omitted when it
+    // declared none, for the same reason `tests` is: "no budget" and "a budget
+    // nothing was measured against" are different answers, and only the absent
+    // section can say the first.
+    if (inputs.thresholds.has_value ()) {
+        nlohmann::json checks = nlohmann::json::array ();
+        for (const auto& check : inputs.thresholds->checks) {
+            checks.push_back ({ { "metric", check.metric }, { "limit", check.limit },
+                { "actual", check.actual }, { "passed", check.passed } });
+        }
+        summary["thresholds"] = { { "checks", checks },
+            { "passed", inputs.thresholds->passed },
+            { "failed", inputs.thresholds->failed } };
     }
     // A scenario load run's sequence tallies, under the same key and in the
     // same shape the design-mode runner writes - one report section, two
