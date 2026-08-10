@@ -5,10 +5,27 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+/**
+ * The collection's own Info tab.
+ *
+ * **It used to demand an explicit Save.** Name and description sat behind
+ * "Save Changes" / "Cancel" while the request builder - the surface you spend
+ * the day in - persisted on blur. Two Info tabs with opposite save models is a
+ * coherence bug: the same act on the same kind of field either sticks or does
+ * not depending on which pane you are in. They are one model now, and it is the
+ * builder's, because that is the one the app is mostly made of.
+ *
+ * Losing the buttons costs the blank-name guard its disabled state, so the
+ * refusal is spoken instead - see `reportBlankNameRefused`. `SaveFailed` still
+ * reports a *rejected* save, which is a different failure and still needs its
+ * own surface.
+ */
+
 import { useCallback } from "react";
 
-import { Button, Input, MarkdownEditor } from "@/components/ui";
+import { Input, MarkdownEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
+import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { Field, SaveFailed, Stat } from "./shared";
@@ -35,15 +52,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// useEntityDraft.
 	//
 	// The resync also re-runs after a save (the props come back changed), which
-	// clears the post-trim divergence: `handleSave` persists `name.trim()`, so
-	// a draft with trailing whitespace would otherwise stay dirty against the
+	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
+	// draft with trailing whitespace would otherwise stay dirty against the
 	// trimmed saved value forever.
-	const {
-		draft,
-		setDraft,
-		isDirty,
-		reset: handleReset,
-	} = useEntityDraft<InfoDraft>({
+	const { draft, setDraft, isDirty } = useEntityDraft<InfoDraft>({
 		entityKey: collection.id,
 		value: { name: collection.name, description: collection.description ?? "" },
 		mutation: updateCollection,
@@ -74,7 +86,26 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
 	// toast instead, since this callout may not be on screen at all.
-	const handleSave = () => void persist().catch(() => {});
+	const commit = () => void persist().catch(() => {});
+
+	/*
+	 * Trim, then commit - or refuse and put the stored name back.
+	 *
+	 * `canSave` already stops a blank one reaching the engine, including from
+	 * Ctrl/Cmd+S and the quit flush. What it cannot do is *say* anything: with
+	 * the Save button gone there is no disabled control left to show the refusal,
+	 * so the draft is reset to the stored name and the save channel reports it.
+	 */
+	const commitName = () => {
+		const trimmed = name.trim();
+		if (!trimmed) {
+			setDraft((d) => ({ ...d, name: collection.name }));
+			reportBlankNameRefused("collection");
+			return;
+		}
+		if (trimmed !== name) setDraft((d) => ({ ...d, name: trimmed }));
+		commit();
+	};
 
 	return (
 		<div className="max-w-[540px] flex flex-col gap-5">
@@ -82,6 +113,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 				<Input
 					value={name}
 					onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+					onBlur={commitName}
+					// `Field`'s label is a styled div, not a `<label for>`, so the
+					// input has no accessible name without this.
+					aria-label="Collection name"
 					className="text-sm font-medium"
 				/>
 			</Field>
@@ -92,14 +127,15 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 			 * as never. It gets the same editor as a request's description: prose
 			 * when you are reading, source when you click in.
 			 *
-			 * The hint is gone because the behaviour now says it. `onCommit` is
-			 * omitted deliberately: this form saves explicitly through its Save
-			 * Changes button, unlike the request builder which persists on blur.
+			 * The hint is gone because the behaviour now says it. `onCommit` fires
+			 * on the same blur that renders the markdown, which is what makes this
+			 * form's save model the request builder's.
 			 */}
 			<Field label="Description">
 				<MarkdownEditor
 					value={description}
 					onChange={(value) => setDraft((d) => ({ ...d, description: value }))}
+					onCommit={commit}
 					/*
 					 * A failed save means the stored text is not what is on
 					 * screen, and rendering shows what is stored - so it would
@@ -123,23 +159,6 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 			</div>
 
 			<SaveFailed mutation={updateCollection} what="this collection" />
-
-			<div className="flex gap-2">
-				<Button
-					onClick={handleSave}
-					disabled={!canSave || updateCollection.isPending}
-					className="font-semibold"
-				>
-					{updateCollection.isPending ? "Saving…" : "Save Changes"}
-				</Button>
-				<Button
-					variant="outline"
-					onClick={handleReset}
-					disabled={!isDirty || updateCollection.isPending}
-				>
-					Cancel
-				</Button>
-			</div>
 		</div>
 	);
 }

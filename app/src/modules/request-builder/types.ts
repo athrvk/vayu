@@ -253,6 +253,18 @@ export interface RequestBuilderContextValue {
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
 
 	/**
+	 * Put the stored name back on screen, discarding whatever the name field
+	 * currently holds.
+	 *
+	 * The Info tab's blank-name refusal is the reader: a request must keep a
+	 * name, so an emptied field is rejected on blur and the saved name returns.
+	 * Only the provider knows what that is - it is the last value the request
+	 * query delivered, which is not `request.name` (the user just cleared that)
+	 * and not a re-read of the cache (this layer does not fetch).
+	 */
+	restoreStoredName: () => void;
+
+	/**
 	 * What the body modes you are not looking at were holding, so switching mode
 	 * does not destroy them. See `utils/body-drafts.ts` for why there are two
 	 * buckets and not six.

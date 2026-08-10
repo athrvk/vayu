@@ -335,16 +335,28 @@ export default function RequestBuilder() {
 
 			const authPayload: RequestAuth = request.auth;
 
+			/*
+			 * A blank name is refused rather than saved.
+			 *
+			 * The Info tab restores the stored name on blur and says so, but the
+			 * debounced auto-save can fire while the field is still empty and
+			 * focused - so the guard has to be here too, where every save path
+			 * passes. Omitting the key leaves the stored name untouched (the
+			 * engine does a partial update on an existing id); sending `""` would
+			 * make a request nameless everywhere it is listed.
+			 *
+			 * `name` was omitted unconditionally until the Info tab gained a name
+			 * field. The reason was staleness, not ownership: the builder's copy
+			 * was a snapshot taken when the tab opened, so an auto-save fired
+			 * minutes after a sidebar rename carried the pre-rename name and
+			 * clobbered it. The provider now adopts a name that changes
+			 * underneath it, so the copy sent here is never stale.
+			 */
+			const name = request.name.trim();
+
 			await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
-				// `name` is deliberately omitted: the builder never edits it (it is
-				// renamed from the collection sidebar), so `request.name` is only a
-				// snapshot taken when the tab opened and the reset effect keeps it
-				// keyed by id - a rename does not change the id, so the snapshot goes
-				// stale. Sending it here made this debounced auto-save clobber a
-				// sidebar rename with the old name a few seconds later. The engine
-				// does a partial update on an existing id, so omitting `name` leaves
-				// the current (renamed) value untouched.
+				...(name ? { name } : {}),
 				description: request.description,
 				method: request.method as HttpMethod,
 				url: request.url,
