@@ -145,6 +145,10 @@ struct TypeNode {
     std::string documentation;
     int kind    = 0;
     bool listed = false; // false for an interior node the labels only imply
+    // Some label reached this node's members through a call - `pm.cookies.jar`
+    // is written `pm.cookies.jar().set` one level down. See the `()` stripping
+    // in generate_script_typedefs.
+    bool called = false;
     // The member may be absent at run time - see split_optional_suffix. Only
     // read for a node that has children; a leaf carries it in its own type.
     bool optional = false;
@@ -269,6 +273,44 @@ struct Signature {
 };
 
 /**
+ * @brief Where @p name's own parameter list opens in @p detail.
+ *
+ * The first `(` in a detail is not always the member's. Every jar entry names
+ * the call that produced the object before naming the member -
+ * `pm.cookies.jar().get(url: string, name: string, ...)` - so reading from the
+ * first `(` finds the empty one in `jar()`: an empty parameter list, whose
+ * closing paren is immediately followed by `.get`, so the return type is
+ * dropped too. Every `pm.cookies.jar().*` member was declared as a
+ * no-argument `void`, which is not merely wrong but inverted - the editor said
+ * "takes nothing" about a method that requires a URL.
+ *
+ * So the search is anchored to the member name, and falls back to the first
+ * `(` only when the detail does not restate it.
+ *
+ * @return the index of the opening `(`, or `npos` if there is none.
+ */
+size_t find_params_open (const std::string& detail, const std::string& name) {
+    for (size_t pos = name.empty () ? std::string::npos : detail.find (name);
+         pos != std::string::npos; pos = detail.find (name, pos + 1)) {
+        const size_t after = pos + name.size ();
+        if (after >= detail.size () || detail[after] != '(') {
+            continue;
+        }
+        // `.get(` anchors, `forget(` does not - the name has to be a whole
+        // segment, not the tail of a longer one.
+        if (pos > 0) {
+            const char before = detail[pos - 1];
+            if (std::isalnum (static_cast<unsigned char> (before)) ||
+            before == '_' || before == '$') {
+                continue;
+            }
+        }
+        return after;
+    }
+    return detail.find ('(');
+}
+
+/**
  * @brief Read a function entry's `detail` as a TypeScript signature.
  *
  * Accepts the two shapes the table uses - `name(params): Return` and
@@ -277,10 +319,12 @@ struct Signature {
  * (`upsert({ key, value }) | (name, value)`); those fall back to `...args:
  * any[]`, which keeps the member callable and its documentation reachable
  * instead of dropping it or emitting a file that does not compile.
+ *
+ * @param name the member being declared, used to find its own `(`.
  */
-Signature parse_signature (const std::string& detail) {
+Signature parse_signature (const std::string& detail, const std::string& name) {
     Signature sig;
-    const auto open = detail.find ('(');
+    const auto open = find_params_open (detail, name);
     if (open == std::string::npos) {
         return sig;
     }
@@ -323,6 +367,39 @@ Signature parse_signature (const std::string& detail) {
 }
 
 /**
+ * @brief Whether every `|`-separated alternative is a quoted string literal.
+ *
+ * A closed set of strings is a type the table can already write and the reader
+ * would otherwise dismiss as prose. `pm.info.eventName` is `'prerequest' |
+ * 'test'`, and reading that as `void` made the documented
+ * `pm.info.eventName === 'prerequest'` an error - a comparison between types
+ * with no overlap - on the very first example in its own section.
+ */
+bool is_string_literal_union (const std::string& base) {
+    if (base.empty ()) {
+        return false;
+    }
+    for (size_t start = 0;;) {
+        const size_t bar       = base.find ('|', start);
+        const std::string part = trim (base.substr (
+        start, bar == std::string::npos ? std::string::npos : bar - start));
+        const char quote       = part.empty () ? '\0' : part.front ();
+        if (part.size () < 2 || (quote != '\'' && quote != '"') || part.back () != quote) {
+            return false;
+        }
+        // An interior quote of the same kind is two literals with prose
+        // between them, not one alternative.
+        if (part.find (quote, 1) != part.size () - 1) {
+            return false;
+        }
+        if (bar == std::string::npos) {
+            return true;
+        }
+        start = bar + 1;
+    }
+}
+
+/**
  * @brief The type of a non-function leaf, read from its `detail`.
  *
  * A `detail` that restates the member's own dotted name (`.to.be.true`) is an
@@ -351,6 +428,8 @@ std::string field_type (const std::string& detail) {
         resolved = base;
     } else if (base == "object") {
         resolved = ANY_OBJECT;
+    } else if (is_string_literal_union (base)) {
+        resolved = base;
     } else {
         // Prose rather than a type - an assertion getter restating its own
         // name, or a description. `void` is the honest answer, and
@@ -414,6 +493,21 @@ bool in_chain) {
     append_doc (out, node, indent);
 
     if (!node.children.empty ()) {
+        // A member that is both a listed call and the parent of its own
+        // members: `pm.cookies.jar` is offered in its own right, and the
+        // `pm.cookies.jar().set` labels give it children. Emitted separately
+        // those were two `jar` members - `jar(): object` beside `jar(): {...}`
+        // - and TypeScript resolves a call against the *first*, so every line
+        // of the documented jar block was "Property 'set' does not exist on
+        // type 'object'". One member, whose return type is the members the
+        // labels gave it.
+        if (node.kind == KIND_FUNCTION || node.called) {
+            const Signature sig = parse_signature (node.detail, name);
+            out += indent + name + "(" + (sig.parsed ? sig.params : "") + "): {\n";
+            out += render_body (node, indent + "\t", in_chain);
+            out += indent + "};\n";
+            return out;
+        }
         // `pm.iterationData?: {...}` - the surface is undefined outside a
         // data-driven collection run, and an object type has nowhere else to
         // say so. Under the renderer's current compiler options this shows in
@@ -425,7 +519,7 @@ bool in_chain) {
     }
 
     if (node.kind == KIND_FUNCTION) {
-        const Signature sig = parse_signature (node.detail);
+        const Signature sig = parse_signature (node.detail, name);
         std::string params  = sig.parsed ? sig.params : "...args: any[]";
         std::string ret     = sig.return_type;
         if (!node.forced_return.empty ()) {
@@ -477,8 +571,17 @@ std::string generate_script_typedefs () {
         // `pm.expect(...)`, not a global.
         TypeNode* node =
         (segments[0] == "to" || segments[0] == "and") ? &chain_root : &global_root;
-        for (const auto& segment : segments) {
-            node = &node->children[segment];
+        for (const auto& raw : segments) {
+            // `pm.cookies.jar().set` spells out the call that produced the
+            // object it hangs off. The call belongs to `jar`, which the table
+            // lists in its own right - so this is one node, not a `jar` beside
+            // a `jar()` that the sorted map would emit as two members.
+            const bool is_call =
+            raw.size () > 2 && raw.compare (raw.size () - 2, 2, "()") == 0;
+            node = &node->children[is_call ? raw.substr (0, raw.size () - 2) : raw];
+            if (is_call) {
+                node->called = true;
+            }
         }
         node->detail        = item.value ("detail", "");
         node->documentation = item.value ("documentation", "");
@@ -531,7 +634,7 @@ std::string generate_script_typedefs () {
         }
         append_doc (out, child, "");
         if (child.kind == KIND_FUNCTION) {
-            const Signature sig = parse_signature (child.detail);
+            const Signature sig = parse_signature (child.detail, name);
             const std::string params = sig.parsed ? sig.params : "...args: any[]";
             const std::string ret = sig.return_type.empty () ? "void" : sig.return_type;
             out += "declare function " + name + "(" + params + "): " + ret + ";\n";

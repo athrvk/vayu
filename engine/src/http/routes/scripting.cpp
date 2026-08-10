@@ -827,7 +827,7 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.cookies.jar().get" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().get(\"${1:https://api.example.com}\", \"${2:session}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().get(url: string, name: string, callback?): string | undefined" },
+    { "detail", "pm.cookies.jar().get(url: string, name: string, callback?: Function): string | undefined" },
     { "documentation",
     "The value of a stored cookie that would be sent to that URL, or "
     "undefined. Same matching as pm.cookies.get, against the URL you pass "
@@ -839,7 +839,7 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.cookies.jar().set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().set(\"${1:https://api.example.com}\", { name: \"${2:session}\", value: ${3:token} })" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().set(url: string, cookie: object, callback?): void" },
+    { "detail", "pm.cookies.jar().set(url: string, cookie: object | string, value?: string | Function, callback?: Function): void" },
     { "documentation",
     "Store a cookie for that URL. The cookie object needs name and value; "
     "domain, path, secure, httpOnly and expires (seconds since the epoch, 0 "
@@ -852,7 +852,7 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.cookies.jar().unset" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().unset(\"${1:https://api.example.com}\", \"${2:session}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?): void" },
+    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): void" },
     { "documentation",
     "Remove the cookies of that name the URL would have carried. Cookies of "
     "the same name stored for another host or path are left alone." },
@@ -860,7 +860,7 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "pm.cookies.jar().clear" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.cookies.jar().clear()" },
-    { "detail", "pm.cookies.jar().clear(callback?): void" },
+    { "detail", "pm.cookies.jar().clear(callback?: Function): void" },
     { "documentation",
     "Empty this environment's jar - a session reset, and nothing wider: "
     "other environments' jars are untouched. Nothing is on disk, so this "
@@ -1036,6 +1036,50 @@ nlohmann::json get_script_completions () {
     ".oneOf.\n\nExample:\npm.expect(data).to.deep.equal({id: 1});" },
     { "sortText", "2_to_deep_equal" }, { "filterText", ".to.deep.equal" } });
 
+    // The rest of what the `deep` documentation above claims. `deep` is a
+    // flag-setting getter on the one chain object, so the runtime has always
+    // answered these - but the completion table listed `deep` with `equal`
+    // alone, and the generated declarations are derived from the table, so
+    // `pm.expect(value).to.deep.include({ a: 1 })` - the docs' own line - was
+    // "Property 'include' does not exist" in the editor. Spelled as chai
+    // spells them, since the getters commute and a pasted Postman script uses
+    // chai's order.
+    completions.push_back ({ { "label", "to.deep.include" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.deep.include(${1:value})" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.deep.include(value: any)" },
+    { "documentation",
+    "Assert the array or string contains the value, comparing objects by value "
+    "rather than by reference.\n\nExample:\n"
+    "pm.expect(items).to.deep.include({id: 1});" },
+    { "sortText", "2_to_deep_include" }, { "filterText", ".to.deep.include" } });
+
+    completions.push_back ({ { "label", "to.have.deep.property" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.deep.property(\"${1:name}\", ${2:value})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.deep.property(name: string, value?: any)" },
+    { "documentation",
+    "Assert the object has a property whose value deeply equals the one "
+    "given.\n\nExample:\n"
+    "pm.expect(data).to.have.deep.property('meta', {page: 1});" },
+    { "sortText", "2_to_have_deep_property" }, { "filterText", ".to.have.deep.property" } });
+
+    completions.push_back ({ { "label", "to.have.deep.members" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.have.deep.members([${1:values}])" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.deep.members(values: any[])" },
+    { "documentation",
+    "Assert the array has the same members in any order, comparing them by "
+    "value.\n\nExample:\n"
+    "pm.expect(rows).to.have.deep.members([{id: 1}, {id: 2}]);" },
+    { "sortText", "2_to_have_deep_members" }, { "filterText", ".to.have.deep.members" } });
+
+    completions.push_back ({ { "label", "to.be.deep.oneOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.be.deep.oneOf([${1:values}])" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.deep.oneOf(values: any[])" },
+    { "documentation",
+    "Assert the value deeply equals one of the candidates.\n\nExample:\n"
+    "pm.expect(body.status).to.be.deep.oneOf([{code: 1}, {code: 2}]);" },
+    { "sortText", "2_to_be_deep_oneOf" }, { "filterText", ".to.be.deep.oneOf" } });
+
     completions.push_back ({ { "label", "to.be.true" }, { "kind", KIND_FIELD },
     { "insertText", "to.be.true" }, { "detail", ".to.be.true" },
     { "documentation", "Assert the value is true." },
@@ -1096,8 +1140,13 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "to.have.property" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.property(\"${1:name}\")" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.property(name: string)" },
-    { "documentation", "Assert the object has a property.\n\nExample:\npm.expect(data).to.have.property('id');" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.property(name: string, value?: any)" },
+    { "documentation",
+    "Assert the object has a property, and optionally that it equals a value. "
+    "The value is compared strictly unless the chain is `deep`.\n\nExample:\n"
+    "pm.expect(data).to.have.property('id');\n"
+    "pm.expect(data).to.have.property('id', 1);" },
     { "sortText", "2_to_have_property" }, { "filterText", ".to.have.property" } });
 
     completions.push_back ({ { "label", "to.have.length" },

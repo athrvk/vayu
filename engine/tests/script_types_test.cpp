@@ -18,7 +18,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <set>
+#include <sstream>
 #include <string>
 
 #include "vayu/http/routes.hpp"
@@ -38,6 +43,29 @@ constexpr int KIND_SNIPPET = 28;
 
 bool contains (const std::string& haystack, const std::string& needle) {
     return haystack.find (needle) != std::string::npos;
+}
+
+/**
+ * @brief Whether an environment variable is present at all - see
+ *        TheCheckedInDeclarationsMatchTheGenerator, its one caller.
+ *
+ * MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996), and this
+ * suite is built with `/W4 /WX`, so the deprecation is followed rather than
+ * suppressed: a `#pragma warning(disable)` here would be a permanent
+ * suppression for a one-line read.
+ */
+bool env_is_set (const char* name) {
+#ifdef _WIN32
+    char* value   = nullptr;
+    size_t length = 0;
+    if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
+        return false;
+    }
+    std::free (value);
+    return true;
+#else
+    return std::getenv (name) != nullptr;
+#endif
 }
 
 TEST (ScriptTypesTest, IsDeterministic) {
@@ -236,6 +264,138 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif
+}
+
+// `pm.cookies.jar` is listed in its own right *and* is the parent of the
+// `pm.cookies.jar().set` labels. Emitted separately those were two `jar`
+// members - `jar(): object` sorting ahead of `jar(): {...}` - and TypeScript
+// resolves a call against the first, so every line of the documented jar block
+// was "Property 'set' does not exist on type 'object'". Nine of the twelve
+// errors this file's compile guard now catches were that one member.
+TEST (ScriptTypesTest, AListedCallIsMergedWithTheMembersItsLabelsImply) {
+    const std::string dts = generate_script_typedefs ();
+
+    // Declaration lines only - the documentation comments name
+    // `pm.cookies.jar()` too, and those are not members.
+    size_t members = 0;
+    std::istringstream lines (dts);
+    for (std::string line; std::getline (lines, line);) {
+        const size_t first = line.find_first_not_of ('\t');
+        if (first != std::string::npos && line.compare (first, 4, "jar(") == 0) {
+            members++;
+        }
+    }
+    EXPECT_EQ (members, 1u)
+    << "pm.cookies.jar is declared more than once, and "
+       "the call resolves against whichever sorts first";
+
+    // The one that survives must be the one carrying the members, not the
+    // `object` leaf - `pm.cookies.jar().set(...)` is the documented form.
+    EXPECT_TRUE (contains (dts, "jar(): {")) << "pm.cookies.jar() returns an "
+                                                "opaque object, so its methods "
+                                                "are unreachable";
+    EXPECT_FALSE (contains (dts, "jar(): object;"));
+    // The segment is stripped, not carried into the declaration.
+    EXPECT_FALSE (contains (dts, "jar()()"));
+}
+
+// `parse_signature` took the *first* `(` in the detail, which for every jar
+// entry is the empty one in `jar()`: the parameter list read as empty and the
+// text after it did not start with `:`, so the return type went too. Signature
+// help was not merely wrong but inverted - "takes nothing", about a method that
+// requires a URL.
+TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts,
+    "get(url: string, name: string, callback?: "
+    "Function): string | undefined;"));
+    EXPECT_TRUE (contains (dts, "unset(url: string, name: string, callback?: Function): void;"));
+    EXPECT_TRUE (contains (dts, "clear(callback?: Function): void;"));
+    // The flat `set(url, name, value)` form the docs also show has to fit the
+    // one signature the table can express.
+    EXPECT_TRUE (contains (dts,
+    "set(url: string, cookie: object | string, "
+    "value?: string | Function, callback?: Function): void;"));
+    EXPECT_FALSE (contains (dts, "get(): void;"));
+    EXPECT_FALSE (contains (dts, "set(): void;"));
+}
+
+// A closed set of strings is a type, and `field_type` called it prose. So
+// `pm.info.eventName` was `void`, and the first example in its own section -
+// `pm.info.eventName === 'prerequest'` - was a comparison between types with no
+// overlap.
+TEST (ScriptTypesTest, AStringLiteralUnionIsAType) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "eventName: 'prerequest' | 'test';"));
+    // And prose is still not one: an assertion getter restating its own dotted
+    // name must not start being read as a type because it contains quotes.
+    EXPECT_TRUE (contains (dts, "true: void;"));
+}
+
+// `deep` is a flag-setting getter on the one chain object, so the runtime has
+// always answered `.to.deep.include`; the table listed `deep` with `equal`
+// alone, and the declarations are derived from the table. The docs' own
+// `pm.expect(value).to.deep.include({ a: 1 })` was "Property 'include' does not
+// exist", and `have.property(name, value)` - which the runtime accepts and
+// `nested.property` already declared - was "expected 1 arguments, but got 2".
+TEST (ScriptTypesTest, TheChainDeclaresWhatTheDocsClaimAndTheRuntimeAnswers) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "property(name: string, value?: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "include(value: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "members(values: any[]): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "oneOf(values: any[]): VayuExpectation;"));
+}
+
+/**
+ * The generated declarations, checked in so a test with a TypeScript compiler
+ * can read them without a running engine.
+ *
+ * `app/src/hooks/script-typedefs.docs-compile.test.ts` compiles the 54 `pm.*`
+ * blocks in `docs/engine/scripting.md` and `docs/app/pm-api-compatibility.md`
+ * against this file and requires zero errors - the guard that found all four
+ * defects above, and the only one that could have: a declaration can contain
+ * every right name and still not type-check, which is what
+ * `EveryListedMemberReachesTheOutput` above proves and nothing more.
+ *
+ * That test needs a TypeScript compiler, which ctest does not have, and this
+ * suite is where the generator lives, which vitest cannot reach. So the two
+ * halves meet at one checked-in artifact - the same shape as
+ * `variable-resolution-conformance.json`, read by this suite and by
+ * `variable-resolution.conformance.test.ts`.
+ *
+ * A generated artifact under version control drifts unless something pins it,
+ * which is what this test is. Regenerate deliberately:
+ *
+ *     VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
+ *
+ * and commit the result, so a change to the surface shows up as a diff in the
+ * declarations the editor will serve.
+ */
+TEST (ScriptTypesTest, TheCheckedInDeclarationsMatchTheGenerator) {
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "script-typedefs.d.ts";
+    const std::string generated = generate_script_typedefs ();
+
+    if (env_is_set ("VAYU_UPDATE_SCRIPT_TYPEDEFS")) {
+        std::ofstream out (path, std::ios::binary);
+        ASSERT_TRUE (out.good ()) << "cannot write fixture: " << path;
+        out << generated;
+        out.close ();
+        GTEST_SKIP () << "regenerated " << path;
+    }
+
+    std::ifstream in (path, std::ios::binary);
+    ASSERT_TRUE (in.good ()) << "fixture missing: " << path;
+    const std::string checked_in (
+    (std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char> ());
+
+    // A fixture that had been emptied would compile every doc block trivially.
+    EXPECT_GT (checked_in.size (), 20000u)
+    << "the checked-in declarations look empty - the app-side compile guard "
+       "would prove nothing against them";
+    EXPECT_EQ (checked_in, generated)
+    << "the checked-in declarations are stale. Regenerate with "
+       "VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes";
 }
 
 // Documentation is what hover text renders; a `*/` inside it would close the

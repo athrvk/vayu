@@ -2933,6 +2933,42 @@ Two things the generated file cannot get from the table, both handled in
   back to `(...args: any[])`, keeping the member callable rather than emitting a
   file that does not compile.
 
+#### The declarations are compiled, not just grepped
+
+`script_types_test.cpp` asserts on substrings of the generated text - every
+listed member appears, the chain returns the chain, an optional field keeps its
+type. That cannot catch the class of defect where a declaration contains every
+right name and still does not type-check, and four of those shipped (#463):
+`pm.cookies.jar()` emitted twice with the `object` overload winning, every jar
+method's signature emptied by the `()` inside its own label, `pm.info.eventName`
+read as prose and typed `void`, and two `pm.expect` chains shorter than the
+documentation beside them.
+
+So the durable guard compiles the **54 `pm.*` code blocks** in
+[`scripting.md`](scripting.md) and
+[`pm-api-compatibility.md`](../app/pm-api-compatibility.md) against the real
+declarations and requires zero errors, with the app's own compiler options and
+its two suppressed codes. The documentation and the declarations then hold each
+other up: an example the editor would squiggle fails the suite, and so does a
+declaration that stops describing what the docs recommend.
+
+It needs a TypeScript compiler, which ctest does not have, and the generator
+needs the engine, which vitest cannot run. The two halves meet at one checked-in
+artifact - the same shape as `variable-resolution-conformance.json`:
+
+| Where | What |
+|-------|------|
+| `engine/tests/fixtures/script-typedefs.d.ts` | The generated declarations, checked in |
+| `ScriptTypesTest.TheCheckedInDeclarationsMatchTheGenerator` | Pins that file to the generator byte-for-byte, so the copy cannot drift |
+| `app/src/hooks/script-typedefs.docs-compile.test.ts` | Compiles the docs' blocks against it |
+
+A change to the surface therefore shows up as a diff in the declarations the
+editor will serve. Regenerate deliberately:
+
+```bash
+VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
+```
+
 ## HTTP Status Codes
 
 | Code | Meaning |
