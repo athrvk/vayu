@@ -14,8 +14,9 @@
  *   constant_concurrency Duration · Total requests · Throughput / VU   · p99
  *   iterations           Elapsed  · Remaining (ETA) · Mean iter time   · p99
  *   ramp_up              Peak concurrency · Breakpoint · p99 at peak · Total requests
+ *   capacity             Peak concurrency · Breakpoint · p99 at peak · Total requests
  *
- * ramp_up is the lone exception: its 4th stat is Total requests, not p99, so
+ * ramp_up and capacity are the exception: their 4th stat is Total requests, not p99, so
  * that branch renders all four cards itself. Shared cards (Duration / Total /
  * Peak) and the universal p99 card live here; the mode-only cards live in
  * ModeStatCards.tsx. Consumes {@link DashboardDerived}; never re-derives from
@@ -66,6 +67,10 @@ function renderModeStats(d: DashboardDerived) {
 					<P99StatCard d={d} />
 				</>
 			);
+		// Capacity discovery asks the same four questions `ramp_up` does - how
+		// high did it get, where did it break, how slow was it there - which is
+		// the whole of what the mode exists to answer.
+		case "capacity":
 		case "ramp_up":
 			return (
 				<>

@@ -142,6 +142,12 @@ struct ReportExtras {
     // Per-budget rows verbatim from the summary, already in the report's
     // camelCase shape - the evaluator writes the wire keys.
     nlohmann::json threshold_checks = nlohmann::json::array ();
+    // What a capacity run's search found, already translated into the report's
+    // camelCase shape. `has_capacity` false is every other mode - a run with a
+    // fixed target measured a point, not a curve, and reporting a knee of zero
+    // would name a limit nothing observed.
+    bool has_capacity       = false;
+    nlohmann::json capacity = nlohmann::json::object ();
     // What the run's bounded stores thinned away. `has_sampling` false is a
     // run recorded before retention was reported, which is not the same as a
     // run that dropped nothing - so the section is left out rather than shown
@@ -198,6 +204,69 @@ void read_number (const nlohmann::json& obj, const char* key, T& out) {
     if (obj.contains (key) && obj[key].is_number ()) {
         out = obj[key].get<T> ();
     }
+}
+
+// Translate a stored `capacity` section (snake_case, like every stored section)
+// into the report's camelCase shape.
+//
+// Every field is optional on the way in: `max_healthy_*` is absent when the
+// very first level already breached the SLO, `knee_*` when the search ended for
+// a reason other than latency, and a summary written by an older engine has
+// none of them. Only a section that carries at least the levels it measured is
+// reported at all - an empty one says nothing a reader can act on, the same
+// rule the thresholds section follows.
+void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
+    if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
+        return;
+    }
+
+    nlohmann::json levels = nlohmann::json::array ();
+    for (const auto& level : stored["levels"]) {
+        if (!level.is_object ()) {
+            continue;
+        }
+        size_t concurrency = 0;
+        double rps         = 0.0;
+        double p99_ms      = 0.0;
+        read_number (level, "concurrency", concurrency);
+        read_number (level, "rps", rps);
+        read_number (level, "p99_ms", p99_ms);
+        levels.push_back (
+        { { "concurrency", concurrency }, { "rps", rps }, { "p99Ms", p99_ms } });
+    }
+
+    nlohmann::json capacity;
+    double slo_ms = 0.0;
+    read_number (stored, "slo_ms", slo_ms);
+    capacity["sloMs"] = slo_ms;
+    capacity["stopReason"] =
+    stored.contains ("stop_reason") && stored["stop_reason"].is_string () ?
+    stored["stop_reason"].get<std::string> () :
+    std::string{};
+    capacity["levels"] = levels;
+
+    if (stored.contains ("max_healthy_concurrency")) {
+        size_t concurrency = 0;
+        double rps         = 0.0;
+        double p99_ms      = 0.0;
+        read_number (stored, "max_healthy_concurrency", concurrency);
+        read_number (stored, "max_healthy_rps", rps);
+        read_number (stored, "p99_at_max_healthy_ms", p99_ms);
+        capacity["maxHealthyConcurrency"] = concurrency;
+        capacity["maxHealthyRps"]         = rps;
+        capacity["p99AtMaxHealthyMs"]     = p99_ms;
+    }
+    if (stored.contains ("knee_concurrency")) {
+        size_t concurrency = 0;
+        double p99_ms      = 0.0;
+        read_number (stored, "knee_concurrency", concurrency);
+        read_number (stored, "knee_p99_ms", p99_ms);
+        capacity["kneeConcurrency"] = concurrency;
+        capacity["kneeP99Ms"]       = p99_ms;
+    }
+
+    extras.has_capacity = true;
+    extras.capacity     = std::move (capacity);
 }
 
 /**
@@ -312,6 +381,10 @@ ReportExtras& extras) {
         read_number (summary["tests"], "sampled", extras.tests_sampled);
         read_number (summary["tests"], "passed", extras.tests_passed);
         read_number (summary["tests"], "failed", extras.tests_failed);
+    }
+
+    if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
+        read_capacity_section (summary["capacity"], extras);
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -805,6 +878,12 @@ const std::string& run_id) {
             (static_cast<double> (extras.tests_passed) * 100.0 /
             static_cast<double> (extras.tests_passed + extras.tests_failed)) :
             0.0 } };
+    }
+
+    // What the capacity search found. Present only for a capacity run, so every
+    // other report renders exactly as it did before the mode existed.
+    if (extras.has_capacity) {
+        json_report["capacity"] = extras.capacity;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived

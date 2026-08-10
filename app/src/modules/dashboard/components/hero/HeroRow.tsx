@@ -67,6 +67,22 @@ function renderModeCards(d: DashboardDerived) {
 					<ThroughputCard throughput={d.throughput} meanLatency={d.meanLatency} />
 				</>
 			);
+		// Capacity discovery climbs toward the ceiling the user set, so the
+		// question its hero answers is "how far up is it, and has the target
+		// given out yet" - the same pair `ramp_up` asks, read against the cap
+		// rather than against a planned curve. `CurrentConcurrencyCard` is
+		// deliberately not reused here: its subtitle states a ramp duration and
+		// a ramp lag, and a search has neither.
+		case "capacity":
+			return (
+				<>
+					<ConcurrencyUtilCard
+						currentConcurrency={activeConcurrency}
+						configuredConcurrency={d.configuredConcurrency}
+					/>
+					<SaturationCard breakpoint={d.breakpoint} failedRequests={d.failedRequests} />
+				</>
+			);
 		case "ramp_up":
 			return (
 				<>

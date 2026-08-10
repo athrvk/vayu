@@ -34,6 +34,7 @@ describe("load test mode vocabulary", () => {
 			"constant_concurrency",
 			"iterations",
 			"ramp_up",
+			"capacity",
 		]);
 	});
 

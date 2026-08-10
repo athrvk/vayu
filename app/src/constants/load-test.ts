@@ -42,6 +42,11 @@ export const LOAD_TEST_DEFAULTS = {
 	SAMPLE_RATE_PCT: 10,
 	/** Responses slower than this are flagged and saved. */
 	SLOW_THRESHOLD_MS: 1000,
+	/**
+	 * Capacity Discovery: how long each concurrency level is held before its
+	 * window is judged. Matches the engine's `constants::capacity`.
+	 */
+	STEP_DURATION_S: 5,
 	SAVE_TIMING_BREAKDOWN: true,
 } as const;
 
@@ -59,7 +64,9 @@ export type LoadTestLimitKey =
 	| "RAMP_DURATION_S"
 	| "START_CONCURRENCY"
 	| "SAMPLE_RATE_PCT"
-	| "SLOW_THRESHOLD_MS";
+	| "SLOW_THRESHOLD_MS"
+	| "SLO_MS"
+	| "STEP_DURATION_S";
 
 export type LoadTestLimits = Record<LoadTestLimitKey, LimitRange>;
 
@@ -87,6 +94,19 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	 */
 	SAMPLE_RATE_PCT: { MIN: 1, MAX: 100 },
 	SLOW_THRESHOLD_MS: { MIN: 0, MAX: 60_000 },
+	/**
+	 * The latency budget a Capacity Discovery run searches for the edge of. The
+	 * ceiling is the engine's own guard on `sloMs`, and the same one the client
+	 * SLO setting clamps to - the two are the same number wearing two hats, so
+	 * they must accept the same range.
+	 */
+	SLO_MS: { MIN: 1, MAX: 60_000 },
+	/**
+	 * MIN is 1 second: the engine discards the first few ticks of every level as
+	 * the transition they measure, so a step shorter than that has nothing left
+	 * to judge and the search would stall waiting for a window it never fills.
+	 */
+	STEP_DURATION_S: { MIN: 1, MAX: 600 },
 };
 
 /**

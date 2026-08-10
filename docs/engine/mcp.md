@@ -159,14 +159,21 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity` |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
 
 - **`start_load_run`** requires confirmation - via elicitation when the client
   supports it, otherwise a `confirmed: true` flag - and enforces the RPS /
-  concurrency / duration caps. `get_live_metrics` is a **bounded snapshot** (SSE
+  concurrency / duration caps. In `capacity` mode the concurrency cap bounds the
+  search's *ceiling* (`concurrency`) and its starting level
+  (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
+  `sloMs` and `stepDuration` are that mode's own two fields, and
+  `get_run_report` returns the search's findings under `capacity`. The duration
+  cap accounts for the mode's own engine-side default deadline (5 minutes, not
+  the 60s other modes fall back to), so a cap between those two values still
+  injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under

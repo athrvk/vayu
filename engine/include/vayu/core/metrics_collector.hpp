@@ -508,6 +508,16 @@ class MetricsCollector {
      * @note Call after test completion - sorts the latencies vector
      */
     struct Percentiles {
+        /**
+         * How many completions the histogram these came from held.
+         *
+         * Zero is the only way to tell "nothing completed in this window" from
+         * "everything completed instantly" - both report percentiles of 0. A
+         * capacity search averages a level's windowed p99 across ticks, and
+         * without this it would average in every idle window and conclude a
+         * 500ms endpoint was meeting a 100ms budget.
+         */
+        size_t count = 0;
         double p50  = 0.0;
         double p75  = 0.0;
         double p90  = 0.0;
