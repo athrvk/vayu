@@ -258,7 +258,7 @@ apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 the same `202 {runId}` answer** - the payload is what selects the executor. A
 scenario states its work as an ordered collection
 (`{scenario: {source: "collection", collectionId, recursive?, iterations?, data?}}`),
-so it carries no `method`/`url` and no `mode`, and its iteration count lives
+so it carries no `method`/`url`, and its iteration count lives
 inside the block rather than beside a load-test mode. `data` is the parsed rows
 of a data file (`services/data-files/`), sent inline because the engine never
 opens a file; `iterations` is **omitted** when the user left it blank, so the
@@ -268,6 +268,17 @@ run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
 `400` with **no run row created** - a failed start leaves nothing to clean up.
 
+Adding a load `mode` beside the block makes it a **scenario load run** (issue
+#357): the same plan, driven by `concurrency` virtual users on the event loop.
+The *presence* of `mode` is the whole discriminator, so a design-mode payload
+must carry none at all - not a falsy one - and `RunCollectionDialog` therefore
+spreads the load fields in rather than always sending them. `constant_rps`, and
+any non-zero `rps`/`targetRps` on any mode, is a `400`: an open-loop arrival
+rate over a multi-step sequence is an arrival-rate executor the engine does not
+implement, and it is refused rather than quietly run closed-loop. Such a run's
+`type` is `load`, so it streams `metrics` ticks and **not** `step` events - the
+caller must attach `loadTestService`, not `scenarioRunService`.
+
 What comes back for one differs in two places worth knowing. `GET /runs/:id`
 returns the **resolved manifest** in place of the block that was sent
 (`{source, collectionId, recursive, iterations, dataRowCount, steps[]}`, each
@@ -275,9 +286,16 @@ step `{index, requestId, name, method, url}` with the *stored* url, never a
 composed one) - that is what the run tab's context bar reads, through
 `run-scenario.ts`. The paginated `GET /runs` list row cannot carry the manifest
 and instead carries `summary.scenario`
-(`{collectionId, iterations, recursive, stepCount}`), present on scenario rows
-only; the history row reads it because a collection run has no `url` or `method`
-for the ordinary row to show.
+(`{collectionId, iterations, recursive, stepCount}`), present on any row whose
+snapshot carries a scenario block - so a scenario *load* run gets it too. The
+history row reads it because a run whose work is a sequence has no `url` or
+`method` for the ordinary row to show, and that is true of both executors.
+
+A scenario load run's **report** carries the per-step breakdown the design-mode
+runner has no need for: `scenario.steps[]`
+(`{index, name, requestId, method, executed, errors, latency:{min,p50,p95,p99,max}}`)
+plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
+rows, so that array is the only per-step record such a run keeps.
 
 A **design run's** list row carries one thing the detail route says at greater
 length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single

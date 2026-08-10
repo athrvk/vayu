@@ -131,6 +131,19 @@ struct RunContext {
     // Replaces direct DB writes for individual results during load tests
     std::unique_ptr<MetricsCollector> metrics_collector;
 
+    /**
+     * The plan a *load-mode* scenario run executes, or null for a
+     * single-request load run. Resolved before the run row existed and shared
+     * immutably, exactly as the design-mode runner's is.
+     *
+     * It lives on the context rather than being threaded through
+     * `execute_load_test` as a parameter because the whole lifecycle around the
+     * executor - the event loop, the metrics thread, the drain, the flush, the
+     * summary, the retain - is identical for both kinds of load run. Only the
+     * choice of executor differs, and that is the one place this is read.
+     */
+    std::shared_ptr<const ScenarioExecution> scenario;
+
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
     std::atomic<size_t> requests_expected{ 0 }; // Total expected requests for this run
@@ -369,6 +382,11 @@ struct RunSummaryInputs {
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
     SamplingRetention retention;
+    // A scenario load run's sequence tallies and per-step breakdown, stored
+    // under the summary's `scenario` key. Absent for a single-request load run,
+    // which leaves the report's scenario section out entirely rather than
+    // showing it zeros - the section exists to say what a sequence did.
+    std::optional<nlohmann::json> scenario;
 };
 
 /**
@@ -474,10 +492,20 @@ class RunManager {
     // spawned nothing - if shutdown() has already begun, so a request that
     // races the drain is refused rather than starting a worker nobody will
     // join. Any other failure still surfaces as an exception from the worker.
+    /**
+     * @brief Start a load run.
+     *
+     * @param scenario A resolved plan for a *load-mode* scenario run, or null
+     *                 for a single-request load run. Both take this path: the
+     *                 event loop, metrics thread, drain, flush and summary are
+     *                 the same, and only the executor differs. The design-mode
+     *                 sequential runner is `start_scenario_run` instead.
+     */
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
-    bool verbose);
+    bool verbose,
+    std::shared_ptr<const ScenarioExecution> scenario = nullptr);
 
     /**
      * @brief Start a scenario run: the same lifecycle, a different executor.

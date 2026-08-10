@@ -442,6 +442,27 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, data->headers_list);
     }
 
+    // Per-transfer cookie state, for the scenario load path's virtual users.
+    // Enable the engine, flush, then seed - the ordering
+    // `client.cpp::apply_jar_cookies` already uses. See cookie_jar.hpp for why
+    // libcurl, not us, decides what actually goes on the wire.
+    //
+    // Handles come from a pool and are reused, so a session left on one would
+    // reach whichever virtual user acquires it next - the opposite of "1,000
+    // VUs are 1,000 users". `CurlHandlePool::acquire` already calls
+    // `curl_easy_reset`, which frees the handle's cookie store as well, so the
+    // "ALL" flush below is redundant *today*: no test can redden it, and none
+    // pretends to. It stays because the pool's reset is another component's
+    // implementation detail on a path where the failure is silent - a load run
+    // that reported numbers for a session it should never have had.
+    if (request.track_cookies) {
+        curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
+        curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
+        for (const auto& line : request.cookie_lines) {
+            curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
+        }
+    }
+
     // Set callbacks
     curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt (curl, CURLOPT_WRITEDATA, data);
@@ -602,6 +623,22 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // failure, which is also the truncated prefix when the body cap tripped.
     response.body      = std::move (data->response_body);
     response.body_size = response.body.size ();
+
+    // Read the handle's jar back before the error branch, for the same reason
+    // client.cpp captures before its own: a redirect chain that dies on its
+    // last hop still collected the cookies of the hops that succeeded, and a VU
+    // that loses them re-authenticates on its next step.
+    if (data->request.track_cookies) {
+        struct curl_slist* held = nullptr;
+        if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) == CURLE_OK && held) {
+            for (struct curl_slist* item = held; item; item = item->next) {
+                if (item->data) {
+                    response.cookie_lines.emplace_back (item->data);
+                }
+            }
+            curl_slist_free_all (held);
+        }
+    }
 
     if (result != CURLE_OK) {
         // Not returned as an Error: the load strategy processes this as a

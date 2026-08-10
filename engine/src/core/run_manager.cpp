@@ -13,6 +13,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -579,8 +580,12 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
 bool RunManager::start_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
-bool verbose) {
+bool verbose,
+std::shared_ptr<const ScenarioExecution> scenario) {
     return spawn_run (run_id, config, db, [&] (const std::shared_ptr<RunContext>& context) {
+        // Set before either thread starts: the worker reads it to choose an
+        // executor, and a later write would race the run it is meant to shape.
+        context->scenario = std::move (scenario);
         // Spawn metrics collection thread first - it is NOT detached and is
         // joined by the worker thread below.
         context->metrics_thread =
@@ -666,27 +671,41 @@ RunManager& manager) {
         // Build the request once: deserialize + timeout + auth. The event loop
         // attaches request.headers to every transfer, so resolving auth here
         // covers the whole run.
-        auto built = vayu::http::build_request (config, db_ptr, timeout_ms);
-        if (!built.ok) {
-            vayu::utils::log_error (
-            built.parse_failed
-            ? std::string ("Load test: invalid request format")
-            : "Load test auth resolution failed: " + built.error_message);
-            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
-            context->is_running = false;
-            if (context->metrics_thread.joinable ())
-                context->metrics_thread.join ();
-            manager.retain_run (context->run_id);
-            return;
+        //
+        // A scenario load run has no single request to build: every step was
+        // composed and auth-resolved at plan time, before the run row existed,
+        // and a step that could not be authorized already failed resolution
+        // with a 400. Building one here would compose the payload's absent
+        // method and url.
+        vayu::Request request;
+        if (!context->scenario) {
+            auto built = vayu::http::build_request (config, db_ptr, timeout_ms);
+            if (!built.ok) {
+                vayu::utils::log_error (
+                built.parse_failed
+                ? std::string ("Load test: invalid request format")
+                : "Load test auth resolution failed: " + built.error_message);
+                db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+                context->is_running = false;
+                if (context->metrics_thread.joinable ())
+                    context->metrics_thread.join ();
+                manager.retain_run (context->run_id);
+                return;
+            }
+            request = std::move (built.request);
         }
-        auto request = std::move (built.request);
 
         // Execute Load Strategy
         auto test_start = std::chrono::steady_clock::now ();
+        std::shared_ptr<ScenarioLoadState> scenario_state;
 
         try {
-            auto strategy = LoadStrategy::create (config);
-            strategy->execute (context, db, request);
+            if (context->scenario) {
+                scenario_state = execute_scenario_load (context, db, *context->scenario);
+            } else {
+                auto strategy = LoadStrategy::create (config);
+                strategy->execute (context, db, request);
+            }
         } catch (const std::exception& e) {
             vayu::utils::log_error ("Load test failed: " + std::string (e.what ()));
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
@@ -794,6 +813,13 @@ RunManager& manager) {
             context->metrics_collector->http_version_downgraded ();
             inputs.tests           = validation;
             inputs.retention = read_retention (*context->metrics_collector);
+            // Read only now, after the drain above: a completion callback can
+            // still be advancing a VU while the strategy's own frame has
+            // already returned, so the tallies are only final here.
+            if (scenario_state) {
+                inputs.scenario = build_scenario_load_summary (
+                *scenario_state, context->scenario->plan);
+            }
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -976,6 +1002,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.tests.has_value ()) {
         summary["tests"] = { { "sampled", inputs.tests->sampled },
             { "passed", inputs.tests->passed }, { "failed", inputs.tests->failed } };
+    }
+    // A scenario load run's sequence tallies, under the same key and in the
+    // same shape the design-mode runner writes - one report section, two
+    // executors. Omitted for a single-request load run, which has no sequence.
+    if (inputs.scenario.has_value ()) {
+        summary["scenario"] = *inputs.scenario;
     }
     return summary;
 }

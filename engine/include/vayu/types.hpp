@@ -238,6 +238,31 @@ struct Request {
     int max_redirects        = 10;
     bool verify_ssl          = true;
     HttpVersion http_version = DEFAULT_HTTP_VERSION;
+
+    /**
+     * @brief Give this transfer its own cookie engine, seeded with
+     *        `cookie_lines` and read back into `Response::cookie_lines`.
+     *
+     * The event loop's handles come from a pool and are reused, so a cookie
+     * engine left enabled on one would carry a session from whichever transfer
+     * ran before it. Setting this flushes the handle first (`CURLOPT_COOKIELIST
+     * "ALL"`) and seeds only what the caller supplied, which is what makes a
+     * per-virtual-user session on a shared pool possible at all.
+     *
+     * Off for every single-request load run: `false` here is the difference
+     * between two `curl_easy_setopt` calls per transfer and none.
+     */
+    bool track_cookies = false;
+
+    /**
+     * @brief libcurl's own Netscape lines to seed this transfer with.
+     *
+     * Same representation the jar stores (`http/cookie_jar.hpp`) and for the
+     * same reason: libcurl owns the cookie semantics - domain and path
+     * matching, `Secure`, expiry, replacement - and a hand-rolled copy of that
+     * does not receive its fixes. Read only when `track_cookies` is set.
+     */
+    std::vector<std::string> cookie_lines;
 };
 
 /**
@@ -340,6 +365,18 @@ struct Response {
      * naming at all.
      */
     bool http_version_downgraded = false;
+
+    /**
+     * @brief The whole cookie jar the finishing handle held, when the request
+     *        asked for one (`Request::track_cookies`); empty otherwise.
+     *
+     * The *whole* jar, not the `Set-Cookie`s of this exchange - what was seeded
+     * plus whatever the response changed - which is why the caller replaces its
+     * copy with this rather than merging: merging would resurrect a cookie the
+     * server deleted by expiring it. Same reasoning, and the same
+     * representation, as `CookieJar::store`.
+     */
+    std::vector<std::string> cookie_lines;
 
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response

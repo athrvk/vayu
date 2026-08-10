@@ -213,9 +213,14 @@ makes a session survive from one design-mode request to the next.
   `pm.cookies.jar().get`, `GET /cookies`), which need an answer without a
   transfer, and the URL-scoped removal `jar().unset` performs. They never
   decide what goes on the wire.
-- **Not on the load path.** `EventLoop` never touches it: a shared jar across
-  workers is either a lock on the hot path or per-worker jars that do not
-  actually share, and a load run repeats a single request anyway.
+- **Not on the load path.** `EventLoop` never touches the *jar*: a shared jar
+  across workers is either a lock on the hot path or per-worker jars that do not
+  actually share. A scenario load run does carry cookies - it has to, since its
+  whole point is a sequence where step 2 uses what step 1 established - but each
+  virtual user owns a private list seeded onto its own transfer and cleared at
+  each iteration boundary, and the environment jar is untouched (see "Scenario
+  load runs" under Load Test Strategies). One session shared between 1,000
+  virtual users is not the thing being measured.
 - **Threading:** one mutex around the scope map; every accessor copies out, so
   no reference into the storage escapes to a caller.
 - **Shown as sent.** Because libcurl attaches the matching cookies itself, the
@@ -449,6 +454,35 @@ this project has already spent an issue eliminating. An `errored` step ends its
 iteration; the next iteration still runs, and the run still reaches
 `completed`. A stop is honoured **between steps**.
 
+**Flow control is design-mode only.** A script returns an intent -
+`pm.execution.setNextRequest(name)`, `setNextRequest(null)`,
+`skipRequest()` - and the runner decides; the script never jumps. An unknown or
+ambiguous target fails the step by name rather than guessing, and
+`maxStepsPerIteration` bounds a cycle. `pm.execution` throws wherever there is
+no live sequence to redirect - a single Send, and every load run, including a
+scenario one, whose scripts are deferred and run against responses that already
+came back.
+
+#### Non-goals, so none of them arrives sideways
+
+Recorded here rather than left to be re-derived: **JMeter's logic-controller
+zoo** (if / while / switch / loop / interleave - `setNextRequest` covers the
+workflows people actually build); **k6's open-model and arrival-rate executors
+for scenarios**; **distributed load**; **the engine reading data files from
+disk** (the sandbox has no filesystem, and a user-supplied path would be a new
+trust boundary); **parallel steps within an iteration** (an iteration is
+ordered - that is the whole primitive); **a scenario-level test script**
+asserting across steps; **replacing `run_collection_smoke`** (an unordered,
+share-nothing, agent-facing matrix is a different tool and stays); and
+**inline scripts on the load path**. The escape hatch for that last one, if it
+is ever wanted, is a bounded pool of QuickJS contexts per worker evaluated only
+for iterations the sampler already selected - its own issue, and its own
+benchmark.
+
+Two things were deliberately left open: whether a **stored scenario entity**
+ever lands (the seam exists; the demand does not), and **retry /
+continue-on-failure policy** beyond "an errored step ends its iteration".
+
 ### Load Test Mode
 
 ```
@@ -551,6 +585,48 @@ run end.
 a pure `compute_refill_deficit` primitive: each tick, refill exactly `target − in_flight` new
 requests (where `in_flight = requests_sent − completed`). On stop the controller is notified for
 prompt cancellation rather than waiting for in-flight requests to drain.
+
+### Scenario load runs - the virtual-user state machine
+
+A `POST /runs` payload carrying **both** a `scenario` block and a load `mode` runs
+that collection as a load test (`core/scenario_load.cpp`). The plan is the same
+object the design-mode sequential runner consumes - resolved once, before the run
+row exists - and the executor is the only thing that differs.
+
+- **`concurrency` is the number of virtual users**, which is what k6 and JMeter
+  mean by it. A VU is a small value, not a thread: a cursor into the shared plan
+  plus its own cookies. On each completion the callback advances that VU's state
+  machine, and `maintain_concurrency`'s refill issues "the next step of VU *k*"
+  in place of "another copy of the one request". The controller, the SPSC
+  submission path and the single-producer discipline are unchanged.
+- **Cookie state is per-VU, never the shared jar** - see the Cookie Jar section's
+  "Not on the load path" bullet, which this strengthens rather than contradicts.
+  Each VU's list is seeded onto its own transfer and read back from it
+  (`Request::track_cookies`), and emptied at every iteration boundary: a new
+  iteration is a new user, not the same one logging in twice.
+- **Closed-loop only.** `constant_rps` with a `scenario` is a `400`, as is a
+  non-zero `rps`/`targetRps` on any mode - an open-loop arrival rate over a
+  multi-step sequence is an arrival-rate executor, a named non-goal. `maxInFlight`
+  is *moot*: in-flight is bounded by the VU count by construction, so setting it
+  logs a warning and does nothing.
+- **An errored step ends its iteration**, and the VU starts the next one. A VU
+  stranded on a failing step would permanently shrink effective concurrency for
+  the rest of the run.
+- **Per-step latency histograms**, one per plan step, allocated once from the
+  plan's step count - which is what `maxScenarioSteps` bounds. They reach the
+  report as `summary.scenario.steps`; a scenario load run stores no per-step
+  `results` rows, so that breakdown is the only per-step record it keeps.
+- **Scripts stay deferred**, and none run: `pm.execution` throws in a load run
+  for the reason the flow-control section gives. There is deliberately no
+  inline-script path on the load hot path.
+- The run's `runs.type` is **`load`**, not `scenario`: it publishes metric ticks
+  and reports RPS and percentiles like any load run, and `scenario` is what the
+  app reads to render a step list instead of the dashboard.
+
+```json
+{ "mode": "constant_concurrency", "concurrency": 50, "duration": "60s",
+  "scenario": { "source": "collection", "collectionId": "col_1" } }
+```
 
 ## Thread Model
 

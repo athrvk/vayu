@@ -192,18 +192,9 @@ vayu::Result<vayu::Response> result) {
     }
 }
 
-namespace {
-
-/**
- * @brief Read a duration field ("30s", "500ms", "5m", "2h") as milliseconds.
- *
- * An absent or null field takes @p default_ms. A JSON number is read as
- * seconds, matching how the MCP duration cap reads the same field. Anything
- * else - an unknown unit, a non-numeric string, a negative - throws: the run
- * thread's caller (execute_load_test) catches it and marks the run Failed with
- * the message, which is the loud path. The old parser silently ran for 60s
- * instead, so a mistyped duration looked like a run that simply took longer.
- */
+// Declared in load_strategy.hpp - a JSON number is read as seconds, matching
+// how the MCP duration cap reads the same field. See the header for why every
+// executor goes through this one parser.
 int64_t duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms) {
     auto it = config.find (key);
     if (it == config.end () || it->is_null ())
@@ -226,6 +217,8 @@ int64_t duration_field_ms (const nlohmann::json& config, const std::string& key,
     return *parsed;
 }
 
+namespace {
+
 // Update the in-flight high-water mark (single writer: the strategy thread).
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
@@ -236,16 +229,10 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
     }
 }
 
-/**
- * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
- * in-flight deficit toward target(t) - woken per completion via refill_cv with
- * a 50ms safety-net timeout (drives ramp growth + bounds stop latency).
- *
- * @param submit_one   submits exactly one request and increments requests_sent
- * @param target_fn    desired in-flight at elapsed_ms
- * @param budget_fn    remaining submission budget (SIZE_MAX for time-bounded)
- * @param should_continue  whether to keep refilling at elapsed_ms
- */
+} // namespace
+
+// Declared in load_strategy.hpp - the scenario load executor drives the same
+// loop with a different submit_one. See the header for the contract.
 void maintain_concurrency (std::shared_ptr<RunContext> context,
 const std::function<void ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
@@ -298,7 +285,6 @@ const std::function<bool (int64_t)>& should_continue) {
         update_peak (context);
     }
 }
-} // namespace
 
 // ============================================================================
 // Constant Load Strategy
