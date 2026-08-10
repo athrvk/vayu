@@ -57,7 +57,7 @@
 		"electron-updater": "^6.8.9",
 		"graphql": "^16.14.2",
 		"graphql-language-service": "^5.5.2",
-		"js-yaml": "^4.3.0",
+		"js-yaml": "^4.3.1",
 		"lucide-react": "^0.562.0",
 		"monaco-editor": "^0.55.1",
 		"prettier": "^3.8.4",
