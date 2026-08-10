@@ -146,19 +146,33 @@ vayu::http::AuthRefreshPlan plan_for (std::string value, int64_t expires_at_ms) 
 // ---------------------------------------------------------------------------
 
 TEST (AuthRefreshDelay, RefreshesTheConfiguredLeadBeforeExpiry) {
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms = 60'000;
     // 1000s of life left, refreshing 60s early -> sleep 940s.
-    EXPECT_EQ (auth_refresh_delay_ms (1'000'000, 0, 60'000), 940'000);
+    EXPECT_EQ (auth_refresh_delay_ms (1'000'000, 0, tuning), 940'000);
 }
 
 // A token whose whole lifetime is shorter than the lead is *always* inside its
 // refresh window. Without the floor the watchdog would re-acquire in a tight
 // loop and hammer the token endpoint on the run's behalf.
 TEST (AuthRefreshDelay, FloorsTheWaitForATokenShorterThanTheLead) {
-    EXPECT_EQ (auth_refresh_delay_ms (2'000, 0, 60'000),
-    vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms         = 60'000;
+    tuning.min_interval_ms = 1'500;
+
+    EXPECT_EQ (auth_refresh_delay_ms (2'000, 0, tuning), 1'500);
     // Already expired: same floor, not a negative sleep.
-    EXPECT_EQ (auth_refresh_delay_ms (1'000, 5'000, 60'000),
-    vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
+    EXPECT_EQ (auth_refresh_delay_ms (1'000, 5'000, tuning), 1'500);
+}
+
+// The floor is the user's setting, not a constant baked into the schedule -
+// mutation check for reading `min_interval_ms` rather than the default.
+TEST (AuthRefreshDelay, TheFloorFollowsTheConfiguredMinimumInterval) {
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms         = 60'000;
+    tuning.min_interval_ms = 250;
+
+    EXPECT_EQ (auth_refresh_delay_ms (2'000, 0, tuning), 250);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +228,93 @@ TEST (AuthRefreshState, SummaryCarriesEveryRefreshAndTheLastFailure) {
     EXPECT_EQ (summary["refreshFailures"], 1u);
     EXPECT_EQ (summary["lastError"], "oauth2_provider_error: nope");
     EXPECT_EQ (state->expires_at_ms (), 2000);
+}
+
+// ---------------------------------------------------------------------------
+// The settings behind the schedule
+// ---------------------------------------------------------------------------
+
+class AuthRefreshTuningTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_auth_refresh_tuning.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db = std::make_unique<vayu::db::Database> (DB_PATH);
+        db->init ();
+    }
+    void TearDown () override {
+        db.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    std::unique_ptr<vayu::db::Database> db;
+};
+
+// Every knob the watchdog reads is a seeded setting, so the Settings UI - which
+// renders engine entries dynamically from GET /config - offers all four rather
+// than leaving them hardcoded.
+TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
+    for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
+         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs" }) {
+        const auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key << " is not offered in Settings";
+        EXPECT_EQ (entry->type, "integer") << key;
+        EXPECT_FALSE (entry->label.empty ()) << key;
+        EXPECT_FALSE (entry->description.empty ()) << key;
+        // A range is what stops a hand-typed 0 from turning the retry loop into
+        // a hot loop against the token endpoint.
+        EXPECT_TRUE (entry->min_value.has_value ()) << key;
+        EXPECT_TRUE (entry->max_value.has_value ()) << key;
+    }
+
+    // Seeded defaults are the constants, not a second set of numbers.
+    const auto tuning = vayu::core::read_auth_refresh_tuning (*db);
+    EXPECT_EQ (tuning.lead_ms, vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS);
+    EXPECT_EQ (tuning.min_interval_ms,
+    vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
+    EXPECT_EQ (tuning.retry_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS);
+    EXPECT_EQ (tuning.retry_max_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS);
+}
+
+// Mutation check for the reader: revert any one key to its constant and the
+// value the user stored stops reaching the run.
+TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
+    const std::pair<const char*, int> edits[] = { { "oauth2RefreshLeadMs", 12'345 },
+        { "oauth2RefreshMinIntervalMs", 321 }, { "oauth2RefreshRetryMs", 777 },
+        { "oauth2RefreshRetryMaxMs", 99'000 } };
+    for (const auto& [key, value] : edits) {
+        auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        entry->value = std::to_string (value);
+        db->save_config_entry (*entry);
+    }
+
+    const auto tuning = vayu::core::read_auth_refresh_tuning (*db);
+    EXPECT_EQ (tuning.lead_ms, 12'345);
+    EXPECT_EQ (tuning.min_interval_ms, 321);
+    EXPECT_EQ (tuning.retry_ms, 777);
+    EXPECT_EQ (tuning.retry_max_ms, 99'000);
+}
+
+// A hand-edited row is the only way a non-positive value reaches the reader
+// (POST /config rejects one against the seeded minimum), and a zero floor would
+// make the schedule a tight loop against the token endpoint.
+TEST_F (AuthRefreshTuningTest, ANonPositiveStoredValueFallsBackToTheDefault) {
+    for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
+         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs" }) {
+        auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        entry->value = "0";
+        db->save_config_entry (*entry);
+    }
+
+    const auto tuning = vayu::core::read_auth_refresh_tuning (*db);
+    EXPECT_EQ (tuning.lead_ms, vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS);
+    EXPECT_EQ (tuning.min_interval_ms,
+    vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
+    EXPECT_EQ (tuning.retry_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS);
+    EXPECT_EQ (tuning.retry_max_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,16 +492,14 @@ class MidRunRefreshTest : public ::testing::Test {
         vayu::http::global_cleanup ();
     }
 
+    /// Change a *seeded* setting the way POST /config does: read the row, edit
+    /// the value, write it back - so the test drives the same key the Settings
+    /// UI offers rather than inventing a row beside it.
     void set_config (const std::string& key, const std::string& value) {
-        vayu::db::ConfigEntry entry;
-        entry.key           = key;
-        entry.value         = value;
-        entry.type          = "integer";
-        entry.label         = key;
-        entry.category      = "server";
-        entry.default_value = value;
-        entry.updated_at    = now_ms ();
-        db->save_config_entry (entry);
+        auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key << " is not seeded";
+        entry->value = value;
+        db->save_config_entry (*entry);
     }
 
     void create_run_row (const std::string& run_id) {

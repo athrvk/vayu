@@ -855,11 +855,11 @@ RunManager& manager) {
                 request, config.value ("auth", nlohmann::json ()), db_ptr)) {
                 context->auth_refresh =
                 std::make_shared<AuthRefreshState> (std::move (*plan));
-                const auto lead_ms = static_cast<int64_t> (db.get_config_int (
-                "oauth2RefreshLeadMs",
-                static_cast<int> (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS)));
-                context->auth_refresh_thread = std::thread ([context, db_ptr, lead_ms] () {
-                    run_auth_refresh (context, db_ptr, lead_ms);
+                // The user's oauth2Refresh* settings, read once here: a run's
+                // schedule must not change under it half way through.
+                const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
+                context->auth_refresh_thread = std::thread ([context, db_ptr, tuning] () {
+                    run_auth_refresh (context, db_ptr, tuning);
                 });
             }
         }

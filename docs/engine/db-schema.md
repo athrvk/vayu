@@ -360,8 +360,12 @@ token clears the row and falls back to a fresh grant.
 A load run **does** refresh mid-run: a run whose auth resolves to a
 header-placed, expiring oauth2 token gets a watchdog thread that re-acquires
 `oauth2RefreshLeadMs` (default 60s) before expiry, writes the new row here and
-republishes the header onto every later transfer. It stays out of the way for
-the shapes it cannot renew - `tokenPlacement: "query"` (the credential is in the
+republishes the header onto every later transfer. That lead, the floor between
+two renewals (`oauth2RefreshMinIntervalMs`) and the retry backoff after a
+refused renewal (`oauth2RefreshRetryMs` doubling to `oauth2RefreshRetryMaxMs`)
+are all settings under **Network & Connectivity**, read once when a run arms its
+watchdog, so a change applies to the next run started. It stays out of the way
+for the shapes it cannot renew - `tokenPlacement: "query"` (the credential is in the
 URL every transfer copies), `autoRefreshToken: false`, an `authorization_code`
 grant with no refresh token, a non-expiring token, and a scenario load run
 (whose steps each resolved their own auth at plan time). Each refresh, and any

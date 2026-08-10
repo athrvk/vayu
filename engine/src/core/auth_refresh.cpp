@@ -106,21 +106,40 @@ uint64_t& seen_generation) {
     seen_generation                        = current;
 }
 
-int64_t auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, int64_t lead_ms) {
-    return std::max (constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS,
-    expires_at_ms - lead_ms - now_ms);
+AuthRefreshTuning read_auth_refresh_tuning (vayu::db::Database& db) {
+    const AuthRefreshTuning defaults;
+    // A non-positive value is not a setting - POST /config rejects one against
+    // each key's seeded minimum - so it can only reach here from a hand-edited
+    // row, and a zero floor would turn the schedule into a tight loop against
+    // the token endpoint. Fall back rather than trust it, as live_ring_size
+    // does for the same reason.
+    auto read = [&db] (const char* key, int64_t fallback) {
+        const auto value =
+        static_cast<int64_t> (db.get_config_int (key, static_cast<int> (fallback)));
+        return value > 0 ? value : fallback;
+    };
+    AuthRefreshTuning tuning;
+    tuning.lead_ms = read ("oauth2RefreshLeadMs", defaults.lead_ms);
+    tuning.min_interval_ms = read ("oauth2RefreshMinIntervalMs", defaults.min_interval_ms);
+    tuning.retry_ms = read ("oauth2RefreshRetryMs", defaults.retry_ms);
+    tuning.retry_max_ms = read ("oauth2RefreshRetryMaxMs", defaults.retry_max_ms);
+    return tuning;
+}
+
+int64_t auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, const AuthRefreshTuning& tuning) {
+    return std::max (tuning.min_interval_ms, expires_at_ms - tuning.lead_ms - now_ms);
 }
 
 void run_auth_refresh (std::shared_ptr<RunContext> context,
 vayu::db::Database* db_ptr,
-int64_t lead_ms) {
+const AuthRefreshTuning& tuning) {
     const auto state = context->auth_refresh;
     if (!state || db_ptr == nullptr) {
         return;
     }
     auto& db = *db_ptr;
 
-    int64_t retry_ms = constants::server::OAUTH2_REFRESH_RETRY_MS;
+    int64_t retry_ms = tuning.retry_ms;
 
     while (context->is_running.load () && !context->should_stop.load ()) {
         const int64_t expires_at = state->expires_at_ms ();
@@ -128,7 +147,7 @@ int64_t lead_ms) {
             return; // The published token does not expire - nothing left to do.
         }
         if (!wait_while_running (
-            context, auth_refresh_delay_ms (expires_at, now_ms (), lead_ms))) {
+            context, auth_refresh_delay_ms (expires_at, now_ms (), tuning))) {
             return;
         }
 
@@ -146,11 +165,11 @@ int64_t lead_ms) {
             if (!wait_while_running (context, retry_ms)) {
                 return;
             }
-            retry_ms = std::min (retry_ms * 2, constants::server::OAUTH2_REFRESH_RETRY_MAX_MS);
+            retry_ms = std::min (retry_ms * 2, tuning.retry_max_ms);
             continue;
         }
 
-        retry_ms                = constants::server::OAUTH2_REFRESH_RETRY_MS;
+        retry_ms                = tuning.retry_ms;
         const auto& token       = std::get<vayu::db::OAuthToken> (result);
         const double at_seconds = context->start_time_ms > 0 ?
         static_cast<double> (now_ms () - context->start_time_ms) / 1000.0 :

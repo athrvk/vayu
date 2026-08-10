@@ -7,6 +7,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "vayu/core/constants.hpp"
+#include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/types.hpp"
 
@@ -105,6 +107,33 @@ class AuthRefreshState {
 };
 
 /**
+ * @brief The knobs a run's refresh watchdog reads, resolved once when it arms.
+ *
+ * Every field is a user setting (`oauth2Refresh*`, seeded in
+ * `seed_default_config`), read at arm time rather than per iteration so a run's
+ * schedule cannot change under it half way through - a change applies to the
+ * next run started.
+ */
+struct AuthRefreshTuning {
+    /// How far ahead of expiry to renew.
+    int64_t lead_ms = constants::server::OAUTH2_REFRESH_LEAD_MS;
+    /// Floor on the wait between two renewals - see auth_refresh_delay_ms.
+    int64_t min_interval_ms = constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS;
+    /// First wait after a refused renewal, doubled per consecutive failure.
+    int64_t retry_ms = constants::server::OAUTH2_REFRESH_RETRY_MS;
+    /// Ceiling on that backoff.
+    int64_t retry_max_ms = constants::server::OAUTH2_REFRESH_RETRY_MAX_MS;
+};
+
+/**
+ * @brief Read the `oauth2Refresh*` settings, falling back to their defaults.
+ *
+ * One reader for the four keys, so the run and any future caller cannot
+ * disagree about which key names or defaults are in force.
+ */
+[[nodiscard]] AuthRefreshTuning read_auth_refresh_tuning (vayu::db::Database& db);
+
+/**
  * @brief Copy the run's current credential onto @p request when it has moved.
  *
  * Called by the submitting thread immediately before each `EventLoop::submit`,
@@ -121,14 +150,15 @@ uint64_t& seen_generation);
 
 /**
  * @brief How long to sleep before refreshing a token that expires at
- *        @p expires_at_ms, refreshing @p lead_ms early.
+ *        @p expires_at_ms, refreshing `tuning.lead_ms` early.
  *
- * Floored at `constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS` rather than at
- * zero: a token whose whole lifetime is shorter than the lead is always inside
- * its refresh window, and an unfloored schedule would re-acquire in a tight
- * loop. Extracted from the watchdog so the schedule is testable without a clock.
+ * Floored at `tuning.min_interval_ms` rather than at zero: a token whose whole
+ * lifetime is shorter than the lead is always inside its refresh window, and an
+ * unfloored schedule would re-acquire in a tight loop. Extracted from the
+ * watchdog so the schedule is testable without a clock.
  */
-[[nodiscard]] int64_t
-auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, int64_t lead_ms);
+[[nodiscard]] int64_t auth_refresh_delay_ms (int64_t expires_at_ms,
+int64_t now_ms,
+const AuthRefreshTuning& tuning);
 
 } // namespace vayu::core

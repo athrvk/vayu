@@ -661,18 +661,21 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 /**
  * @brief Keep a run's OAuth 2.0 credential valid for as long as the run lasts.
  *
- * Sleeps until @p lead_ms before the published token expires, re-acquires
+ * Sleeps until `tuning.lead_ms` before the published token expires, re-acquires
  * (forced, so the cache cannot hand back the one that is about to die),
  * publishes the new header on `context->auth_refresh` and re-arms from the new
  * expiry. A failed refresh is recorded and retried with a backoff; it never
  * fails the run, because the honest report of a 401 storm is the target's own
  * status codes plus the `auth` section saying the refresh did not happen.
  *
+ * @p tuning is the run's snapshot of the user's `oauth2Refresh*` settings, read
+ * once when the watchdog arms (`read_auth_refresh_tuning`).
+ *
  * Returns as soon as the run stops, or once the published token no longer
  * expires. Inert (returns immediately) when the run has no `auth_refresh`.
  */
 void run_auth_refresh (std::shared_ptr<RunContext> context,
 vayu::db::Database* db_ptr,
-int64_t lead_ms);
+const AuthRefreshTuning& tuning);
 
 } // namespace vayu::core

@@ -533,8 +533,10 @@ starts, so a run longer than its OAuth 2.0 access token used to turn into a 401
 storm the report never explained. The watchdog closes that: it sleeps until
 `oauth2RefreshLeadMs` (default 60s) before the token expires, re-acquires it with
 a forced refresh, and publishes the new `Authorization` value on the run's
-`AuthRefreshState`. The *submitting* thread - the strategy, which is the event
-loop's sole producer - copies it onto its own `Request` when the cell's
+`AuthRefreshState`. Its four `oauth2Refresh*` settings are read once, when the
+run arms it (`read_auth_refresh_tuning`), so a run's schedule cannot change
+under it half way through. The *submitting* thread - the strategy, which is the
+event loop's sole producer - copies it onto its own `Request` when the cell's
 generation moves, and `EventLoop::submit` copies that request wholesale into
 each transfer. So the swap needs no lock on the submission path and cannot race
 a transfer already queued. Runs it deliberately leaves alone (query-placed
