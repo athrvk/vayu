@@ -474,3 +474,63 @@ describe("pass/fail budgets", () => {
 		expect(started(second.onStart).thresholds).toBeUndefined();
 	});
 });
+
+/**
+ * Server monitoring: the run's optional second data source. The rules live in
+ * `monitor.ts` and are tested there; these pin the wiring - that what the user
+ * types reaches the payload, that an incomplete block stops the run here rather
+ * than at the engine's 400, and that a run without one is unchanged.
+ */
+describe("server monitoring", () => {
+	const openMonitoring = () =>
+		fireEvent.click(screen.getByRole("button", { name: /server monitoring/i }));
+	const url = () => screen.getByLabelText(/metrics endpoint/i) as HTMLInputElement;
+	const metrics = () => screen.getByLabelText(/metrics to chart/i) as HTMLTextAreaElement;
+
+	it("sends nothing when no endpoint is given", () => {
+		const { onStart } = open();
+		expect(started(onStart).monitor).toBeUndefined();
+	});
+
+	it("sends the block the user typed", () => {
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), {
+			target: { value: "node_cpu_seconds_total\nprocess_resident_memory_bytes" },
+		});
+
+		expect(started(onStart).monitor).toEqual({
+			url: "http://localhost:9100/metrics",
+			intervalMs: 1000,
+			format: "prometheus",
+			series: ["node_cpu_seconds_total", "process_resident_memory_bytes"],
+		});
+	});
+
+	it("blocks Start on an endpoint with no metrics instead of dropping the block", () => {
+		// The engine rejects `series: []`, so a silently dropped block would be a
+		// run the user believes is monitored and a chart that never appears.
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+		expect(onStart).not.toHaveBeenCalled();
+		expect(screen.getByText(/server monitoring is incomplete/i)).toBeInTheDocument();
+	});
+
+	it("remembers the endpoint across dialog opens - it is a property of the target", () => {
+		const first = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), { target: { value: "up" } });
+		expect(started(first.onStart).monitor?.series).toEqual(["up"]);
+
+		cleanup();
+		open();
+		openMonitoring();
+		expect(url().value).toBe("http://localhost:9100/metrics");
+		expect(metrics().value).toBe("up");
+	});
+});

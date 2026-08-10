@@ -51,6 +51,21 @@ export type ColorRole =
 	 * of the categorical palette from success/warning/destructive.
 	 */
 	| "categorical"
+	/**
+	 * The rest of the categorical set - teal, rose, moss - for a plot whose
+	 * series count is decided by the user rather than by this app.
+	 *
+	 * The server-vitals overlay is the only such plot: a run names its own
+	 * metrics, so the wrapper cycles these rather than hand-picking a role per
+	 * series. `--chart-1` stays out for the reason given above `categorical`,
+	 * and so does **`--chart-4` (amber)**: it measures 2.38 against a light card,
+	 * under the 3.0 a series has to clear to be seen at all
+	 * (`status-token-contrast.test.ts`). It is fine as a *fill* in the timing
+	 * waterfall, where the shape carries the meaning; a 1.8px line is not that.
+	 */
+	| "categorical-2"
+	| "categorical-3"
+	| "categorical-4"
 	/*
 	 * HTTP status classes, resolving to the same `--status-*` family the badges
 	 * and history tiles use.
@@ -95,6 +110,9 @@ export const ROLE_TOKEN: Record<ColorRole, string> = {
 	muted: "--muted-foreground",
 	subtle: "--subtle-foreground",
 	categorical: "--chart-3",
+	"categorical-2": "--chart-2",
+	"categorical-3": "--chart-5",
+	"categorical-4": "--chart-6",
 	"status-success": STATUS_CLASS_CSS_VAR.success,
 	"status-redirect": STATUS_CLASS_CSS_VAR.redirect,
 	"status-client-error": STATUS_CLASS_CSS_VAR["client-error"],

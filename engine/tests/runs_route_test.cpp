@@ -731,6 +731,41 @@ TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
     EXPECT_FALSE (body.contains ("sampling"));
 }
 
+// Server vitals survive the summary -> report round trip in the shape the
+// scrape wrote them, so the section a reader sees is the one the run recorded.
+TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
+    seed ({ .id = "run_monitor", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    vayu::core::MonitorTotals totals;
+    totals.add ({ { "node_cpu", 1.0 } });
+    totals.add ({ { "node_cpu", 3.0 } });
+    totals.record_failure ();
+    inputs.monitor = totals.to_summary ();
+    db_->update_run_summary (
+    "run_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_monitor");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("monitor"));
+    EXPECT_EQ (body["monitor"]["samples"].get<size_t> (), 2u);
+    EXPECT_EQ (body["monitor"]["failures"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (body["monitor"]["series"]["node_cpu"]["avg"].get<double> (), 2.0);
+}
+
+// The absence twin: a run that configured no monitor reports no section, rather
+// than a target that reported nothing.
+TEST_F (RunsRouteTest, ReportOmitsMonitorWhenNoneWasConfigured) {
+    seed ({ .id = "run_no_monitor", .start_time = 1000 });
+    auto inputs    = summary_inputs ();
+    inputs.monitor = std::nullopt;
+    db_->update_run_summary (
+    "run_no_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_monitor");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("monitor"));
+}
+
 // A run without script validation keeps the section out entirely, rather than
 // reporting a run of zero tests that all passed.
 TEST_F (RunsRouteTest, ReportOmitsTestValidationWhenNoScriptRan) {

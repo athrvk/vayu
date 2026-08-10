@@ -22,6 +22,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -534,6 +535,13 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
     // evaluator (`core/threshold_eval.cpp`), which reads the same metric table
     // - a budget this accepts is one the run will actually judge.
     if (auto reason = vayu::core::validate_thresholds (config)) {
+        return reason;
+    }
+
+    // `monitor` is the other nested object, and its rule lives with the scrape
+    // loop for the same reason: `core/monitor.cpp` holds one description of the
+    // block, so a field this accepts is one the run will actually read.
+    if (auto reason = vayu::core::validate_monitor_config (config)) {
         return reason;
     }
 

@@ -478,6 +478,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
   historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)
+  monitorSamples: MonitorSample[]       // Server vitals scraped this run (cap: maxRetainedTicks)
   liveWindowSeconds: number | null             // Live retention window; null = full run
   finalReport: RunReport | null
   error: string | null
@@ -495,11 +496,21 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 const {
   startRun, stopRun, setStreaming,
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
+  addMonitorSamples, // Append scraped server vitals, bounded by maxRetainedTicks
   setFinalReport, setError, setActiveView, setStopping,
   setLiveWindowSeconds,  // Update the live retention window (from useLiveChartSettings)
   setMaxRetainedTicks
 } = useDashboardStore();
 ```
+
+`monitorSamples` is kept **beside** the ticks rather than merged into them: the
+two are sampled by different clocks (the engine's tick cadence and the user's
+scrape interval), so they are joined onto one x axis at render time by
+`joinMonitorToTimeline` - which is also where a failed scrape becomes a gap in
+the line rather than a plateau. The array is empty for a run that configured no
+monitor, and that emptiness is what keeps the vitals chart row off the dashboard
+entirely. It carries its own copy of the tick ceiling because a scrape can be
+configured faster than the tick cadence.
 
 There is deliberately no store-wide `reset`: `startRun` already wipes the series,
 the report and the aggregates, and a reset on top of it nulls `currentRunId` -
@@ -1058,6 +1069,7 @@ runs: {
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
   timeSeries: (id) => ["runs", "timeSeries", id],
+  monitorSeries: (id) => ["runs", "monitorSeries", id],   // scraped server vitals, when the run had a monitor
   samples: (id) => ["runs", "samples", id],               // captured response bodies, fetched lazily
 },
 // environments mirrors collections; globals / cookies / health / config /

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { mapSseMetrics, parseStepEvent } from "./sse-client";
+import { mapSseMetrics, parseMonitorEvent, parseStepEvent } from "./sse-client";
 
 describe("mapSseMetrics", () => {
 	it("maps bytes and the full status-code map", () => {
@@ -107,5 +107,33 @@ describe("parseStepEvent", () => {
 		// means everywhere else in the app.
 		expect(step?.statusCode).toBe(0);
 		expect(step?.latencyMs).toBe(0);
+	});
+});
+
+describe("parseMonitorEvent", () => {
+	it("reads a scrape", () => {
+		expect(parseMonitorEvent({ timestamp: 1700, series: { cpu: 0.5, rss: 1024 } })).toEqual({
+			timestamp: 1700,
+			series: { cpu: 0.5, rss: 1024 },
+		});
+	});
+
+	it("drops a frame with no usable timestamp or series", () => {
+		// A sample defaulted to timestamp 0 would join onto the very start of the
+		// run's timeline and draw a reading at a moment it was never taken.
+		expect(parseMonitorEvent({ series: { cpu: 1 } })).toBeNull();
+		expect(parseMonitorEvent({ timestamp: "1700", series: { cpu: 1 } })).toBeNull();
+		expect(parseMonitorEvent({ timestamp: 1700 })).toBeNull();
+		expect(parseMonitorEvent({ timestamp: 1700, series: {} })).toBeNull();
+		expect(parseMonitorEvent(null)).toBeNull();
+	});
+
+	it("drops non-numeric readings but keeps the rest of the scrape", () => {
+		expect(
+			parseMonitorEvent({
+				timestamp: 1700,
+				series: { cpu: 0.5, name: "web-1", broken: Number.NaN },
+			})
+		).toEqual({ timestamp: 1700, series: { cpu: 0.5 } });
 	});
 });

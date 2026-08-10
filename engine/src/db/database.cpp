@@ -167,6 +167,9 @@ inline auto make_storage (const std::string& path) {
     // every run ever recorded, not just the current one.
     // get_metric_ticks_since is polled every 500ms by the legacy SSE loop.
     make_index ("idx_metric_ticks_run_id", &MetricTick::run_id),
+    // monitor_samples grows with the run too (one row per scrape interval), and
+    // both its reader and the run cascade filter on run_id.
+    make_index ("idx_monitor_samples_run_id", &MonitorSample::run_id),
     make_index ("idx_results_run_id", &Result::run_id),
     // GET /runs/:id/samples pages result_bodies by run, and the run cascade
     // deletes both new tables by run_id.
@@ -255,6 +258,16 @@ inline auto make_storage (const std::string& path) {
     make_column ("run_id", &MetricTick::run_id),
     make_column ("timestamp", &MetricTick::timestamp),
     make_column ("payload", &MetricTick::payload)), // JSON: the whole tick object
+
+    // Monitor samples: one row per scrape of the run's configured server-vitals
+    // endpoint. Its own table rather than a wider metric_ticks row - the tick
+    // payload's key set is the GET /runs/:id/metrics contract, and these arrive
+    // on the user's scrape cadence, not the tick cadence.
+    make_table ("monitor_samples",
+    make_column ("id", &MonitorSample::id, primary_key ().autoincrement ()),
+    make_column ("run_id", &MonitorSample::run_id),
+    make_column ("timestamp", &MonitorSample::timestamp),
+    make_column ("payload", &MonitorSample::payload)), // JSON: {timestamp, series}
 
     // Results: Individual request outcomes with timing breakdown
     make_table ("results", make_column ("id", &Result::id, primary_key ().autoincrement ()),
@@ -1000,6 +1013,7 @@ int64_t Database::count_runs (const RunFilter& filter) {
 // was added to both by editing only this function). Caller holds the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
+    impl_->storage.remove_all<MonitorSample> (where (c (&MonitorSample::run_id) == id));
     // Captured bodies before the results they hang off, so a delete interrupted
     // between the two leaves results without bodies rather than body rows
     // pointing at nothing. `maxRunsRetained` doubles as the expiry for anything
@@ -1168,6 +1182,31 @@ Database::get_metric_ticks_since (const std::string& run_id, int64_t last_id) {
 int64_t Database::count_metric_ticks (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.count<MetricTick> (where (c (&MetricTick::run_id) == run_id));
+}
+
+// ============================================================================
+// Monitor samples - external server vitals scraped alongside a run
+// ============================================================================
+
+void Database::add_monitor_sample (const MonitorSample& sample) {
+    retry_on_busy ("add monitor sample", 5, std::chrono::milliseconds (100),
+    [&] { impl_->storage.insert (sample); });
+}
+
+// Ordered (timestamp, id) for the same reason the tick reader is: a page
+// boundary falls between two whole samples, never inside one.
+std::vector<MonitorSample>
+Database::get_monitor_samples_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<MonitorSample> (
+    where (c (&MonitorSample::run_id) == run_id),
+    multi_order_by (order_by (&MonitorSample::timestamp), order_by (&MonitorSample::id)),
+    sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_monitor_samples (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<MonitorSample> (where (c (&MonitorSample::run_id) == run_id));
 }
 
 // ============================================================================

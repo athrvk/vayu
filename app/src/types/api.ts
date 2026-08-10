@@ -24,6 +24,7 @@ import type {
 	ScriptPart,
 	HttpVersion,
 	RunThresholds,
+	RunMonitorConfig,
 } from "./domain";
 
 // API Response wrapper
@@ -397,6 +398,12 @@ export interface StartLoadTestRequest {
 	// `thresholdValidation`. Omitted entirely when none were declared - the
 	// engine rejects an empty object rather than starting an unjudged run.
 	thresholds?: RunThresholds;
+
+	// The server-vitals endpoint to scrape during the run. camelCase for the
+	// same reason `thresholds` is - these are the engine's own field names.
+	// Omitted entirely when no endpoint was given; the engine rejects a block
+	// with no `series` rather than starting a run that scrapes nothing.
+	monitor?: RunMonitorConfig;
 }
 
 export interface StartLoadTestResponse {

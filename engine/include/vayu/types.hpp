@@ -894,6 +894,22 @@ struct MetricTick {
     std::string payload; // JSON object (see build_metric_tick_payload)
 };
 
+/**
+ * @brief One scrape of the run's configured server-vitals endpoint.
+ *
+ * Shaped exactly like `MetricTick` and stored in its own table on purpose: the
+ * tick payload's key set is the `GET /runs/:id/metrics` contract, and external
+ * numbers arriving at their own cadence are not part of it. `payload` is the
+ * object `GET /runs/:id/monitor` returns verbatim (see
+ * `build_monitor_sample_payload`).
+ */
+struct MonitorSample {
+    int id;
+    std::string run_id;
+    int64_t timestamp;   // Unix ms - when the engine scraped it
+    std::string payload; // JSON object: {timestamp, series:{name: value}}
+};
+
 struct Result {
     int id;
     std::string run_id;

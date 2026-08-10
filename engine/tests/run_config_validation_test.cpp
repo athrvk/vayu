@@ -425,3 +425,36 @@ TEST (RunConfigValidation, AnEmptyThresholdsObjectIsRejectedByTheRunRoute) {
     config["thresholds"] = nlohmann::json::object ();
     expect_rejected (config, "thresholds");
 }
+
+// --- 8. Monitor: the other nested object the route gates -------------------
+//
+// Same split as thresholds above: the rule lives with the scrape loop
+// (`vayu::core::validate_monitor_config`, exercised field by field in
+// monitor_test.cpp), and what matters here is that the run route reaches it -
+// an unusable monitor block must be a 400 before a run row exists, not a run
+// that starts a scrape thread with nothing to read.
+
+TEST (RunConfigValidation, AConfigWithoutAMonitorIsStillValid) {
+    auto config = valid_config ();
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, AValidMonitorBlockIsAccepted) {
+    auto config       = valid_config ();
+    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" }, { "intervalMs", 1000 },
+        { "series", nlohmann::json::array ({ "node_cpu_seconds_total" }) } };
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, AMonitorWithoutSeriesIsRejectedByTheRunRoute) {
+    auto config       = valid_config ();
+    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" } };
+    expect_rejected (config, "monitor.series");
+}
+
+TEST (RunConfigValidation, AMonitorIntervalOutOfRangeIsRejectedByTheRunRoute) {
+    auto config       = valid_config ();
+    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" }, { "intervalMs", 10 },
+        { "series", nlohmann::json::array ({ "up" }) } };
+    expect_rejected (config, "monitor.intervalMs");
+}

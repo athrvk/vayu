@@ -8,7 +8,7 @@
 // Dashboard State Store (Load Test Metrics)
 
 import { create } from "zustand";
-import type { LoadTestMetrics, RunReport } from "@/types";
+import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 import { type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useClientSettingsStore } from "./client-settings-store";
 import {
@@ -61,6 +61,17 @@ interface DashboardState {
 	isStreaming: boolean;
 	currentMetrics: LoadTestMetrics | null;
 	historicalMetrics: LoadTestMetrics[];
+	/**
+	 * Server vitals scraped during this run, oldest first. Kept beside the ticks
+	 * rather than merged into them: the two are sampled by different clocks, and
+	 * the join onto the tick timeline happens at render time
+	 * ({@link joinMonitorToTimeline}) so a changing retention window cannot
+	 * strand a reading on a tick that has rolled out.
+	 *
+	 * Empty for a run that configured no monitor, which is what the chart row
+	 * reads to stay out of the way entirely.
+	 */
+	monitorSamples: MonitorSample[];
 	finalReport: RunReport | null;
 	error: string | null;
 	activeView: DashboardView;
@@ -105,6 +116,7 @@ interface DashboardState {
 	setLiveWindowSeconds: (seconds: number | null) => void;
 	setMaxRetainedTicks: (ticks: number) => void;
 	addMetricsBatch: (batch: LoadTestMetrics[]) => void;
+	addMonitorSamples: (batch: MonitorSample[]) => void;
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
 	setActiveView: (view: DashboardView) => void;
@@ -117,6 +129,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	isStreaming: false,
 	currentMetrics: null,
 	historicalMetrics: [],
+	monitorSamples: [],
 	finalReport: null,
 	error: null,
 	activeView: "metrics",
@@ -136,6 +149,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			isStreaming: true,
 			currentMetrics: null,
 			historicalMetrics: [],
+			monitorSamples: [],
 			finalReport: null,
 			error: null,
 			activeView: "metrics",
@@ -212,6 +226,22 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 				peakConcurrency: peak,
 				breakpoint: bp,
 			};
+		}),
+
+	/**
+	 * Append scrapes, bounded by the same tick ceiling the series is.
+	 *
+	 * A scrape can be configured faster than the tick cadence, so the bound is
+	 * on this array's own length rather than derived from the ticks - otherwise
+	 * a 250ms scrape over an overnight soak would grow without limit beside a
+	 * series that is trimmed.
+	 */
+	addMonitorSamples: (batch) =>
+		set((state) => {
+			if (batch.length === 0) return state;
+			const merged = [...state.monitorSamples, ...batch];
+			const cap = state.maxRetainedTicks;
+			return { monitorSamples: merged.length > cap ? merged.slice(-cap) : merged };
 		}),
 
 	setFinalReport: (report) =>

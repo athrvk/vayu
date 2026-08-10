@@ -182,6 +182,12 @@ struct ReportExtras {
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
     size_t response_bodies_captured = 0;
+    // What the run's server-vitals scrape recorded, verbatim from the summary
+    // (per-series min/max/avg plus the sample and gap counts). `has_monitor`
+    // false leaves the section out entirely - a run that configured no monitor
+    // did not measure a target reporting zeros.
+    bool has_monitor = false;
+    nlohmann::json monitor = nlohmann::json::object ();
     // How many of this run's transfers asked for HTTP/2 and negotiated
     // something older. Not a performance number - it is what tells the reader
     // whether the protocol the report is labelled with is the one the numbers
@@ -305,6 +311,11 @@ ReportExtras& extras) {
         if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
             extras.step_breakdown = scenario["steps"];
         }
+    }
+
+    if (summary.contains ("monitor") && summary["monitor"].is_object ()) {
+        extras.has_monitor = true;
+        extras.monitor     = summary["monitor"];
     }
 
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
@@ -794,6 +805,13 @@ const std::string& run_id) {
         if (!extras.step_breakdown.empty ()) {
             json_report["scenario"]["steps"] = extras.step_breakdown;
         }
+    }
+
+    // Server vitals beside the run's own numbers. Passed through as stored:
+    // the totals are written in the report's own shape, so there is one
+    // description of the section rather than a writer and a translator.
+    if (extras.has_monitor) {
+        json_report["monitor"] = extras.monitor;
     }
 
     if (extras.has_tests) {

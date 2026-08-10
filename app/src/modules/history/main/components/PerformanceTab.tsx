@@ -33,6 +33,7 @@ export default function PerformanceTab({
 	runId,
 	derived,
 	timeSeries,
+	monitorSamples,
 	isLoadingSeries,
 	isFetchingMore,
 	progress,
@@ -51,6 +52,7 @@ export default function PerformanceTab({
 			{runId && (
 				<HistoricalChartsSection
 					data={timeSeries}
+					monitorSamples={monitorSamples}
 					isLoading={isLoadingSeries}
 					isFetchingMore={isFetchingMore}
 					progress={progress}

@@ -48,6 +48,7 @@ import {
 	StatusCodesOverTimeChart,
 	ResponseTimeVsConcurrencyChart,
 	HdrPercentileChart,
+	ServerVitalsChart,
 	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
@@ -93,6 +94,9 @@ function MetricsView({
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
+	// Empty for a run that configured no monitor - the row below reads that
+	// rather than the config, so it is right for a replayed run too.
+	const monitorSamples = useDashboardStore((s) => s.monitorSamples);
 
 	// Only the latest tick's elapsed_seconds is consumed below - depending on the
 	// whole historicalMetrics array would rebuild `derived` every tick (10 Hz) and
@@ -419,6 +423,28 @@ function MetricsView({
 					</div>
 					<StatusCodesOverTimeChart
 						history={chartWindow}
+						isCompleted={isCompleted}
+						syncKey={CHART_SYNC.live}
+					/>
+				</div>
+			)}
+
+			{/* Server vitals - only for a run that scraped an endpoint, so a run
+			    without a monitor block keeps the dashboard it always had. */}
+			{monitorSamples.length > 0 && chartWindow.length > 1 && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-xs font-semibold text-foreground">
+							Server vitals
+							<InfoChip tip={TOOLTIPS.serverVitals} />
+						</h3>
+						<span className="text-[10px] font-mono text-muted-foreground">
+							scraped from the target
+						</span>
+					</div>
+					<ServerVitalsChart
+						history={chartWindow}
+						samples={monitorSamples}
 						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
 					/>
