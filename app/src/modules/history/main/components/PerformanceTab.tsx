@@ -32,6 +32,7 @@ export default function PerformanceTab({
 	report,
 	runId,
 	derived,
+	anomalies,
 	timeSeries,
 	isLoadingSeries,
 	isFetchingMore,
@@ -55,6 +56,7 @@ export default function PerformanceTab({
 					isFetchingMore={isFetchingMore}
 					progress={progress}
 					breakpoint={derived.breakpoint}
+					anomalies={anomalies}
 				/>
 			)}
 
@@ -91,6 +93,7 @@ export default function PerformanceTab({
 								isCompleted
 								syncKey={CHART_SYNC.history}
 								breakpoint={derived.breakpoint}
+								anomalies={anomalies}
 							/>
 						</CardContent>
 					</Card>

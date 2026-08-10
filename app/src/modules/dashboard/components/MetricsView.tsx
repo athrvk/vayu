@@ -39,6 +39,7 @@ import {
 	buildStatusOverTime,
 	latestThroughputMbps,
 } from "../utils/metricsTransforms";
+import { detectAnomalies } from "../utils/detectAnomalies";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -87,6 +88,15 @@ function MetricsView({
 		() => (loadMode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
 		[loadMode, chartWindow, rampConfig]
 	);
+
+	/*
+	 * Degradation windows, derived here beside the other series transforms rather
+	 * than inside `derived` below: that bundle deliberately depends on the latest
+	 * tick and not on the whole history array, so folding a history-wide scan into
+	 * it would rebuild it at 10 Hz and defeat the React.memo on HeroRow /
+	 * ModeStatsRow. The charts are the consumers, and they take it directly.
+	 */
+	const anomalies = useMemo(() => detectAnomalies(chartWindow), [chartWindow]);
 
 	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead
@@ -239,6 +249,7 @@ function MetricsView({
 						rampOverlay={rampOverlay}
 						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
+						anomalies={anomalies}
 					/>
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
@@ -303,6 +314,7 @@ function MetricsView({
 						history={chartWindow}
 						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
+						anomalies={anomalies}
 					/>
 				</div>
 			)}
@@ -378,6 +390,7 @@ function MetricsView({
 								isCompleted={isCompleted}
 								syncKey={CHART_SYNC.live}
 								breakpoint={breakpoint}
+								anomalies={anomalies}
 							/>
 						</div>
 					)}

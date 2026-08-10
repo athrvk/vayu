@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics } from "@/types";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 import {
 	RequestRateChart,
 	ConnectionsChart,
@@ -30,6 +31,7 @@ interface HistoricalChartsSectionProps {
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
 	breakpoint?: Breakpoint | null;
+	anomalies?: Anomaly[] | null;
 }
 
 const SYNC_KEY = CHART_SYNC.history;
@@ -40,6 +42,7 @@ export default function HistoricalChartsSection({
 	isFetchingMore,
 	progress,
 	breakpoint,
+	anomalies,
 }: HistoricalChartsSectionProps) {
 	if (isLoading && data.length === 0) {
 		return (
@@ -90,6 +93,7 @@ export default function HistoricalChartsSection({
 						isCompleted
 						syncKey={SYNC_KEY}
 						breakpoint={breakpoint}
+						anomalies={anomalies}
 					/>
 				</CardContent>
 			</Card>
@@ -104,6 +108,7 @@ export default function HistoricalChartsSection({
 						isCompleted
 						syncKey={SYNC_KEY}
 						breakpoint={breakpoint}
+						anomalies={anomalies}
 					/>
 				</CardContent>
 			</Card>

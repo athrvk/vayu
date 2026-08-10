@@ -12,7 +12,7 @@
  */
 
 export { UPlotChart } from "./UPlotChart";
-export type { UPlotChartProps, UPlotSeriesSpec, Marker } from "./UPlotChart";
+export type { UPlotChartProps, UPlotSeriesSpec, Marker, Annotation } from "./UPlotChart";
 export { CHART_SYNC } from "./syncKeys";
 export {
 	LatencyPercentilesChart,
