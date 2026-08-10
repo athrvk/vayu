@@ -318,12 +318,29 @@ jobs:
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml"
 
+      # `always()` so a suite that ran and failed is still reported - but on its
+      # own that also reports a *pass* for a job that never got as far as
+      # running a test. When `Build engine` fails or the job is cancelled,
+      # `Run engine tests` is skipped, no report file is written, and the action
+      # defaults to publishing a green `C++ Tests ()` check over nothing at all
+      # (seen on runs 31379169990 and 31378525863, where the Windows engine had
+      # not compiled). `require_tests` is what closes that: a missing report
+      # fails this step instead of inventing a pass, and the action returns
+      # before creating any check run. The legitimate no-report case - a
+      # docs-only change - never reaches here, because `changes.outputs.code`
+      # skips the whole job.
+      #
+      # `fail_on_failure` stays off deliberately, so the pair is a decision and
+      # not a default: `Run engine tests` above already fails the job on a red
+      # suite, and turning this on would make one failing test fail two steps.
       - name: Publish C++ test results
         uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           report_paths: 'engine/test-results.xml'
           check_name: 'C++ Tests (${{ matrix.os }})'
+          require_tests: true
+          fail_on_failure: false
 
   installer:
     name: Installer script on ${{ matrix.os }}
