@@ -34,15 +34,25 @@ const char* error_type_name (vayu::ErrorCode code) {
     case vayu::ErrorCode::InvalidUrl: return "invalid_url";
     case vayu::ErrorCode::InvalidMethod: return "invalid_method";
     case vayu::ErrorCode::ScriptError: return "script_error";
+    case vayu::ErrorCode::DataBindingFailed: return "data_binding_failed";
     case vayu::ErrorCode::InternalError: return "internal_error";
     default: return "unknown";
     }
 }
+/// Stamp the executor's per-completion facts onto the record being built. One
+/// helper for all three branches, so a record kind cannot quietly lose them.
+void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
+    if (annotations.data_row_index) {
+        record["dataRowIndex"] = *annotations.data_row_index;
+    }
+}
+
 } // namespace
 
 void handle_result (std::shared_ptr<RunContext> context,
 vayu::db::Database& /* db - unused, kept for API compat */,
-vayu::Result<vayu::Response> result) {
+vayu::Result<vayu::Response> result,
+const ResultAnnotations& annotations) {
     // A transfer usually completes as a Response carrying error_code, but two
     // paths still produce a real Error: curl-handle creation failure, and the
     // stop(false) cancellation drain. Both raise ErrorCode::InternalError, so
@@ -55,6 +65,7 @@ vayu::Result<vayu::Response> result) {
         nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
             { "error_type", error_type_name (error.code) }, { "message", error.message },
             { "request_number", context->total_requests () } };
+        annotate (error_json, annotations);
         context->metrics_collector->record_error (
         error.code, error.message, error_json.dump ());
 
@@ -83,6 +94,8 @@ vayu::Result<vayu::Response> result) {
             { "error_type", error_type_name (response.error_code) },
             { "message", response.error_message },
             { "request_number", context->total_requests () } };
+
+        annotate (error_json, annotations);
 
         // Include timing info if available
         if (response.timing.total_ms > 0) {
@@ -162,6 +175,7 @@ vayu::Result<vayu::Response> result) {
                 timing_json["isSlow"]      = true;
                 timing_json["thresholdMs"] = context->slow_threshold_ms;
             }
+            annotate (timing_json, annotations);
 
             trace_data = timing_json.dump ();
         }

@@ -37,6 +37,17 @@
  * not actually share. It is also the semantically correct answer - one session
  * shared between 1,000 users is not the thing being measured.
  *
+ * ## Data rows bind per iteration, from one shared cursor
+ *
+ * A run sent with `data` claims a row per VU iteration from a single run-wide
+ * cursor (`ScenarioLoadState::data_cursor`), wrapping when the rows run out,
+ * and every step of that iteration binds the same row (issue #449). Shared
+ * rather than per-VU is what makes distinct credentials per user work: two VUs
+ * must not both be handed row 0. The substitution itself is a join over the
+ * step's `data_template`, split once at plan resolution - a step with no
+ * `{{data.*}}` token has an empty template and does no per-iteration work at
+ * all.
+ *
  * ## Scripts stay deferred
  *
  * A step's `pre_script` / `post_script` are not run inline; the run's deferred
@@ -116,6 +127,15 @@ struct VirtualUser {
      * server deleted by expiring it.
      */
     std::vector<std::string> cookies;
+    /**
+     * The data row bound for this VU's *current* iteration, claimed from the
+     * run's shared cursor when the VU wraps to step 0 and held for every step
+     * of that iteration - the same row reaches the login and the checkout.
+     *
+     * `nullopt` for a run sent without `data`, which is what keeps a
+     * token-free plan from ever consulting a row.
+     */
+    std::optional<size_t> data_row;
     /// In flight (or retired) when true. See the struct comment.
     std::atomic<bool> busy{ false };
     /// Set once the VU may start no further iteration; it then never becomes
@@ -190,6 +210,20 @@ struct ScenarioLoadState {
     size_t virtual_users = 0;
     /// Producer-thread only: how many iterations were ever begun.
     size_t iterations_started = 0;
+    /// Rows this run was given; 0 for a run sent without `data`.
+    size_t data_row_count = 0;
+    /**
+     * The run's shared row cursor: one claim per *iteration*, across every
+     * virtual user, wrapping when the rows run out.
+     *
+     * Shared rather than per-VU because that is the semantics that makes
+     * distinct-credentials-per-user work - two VUs must not both get row 0 -
+     * and it is k6's `iterationInTest` / JMeter's "All threads" parity. Plain,
+     * not atomic, for the same reason `iterations_started` beside it is: the
+     * strategy thread is the sole producer and `take_ready_vu` is the only
+     * claimer, so the claim costs an increment rather than a locked one.
+     */
+    size_t data_cursor = 0;
     std::atomic<size_t> iterations_completed{ 0 };
     /// Iterations an errored step ended before the plan's last step. Counted
     /// rather than folded into `completed`, since a run that abandoned most of

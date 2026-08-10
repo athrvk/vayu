@@ -296,7 +296,12 @@ enum class ErrorCode {
     ScriptError,
     AuthRequired,
     AuthFailed,
-    InternalError
+    InternalError,
+    /// A `{{data.column}}` token named a column its bound row does not carry,
+    /// so the request could not be built and nothing was sent. Appended rather
+    /// than inserted: the numeric value is what a stored trace's `error_code`
+    /// holds, so the existing ones cannot move.
+    DataBindingFailed
 };
 
 /**
@@ -315,6 +320,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::AuthRequired: return "AUTH_REQUIRED";
     case ErrorCode::AuthFailed: return "AUTH_FAILED";
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
+    case ErrorCode::DataBindingFailed: return "DATA_BINDING_FAILED";
     }
     return "UNKNOWN";
 }

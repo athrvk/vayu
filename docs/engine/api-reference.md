@@ -1906,6 +1906,22 @@ knob.
   `pm.execution` therefore throws - a script that has already run against a
   recorded response cannot redirect a sequence that already happened.
   Flow control is design-mode only.
+- **Data rows are claimed from one shared cursor**, one per virtual-user
+  iteration, wrapping when they run out - so two virtual users never hold the
+  same row at once, which is what a credentials file is for. Every step of an
+  iteration binds that iteration's row. `scenario.iterations` still has no
+  meaning here: the run repeats until its duration is up, and the row count does
+  not bound it.
+
+  A `{{data.column}}` naming a column its bound row does not carry **fails that
+  step**: nothing is sent, the step's `errors` count in the breakdown moves, and
+  the run's error list carries an entry with `error_type: "data_binding_failed"`
+  naming the token, the row and the row's columns. It is never substituted with
+  an empty string.
+
+  Every retained result carries **`dataRowIndex`** on its `trace`, which is how
+  a failure is attributed to a row when no per-step `results` rows exist. Absent
+  for a run sent without `data`.
 - **An errored step ends its iteration** and its virtual user starts the next
   one. It is never stranded.
 - **No per-step `results` rows are stored** - one row per step per iteration per

@@ -41,6 +41,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -64,6 +65,10 @@ struct ScenarioStep {
     /// `request.url` has `{{vars}}` substituted and may carry an `apikey` auth
     /// with `in: "query"`, i.e. a live key.
     std::string stored_url;
+    /// `request`'s `{{data.column}}` tokens, split once here so no executor has
+    /// to re-scan the step per iteration. Empty for a step that carries none,
+    /// which is what both executors test before doing any join work at all.
+    StepDataTemplate data_template;
 };
 
 /** An ordered, immutable sequence of composed steps. */

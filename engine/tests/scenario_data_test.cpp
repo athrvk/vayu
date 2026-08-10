@@ -196,6 +196,9 @@ TEST (ScenarioDataBindTest, ASubstitutedValueIsNeverRescanned) {
 
 // ---------------------------------------------------------------------------
 // The pre-run scan: a token nothing can bind (issue #415)
+//
+// Driven through the step template, which is what plan resolution builds and
+// reads `first_token()` off - the scan is the split with no row behind it.
 // ---------------------------------------------------------------------------
 
 TEST (ScenarioDataScanTest, ARequestWithNoDataTokenScansClean) {
@@ -205,7 +208,7 @@ TEST (ScenarioDataScanTest, ARequestWithNoDataTokenScansClean) {
     request.body.content      = R"({"n":1})";
     request.body.fields       = { { "k", "v", true } };
 
-    EXPECT_FALSE (vayu::core::find_data_token (request).has_value ());
+    EXPECT_FALSE (vayu::core::tokenize_data_fields (request).first_token ().has_value ());
 }
 
 TEST (ScenarioDataScanTest, EveryFieldTheBinderSubstitutesIsAFieldTheScanSees) {
@@ -213,7 +216,7 @@ TEST (ScenarioDataScanTest, EveryFieldTheBinderSubstitutesIsAFieldTheScanSees) {
     // would miss is a token that survives the refusal and reaches the wire.
     // Each case seeds exactly one field, so a hole names itself.
     const auto seen = [] (const vayu::Request& request) {
-        return vayu::core::find_data_token (request).value_or ("<none>");
+        return vayu::core::tokenize_data_fields (request).first_token ().value_or ("<none>");
     };
 
     EXPECT_EQ (seen (request_with_url ("https://api.test/{{data.id}}")), "{{data.id}}");
@@ -252,17 +255,95 @@ TEST (ScenarioDataScanTest, TheScanLeavesTheRequestAlone) {
     request.body.content             = "{{data.body}}";
     const auto before                = request.url;
 
-    EXPECT_TRUE (vayu::core::find_data_token (request).has_value ());
+    EXPECT_TRUE (vayu::core::tokenize_data_fields (request).first_token ().has_value ());
     EXPECT_EQ (request.url, before);
     EXPECT_EQ (request.headers.at ("X-{{data.hn}}"), "{{data.token}}");
     EXPECT_EQ (request.body.content, "{{data.body}}");
+}
+
+// ---------------------------------------------------------------------------
+// Split once, joined per row (issue #449)
+// ---------------------------------------------------------------------------
+
+TEST (ScenarioDataTemplateTest, AStepWithNoDataTokenHasAnEmptyTemplate) {
+    // The zero-cost claim, as a test rather than a comment: the load executor
+    // tests exactly this before doing any join work, so a template that came
+    // back non-empty here would put a per-iteration walk on a plan that has
+    // nothing to bind.
+    auto request = request_with_url ("https://api.test/{{host}}/users");
+    request.headers["X-Tenant"] = "acme";
+    request.body.content        = R"({"n":1})";
+    request.body.fields         = { { "k", "v", true } };
+
+    EXPECT_TRUE (vayu::core::tokenize_data_fields (request).empty ());
+}
+
+TEST (ScenarioDataTemplateTest, ATemplateJoinsTheSameTextTheScannerWouldSubstitute) {
+    // One binder for both executors: the template path and the convenience
+    // `bind_data_row` must agree field for field, or a step binds differently
+    // depending on which executor ran it.
+    const json row = { { "id", "42" }, { "hn", "Acme" }, { "token", "t-1" },
+        { "email", "a@b.c" }, { "field", "fk" }, { "value", "fv" } };
+
+    auto make = [] () {
+        auto request = request_with_url ("https://api.test/{{data.id}}");
+        request.headers["X-{{data.hn}}"] = "{{data.token}}";
+        request.body.content             = R"({"email":"{{data.email}}"})";
+        request.body.fields = { { "{{data.field}}", "{{data.value}}", true } };
+        return request;
+    };
+
+    auto templated  = make ();
+    const auto tmpl = vayu::core::tokenize_data_fields (templated);
+    ASSERT_TRUE (vayu::core::apply_data_template (templated, tmpl, row, 0).ok);
+
+    auto scanned = make ();
+    ASSERT_TRUE (bind_data_row (scanned, row, 0).ok);
+
+    EXPECT_EQ (templated.url, "https://api.test/42");
+    EXPECT_EQ (templated.url, scanned.url);
+    EXPECT_EQ (templated.headers.at ("X-Acme"), "t-1");
+    EXPECT_EQ (templated.headers.at ("X-Acme"), scanned.headers.at ("X-Acme"));
+    EXPECT_EQ (templated.body.content, R"({"email":"a@b.c"})");
+    EXPECT_EQ (templated.body.content, scanned.body.content);
+    EXPECT_EQ (templated.body.fields[0].key, "fk");
+    EXPECT_EQ (templated.body.fields[0].value, "fv");
+}
+
+TEST (ScenarioDataTemplateTest, ATemplateIsReusableAcrossRows) {
+    // What the load path relies on: one split, many joins. A template that read
+    // anything off the first row would bind every later iteration to it.
+    auto request =
+    request_with_url ("https://api.test/u/{{data.id}}/{{data.id}}");
+    const auto tmpl = vayu::core::tokenize_data_fields (request);
+
+    for (const char* id : { "1", "2", "3" }) {
+        auto bound = request;
+        ASSERT_TRUE (
+        vayu::core::apply_data_template (bound, tmpl, json{ { "id", id } }, 0).ok);
+        EXPECT_EQ (bound.url, std::string ("https://api.test/u/") + id + "/" + id);
+    }
+}
+
+TEST (ScenarioDataTemplateTest, AnAbsentColumnFailsTheJoinAndNamesTheRow) {
+    auto request    = request_with_url ("https://api.test/{{data.missing}}");
+    const auto tmpl = vayu::core::tokenize_data_fields (request);
+
+    const auto bound =
+    vayu::core::apply_data_template (request, tmpl, json{ { "id", "1" } }, 7);
+    EXPECT_FALSE (bound.ok);
+    EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
+    << bound.error;
+    EXPECT_NE (bound.error.find ("row 7"), std::string::npos) << bound.error;
+    EXPECT_NE (bound.error.find ("id"), std::string::npos) << bound.error;
 }
 
 TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
     // `{{data.}}` names no column, so composition already resolved it to "" and
     // there is nothing left to send literally. Refusing it would block a run
     // over a token that never reaches the wire.
-    EXPECT_FALSE (vayu::core::find_data_token (
+    EXPECT_FALSE (vayu::core::tokenize_data_fields (
     request_with_url ("https://api.test/{{data.}}"))
+                  .first_token ()
                   .has_value ());
 }
