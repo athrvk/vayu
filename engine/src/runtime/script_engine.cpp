@@ -3092,6 +3092,42 @@ std::string script_body_view (const Body& body) {
                                          body.content;
 }
 
+/**
+ * Which header map `pm.request.headers` shows.
+ *
+ * Two records of "the request's headers" exist and they are not the same set
+ * (issue #483). `request->headers` is what the request was *composed* with;
+ * `response->request_headers` is what was *sent* - that same map minus the
+ * headers the transfer suppresses, plus the ones the engine derives at curl
+ * setup: the body-implied `Content-Type` (GraphQL -> `application/json`, Form
+ * -> `application/x-www-form-urlencoded`) and the default `User-Agent`. A test
+ * script asking which Content-Type went out for a GraphQL body is asking about
+ * the second, and the composed map structurally cannot answer - nobody wrote
+ * that header down, the engine derived it precisely so the user would not have
+ * to. It read `undefined` and the assertion went red on a request that went
+ * out right.
+ *
+ * So a **test** script reads the sent record and a **pre-request** script reads
+ * the composed map. That split is forced, not preferred: before the send there
+ * is no sent record to read, and the pre-request object is the one
+ * `apply_pm_request_writeback` applies back onto the request, so showing it
+ * anything other than the composed set would make `delete` operate on headers
+ * the request never carried.
+ *
+ * The fallback is load-bearing rather than defensive padding. A load run's
+ * deferred validation rebuilds its `Response` from a sampled response
+ * (`run_manager.cpp`), which records no sent headers at all; seeding from that
+ * empty map would take `pm.request.headers` from "missing the two derived
+ * entries" to "empty", a worse answer than the one this fixes. An empty sent
+ * record means nothing was recorded, never that nothing was sent.
+ */
+const Headers& script_request_header_view (const ContextData& data) {
+    if (data.response != nullptr && !data.response->request_headers.empty ()) {
+        return data.response->request_headers;
+    }
+    return data.request->headers;
+}
+
 void setup_pm_request (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -3113,10 +3149,11 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         JS_NewString (ctx, to_string (data->request->method)));
 
         // pm.request.headers - the object the write-back reads, so its methods
-        // and plain assignment reach the same property set.
+        // and plain assignment reach the same property set. Which set that is
+        // depends on the hook - see script_request_header_view.
         JSValue headers = JS_NewObject (ctx);
         install_header_methods (ctx, headers, /*mutators=*/true);
-        for (const auto& [key, value] : data->request->headers) {
+        for (const auto& [key, value] : script_request_header_view (*data)) {
             define_header_entry (ctx, headers, key, value);
         }
         JS_SetPropertyStr (ctx, request, "headers", headers);
