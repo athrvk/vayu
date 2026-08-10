@@ -343,6 +343,9 @@ struct ExpectState {
     // the same matcher compares rather than needing matchers of their own.
     bool deep   = false;
     bool nested = false;
+    // chai's second argument to `expect(value, message)`, empty when the script
+    // passed one argument. Read only by `throw_expect_failure`.
+    std::string message;
 };
 
 JSClassID expect_class_id = 0;
@@ -367,6 +370,31 @@ JSClassDef expect_class = { .class_name = "Expectation",
     .gc_mark                            = expect_gc_mark,
     .call                               = nullptr,
     .exotic                             = nullptr };
+
+/**
+ * @brief Report a failed assertion, prefixed with the expectation's message.
+ *
+ * chai's `expect(value, message)` puts the script's own words in front of
+ * whatever the matcher reports, which is the whole reason to pass one: the
+ * generic text ("Expected value to be truthy") says what broke and the prefix
+ * says which value it was - the third item in a loop, the MCP path rather than
+ * the app path. Postman scripts use the two-argument form routinely.
+ *
+ * Every matcher throws its failure through here rather than concatenating the
+ * prefix itself, so the prefix is one rule in one place: a matcher added later
+ * gets it by throwing the way its neighbours do, and cannot report a bare
+ * message by forgetting a concatenation. Usage errors - `above()` with no
+ * argument, `members()` against a non-array - deliberately do **not** come
+ * through here: they name a mistake in the script text, not the value under
+ * test, and their message already names the matcher that rejected the call.
+ */
+JSValue throw_expect_failure (JSContext* ctx, const ExpectState* state, const std::string& failure) {
+    if (state != nullptr && !state->message.empty ()) {
+        const std::string prefixed = state->message + ": " + failure;
+        return JS_ThrowTypeError (ctx, "%s", prefixed.c_str ());
+    }
+    return JS_ThrowTypeError (ctx, "%s", failure.c_str ());
+}
 
 // ----------------------------------------------------------------------------
 // Value comparison for the equality matchers.
@@ -685,7 +713,7 @@ expect_equality (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         (deep ? "deeply equal " : "equal ");
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         relation + js_describe (ctx, argv[0]);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -711,7 +739,7 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     if (!pass) {
         const char* msg = state->negated ? "Expected value to not exist" :
                                            "Expected value to exist";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -729,7 +757,7 @@ JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     if (!pass) {
         const char* msg = state->negated ? "Expected value to be falsy" :
                                            "Expected value to be truthy";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -747,7 +775,7 @@ JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     if (!pass) {
         const char* msg = state->negated ? "Expected value to not be false" :
                                            "Expected value to be false";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -777,7 +805,7 @@ JSValue expect_above (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         " to not be above " + std::to_string (expected) :
                                            "Expected " +
         std::to_string (actual) + " to be above " + std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -807,7 +835,7 @@ JSValue expect_below (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         " to not be below " + std::to_string (expected) :
                                            "Expected " +
         std::to_string (actual) + " to be below " + std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -855,7 +883,7 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not include " : " to include ") +
         js_describe (ctx, argv[0]);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -955,7 +983,7 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         if (argc >= 2) {
             msg += " equal to " + js_describe (ctx, argv[1]);
         }
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -979,7 +1007,7 @@ JSValue expect_null_getter (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!pass) {
         const char* msg = state->negated ? "Expected value to not be null" :
                                            "Expected value to be null";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return JS_DupValue (ctx, this_val);
@@ -1000,7 +1028,7 @@ JSValue expect_undefined_getter (JSContext* ctx, JSValueConst this_val, int argc
         const char* msg = state->negated ?
         "Expected value to not be undefined" :
         "Expected value to be undefined";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return JS_DupValue (ctx, this_val);
@@ -1020,7 +1048,7 @@ JSValue expect_ok_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     if (!pass) {
         const char* msg = state->negated ? "Expected value to not be truthy" :
                                            "Expected value to be truthy";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return JS_DupValue (ctx, this_val);
@@ -1061,7 +1089,7 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
     if (!pass) {
         const char* msg = state->negated ? "Expected value to not be empty" :
                                            "Expected value to be empty";
-        return JS_ThrowTypeError (ctx, "%s", msg);
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return JS_DupValue (ctx, this_val);
@@ -1092,7 +1120,7 @@ JSValue expect_least (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         std::string msg = "Expected " + std::to_string (actual) +
         (state->negated ? " to not be at least " : " to be at least ") +
         std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1121,7 +1149,7 @@ JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         std::string msg = "Expected " + std::to_string (actual) +
         (state->negated ? " to not be at most " : " to be at most ") +
         std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1156,7 +1184,7 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     if (!pass) {
         std::string msg = "Expected length " + std::to_string (actual_len) +
         (state->negated ? " to not equal " : " to equal ") + std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1204,7 +1232,7 @@ JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst*
     if (!pass) {
         std::string msg = "Expected type " + type_name +
         (state->negated ? " to not be " : " to be ") + expected;
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1245,7 +1273,7 @@ JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         std::string msg = state->negated ?
         "Expected '" + subject + "' to not match the pattern" :
         "Expected '" + subject + "' to match the pattern";
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1287,7 +1315,7 @@ JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not be one of " : " to be one of ") +
         js_describe (ctx, argv[0]);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1342,7 +1370,7 @@ JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         }
         const std::string msg = std::string ("Expected object to ") +
         (state->negated ? "not have" : "have") + " exactly the keys " + listed;
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1404,7 +1432,7 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not have members " : " to have members ") +
         js_describe (ctx, argv[0]);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1461,7 +1489,7 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         if (threw) {
             msg += ", but it threw " + thrown;
         }
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1489,7 +1517,7 @@ JSValue expect_instance_of (JSContext* ctx, JSValueConst this_val, int argc, JSV
         JS_FreeValue (ctx, name_val);
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not be an instance of " : " to be an instance of ") + ctor_name;
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1521,7 +1549,7 @@ JSValue expect_close_to (JSContext* ctx, JSValueConst this_val, int argc, JSValu
         const std::string msg = "Expected " + std::to_string (actual) +
         (state->negated ? " to not be within " : " to be within ") +
         std::to_string (delta) + " of " + std::to_string (expected);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1551,7 +1579,7 @@ JSValue expect_satisfy (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     if (!pass) {
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not satisfy the predicate" : " to satisfy the predicate");
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
@@ -1579,19 +1607,20 @@ JSValue expect_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     if (!pass) {
         const std::string msg = "Expected '" + subject +
         (state->negated ? "' to not contain '" : "' to contain '") + needle + "'";
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
 }
 
-JSValue create_expectation (JSContext* ctx, JSValue actual) {
+JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message) {
     JSValue obj = JS_NewObjectClass (ctx, static_cast<int> (expect_class_id));
     if (JS_IsException (obj)) {
         return obj;
     }
 
-    auto* state = new ExpectState{ JS_DupValue (ctx, actual), false };
+    auto* state    = new ExpectState{ JS_DupValue (ctx, actual), false };
+    state->message = std::move (message);
     JS_SetOpaque (obj, state);
 
     // Add "to" getter for chaining
@@ -2031,7 +2060,22 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "pm.expect requires a value");
     }
 
-    return create_expectation (ctx, argv[0]);
+    // chai coerces the message rather than demanding a string, and treats an
+    // absent one and an explicit `undefined` / `null` alike - both are how a
+    // caller that computes the message conditionally spells "no message". A
+    // value whose conversion throws (a Symbol, a throwing `toString`) is a real
+    // error and propagates rather than being swallowed into an empty prefix.
+    std::string message;
+    if (argc >= 2 && !JS_IsUndefined (argv[1]) && !JS_IsNull (argv[1])) {
+        const char* str = JS_ToCString (ctx, argv[1]);
+        if (!str) {
+            return JS_EXCEPTION;
+        }
+        message = str;
+        JS_FreeCString (ctx, str);
+    }
+
+    return create_expectation (ctx, argv[0], std::move (message));
 }
 
 // json() and text() read the body bound to the function at build time rather

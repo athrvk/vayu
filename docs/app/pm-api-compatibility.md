@@ -16,7 +16,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
-| Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value)`                                    |
+| Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
@@ -257,6 +257,19 @@ these:
 `expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
 equality. `include`, `property(name, value)`, `members` and `oneOf` compare
 strictly too, unless a `deep` appears in the chain.
+
+**The second argument is chai's failure message.** `pm.expect(value, 'context')`
+prefixes `context: ` to whatever the failing matcher reports, so an assertion
+that runs more than once says which value it was about:
+
+```javascript
+pm.expect(user.active, 'user ' + user.id).to.be.true;
+// user 42: Expected value to be truthy
+```
+
+Non-strings are coerced and `undefined` / `null` mean no message, both as in
+chai. Assertion failures carry it; a malformed call (`.to.be.above()` with no
+argument) reports its own misuse unprefixed.
 
 `have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
 reported unequal by `eql` rather than compared (their contents are not

@@ -33,6 +33,27 @@ pm.test('Test name', function() {
 
 Create Chai-style expectations for assertions.
 
+```javascript
+pm.expect(value);                  // the usual form
+pm.expect(value, 'context');       // chai's second argument, see below
+```
+
+**The optional second argument is prefixed to the failure.** It is chai's
+`expect(value, message)`, and it exists for the moment the assertion fails: the
+matcher says *what* broke and the message says *which* value it was - the third
+item in a loop, the request that came from the MCP path rather than the app.
+
+```javascript
+pm.expect(user.active, 'user ' + user.id).to.be.true;
+// fails with: user 42: Expected value to be truthy
+```
+
+The message is coerced like chai's, and `undefined` / `null` mean "no message",
+so a conditionally built one that came out absent leaves the failure text
+unchanged. It prefixes assertion failures only - a call the script wrote wrong
+(`.to.be.above()` with no argument) reports the misuse on its own, since the
+message describes a value, not a typo.
+
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
 `deep.equal`) compares contents recursively and does not care about key order.

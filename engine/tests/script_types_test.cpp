@@ -129,7 +129,7 @@ TEST (ScriptTypesTest, ChainContinuationsReturnTheChain) {
     const std::string dts = generate_script_typedefs ();
     // `expect` opens the chain, `.and` continues it, `.not` re-enters the `to`
     // node it sits in - none of which the table says.
-    EXPECT_TRUE (contains (dts, "expect(value: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "expect(value: any, message?: string): VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "and: VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "not: VayuExpectTo;"));
     EXPECT_TRUE (contains (dts, "interface VayuExpectTo {"));

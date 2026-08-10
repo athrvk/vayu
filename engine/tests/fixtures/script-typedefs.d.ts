@@ -495,6 +495,8 @@ declare const pm: {
 	/**
 	 * Create a Chai-style expectation for assertions.
 	 * 
+	 * The optional second argument is prefixed to the failure message, so a failing assertion says which value it was about.
+	 * 
 	 * Chain with:
 	 * - .to.equal(expected) - strict (===), so two objects with the same contents are not equal
 	 * - .to.eql(expected) / .to.deep.equal(expected) - deep equality, key order insensitive
@@ -504,7 +506,7 @@ declare const pm: {
 	 * - .to.include(value)
 	 * - .and to continue a chain
 	 */
-	expect(value: any): VayuExpectation;
+	expect(value: any, message?: string): VayuExpectation;
 	/**
 	 * Access and modify global variables. Changes persist to global variables.
 	 */
