@@ -29,6 +29,7 @@ export * from "./SampleRetentionNote";
 
 // "p99 was 47ms against a 50ms budget" - wherever a run's verdict is shown
 export * from "./ThresholdVerdict";
+export * from "./CapacitySummary";
 
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";

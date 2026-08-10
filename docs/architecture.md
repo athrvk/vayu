@@ -234,8 +234,9 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Lock-Free Design**: High-performance metrics collection with minimal contention
 - **Async I/O**: Uses `curl_multi` for concurrent request handling
 - **Load models**: `constant_rps` is open-loop (dispatch at a fixed rate); `constant_concurrency`,
-  `ramp_up`, and `iterations` are closed-loop (hold a target in-flight count). See
-  [Engine Architecture](engine/architecture.md#load-test-strategies).
+  `ramp_up`, `iterations` and `capacity` are closed-loop (hold a target in-flight count).
+  `capacity` is the one whose target adapts to what the run measured, stepping up until latency
+  breaks its budget. See [Engine Architecture](engine/architecture.md#load-test-strategies).
 - **Efficient Caching**: TanStack Query caches server responses in Manager
 
 ## File Locations

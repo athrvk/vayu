@@ -142,6 +142,7 @@ export interface LoadRunParams {
 	startConcurrency?: number;
 	duration?: string | number;
 	rampUpDuration?: string | number;
+	stepDuration?: string | number;
 	iterations?: number;
 }
 
@@ -150,7 +151,13 @@ export interface LoadRunParams {
  * Anything else falls through `LoadStrategy::create`, so the guard mirrors that
  * fallback rather than trusting the string it was given.
  */
-const KNOWN_LOAD_MODES = new Set(["constant_rps", "constant_concurrency", "ramp_up", "iterations"]);
+const KNOWN_LOAD_MODES = new Set([
+	"constant_rps",
+	"constant_concurrency",
+	"ramp_up",
+	"iterations",
+	"capacity",
+]);
 
 /**
  * What the engine runs when `duration` is absent - `duration_field_ms(config,
@@ -209,7 +216,10 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	}
 	// `startConcurrency` rides the same ceiling as `concurrency`: `ramp_up` seeds
 	// the run with it (`RampUpLoadStrategy`, `target_fn(0) = startConcurrency`),
-	// so an uncapped start is an uncapped run however low the target is.
+	// so an uncapped start is an uncapped run however low the target is. For
+	// `capacity` the same pair is what bounds the search - `concurrency` is the
+	// ceiling it climbs toward rather than a target it holds - so capping both
+	// is exactly what stops an adaptive run from outgrowing the cap.
 	for (const field of ["concurrency", "startConcurrency"] as const) {
 		const value = params[field];
 		if (typeof value === "number" && value > config.maxConcurrency) {
@@ -221,7 +231,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	}
 	// A duration the engine cannot read now fails the run rather than quietly
 	// becoming 60s, so say so here instead of starting a run that dies.
-	for (const field of ["duration", "rampUpDuration"] as const) {
+	for (const field of ["duration", "rampUpDuration", "stepDuration"] as const) {
 		const value = params[field];
 		if (value !== undefined && parseDurationGrammar(value) === null) {
 			return {

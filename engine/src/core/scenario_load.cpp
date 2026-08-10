@@ -60,6 +60,14 @@ std::optional<std::string> validate_scenario_load_config (const nlohmann::json& 
         "'iterations'";
     }
 
+    if (*type == LoadTestType::Capacity) {
+        return "'capacity' is not available for scenario runs: the search "
+               "judges one windowed p99, and a sequence has one per step - "
+               "which of them is 'the' latency the knee is measured against is "
+               "a question the mode does not answer. Use "
+               "'constant_concurrency', 'ramp_up' or 'iterations'.";
+    }
+
     if (*type == LoadTestType::ConstantRps) {
         return "'constant_rps' is not available for scenario runs: an "
                "open-loop "
@@ -219,7 +227,8 @@ const ScenarioExecution& execution) {
 
     const std::string mode = config.value ("mode", std::string{});
     const auto type        = parse_load_test_type (mode);
-    if (!type || *type == LoadTestType::ConstantRps || requested_rps (config) > 0.0) {
+    if (!type || *type == LoadTestType::ConstantRps || *type == LoadTestType::Capacity ||
+    requested_rps (config) > 0.0) {
         // The route rejects both with a 400 before the run row exists; this is
         // the same rule stated where the executor would otherwise have to guess.
         throw std::invalid_argument (validate_scenario_load_config (config).value_or (

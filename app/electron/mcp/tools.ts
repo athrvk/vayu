@@ -1759,7 +1759,7 @@ export const TOOLS: McpTool[] = [
 			mode: z
 				.string()
 				.optional()
-				.describe("constant_rps | constant_concurrency | ramp_up | iterations."),
+				.describe("constant_rps | constant_concurrency | ramp_up | iterations | capacity."),
 			// Positive, because an agent's natural guess for "unlimited" is -1 or
 			// 0, and the engine reads concurrency as an eager per-worker
 			// pre-allocation count. It rejects those with a 400; failing here
@@ -1789,6 +1789,23 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe("Ramp time (ramp_up), same units as `duration`."),
+			// Capacity discovery reuses `startConcurrency` (where the search
+			// begins), `concurrency` (the ceiling it will not climb past) and
+			// `duration` (the whole search's deadline), so it adds only these
+			// two. The `sloMs` bound is the engine's, so a value this schema
+			// accepts is one POST /runs accepts.
+			sloMs: z
+				.number()
+				.positive()
+				.max(60_000)
+				.optional()
+				.describe("p99 budget the capacity search looks for the edge of, in ms."),
+			stepDuration: z
+				.string()
+				.optional()
+				.describe(
+					"How long each concurrency level is held before it is judged (capacity), same units as `duration`."
+				),
 			// An iterations run stops on this count and reads no duration, so it
 			// is the only thing bounding the run; `-1` would cast to ~1.8e19.
 			iterations: z
@@ -1872,6 +1889,7 @@ export const TOOLS: McpTool[] = [
 				iterations: typeof args.iterations === "number" ? args.iterations : undefined,
 				duration: (args.duration as string | number | undefined) ?? undefined,
 				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
+				stepDuration: (args.stepDuration as string | number | undefined) ?? undefined,
 			};
 			const caps = checkLoadCaps(loadParams, ctx.config);
 			if (!caps.ok) return errorResult(caps.error!);
@@ -1886,10 +1904,11 @@ export const TOOLS: McpTool[] = [
 				"iterations",
 				"targetRps",
 				"maxInFlight",
+				"sloMs",
 			]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
-			for (const key of ["duration", "rampUpDuration"]) {
+			for (const key of ["duration", "rampUpDuration", "stepDuration"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
 			}

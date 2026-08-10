@@ -15,7 +15,7 @@ import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import { ThresholdVerdict } from "@/components/shared";
+import { CapacitySummary, ThresholdVerdict } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import type { TabProps } from "../../types";
@@ -34,6 +34,11 @@ export default function OverviewTab({ report, derived }: TabProps) {
 			    question a stored run is opened to answer. Absent for a run that
 			    declared no budgets, which is every run recorded before them. */}
 			<ThresholdVerdict verdict={report.thresholdValidation} />
+
+			{/* What the search found, for a capacity run. Beside the verdict
+			    rather than below the charts: "what can it take" is the question
+			    the run was started to answer. Absent for every other mode. */}
+			<CapacitySummary capacity={report.capacity} />
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (

@@ -869,3 +869,140 @@ TEST_F (LoadStrategyTest, CaptureOffLeavesTheCompletionPathUnchanged) {
     EXPECT_FALSE (context->metrics_collector->slow_results ()[0].capture.has_value ());
     EXPECT_EQ (context->metrics_collector->captured_body_bytes (), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Capacity discovery
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/**
+ * Run a capacity search end to end against the mock server.
+ *
+ * The metrics thread is spawned here rather than left out as the other
+ * strategy tests leave it, because it is the search's only sensor: the
+ * controller steers by `RunContext::latest_live_tick()`, which nothing else
+ * publishes. A capacity test without it measures a search that never sees a
+ * window close - which is itself the documented behaviour, but not the one
+ * these tests are about.
+ */
+vayu::core::CapacitySummary run_capacity_search (const nlohmann::json& config,
+const std::string& url,
+const std::string& run_id,
+vayu::db::Database& db) {
+    auto context = std::make_shared<vayu::core::RunContext> (run_id, config);
+
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = url;
+    request.timeout_ms = 30000;
+
+    context->is_running = true;
+    context->start_time_ms =
+    std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+    std::thread metrics ([context, &db] () { vayu::core::collect_metrics (context, &db); });
+
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    EXPECT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+
+    context->is_running = false;
+    metrics.join ();
+    context->event_loop->stop (false);
+
+    EXPECT_TRUE (context->capacity.has_value ());
+    return context->capacity.value_or (vayu::core::CapacitySummary{});
+}
+
+} // namespace
+
+TEST_F (LoadStrategyTest, CapacityModeIsSelectedByTheFactory) {
+    nlohmann::json config = { { "mode", "capacity" } };
+    EXPECT_NE (vayu::core::LoadStrategy::create (config), nullptr);
+    EXPECT_EQ (vayu::parse_load_test_type ("capacity"), vayu::LoadTestType::Capacity);
+    EXPECT_STREQ (vayu::to_string (vayu::LoadTestType::Capacity), "capacity");
+}
+
+// A 500ms endpoint cannot meet a 100ms p99 at any concurrency, so the search
+// gives up at its very first level - and says so with the level that breached,
+// not with a headline it never measured.
+TEST_F (LoadStrategyTest, CapacityStopsOnTheSloAgainstASlowEndpoint) {
+    nlohmann::json config = {
+        { "mode", "capacity" },
+        { "duration", "20s" }, // far above what the SLO stop needs
+        { "stepDuration", "1s" },
+        { "sloMs", 100 },
+        { "startConcurrency", 4 },
+        { "concurrency", 64 },
+    };
+
+    vayu::db::Database db (TEST_DB_PATH);
+    const auto summary =
+    run_capacity_search (config, mock_server->slow_url (), "test-capacity-slo", db);
+
+    EXPECT_EQ (summary.stop_reason, "slo_exceeded");
+    ASSERT_TRUE (summary.knee.has_value ());
+    EXPECT_GT (summary.knee->p99_ms, summary.slo_ms);
+    EXPECT_EQ (summary.knee->concurrency, 4u) << "the search should not have climbed";
+    EXPECT_FALSE (summary.max_healthy.has_value ())
+    << "no level held the budget, so there is no sustainable capacity to report";
+    // The breach plus the re-measure that confirmed it.
+    EXPECT_EQ (summary.levels.size (), 2u);
+}
+
+// A fast endpoint inside its budget climbs until it runs out of room, and the
+// report says the search ended on the caller's ceiling rather than inventing a
+// knee it never observed.
+TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
+    nlohmann::json config = {
+        { "mode", "capacity" },
+        { "duration", "30s" },
+        { "stepDuration", "1s" },
+        { "sloMs", 2000 }, // far above anything /fast can produce
+        { "startConcurrency", 2 },
+        { "concurrency", 3 }, // one step-up and the search is at its ceiling
+    };
+
+    vayu::db::Database db (TEST_DB_PATH);
+    const auto summary =
+    run_capacity_search (config, mock_server->fast_url (), "test-capacity-cap", db);
+
+    EXPECT_EQ (summary.stop_reason, "cap_reached");
+    ASSERT_TRUE (summary.max_healthy.has_value ());
+    EXPECT_EQ (summary.max_healthy->concurrency, 3u);
+    EXPECT_GT (summary.max_healthy->rps, 0.0);
+    EXPECT_FALSE (summary.knee.has_value ());
+    EXPECT_EQ (summary.levels.size (), 2u);
+}
+
+// The deadline is the strategy's own stop, not the controller's - it is the one
+// condition that is about the clock rather than about what the service did.
+TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
+    nlohmann::json config = {
+        { "mode", "capacity" },
+        { "duration", "1200ms" }, // ends inside the second window
+        { "stepDuration", "1s" },
+        { "sloMs", 2000 },
+        { "startConcurrency", 2 },
+        { "concurrency", 1000 },
+    };
+
+    vayu::db::Database db (TEST_DB_PATH);
+    const auto summary =
+    run_capacity_search (config, mock_server->fast_url (), "test-capacity-deadline", db);
+
+    EXPECT_EQ (summary.stop_reason, "deadline");
+    // One window closed before the clock ran out; the partial second one is not
+    // in the audit trail, because it was never judged.
+    EXPECT_EQ (summary.levels.size (), 1u);
+    ASSERT_TRUE (summary.max_healthy.has_value ());
+    EXPECT_EQ (summary.max_healthy->concurrency, 2u);
+}

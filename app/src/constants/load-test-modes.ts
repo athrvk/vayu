@@ -51,6 +51,11 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 		label: "Ramp-Up",
 		description: "Climb to the target concurrency over a ramp.",
 	},
+	{
+		value: "capacity",
+		label: "Capacity Discovery",
+		description: "Step up until latency breaks its budget, then report the limit.",
+	},
 ];
 
 const BY_VALUE = new Map<string, LoadTestModeInfo>(LOAD_TEST_MODES.map((m) => [m.value, m]));

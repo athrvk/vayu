@@ -248,3 +248,34 @@ describe("defaultDurationUnderCap", () => {
 		expect(defaultDurationUnderCap({ mode: "iterations", iterations: 10 }, config)).toBeNull();
 	});
 });
+
+describe("capacity discovery", () => {
+	const config = resolveSafetyConfig({ maxConcurrency: 500, maxDurationSeconds: 300 });
+
+	test("caps the ceiling the search climbs toward, not just a fixed target", () => {
+		// `concurrency` is the ceiling in this mode rather than a level held, so
+		// it is exactly the field that decides how large the run can get.
+		expect(checkLoadCaps({ mode: "capacity", concurrency: 5000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ mode: "capacity", startConcurrency: 5000 }, config).ok).toBe(false);
+		expect(
+			checkLoadCaps({ mode: "capacity", startConcurrency: 4, concurrency: 256 }, config).ok
+		).toBe(true);
+	});
+
+	test("rejects a step duration the engine cannot read", () => {
+		// It goes through the same string parser `duration` does, so a value the
+		// engine would throw on has to fail here rather than at run time.
+		expect(checkLoadCaps({ mode: "capacity", stepDuration: "a bit" }, config).ok).toBe(false);
+		expect(checkLoadCaps({ mode: "capacity", stepDuration: "5s" }, config).ok).toBe(true);
+	});
+
+	test("is a duration mode, so the duration cap still reaches it", () => {
+		// The guard mirrors `LoadStrategy::create`: an unrecognised mode with no
+		// `iterations` falls through to a duration strategy. `capacity` is a
+		// duration mode either way - the check is that adding it to the known
+		// set did not accidentally route it to the iterations branch, which
+		// takes no duration cap at all.
+		const tight = resolveSafetyConfig({ maxDurationSeconds: 30 });
+		expect(defaultDurationUnderCap({ mode: "capacity" }, tight)).toBe("30s");
+	});
+});
