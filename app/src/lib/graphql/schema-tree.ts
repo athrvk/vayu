@@ -324,16 +324,27 @@ function formatDefault(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-/** One row of the search index: a node, plus the lowercased text it matches on. */
+/**
+ * One row of the search index: a node, plus each field it matches on,
+ * lowercased.
+ *
+ * Three fields rather than one concatenated haystack, because the ranking turns
+ * on *which* of them matched - and folding case here rather than inside the
+ * loop keeps a keystroke from re-lowercasing the whole schema.
+ */
 interface IndexEntry {
 	node: SchemaTreeNode;
-	haystack: string;
+	name: string;
+	signature: string;
+	description: string;
 }
 
 export interface SchemaSearchMatch {
 	node: SchemaTreeNode;
 	/** Where the term matched in `node.name`, for highlighting. -1 for no match. */
 	matchStart: number;
+	/** Where the term matched in `node.description`, for highlighting. -1 for no match. */
+	descriptionStart: number;
 }
 
 export interface SchemaSearchIndex {
@@ -381,15 +392,33 @@ export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 }
 
 function entry(node: SchemaTreeNode): IndexEntry {
-	return { node, haystack: `${node.name} ${node.signature}`.toLowerCase() };
+	return {
+		node,
+		name: node.name.toLowerCase(),
+		signature: node.signature.toLowerCase(),
+		description: (node.description ?? "").toLowerCase(),
+	};
 }
 
 /**
- * The index rows matching `term`, name matches first.
+ * The index rows matching `term`, in three tiers: name, then signature, then
+ * description.
  *
  * A signature match is kept but ranked below a name match: searching `Post`
  * should list the `Post` type and `Query.post` before every field that happens
  * to return one, and without the split the type is buried under its own users.
+ *
+ * **Descriptions are a third tier rather than more haystack.** They are prose -
+ * whole sentences on a documented schema - so a common word (`the`, `id`,
+ * `user`) matches most of the schema through them. Folded into the signature
+ * tier that flood would drown the type matches that tier exists to surface;
+ * ranked below it, a description hit is the last thing offered rather than the
+ * first, which is the order a user reading a flat list expects. The pane still
+ * has to say *why* such a row is in the list, since its name is unmarked - that
+ * is what `descriptionStart` is for.
+ *
+ * Both offsets are reported whatever tier the row landed in, so a row whose
+ * name *and* description mention the term marks both.
  */
 export function searchSchema(
 	index: SchemaSearchIndex,
@@ -399,15 +428,21 @@ export function searchSchema(
 	const needle = term.trim().toLowerCase();
 	if (!needle) return [];
 
-	const named: SchemaSearchMatch[] = [];
-	const other: SchemaSearchMatch[] = [];
-	for (const { node, haystack } of index.entries) {
-		const inName = node.name.toLowerCase().indexOf(needle);
-		if (inName >= 0) named.push({ node, matchStart: inName });
-		else if (haystack.includes(needle)) other.push({ node, matchStart: -1 });
-		if (named.length >= limit) break;
+	const byName: SchemaSearchMatch[] = [];
+	const bySignature: SchemaSearchMatch[] = [];
+	const byDescription: SchemaSearchMatch[] = [];
+	for (const item of index.entries) {
+		const matchStart = item.name.indexOf(needle);
+		const descriptionStart = item.description.indexOf(needle);
+		const match = { node: item.node, matchStart, descriptionStart };
+
+		if (matchStart >= 0) byName.push(match);
+		else if (item.signature.includes(needle)) bySignature.push(match);
+		else if (descriptionStart >= 0) byDescription.push(match);
+
+		if (byName.length >= limit) break;
 	}
-	return [...named, ...other].slice(0, limit);
+	return [...byName, ...bySignature, ...byDescription].slice(0, limit);
 }
 
 /** A name cut into the part before the search match, the match, and the rest. */

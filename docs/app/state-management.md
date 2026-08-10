@@ -707,21 +707,30 @@ const { selectedCategory, setSelectedCategory } = useSettingsStore();
 #### `lib/graphql/explorer-store.ts` - GraphQL Schema Explorer View
 
 UI-only, in memory: whether the schema explorer pane is open, and per schema
-identity the search text, the expanded row ids and the scroll position.
+identity the search text, the expanded row ids, the scroll position and whether
+rows show their full description or one clipped line.
 
 **State:**
 ```typescript
 {
   open: boolean,
-  byKey: Record<string, { search: string; expanded: string[]; scrollTop: number }>,
+  byKey: Record<
+    string,
+    { search: string; expanded: string[]; scrollTop: number; showDescriptions: boolean }
+  >,
   lru: string[]
 }
 ```
 
 **Key Methods:**
 ```typescript
-const { open, setOpen, view, setSearch, toggleExpanded, setScrollTop } = useExplorerStore();
+const { open, setOpen, view, setSearch, toggleExpanded, setScrollTop, toggleDescriptions } =
+  useExplorerStore();
 ```
+
+`showDescriptions` is per schema like everything else here: how much
+documentation a user wants on screen is a property of the schema being read, and
+an endpoint that documents nothing has nothing to answer for.
 
 **A store rather than component state, because the pane is unmounted for no
 reason the user did.** Radix tears the whole Body tab down on every glance at

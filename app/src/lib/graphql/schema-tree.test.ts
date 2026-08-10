@@ -199,6 +199,62 @@ describe("searchSchema", () => {
 	it("bounds what it returns", () => {
 		expect(searchSchema(index, "e", 3)).toHaveLength(3);
 	});
+
+	it("finds a row by a word that appears only in its description", () => {
+		// "Search across users and posts." - `across` is in no name and no
+		// signature anywhere in the fixture, so before descriptions were indexed
+		// this returned nothing while the pane was displaying the sentence.
+		const found = searchSchema(index, "across");
+		expect(found.map((m) => m.node.name)).toEqual(["search"]);
+		expect(found[0].matchStart).toBe(-1);
+		expect(found[0].descriptionStart).toBe(7);
+	});
+
+	it("reports where the description matched, for highlighting", () => {
+		// "How search results are ordered." on the Ranking enum.
+		const ranking = searchSchema(index, "search").find((m) => m.node.name === "Ranking");
+		expect(ranking?.descriptionStart).toBe(4);
+	});
+
+	it("reports both offsets when the name and the description each match", () => {
+		const search = searchSchema(index, "search").find((m) => m.node.name === "search");
+		expect(search?.matchStart).toBe(0);
+		expect(search?.descriptionStart).toBe(0);
+	});
+
+	it("leaves the offset at -1 for a node with no description at all", () => {
+		const post = searchSchema(index, "post").find((m) => m.node.name === "Post");
+		expect(post?.descriptionStart).toBe(-1);
+	});
+
+	it("ranks name above signature above description", () => {
+		/*
+		 * A purpose-built schema rather than the fixture: `zebra` reaches each
+		 * tier exactly once, so the order proves the tiers rather than the
+		 * type map's iteration order. Collapse description into the signature
+		 * tier and `Documented` - declared first - overtakes `striped`.
+		 */
+		const tiered = buildSchema(`
+			"""Mentions zebra in prose."""
+			type Documented { id: ID }
+			type Zebra { id: ID }
+			type Query {
+				striped: Zebra
+				zebra: Int
+			}
+		`);
+		const names = searchSchema(buildSearchIndex(tiered), "zebra").map((m) => m.node.name);
+
+		expect(names).toEqual(expect.arrayContaining(["Zebra", "striped", "Documented"]));
+		expect(names.indexOf("striped")).toBeGreaterThan(names.indexOf("Zebra"));
+		expect(names.indexOf("Documented")).toBeGreaterThan(names.indexOf("striped"));
+	});
+
+	it("does not let a description match crowd out the tiers above it", () => {
+		// `e` is in most descriptions; the first results must still be names.
+		const first = searchSchema(index, "e", 5);
+		expect(first.every((m) => m.matchStart >= 0)).toBe(true);
+	});
 });
 
 describe("splitAtMatch", () => {

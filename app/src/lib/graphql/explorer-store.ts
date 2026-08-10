@@ -31,9 +31,22 @@ export interface ExplorerViewState {
 	/** Ids of the expanded rows. An array, so the state stays serialisable. */
 	expanded: string[];
 	scrollTop: number;
+	/**
+	 * Whether every row shows its full description rather than one clipped line.
+	 *
+	 * Per schema, like everything else here: how much documentation a user wants
+	 * on screen is a property of the schema they are reading, and an endpoint
+	 * that documents nothing has nothing to answer for.
+	 */
+	showDescriptions: boolean;
 }
 
-const EMPTY_VIEW: ExplorerViewState = { search: "", expanded: [], scrollTop: 0 };
+const EMPTY_VIEW: ExplorerViewState = {
+	search: "",
+	expanded: [],
+	scrollTop: 0,
+	showDescriptions: false,
+};
 
 /**
  * How many schemas' view states to keep. Matches the schema cache's own cap -
@@ -51,6 +64,7 @@ interface ExplorerState {
 	setSearch: (key: string, search: string) => void;
 	toggleExpanded: (key: string, id: string) => void;
 	setScrollTop: (key: string, scrollTop: number) => void;
+	toggleDescriptions: (key: string) => void;
 }
 
 function withView(
@@ -89,4 +103,10 @@ export const useExplorerStore = create<ExplorerState>((set, get) => ({
 		}),
 
 	setScrollTop: (key, scrollTop) => set((s) => withView(s, key, { ...s.view(key), scrollTop })),
+
+	toggleDescriptions: (key) =>
+		set((s) => {
+			const current = s.view(key);
+			return withView(s, key, { ...current, showDescriptions: !current.showDescriptions });
+		}),
 }));

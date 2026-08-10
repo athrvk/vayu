@@ -27,7 +27,15 @@
  */
 
 import { useCallback, useMemo, useRef } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import {
+	AlertCircle,
+	ChevronDown,
+	ChevronRight,
+	Loader2,
+	RefreshCw,
+	Search,
+	Text,
+} from "lucide-react";
 import type { GraphQLSchema } from "graphql";
 import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
@@ -51,16 +59,17 @@ const INDENT_STEP = 12;
 
 /**
  * A row on screen: a node, how deep it sits, and where the search term matched
- * its name.
+ * it.
  *
- * Tree rows and signature-only matches carry -1, the same "no match" the search
- * itself reports - so the row draws its name whole without needing to know
+ * Tree rows carry -1 for both, the same "no match" the search itself reports -
+ * so a row draws its name and its description whole without needing to know
  * which of the two modes produced it.
  */
 interface ExplorerRowModel {
 	node: SchemaTreeNode;
 	depth: number;
 	matchStart: number;
+	descriptionStart: number;
 }
 
 export interface SchemaExplorerProps {
@@ -88,9 +97,11 @@ export function SchemaExplorer({
 }: SchemaExplorerProps) {
 	const view = useExplorerStore((s) => s.byKey[schemaKey]);
 	const search = view?.search ?? "";
+	const showDescriptions = view?.showDescriptions ?? false;
 	const setSearch = useExplorerStore((s) => s.setSearch);
 	const toggleExpanded = useExplorerStore((s) => s.toggleExpanded);
 	const setScrollTop = useExplorerStore((s) => s.setScrollTop);
+	const toggleDescriptions = useExplorerStore((s) => s.toggleDescriptions);
 
 	const treeRef = useRef<HTMLDivElement | null>(null);
 	const searchRef = useRef<HTMLInputElement | null>(null);
@@ -120,9 +131,14 @@ export function SchemaExplorer({
 				node: m.node,
 				depth: 0,
 				matchStart: m.matchStart,
+				descriptionStart: m.descriptionStart,
 			}));
 		}
-		return visibleRows(schema, expanded).map((row) => ({ ...row, matchStart: -1 }));
+		return visibleRows(schema, expanded).map((row) => ({
+			...row,
+			matchStart: -1,
+			descriptionStart: -1,
+		}));
 	}, [schema, searchIndex, term, expanded]);
 
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(rows.length, ROW_WINDOW);
@@ -180,6 +196,22 @@ export function SchemaExplorer({
 						className="h-6 pl-6 text-[11px]"
 					/>
 				</div>
+				{/*
+				 * Descriptions are clipped to one line by default and the full
+				 * text is only in the row's native tooltip, which is no use to
+				 * anyone reading rather than pointing. This is the show/hide for
+				 * it - one pane-level control rather than a per-row disclosure,
+				 * because a third target inside a 24px row is exactly the
+				 * composite-row hit-area trap `drawer-row-hit-area` was written
+				 * against, and it would take its width from the activator.
+				 */}
+				<TooltipIconButton
+					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
+					aria-pressed={showDescriptions}
+					className={cn("h-6 w-6 shrink-0", showDescriptions && "text-primary")}
+					icon={<Text className="w-3 h-3" />}
+					onClick={() => toggleDescriptions(schemaKey)}
+				/>
 				<TooltipIconButton
 					label="Refresh schema"
 					className="h-6 w-6 shrink-0"
@@ -230,18 +262,22 @@ export function SchemaExplorer({
 						onKeyDown={onKeyDown}
 						onFocus={roving.onFocus}
 					>
-						{rows.slice(0, visible).map(({ node, depth, matchStart }) => (
-							<ExplorerRow
-								key={node.id}
-								node={node}
-								depth={depth}
-								matchStart={matchStart}
-								matchLength={term.length}
-								expanded={expanded.has(node.id)}
-								onToggle={() => toggleExpanded(schemaKey, node.id)}
-								onInsert={() => onInsert(node)}
-							/>
-						))}
+						{rows
+							.slice(0, visible)
+							.map(({ node, depth, matchStart, descriptionStart }) => (
+								<ExplorerRow
+									key={node.id}
+									node={node}
+									depth={depth}
+									matchStart={matchStart}
+									descriptionStart={descriptionStart}
+									matchLength={term.length}
+									showDescription={showDescriptions}
+									expanded={expanded.has(node.id)}
+									onToggle={() => toggleExpanded(schemaKey, node.id)}
+									onInsert={() => onInsert(node)}
+								/>
+							))}
 						{hasMore && (
 							<div ref={sentinelRef} className="px-2 py-1">
 								<span className={EYEBROW_CLASS}>
@@ -261,8 +297,12 @@ interface ExplorerRowProps {
 	depth: number;
 	/** Where the search term matched `node.name`; -1 when nothing marks the name. */
 	matchStart: number;
-	/** Length of the search term, i.e. how much of the name the match covers. */
+	/** Where the search term matched `node.description`; -1 when nothing marks it. */
+	descriptionStart: number;
+	/** Length of the search term, i.e. how much of the text the match covers. */
 	matchLength: number;
+	/** Whether the pane is showing full descriptions rather than one clipped line. */
+	showDescription: boolean;
 	expanded: boolean;
 	onToggle: () => void;
 	onInsert: () => void;
@@ -272,13 +312,25 @@ function ExplorerRow({
 	node,
 	depth,
 	matchStart,
+	descriptionStart,
 	matchLength,
+	showDescription,
 	expanded,
 	onToggle,
 	onInsert,
 }: ExplorerRowProps) {
 	const deprecated = node.deprecationReason !== null;
 	const name = splitAtMatch(node.name, matchStart, matchLength);
+	const description = splitAtMatch(node.description ?? "", descriptionStart, matchLength);
+
+	/*
+	 * A description the term matched is always shown in full, whatever the
+	 * toggle says. Clipped to one line it is usually cut off *before* the word
+	 * that put the row in the results, which leaves the user a row they cannot
+	 * connect to what they typed - the failure the mark exists to prevent, and
+	 * the reason a description tier needs this and the name tier does not.
+	 */
+	const full = showDescription || descriptionStart >= 0;
 	const title = [
 		node.description,
 		deprecated ? `Deprecated: ${node.deprecationReason}` : null,
@@ -305,7 +357,7 @@ function ExplorerRow({
 			tabIndex={-1}
 			title={title || undefined}
 			style={{ paddingLeft: 4 + depth * INDENT_STEP }}
-			className="focus-row flex h-6 items-center gap-1 pr-2 hover:bg-accent transition-colors"
+			className="focus-row flex min-h-6 items-center gap-1 pr-2 hover:bg-accent transition-colors"
 		>
 			{node.expandable ? (
 				<button
@@ -326,45 +378,79 @@ function ExplorerRow({
 				<span className="w-3 shrink-0" />
 			)}
 
+			{/*
+			 * One line or two, the activator stays a single button: the whole row
+			 * inserts, including the description, and splitting the description
+			 * onto its own control would carve a hole in the hit area the row
+			 * paints - the composite-row trap again.
+			 */}
 			<button
 				type="button"
 				data-tree-activate
 				tabIndex={-1}
 				onClick={onInsert}
-				className="flex min-w-0 self-stretch items-center gap-1 flex-1 text-left text-[11px] font-mono"
+				className={cn(
+					"flex min-w-0 self-stretch flex-1 text-left text-[11px] font-mono",
+					full ? "flex-col justify-center py-0.5" : "items-center gap-1"
+				)}
 			>
 				<span
-					className={cn(
-						"shrink-0",
-						deprecated && "line-through",
-						node.kind === "type" || node.kind === "branch"
-							? "text-foreground"
-							: "text-primary"
-					)}
+					className={cn("flex min-w-0 max-w-full items-center gap-1", full && "w-full")}
 				>
-					{/*
-					 * Three segments rather than one string, so the matched run
-					 * can be marked without the row's own colour moving: a field
-					 * name is `text-primary` and a type name `text-foreground`,
-					 * and `text-inherit` keeps that distinction through the tint.
-					 * The `mark` element needs both properties set - a bare one
-					 * arrives with the user agent's yellow-on-black.
-					 *
-					 * The three concatenate to exactly `node.name`, which is what
-					 * keeps the accessible row text unchanged by highlighting.
-					 */}
-					{name.before}
-					{name.match && (
-						<mark className="rounded-sm bg-primary/20 text-inherit">{name.match}</mark>
+					<span
+						data-tree-name
+						className={cn(
+							"shrink-0",
+							deprecated && "line-through",
+							node.kind === "type" || node.kind === "branch"
+								? "text-foreground"
+								: "text-primary"
+						)}
+					>
+						{/*
+						 * Three segments rather than one string, so the matched run
+						 * can be marked without the row's own colour moving: a field
+						 * name is `text-primary` and a type name `text-foreground`,
+						 * and `text-inherit` keeps that distinction through the tint.
+						 * The `mark` element needs both properties set - a bare one
+						 * arrives with the user agent's yellow-on-black.
+						 *
+						 * The three concatenate to exactly `node.name`, which is what
+						 * keeps the accessible row text unchanged by highlighting.
+						 */}
+						{name.before}
+						{name.match && (
+							<mark className="rounded-sm bg-primary/20 text-inherit">
+								{name.match}
+							</mark>
+						)}
+						{name.after}
+					</span>
+					{node.signature && (
+						<span className="truncate text-muted-foreground">{node.signature}</span>
 					)}
-					{name.after}
+					{node.description && !full && (
+						<span
+							data-tree-description
+							className="truncate text-muted-foreground font-sans"
+						>
+							- {node.description}
+						</span>
+					)}
 				</span>
-				{node.signature && (
-					<span className="truncate text-muted-foreground">{node.signature}</span>
-				)}
-				{node.description && (
-					<span className="truncate text-muted-foreground font-sans">
-						- {node.description}
+
+				{node.description && full && (
+					<span
+						data-tree-description
+						className="w-full whitespace-normal break-words text-muted-foreground font-sans"
+					>
+						{description.before}
+						{description.match && (
+							<mark className="rounded-sm bg-primary/20 text-inherit">
+								{description.match}
+							</mark>
+						)}
+						{description.after}
 					</span>
 				)}
 			</button>
