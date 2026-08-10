@@ -326,6 +326,22 @@ inline const char* to_string (ErrorCode code) {
 }
 
 /**
+ * @brief Does this status code count as a success when a run is *tallied*?
+ *
+ * 2xx and 3xx succeed; everything else - 4xx, 5xx, and the 0 a transport
+ * failure is recorded under - is a failure. Deliberately wider than
+ * `Response::is_success`, which answers a per-request question about one
+ * exchange: an aggregate must classify a code it holds no `ErrorCode` for,
+ * because a stored status distribution is all the numbers it has left.
+ *
+ * One copy so the run report, the sampled-results report and the threshold
+ * verdict cannot disagree about what "failed" counted.
+ */
+[[nodiscard]] constexpr bool is_success_status (int status_code) noexcept {
+    return status_code >= 200 && status_code < 400;
+}
+
+/**
  * @brief HTTP Response
  */
 struct Response {

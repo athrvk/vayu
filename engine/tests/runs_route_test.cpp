@@ -745,6 +745,73 @@ TEST_F (RunsRouteTest, ReportOmitsTestValidationWhenNoScriptRan) {
     EXPECT_FALSE (body.contains ("testValidation"));
 }
 
+// The aggregate verdict a per-response script cannot give, round-tripped
+// through the stored summary. The property under test is not just that the
+// section survives: the error rate the verdict judged has to be the same number
+// the report prints beside it, or the two halves of the report contradict.
+TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
+    seed ({ .id = "run_budgets", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    // p99 is 30 ms against a 50 ms budget (passes); the fixture's 10 failures
+    // in 100 requests are 10% against a 1% budget (fails).
+    const nlohmann::json config{ { "thresholds",
+    { { "latencyP99Ms", 50 }, { "maxErrorRatePct", 1 } } } };
+    inputs.thresholds = vayu::core::evaluate_thresholds (config, inputs);
+    db_->update_run_summary (
+    "run_budgets", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_budgets");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("thresholdValidation"));
+    const auto& verdict = body["thresholdValidation"];
+    EXPECT_EQ (verdict["verdict"].get<std::string> (), "failed");
+    EXPECT_EQ (verdict["passed"].get<size_t> (), 1u);
+    EXPECT_EQ (verdict["failed"].get<size_t> (), 1u);
+
+    ASSERT_TRUE (verdict["checks"].is_array ());
+    ASSERT_EQ (verdict["checks"].size (), 2u);
+    EXPECT_EQ (verdict["checks"][0]["metric"].get<std::string> (), "latencyP99Ms");
+    EXPECT_DOUBLE_EQ (verdict["checks"][0]["limit"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (verdict["checks"][0]["actual"].get<double> (), 30.0);
+    EXPECT_TRUE (verdict["checks"][0]["passed"].get<bool> ());
+    EXPECT_EQ (verdict["checks"][1]["metric"].get<std::string> (), "maxErrorRatePct");
+    EXPECT_FALSE (verdict["checks"][1]["passed"].get<bool> ());
+
+    // The one assertion that pins the two sides together.
+    EXPECT_DOUBLE_EQ (verdict["checks"][1]["actual"].get<double> (),
+    body["summary"]["errorRate"].get<double> ());
+}
+
+TEST_F (RunsRouteTest, AThresholdVerdictPassesOnlyWhenNothingFailed) {
+    seed ({ .id = "run_budgets_ok", .start_time = 1000 });
+    auto inputs       = summary_inputs ();
+    inputs.thresholds = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "latencyP99Ms", 50 }, { "maxErrorRatePct", 25 } } } },
+    inputs);
+    db_->update_run_summary (
+    "run_budgets_ok", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_budgets_ok");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["thresholdValidation"]["verdict"].get<std::string> (), "passed");
+    EXPECT_EQ (body["thresholdValidation"]["failed"].get<size_t> (), 0u);
+}
+
+// A run that declared no budgets keeps the section out entirely - and so does
+// every run recorded before budgets existed, which is the same stored shape.
+TEST_F (RunsRouteTest, ReportOmitsThresholdValidationWhenNoBudgetWasDeclared) {
+    seed ({ .id = "run_no_budgets", .start_time = 1000 });
+    auto inputs       = summary_inputs ();
+    inputs.thresholds = std::nullopt;
+    db_->update_run_summary (
+    "run_no_budgets", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_budgets");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("thresholdValidation"));
+}
+
 // A summary that is not a JSON object is treated as absent. There is no second
 // aggregate source any more, so the report stands on the run's sampled results
 // - which is a report, not a 500 and not an empty run.

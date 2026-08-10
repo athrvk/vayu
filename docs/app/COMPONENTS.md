@@ -212,7 +212,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput`. The method dropdown lives **inside** the URL field's border (one control, not two - it was a separate `w-[76px]` box sized for OPTIONS). Send + Load Test are one **attached** pair on the same accent: Send is `--primary-fill` with a white label, Load Test is `--primary` at 12% with `--primary-text` and a transparent left border, so the join is a step in weight rather than a seam between materials. Send owns both corners when `canStartLoadTest` is false. Both shortcuts (`⌘↵` / `⌘⇧↵`) come from `constants/shortcuts.ts` and are shown on the buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
 | `components/RequestTabs/` | `index` + `panels/`: `InfoPanel` (**first in the row**), `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `script/ScriptPanel`, `InheritedScriptsNotice`, `ChainCard`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form) through it. One `ScriptPanel` serves both script tabs, as `variant="pre"` and `variant="post"`; everything that differs between them - the field it binds, the two context keys it reads, the intro sentence and the quick reference - is data in `script/script-variants.tsx`. It replaced `PreScriptPanel` and `TestScriptPanel`, two ~155-line files that a normalised `diff` showed differing in three places. It renders `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; that accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `AuthInheritBanner` and `InheritedScriptsNotice` share their chrome through `ChainCard` - the tinted box, summary row, captioned list and hairline separators - which they previously wrote out twice, identically. `InfoPanel` holds the request **name** (autosaved: committed trimmed on blur, a blank one refused out loud via `reportBlankNameRefused()` and the stored name restored through the context's `restoreStoredName()`) and its description, and is first because those are the first things you want to read about a request; it replaced `RequestDescription`, a permanent ~30px band above the tab strip that every request paid for whether or not it had one. Its badge is `1` for "there is something here", matching Body/Auth/Scripts/Settings. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
 | `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`). The Console tab renders whenever the response carries console logs **or** a `preScriptError`/`postScriptError`, so a script that throws before logging still shows its error rather than a silent 200 |
-| `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
+| `components/LoadTestConfigDialog/` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0. A second disclosure, **Pass/fail budgets**, declares the run's latency / error-rate / throughput limits; the field table and its rules are `budgets.ts`, and the p99 field is seeded from the `sloThresholdMs` client setting so that setting becomes the default budget rather than a parallel notion of "too slow". A budget out of the engine's range blocks Start with a named message instead of being dropped from the payload |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
 | `shared/KeyValueEditor/` | `index`, `KeyValueRow`, `FilePartCell` - reusable key/value table (params, headers, form fields). `allowFiles` (form-data only) turns each row into a text/file switch; `FilePartCell` is the value cell of a file part - it picks a file, shows the path, and marks one an import brought in and this app never chose. `lib/file-path.ts` holds the basename rule it shares with the importers |
 | `shared/VariableInput/` | `index`, `EditableVariable`, `DynamicVariableToken` - input with `{{variable}}` highlighting + autocomplete. `EditableVariable` is the stored-variable token (hover to read, click to edit, red when nothing defines the name); `DynamicVariableToken` is the `{{$guid}}` one, which has no stored value to show or edit and must not be painted as undefined |
@@ -448,6 +448,27 @@ Renders nothing when the run displaced nothing, and nothing when the run
 reported no counts at all (an older summary): "nothing was dropped" and "we
 cannot tell" are both worse as prose than as absence. Built on `Callout`
 (`severity="info"`) rather than a hand-rolled muted row.
+
+## Threshold Verdict (`components/shared/ThresholdVerdict.tsx`)
+
+The run's verdict against the pass/fail budgets it declared
+(`RunReport.thresholdValidation`): one row per budget - the limit, what the run
+measured, and whether it met it - under a Passed/Failed header. Two surfaces
+show it, the dashboard's report view and the history detail's Overview, so it
+lives here once.
+
+It is the **aggregate** counterpart to the Test Validation card beside it: a
+`pm.test` script sees one response at a time and structurally cannot assert a
+p99 or an error rate, so a run where every assertion passed can still have
+missed the budget it was run to check.
+
+Renders nothing when the run declared no budgets - which is every run recorded
+before they existed - following the same absent-vs-zero rule as
+`SampleRetentionNote` and `CapturedDataWarning`: "not judged" is a different
+claim from "judged and passed nothing", and only absence can make the first.
+The comparator follows the metric (`≥` for the throughput floor, `≤` for the
+ceilings), and a metric key this build has no label for renders under its raw
+name rather than vanishing from a verdict whose counts still include it.
 
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 

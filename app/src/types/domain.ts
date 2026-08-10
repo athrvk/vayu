@@ -688,6 +688,24 @@ export interface RunListParams {
 /** Load-test execution strategy. Single source of truth for the mode union. */
 export type LoadTestMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
 
+/**
+ * Pass/fail budgets a run declares up front, so the engine can judge it rather
+ * than only measure it. Keys are the engine's own metric names (they travel
+ * verbatim on `POST /runs` and come back in `RunReport.thresholdValidation`),
+ * which is why they are camelCase where the rest of `LoadTestConfig` is not.
+ *
+ * Every key is optional and at least one must be present - the engine rejects
+ * an empty object rather than starting a run nothing will judge.
+ */
+export interface RunThresholds {
+	latencyP50Ms?: number;
+	latencyP95Ms?: number;
+	latencyP99Ms?: number;
+	/** Share of the run's requests allowed to fail, 0-100. */
+	maxErrorRatePct?: number;
+	minThroughputRps?: number;
+}
+
 export interface LoadTestConfig {
 	duration_seconds?: number;
 	rps?: number;
@@ -709,6 +727,8 @@ export interface LoadTestConfig {
 	comment?: string;
 	latency_percentiles?: number[];
 	max_in_flight?: number;
+	/** Absent when the run declared no budgets - never an empty object. */
+	thresholds?: RunThresholds;
 }
 
 /**
@@ -978,6 +998,30 @@ export interface RunReport {
 		testsPassed: number;
 		testsFailed: number;
 		successRate: number;
+	};
+	/**
+	 * The run's verdict against the budgets it declared ({@link RunThresholds}).
+	 *
+	 * The aggregate half of pass/fail: `testValidation` replays a script against
+	 * individual responses and structurally cannot assert a p99 or an error
+	 * rate, so a run that meets every assertion can still miss its budget.
+	 *
+	 * `undefined` is a run that declared no budgets - which is *not* the same
+	 * claim as "passed nothing", so a report without it renders exactly as it
+	 * did before budgets existed. `metric` is typed loosely on purpose: it is
+	 * the engine's key, and a newer sidecar may judge a metric this build has
+	 * no label for.
+	 */
+	thresholdValidation?: {
+		checks: {
+			metric: string;
+			limit: number;
+			actual: number;
+			passed: boolean;
+		}[];
+		passed: number;
+		failed: number;
+		verdict: "passed" | "failed";
 	};
 	/**
 	 * How many records each of the run's bounded stores thinned away.

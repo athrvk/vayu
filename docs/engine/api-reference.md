@@ -1662,6 +1662,7 @@ Start a load test run (Vayu Mode).
   "requestName": "Create user",       // Optional, read by the tests script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
+  "thresholds": {},          // Optional pass/fail budgets - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
   "httpVersion": "auto"      // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
@@ -1678,6 +1679,42 @@ actually depends on this field to specify a protocol in the first place. An
 explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
+
+#### The `thresholds` block (pass/fail budgets)
+
+A run may declare budgets it must meet. The engine evaluates them once, when the
+run reaches a terminal status, and the report comes back with a
+[`thresholdValidation`](#get-runsrunidreport) section carrying one check per
+budget and a verdict. Without the block a run is measured and not judged, and
+its report has no such section at all.
+
+```jsonc
+{
+  "thresholds": {
+    "latencyP50Ms": 20,        // ceiling, ms; > 0 and <= 86400000
+    "latencyP95Ms": 40,        // ceiling, ms
+    "latencyP99Ms": 50,        // ceiling, ms
+    "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
+    "minThroughputRps": 10000  // floor, completed requests per second; > 0
+  }
+}
+```
+
+Every key is optional and at least one must be present. An unknown key, a
+non-numeric or out-of-range value, or an object that declares nothing is a `400`
+`invalid_run_config` naming the field - and, like every other run-config
+rejection, it happens before the run row is created, so a rejected request
+leaves no trace. A `null` value reads as absent, the same rule the flat numeric
+fields follow.
+
+`maxErrorRatePct` is measured against every response outside 2xx/3xx **plus** the
+transport failures that never got one - the same figure `summary.errorRate`
+reports. This is deliberately wider than the script-level `pm.test` view: a run
+of nothing but HTTP 500s has a transport error rate of zero.
+
+The verdict is the run's, not the process's: a run **stopped early** is judged on
+what it measured up to that point, and its status stays `completed` / `stopped`
+whatever the verdict says. A failing budget is reported, never a failed run.
 
 #### The `scenario` block (collection runs)
 
@@ -2599,7 +2636,8 @@ A run that is already finished answers `{"status": "<status>", "runId": ...,
 
 Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
-only when a test script ran).
+only when a test script ran, `thresholdValidation` only when the run declared
+[budgets](#the-thresholds-block-passfail-budgets)).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -2670,6 +2708,10 @@ alone rather than erroring. **The response shape is the same either way.**
     "responseBodiesCaptured": 23
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
+  "thresholdValidation": {
+    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
+    "passed": 1, "failed": 0, "verdict": "passed"
+  },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```

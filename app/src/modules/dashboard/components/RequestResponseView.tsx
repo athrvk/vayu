@@ -26,7 +26,7 @@ import {
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
-import { SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
+import { SampleRetentionNote, CapturedDataWarning, ThresholdVerdict } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
@@ -216,6 +216,10 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 					</CardContent>
 				</Card>
 			)}
+
+			{/* The whole-run verdict, above the per-response one: a run can meet
+			    every assertion and still miss the budget it was run to check. */}
+			<ThresholdVerdict verdict={report.thresholdValidation} />
 
 			{/* Test Validation Results */}
 			{report.testValidation && (
