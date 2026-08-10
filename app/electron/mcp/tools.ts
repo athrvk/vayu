@@ -29,6 +29,13 @@ import { HTTP_VERSIONS } from "./http-versions.js";
 /** An auth block as stored/forwarded (discriminated by `mode`). */
 type AuthRecord = Record<string, unknown> & { mode?: string };
 
+/**
+ * The one engine call composition needs. Named as a subset so a caller outside
+ * the tool registry - the CI gate - can reuse the load-run payload builder
+ * without standing up a client it does not otherwise use.
+ */
+type ComposeCapableClient = Pick<EngineClient, "composeRequest">;
+
 // --- Elicitation -------------------------------------------------------------
 
 /** A restricted, flat object schema the client renders as a form. */
@@ -465,7 +472,7 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
  * agent reads "no such saved request", not a transport failure.
  */
 async function composeViaEngine(
-	client: EngineClient,
+	client: ComposeCapableClient,
 	body: Record<string, unknown>,
 	signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
@@ -540,7 +547,7 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
  */
 async function composeLoadRunRequest(
 	args: Record<string, unknown>,
-	ctx: ToolContext,
+	client: ComposeCapableClient,
 	signal?: AbortSignal
 ): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
 	const savedId = str(args, "requestId");
@@ -568,7 +575,7 @@ async function composeLoadRunRequest(
 		if (Object.keys(overrides).length > 0) composeBody.request = overrides;
 	}
 
-	const payload = await composeViaEngine(ctx.client, composeBody, signal);
+	const payload = await composeViaEngine(client, composeBody, signal);
 
 	// A saved request's pre-request scripts cannot run under load; strip them
 	// from the payload but report how many were dropped.
@@ -597,6 +604,84 @@ async function composeLoadRunRequest(
  * duration-bounded, so an unspecified run is one the duration cap can hold.
  */
 const DEFAULT_LOAD_MODE = "constant_concurrency";
+
+/**
+ * Which fields a load-run description carries onto the engine payload. Two
+ * lists rather than one because the engine reads the strategy numbers as
+ * numbers and the durations as its own duration grammar, and a number arriving
+ * where a duration string belongs is a run configured differently than asked.
+ */
+const LOAD_RUN_NUMBER_FIELDS = [
+	"concurrency",
+	"startConcurrency",
+	"iterations",
+	"targetRps",
+	"maxInFlight",
+	"sloMs",
+] as const;
+
+const LOAD_RUN_DURATION_FIELDS = ["duration", "rampUpDuration", "stepDuration"] as const;
+
+/**
+ * The `POST /runs` payload for a load run described the way `start_load_run`
+ * describes one: composed engine-side, then the mode, the strategy fields and
+ * the pass/fail budgets laid on top.
+ *
+ * **No safety guard is applied here** - not the allowlist, not the caps, not
+ * the duration default that keeps an omitted duration under one. Those are the
+ * *agent* surface's rules and they live with the tool, because the other caller
+ * is `gate-cli.ts`: an operator-invoked CI gate, where the human chose the
+ * target the same way a human pointing the app at it does. Splitting the build
+ * from the guard is what lets the gate reuse this without inheriting an
+ * agent-shaped refusal, and what keeps one description of a load run instead of
+ * two that drift.
+ *
+ * `loadParams` comes back so the caller can guard the *same* mode string the
+ * payload carries - a guard reading a different mode than the run uses is a
+ * guard reading the wrong run.
+ */
+export async function buildLoadRunPayload(
+	args: Record<string, unknown>,
+	client: ComposeCapableClient,
+	signal?: AbortSignal
+): Promise<{
+	payload: Record<string, unknown>;
+	droppedPreRequestScripts: number;
+	loadParams: LoadRunParams;
+}> {
+	const composed = await composeLoadRunRequest(args, client, signal);
+	const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
+
+	const payload: Record<string, unknown> = { ...composed.payload, mode };
+	for (const key of LOAD_RUN_NUMBER_FIELDS) {
+		if (typeof args[key] === "number") payload[key] = args[key];
+	}
+	for (const key of LOAD_RUN_DURATION_FIELDS) {
+		const v = str(args, key);
+		if (v !== undefined) payload[key] = v;
+	}
+	// Forwarded verbatim - the keys are the engine's own metric names, and they
+	// come back unchanged in the report's `thresholdValidation`. Both callers
+	// bound the values before they get here (Zod on the tool, the flag parser
+	// on the gate).
+	if (args.thresholds && typeof args.thresholds === "object") {
+		payload.thresholds = args.thresholds;
+	}
+
+	const loadParams: LoadRunParams = {
+		mode,
+		targetRps: typeof args.targetRps === "number" ? args.targetRps : undefined,
+		concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
+		startConcurrency:
+			typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
+		iterations: typeof args.iterations === "number" ? args.iterations : undefined,
+		duration: (args.duration as string | number | undefined) ?? undefined,
+		rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
+		stepDuration: (args.stepDuration as string | number | undefined) ?? undefined,
+	};
+
+	return { payload, droppedPreRequestScripts: composed.droppedPreRequestScripts, loadParams };
+}
 
 /**
  * The engine's `maxInFlight` guard (`run_config::MAX_IN_FLIGHT` in
@@ -1862,12 +1947,13 @@ export const TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			let composed;
 			try {
-				composed = await composeLoadRunRequest(args, ctx, signal);
+				composed = await buildLoadRunPayload(args, ctx.client, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
-			const url = String(composed.payload.url ?? "");
+			const payload = composed.payload;
+			const url = String(payload.url ?? "");
 			if (!url) {
 				return errorResult(
 					`Saved request "${str(args, "requestId")}" has no URL to load-test.`
@@ -1876,52 +1962,17 @@ export const TOOLS: McpTool[] = [
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 
-			// One mode string for both the guard and the payload: which strategy
-			// the engine picks decides which cap applies, so a guard reading a
-			// different mode than the run uses is a guard reading the wrong run.
-			const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
-			const loadParams: LoadRunParams = {
-				mode,
-				targetRps: typeof args.targetRps === "number" ? args.targetRps : undefined,
-				concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
-				startConcurrency:
-					typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
-				iterations: typeof args.iterations === "number" ? args.iterations : undefined,
-				duration: (args.duration as string | number | undefined) ?? undefined,
-				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
-				stepDuration: (args.stepDuration as string | number | undefined) ?? undefined,
-			};
-			const caps = checkLoadCaps(loadParams, ctx.config);
+			// The guard reads the very params the payload was built from, so the
+			// strategy it caps is the strategy the engine will pick - a guard
+			// reading a different mode than the run uses is a guard reading the
+			// wrong run.
+			const caps = checkLoadCaps(composed.loadParams, ctx.config);
 			if (!caps.ok) return errorResult(caps.error!);
 
-			const payload: Record<string, unknown> = {
-				...composed.payload,
-				mode,
-			};
-			for (const key of [
-				"concurrency",
-				"startConcurrency",
-				"iterations",
-				"targetRps",
-				"maxInFlight",
-				"sloMs",
-			]) {
-				if (typeof args[key] === "number") payload[key] = args[key];
-			}
-			for (const key of ["duration", "rampUpDuration", "stepDuration"]) {
-				const v = str(args, key);
-				if (v !== undefined) payload[key] = v;
-			}
-			// Forwarded verbatim - the keys are the engine's own metric names,
-			// and they come back unchanged in `get_run_report`'s
-			// `thresholdValidation`. Zod has already bounded every value.
-			if (args.thresholds && typeof args.thresholds === "object") {
-				payload.thresholds = args.thresholds;
-			}
 			// An omitted duration is 60s engine-side, not "unbounded" and not
 			// "capped" - so a cap under 60s has to be sent as an explicit field
 			// or it never reaches the run.
-			const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
+			const cappedDuration = defaultDurationUnderCap(composed.loadParams, ctx.config);
 			if (cappedDuration !== null) payload.duration = cappedDuration;
 
 			// A saved request's pre-request script cannot run under load - the

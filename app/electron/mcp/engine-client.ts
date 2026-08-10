@@ -237,6 +237,19 @@ export class EngineClient {
 		return this.request("GET", "/runs?limit=100&offset=0", undefined, signal);
 	}
 
+	/**
+	 * One run row by id (`GET /runs/:id`), carrying its `status` and its
+	 * `configSnapshot` rather than the list row's compact `summary`.
+	 *
+	 * This is how the CI gate learns a run has stopped running: `POST /runs`
+	 * returns as soon as the run is accepted, and the live-metrics stream says
+	 * what is happening, not whether it is over. The status is the only field
+	 * that reaches a terminal value exactly once.
+	 */
+	getRun(runId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/runs/${encodeURIComponent(runId)}`, undefined, signal);
+	}
+
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
 	}

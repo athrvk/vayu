@@ -713,6 +713,75 @@ exactly the rules Settings is held to:
 - The two opt-in booleans stay off for any value other than the exact string
   `true`.
 
+## CI gating
+
+`gate-cli.ts` is a second standalone Node entry beside the stdio server: it starts
+one load run, waits for it, prints the per-budget verdict and **exits non-zero
+when the run missed a budget**. It is what turns a run's `thresholdValidation`
+into a red build.
+
+```bash
+node dist-electron/mcp/gate-cli.js \
+  --url https://api.example.com/health \
+  --mode constant_concurrency --concurrency 32 --duration 60s \
+  --p99 50 --error-rate 0.5 --min-rps 1000
+```
+
+| Exit code | Meaning                                                                        |
+| --------- | ------------------------------------------------------------------------------ |
+| `0`       | Every declared budget was met.                                                 |
+| `1`       | The run finished and missed at least one budget.                               |
+| `2`       | No verdict: bad flags, engine unreachable, run failed/stopped, wait timed out. |
+
+`1` and `2` are separate so a pipeline can tell "too slow" from "broken" - the two
+usually want different alerts.
+
+**Targets.** `--url` runs ad-hoc (`--method` defaults to GET); `--request-id` load-tests
+a saved request, composed engine-side exactly as the app composes it - variables
+resolved, stored auth applied through the collection chain, its test scripts run
+against sampled responses. `--environment-id` scopes the resolution. A saved
+request's pre-request scripts are reported as dropped, since `POST /runs` has no
+pre-request hook.
+
+**Budgets.** `--p50`, `--p95`, `--p99` (ms), `--error-rate` (percent), `--min-rps`.
+At least one is required - a run with no budget is a smoke run, and the gate would
+have nothing to judge. They map onto the `thresholds` object `POST /runs` takes and
+come back as `thresholdValidation` in the report.
+
+**Load shape.** `--mode` accepts `constant_concurrency` (default, takes
+`--concurrency`) and `constant_rps` (takes `--target-rps`). Those two are
+duration-bounded and fully described by the flags, so the same command twice is the
+same run twice and the wait has a deadline known before it starts. `capacity`,
+`ramp_up` and `iterations` are deliberately **not** gate modes: they carry
+parameters this CLI does not expose, and an iterations run stops on a request count
+rather than a clock. Start those from the app or from `POST /runs`.
+
+**It assumes a running engine and never manages one.** `--engine-url` (default
+`http://127.0.0.1:9876`) is the only coupling; starting and stopping `vayu-engine`
+stays with the app or with the CI step that launches it.
+
+**The MCP allowlist and load caps do not apply.** This is an operator-invoked CLI,
+not an agent surface - a human putting a target in their own pipeline, exactly like
+a human pointing the app at one. The [Safety model](#safety-model) bounds what an
+autonomous agent may do on the user's behalf, and there is no agent here. What the
+gate does share with `start_load_run` is the payload builder (`buildLoadRunPayload`
+in `electron/mcp/tools.ts`), so both describe a load run the same way.
+
+stdout carries the verdict table, or the raw report under `--json`; progress,
+warnings and errors go to stderr.
+
+```yaml
+- name: Performance gate
+  run: |
+    vayu-engine &
+    node dist-electron/mcp/gate-cli.js \
+      --url "${{ env.TARGET_URL }}" \
+      --concurrency 32 --duration 60s \
+      --p99 50 --error-rate 0.5
+```
+
+Once backlog M1 packages the CLI shim, the same invocation becomes `vayu gate`.
+
 ## Design notes
 
 Rationale behind the load-bearing decisions.

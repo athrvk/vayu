@@ -32,6 +32,8 @@ lands second must not generalise its rule over both. See
 
 The stdio MCP server (`app/electron/mcp/cli.ts`) is built and tested but is only invocable by full path (`node dist-electron/mcp/cli.js`), which is clunky for stdio-only clients (e.g. Zed's `context_servers`) and headless/CI. **Needs:** expose it as a `vayu mcp` command - a `bin` entry / installer shim - so a client config can use `command: "vayu", args: ["mcp"]` instead of a `dist-electron` path. Ergonomics only; the server itself is complete (reuses the same registry/guards as the HTTP host, config via `VAYU_MCP_*` env vars). Best folded into the app installer/packaging work.
 
+**A second subcommand now rides the same shim.** Issue #473 added `gate-cli.ts`, the headless CI load gate, built the same way and invoked the same way (`node dist-electron/mcp/gate-cli.js`). Whatever shim M1 lands should expose both - `vayu mcp` and `vayu gate` - since the packaging problem is identical and solving it once for one entry point leaves the other on a `dist-electron` path. See [CI gating](../engine/mcp.md#ci-gating).
+
 ---
 
 ## Architecture / maintainability

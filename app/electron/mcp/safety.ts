@@ -182,8 +182,14 @@ const ENGINE_DEFAULT_DURATION_SECONDS: Readonly<Record<string, number>> = {
 /** The fallback for every mode that has no entry of its own. */
 const ENGINE_FALLBACK_DURATION_SECONDS = 60;
 
-/** What the engine would run for, in seconds, if `duration` were omitted. */
-function engineDefaultDurationSeconds(mode: string): number {
+/**
+ * What the engine would run for, in seconds, if `duration` were omitted.
+ *
+ * Exported because the CI gate derives its wait deadline from the same number:
+ * an omitted `--duration` is not an unbounded run, and a second copy of "60,
+ * except capacity" is a copy to drift.
+ */
+export function engineDefaultDurationSeconds(mode: string): number {
 	return ENGINE_DEFAULT_DURATION_SECONDS[mode] ?? ENGINE_FALLBACK_DURATION_SECONDS;
 }
 

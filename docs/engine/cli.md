@@ -209,3 +209,19 @@ The CLI is designed for:
 - Command-line workflows
 
 For interactive use, prefer the Electron UI which provides a richer experience.
+
+## The other two CLIs
+
+`vayu-cli` is the engine's own binary: it posts a request or a load test to the
+daemon and returns. Two Node entry points ship beside it, both requiring the same
+running engine:
+
+| CLI | What it is for |
+|-----|----------------|
+| `vayu-cli` (this page) | Run a request or a load test from a JSON file. Starts the run and returns; it does not wait for a verdict. |
+| [`gate-cli.js`](./mcp.md#ci-gating) | **Fail a build on a performance budget.** Starts one load run, waits for it, prints per-budget pass/fail and exits `0`/`1`/`2`. |
+| [`cli.js`](./mcp.md#stdio-cli-zed--headless--ci) | The stdio MCP server, for stdio-only clients and agents. |
+
+Reach for `gate-cli.js` rather than `vayu-cli` when the pipeline has to *judge* the
+run: `vayu-cli run load-test.json` exits as soon as the engine accepts the run, so a
+job built on it goes green whatever the latency turned out to be.
