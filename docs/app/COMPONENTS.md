@@ -275,16 +275,18 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Tab | Component | Notes |
 |---|---|---|
 | Info | `InfoTab.tsx` | Name, description, request count. **Autosaves** - no Save/Cancel |
-| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields) |
-| Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script |
-| Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script |
+| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields). **The one tab with a Save button**, and it says so above the fields |
+| Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save |
+| Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh).
 
-Auth and both Script tabs share one save model: an editable draft with a Save button gated on `isDirty` and a Reset, held by [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model). It is the manual counterpart to the request builder's `useSaveManager()` autosave, and it owns the mutation reset on a collection switch - that part had been hand-rolled per tab and one tab had omitted it.
+All five tabs hold their edits in a draft; four of them commit it without being asked. Info commits on blur (name) and on `onCommit` (description); both Script tabs commit when focus leaves the editor; Variables autosaves through `VariableTableEditor`. Info and the Script tabs take the draft, the resync and the mutation reset from [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model) and render no Save button at all - the hook owns the mutation reset on a collection switch, which had been hand-rolled per tab with one tab omitting it.
 
-**Info is the exception, deliberately.** It takes the draft, the resync and the mutation reset from the same hook but commits on blur (name) and on `onCommit` (description) and renders no Save or Cancel - the request builder's model, because two Info tabs with opposite save models is a coherence bug rather than two defensible choices. The blank-name rule survives the buttons' removal by being spoken instead: `reportBlankNameRefused()` (`lib/blank-name.ts`) puts the stored name back and reports through `failSave`, the same channel and the same wording the request builder's Info tab uses.
+Info's blank-name rule survives the buttons' removal by being spoken instead: `reportBlankNameRefused()` (`lib/blank-name.ts`) puts the stored name back and reports through `failSave`, the same channel and the same wording the request builder's Info tab uses. The Script tabs' `Clear` writes on the press rather than waiting for a blur that is not coming - focus lands on the button, not in the editor.
+
+**Auth is the exception, and it is a decision (#446), not a leftover.** Not because a credential outranks a script - the request builder autosaves its own auth - but because a blur inside `AuthFields` is not a completion signal. Measured on this tab: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them non-value controls (the grant-type and Add-to pickers, three switches, the secret reveal toggle, the Advanced disclosure, Get Token), and clicking reveal to check a half-typed password fires `focusout` while the draft is dirty. The fields only make sense written together, which is what the button means. A script tab has exactly one focus stop. Because the tab therefore differs from its neighbours, it states its save model above the fields rather than only through a button further down the page. If collection auth is ever to persist by itself, the mechanism is `useSaveManager`'s debounce, not a blur.
 
 ## Load Test Dashboard (`modules/dashboard/`)
 

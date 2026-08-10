@@ -14,9 +14,26 @@
  * same component the request builder's Auth tab renders. The bottom shows the
  * inheritance chain so the user can see which ancestor a child request would
  * resolve to.
+ *
+ * **This is the one tab on the screen that still waits for a button, and that is
+ * a decision (#446), not a leftover.** Info and both Script tabs commit when
+ * focus leaves the field, because each is one text buffer and leaving it means
+ * you are done with it. This form is not one buffer: an OAuth 2.0 config with
+ * Advanced open is 20 focus stops, 9 of which are not value fields at all - the
+ * grant-type and Add-to pickers, three switches, the secret's reveal toggle, the
+ * Advanced disclosure, Get Token. Measured: clicking reveal to check a
+ * half-typed password fires `focusout` on that field while the draft is dirty,
+ * so a blur-commit would write half a credential to the record every descendant
+ * request inherits from. The fields only make sense saved together, which is
+ * what the button means here.
+ *
+ * A form that saves differently from its neighbours has to say so where the
+ * typing is, not only through a button further down the page - hence the note
+ * above the fields.
  */
 
 import { useCallback } from "react";
+import { Lock } from "lucide-react";
 
 import {
 	Button,
@@ -119,6 +136,10 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	// `mode === null` is exactly the digest/aws/ntlm set.
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
+	// The modes with credentials to type. `none`/`noauth` render an empty state
+	// and are saved by the picker alone, so they get neither the note nor the
+	// always-visible button row.
+	const hasCredentialFields = mode !== null && mode !== "none" && mode !== "noauth";
 
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
@@ -194,6 +215,19 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			</div>
 
 			{/*
+			 * Where the typing is, not only at the button. Info and the script
+			 * tabs on this same screen persist on their own, so the one form that
+			 * does not has to say which kind it is before the first keystroke
+			 * rather than after the user goes looking for a way to keep it.
+			 */}
+			{hasCredentialFields && (
+				<p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1.5">
+					<Lock className="w-3 h-3 shrink-0" aria-hidden="true" />
+					These fields are saved together, when you press Save Auth - not as you type.
+				</p>
+			)}
+
+			{/*
 			 * The same fields the request builder's Auth tab renders. No
 			 * `TextInput` is injected: a collection has no per-request variable
 			 * scope to resolve against at edit time, so the shared default -
@@ -225,7 +259,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 
 			<SaveFailed mutation={updateCollection} what="auth" className="mt-6" />
 
-			{mode !== null && mode !== "none" && mode !== "noauth" && (
+			{hasCredentialFields && (
 				<div className="flex gap-2 mt-6">
 					<Button
 						onClick={handleSave}

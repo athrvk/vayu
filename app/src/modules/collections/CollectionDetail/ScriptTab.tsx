@@ -20,6 +20,14 @@
  * own. The banner below said so to users, which is worse than saying it here.
  *
  * Used by both the Pre-request and Post-request tabs in CollectionDetail.
+ *
+ * **It used to demand an explicit Save.** A script is a text buffer, and the two
+ * other places you edit one - the request builder's script panels and this
+ * screen's own description field - both persist it without being asked. Both
+ * kinds now commit when focus leaves the editor, like `InfoTab`. The Auth tab
+ * deliberately did *not* follow: its form is up to 20 focus stops, 9 of which
+ * are not value fields, so a blur there is not a completion signal (see #446 and
+ * `useEntityDraft`). This editor has exactly one.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -75,10 +83,20 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	// landed in the helper never reached the pre- and post-request tabs here.
 	const usedVars = useMemo(() => referencedVariables(script), [script]);
 
+	// Takes the text rather than reading the draft, so Clear can write the empty
+	// script on the same tick it sets it - `setScript` has not landed yet when
+	// the handler runs, and a `persist()` there would save the old text.
+	const persistText = useCallback(
+		async (text: string) => {
+			await updateCollection.mutateAsync({ id: collection.id, [fieldKey]: text });
+		},
+		[updateCollection, collection.id, fieldKey]
+	);
+
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
-		await updateCollection.mutateAsync({ id: collection.id, [fieldKey]: script });
-	}, [isDirty, updateCollection, collection.id, fieldKey, script]);
+		await persistText(script);
+	}, [isDirty, persistText, script]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-${fieldKey}`,
@@ -90,10 +108,35 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
 	// toast instead, since this callout may not be on screen at all.
-	const handleSave = () => void persist().catch(() => {});
+	const commit = () => void persist().catch(() => {});
 
+	/*
+	 * Commit when focus leaves the editor - the blur Monaco does not expose.
+	 *
+	 * `focusout` bubbles, so the wrapper hears the internal textarea losing
+	 * focus; `relatedTarget` inside the wrapper means focus only moved *within*
+	 * the editor (the find widget takes focus on Ctrl+F) and nothing has been
+	 * finished. Leaving to nowhere - a click on empty page - reports a null
+	 * relatedTarget, which `contains` correctly reads as "outside".
+	 *
+	 * The alternative was an `onBlur` prop on `CodeEditor` wired to Monaco's
+	 * `onDidBlurEditorWidget`. Rejected: every suite that mounts the editor
+	 * stubs the instance, so a shared primitive reaching for one more method
+	 * makes each stub a place the next method can be forgotten - and the
+	 * container's own focusout answers the same question in the DOM, where the
+	 * tests already live.
+	 */
+	const handleEditorFocusOut = (event: React.FocusEvent<HTMLDivElement>) => {
+		if (event.currentTarget.contains(event.relatedTarget)) return;
+		commit();
+	};
+
+	// Clearing is a button press, so it persists on the press - there is no
+	// later blur to carry it (focus is on the button, not the editor). Monaco's
+	// undo stack still holds the text, and undoing re-commits it on the way out.
 	const handleClear = () => {
 		setScript("");
+		void persistText("").catch(() => {});
 	};
 
 	return (
@@ -128,7 +171,10 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 				</div>
 			)}
 
-			<div className="border border-border rounded-md overflow-hidden">
+			<div
+				className="border border-border rounded-md overflow-hidden"
+				onBlur={handleEditorFocusOut}
+			>
 				<div className="flex items-center gap-2.5 px-3 py-1.5 bg-panel border-b border-border">
 					<span className="text-[11px] font-mono text-muted-foreground">
 						{isPre ? "pre-request.js" : "post-request.js"}
@@ -179,13 +225,6 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 			<SaveFailed mutation={updateCollection} what="the script" />
 
 			<div className="flex gap-2">
-				<Button
-					onClick={handleSave}
-					disabled={!isDirty || updateCollection.isPending}
-					className="font-semibold"
-				>
-					{updateCollection.isPending ? "Saving…" : "Save Script"}
-				</Button>
 				<Button
 					variant="outline"
 					onClick={handleClear}

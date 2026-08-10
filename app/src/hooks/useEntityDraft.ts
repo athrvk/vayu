@@ -10,14 +10,24 @@
  *
  * Two save models exist in this app. `useSaveManager` is the autosave one the
  * request builder uses. This is the other one: an editable draft, a Save button
- * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
- * `ScriptTab` use it because a credential or a script is a deliberate act with
- * a button, not a keystroke that persists itself.
+ * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` is its
+ * one remaining button user.
  *
- * `InfoTab` no longer does. Its name and description commit on blur like the
- * request builder's, so it takes the draft, the resync and the mutation reset
- * from here and simply never renders a Save button - which is why `reset` has
- * one caller fewer than `draft` does.
+ * `InfoTab` and `ScriptTab` take the draft, the resync and the mutation reset
+ * from here and render no Save button at all - they commit when focus leaves
+ * the field, like the request builder. `reset` therefore has one caller, where
+ * `draft` has three.
+ *
+ * **Why auth alone kept the button (#446).** Not because a credential is
+ * grander than a script - the request builder autosaves its own auth. Because a
+ * blur inside `AuthFields` is not a completion signal: an OAuth 2.0 config with
+ * Advanced open renders 20 focus stops, 9 of them non-value controls (pickers,
+ * switches, the reveal toggle, Get Token), and clicking reveal to check a
+ * half-typed password fires `focusout` while the draft is dirty. The fields
+ * only make sense written together. A script tab has exactly one focus stop, so
+ * leaving it means the same thing leaving a description does. If collection
+ * auth is ever to persist by itself, the mechanism is `useSaveManager`'s
+ * debounce, not a blur - a different change from this one.
  *
  * The mechanism was hand-rolled once per tab (`AuthTab`, `InfoTab`,
  * `ScriptTab`) with the same five moving parts each time, and the copies had

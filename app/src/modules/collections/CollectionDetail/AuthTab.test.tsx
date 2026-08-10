@@ -169,6 +169,49 @@ describe("AuthTab with an editable auth mode", () => {
 	});
 });
 
+/**
+ * The other half of #446's decision. Info and both script tabs on this screen
+ * commit when focus leaves the field; this one does not, and the reason is
+ * measurable rather than a preference - a blur inside `AuthFields` is not a
+ * completion signal. If a later change wires blur-commit in here, these two fail
+ * and the decision gets revisited rather than drifting.
+ */
+describe("AuthTab keeps its button, and says so", () => {
+	it("does not write when a field blurs - including on the reveal toggle", () => {
+		renderTab(makeCollection({ mode: "basic", username: "acme", password: "" }));
+		const password = screen.getByPlaceholderText("Password");
+		fireEvent.change(password, { target: { value: "hunt" } });
+
+		// Clicking the eye to check a half-typed secret moves focus off the field.
+		// That is the gesture a commit-on-blur would write a partial credential
+		// on, and it is why this tab kept its button.
+		fireEvent.blur(password, {
+			relatedTarget: screen.getByRole("button", { name: /show value/i }),
+		});
+		fireEvent.blur(password);
+
+		expect(mutation.mutateAsync).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: /save auth/i }));
+		expect(mutation.mutateAsync).toHaveBeenCalledWith({
+			id: "c1",
+			auth: { mode: "basic", username: "acme", password: "hunt" },
+		});
+	});
+
+	it("says the fields are saved together, where the typing is", () => {
+		// A button further down the page is not the same as knowing before the
+		// first keystroke, which is the whole of what C's half owed.
+		renderTab(makeCollection({ mode: "bearer", token: "" }));
+		expect(screen.getByText(/saved together, when you press Save Auth/i)).toBeInTheDocument();
+	});
+
+	it("says nothing on a mode with no fields to type into", () => {
+		renderTab(makeCollection({ mode: "none" }));
+		expect(screen.queryByText(/saved together/i)).not.toBeInTheDocument();
+	});
+});
+
 describe("AuthTab when the save fails", () => {
 	it("surfaces the rejection instead of quietly re-enabling the button", () => {
 		mutation.isError = true;
