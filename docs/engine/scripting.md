@@ -412,15 +412,23 @@ actually running. The other two are supplied per send:
   `POST /compose` fills it in on its by-id path, so a composed payload arrives
   carrying it.
 
-**`iteration` and `iterationCount` are set by the collection runner and by
-nothing else.** In a scenario run (`POST /runs` with a `scenario` block) every
-step's scripts read the real index - `iteration` counts from 0, and it reads as
-`0`, not as absent, on the first pass. Everywhere else both are `undefined`,
-which is the honest answer rather than an omission: a load test's test script
-runs once per *sampled* response after the run has finished, and the sample is a
-reservoir over the whole run rather than the first N iterations, so an index
-reported there would not be an iteration number. A binding that cannot fail is
-worse than a missing one.
+**`iteration` is reported wherever a real one exists, and nowhere else.** In a
+design-mode scenario run (`POST /runs` with a `scenario` block and no `mode`)
+every step's scripts read the real index - `iteration` counts from 0, and it
+reads as `0`, not as absent, on the first pass. A **scenario load run**'s
+deferred per-step script reads it too: each sampled response carries the virtual
+user's iteration it was actually sent in, so the number is a fact about that
+response rather than its position in a reservoir.
+
+A single-request load run's `tests` script gets `undefined`, which is the honest
+answer rather than an omission: it runs once per *sampled* response after the
+run has finished, and the sample is a reservoir over the whole run rather than
+the first N iterations, so an index reported there would not be an iteration
+number. A binding that cannot fail is worse than a missing one.
+
+**`iterationCount` is set by the collection runner and by nothing else.** A
+duration-bounded load run has no iteration total to report, and a field readable
+from one mode and not another is worse than one that is never readable at all.
 
 ## Environment Variables (`pm.environment`)
 
@@ -762,7 +770,7 @@ reports success for something that never happened.
 | Call | Where | What happens |
 |------|-------|--------------|
 | Either method | A single Send (`POST /execute`) | Throws - there is no next request |
-| Either method | A load run's deferred `tests` script | Throws - the script runs after the run finished, against a recorded response, and cannot redirect a sequence that already happened |
+| Either method | A load run's deferred `tests` script, and a scenario load run's deferred per-step script | Throws - the script runs after the run finished, against a recorded response, and cannot redirect a sequence that already happened |
 | `skipRequest()` | A test script inside a collection run | Throws - the request has already gone out; there is nothing left to skip |
 | `setNextRequest()` | Anywhere | `TypeError` - the argument is required. Omitting it is not a synonym for `null` |
 | `setNextRequest(3)`, `setNextRequest('')` | Anywhere | `TypeError` - a target is a non-empty string, or `null` |
@@ -818,8 +826,10 @@ fact `get` alone cannot state without the reader knowing that an absent column
 comes back as `undefined` while a null one comes back as `null`.
 
 **`pm.iterationData` is `undefined` where there is no row** - a single Send, a
-load run's deferred `tests` script, and a collection run started without a data
-set. That is deliberate, and it is the opposite treatment to `pm.execution`
+single-request load run's deferred `tests` script, and any run started without a
+data set. A scenario load run's deferred per-step script *does* read one: the
+sampled response carries the row its iteration was bound to, so the row is a
+fact about that response rather than a guess. That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:
@@ -1254,6 +1264,26 @@ The **language** is current; what is missing is the **host environment**:
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now
   checked under load, not only in design mode
+
+**A scenario load run validates per step instead.** It has no run-level `tests`
+field: each plan step carries its own post-request script, and after the run
+drains each is replayed against the responses *that step* produced. The tallies
+land on `scenario.steps[].tests` in the report - a whole-run pass/fail count
+over a sequence says something failed, not which step - while the aggregate
+still appears as `testValidation`. Three differences from the single-request
+shape:
+
+- `pm.request` is the step's own request, and `pm.info.requestId` /
+  `requestName` are that step's, not a run-level one.
+- `pm.info.iteration` and `pm.iterationData` are bound: the sample carries the
+  virtual user's iteration and the data row that iteration used, so a script
+  asserting on `{{data.*}}`-driven behaviour grades the right row.
+- The sample budget is split across the steps that carry a script rather than
+  spent run-wide, so the last step of a long plan is validated instead of being
+  crowded out by the first. A step with no script is never sampled.
+
+`pm.execution` still throws throughout - a deferred script cannot redirect a
+sequence that already happened - and no step script runs inline.
 
 ## Script Parts
 

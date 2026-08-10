@@ -73,6 +73,15 @@ struct ResultAnnotations {
     /// `data` - the record then carries no `dataRowIndex` at all rather than a
     /// zero that reads like row 0.
     std::optional<size_t> data_row_index;
+    /**
+     * The plan step this completion belongs to, and the virtual user's
+     * iteration it ran in. Set by the scenario load executor and by nothing
+     * else, so their presence *is* how `handle_result` tells a scenario
+     * completion from a single-request one - which is what routes the response
+     * to the step's own sample reservoir instead of the run's (issue #450).
+     */
+    std::optional<size_t> step_index;
+    std::optional<size_t> iteration;
 };
 
 /**

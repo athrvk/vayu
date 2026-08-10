@@ -18,6 +18,12 @@
  * `executed` per step is the number worth reading first: an errored step ends
  * its iteration, so a sequence whose counts fall away after step 3 is telling
  * you step 3 failed, and the `errors` column says how often.
+ *
+ * The Tests column is the deferred per-step validation (issue #450): each
+ * step's own post-request script replayed after the run against that step's
+ * sampled responses. A step that asserted nothing shows a dash rather than a
+ * zero - "no assertions" and "no failures" are different answers, and the
+ * engine keeps them apart by omitting the object.
  */
 
 import { AlertTriangle } from "lucide-react";
@@ -101,6 +107,9 @@ export default function ScenarioStepsTab({
 								Errors
 							</th>
 							<th scope="col" className="px-3 py-2 font-medium text-right">
+								Tests
+							</th>
+							<th scope="col" className="px-3 py-2 font-medium text-right">
 								p50
 							</th>
 							<th scope="col" className="px-3 py-2 font-medium text-right">
@@ -157,6 +166,36 @@ export default function ScenarioStepsTab({
 									}
 								>
 									{formatNumber(step.errors)}
+								</td>
+								<td className="px-3 py-2 text-right font-mono">
+									{step.tests ? (
+										<span
+											title={`${formatNumber(
+												step.tests.passed
+											)} passed, ${formatNumber(
+												step.tests.failed
+											)} failed across ${formatNumber(
+												step.tests.sampled
+											)} sampled response${step.tests.sampled === 1 ? "" : "s"}`}
+										>
+											{formatNumber(step.tests.passed)}
+											{step.tests.failed > 0 && (
+												<span className="text-status-error-text">
+													{" / "}
+													{formatNumber(step.tests.failed)}
+												</span>
+											)}
+										</span>
+									) : (
+										// A step that asserted nothing. A zero here would read as
+										// "nothing failed", which is a claim the run never made.
+										<span
+											className="text-muted-foreground"
+											title="No assertions"
+										>
+											-
+										</span>
+									)}
 								</td>
 								<td className="px-3 py-2 text-right font-mono">
 									{latency(step.latency.p50)}

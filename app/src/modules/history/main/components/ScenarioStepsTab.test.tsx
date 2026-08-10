@@ -102,10 +102,60 @@ describe("the step table", () => {
 	});
 
 	it("keeps a wide table inside its own scroll box", () => {
-		// The page body must never scroll horizontally; a seven-column table on a
+		// The page body must never scroll horizontally; an eight-column table on a
 		// narrow window is exactly what would make it.
 		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
 		const table = screen.getByRole("table");
 		expect(table.parentElement?.className).toContain("overflow-x-auto");
+	});
+});
+
+/**
+ * The deferred per-step validation (issue #450): each step's own post-request
+ * script, replayed after the run against that step's sampled responses. Before
+ * it, a collection's assertions passed in design mode and were silently never
+ * checked by a load run of the same collection.
+ */
+describe("the per-step test tallies", () => {
+	const WITH_TESTS: RunScenarioStepStat[] = [
+		{ ...STEPS[0], tests: { sampled: 10, passed: 10, failed: 0 } },
+		{ ...STEPS[1], tests: { sampled: 8, passed: 5, failed: 3 } },
+	];
+
+	it("reports each step's own passes and failures", () => {
+		render(<ScenarioStepsTab steps={WITH_TESTS} virtualUsers={8} />);
+
+		// The failing step names its own count, which is the whole point of the
+		// breakdown: a whole-run total says something failed, not which step.
+		const failing = within(rowFor("List orders"));
+		expect(failing.getByText("5")).toBeTruthy();
+		expect(failing.getByText(/3/, { selector: "span.text-status-error-text" })).toBeTruthy();
+		expect(failing.getByTitle("5 passed, 3 failed across 8 sampled responses")).toBeTruthy();
+		expect(
+			within(rowFor("Log in")).getByTitle("10 passed, 0 failed across 10 sampled responses")
+		).toBeTruthy();
+	});
+
+	it("shows a dash, never a zero, for a step that asserted nothing", () => {
+		// "No assertions" and "no failures" are different answers - the engine
+		// omits the object rather than writing zeros, and so must the table.
+		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
+		expect(within(rowFor("Log in")).getByTitle("No assertions")).toBeTruthy();
+		expect(within(rowFor("List orders")).getByTitle("No assertions")).toBeTruthy();
+	});
+
+	it("tints only the failed count", () => {
+		// The passed count is not an error, and a whole cell in the error colour
+		// would say the step's assertions all failed.
+		render(<ScenarioStepsTab steps={WITH_TESTS} virtualUsers={8} />);
+		const failed = within(rowFor("List orders")).getByText(/3/, {
+			selector: "span.text-status-error-text",
+		});
+		expect(failed).toBeTruthy();
+		expect(
+			within(rowFor("Log in")).queryByText(/10/, {
+				selector: "span.text-status-error-text",
+			})
+		).toBeNull();
 	});
 });

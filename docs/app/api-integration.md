@@ -297,6 +297,12 @@ runner has no need for: `scenario.steps[]`
 plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
 rows, so that array is the only per-step record such a run keeps.
 
+A step also carries `tests` (`{sampled, passed, failed}`) when its own
+post-request script was replayed against that step's sampled responses - the
+deferred per-step validation. The key is **absent** for a step that asserted
+nothing or whose script drew no sample, which is not the same claim as zero
+failures, so the table shows a dash there rather than a `0`.
+
 A **design run's** list row carries one thing the detail route says at greater
 length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single
 exchange. `GET /runs/:id` attaches the whole `result` instead, trace and bodies
