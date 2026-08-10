@@ -11,18 +11,26 @@
  *
  * The engine resolves `{{name}}` anywhere in a body before it goes on the wire,
  * so both a query and a variables object may legitimately hold tokens that are
- * *not* valid GraphQL and *not* valid JSON at rest. Two different maskings fall
- * out of that, and they are deliberately not the same function:
+ * *not* valid GraphQL and *not* valid JSON at rest. Three maskings fall out of
+ * that, and which one a caller wants is decided by one question: does it need
+ * the *positions* back, or does it need the *token text* back?
  *
  * - **GraphQL text** is masked in place, character for character, because the
  *   markers that come back carry positions into the masked string and those
  *   positions are only usable if they are also positions into the original.
- * - **JSON text** is masked into a *sentinel string*, which changes the length,
- *   because there is no length-preserving JSON value for `{{n}}` in every
- *   position - and nothing downstream needs offsets, only the parsed value.
+ * - **JSON text on the wire path** is masked into a *sentinel string*, which
+ *   changes the length, because the token has to be recognisable again after a
+ *   `JSON.parse` / `JSON.stringify` round trip: the sentinel is a needle no user
+ *   can type, and a same-length placeholder is not - `"vvv"` is text somebody
+ *   might have written themselves, so unmasking it would corrupt their document.
+ *   Nothing on that path needs offsets, only the parsed value.
+ * - **JSON text for diagnostics** is masked in place, into a string literal of
+ *   the token's exact length, because the JSON worker's markers carry positions
+ *   into what it was given. It is never unmasked - which is precisely why it can
+ *   afford a placeholder the sentinel masking cannot.
  *
- * Both take their token syntax from `@/constants/variables`, the app's single
- * `{{name}}` matcher; neither re-declares it.
+ * All three take their token syntax from `@/constants/variables`, the app's
+ * single `{{name}}` matcher; none of them re-declares it.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -60,14 +68,7 @@ const PLACEHOLDER_CHAR = "V";
 export function maskGraphqlTemplates(text: string): { masked: string; spans: TemplateSpan[] } {
 	const spans: TemplateSpan[] = [];
 	const masked = text.replace(VARIABLE_PATTERN, (match, _name: string, offset: number) => {
-		const start = positionAt(text, offset);
-		const end = positionAt(text, offset + match.length);
-		spans.push({
-			startLineNumber: start.line,
-			startColumn: start.column,
-			endLineNumber: end.line,
-			endColumn: end.column,
-		});
+		spans.push(spanOf(text, offset, offset + match.length));
 		return PLACEHOLDER_CHAR.repeat(match.length);
 	});
 	return { masked, spans };
@@ -125,26 +126,76 @@ export interface MaskedJson {
  * The scan tracks string state for exactly that reason - a regex cannot.
  */
 export function maskJsonTemplates(text: string): MaskedJson {
-	const tokens: string[] = [];
-	let out = "";
+	const found = scanJsonTemplates(text);
+	return {
+		masked: replaceRanges(text, found, (_range, index) => JSON.stringify(sentinel(index))),
+		tokens: found.map((range) => text.slice(range.start, range.end)),
+	};
+}
+
+/**
+ * Replace every out-of-string `{{token}}` with a JSON string of the *same
+ * length*, and report where they were.
+ *
+ * For the one caller that needs positions back: Monaco's JSON worker parses the
+ * pane's text itself, and an unmasked token is a syntax error it reports three
+ * ways - at the token, and then at the next character, and then not at all for
+ * the rest of the document, because the parse gave up. Masking makes the
+ * document parse, so everything after the token is checked again; the spans let
+ * the caller drop the markers the placeholder itself earns (a string where the
+ * schema wanted an `Int` is still wrong, just wrong about characters the user
+ * never typed - the same rule `diagnostics.ts` applies to the query pane).
+ */
+export function maskJsonTemplatesInPlace(text: string): { masked: string; spans: TemplateSpan[] } {
+	const found = scanJsonTemplates(text);
+	return {
+		masked: replaceRanges(text, found, (range) => jsonStringOfLength(range.end - range.start)),
+		spans: found.map((range) => spanOf(text, range.start, range.end)),
+	};
+}
+
+/**
+ * A JSON string literal of exactly `length` characters.
+ *
+ * The shortest token is `{{a}}`, five characters, so there is always room for
+ * the two quotes and at least one character between them. A string is the one
+ * JSON value that exists at every length, and it is grammatical in both places
+ * a token realistically appears - as a value, and as an object key.
+ */
+function jsonStringOfLength(length: number): string {
+	return `"${PLACEHOLDER_CHAR.repeat(length - 2)}"`;
+}
+
+/** Half-open `[start, end)` character offsets of one token in the source text. */
+interface TokenRange {
+	start: number;
+	end: number;
+}
+
+/**
+ * Every out-of-string `{{token}}`, in source order.
+ *
+ * Tokens already inside a JSON string (`{"id": "{{userId}}"}`) are skipped: that
+ * text is valid JSON as it stands, and touching it would break it. The scan
+ * tracks string state for exactly that reason - a regex cannot.
+ */
+function scanJsonTemplates(text: string): TokenRange[] {
+	const found: TokenRange[] = [];
 	let inString = false;
 	let i = 0;
 	while (i < text.length) {
 		const ch = text[i];
 		if (inString) {
 			if (ch === "\\") {
-				out += text.slice(i, i + 2);
 				i += 2;
 				continue;
 			}
 			if (ch === '"') inString = false;
-			out += ch;
 			i++;
 			continue;
 		}
 		if (ch === '"') {
 			inString = true;
-			out += ch;
 			i++;
 			continue;
 		}
@@ -152,16 +203,41 @@ export function maskJsonTemplates(text: string): MaskedJson {
 			const close = text.indexOf("}}", i + 2);
 			const inner = close === -1 ? "" : text.slice(i + 2, close);
 			if (close !== -1 && inner.length > 0 && !/[{}]/.test(inner)) {
-				out += JSON.stringify(sentinel(tokens.length));
-				tokens.push(text.slice(i, close + 2));
+				found.push({ start: i, end: close + 2 });
 				i = close + 2;
 				continue;
 			}
 		}
-		out += ch;
 		i++;
 	}
-	return { masked: out, tokens };
+	return found;
+}
+
+/** Splice a replacement over each range, keeping everything between them. */
+function replaceRanges(
+	text: string,
+	ranges: TokenRange[],
+	replacement: (range: TokenRange, index: number) => string
+): string {
+	let out = "";
+	let last = 0;
+	ranges.forEach((range, index) => {
+		out += text.slice(last, range.start) + replacement(range, index);
+		last = range.end;
+	});
+	return out + text.slice(last);
+}
+
+/** The 1-based Monaco range covering `[start, end)`. */
+function spanOf(text: string, start: number, end: number): TemplateSpan {
+	const from = positionAt(text, start);
+	const to = positionAt(text, end);
+	return {
+		startLineNumber: from.line,
+		startColumn: from.column,
+		endLineNumber: to.line,
+		endColumn: to.column,
+	};
 }
 
 /** Put the original `{{token}}` text back into serialized JSON. */

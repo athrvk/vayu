@@ -18,12 +18,21 @@ import {
 	getVariablesJSONSchema,
 	type JSONSchema6,
 } from "graphql-language-service";
+import { maskGraphqlTemplates } from "./templates";
+import { templateTwinUri } from "./variables-diagnostics";
 
 const VARIABLES_SCHEMA_URI = "inmemory://graphql-variables-schema.json";
 
 /**
  * Pure: build a JSON Schema for the query's variables, or null when there is no
  * schema, no declared variables, or the query can't be parsed.
+ *
+ * The query is masked first, because `getOperationFacts` *parses* it and an
+ * unmasked `{{token}}` is a parse failure: a query that mentions one token
+ * anywhere lost the schema for every variable it declares, so the pane fell back
+ * to no validation and no completion at all. Only the variable-to-type map is
+ * read here, so nothing downstream cares where the tokens were - the mask is
+ * length-preserving anyway, being the same one the query pane's diagnostics use.
  */
 export function buildVariablesJsonSchema(
 	query: string,
@@ -31,7 +40,7 @@ export function buildVariablesJsonSchema(
 ): JSONSchema6 | null {
 	if (!schema || !query.trim()) return null;
 	try {
-		const facts = getOperationFacts(schema, query);
+		const facts = getOperationFacts(schema, maskGraphqlTemplates(query).masked);
 		if (facts?.variableToType && Object.keys(facts.variableToType).length > 0) {
 			return getVariablesJSONSchema(facts.variableToType);
 		}
@@ -45,6 +54,10 @@ export function buildVariablesJsonSchema(
  * Register (or clear) the variables JSON Schema on Monaco's JSON language,
  * scoped to the given variables model URI via fileMatch so other JSON editors
  * are unaffected. Existing schemas from other sources are preserved.
+ *
+ * The pane's masked twin (`variables-diagnostics.ts`) is matched too: it is the
+ * model the worker's markers actually come from, so a schema registered only
+ * against the visible one would validate nothing the user ever sees.
  */
 export function applyVariablesSchema(
 	monaco: typeof Monaco,
@@ -67,7 +80,7 @@ export function applyVariablesSchema(
 					...others,
 					{
 						uri: VARIABLES_SCHEMA_URI,
-						fileMatch: [variablesModelUri],
+						fileMatch: [variablesModelUri, templateTwinUri(variablesModelUri)],
 						schema: jsonSchema,
 					},
 				]

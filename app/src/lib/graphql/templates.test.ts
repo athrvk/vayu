@@ -10,6 +10,7 @@ import {
 	hasJsonTemplateSentinel,
 	maskGraphqlTemplates,
 	maskJsonTemplates,
+	maskJsonTemplatesInPlace,
 	rangesOverlap,
 	unmaskJsonTemplates,
 } from "./templates";
@@ -125,6 +126,43 @@ describe("maskJsonTemplates", () => {
 		expect(unmaskJsonTemplates(JSON.stringify(JSON.parse(masked)), tokens)).toBe(
 			'{"a":{{first}},"b":{{second}}}'
 		);
+	});
+});
+
+describe("maskJsonTemplatesInPlace", () => {
+	it("keeps every offset, because the markers come back as offsets", () => {
+		const source = '{\n  "limit": {{n}},\n  "name": "x"\n}';
+		const { masked, spans } = maskJsonTemplatesInPlace(source);
+		expect(masked).toBe('{\n  "limit": "VVV",\n  "name": "x"\n}');
+		expect(masked.length).toBe(source.length);
+		expect(JSON.parse(masked)).toEqual({ limit: "VVV", name: "x" });
+		expect(spans).toEqual([
+			{ startLineNumber: 2, startColumn: 12, endLineNumber: 2, endColumn: 17 },
+		]);
+	});
+
+	it("masks a token in key position too", () => {
+		const { masked } = maskJsonTemplatesInPlace("{{{key}}: 1}");
+		expect(JSON.parse(masked)).toEqual({ VVVVV: 1 });
+	});
+
+	it("leaves a token that is already inside a string alone", () => {
+		const source = '{"id": "{{userId}}"}';
+		expect(maskJsonTemplatesInPlace(source)).toEqual({ masked: source, spans: [] });
+	});
+
+	it("spans several tokens across lines", () => {
+		const { masked, spans } = maskJsonTemplatesInPlace('{\n "a": {{x}},\n "b": {{yy}}\n}');
+		expect(JSON.parse(masked)).toEqual({ a: "VVV", b: "VVVV" });
+		expect(spans).toEqual([
+			{ startLineNumber: 2, startColumn: 7, endLineNumber: 2, endColumn: 12 },
+			{ startLineNumber: 3, startColumn: 7, endLineNumber: 3, endColumn: 13 },
+		]);
+	});
+
+	it("leaves text without tokens exactly as it was", () => {
+		const source = '{"limit": 5}';
+		expect(maskJsonTemplatesInPlace(source)).toEqual({ masked: source, spans: [] });
 	});
 });
 
