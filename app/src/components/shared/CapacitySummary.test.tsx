@@ -162,4 +162,15 @@ describe("CapacitySummary", () => {
 		expect(p99Cells[1].className).toContain("text-warning-text");
 		cleanup();
 	});
+
+	it("paints the stop-reason chip through the Badge primitive, radius included", () => {
+		// Same guard as `ThresholdVerdict`'s, for the same reason: the colour is
+		// bound from `stop.degraded`, so only a render can see the class list,
+		// and a missing radius class is invisible to any source scan.
+		render(<CapacitySummary capacity={capacity()} />);
+		const chip = screen.getByText("Latency budget exceeded");
+		expect(chip.className).toMatch(/\brounded-(sm|md|lg)\b/);
+		expect(chip.className).toContain("text-warning-text");
+		cleanup();
+	});
 });
