@@ -250,6 +250,18 @@ const ScenarioExecution& execution) {
         context->requests_expected = max_iterations * step_count;
     }
 
+    // Which steps the deferred pass will have a script for. Sized here, before
+    // the first submission, because the completion path only ever reads it.
+    // A plan whose steps assert nothing gets no stores at all, so it samples
+    // nothing and the report omits the section rather than showing zeros.
+    {
+        std::vector<bool> scripted (step_count, false);
+        for (size_t i = 0; i < step_count; ++i) {
+            scripted[i] = !plan.steps[i].post_script.empty ();
+        }
+        context->metrics_collector->configure_step_samples (scripted);
+    }
+
     vayu::utils::log_info ("Starting Scenario Load Test (" + mode + ")");
     vayu::utils::log_info ("  Virtual users: " + std::to_string (vu_count));
     vayu::utils::log_info ("  Steps per iteration: " + std::to_string (step_count));
@@ -366,6 +378,10 @@ const ScenarioExecution& execution) {
         const size_t step_index         = vu->step;
         const ScenarioStep& step        = plan.steps[step_index];
         const std::optional<size_t> row = vu->data_row;
+        // Read here rather than in the completion: `finish_step` advances it at
+        // an iteration boundary, so the callback would report the iteration the
+        // VU moved on to instead of the one this step ran in.
+        const size_t iteration          = vu->iteration;
         vayu::Request request           = step.request;
         request.track_cookies           = true;
         request.cookie_lines            = vu->cookies;
@@ -388,13 +404,13 @@ const ScenarioExecution& execution) {
                 handle_result (context, db,
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
-                ResultAnnotations{ row });
+                ResultAnnotations{ row, step_index, iteration });
                 return;
             }
         }
 
         context->event_loop->submit (request,
-        [context, &db, state, vu, step_index, row, finish_step] (
+        [context, &db, state, vu, step_index, iteration, row, finish_step] (
         size_t, vayu::Result<vayu::Response> result) {
             const bool errored = result.is_error () || result.value ().has_error ();
             if (!errored) {
@@ -402,7 +418,8 @@ const ScenarioExecution& execution) {
             }
             finish_step (vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
-            handle_result (context, db, std::move (result), ResultAnnotations{ row });
+            handle_result (context, db, std::move (result),
+            ResultAnnotations{ row, step_index, iteration });
         });
         context->requests_sent++;
     };

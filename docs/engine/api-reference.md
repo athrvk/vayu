@@ -1902,10 +1902,22 @@ knob.
 - **Cookies are per virtual user**, empty at the start of each iteration, and
   the environment jar is untouched. One session shared between 1,000 virtual
   users is not the thing being measured.
-- **Scripts do not run.** They stay deferred, as on every load path, and
-  `pm.execution` therefore throws - a script that has already run against a
-  recorded response cannot redirect a sequence that already happened.
-  Flow control is design-mode only.
+- **Scripts do not run inline. They stay deferred, keyed per step.** After the
+  run drains, each step's own post-request script is replayed against the
+  responses that step produced, and the tallies appear on that step's entry in
+  the breakdown as `tests` (see `scenario.steps` below). A step that carries no
+  script, or whose script never got a sampled response, carries no `tests`
+  object at all rather than a row of zeros. A pre-request script runs nowhere.
+  `pm.execution` still throws - a script that has already run against a recorded
+  response cannot redirect a sequence that already happened. Flow control is
+  design-mode only.
+
+  Sampling is keyed per step for the same reason: the run's
+  `max_response_samples` budget is split evenly across the steps that carry a
+  script (floored at one apiece), so the last step of a forty-step plan is
+  sampled instead of being crowded out by the first. The whole-run
+  `testValidation` section still reports the aggregate - it says *something*
+  failed, and the per-step `tests` say where.
 - **Data rows are claimed from one shared cursor**, one per virtual-user
   iteration, wrapping when they run out - so two virtual users never hold the
   same row at once, which is what a credentials file is for. Every step of an
@@ -1935,13 +1947,18 @@ knob.
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 0,
-      "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 } }
+      "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
+      "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
 ```
 
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
+
+`tests` is the step's deferred validation, and is **absent** for a step that
+asserted nothing or whose script drew no sample - "no assertions" and "no
+failures" are different answers.
 
 **Response:**
 ```json

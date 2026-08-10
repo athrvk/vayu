@@ -633,9 +633,18 @@ row exists - and the executor is the only thing that differs.
   (`DATA_BINDING_FAILED`). Every retained result carries its `dataRowIndex`,
   which is what makes a failure attributable to a row when no per-step `results`
   rows exist.
-- **Scripts stay deferred**, and none run: `pm.execution` throws in a load run
-  for the reason the flow-control section gives. There is deliberately no
-  inline-script path on the load hot path.
+- **Scripts stay deferred, keyed per step.** Nothing runs inline; after the run
+  drains, each step's own `post_script` is replayed against the responses *that
+  step* produced, and the tallies land on that step's entry in the breakdown
+  (`scenario.steps[].tests`). Sampling is per step index for the same reason -
+  one flat run-wide reservoir lets the hot first step swamp the budget and never
+  samples the last step of a long plan. The run's `max_response_samples` budget
+  is split evenly across the steps that carry a script (not across every step),
+  floored at one apiece; a step with no script is never sampled and never
+  counted as a thinned sample. A `pre_script` runs nowhere: it would have to run
+  before a send this mode never pauses for. `pm.execution` still throws in a
+  load run for the reason the flow-control section gives, and there is
+  deliberately no inline-script path on the load hot path.
 - The run's `runs.type` is **`load`**, not `scenario`: it publishes metric ticks
   and reports RPS and percentiles like any load run, and `scenario` is what the
   app reads to render a step list instead of the dashboard.

@@ -374,6 +374,88 @@ void MetricsCollector::record_response_sample (const Response& response) {
     }
 }
 
+const std::vector<ResponseSample> MetricsCollector::NO_SAMPLES;
+
+void MetricsCollector::configure_step_samples (const std::vector<bool>& scripted) {
+    step_samples_.clear ();
+    if (scripted.empty ()) {
+        return;
+    }
+
+    const size_t scripted_steps =
+    static_cast<size_t> (std::count (scripted.begin (), scripted.end (), true));
+
+    // The whole run budget across the steps that will actually be validated,
+    // floored at one so a plan with more scripted steps than slots still
+    // samples every one of them. See the header for why the floor is the
+    // deliberate over-run and not an oversight.
+    const size_t per_step = scripted_steps == 0 ?
+    0 :
+    std::max<size_t> (1, config_.max_response_samples / scripted_steps);
+
+    step_samples_.reserve (scripted.size ());
+    for (bool has_script : scripted) {
+        auto store      = std::make_unique<StepSampleStore> ();
+        store->capacity = has_script ? per_step : 0;
+        store->samples.reserve (store->capacity);
+        step_samples_.push_back (std::move (store));
+    }
+}
+
+void MetricsCollector::record_step_response_sample (const Response& response,
+size_t step_index,
+size_t iteration,
+std::optional<size_t> data_row_index) {
+    if (step_index >= step_samples_.size ()) {
+        return;
+    }
+    StepSampleStore& store = *step_samples_[step_index];
+    // A step no script will ever read. Refused before the rate counter, so an
+    // unsampled step costs one load and one compare per completion.
+    if (store.capacity == 0) {
+        return;
+    }
+
+    // Per step rather than per run: the run-wide counter would hand a plan's
+    // steps a rotating share of the 1-in-N period instead of each step keeping
+    // its own.
+    const size_t counter = store.rate_counter.fetch_add (1, std::memory_order_relaxed);
+    if (counter % config_.response_sample_rate != 0) {
+        return;
+    }
+
+    // Claim before copying, exactly as the run-level store does - a refusal
+    // must not cost a body-sized copy.
+    const size_t seen = store.seen.fetch_add (1, std::memory_order_relaxed);
+    const ReservoirSlot slot = reservoir_slot (seen, store.capacity, next_random ());
+    if (!slot.accepted) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
+    ResponseSample sample (response, now_ms ());
+    sample.iteration      = iteration;
+    sample.data_row_index = data_row_index;
+
+    bool displaced = false;
+    {
+        std::lock_guard<std::mutex> lock (store.mutex);
+        displaced =
+        insert_at_slot (store.samples, store.capacity, slot, std::move (sample));
+    }
+    if (displaced) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+const std::vector<ResponseSample>& MetricsCollector::step_response_samples (
+size_t step_index) const {
+    if (step_index >= step_samples_.size ()) {
+        return NO_SAMPLES;
+    }
+    return step_samples_[step_index]->samples;
+}
+
 void MetricsCollector::record_error (ErrorCode code,
 const std::string& message,
 const std::string& trace_data,

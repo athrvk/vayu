@@ -25,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -51,6 +52,20 @@ struct ResponseSample {
     Headers headers;
     double latency_ms;
     int64_t timestamp;
+    /**
+     * Scenario load runs only: the virtual user's iteration this response was
+     * sent in, and the data row that iteration was bound to.
+     *
+     * Both absent for a single-request load run, where neither exists - the
+     * deferred script then reads `pm.info.iteration` and `pm.iterationData` as
+     * `undefined`, which is issue #300's ruling and stays intact: what that
+     * ruling refuses is reporting a *reservoir position* as an iteration
+     * number, a binding that cannot fail. A scenario step carries the real
+     * iteration index it ran in, so reporting it is the honest answer rather
+     * than the invented one.
+     */
+    std::optional<size_t> iteration;
+    std::optional<size_t> data_row_index;
 
     ResponseSample () = default;
     ResponseSample (const Response& resp, int64_t ts)
@@ -266,6 +281,49 @@ class MetricsCollector {
      * Thread-safe, stores sampled responses for post-test script execution
      */
     void record_response_sample (const Response& response);
+
+    /**
+     * @brief Size the per-step sample stores for a scenario load run (#450).
+     *
+     * @param scripted One entry per plan step, true where that step carries a
+     *        deferred script. A step with none is given no store at all: it is
+     *        never sampled and never counted as a drop, because nothing was
+     *        ever a candidate for a reservoir that does not exist.
+     *
+     * The run's whole `max_response_samples` budget is split evenly across the
+     * **scripted** steps rather than across every step, so a forty-step plan
+     * with two assertions gives those two the budget instead of thinning it
+     * forty ways down to noise. The split has a floor of one sample per
+     * scripted step: a plan with more scripted steps than the budget has slots
+     * still validates every one of them, which is the property "the last step
+     * of a long plan is sampled" actually needs. That floor is the only case
+     * where the retained total can exceed the configured budget, and it is
+     * bounded by `maxScenarioSteps`.
+     *
+     * Called once, before the first submission. Calling it twice, or after a
+     * completion has landed, would resize a store a worker may be inside.
+     */
+    void configure_step_samples (const std::vector<bool>& scripted);
+
+    /**
+     * @brief Record a response sample against the plan step that produced it.
+     *
+     * The scenario counterpart of `record_response_sample`: one reservoir per
+     * step, so one hot step cannot swamp the run's budget and leave the last
+     * step of a long plan never sampled. A step `configure_step_samples` gave
+     * no store returns immediately - the common case for a plan where only
+     * some steps assert anything.
+     *
+     * @param iteration The virtual user's iteration this step ran in, and
+     * @param data_row_index the row that iteration was bound to (absent for a
+     *        run sent without `data`). Both are carried onto the sample so the
+     *        deferred script reads the iteration it actually ran in - see
+     *        ResponseSample.
+     */
+    void record_step_response_sample (const Response& response,
+    size_t step_index,
+    size_t iteration,
+    std::optional<size_t> data_row_index);
 
     /**
      * @brief Record a failed request
@@ -537,6 +595,25 @@ class MetricsCollector {
         return response_samples_.size ();
     }
 
+    /**
+     * @brief How many plan steps `configure_step_samples` was told about.
+     * Zero for a single-request load run, which is what tells the deferred
+     * validation pass which of the two shapes it is looking at.
+     */
+    [[nodiscard]] size_t step_sample_step_count () const {
+        return step_samples_.size ();
+    }
+
+    /**
+     * @brief A step's stored response samples, empty for an unsampled step.
+     *
+     * Read after the run has drained (the deferred validation pass), for the
+     * same reason `response_samples()` is: a reference into a store a worker
+     * could still be inserting into would be a race, and by then none can.
+     */
+    [[nodiscard]] const std::vector<ResponseSample>& step_response_samples (
+    size_t step_index) const;
+
     // ========================================================================
     // Database persistence
     // ========================================================================
@@ -663,6 +740,32 @@ class MetricsCollector {
     std::atomic<size_t> response_sample_counter_{ 0 };
     std::atomic<size_t> response_seen_{ 0 };
     std::atomic<size_t> response_dropped_{ 0 };
+
+    /**
+     * @brief One reservoir per plan step, for a scenario load run's deferred
+     *        per-step validation. Empty for a single-request load run.
+     *
+     * Held by pointer because each store owns a mutex and two counters, none of
+     * which are movable - the vector is sized once by
+     * `configure_step_samples` and never grows again, so a worker holding a
+     * store's lock can never have it reallocated out from under it.
+     *
+     * `capacity == 0` is a step nothing will ever validate. Its store exists
+     * only to keep the vector indexable by step, and refuses every candidate
+     * without counting a drop - a response no script will read is not a
+     * retained sample the run thinned away.
+     */
+    struct StepSampleStore {
+        mutable std::mutex mutex;
+        std::vector<ResponseSample> samples;
+        std::atomic<size_t> rate_counter{ 0 };
+        std::atomic<size_t> seen{ 0 };
+        size_t capacity = 0;
+    };
+    std::vector<std::unique_ptr<StepSampleStore>> step_samples_;
+    /// Returned for a step index no store covers, so the accessor can hand back
+    /// a reference rather than an optional every caller would have to unwrap.
+    static const std::vector<ResponseSample> NO_SAMPLES;
 
     // Overflow for non-standard / out-of-range codes (e.g. 999 from misbehaving
     // proxies). Dead path for real traffic; guarded by a mutex it almost never

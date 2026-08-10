@@ -864,6 +864,21 @@ export interface RunScenarioStepStat {
 		p99: number;
 		max: number;
 	};
+	/**
+	 * What this step's own post-request script found, replayed after the run
+	 * against the responses *this step* produced (issue #450).
+	 *
+	 * `undefined` is a step that asserted nothing, or one whose script never got
+	 * a sampled response to run against - deliberately not the same claim as
+	 * "zero assertions failed", which is why the engine omits the object rather
+	 * than writing zeros.
+	 */
+	tests?: {
+		/** Sampled responses the script was replayed against. */
+		sampled: number;
+		passed: number;
+		failed: number;
+	};
 }
 
 export interface RunReport {

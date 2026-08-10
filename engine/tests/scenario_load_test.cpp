@@ -197,13 +197,18 @@ class ScenarioLoadTest : public ::testing::Test {
     size_t pool_size = 500) {
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-scenario-load", config);
+        // Set the way `execute_load_test` does, so the deferred validation pass
+        // finds the plan where production leaves it rather than where a test
+        // handed it over.
+        context->scenario =
+        std::make_shared<const vayu::core::ScenarioExecution> (execution);
         vayu::http::EventLoopConfig loop_config;
         loop_config.max_concurrent = pool_size;
         loop_config.max_per_host   = 500;
         context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
         context->event_loop->start ();
 
-        auto state = vayu::core::execute_scenario_load (context, *db_, execution);
+        auto state = vayu::core::execute_scenario_load (context, *db_, *context->scenario);
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
         context_ = context;
         return state;
@@ -480,15 +485,15 @@ TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenario
     EXPECT_TRUE (summary["steps"][0]["latency"].contains ("p99"));
 }
 
-// Scripts stay deferred, and a load-mode scenario runs none of them: the run
-// must not claim a validation it never performed. `pm.execution` therefore
-// throws for the same reason it does in any load run - there is no live
-// sequence for a script to redirect.
-TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScripts) {
+// Scripts stay deferred: a load-mode scenario runs none of them inline, and the
+// run acquires no run-level script to stand in for the steps' own. What it does
+// acquire (issue #450) is a per-step sample store for the steps that carry one,
+// which the deferred pass below replays against.
+TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScriptsAndSamplesOnlyScriptedSteps) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    // A step that carries scripts, so "none ran" is a property of the executor
-    // rather than of an empty plan.
+    // A step that carries scripts, so "none ran inline" is a property of the
+    // executor rather than of an empty plan.
     execution.plan.steps[0].pre_script  = "pm.environment.set('x', '1');";
     execution.plan.steps[0].post_script = "pm.test('t', function () { });";
 
@@ -498,8 +503,225 @@ TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScripts) {
 
     EXPECT_TRUE (context_->test_script.empty ())
     << "a scenario load run must not acquire a run-level test script";
-    EXPECT_EQ (context_->metrics_collector->response_samples ().size (), 0u)
-    << "responses were sampled for a script validation pass that cannot run";
+    const auto& mc = *context_->metrics_collector;
+    EXPECT_EQ (mc.response_samples ().size (), 0u)
+    << "a scenario run must not fill the run-level store - its scripts are per "
+       "step";
+    EXPECT_GT (mc.step_response_samples (0).size (), 0u)
+    << "the step carrying a post-request script was never sampled, so its "
+       "assertions can never be checked";
+    EXPECT_EQ (mc.step_response_samples (1).size (), 0u)
+    << "a step with no script was sampled - a body-sized copy nothing will "
+       "read";
+}
+
+// A plan whose steps assert nothing gets no stores at all, which is what keeps
+// the report's section absent rather than showing zeros.
+TEST_F (ScenarioLoadTest, APlanWithNoScriptsSamplesNothing) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto& mc = *context_->metrics_collector;
+    EXPECT_EQ (mc.step_response_samples (0).size (), 0u);
+    EXPECT_EQ (mc.step_response_samples (1).size (), 0u);
+    EXPECT_EQ (mc.response_samples_dropped (), 0u)
+    << "a step nothing will validate must not be counted as a thinned sample";
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    EXPECT_FALSE (validation.run.has_value ())
+    << "a run that validated nothing must omit the section, not report zeros";
+}
+
+// Sampling is keyed per step, so the last step of a long plan is sampled even
+// when the run budget is far smaller than the number of completions.
+//
+// Mutation-check: revert to the flat whole-run reservoir and every one of these
+// stores is empty - the run's samples all land in `response_samples()`, where
+// nothing can tell which step produced them.
+TEST_F (ScenarioLoadTest, EveryScriptedStepIsSampledIncludingTheLast) {
+    ScenarioMockServer server;
+    // Four steps over three distinct paths - the plan is what is long here, not
+    // the mock. Every step asserts, so every step competes for the budget.
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1"),
+    server.url ("/s2"), server.url ("/echo") });
+    for (auto& step : execution.plan.steps) {
+        step.post_script = "pm.test('ok', function () { });";
+    }
+
+    // A budget of exactly one slot per scripted step, so the split is what
+    // decides coverage rather than a budget large enough to hide it.
+    const json config = { { "mode", "iterations" }, { "iterations", 6 },
+        { "concurrency", 1 }, { "max_response_samples", 4 },
+        { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto& mc  = *context_->metrics_collector;
+    size_t retained = 0;
+    for (size_t step = 0; step < execution.plan.steps.size (); ++step) {
+        EXPECT_GT (mc.step_response_samples (step).size (), 0u)
+        << "step " << step << " was never sampled, so its assertions are never checked";
+        retained += mc.step_response_samples (step).size ();
+    }
+    EXPECT_LE (retained, 4u) << "the run budget was handed to each step whole "
+                                "instead of split across them";
+    EXPECT_GT (mc.response_samples_dropped (), 0u)
+    << "24 completions into a 4-sample budget must report what was thinned";
+}
+
+// ============================================================================
+// Deferred per-step script validation (issue #450)
+// ============================================================================
+
+// Each step's own `post_script` is replayed against that step's samples, and a
+// step with no script reports no tallies at all.
+TEST_F (ScenarioLoadTest, EachStepsScriptIsReplayedAgainstItsOwnSamples) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].post_script =
+    "pm.test('ok', function () { pm.expect(pm.response.code).to.equal(200); "
+    "});";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 2u);
+    ASSERT_TRUE (validation.steps[0].has_value ())
+    << "the scripted step reported no tallies, so its assertions went "
+       "unchecked";
+    EXPECT_EQ (validation.steps[0]->sampled, 3u);
+    EXPECT_EQ (validation.steps[0]->passed, 3u);
+    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    EXPECT_FALSE (validation.steps[1].has_value ())
+    << "a step with no script must report nothing rather than a row of zeros";
+
+    ASSERT_TRUE (validation.run.has_value ());
+    EXPECT_EQ (validation.run->sampled, 3u);
+    EXPECT_EQ (validation.run->passed, 3u);
+}
+
+// A failing assertion is attributed to the step that made it, not to the run -
+// which is the whole reason the tallies are per step.
+TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+    execution.plan.steps[0].post_script =
+    "pm.test('ok', function () { pm.expect(pm.response.code).to.equal(200); "
+    "});";
+    execution.plan.steps[1].post_script =
+    "pm.test('wrong', function () { pm.expect(pm.response.code).to.equal(500); "
+    "});";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 3u);
+    ASSERT_TRUE (validation.steps[0].has_value ());
+    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    EXPECT_EQ (validation.steps[0]->passed, 2u);
+    ASSERT_TRUE (validation.steps[1].has_value ());
+    EXPECT_EQ (validation.steps[1]->failed, 2u)
+    << "step 2's failing assertion was not attributed to step 2";
+    EXPECT_EQ (validation.steps[1]->passed, 0u);
+    EXPECT_FALSE (validation.steps[2].has_value ());
+
+    // The run's headline still says something failed; the breakdown says where.
+    ASSERT_TRUE (validation.run.has_value ());
+    EXPECT_EQ (validation.run->failed, 2u);
+    EXPECT_EQ (validation.run->passed, 2u);
+}
+
+// The replayed script reads the iteration it actually ran in and the data row
+// that iteration was bound to - a real index, not a reservoir position.
+TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "a" } }, json{ { "id", "b" } } });
+    // Two iterations bind rows 0 and 1, so a script that pairs the iteration
+    // with its row passes only if both bindings are the real ones.
+    execution.plan.steps[0].post_script =
+    "pm.test('bound', function () {"
+    "  var expected = pm.info.iteration === 0 ? 'a' : 'b';"
+    "  if (pm.iterationData.get('id') !== expected) {"
+    "    throw new Error('iteration ' + pm.info.iteration + ' saw ' +"
+    "      pm.iterationData.get('id'));"
+    "  }"
+    "});";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_EQ (validation.steps.size (), 1u);
+    ASSERT_TRUE (validation.steps[0].has_value ());
+    EXPECT_EQ (validation.steps[0]->passed, 2u);
+    EXPECT_EQ (validation.steps[0]->failed, 0u);
+}
+
+// `pm.execution` still throws, naming itself: a script that has already run
+// against a recorded response cannot redirect a sequence that already happened.
+TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    // The assertion passes only if the call threw *and* the sentence named the
+    // method - so a silently accepted call fails this test rather than reading
+    // as a pass.
+    execution.plan.steps[0].post_script =
+    "pm.test('refused', function () {"
+    "  var message = '';"
+    "  try { pm.execution.setNextRequest('somewhere'); }"
+    "  catch (e) { message = String(e && e.message ? e.message : e); }"
+    "  if (message.indexOf('setNextRequest') === -1) {"
+    "    throw new Error('not refused by name: ' + message);"
+    "  }"
+    "});";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_EQ (validation.steps.size (), 1u);
+    ASSERT_TRUE (validation.steps[0].has_value ());
+    EXPECT_EQ (validation.steps[0]->passed, 1u);
+    EXPECT_EQ (validation.steps[0]->failed, 0u);
+}
+
+// The tallies land on the step they belong to in the stored summary, which is
+// what the report route hands the app verbatim.
+TEST_F (ScenarioLoadTest, PerStepTalliesAreAttachedToTheStoredBreakdown) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].post_script = "pm.test('ok', function () { });";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    auto state        = run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    auto summary =
+    vayu::core::build_scenario_load_summary (*state, context_->scenario->plan);
+    vayu::core::attach_step_test_totals (summary, validation.steps);
+
+    ASSERT_TRUE (summary["steps"].is_array ());
+    ASSERT_EQ (summary["steps"].size (), 2u);
+    ASSERT_TRUE (summary["steps"][0].contains ("tests"));
+    EXPECT_EQ (summary["steps"][0]["tests"]["sampled"], 2);
+    EXPECT_EQ (summary["steps"][0]["tests"]["passed"], 2);
+    EXPECT_EQ (summary["steps"][0]["tests"]["failed"], 0);
+    EXPECT_FALSE (summary["steps"][1].contains ("tests"))
+    << "a step that asserted nothing must carry no tests object at all";
 }
 
 // ============================================================================
