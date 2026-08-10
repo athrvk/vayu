@@ -338,8 +338,9 @@ const {
 } = useSaveStore();
 ```
 
-**Non-persisted**. See `useSaveManager` (autosave editors) and
-`useDraftSaveContext` (manual save-button editors) for registration details.
+**Non-persisted**. See `useSaveManager` (debounced-autosave editors) and
+`useDraftSaveContext` (draft editors, whether they commit on blur or on a
+button) for registration details.
 Between them every dirty editor in the app is in this registry, which is what
 `flushAll` walks on quit - a surface that is not registered is not merely
 unsaved on quit, it is invisible.
@@ -1421,9 +1422,11 @@ const { forceSave, status, isSaving } = useSaveManager({
 
 ### `useEntityDraft()` - Manual Draft/Save Model
 
-The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. Used by `CollectionDetail`'s `AuthTab` and `ScriptTab`, where a save is a deliberate button press rather than a keystroke that persists itself.
+The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. `CollectionDetail`'s `AuthTab` is its one remaining button user.
 
-`InfoTab` uses the hook without the button: it wants the draft, the resync and the mutation reset, but commits on blur like the request builder. `reset` therefore has one caller fewer than `draft` does.
+`InfoTab` and `ScriptTab` use the hook without the button: they want the draft, the resync and the mutation reset, but commit when focus leaves the field, like the request builder. `reset` therefore has one caller where `draft` has three.
+
+**Why auth alone kept the button (#446).** Not because a credential outranks a script - the request builder autosaves its own auth through `useSaveManager`. Because a blur inside `AuthFields` is not a completion signal: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them non-value controls (pickers, switches, the reveal toggle, Get Token), and clicking reveal to check a half-typed password fires `focusout` while the draft is dirty - so a blur-commit would write half a credential to the record every descendant request inherits from. The fields only make sense written together. A script tab has one focus stop, so leaving it means what leaving a description means. Should collection auth ever persist by itself, the mechanism is the debounce, not a blur - a different change from this one. `AuthTab` states its save model above the fields, since it is the tab on that screen that differs.
 
 **API:**
 ```typescript
@@ -1484,10 +1487,12 @@ useDraftSaveContext({
 ```
 
 **Behaviour:**
-- **Registration only.** It schedules nothing; the Save button stays the primary
-  affordance. The defect it fixes is that the *other* ways to save - Ctrl/Cmd+S,
-  the quit flush, tab eviction - could not reach these editors at all, because
-  none of the three tabs ever called `registerContext`.
+- **Registration only.** It schedules nothing; each editor decides when to call
+  its own `save` - `AuthTab` on its Save button, `InfoTab` and `ScriptTab` when
+  focus leaves the field. The defect it fixes is orthogonal to that choice: the
+  *other* ways to save - Ctrl/Cmd+S, the quit flush, tab eviction - could not
+  reach these editors at all, because none of the three tabs ever called
+  `registerContext`.
 - **`isActive` decides who owns Ctrl/Cmd+S.** `triggerSave` prefers the active
   context, and these editors stay mounted while hidden, so without it the last
   sibling to mount would answer for the panel on screen.
@@ -1596,7 +1601,7 @@ starts the engine at import time.
 
 3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
 
-4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that holds a draft instead - committing it on blur or on an explicit button - use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
 

@@ -14,10 +14,11 @@
  * flush, tab eviction) could not see them at all. A collection's auth, its
  * description, its scripts - all dirty, all invisible, all gone on quit.
  *
- * This is registration only. It does not schedule anything, and the Save button
- * stays the primary affordance: the manual model is a deliberate choice for
- * these editors (see `useEntityDraft`), and the defect was that the *other*
- * ways to save could not reach them.
+ * This is registration only. It does not schedule anything: each editor decides
+ * when to call its own `save` - `AuthTab` on its Save button, `InfoTab` and
+ * `ScriptTab` when focus leaves the field (see `useEntityDraft` for why auth is
+ * the one that waits). The defect this fixes is orthogonal to that choice: the
+ * *other* ways to save could not reach any of them.
  *
  * A failure on this path toasts through `failSave` rather than resolving
  * quietly. The editors render their own inline `SaveFailed` callout for a
