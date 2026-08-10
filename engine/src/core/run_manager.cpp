@@ -34,20 +34,6 @@ inline int64_t now_ms () {
 /// Snapshot what each bounded store thinned away, for the run summary. One
 /// copy so the completed-run and crashed-run summaries cannot report retention
 /// differently.
-/// Join the run's auxiliary threads - the tick producer and, when the run
-/// configured one, the server-vitals scrape. Both exit on `is_running` and both
-/// must be joined before the worker reads what they wrote; there are four ways
-/// out of a load run, so the pair lives here rather than being remembered four
-/// times.
-void join_run_threads (const std::shared_ptr<RunContext>& context) {
-    if (context->metrics_thread.joinable ()) {
-        context->metrics_thread.join ();
-    }
-    if (context->monitor_thread.joinable ()) {
-        context->monitor_thread.join ();
-    }
-}
-
 SamplingRetention read_retention (const MetricsCollector& mc) {
     SamplingRetention retention;
     retention.errors_dropped           = mc.errors_dropped ();
@@ -452,10 +438,14 @@ RunContext::~RunContext () {
     // Wake the closed-loop controller so it observes should_stop without
     // waiting for its 50ms safety-net timeout before the join below.
     notify_refill ();
-    // The worker joins this itself before it returns; the join here only covers
-    // a context destroyed before its worker ever ran. The *worker* thread is
-    // owned by RunManager (run_workers_), never by the context - see the
-    // declaration for why.
+    // The worker joins these itself before it returns; the join here only
+    // covers a context destroyed before its worker ever ran. The *worker*
+    // thread is owned by RunManager (run_workers_), never by the context - see
+    // the declaration for why.
+    join_aux_threads ();
+}
+
+void RunContext::join_aux_threads () {
     if (metrics_thread.joinable ()) {
         metrics_thread.join ();
     }
@@ -463,6 +453,9 @@ RunContext::~RunContext () {
     // destroyed context is std::terminate, not a leak.
     if (monitor_thread.joinable ()) {
         monitor_thread.join ();
+    }
+    if (auth_refresh_thread.joinable ()) {
+        auth_refresh_thread.join ();
     }
 }
 
@@ -862,11 +855,32 @@ RunManager& manager) {
                 : "Load test auth resolution failed: " + built.error_message);
                 db.update_run_status (context->run_id, vayu::RunStatus::Failed);
                 context->is_running = false;
-                join_run_threads (context);
+                context->join_aux_threads ();
                 manager.retain_run (context->run_id);
                 return;
             }
             request = std::move (built.request);
+
+            // A run that outlives its OAuth 2.0 token used to become a 401
+            // storm the report never explained. Armed here, while the token
+            // this run just resolved is still the one in the cache, and inert
+            // for every auth that cannot be refreshed mid-run - see
+            // plan_auth_refresh for that list.
+            //
+            // A scenario load run is deliberately not covered: each of its
+            // steps resolved its own auth at plan time, before this run row
+            // existed, so there is no single credential to keep current.
+            if (auto plan = vayu::http::plan_auth_refresh (
+                request, config.value ("auth", nlohmann::json ()), db_ptr)) {
+                context->auth_refresh =
+                std::make_shared<AuthRefreshState> (std::move (*plan));
+                // The user's oauth2Refresh* settings, read once here: a run's
+                // schedule must not change under it half way through.
+                const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
+                context->auth_refresh_thread = std::thread ([context, db_ptr, tuning] () {
+                    run_auth_refresh (context, db_ptr, tuning);
+                });
+            }
         }
 
         // Execute Load Strategy
@@ -884,7 +898,7 @@ RunManager& manager) {
             vayu::utils::log_error ("Load test failed: " + std::string (e.what ()));
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
-            join_run_threads (context);
+            context->join_aux_threads ();
             manager.retain_run (context->run_id);
             return;
         }
@@ -921,10 +935,11 @@ RunManager& manager) {
         // Stop background collection and wait for the threads to finish
         context->is_running = false;
 
-        // Properly join them to ensure they are done writing to the DB - and,
-        // for the scrape loop, that `monitor_totals` is final before the
-        // summary below reads it.
-        join_run_threads (context);
+        // Properly join the auxiliary threads to ensure the tick thread is
+        // done writing to the DB, the refresh watchdog has let go of it, and
+        // the scrape loop's `monitor_totals` is final before the summary below
+        // reads it.
+        context->join_aux_threads ();
 
         // Calculate cleanup overhead (time from test end to after cleanup)
         auto cleanup_end = std::chrono::steady_clock::now ();
@@ -986,6 +1001,9 @@ RunManager& manager) {
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests     = validation.run;
+            // Written by the capacity strategy before its execute() returned,
+            // so it is already final here; absent for every other mode.
+            inputs.capacity  = context->capacity;
             inputs.retention = read_retention (*context->metrics_collector);
             // Safe to read unlocked: the scrape thread is its only writer and
             // was joined above, which is the happens-before edge.
@@ -1009,6 +1027,11 @@ RunManager& manager) {
             // is about to store, or a report could print a p99 its own verdict
             // disagrees with. A run stopped early is judged on what it measured.
             inputs.thresholds = evaluate_thresholds (context->config, inputs);
+            // What the refresh watchdog did, for a run that had one. Read after
+            // the join above, so the tallies are final.
+            if (context->auth_refresh) {
+                inputs.auth = context->auth_refresh->summary ();
+            }
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -1050,7 +1073,7 @@ RunManager& manager) {
         // failure paths do. Deferring the join to ~RunContext instead would run
         // it under RunManager::mutex_ during a later sweep eviction.
         context->is_running = false;
-        join_run_threads (context);
+        context->join_aux_threads ();
 
         vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
 
@@ -1085,6 +1108,9 @@ RunManager& manager) {
             inputs.latency_avg_ms   = mc.average_latency ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
+            if (context->auth_refresh) {
+                inputs.auth = context->auth_refresh->summary ();
+            }
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -1205,6 +1231,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
             { "passed", inputs.thresholds->passed },
             { "failed", inputs.thresholds->failed } };
     }
+    // What a capacity run's search found, level by level. Omitted for every
+    // other mode - a fixed-target run measured a point, not a curve, and has
+    // no knee to report.
+    if (inputs.capacity.has_value ()) {
+        summary["capacity"] = build_capacity_summary_payload (*inputs.capacity);
+    }
     // A scenario load run's sequence tallies, under the same key and in the
     // same shape the design-mode runner writes - one report section, two
     // executors. Omitted for a single-request load run, which has no sequence.
@@ -1216,6 +1248,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // that scraped nothing as one whose target reported zeros.
     if (inputs.monitor.has_value ()) {
         summary["monitor"] = *inputs.monitor;
+    }
+    // Whether this run's OAuth 2.0 credential was kept current, and at what
+    // cost. Omitted for every run that could not refresh at all, so an absent
+    // section reads as "this run was never watching" rather than as a run that
+    // watched and saw nothing.
+    if (inputs.auth.has_value ()) {
+        summary["auth"] = *inputs.auth;
     }
     return summary;
 }
@@ -1297,6 +1336,12 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         stats["timestamp"]        = now_wall_ms;
         stats["requestsSent"]     = requests_sent;
         stats["requestsExpected"] = requests_expected;
+
+        // Publish the same numbers to the strategies' feedback path, before
+        // the SSE payload rather than after: a capacity search polls this every
+        // tick, and the serialize-and-append below is the slower half.
+        context->publish_live_tick ({ 0, win_p50, win_p95, win_p99, live_current_rps,
+        backpressure, window.count });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the

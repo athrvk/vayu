@@ -29,7 +29,11 @@ import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
-import { validateRampDuration, validateStartConcurrency } from "../../utils/loadTestValidation";
+import {
+	validateCapacityRange,
+	validateRampDuration,
+	validateStartConcurrency,
+} from "../../utils/loadTestValidation";
 import {
 	LOAD_TEST_DEFAULTS,
 	clampToRange,
@@ -83,6 +87,8 @@ interface SavedLoadTestConfig {
 	iterations: number;
 	rampDuration: number;
 	startConcurrency: number;
+	stepDuration: number;
+	sloMs: number;
 	maxInFlight: number | null;
 	sampleRate: number;
 	slowThreshold: number;
@@ -247,6 +253,9 @@ export default function LoadTestConfigDialog({
 	const [startConcurrency, setStartConcurrency] = useState(() =>
 		restore(saved.startConcurrency, LOAD_TEST_DEFAULTS.START_CONCURRENCY, "START_CONCURRENCY")
 	);
+	const [stepDuration, setStepDuration] = useState(() =>
+		restore(saved.stepDuration, LOAD_TEST_DEFAULTS.STEP_DURATION_S, "STEP_DURATION_S")
+	);
 	const [maxInFlight, setMaxInFlight] = useState<string>(
 		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
 	);
@@ -270,6 +279,15 @@ export default function LoadTestConfigDialog({
 	 * draft has been memoed, a cleared p99 stays cleared.
 	 */
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	/**
+	 * Capacity Discovery searches for the edge of this budget. Seeded from the
+	 * same `sloThresholdMs` setting the p99 budget below is - the search and the
+	 * chart annotation are two readings of one number, and giving the mode its
+	 * own default would be a third notion of "too slow".
+	 */
+	const [sloMs, setSloMs] = useState(() =>
+		restore(saved.sloMs ?? sloThresholdMs, sloThresholdMs, "SLO_MS")
+	);
 	const [budgets, setBudgets] = useState<BudgetDraft>(
 		() =>
 			saved.budgets ?? {
@@ -299,10 +317,15 @@ export default function LoadTestConfigDialog({
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
+	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
 	const budgetsError = budgetError(budgets);
 	const monitoringError = monitorError(monitor);
 	const blockingError =
-		rampDurationError ?? startConcurrencyError ?? budgetsError ?? monitoringError;
+		rampDurationError ??
+		startConcurrencyError ??
+		capacityRangeError ??
+		budgetsError ??
+		monitoringError;
 
 	const notices = useMemo(() => {
 		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
@@ -338,6 +361,18 @@ export default function LoadTestConfigDialog({
 				node: (
 					<Callout severity="blocking" title="Server monitoring is incomplete">
 						{monitoringError}
+					</Callout>
+				),
+			});
+		}
+
+		if (capacityRangeError) {
+			list.push({
+				key: "capacity-range",
+				severity: "blocking",
+				node: (
+					<Callout severity="blocking" title="The search has nowhere to climb">
+						{capacityRangeError}
 					</Callout>
 				),
 			});
@@ -388,6 +423,7 @@ export default function LoadTestConfigDialog({
 	}, [
 		rampDurationError,
 		startConcurrencyError,
+		capacityRangeError,
 		budgetsError,
 		monitoringError,
 		hasPreRequestScript,
@@ -407,6 +443,8 @@ export default function LoadTestConfigDialog({
 			iterations,
 			rampDuration,
 			startConcurrency,
+			stepDuration,
+			sloMs,
 			maxInFlight: maxInFlightValue,
 			sampleRate,
 			slowThreshold,
@@ -449,6 +487,15 @@ export default function LoadTestConfigDialog({
 			config.concurrency = concurrency;
 			config.ramp_duration_seconds = rampDuration;
 			config.start_concurrency = startConcurrency;
+		} else if (mode === "capacity") {
+			// `concurrency` is the ceiling the search will not climb past and
+			// `start_concurrency` is where it begins - the same two fields the
+			// ramp owns, reused rather than respelled, so one cap in Settings
+			// bounds both modes.
+			config.concurrency = concurrency;
+			config.start_concurrency = startConcurrency;
+			config.slo_ms = sloMs;
+			config.step_duration_seconds = stepDuration;
 		}
 
 		onStart(config);
@@ -493,11 +540,22 @@ export default function LoadTestConfigDialog({
 						{mode !== "constant_rps" && (
 							<NumberField
 								id="lt-concurrency"
-								label={mode === "ramp_up" ? "Target connections" : "Connections"}
+								label={
+									mode === "ramp_up"
+										? "Target connections"
+										: mode === "capacity"
+											? "Stop climbing at"
+											: "Connections"
+								}
 								value={concurrency}
 								onChange={num(setConcurrency)}
 								min={limits.CONCURRENCY.MIN}
 								max={limits.CONCURRENCY.MAX}
+								hint={
+									mode === "capacity"
+										? "The ceiling the search will not climb past. Reaching it ends the run."
+										: undefined
+								}
 							/>
 						)}
 
@@ -515,7 +573,13 @@ export default function LoadTestConfigDialog({
 						{usesDuration && (
 							<NumberField
 								id="lt-duration"
-								label={mode === "ramp_up" ? "Total duration" : "Duration"}
+								label={
+									mode === "ramp_up"
+										? "Total duration"
+										: mode === "capacity"
+											? "Give up after"
+											: "Duration"
+								}
 								unit="sec"
 								value={duration}
 								onChange={num(setDuration)}
@@ -524,7 +588,33 @@ export default function LoadTestConfigDialog({
 							/>
 						)}
 
-						{mode === "ramp_up" && (
+						{mode === "capacity" && (
+							<NumberField
+								id="lt-slo"
+								label="Latency budget"
+								unit="ms"
+								value={sloMs}
+								onChange={num(setSloMs)}
+								min={limits.SLO_MS.MIN}
+								max={limits.SLO_MS.MAX}
+								hint="The p99 the search looks for the edge of. Prefilled from your SLO setting."
+							/>
+						)}
+
+						{mode === "capacity" && (
+							<NumberField
+								id="lt-step-duration"
+								label="Hold each level for"
+								unit="sec"
+								value={stepDuration}
+								onChange={num(setStepDuration)}
+								min={limits.STEP_DURATION_S.MIN}
+								max={limits.STEP_DURATION_S.MAX}
+								hint="Longer steps measure each level more steadily; shorter ones search faster."
+							/>
+						)}
+
+						{(mode === "ramp_up" || mode === "capacity") && (
 							<NumberField
 								id="lt-start-concurrency"
 								label="Start from"
@@ -532,7 +622,11 @@ export default function LoadTestConfigDialog({
 								onChange={num(setStartConcurrency)}
 								min={limits.START_CONCURRENCY.MIN}
 								max={limits.START_CONCURRENCY.MAX}
-								hint="Connections at the start of the ramp. The engine climbs from here to the target."
+								hint={
+									mode === "capacity"
+										? "The first level the search measures. It steps up from here while latency holds."
+										: "Connections at the start of the ramp. The engine climbs from here to the target."
+								}
 							/>
 						)}
 
@@ -559,6 +653,8 @@ export default function LoadTestConfigDialog({
 								iterations,
 								rampDuration,
 								startConcurrency,
+								stepDuration,
+								sloMs,
 							},
 							blockingError !== null
 						)}

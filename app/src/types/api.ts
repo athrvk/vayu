@@ -374,6 +374,15 @@ export interface StartLoadTestRequest {
 	rampUpDuration?: string;
 	startConcurrency?: number;
 
+	// For "capacity" mode. `startConcurrency` is where the search begins and
+	// `concurrency` is the ceiling it will not climb past - both fields the ramp
+	// already owns, reused rather than respelled. `duration` is the whole
+	// search's deadline.
+	/** p99 budget the search looks for the edge of, in ms. */
+	sloMs?: number;
+	/** How long each concurrency level is held before it is judged, e.g. `"5s"`. */
+	stepDuration?: string;
+
 	// Optional linking
 	requestId?: string;
 	environmentId?: string;

@@ -252,6 +252,7 @@ This matters because the seeded labels are wrong in places.
 | `scriptEnableConsole` | `core/run_manager.cpp` | Per run |
 | `liveTickIntervalMs` | `core/run_manager.cpp` | Per run |
 | `maxResponseBodyBytes` | `core/run_manager.cpp` | Per run |
+| `oauth2RefreshLeadMs`, `oauth2RefreshMinIntervalMs`, `oauth2RefreshRetryMs`, `oauth2RefreshRetryMaxMs`, `oauth2RefreshPollIntervalMs` | `core/auth_refresh.cpp` (read at `core/run_manager.cpp`) | Per run. Mid-run OAuth 2.0 renewal: lead time, floor between renewals, the retry backoff's first wait and ceiling, and how often the watchdog wakes to notice the run ended |
 | `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize`, `dbTempStore`, `dbMmapSize`, `dbWalAutocheckpoint` | `db/database.cpp` | DB open. **Restart required** |
 | `maxConnections` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |
 | `statsInterval` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |

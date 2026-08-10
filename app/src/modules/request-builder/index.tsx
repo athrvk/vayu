@@ -462,6 +462,14 @@ export default function RequestBuilder() {
 					// engine and read back into the dashboard, but nothing set it, so
 					// every ramp started from the engine default of 1.
 					startConcurrency: config.start_concurrency,
+					// Capacity only. `startConcurrency` above is where the search
+					// begins and `concurrency` is its ceiling, so the mode adds
+					// only these two rather than a second spelling of bounds the
+					// ramp already owns.
+					sloMs: config.slo_ms,
+					stepDuration: config.step_duration_seconds
+						? `${config.step_duration_seconds}s`
+						: undefined,
 					maxInFlight: config.max_in_flight,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,

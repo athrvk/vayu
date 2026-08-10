@@ -355,8 +355,27 @@ Auto-created by `sync_schema()`.
 
 Expiry is `now > created_at + expires_in*1000 − 45s` (skew). On refresh the
 `refresh_token` rotates when the provider issues a new one; a rejected refresh
-token clears the row and falls back to a fresh grant. There is **no** mid-run
-refresh. Tokens are plaintext at rest (v1 posture); the row is cleared via
+token clears the row and falls back to a fresh grant.
+
+A load run **does** refresh mid-run: a run whose auth resolves to a
+header-placed, expiring oauth2 token gets a watchdog thread that re-acquires
+`oauth2RefreshLeadMs` (default 60s) before expiry, writes the new row here and
+republishes the header onto every later transfer. That lead, the floor between
+two renewals (`oauth2RefreshMinIntervalMs`), the retry backoff after a refused
+renewal (`oauth2RefreshRetryMs` doubling to `oauth2RefreshRetryMaxMs`) and how
+often the watchdog wakes to notice the run ended (`oauth2RefreshPollIntervalMs`,
+which bounds how long a finished run waits to join it) are all settings under
+**Network & Connectivity**, read once when a run arms its watchdog, so a change
+applies to the next run started. It stays out of the way
+for the shapes it cannot renew - `tokenPlacement: "query"` (the credential is in the
+URL every transfer copies), `autoRefreshToken: false`, an `authorization_code`
+grant with no refresh token, a non-expiring token, and a scenario load run
+(whose steps each resolved their own auth at plan time). Each refresh, and any
+failure, is reported in the run's `auth` section; a failed refresh never fails
+the run. See `plan_auth_refresh` (`engine/src/http/auth_resolver.cpp`) and
+`run_auth_refresh` (`engine/src/core/auth_refresh.cpp`).
+
+Tokens are plaintext at rest (v1 posture); the row is cleared via
 `DELETE /oauth2/token`.
 
 ---

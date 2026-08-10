@@ -470,6 +470,40 @@ The comparator follows the metric (`≥` for the throughput floor, `≤` for the
 ceilings), and a metric key this build has no label for renders under its raw
 name rather than vanishing from a verdict whose counts still include it.
 
+## Capacity Summary (`components/shared/CapacitySummary.tsx`)
+
+What a `mode: "capacity"` run's adaptive search found (`RunReport.capacity`):
+the highest concurrency the target held inside its latency budget, the level it
+gave out at, and the per-level table both were read off. Shown in the history
+detail's Overview, beside `ThresholdVerdict`.
+
+The headline is a **sentence**, not a stat grid, because the mode exists to
+answer one question in words - "what can my service take" - and four numbers
+side by side make the reader assemble that answer themselves. The table below
+is the evidence, for a reader who wants to see the shape of the curve rather
+than trust the summary of it.
+
+Three states, not two, and the distinction is the whole point of the component
+(same absent-vs-zero discipline as `ThresholdVerdict`, one level deeper):
+
+- **Sustained a level** - the usual reading, with the knee beside it when
+  latency is what ended the search.
+- **No level held the budget** - the first level already breached. The search
+  found no sustainable capacity, which is *not* the claim "this service
+  sustains zero".
+- **Judged nothing at all** - the run ended before its first level closed
+  (`stepDuration` longer than `duration`, or a hand stop seconds in). The
+  engine still reports the section, because "the search measured nothing" is
+  the finding that says to lengthen the run or shorten the step - but the card
+  must say that rather than fall into the second state and claim a measurement
+  at a concurrency it never reached.
+
+A level the search re-measured after one bad window appears **twice** in the
+table, at the same concurrency; that repeat is the audit trail doing its job,
+so the rows are keyed by index rather than by level. A `stopReason` this build
+has no words for renders under its raw key, as `ThresholdVerdict` does with an
+unknown metric.
+
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 
 Wherever a run's captured response exchanges are on screen: the run stored those

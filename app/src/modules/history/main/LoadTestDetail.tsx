@@ -20,6 +20,7 @@ import {
 	Settings2,
 	AlertTriangle,
 	ListOrdered,
+	KeyRound,
 } from "lucide-react";
 import {
 	Badge,
@@ -39,6 +40,7 @@ import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore } from "@/stores";
 import { OverviewTab, PerformanceTab, SamplesTab, ScenarioStepsTab } from "./components";
+import { authRefreshNote } from "./auth-refresh-note";
 import type { LoadTestDetailProps, MonitorSeriesResponse, TimeSeriesResponse } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
@@ -142,6 +144,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		if (timeSeries.length < 2) return base;
 		return { ...base, breakpoint: computeBreakpoint(timeSeries, sloThresholdMs) };
 	}, [report, timeSeries, sloThresholdMs]);
+
+	// One line on whether the run's OAuth 2.0 credential was kept current - the
+	// answer to 401s that appear partway through an otherwise healthy run.
+	const authNote = useMemo(() => authRefreshNote(report.auth), [report.auth]);
 
 	const successRate =
 		report.summary.totalRequests > 0
@@ -261,6 +267,24 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								<span className="text-foreground/90 italic">{config.comment}</span>
 							</div>
 						)}
+					</div>
+				)}
+
+				{/* What kept the run authorized. Drawn only when the engine was able to
+				    refresh at all - a run without the section reports nothing here,
+				    exactly as every run did before mid-run refresh existed. */}
+				{authNote && (
+					<div
+						className={`flex items-center gap-2 text-sm mb-3 p-3 border rounded-md bg-background/50 ${
+							authNote.warning ? "text-status-warning-text" : "text-muted-foreground"
+						}`}
+					>
+						{authNote.warning ? (
+							<AlertTriangle className="w-4 h-4 shrink-0" />
+						) : (
+							<KeyRound className="w-4 h-4 shrink-0" />
+						)}
+						<span>{authNote.text}</span>
 					</div>
 				)}
 

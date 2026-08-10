@@ -1661,11 +1661,13 @@ Start a load test run (Vayu Mode).
     "mode": "none",
     "content": ""
   },
-  "mode": "constant_rps",    // "constant_rps", "constant_concurrency", "ramp_up", or "iterations"
-  "concurrency": 100,        // Target in-flight requests (constant_concurrency / ramp_up target / iterations)
-  "startConcurrency": 1,     // Ramp start concurrency (ramp_up mode)
-  "duration": "60s",         // Duration, ms/s/m/h (constant_rps / constant_concurrency / ramp_up)
+  "mode": "constant_rps",    // "constant_rps", "constant_concurrency", "ramp_up", "iterations", or "capacity"
+  "concurrency": 100,        // Target in-flight requests (constant_concurrency / ramp_up target / iterations); the ceiling for capacity
+  "startConcurrency": 1,     // Ramp start concurrency (ramp_up); first level searched (capacity)
+  "duration": "60s",         // Duration, ms/s/m/h (constant_rps / constant_concurrency / ramp_up); the deadline for capacity
   "rampUpDuration": "10s",   // Ramp time, ms/s/m/h (ramp_up mode; start may be above target)
+  "sloMs": 200,              // p99 budget the search looks for the edge of (capacity mode)
+  "stepDuration": "5s",      // How long each level is held before it is judged (capacity mode)
   "iterations": 0,           // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
@@ -2108,6 +2110,8 @@ default, and whose message names the offending field and why the bound exists:
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
+| `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
+| `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the SLO setting. |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of
 them has a default. The ceilings are crash guards, not policy: each client caps
@@ -2217,6 +2221,31 @@ floored to a multiple of 1000. Requests that come due while in-flight is at
 wall-clock `duration`, and `droppedRequests` (in the run summary and per-tick
 metrics) carries what the rate owed but could not issue. `sent + dropped` is
 therefore what `targetRps × duration` asked for.
+
+**Capacity semantics.** `capacity` is the one mode whose target is not a
+function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
+that window's windowed p99 and throughput, and then steps up by 25% (at least
++1) while the level stayed inside `sloMs`. It stops - and names the reason in
+the report - when p99 exceeds `sloMs` across **two consecutive** windows
+(`slo_exceeded`; one breaching window re-measures the same level rather than
+ending the search), when two step-ups buy under 5% more throughput
+(`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
+runs out (`deadline`), or when the operator stops the run (`stopped`).
+
+An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
+60 seconds every other mode falls back to: this mode walks a level every
+`stepDuration`, so a minute is a dozen levels and a search that almost always
+ends `deadline` rather than finding anything. Any client enforcing its own
+duration ceiling has to account for that per-mode default rather than assuming
+one number - the MCP tool's cap does.
+
+The search steers by the published metric tick - the same numbers `GET
+/runs/:id/live` streams - rather than sampling the collector itself, so the
+controller and the dashboard cannot disagree about a level. Windows in which
+nothing completed are not judged: their percentiles are the empty-window zeros
+and reading those as "answered instantly" would climb straight past the limit.
+`capacity` is rejected on a **scenario** run with a `400`: the search judges one
+windowed p99 and a sequence has one per step.
 
 **Ramp semantics.** `ramp_up` interpolates linearly from `startConcurrency` to
 `concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of
@@ -2763,7 +2792,9 @@ A run that is already finished answers `{"status": "<status>", "runId": ...,
 Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
 only when a test script ran, `thresholdValidation` only when the run declared
-[budgets](#the-thresholds-block-passfail-budgets)).
+[budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
+`capacity` run, `auth` only when the run's OAuth 2.0 credential could be
+refreshed mid-run).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -2844,9 +2875,48 @@ alone rather than erroring. **The response shape is the same either way.**
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
+  "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**A capacity run adds a `capacity` section** and no other mode carries one:
+
+```json
+"capacity": {
+  "sloMs": 200,
+  "stopReason": "slo_exceeded",
+  "maxHealthyConcurrency": 48, "maxHealthyRps": 23400, "p99AtMaxHealthyMs": 41.2,
+  "kneeConcurrency": 64, "kneeP99Ms": 312.0,
+  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4 } ]
+}
+```
+
+`stopReason` is one of `slo_exceeded`, `plateau`, `cap_reached`, `deadline` or
+`stopped` - see [Capacity semantics](#post-runs). The two optional halves are
+**omitted rather than zeroed**, and the distinction carries information:
+
+- `maxHealthy*` is absent when the very first level already breached the budget.
+  The search found no sustainable capacity, which is not the same claim as a
+  capacity of zero.
+- `knee*` is absent unless `stopReason` is `slo_exceeded`. A run that ended at
+  its ceiling, its deadline, or on a plateau inside the budget never watched the
+  target give out, so it has no knee to report.
+
+`levels[]` is one entry per level *judged*, in order - bounded by construction
+(a search holds tens of levels, not thousands). A level that breached once and
+was re-measured appears twice, at the same concurrency; the level still being
+measured when the run ended does not appear at all, because it was never judged.
+
+**`auth`** appears only for a run whose OAuth 2.0 credential could be renewed
+while it ran - a header-placed, expiring token with `autoRefreshToken` on (see
+[db-schema.md](db-schema.md#oauth_tokens) for the full eligibility list). Each
+entry in `refreshes` is when a renewal landed, in seconds from the run's start.
+`refreshFailures` plus a `lastError` string is the other half of the answer: the
+run kept sending the credential it had, so 401s in `statusCodes` from that point
+on are explained here rather than by the target. The section is **absent** for a
+run that could never refresh, which is not the same claim as a run that watched
+and never needed to (that one reports an empty `refreshes` array).
 
 **A scenario run adds a `scenario` section** and no other run type carries one:
 

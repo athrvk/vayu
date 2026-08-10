@@ -458,3 +458,52 @@ TEST (RunConfigValidation, AMonitorIntervalOutOfRangeIsRejectedByTheRunRoute) {
         { "series", nlohmann::json::array ({ "up" }) } };
     expect_rejected (config, "monitor.intervalMs");
 }
+
+// --- Capacity discovery: the two fields the mode adds ----------------------
+//
+// `stepDuration` reads through the same string parser `duration` does, so it
+// has to be gated by the same rule - it went through a shared helper for
+// exactly that reason. `sloMs` is a plain numeric field, and the bound it gets
+// is the app's own clamp on the SLO setting, so a budget the dialog can express
+// is one the engine accepts.
+
+TEST (RunConfigValidation, AValidCapacityConfigIsAccepted) {
+    auto config             = valid_config ();
+    config["mode"]          = "capacity";
+    config["sloMs"]         = 250;
+    config["stepDuration"]  = "5s";
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, AnUnparseableStepDurationIsRejected) {
+    for (const nlohmann::json bad : { nlohmann::json (5000), nlohmann::json ("soon"),
+    nlohmann::json ("0s"), nlohmann::json ("-1s"), nlohmann::json (true) }) {
+        auto config            = valid_config ();
+        config["stepDuration"] = bad;
+        expect_rejected (config, "stepDuration");
+    }
+}
+
+TEST (RunConfigValidation, StepDurationAcceptsTheSameSpellingsAsDuration) {
+    for (const std::string good : { "5s", "500ms", "1m", "5", "2.5s" }) {
+        auto config            = valid_config ();
+        config["stepDuration"] = good;
+        EXPECT_FALSE (validate_run_config (config).has_value ())
+        << "expected '" << good << "' to be accepted";
+    }
+}
+
+TEST (RunConfigValidation, ANullStepDurationIsAcceptedAsAbsent) {
+    auto config            = valid_config ();
+    config["stepDuration"] = nullptr;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
+    for (const nlohmann::json bad :
+    { nlohmann::json (0), nlohmann::json (-1), nlohmann::json (60001), nlohmann::json ("fast") }) {
+        auto config     = valid_config ();
+        config["sloMs"] = bad;
+        expect_rejected (config, "sloMs");
+    }
+}

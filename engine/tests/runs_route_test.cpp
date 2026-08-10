@@ -847,6 +847,121 @@ TEST_F (RunsRouteTest, ReportOmitsThresholdValidationWhenNoBudgetWasDeclared) {
     EXPECT_FALSE (body.contains ("thresholdValidation"));
 }
 
+// Mid-run OAuth 2.0 refresh (#478), round-tripped through the stored summary:
+// the section is what explains 401s that appear partway through a run, so it
+// has to survive the write/read pair, not merely be produced.
+TEST_F (RunsRouteTest, ReportCarriesTheAuthRefreshSection) {
+    seed ({ .id = "run_auth", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    inputs.auth = nlohmann::json{ { "refreshes", { { { "atSeconds", 3620.4 } } } },
+        { "refreshFailures", 1 }, { "lastError", "oauth2_provider_error: invalid_grant" } };
+    db_->update_run_summary (
+    "run_auth", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_auth");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("auth"));
+    const auto& auth = body["auth"];
+    ASSERT_TRUE (auth["refreshes"].is_array ());
+    ASSERT_EQ (auth["refreshes"].size (), 1u);
+    EXPECT_DOUBLE_EQ (auth["refreshes"][0]["atSeconds"].get<double> (), 3620.4);
+    EXPECT_EQ (auth["refreshFailures"].get<size_t> (), 1u);
+    EXPECT_EQ (auth["lastError"].get<std::string> (),
+    "oauth2_provider_error: invalid_grant");
+}
+
+// A run that could not refresh at all keeps the section out entirely - and so
+// does every run recorded before mid-run refresh existed. "Never watching" and
+// "watched and never needed to" are different answers; only the absent section
+// can say the first.
+TEST_F (RunsRouteTest, ReportOmitsAuthWhenTheRunCouldNotRefresh) {
+    seed ({ .id = "run_no_auth_section", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    inputs.auth = std::nullopt;
+    db_->update_run_summary (
+    "run_no_auth_section", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_no_auth_section");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("auth"));
+}
+
+// What a capacity search found, round-tripped through the stored summary. The
+// property under test is the translation: the search stores snake_case like
+// every other section, and the report speaks camelCase, so a key added on one
+// side and forgotten on the other reaches the renderer as an absent field
+// rather than as a build error.
+TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
+    seed ({ .id = "run_capacity", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+
+    vayu::core::CapacityConfig search;
+    search.slo_ms          = 100.0;
+    search.max_concurrency = 256;
+    const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0 },
+        { 16, 1700.0, 20.0 }, { 32, 1750.0, 180.0 }, { 32, 1720.0, 210.0 } };
+    inputs.capacity = vayu::core::summarize_capacity (search, levels,
+    vayu::core::capacity_stop::SLO_EXCEEDED);
+    db_->update_run_summary (
+    "run_capacity", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_capacity");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("capacity"));
+    const auto& capacity = body["capacity"];
+    EXPECT_DOUBLE_EQ (capacity["sloMs"].get<double> (), 100.0);
+    EXPECT_EQ (capacity["stopReason"].get<std::string> (), "slo_exceeded");
+    EXPECT_EQ (capacity["maxHealthyConcurrency"].get<size_t> (), 16u);
+    EXPECT_DOUBLE_EQ (capacity["maxHealthyRps"].get<double> (), 1700.0);
+    EXPECT_DOUBLE_EQ (capacity["p99AtMaxHealthyMs"].get<double> (), 20.0);
+    EXPECT_EQ (capacity["kneeConcurrency"].get<size_t> (), 32u);
+    EXPECT_DOUBLE_EQ (capacity["kneeP99Ms"].get<double> (), 210.0);
+
+    ASSERT_EQ (capacity["levels"].size (), 4u);
+    EXPECT_EQ (capacity["levels"][0]["concurrency"].get<size_t> (), 8u);
+    EXPECT_DOUBLE_EQ (capacity["levels"][0]["rps"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (capacity["levels"][0]["p99Ms"].get<double> (), 12.0);
+}
+
+// A search that ran out of room never watched the service give out, so the
+// report carries the headline without a knee - rather than naming the last
+// level it happened to reach as the limit.
+TEST_F (RunsRouteTest, ReportOmitsTheKneeWhenNoLevelBreached) {
+    seed ({ .id = "run_capacity_cap", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+
+    vayu::core::CapacityConfig search;
+    search.slo_ms   = 100.0;
+    inputs.capacity = vayu::core::summarize_capacity (search, { { 8, 900.0, 12.0 } },
+    vayu::core::capacity_stop::CAP_REACHED);
+    db_->update_run_summary (
+    "run_capacity_cap", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_capacity_cap");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("capacity"));
+    EXPECT_FALSE (body["capacity"].contains ("kneeConcurrency"));
+    EXPECT_EQ (body["capacity"]["maxHealthyConcurrency"].get<size_t> (), 8u);
+}
+
+// Every other mode. The section is absent, not zeroed - a fixed-target run
+// measured a point, and a knee of 0 would read as a service that collapses at
+// no concurrency at all.
+TEST_F (RunsRouteTest, ReportOmitsCapacityForEveryOtherMode) {
+    seed ({ .id = "run_not_capacity", .start_time = 1000 });
+    auto inputs     = summary_inputs ();
+    inputs.capacity = std::nullopt;
+    db_->update_run_summary (
+    "run_not_capacity", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_not_capacity");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("capacity"));
+}
+
 // A summary that is not a JSON object is treated as absent. There is no second
 // aggregate source any more, so the report stands on the run's sampled results
 // - which is a report, not a 500 and not an empty run.

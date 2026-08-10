@@ -15,9 +15,9 @@
  *     the total, so a 30s ramp in a 60s run means 30s ramping and 30s at target.
  *   - **It can state the total request count**, which no single field shows.
  *
- * The count is only stated where it is knowable. `constant_concurrency` and
- * `ramp_up` send as many requests as the target can answer, which depends on
- * latency - guessing there would be worse than saying nothing.
+ * The count is only stated where it is knowable. `constant_concurrency`,
+ * `ramp_up` and `capacity` send as many requests as the target can answer,
+ * which depends on latency - guessing there would be worse than saying nothing.
  */
 
 import type { LoadTestConfig } from "@/types";
@@ -30,6 +30,10 @@ export interface SummaryInput {
 	iterations: number;
 	rampDuration: number;
 	startConcurrency: number;
+	/** Capacity only: how long each concurrency level is held. */
+	stepDuration: number;
+	/** Capacity only: the p99 the search looks for the edge of. */
+	sloMs: number;
 }
 
 /** `6000` → `"6,000"`. Grouped because these run to five and six figures. */
@@ -47,7 +51,29 @@ function plural(n: number, one: string, many = `${one}s`): string {
  *                 printed as a confident falsehood.
  */
 export function summarise(input: SummaryInput, blocked = false): string {
-	const { mode, duration, rps, concurrency, iterations, rampDuration, startConcurrency } = input;
+	const {
+		mode,
+		duration,
+		rps,
+		concurrency,
+		iterations,
+		rampDuration,
+		startConcurrency,
+		stepDuration,
+		sloMs,
+	} = input;
+
+	if (mode === "capacity") {
+		// No count, for the same reason constant_concurrency has none - and one
+		// more: how many levels the search holds is decided by the target, not
+		// by anything on this form.
+		return `Steps up from ${count(startConcurrency)} connections, holding each level for ${count(
+			stepDuration
+		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${plural(
+			concurrency,
+			"connection"
+		)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
+	}
 
 	if (mode === "iterations") {
 		return `Sends exactly ${plural(iterations, "request")} using ${plural(

@@ -142,7 +142,54 @@ constexpr int64_t MAX_SAMPLE_BYTES = 1073741824; // 1GB
 /// Upper bound on `max_exemplar_results`. Each retained exemplar holds a
 /// captured exchange, bounded in turn by the two budgets above.
 constexpr int64_t MAX_EXEMPLAR_RESULTS = 100000;
+/// Upper bound on a capacity run's `sloMs`. Mirrors the app's own clamp on the
+/// client-side SLO setting (`app/src/constants/client-settings.ts`), so a
+/// budget the dialog can express is one the engine accepts.
+constexpr int64_t MAX_SLO_MS = 60000;
 } // namespace run_config
+
+/**
+ * @brief Defaults for the capacity-discovery search.
+ *
+ * Only the first three are settable per run (`sloMs`, `stepDuration`, and the
+ * `startConcurrency`/`concurrency` bounds the other modes already own). The
+ * rest are the controller's policy: they live here rather than as run-config
+ * keys because a user asking "what can my service take" is not also choosing a
+ * step-growth factor, and a knob nobody sets is a knob nobody maintains.
+ */
+namespace capacity {
+/// Default latency budget the search looks for the edge of, in ms. Matches the
+/// app's `DEFAULT_SLO_THRESHOLD_MS` so the dialog's prefill is the same number.
+constexpr int64_t SLO_MS = 200;
+/// How long each level is held before its window is judged. Long enough for the
+/// windowed percentiles to settle at the stock 100ms tick cadence, short enough
+/// that a search over tens of levels finishes inside a normal run duration.
+constexpr int64_t STEP_DURATION_MS = 5000;
+/// Deadline for the whole search when the run config names no `duration`.
+///
+/// Deliberately **not** the 60s every other mode falls back to: at the default
+/// step this mode walks a level every 5s, so a minute is a dozen levels and a
+/// search that almost always ends `deadline` rather than finding anything. It
+/// is a named constant rather than a literal because the MCP duration cap has
+/// to know it - a guard assuming one default for every mode let a capacity run
+/// past a cap it was under - and `safety.test.ts` reads this line to stay in
+/// step.
+constexpr int64_t DEADLINE_MS = 300000;
+/// Ticks discarded at the start of each level: the in-flight count is still
+/// climbing to the new target, so those windows measure the transition rather
+/// than the level. At the stock cadence this is the first 300ms of every step.
+constexpr size_t SETTLE_TICKS = 3;
+/// Concurrency cap when the run config names none.
+constexpr int64_t MAX_CONCURRENCY = 100;
+/// Fractional growth per healthy step (+25%), floored at +1 concurrency.
+constexpr double STEP_GROWTH = 0.25;
+/// Below this percentage of throughput gained across the last two step-ups, the
+/// service is saturated even though it is still inside its latency budget.
+constexpr double PLATEAU_GAIN_PCT = 5.0;
+/// Consecutive breaching windows before the search stops. Two, not one, so a
+/// single noisy window re-measures instead of ending the run.
+constexpr size_t SLO_BREACH_WINDOWS = 2;
+} // namespace capacity
 
 /**
  * @brief Server configuration
@@ -189,6 +236,30 @@ constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
 /// the use-after-free the drain exists to prevent. Matches the 5s the daemon
 /// waited before the drain was ordered.
 constexpr int64_t RUN_SHUTDOWN_GRACE_MS = 5000;
+/// How far ahead of an OAuth 2.0 token's expiry a run refreshes it (config key
+/// `oauth2RefreshLeadMs`). Comfortably wider than the 45s skew
+/// `oauth::is_expired` already applies, so the new credential is published
+/// while the old one is still being accepted and no request falls in the gap.
+constexpr int64_t OAUTH2_REFRESH_LEAD_MS = 60000;
+/// Floor on the wait between two mid-run refreshes. A token whose whole
+/// lifetime is shorter than the lead is always inside its refresh window, so
+/// without a floor the watchdog would re-acquire in a tight loop and hammer the
+/// token endpoint on the run's behalf.
+constexpr int64_t OAUTH2_REFRESH_MIN_INTERVAL_MS = 1000;
+/// First wait after a failed mid-run refresh, doubled per consecutive failure
+/// up to OAUTH2_REFRESH_RETRY_MAX_MS. The run keeps sending the credential it
+/// has - a failed refresh is reported, never fatal - so retrying is about
+/// recovering from a token endpoint that blipped, not about the run's fate.
+constexpr int64_t OAUTH2_REFRESH_RETRY_MS = 5000;
+/// Ceiling on that backoff, so a token endpoint that is down for an hour costs
+/// the run a bounded number of attempts rather than one every five seconds.
+constexpr int64_t OAUTH2_REFRESH_RETRY_MAX_MS = 60000;
+/// How often the refresh watchdog wakes while waiting, to notice that the run
+/// has ended. The worker joins the thread on its way out, so this is what
+/// bounds how long a finished run waits for it: without the slice, a watchdog
+/// asleep until the next expiry would hold the run open for the rest of the
+/// token's life. Lower costs a few more wakeups per second on one thread.
+constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 } // namespace server
 
 /**

@@ -48,3 +48,25 @@ export function validateStartConcurrency(
 	}
 	return null;
 }
+
+/**
+ * Capacity Discovery climbs from `startConcurrency` toward `concurrency`. A
+ * start at or above the ceiling is a search with nothing to search: the engine
+ * measures the one level and stops `cap_reached`, which is a legitimate run but
+ * never the one the user meant when they picked the profile whose whole job is
+ * to find a limit.
+ *
+ * Returns a user-facing message when invalid, or null (including for every
+ * non-capacity mode).
+ */
+export function validateCapacityRange(
+	mode: string | undefined,
+	startConcurrency: number,
+	concurrency: number
+): string | null {
+	if (mode !== "capacity") return null;
+	if (startConcurrency >= concurrency) {
+		return `The search starts at ${startConcurrency} and stops at ${concurrency}, so it has only one level to measure and cannot find a limit. Lower the start or raise the ceiling.`;
+	}
+	return null;
+}

@@ -142,6 +142,7 @@ export interface LoadRunParams {
 	startConcurrency?: number;
 	duration?: string | number;
 	rampUpDuration?: string | number;
+	stepDuration?: string | number;
 	iterations?: number;
 }
 
@@ -150,14 +151,41 @@ export interface LoadRunParams {
  * Anything else falls through `LoadStrategy::create`, so the guard mirrors that
  * fallback rather than trusting the string it was given.
  */
-const KNOWN_LOAD_MODES = new Set(["constant_rps", "constant_concurrency", "ramp_up", "iterations"]);
+const KNOWN_LOAD_MODES = new Set([
+	"constant_rps",
+	"constant_concurrency",
+	"ramp_up",
+	"iterations",
+	"capacity",
+]);
 
 /**
- * What the engine runs when `duration` is absent - `duration_field_ms(config,
- * "duration", 60000)` in `load_strategy.cpp`. An omitted duration is therefore
- * not "no duration", and a cap below this one only binds if the field is sent.
+ * What the engine runs when `duration` is absent, **per mode**.
+ *
+ * An omitted duration is not "no duration": each strategy passes its own
+ * fallback to `duration_field_ms`, so a cap only binds when the field is sent
+ * *or* when the cap is under the default the engine would otherwise use.
+ *
+ * This was a single number, on the assumption that every mode falls back to
+ * 60s. `capacity` does not - it walks a level every `stepDuration`, so its
+ * `constants::capacity::DEADLINE_MS` is 300s - and the assumption became a
+ * hole: with the cap set to 120s and an agent omitting `duration`,
+ * `checkLoadCaps` had nothing to check and this function returned null because
+ * 120 >= 60, so the search ran for 300s against a 120s cap. Keyed by mode, the
+ * guard now models what the engine actually does rather than one mode's version
+ * of it, and `safety.test.ts` reads `constants.hpp` to keep the numbers in step.
  */
-const ENGINE_DEFAULT_DURATION_SECONDS = 60;
+const ENGINE_DEFAULT_DURATION_SECONDS: Readonly<Record<string, number>> = {
+	capacity: 300,
+};
+
+/** The fallback for every mode that has no entry of its own. */
+const ENGINE_FALLBACK_DURATION_SECONDS = 60;
+
+/** What the engine would run for, in seconds, if `duration` were omitted. */
+function engineDefaultDurationSeconds(mode: string): number {
+	return ENGINE_DEFAULT_DURATION_SECONDS[mode] ?? ENGINE_FALLBACK_DURATION_SECONDS;
+}
 
 /** What the engine runs when `iterations` is absent (`IterationsLoadStrategy`). */
 const ENGINE_DEFAULT_ITERATIONS = 1000;
@@ -189,7 +217,11 @@ export function defaultDurationUnderCap(
 ): string | null {
 	if (params.duration !== undefined) return null;
 	if (isIterationsRun(params)) return null;
-	if (config.maxDurationSeconds >= ENGINE_DEFAULT_DURATION_SECONDS) return null;
+	// The engine's own default for an absent `mode` is a duration mode, and the
+	// same string `isIterationsRun` reads - the two must agree about which run
+	// this is or the cap lands on the wrong strategy.
+	const mode = params.mode ?? "constant_rps";
+	if (config.maxDurationSeconds >= engineDefaultDurationSeconds(mode)) return null;
 	return `${config.maxDurationSeconds}s`;
 }
 
@@ -209,7 +241,10 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	}
 	// `startConcurrency` rides the same ceiling as `concurrency`: `ramp_up` seeds
 	// the run with it (`RampUpLoadStrategy`, `target_fn(0) = startConcurrency`),
-	// so an uncapped start is an uncapped run however low the target is.
+	// so an uncapped start is an uncapped run however low the target is. For
+	// `capacity` the same pair is what bounds the search - `concurrency` is the
+	// ceiling it climbs toward rather than a target it holds - so capping both
+	// is exactly what stops an adaptive run from outgrowing the cap.
 	for (const field of ["concurrency", "startConcurrency"] as const) {
 		const value = params[field];
 		if (typeof value === "number" && value > config.maxConcurrency) {
@@ -221,7 +256,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	}
 	// A duration the engine cannot read now fails the run rather than quietly
 	// becoming 60s, so say so here instead of starting a run that dies.
-	for (const field of ["duration", "rampUpDuration"] as const) {
+	for (const field of ["duration", "rampUpDuration", "stepDuration"] as const) {
 		const value = params[field];
 		if (value !== undefined && parseDurationGrammar(value) === null) {
 			return {

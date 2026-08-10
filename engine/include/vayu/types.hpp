@@ -738,7 +738,15 @@ inline std::optional<RunType> parse_run_type (const std::string& str) {
     return std::nullopt;
 }
 
-enum class LoadTestType { ConstantRps, ConstantConcurrency, RampUp, Iterations };
+/**
+ * @brief How a load run decides what to send.
+ *
+ * `Capacity` is the one member that is not a fixed shape chosen up front: it
+ * is an adaptive step-ramp steered by the run's own latency, so it reads the
+ * published metric tick and stops itself. Every other member's target is a
+ * pure function of elapsed time.
+ */
+enum class LoadTestType { ConstantRps, ConstantConcurrency, RampUp, Iterations, Capacity };
 
 inline const char* to_string (LoadTestType type) {
     switch (type) {
@@ -746,6 +754,7 @@ inline const char* to_string (LoadTestType type) {
     case LoadTestType::ConstantConcurrency: return "constant_concurrency";
     case LoadTestType::RampUp: return "ramp_up";
     case LoadTestType::Iterations: return "iterations";
+    case LoadTestType::Capacity: return "capacity";
     }
     return "unknown";
 }
@@ -759,6 +768,8 @@ inline std::optional<LoadTestType> parse_load_test_type (const std::string& str)
         return LoadTestType::RampUp;
     if (str == "iterations")
         return LoadTestType::Iterations;
+    if (str == "capacity")
+        return LoadTestType::Capacity;
     return std::nullopt;
 }
 

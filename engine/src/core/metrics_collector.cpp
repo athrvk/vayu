@@ -527,6 +527,7 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
         return static_cast<double> (us) / 1000.0;
     };
 
+    result.count = static_cast<size_t> (latency_histogram_->total_count);
     result.min  = us_to_ms (hdr_min (latency_histogram_));
     result.max  = us_to_ms (hdr_max (latency_histogram_));
     result.p50  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 50.0));
@@ -560,6 +561,7 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
         return static_cast<double> (us) / 1000.0;
     };
 
+    result.count = static_cast<size_t> (interval->total_count);
     result.min  = us_to_ms (hdr_min (interval));
     result.max  = us_to_ms (hdr_max (interval));
     result.p50  = us_to_ms (hdr_value_at_percentile (interval, 50.0));

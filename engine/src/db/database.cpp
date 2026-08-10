@@ -1748,6 +1748,73 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
     "1", "300", std::nullopt, now });
 
+    // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
+    // before it expires, so a run longer than its token does not turn into a
+    // 401 storm. All four are read once when the run arms its watchdog, so a
+    // change applies to the next run started - no restart.
+    upsert_config (ConfigEntry{ "oauth2RefreshLeadMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS), "integer",
+    "OAuth 2.0 Refresh Lead Time",
+    "How far ahead of an access token's expiry a running load test renews it. "
+    "Wider than the 45s skew the token cache already applies, so the new "
+    "credential is published while the old one is still accepted and no "
+    "request falls in the gap. Raise it for a provider that is slow to issue "
+    "tokens.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
+    "1000",    // 1 second
+    "3600000", // 1 hour
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "oauth2RefreshMinIntervalMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS), "integer",
+    "Minimum OAuth 2.0 Refresh Interval",
+    "Floor on the wait between two mid-run renewals. A token whose whole "
+    "lifetime is shorter than the lead time above is always inside its refresh "
+    "window, so without this floor a run would re-acquire in a tight loop and "
+    "hammer the token endpoint. Lower it only when testing against a provider "
+    "that issues very short-lived tokens.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS),
+    "100",     // 0.1 second - a floor, never 0: that is the tight loop
+    "3600000", // 1 hour
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "oauth2RefreshRetryMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer",
+    "OAuth 2.0 Refresh Retry Delay",
+    "First wait after a mid-run renewal is refused, doubled per consecutive "
+    "failure up to the ceiling below. The run keeps sending the credential it "
+    "already has - a failed renewal is reported in the run's report, never "
+    "fatal - so this is about recovering from a token endpoint that blipped.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS),
+    "250", "600000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "oauth2RefreshRetryMaxMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS), "integer",
+    "Maximum OAuth 2.0 Refresh Retry Delay",
+    "Ceiling on that backoff, so a token endpoint that is down for an hour "
+    "costs the run a bounded number of attempts rather than one every few "
+    "seconds.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
+    "1000", "3600000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "oauth2RefreshPollIntervalMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
+    "integer", "OAuth 2.0 Refresh Poll Interval",
+    "How often the renewal watchdog wakes while it waits, to notice that the "
+    "run has ended. A finished run joins that thread before it writes its "
+    "report, so this is what bounds how long the run's last moments take. "
+    "Lower costs a few more wakeups per second on one sleeping thread and "
+    "nothing on the request path; raise it only to quiet a very long soak.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
+    "10",   // 10ms - below this the wakeups outweigh what they save
+    "5000", // 5s - past this a finished run visibly waits on the join
+    std::nullopt, now });
+
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
     // Configuration for the QuickJS sandbox execution, limits, and debugging

@@ -276,6 +276,7 @@ add_library(vayu_core STATIC
     src/utils/metrics_helper.cpp
     src/utils/id.cpp
     src/db/database.cpp
+    src/core/auth_refresh.cpp
     src/core/load_strategy.cpp
     src/core/scenario_data.cpp
     src/core/scenario_load.cpp
@@ -285,6 +286,7 @@ add_library(vayu_core STATIC
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
     src/core/threshold_eval.cpp
+    src/core/capacity_controller.cpp
     src/core/monitor.cpp
     ${PLATFORM_SOURCES}
 )
@@ -460,6 +462,7 @@ if(VAYU_BUILD_TESTS)
         tests/sample_capture_test.cpp
         tests/load_pacing_test.cpp
         tests/threshold_eval_test.cpp
+        tests/capacity_controller_test.cpp
         tests/monitor_test.cpp
         tests/run_manager_test.cpp
         tests/run_route_test.cpp
@@ -471,6 +474,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_compose_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
+        tests/auth_refresh_test.cpp
         tests/request_builder_test.cpp
         tests/oauth_client_test.cpp
         tests/oauth_route_test.cpp

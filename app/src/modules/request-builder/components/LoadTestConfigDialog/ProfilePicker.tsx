@@ -6,19 +6,19 @@
  */
 
 /**
- * The four load profiles, as a radio group rather than a `<Select>`.
+ * The load profiles, as a radio group rather than a `<Select>`.
  *
- * They are four different strategies with four different forms behind them, and
- * a select shows one label at a time - so choosing meant opening a menu and
- * reading options you could not compare. As cards, all four are visible with a
- * line of description each, which also retires most of the old "What will
- * happen" prose.
+ * They are different strategies with different forms behind them, and a select
+ * shows one label at a time - so choosing meant opening a menu and reading
+ * options you could not compare. As cards, all of them are visible with a line
+ * of description each, which also retires most of the old "What will happen"
+ * prose. The list comes from `LOAD_TEST_MODES`, so adding a mode adds a card.
  *
  * Keyboard follows the WAI-ARIA radio group pattern, which is stricter than it
  * looks: the whole group is **one** Tab stop, arrows move *and* select (wrapping
  * at the ends), and Space selects the focused option. Roving tabindex is what
- * makes the single stop work - anything else would put four stops in the middle
- * of a form.
+ * makes the single stop work - anything else would put one stop per card in the
+ * middle of a form.
  */
 
 import { useRef } from "react";

@@ -22,6 +22,7 @@ import type { LoadTestConfig } from "@/types";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useClientSettingsStore } from "@/stores";
 import { DEFAULT_LOAD_TEST_CEILINGS, LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
 
 vi.mock("../OAuth2LoadTestGuard", () => ({
 	default: () => null,
@@ -86,6 +87,18 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
 	});
 
+	it("shows the budget, the step and both bounds for Capacity Discovery", () => {
+		open();
+		pickProfile("Capacity Discovery");
+		expect(screen.getByLabelText(/latency budget/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/hold each level for/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/start from/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/stop climbing at/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/give up after/i)).toBeInTheDocument();
+		// The ramp's own field belongs to the ramp; a search has no ramp curve.
+		expect(screen.queryByLabelText(/ramp duration/i)).not.toBeInTheDocument();
+	});
+
 	it("shows target, total and ramp for Ramp-Up", () => {
 		open();
 		pickProfile("Ramp-Up");
@@ -108,7 +121,7 @@ describe("payload", () => {
 	// `it.each`, not a loop with a manual teardown: the dialog renders through a
 	// Radix portal, so removing its node by hand throws and leaves the next
 	// iteration asserting against a half-torn-down DOM.
-	it.each(["Constant RPS", "Constant Concurrency", "Ramp-Up"])(
+	it.each(["Constant RPS", "Constant Concurrency", "Ramp-Up", "Capacity Discovery"])(
 		"sends duration_seconds for %s",
 		(profile) => {
 			const { onStart } = open();
@@ -116,6 +129,35 @@ describe("payload", () => {
 			expect(started(onStart).duration_seconds).toBeGreaterThan(0);
 		}
 	);
+
+	it("sends the search bounds and budget for Capacity Discovery", () => {
+		const { onStart } = open();
+		pickProfile("Capacity Discovery");
+		// The default start (1) is below the default ceiling (10), so the
+		// picked profile starts valid; anything else and Start is disabled and
+		// `started` would fail on the call count rather than on the payload.
+		const config = started(onStart);
+		expect(config.mode).toBe("capacity");
+		// `concurrency` is the ceiling and `start_concurrency` the first level -
+		// the ramp's two fields reused, so one Settings cap bounds both modes.
+		expect(config.concurrency).toBeGreaterThan(0);
+		expect(config.start_concurrency).toBeGreaterThan(0);
+		expect(config.slo_ms).toBeGreaterThan(0);
+		expect(config.step_duration_seconds).toBeGreaterThan(0);
+		// `duration` is the search's deadline in this mode, not a run length.
+		expect(config.duration_seconds).toBeGreaterThan(0);
+	});
+
+	it("sends no capacity fields for any other profile", () => {
+		// The mirror of the test above, and the one that would catch the
+		// fields being set unconditionally: a ramp carrying an sloMs would make
+		// its stored config claim a search it never ran.
+		const { onStart } = open();
+		pickProfile("Ramp-Up");
+		const config = started(onStart);
+		expect(config).not.toHaveProperty("slo_ms");
+		expect(config).not.toHaveProperty("step_duration_seconds");
+	});
 
 	it("keeps the recording options even though they are folded away", () => {
 		const { onStart } = open();
@@ -242,7 +284,9 @@ describe("keyboard", () => {
 		open();
 		const group = screen.getByRole("radiogroup", { name: /load profile/i });
 		const radios = within(group).getAllByRole("radio");
-		expect(radios).toHaveLength(4);
+		// One card per entry in LOAD_TEST_MODES - the picker renders from that
+		// list, so hardcoding a count here would fail on every mode added.
+		expect(radios).toHaveLength(LOAD_TEST_MODES.length);
 		expect(radios.filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1);
 
 		radios[0].focus();
@@ -257,7 +301,7 @@ describe("keyboard", () => {
 		const radios = within(group).getAllByRole("radio");
 		radios[0].focus();
 		fireEvent.keyDown(group, { key: "ArrowLeft" });
-		expect(radios[3]).toHaveAttribute("aria-checked", "true");
+		expect(radios[radios.length - 1]).toHaveAttribute("aria-checked", "true");
 	});
 
 	it("labels every field, so none is named by its placeholder alone", () => {

@@ -341,6 +341,48 @@ const NumericRunField& field) {
     return std::nullopt;
 }
 
+// Reject a duration-shaped field that is present but not a positive magnitude
+// with an optional ms/s/m/h unit. Absent or null is always fine - every such
+// field has a default. Shared by `duration` and `stepDuration` rather than
+// copied, so the two cannot drift into accepting different spellings.
+std::optional<std::string> check_duration_field (const nlohmann::json& config, const char* key) {
+    if (!config.contains (key) || config[key].is_null ()) {
+        return std::nullopt;
+    }
+    const auto& value = config[key];
+    if (!value.is_string ()) {
+        return std::string ("'") + key +
+        "' must be a string with a unit, e.g. \"60s\" (got " +
+        std::string (value.type_name ()) + ")";
+    }
+    // Accept an optional unit: the unit-aware parser is #126's, and a bare
+    // "60" is what a client that never read the docs sends. This only has to
+    // separate "parses to something positive" from "wedges the run".
+    static const std::regex duration_pattern (
+    R"(^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$)", std::regex::icase);
+    std::smatch match;
+    const std::string text = value.get<std::string> ();
+    if (!std::regex_match (text, match, duration_pattern)) {
+        return std::string ("'") + key +
+        "' must be a number with an optional unit (ms|s|m|h), e.g. \"60s\" "
+        "(got \"" +
+        text + "\")";
+    }
+    // The regex already proved group 1 is a plain decimal, so `stod` cannot
+    // fail on it - but this guard exists precisely because a conversion threw
+    // somewhere nobody was catching, so it stays total here too.
+    double magnitude = 0.0;
+    try {
+        magnitude = std::stod (match[1].str ());
+    } catch (const std::exception&) {
+        magnitude = 0.0; // out of double's range; falls into the check below
+    }
+    if (!(magnitude > 0.0)) {
+        return std::string ("'") + key + "' must be greater than zero (got \"" + text + "\")";
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -449,38 +491,13 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
                "only, because a run is identified by the row it creates";
     }
 
-    // `duration` is the one non-numeric field here, and the only one whose bad
-    // value throws rather than miscomputes: `RunContext` reads it as a string.
-    if (config.contains ("duration") && !config["duration"].is_null ()) {
-        const auto& duration = config["duration"];
-        if (!duration.is_string ()) {
-            return "'duration' must be a string with a unit, e.g. \"60s\" "
-                   "(got " +
-            std::string (duration.type_name ()) + ")";
-        }
-        // Accept an optional unit: the unit-aware parser is #126's, and a bare
-        // "60" is what a client that never read the docs sends. This only has
-        // to separate "parses to something positive" from "wedges the run".
-        static const std::regex duration_pattern (
-        R"(^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$)", std::regex::icase);
-        std::smatch match;
-        const std::string text = duration.get<std::string> ();
-        if (!std::regex_match (text, match, duration_pattern)) {
-            return "'duration' must be a number with an optional unit "
-                   "(ms|s|m|h), e.g. \"60s\" (got \"" +
-            text + "\")";
-        }
-        // The regex already proved group 1 is a plain decimal, so `stod` cannot
-        // fail on it - but this guard exists precisely because a conversion
-        // threw somewhere nobody was catching, so it stays total here too.
-        double magnitude = 0.0;
-        try {
-            magnitude = std::stod (match[1].str ());
-        } catch (const std::exception&) {
-            magnitude = 0.0; // out of double's range; falls into the check below
-        }
-        if (!(magnitude > 0.0)) {
-            return "'duration' must be greater than zero (got \"" + text + "\")";
+    // The duration-shaped fields are the only non-numeric ones here, and the
+    // only ones whose bad value throws rather than miscomputes: they are read
+    // as strings by `duration_field_ms`, which rejects an unknown unit at run
+    // time - far too late, since the run row already exists by then.
+    for (const char* key : { "duration", "stepDuration" }) {
+        if (auto reason = check_duration_field (config, key)) {
+            return reason;
         }
     }
 
@@ -519,6 +536,10 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         "It is a pending-request ceiling read as a size_t, so a negative value "
         "is ~1.8e19 - it removes the backpressure the field exists to provide "
         "rather than tightening it." },
+        { "sloMs", 1, limits::MAX_SLO_MS,
+        "It is the latency budget a capacity search looks for the edge of; a "
+        "non-positive budget has no edge, and one past a minute is longer than "
+        "the transfers any realistic run measures." },
         { "timeout", 1, 86400000,
         "A transfer with no timeout never completes, so the run can never "
         "reach "

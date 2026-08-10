@@ -686,7 +686,12 @@ export interface RunListParams {
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
-export type LoadTestMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+export type LoadTestMode =
+	| "constant_rps"
+	| "constant_concurrency"
+	| "iterations"
+	| "ramp_up"
+	| "capacity";
 
 /**
  * Pass/fail budgets a run declares up front, so the engine can judge it rather
@@ -751,6 +756,15 @@ export interface LoadTestConfig {
 	thresholds?: RunThresholds;
 	/** Absent when the run monitors no endpoint - never an empty object. */
 	monitor?: RunMonitorConfig;
+	/**
+	 * Capacity only: the p99 budget the search looks for the edge of, in ms.
+	 * Prefilled from the client-side `sloThresholdMs` setting, so the number
+	 * the dashboard already annotates its charts with becomes the number the
+	 * search is steered by rather than a second, unrelated one.
+	 */
+	slo_ms?: number;
+	/** Capacity only: how long each concurrency level is held before it is judged. */
+	step_duration_seconds?: number;
 }
 
 /**
@@ -1088,6 +1102,50 @@ export interface RunReport {
 		passed: number;
 		failed: number;
 		verdict: "passed" | "failed";
+	};
+	/**
+	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
+	 *
+	 * A run longer than its access token used to turn into a 401 storm the
+	 * report never explained; the engine now refreshes header-placed tokens
+	 * mid-run and records each swap here. `refreshFailures` with a `lastError`
+	 * is the other half of that answer: the run kept going with the credential
+	 * it had, so the 401s in `statusCodes` are explained by this, not by the
+	 * target.
+	 *
+	 * `undefined` is a run that could not refresh at all - no OAuth 2.0 auth, a
+	 * non-expiring or query-placed token, the user's `autoRefreshToken`
+	 * opt-out, or a sidecar older than mid-run refresh - which is *not* the
+	 * same claim as "watched and never needed to".
+	 */
+	auth?: {
+		/** Seconds into the run at which each successful refresh landed. */
+		refreshes: { atSeconds: number }[];
+		refreshFailures: number;
+		lastError?: string;
+	};
+	/**
+	 * What a capacity run's adaptive search found: the highest concurrency the
+	 * service held inside its latency budget, the level it gave out at, and the
+	 * per-level audit trail behind both.
+	 *
+	 * `undefined` for every other mode - a fixed-target run measured a point,
+	 * not a curve, so there is no knee to show. `maxHealthy*` is absent when the
+	 * very first level already breached (the search found no sustainable
+	 * capacity) and `knee*` when the search ended for a reason other than
+	 * latency, so neither can be read as a measured zero. `stopReason` is typed
+	 * loosely for the same reason `thresholdValidation.metric` is: a newer
+	 * sidecar may stop for a reason this build has no words for.
+	 */
+	capacity?: {
+		sloMs: number;
+		stopReason: string;
+		maxHealthyConcurrency?: number;
+		maxHealthyRps?: number;
+		p99AtMaxHealthyMs?: number;
+		kneeConcurrency?: number;
+		kneeP99Ms?: number;
+		levels: { concurrency: number; rps: number; p99Ms: number }[];
 	};
 	/**
 	 * How many records each of the run's bounded stores thinned away.
