@@ -704,6 +704,37 @@ UI-only: Which settings category (e.g., "ui") is selected in the sidebar.
 const { selectedCategory, setSelectedCategory } = useSettingsStore();
 ```
 
+#### `lib/graphql/explorer-store.ts` - GraphQL Schema Explorer View
+
+UI-only, in memory: whether the schema explorer pane is open, and per schema
+identity the search text, the expanded row ids and the scroll position.
+
+**State:**
+```typescript
+{
+  open: boolean,
+  byKey: Record<string, { search: string; expanded: string[]; scrollTop: number }>,
+  lru: string[]
+}
+```
+
+**Key Methods:**
+```typescript
+const { open, setOpen, view, setSearch, toggleExpanded, setScrollTop } = useExplorerStore();
+```
+
+**A store rather than component state, because the pane is unmounted for no
+reason the user did.** Radix tears the whole Body tab down on every glance at
+Headers or Auth - the same unmount the [body drafts](#requestbuildercontext---body-drafts)
+exist for - and a component-state explorer comes back collapsed to its roots
+with an empty search box.
+
+**Keyed by schema identity**, using the schema cache's own `schemaCacheKey`, so
+two requests against one endpoint share the tree they have opened and the same
+URL reached with different credentials does not. Deliberately not persisted and
+capped at `EXPLORER_VIEW_MAX_ENTRIES` (8, matching the schema cache): an
+expansion set is a description of a schema that may not exist next launch.
+
 ## TanStack Query (Server State)
 
 TanStack Query manages server state with automatic caching, refetching, and synchronization. It is the source of truth for collections, requests, environments, globals, and runs.
