@@ -830,12 +830,20 @@ body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, 
 
 **User-selectable UI font + scale.** Settings → Appearance → Interface lets the
 user pick the sans/body face (Space Grotesk / Inter / System / JetBrains Mono)
-and an interface scale (Compact / Default / Comfortable). Font swaps the `--font-sans`
+and an interface scale - a slider over **80% to 200% in 10% steps**, which
+covers the 125-150% accessibility band the three fixed presets it replaced
+(Compact / Default / Comfortable) topped out below. Font swaps the `--font-sans`
 custom property (so `body` + every `font-sans` utility follow); scale sets the
 page zoom factor (Electron `webFrame`, CSS `zoom` fallback in the browser).
-Both are owned by `useAppearance` (source of truth `constants/appearance.ts`),
+Both live in `appearance-store` (source of truth `constants/appearance.ts`),
 persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
 text stays JetBrains Mono regardless.
+
+The View menu's `Ctrl`/`Cmd` `+` `-` `0` drive that same setting rather than
+Chromium's own zoom, so a keyboard zoom persists across a restart and "Actual
+Size" means 100% *because that is the default setting*, not because it bypasses
+it. The code font size (Settings → Editor) stays an independent control and
+composes with page zoom.
 
 ### Type Scale Conventions
 
@@ -929,7 +937,7 @@ option regardless of which one is active. The same test enforces this, across
 
 **User-adjustable.** Settings → Appearance → Interface → Roundedness sets
 `--radius` (Square `0rem` / Default `0.375rem` / Rounded `0.75rem`), owned by
-`useAppearance`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
+`appearance-store`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
 live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
 unsuffixed `rounded`** (fixed 4px - it ignores `--radius` and won't follow the
 control). `rounded-full` stays a pill regardless.

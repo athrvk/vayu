@@ -377,6 +377,43 @@ session - each entry holds a body plus its raw copy.
 
 **Non-persisted** (responses are reloadable from backend).
 
+#### `appearance-store.ts` - Pre-Paint Interface Preferences
+
+The UI font, the interface scale and the corner roundedness - the three
+preferences `index.html`'s pre-paint script applies before React mounts. Seeded
+from localStorage at module load and written back one key per preference
+(`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`, `vayu-ui-radius`), *not*
+through zustand's `persist`: the pre-paint script reads those exact keys, and
+`SETTINGS_STORAGE_KEYS` clears them on "Reset app settings".
+
+**State:**
+```typescript
+{
+  font: UiFontChoice   // a preset or "custom"
+  fontCustom: string   // used when font === "custom"
+  scale: number        // page-zoom factor, 0.8-2.0 in 0.1 steps
+  radius: UiRadius
+}
+```
+
+Each action both persists and applies (`--font-sans`, `--radius`,
+`webFrame.setZoomFactor`), so there is one write path per preference rather than
+a state update and a separate effect that has to agree with it.
+
+**Why a store and not `useState` in `useAppearance`:** scale has two inputs. The
+Appearance panel's slider and the View menu's `Ctrl`/`Cmd` `+` `-` `0` move the
+same value, and `useAppearance` is mounted twice (the app shell and the panel).
+Per-instance state let the panel keep reading "Default" while the window
+rendered 133%. The menu bridge (`onZoomCommand` → `nudgeScale`/`resetScale`)
+lives in `useMenuActions`, which mounts exactly once - subscribing from
+`useAppearance` would move the zoom two steps per keypress.
+
+The scale range, the legacy-preset migration and the clamp/snap live in
+`constants/appearance.ts` (`clampScale`, `parseScale`, `nudgeScale`). The
+pre-paint script duplicates them by necessity - it runs before any module - and
+`appearance.prepaint.test.ts` executes the real script to keep the duplicate
+honest.
+
 #### `client-settings-store.ts` - Renderer Preferences
 
 Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.

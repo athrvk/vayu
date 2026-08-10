@@ -316,6 +316,18 @@ function openSettings() {
 	mainWindow?.webContents.send("menu:open-settings");
 }
 
+/**
+ * Ask the renderer to move its interface-scale setting (View → zoom, Ctrl+±/0).
+ *
+ * Deliberately not the `zoomIn`/`zoomOut`/`resetZoom` roles: those drive
+ * Chromium's zoom directly, which compounded on top of the saved scale, was
+ * never persisted, and made `resetZoom` snap to 100% in defiance of the user's
+ * setting. The renderer owns the value, so the menu only nudges it.
+ */
+function sendZoomCommand(command: "in" | "out" | "reset") {
+	mainWindow?.webContents.send("menu:zoom", command);
+}
+
 function createMenu() {
 	const isMac = process.platform === "darwin";
 
@@ -404,9 +416,31 @@ function createMenu() {
 							{ type: "separator" as const },
 						]
 					: []),
-				{ role: "resetZoom" as const },
-				{ role: "zoomIn" as const },
-				{ role: "zoomOut" as const },
+				{
+					label: "Actual Size",
+					accelerator: "CmdOrCtrl+0",
+					click: () => sendZoomCommand("reset"),
+				},
+				{
+					label: "Zoom In",
+					accelerator: "CmdOrCtrl+=",
+					click: () => sendZoomCommand("in"),
+				},
+				// The role this replaced also answered to Cmd/Ctrl+Plus - the
+				// shifted key on most layouts. A hidden twin keeps that binding
+				// rather than dropping it silently; one menu item can hold only
+				// one accelerator.
+				{
+					label: "Zoom In",
+					accelerator: "CmdOrCtrl+Plus",
+					visible: false,
+					click: () => sendZoomCommand("in"),
+				},
+				{
+					label: "Zoom Out",
+					accelerator: "CmdOrCtrl+-",
+					click: () => sendZoomCommand("out"),
+				},
 				{ type: "separator" as const },
 				{ role: "togglefullscreen" as const },
 			],
