@@ -45,6 +45,29 @@ bool contains (const std::string& haystack, const std::string& needle) {
     return haystack.find (needle) != std::string::npos;
 }
 
+/**
+ * @brief Whether an environment variable is present at all - see
+ *        TheCheckedInDeclarationsMatchTheGenerator, its one caller.
+ *
+ * MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996), and this
+ * suite is built with `/W4 /WX`, so the deprecation is followed rather than
+ * suppressed: a `#pragma warning(disable)` here would be a permanent
+ * suppression for a one-line read.
+ */
+bool env_is_set (const char* name) {
+#ifdef _WIN32
+    char* value   = nullptr;
+    size_t length = 0;
+    if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
+        return false;
+    }
+    std::free (value);
+    return true;
+#else
+    return std::getenv (name) != nullptr;
+#endif
+}
+
 TEST (ScriptTypesTest, IsDeterministic) {
     EXPECT_EQ (generate_script_typedefs (), generate_script_typedefs ());
 }
@@ -353,7 +376,7 @@ TEST (ScriptTypesTest, TheCheckedInDeclarationsMatchTheGenerator) {
     "tests" / "fixtures" / "script-typedefs.d.ts";
     const std::string generated = generate_script_typedefs ();
 
-    if (std::getenv ("VAYU_UPDATE_SCRIPT_TYPEDEFS") != nullptr) {
+    if (env_is_set ("VAYU_UPDATE_SCRIPT_TYPEDEFS")) {
         std::ofstream out (path, std::ios::binary);
         ASSERT_TRUE (out.good ()) << "cannot write fixture: " << path;
         out << generated;
