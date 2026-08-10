@@ -97,10 +97,12 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
 /**
  * One program per block - each is its own script, and two of them declaring
  * `const jar` is correct documentation a single merged file would reject. What
- * is shared is the *parsing*: `lib.es2022.d.ts` and its references plus the
- * declarations are the overwhelming majority of the work and are identical
- * every time, so they are parsed once and handed to every program. Without the
- * cache the 54 blocks take ~19s; with it, under one.
+ * is shared is the *work around* it: `lib.es2022.d.ts` and its references plus
+ * the declarations are the overwhelming majority of the cost and are identical
+ * every time, so they are parsed once and handed to every program, and each
+ * program reuses the last one's structure. Uncached, the 54 blocks take ~19s;
+ * cached, under 2 on Linux - and the Windows runner is several times slower
+ * again, which is what the explicit timeout at the bottom of this file is for.
  */
 function createCompiler(declarations: string) {
 	const defaultHost = ts.createCompilerHost(COMPILER_OPTIONS, true);
@@ -136,6 +138,8 @@ function createCompiler(declarations: string) {
 		writeFile: () => {},
 	};
 
+	let previous: ts.Program | undefined;
+
 	/**
 	 * The diagnostics the editor would show, so the codes the app suppresses are
 	 * dropped here too. Both come from the editor holding a fragment while the
@@ -150,7 +154,16 @@ function createCompiler(declarations: string) {
 			COMPILER_OPTIONS.target ?? ts.ScriptTarget.ESNext,
 			true
 		);
-		const program = ts.createProgram([DECLARATIONS_NAME, SCRIPT_NAME], COMPILER_OPTIONS, host);
+		// `oldProgram` lets the compiler keep the structure for every file that
+		// did not change, which is all of them but the block - the same
+		// mechanism a watching editor uses between keystrokes.
+		const program = ts.createProgram({
+			rootNames: [DECLARATIONS_NAME, SCRIPT_NAME],
+			options: COMPILER_OPTIONS,
+			host,
+			oldProgram: previous,
+		});
+		previous = program;
 		const script = program.getSourceFile(SCRIPT_NAME);
 		if (!script) throw new Error("the block never reached the compiler");
 
@@ -187,9 +200,17 @@ describe("the documented pm.* examples compile against the generated declaration
 		expect(declarations.length).toBeGreaterThan(20000);
 	});
 
+	/*
+	 * The only test in this suite that needs a timeout of its own. Running the
+	 * TypeScript compiler over 54 blocks is real work - about 2s on a Linux
+	 * developer machine, and the Windows CI runner took past vitest's 5s default
+	 * on the first attempt at this. The number is a ceiling for a hang, not a
+	 * budget: if this starts approaching it, the compiler is being asked to redo
+	 * something the caches above should be holding.
+	 */
 	it("reports no errors on any of them", () => {
 		const compile = createCompiler(declarations);
 		const errors = blocks.flatMap(compile);
 		expect(errors.join("\n")).toBe("");
-	});
+	}, 120_000);
 });
