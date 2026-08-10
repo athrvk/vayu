@@ -46,31 +46,128 @@ SamplingRetention read_retention (const MetricsCollector& mc) {
 }
 
 /**
- * @brief Validate sampled responses using test scripts (deferred validation)
- * This runs after the load test completes to avoid impacting throughput.
+ * @brief One deferred replay: a script, the samples it runs against, and the
+ *        identity `pm.info` reports while it does.
  *
- * Returns the tallies for the run summary, or nullopt when validation did not
- * run at all (no test script, or no sampled responses) - which is what keeps
- * the report's testValidation section absent instead of all-zero.
+ * A single-request run builds exactly one of these; a scenario load run builds
+ * one per scripted step, which is the whole of the per-step extension - the
+ * replay itself is the same code either way, so the two shapes cannot drift
+ * into reporting a pass differently.
  */
-std::optional<ScriptValidationTotals>
-validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, bool verbose) {
-    if (context->test_script.empty ()) {
-        return std::nullopt; // No script to validate
+struct ScriptReplay {
+    const std::string* script                  = nullptr;
+    const vayu::Request* request               = nullptr;
+    const std::vector<ResponseSample>* samples = nullptr;
+    /// The run's data rows, so a sampled iteration reads the row it was bound
+    /// to as `pm.iterationData`. Null for a run sent without `data`.
+    const std::vector<nlohmann::json>* data_rows = nullptr;
+    std::optional<std::string> request_id;
+    std::optional<std::string> request_name;
+    /// Prefixed to every failure message so a scenario's failures name their
+    /// step. Empty for a single-request run, whose failures need no qualifier.
+    std::string failure_prefix;
+};
+
+/**
+ * @brief Replay one script against one set of samples, tallying the results.
+ *
+ * @param failure_messages Appended to, bounded by MAX_FAILURE_MESSAGES across
+ *        the whole run - a forty-step plan must not multiply the cap by forty.
+ */
+ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
+vayu::Environment& env,
+const ScriptReplay& replay,
+std::vector<std::string>& failure_messages) {
+    ScriptValidationTotals totals;
+    totals.sampled = replay.samples->size ();
+
+    auto record_failure = [&failure_messages, &replay] (const std::string& message) {
+        if (failure_messages.size () <
+        vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
+            failure_messages.push_back (replay.failure_prefix + message);
+        }
+    };
+
+    for (const auto& sample : *replay.samples) {
+        // Build Response from sample
+        vayu::Response response;
+        response.status_code     = sample.status_code;
+        response.status_text     = sample.status_text;
+        response.body            = sample.body;
+        response.headers         = sample.headers;
+        response.timing.total_ms = sample.latency_ms;
+
+        try {
+            auto script_ctx =
+            vayu::runtime::ScriptContext::for_test (*replay.request, response);
+            script_ctx.environment  = &env;
+            script_ctx.request_id   = replay.request_id;
+            script_ctx.request_name = replay.request_name;
+            // The iteration this response was actually sent in, for a scenario
+            // step that recorded one. Absent everywhere else, which is issue
+            // #300's ruling kept intact: a reservoir position is not an
+            // iteration, and reporting it as one would be a binding that
+            // cannot fail. `iterationCount` stays absent even here - a
+            // duration-bounded run has no total to report, and a script that
+            // could read it from one mode and not the other is worse than one
+            // that never reads it.
+            script_ctx.iteration = sample.iteration;
+            if (replay.data_rows != nullptr && sample.data_row_index &&
+            *sample.data_row_index < replay.data_rows->size ()) {
+                script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
+            }
+            auto result = engine.execute (*replay.script, script_ctx);
+
+            if (result.success) {
+                // Check individual test results
+                for (const auto& test : result.tests) {
+                    if (test.passed) {
+                        totals.passed++;
+                    } else {
+                        totals.failed++;
+                        record_failure (test.name + ": " + test.error_message);
+                    }
+                }
+                if (result.tests.empty ()) {
+                    // Script ran but had no pm.test() calls - count as passed
+                    totals.passed++;
+                }
+            } else {
+                totals.failed++;
+                record_failure ("Script error: " + result.error_message);
+            }
+        } catch (const std::exception& e) {
+            totals.failed++;
+            record_failure ("Exception: " + std::string (e.what ()));
+        }
     }
 
-    const auto& samples = context->metrics_collector->response_samples ();
-    if (samples.empty ()) {
+    return totals;
+}
+} // namespace
+
+ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+bool verbose) {
+    ScriptValidation validation;
+
+    // Which shape this run is. A scenario load run's scripts hang off its plan
+    // steps; a single-request run has the one run-level script. The step stores
+    // exist only where the executor sized them, so their presence is the test
+    // rather than a second flag that could disagree with them.
+    const bool per_step = context->scenario != nullptr &&
+    context->metrics_collector->step_sample_step_count () > 0;
+
+    if (!per_step && context->test_script.empty ()) {
+        return validation; // No script to validate
+    }
+
+    if (!per_step && context->metrics_collector->response_samples ().empty ()) {
         if (verbose) {
             vayu::utils::log_info (
             "No response samples collected for script validation");
         }
-        return std::nullopt;
-    }
-
-    if (verbose) {
-        vayu::utils::log_info ("Validating " + std::to_string (samples.size ()) +
-        " response samples with test script...");
+        return validation;
     }
 
     // Create script engine for validation, bounded by the same timeout/limits
@@ -96,92 +193,121 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
     vayu::runtime::ScriptEngine engine (script_config);
     vayu::Environment env;
 
-    // Build a dummy request for script context (HTTP request fields are at root level)
+    // The run-level request and identity, for the single-request shape. A
+    // scenario takes both off the plan step it is replaying instead, so it does
+    // not pay for a payload lookup whose answer it would discard.
     vayu::Request dummy_request;
-    auto request_result = vayu::json::deserialize_request (context->config);
-    if (request_result.is_ok ()) {
-        dummy_request = request_result.value ();
-    }
-
-    // Identity for `pm.info`. A load run's `tests` script is the same script a
-    // Send runs, so it must not read `pm.info.requestId` as undefined here and
-    // as a value there. Both fields ride in on the composed payload for a run
-    // started from a saved request; resolved once, not per sample.
     std::optional<std::string> script_request_id;
     std::optional<std::string> script_request_name;
-    if (auto id = context->config.find ("requestId");
-        id != context->config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
-        script_request_id = id->get<std::string> ();
-    }
-    if (auto name = context->config.find ("requestName");
-        name != context->config.end () && name->is_string () &&
-        !name->get<std::string> ().empty ()) {
-        script_request_name = name->get<std::string> ();
-    } else if (script_request_id) {
-        try {
-            if (auto stored = db.get_request (*script_request_id);
-                stored && !stored->name.empty ()) {
-                script_request_name = stored->name;
+    if (!per_step) {
+        // Build a dummy request for script context (HTTP request fields are at root level)
+        auto request_result = vayu::json::deserialize_request (context->config);
+        if (request_result.is_ok ()) {
+            dummy_request = request_result.value ();
+        }
+
+        // Identity for `pm.info`. A load run's `tests` script is the same script a
+        // Send runs, so it must not read `pm.info.requestId` as undefined here and
+        // as a value there. Both fields ride in on the composed payload for a run
+        // started from a saved request; resolved once, not per sample.
+        if (auto id = context->config.find ("requestId"); id != context->config.end () &&
+            id->is_string () && !id->get<std::string> ().empty ()) {
+            script_request_id = id->get<std::string> ();
+        }
+        if (auto name = context->config.find ("requestName");
+            name != context->config.end () && name->is_string () &&
+            !name->get<std::string> ().empty ()) {
+            script_request_name = name->get<std::string> ();
+        } else if (script_request_id) {
+            try {
+                if (auto stored = db.get_request (*script_request_id);
+                    stored && !stored->name.empty ()) {
+                    script_request_name = stored->name;
+                }
+            } catch (const std::exception& e) {
+                // A lookup failure costs the script a name, never the validation.
+                vayu::utils::log_warning (
+                "pm.info.requestName lookup failed: " + std::string (e.what ()));
             }
-        } catch (const std::exception& e) {
-            // A lookup failure costs the script a name, never the validation.
-            vayu::utils::log_warning (
-            "pm.info.requestName lookup failed: " + std::string (e.what ()));
         }
     }
 
     size_t passed = 0;
     size_t failed = 0;
+    size_t sampled = 0;
     std::vector<std::string> failure_messages;
 
-    for (const auto& sample : samples) {
-        // Build Response from sample
-        vayu::Response response;
-        response.status_code     = sample.status_code;
-        response.status_text     = sample.status_text;
-        response.body            = sample.body;
-        response.headers         = sample.headers;
-        response.timing.total_ms = sample.latency_ms;
+    if (per_step) {
+        const auto& plan      = context->scenario->plan;
+        const auto& data_rows = context->scenario->data_rows;
+        const size_t steps    = std::min (plan.steps.size (),
+           context->metrics_collector->step_sample_step_count ());
+        validation.steps.resize (steps);
 
-        try {
-            auto script_ctx =
-            vayu::runtime::ScriptContext::for_test (dummy_request, response);
-            script_ctx.environment  = &env;
-            script_ctx.request_id   = script_request_id;
-            script_ctx.request_name = script_request_name;
-            auto result = engine.execute (context->test_script, script_ctx);
+        for (size_t i = 0; i < steps; ++i) {
+            const auto& step = plan.steps[i];
+            const auto& samples = context->metrics_collector->step_response_samples (i);
+            // A step with no script, or one whose script never got a sample to
+            // run against, reports nothing rather than a row of zeros - the
+            // same distinction the whole-run section has always kept.
+            if (step.post_script.empty () || samples.empty ()) {
+                continue;
+            }
 
-            if (result.success) {
-                // Check individual test results
-                for (const auto& test : result.tests) {
-                    if (test.passed) {
-                        passed++;
-                    } else {
-                        failed++;
-                        if (failure_messages.size () <
-                        vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
-                            failure_messages.push_back (test.name + ": " + test.error_message);
-                        }
-                    }
-                }
-                if (result.tests.empty ()) {
-                    // Script ran but had no pm.test() calls - count as passed
-                    passed++;
-                }
-            } else {
-                failed++;
-                if (failure_messages.size () <
-                vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
-                    failure_messages.push_back ("Script error: " + result.error_message);
-                }
+            if (verbose) {
+                vayu::utils::log_info ("Validating " +
+                std::to_string (samples.size ()) + " response samples for step " +
+                std::to_string (i + 1) + " (" + step.name + ")...");
             }
-        } catch (const std::exception& e) {
-            failed++;
-            if (failure_messages.size () <
-            vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
-                failure_messages.push_back ("Exception: " + std::string (e.what ()));
-            }
+
+            ScriptReplay replay;
+            replay.script = &step.post_script;
+            // The step's own request, so `pm.request` describes the step the
+            // script is asserting on rather than a run-level request a
+            // scenario payload does not have.
+            replay.request    = &step.request;
+            replay.samples    = &samples;
+            replay.data_rows  = data_rows.empty () ? nullptr : &data_rows;
+            replay.request_id = step.request_id.empty () ?
+            std::nullopt :
+            std::optional<std::string> (step.request_id);
+            replay.request_name =
+            step.name.empty () ? std::nullopt : std::optional<std::string> (step.name);
+            // Which step failed, in a message that may be read far from the
+            // per-step tallies below.
+            replay.failure_prefix = step.name.empty () ?
+            "step " + std::to_string (i + 1) + ": " :
+            step.name + ": ";
+
+            const auto totals = run_replay (engine, env, replay, failure_messages);
+            validation.steps[i] = totals;
+            sampled += totals.sampled;
+            passed += totals.passed;
+            failed += totals.failed;
         }
+
+        // Every scripted step drew a blank, so the run validated nothing.
+        if (sampled == 0) {
+            return validation;
+        }
+    } else {
+        const auto& samples = context->metrics_collector->response_samples ();
+        if (verbose) {
+            vayu::utils::log_info ("Validating " + std::to_string (samples.size ()) +
+            " response samples with test script...");
+        }
+
+        ScriptReplay replay;
+        replay.script       = &context->test_script;
+        replay.request      = &dummy_request;
+        replay.samples      = &samples;
+        replay.request_id   = script_request_id;
+        replay.request_name = script_request_name;
+
+        const auto totals = run_replay (engine, env, replay, failure_messages);
+        sampled           = totals.sampled;
+        passed            = totals.passed;
+        failed            = totals.failed;
     }
 
     // Store failure summary as a result record
@@ -208,9 +334,25 @@ validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, b
         " passed, " + std::to_string (failed) + " failed");
     }
 
-    return ScriptValidationTotals{ samples.size (), passed, failed };
+    validation.run = ScriptValidationTotals{ sampled, passed, failed };
+    return validation;
 }
-} // namespace
+
+void attach_step_test_totals (nlohmann::json& scenario,
+const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
+    auto steps = scenario.find ("steps");
+    if (steps == scenario.end () || !steps->is_array ()) {
+        return;
+    }
+    const size_t count = std::min (steps->size (), per_step.size ());
+    for (size_t i = 0; i < count; ++i) {
+        if (!per_step[i]) {
+            continue;
+        }
+        (*steps)[i]["tests"] = { { "sampled", per_step[i]->sampled },
+            { "passed", per_step[i]->passed }, { "failed", per_step[i]->failed } };
+    }
+}
 
 RunContext::RunContext (const std::string& id,
 nlohmann::json cfg,
@@ -781,7 +923,7 @@ RunManager& manager) {
 
         // Run deferred script validation if test script is present. Its tallies
         // go into the summary below, so it has to run before the summary write.
-        std::optional<ScriptValidationTotals> validation;
+        ScriptValidation validation;
         try {
             validation = validate_scripts (context, db, verbose);
         } catch (const std::exception& e) {
@@ -811,7 +953,7 @@ RunManager& manager) {
             inputs.latency_avg_ms  = avg_latency;
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
-            inputs.tests           = validation;
+            inputs.tests     = validation.run;
             inputs.retention = read_retention (*context->metrics_collector);
             // Read only now, after the drain above: a completion callback can
             // still be advancing a VU while the strategy's own frame has
@@ -819,6 +961,10 @@ RunManager& manager) {
             if (scenario_state) {
                 inputs.scenario = build_scenario_load_summary (
                 *scenario_state, context->scenario->plan);
+                // Which step's assertions failed, beside what that step did.
+                // The whole-run `tests` section above says only that something
+                // failed, which over a sequence is not an answer.
+                attach_step_test_totals (*inputs.scenario, validation.steps);
             }
 
             db.update_run_summary (

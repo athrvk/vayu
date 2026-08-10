@@ -48,15 +48,22 @@
  * `{{data.*}}` token has an empty template and does no per-iteration work at
  * all.
  *
- * ## Scripts stay deferred
+ * ## Scripts stay deferred, and are keyed per step (issue #450)
  *
  * A step's `pre_script` / `post_script` are not run inline; the run's deferred
- * `validate_scripts` pass keeps its existing discipline. `pm.execution`
- * therefore throws in a load run (`in_scenario == false`), because a script
- * that has already run against a recorded response cannot redirect a sequence
- * that already happened. Do not smuggle inline scripts in here - the shape, if
- * it is ever wanted, is a bounded pool of QuickJS contexts per worker, and that
- * is its own issue and its own benchmark.
+ * `validate_scripts` pass keeps its existing discipline, extended only by being
+ * keyed per step index rather than per run. A step's `post_script` is replayed
+ * after the run against the responses *that step* produced, which is why
+ * sampling is per step too: one flat run-wide reservoir would let the hot first
+ * step swamp the budget and never sample the last step of a long plan.
+ * A `pre_script` still runs nowhere - it would have to run *before* a send this
+ * mode never pauses for.
+ *
+ * `pm.execution` therefore still throws in a load run (`in_scenario == false`),
+ * because a script that has already run against a recorded response cannot
+ * redirect a sequence that already happened. Do not smuggle inline scripts in
+ * here - the shape, if it is ever wanted, is a bounded pool of QuickJS contexts
+ * per worker, and that is its own issue and its own benchmark.
  */
 
 #include <atomic>

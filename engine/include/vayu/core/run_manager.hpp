@@ -328,6 +328,68 @@ struct ScriptValidationTotals {
 };
 
 /**
+ * @brief What the deferred validation pass found, for the run and per step.
+ *
+ * `run` is the whole-run headline the report's `testValidation` section has
+ * always shown; `steps` is a scenario load run's per-step breakdown, which is
+ * the only reading that says *which* step's assertion failed. Both, rather than
+ * one: a sequence's aggregate answers "did anything fail" and the breakdown
+ * answers "where", and neither is derivable from the other.
+ */
+struct ScriptValidation {
+    /// Absent when validation did not run at all - no script, or no samples.
+    std::optional<ScriptValidationTotals> run;
+    /**
+     * One entry per plan step, in plan order, for a scenario load run; empty
+     * for a single-request run. An entry is absent where that step carried no
+     * script, or carried one and produced no sample to replay it against.
+     */
+    std::vector<std::optional<ScriptValidationTotals>> steps;
+};
+
+/**
+ * @brief Replay the run's deferred test scripts against its sampled responses.
+ *
+ * Runs after the load test has drained, which is what keeps it off the hot
+ * path: a `tests` script is executed once per *sampled* response, never per
+ * completion. Two shapes, chosen by what the run is:
+ *
+ * - a single-request run replays `RunContext::test_script` against the run's
+ *   one sample store;
+ * - a **scenario** load run replays each step's own `post_script` against that
+ *   step's samples, and reports the tallies per step (issue #450).
+ *
+ * `pm.execution` throws in both (`in_scenario` stays false) - a script that has
+ * already run against a recorded response cannot redirect a sequence that
+ * already happened.
+ *
+ * Declared here rather than kept file-local so the per-step behaviour can be
+ * tested directly against a drained run; the production caller is
+ * `execute_load_test`.
+ *
+ * @param verbose Log the tallies, as the run's own logging does.
+ */
+[[nodiscard]] ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+bool verbose);
+
+/**
+ * @brief Hang each step's deferred-validation tallies off its entry in a
+ *        scenario summary's `steps` array.
+ *
+ * Merged rather than passed into `build_scenario_load_summary` because the two
+ * halves are produced at different times by different code: the breakdown comes
+ * from the executor's per-step histograms, the tallies from the validation pass
+ * that can only run once the samples are final.
+ *
+ * A step with no tallies keeps no `tests` key at all, so a reader can tell
+ * "this step asserted nothing" from "this step's assertions all passed" - the
+ * same distinction the whole-run section keeps by being absent.
+ */
+void attach_step_test_totals (nlohmann::json& scenario,
+const std::vector<std::optional<ScriptValidationTotals>>& per_step);
+
+/**
  * @brief What each bounded store thinned away, for the run summary.
  *
  * Every store the collector keeps is capped, so a long enough run retains a
