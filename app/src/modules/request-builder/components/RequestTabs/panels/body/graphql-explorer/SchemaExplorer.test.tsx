@@ -60,7 +60,10 @@ function renderExplorer(overrides: Partial<Parameters<typeof SchemaExplorer>[0]>
 }
 
 const rows = () => screen.getAllByRole("treeitem");
-const rowNamed = (name: string) => rows().find((r) => r.getAttribute("data-tree-label") === name);
+const rowNamed = (label: string) => rows().find((r) => r.getAttribute("data-tree-label") === label);
+
+/** The text of a row's name span - the whole name, however it was cut up. */
+const name = (row: HTMLElement) => row.querySelector("[data-tree-activate] > span")!.textContent;
 
 beforeEach(() => {
 	vi.stubGlobal("IntersectionObserver", StubObserver);
@@ -144,6 +147,34 @@ describe("search", () => {
 		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "zzzz" } });
 		expect(screen.getByText(/Nothing matches/)).toBeTruthy();
 		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
+	});
+
+	it("marks the matched run of a name, so a flat list says why each row is in it", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "gacy" } });
+
+		const row = rowNamed("legacySearch")!;
+		expect(row.querySelector("mark")!.textContent).toBe("gacy");
+		// The mark is inside the name, not instead of it: what a screen reader
+		// reads out is the same string it read before highlighting existed.
+		expect(name(row)).toBe("legacySearch");
+	});
+
+	it("leaves a signature-only match unmarked, since its name is not what matched", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "Ranking" } });
+
+		// `Query.search` mentions Ranking only in its argument list.
+		expect(rowNamed("search")!.querySelector("mark")).toBeNull();
+		expect(name(rowNamed("search")!)).toBe("search");
+		// Same render pass, same term - the type whose name matched is marked.
+		expect(rowNamed("Ranking")!.querySelector("mark")!.textContent).toBe("Ranking");
+	});
+
+	it("marks nothing when there is no search", () => {
+		const { view } = renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		expect(view.container.querySelectorAll("mark")).toHaveLength(0);
 	});
 });
 

@@ -410,6 +410,38 @@ export function searchSchema(
 	return [...named, ...other].slice(0, limit);
 }
 
+/** A name cut into the part before the search match, the match, and the rest. */
+export interface NameSegments {
+	before: string;
+	match: string;
+	after: string;
+}
+
+/**
+ * Split a name around the match `searchSchema` located in it.
+ *
+ * Lives beside the search rather than in the row that draws it: this is index
+ * arithmetic, where an off-by-one silently mangles a name, and here it is
+ * testable without a DOM.
+ *
+ * A `matchStart` of -1 - a signature-only match, or a row that is not a search
+ * result at all - returns the name whole, which is what leaves those rows
+ * drawing exactly as they did before highlighting existed. `end` is clamped
+ * because the caller owns the term's length and the match's: a term longer than
+ * the tail of the name must yield the tail, not an empty slice.
+ */
+export function splitAtMatch(name: string, matchStart: number, length: number): NameSegments {
+	if (matchStart < 0 || matchStart >= name.length || length <= 0) {
+		return { before: name, match: "", after: "" };
+	}
+	const end = Math.min(matchStart + length, name.length);
+	return {
+		before: name.slice(0, matchStart),
+		match: name.slice(matchStart, end),
+		after: name.slice(end),
+	};
+}
+
 /** A row in the flattened tree: a node, and how deep it sits. */
 export interface SchemaTreeRow {
 	node: SchemaTreeNode;

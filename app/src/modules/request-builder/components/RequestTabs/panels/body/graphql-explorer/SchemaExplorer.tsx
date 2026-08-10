@@ -36,6 +36,7 @@ import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import {
 	buildSearchIndex,
 	searchSchema,
+	splitAtMatch,
 	visibleRows,
 	type SchemaTreeNode,
 } from "@/lib/graphql/schema-tree";
@@ -47,6 +48,20 @@ import { cn } from "@/lib/utils";
 const ROW_WINDOW = 200;
 /** One level of indentation, in pixels. Matches the collection tree's step. */
 const INDENT_STEP = 12;
+
+/**
+ * A row on screen: a node, how deep it sits, and where the search term matched
+ * its name.
+ *
+ * Tree rows and signature-only matches carry -1, the same "no match" the search
+ * itself reports - so the row draws its name whole without needing to know
+ * which of the two modes produced it.
+ */
+interface ExplorerRowModel {
+	node: SchemaTreeNode;
+	depth: number;
+	matchStart: number;
+}
 
 export interface SchemaExplorerProps {
 	schema: GraphQLSchema | null;
@@ -90,13 +105,25 @@ export function SchemaExplorer({
 	 */
 	const searchIndex = useMemo(() => (schema ? buildSearchIndex(schema) : null), [schema]);
 
-	const rows = useMemo(() => {
+	/*
+	 * The term drives the rows *and* the highlight, so it is trimmed once here
+	 * rather than in each place: the offsets `searchSchema` reports are into a
+	 * name matched against the trimmed needle, and slicing with an untrimmed
+	 * length would run the highlight past the end of the match.
+	 */
+	const term = search.trim();
+
+	const rows = useMemo<ExplorerRowModel[]>(() => {
 		if (!schema) return [];
-		if (search.trim() && searchIndex) {
-			return searchSchema(searchIndex, search).map((m) => ({ node: m.node, depth: 0 }));
+		if (term && searchIndex) {
+			return searchSchema(searchIndex, term).map((m) => ({
+				node: m.node,
+				depth: 0,
+				matchStart: m.matchStart,
+			}));
 		}
-		return visibleRows(schema, expanded);
-	}, [schema, searchIndex, search, expanded]);
+		return visibleRows(schema, expanded).map((row) => ({ ...row, matchStart: -1 }));
+	}, [schema, searchIndex, term, expanded]);
 
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(rows.length, ROW_WINDOW);
 
@@ -193,7 +220,7 @@ export function SchemaExplorer({
 					</p>
 				) : rows.length === 0 ? (
 					<p className="px-2 py-2 m-0 text-[11px] text-muted-foreground">
-						Nothing matches "{search.trim()}".
+						Nothing matches "{term}".
 					</p>
 				) : (
 					<div
@@ -203,11 +230,13 @@ export function SchemaExplorer({
 						onKeyDown={onKeyDown}
 						onFocus={roving.onFocus}
 					>
-						{rows.slice(0, visible).map(({ node, depth }) => (
+						{rows.slice(0, visible).map(({ node, depth, matchStart }) => (
 							<ExplorerRow
 								key={node.id}
 								node={node}
 								depth={depth}
+								matchStart={matchStart}
+								matchLength={term.length}
 								expanded={expanded.has(node.id)}
 								onToggle={() => toggleExpanded(schemaKey, node.id)}
 								onInsert={() => onInsert(node)}
@@ -230,13 +259,26 @@ export function SchemaExplorer({
 interface ExplorerRowProps {
 	node: SchemaTreeNode;
 	depth: number;
+	/** Where the search term matched `node.name`; -1 when nothing marks the name. */
+	matchStart: number;
+	/** Length of the search term, i.e. how much of the name the match covers. */
+	matchLength: number;
 	expanded: boolean;
 	onToggle: () => void;
 	onInsert: () => void;
 }
 
-function ExplorerRow({ node, depth, expanded, onToggle, onInsert }: ExplorerRowProps) {
+function ExplorerRow({
+	node,
+	depth,
+	matchStart,
+	matchLength,
+	expanded,
+	onToggle,
+	onInsert,
+}: ExplorerRowProps) {
 	const deprecated = node.deprecationReason !== null;
+	const name = splitAtMatch(node.name, matchStart, matchLength);
 	const title = [
 		node.description,
 		deprecated ? `Deprecated: ${node.deprecationReason}` : null,
@@ -300,7 +342,22 @@ function ExplorerRow({ node, depth, expanded, onToggle, onInsert }: ExplorerRowP
 							: "text-primary"
 					)}
 				>
-					{node.name}
+					{/*
+					 * Three segments rather than one string, so the matched run
+					 * can be marked without the row's own colour moving: a field
+					 * name is `text-primary` and a type name `text-foreground`,
+					 * and `text-inherit` keeps that distinction through the tint.
+					 * The `mark` element needs both properties set - a bare one
+					 * arrives with the user agent's yellow-on-black.
+					 *
+					 * The three concatenate to exactly `node.name`, which is what
+					 * keeps the accessible row text unchanged by highlighting.
+					 */}
+					{name.before}
+					{name.match && (
+						<mark className="rounded-sm bg-primary/20 text-inherit">{name.match}</mark>
+					)}
+					{name.after}
 				</span>
 				{node.signature && (
 					<span className="truncate text-muted-foreground">{node.signature}</span>

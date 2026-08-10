@@ -14,6 +14,7 @@ import {
 	childNodes,
 	schemaBranches,
 	searchSchema,
+	splitAtMatch,
 	type SchemaTreeNode,
 } from "./schema-tree";
 
@@ -197,5 +198,74 @@ describe("searchSchema", () => {
 
 	it("bounds what it returns", () => {
 		expect(searchSchema(index, "e", 3)).toHaveLength(3);
+	});
+});
+
+describe("splitAtMatch", () => {
+	it("cuts a match out of the middle", () => {
+		expect(splitAtMatch("legacySearch", 6, 6)).toEqual({
+			before: "legacy",
+			match: "Search",
+			after: "",
+		});
+	});
+
+	it("cuts a match at the start", () => {
+		expect(splitAtMatch("posts", 0, 4)).toEqual({ before: "", match: "post", after: "s" });
+	});
+
+	it("cuts a match at the end", () => {
+		expect(splitAtMatch("createPost", 6, 4)).toEqual({
+			before: "create",
+			match: "Post",
+			after: "",
+		});
+	});
+
+	it("keeps the name whole for a signature-only match", () => {
+		// -1 is what `searchSchema` reports when the term is only in the
+		// signature; the row must draw exactly as an unsearched one does.
+		expect(splitAtMatch("search", -1, 7)).toEqual({
+			before: "search",
+			match: "",
+			after: "",
+		});
+	});
+
+	it("keeps the name whole for an empty term", () => {
+		expect(splitAtMatch("search", 0, 0)).toEqual({ before: "search", match: "", after: "" });
+	});
+
+	it("stops the match at the end of the name rather than past it", () => {
+		expect(splitAtMatch("post", 2, 40)).toEqual({ before: "po", match: "st", after: "" });
+	});
+
+	it("keeps the name whole when the offset is past its end", () => {
+		expect(splitAtMatch("post", 9, 2)).toEqual({ before: "post", match: "", after: "" });
+	});
+
+	it("splits on code units, so an astral character survives the cut", () => {
+		// GraphQL names are ASCII by spec, but the branch rows are prose
+		// ("Subscription (not executable)") and nothing stops a server from
+		// describing itself in any script. A surrogate pair split down the
+		// middle would render two replacement characters.
+		const name = "🎯target";
+		const start = name.indexOf("target");
+		expect(splitAtMatch(name, start, 6)).toEqual({
+			before: "🎯",
+			match: "target",
+			after: "",
+		});
+		expect(splitAtMatch("héllo", 1, 4)).toEqual({ before: "h", match: "éllo", after: "" });
+	});
+
+	it("reassembles into the original name, whatever the cut", () => {
+		const name = "legacySearch";
+		for (let start = 0; start < name.length; start++) {
+			for (let length = 1; length <= name.length; length++) {
+				const { before, match, after } = splitAtMatch(name, start, length);
+				expect(before + match + after).toBe(name);
+			}
+		}
 	});
 });
