@@ -498,7 +498,7 @@ nlohmann::json get_script_completions () {
     { "detail", "This iteration's data row | undefined" },
     { "documentation",
     "The row a data-driven collection run bound to this iteration - row "
-    "i % rows for iteration i - read through get() and "
+    "i % rows for iteration i - read through get(), has() and "
     "toObject().\n\nundefined "
     "wherever there is no row: a single Send, a load run's Tests script, and a "
     "collection run started without a data set. That is the opposite treatment "
@@ -521,6 +521,19 @@ nlohmann::json get_script_completions () {
     "elsewhere pm.iterationData is undefined, so guard with it before "
     "calling.\n\nExample:\nconst user = pm.iterationData.get('username');" },
     { "sortText", "1_pm_iterationData_get" } });
+
+    completions.push_back ({ { "label", "pm.iterationData.has" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.iterationData.has(\"${1:column}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.iterationData.has(column: string): boolean" },
+    { "documentation",
+    "Whether this iteration's row carries that column. true for a column whose "
+    "value is null - the row has it - which is the one answer get() cannot "
+    "give directly.\n\nOnly inside a data-driven collection run - "
+    "elsewhere pm.iterationData is undefined, so guard with it before "
+    "calling.\n\nExample:\nif (pm.iterationData.has('coupon')) { /* the column "
+    "is in this row */ }" },
+    { "sortText", "1_pm_iterationData_has" } });
 
     completions.push_back ({ { "label", "pm.iterationData.toObject" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.iterationData.toObject()" },

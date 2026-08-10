@@ -37,6 +37,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "vayu/http/routes.hpp"
@@ -144,6 +145,9 @@ struct TypeNode {
     std::string documentation;
     int kind    = 0;
     bool listed = false; // false for an interior node the labels only imply
+    // The member may be absent at run time - see split_optional_suffix. Only
+    // read for a node that has children; a leaf carries it in its own type.
+    bool optional = false;
     // Set only where the table cannot say it: `pm.expect` is the entry point
     // into the chain, and its `detail` documents no return type because the
     // completion popup has nothing useful to show there.
@@ -172,6 +176,33 @@ std::string trim (const std::string& s) {
     }
     const auto last = s.find_last_not_of (" \t\n");
     return s.substr (first, last - first + 1);
+}
+
+constexpr std::string_view OPTIONAL_SUFFIX = " | undefined";
+
+/**
+ * @brief The table's one way of saying "this member may not be there".
+ *
+ * A `detail` ending in ` | undefined` marks the member optional, with the same
+ * spelling for a leaf (`pm.info.iteration` is `number | undefined`) and for a
+ * whole surface (`pm.iterationData` is `undefined` outside a data-driven
+ * collection run). Only the rendering differs: a leaf keeps the union, and a
+ * surface that has members has no union to put it in, so it becomes a `?` on
+ * the property name.
+ *
+ * One reader of the convention rather than two, so `field_type` and
+ * `render_member` cannot come to disagree about what the suffix means.
+ *
+ * @return the detail with the suffix removed, and whether it was there.
+ */
+std::pair<std::string, bool> split_optional_suffix (const std::string& detail) {
+    const std::string base = trim (detail);
+    if (base.size () > OPTIONAL_SUFFIX.size () &&
+    base.compare (base.size () - OPTIONAL_SUFFIX.size (),
+    OPTIONAL_SUFFIX.size (), OPTIONAL_SUFFIX) == 0) {
+        return { trim (base.substr (0, base.size () - OPTIONAL_SUFFIX.size ())), true };
+    }
+    return { base, false };
 }
 
 /**
@@ -312,14 +343,8 @@ std::string field_type (const std::string& detail) {
     // undefined` and not `number | undefined`, which silently declared
     // `pm.info.iteration` as `void` and made `pm.info.iteration + 1` an error
     // in the editor.
-    static constexpr std::string_view OPTIONAL_SUFFIX = " | undefined";
-    bool optional                                     = false;
-    if (base.size () > OPTIONAL_SUFFIX.size () &&
-    base.compare (base.size () - OPTIONAL_SUFFIX.size (),
-    OPTIONAL_SUFFIX.size (), OPTIONAL_SUFFIX) == 0) {
-        optional = true;
-        base = trim (base.substr (0, base.size () - OPTIONAL_SUFFIX.size ()));
-    }
+    const auto [stripped, optional] = split_optional_suffix (base);
+    base                            = stripped;
 
     std::string resolved;
     if (base == "number" || base == "string" || base == "boolean" || base == "any") {
@@ -389,7 +414,11 @@ bool in_chain) {
     append_doc (out, node, indent);
 
     if (!node.children.empty ()) {
-        out += indent + name + ": {\n";
+        // `pm.iterationData?: {...}` - the surface is undefined outside a
+        // data-driven collection run, and an object type has nowhere else to
+        // say so. Under the renderer's current compiler options this shows in
+        // hover rather than producing a diagnostic; see useScriptTypeDefinitions.
+        out += indent + name + (node.optional ? "?: {\n" : ": {\n");
         out += render_body (node, indent + "\t", in_chain);
         out += indent + "};\n";
         return out;
@@ -455,6 +484,7 @@ std::string generate_script_typedefs () {
         node->documentation = item.value ("documentation", "");
         node->kind          = kind;
         node->listed        = true;
+        node->optional      = split_optional_suffix (node->detail).second;
     }
 
     // `pm.expect(value)` opens the chain the `to.*` entries continue. Nothing

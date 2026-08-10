@@ -4773,6 +4773,32 @@ JSValue js_iteration_data_get (JSContext* ctx, JSValueConst this_val, int argc, 
     return js_from_json (ctx, *found, key.c_str ());
 }
 
+// pm.iterationData.has(key) - whether the row carries that column.
+//
+// Every other scope reader in the pm surface answers `has` - pm.environment,
+// pm.globals, pm.collectionVariables, pm.variables and pm.cookies all do - and
+// Postman's pm.iterationData is a VariableScope, which has one too. Absent, the
+// question has to be asked as `get(key) !== undefined`, which is both indirect
+// and easy to write wrongly for a column whose value is JSON `null`.
+//
+// A column that is present and null is `true` here: the row carries it. That is
+// the one answer `get` cannot phrase as a presence check without the reader
+// knowing that a null column comes back as JS `null` rather than `undefined`.
+JSValue js_iteration_data_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = iteration_data_context (ctx, "has");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    // No argument is "no such column", the same answer pm.variables.has gives.
+    if (argc < 1) {
+        return JS_NewBool (ctx, 0);
+    }
+
+    const std::string key = js_to_string (ctx, argv[0]);
+    return JS_NewBool (ctx, data->iteration_data->contains (key) ? 1 : 0);
+}
+
 // pm.iterationData.toObject() - the whole row, as a plain object.
 JSValue js_iteration_data_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
@@ -4829,6 +4855,8 @@ void setup_pm_iteration_data (JSContext* ctx, JSValue pm) {
     JSValue iteration_data = JS_NewObject (ctx);
     JS_SetPropertyStr (ctx, iteration_data, "get",
     JS_NewCFunction (ctx, js_iteration_data_get, "get", 1));
+    JS_SetPropertyStr (ctx, iteration_data, "has",
+    JS_NewCFunction (ctx, js_iteration_data_has, "has", 1));
     JS_SetPropertyStr (ctx, iteration_data, "toObject",
     JS_NewCFunction (ctx, js_iteration_data_to_object, "toObject", 0));
     for (const char* writer : { "set", "unset", "clear" }) {
