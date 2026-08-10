@@ -1053,6 +1053,27 @@ export interface RunReport {
 		verdict: "passed" | "failed";
 	};
 	/**
+	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
+	 *
+	 * A run longer than its access token used to turn into a 401 storm the
+	 * report never explained; the engine now refreshes header-placed tokens
+	 * mid-run and records each swap here. `refreshFailures` with a `lastError`
+	 * is the other half of that answer: the run kept going with the credential
+	 * it had, so the 401s in `statusCodes` are explained by this, not by the
+	 * target.
+	 *
+	 * `undefined` is a run that could not refresh at all - no OAuth 2.0 auth, a
+	 * non-expiring or query-placed token, the user's `autoRefreshToken`
+	 * opt-out, or a sidecar older than mid-run refresh - which is *not* the
+	 * same claim as "watched and never needed to".
+	 */
+	auth?: {
+		/** Seconds into the run at which each successful refresh landed. */
+		refreshes: { atSeconds: number }[];
+		refreshFailures: number;
+		lastError?: string;
+	};
+	/**
 	 * What a capacity run's adaptive search found: the highest concurrency the
 	 * service held inside its latency budget, the level it gave out at, and the
 	 * per-level audit trail behind both.

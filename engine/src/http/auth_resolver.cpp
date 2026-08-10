@@ -42,6 +42,14 @@ const std::string& value) {
     url += fragment;
 }
 
+// Fetch a boolean field, tolerating a missing key or non-boolean value.
+bool flag (const nlohmann::json& obj, const char* key, bool fallback) {
+    if (auto it = obj.find (key); it != obj.end () && it->is_boolean ()) {
+        return it->get<bool> ();
+    }
+    return fallback;
+}
+
 // Map a token-acquisition failure onto the auth-resolution result shape.
 AuthApplyResult from_token_error (const oauth::TokenError& err) {
     AuthApplyResult out;
@@ -98,19 +106,72 @@ vayu::db::Database* db) {
             }
             append_query_param (req->url, param, token.access_token);
         } else if (req->headers.count ("Authorization") == 0) {
-            std::string prefix = "Bearer";
-            if (auto it = config.find ("headerPrefix");
-                it != config.end () && it->is_string ()) {
-                prefix = it->get<std::string> ();
-            }
             req->headers["Authorization"] =
-            prefix.empty () ? token.access_token : prefix + " " + token.access_token;
+            oauth2_header_value (config, token.access_token);
         }
     }
     return {};
 }
 
 } // namespace
+
+std::string oauth2_header_value (const nlohmann::json& config,
+const std::string& access_token) {
+    std::string prefix = "Bearer";
+    if (auto it = config.find ("headerPrefix"); it != config.end () && it->is_string ()) {
+        prefix = it->get<std::string> ();
+    }
+    return prefix.empty () ? access_token : prefix + " " + access_token;
+}
+
+std::optional<AuthRefreshPlan> plan_auth_refresh (const vayu::Request& request,
+const nlohmann::json& auth,
+vayu::db::Database* db) {
+    if (db == nullptr) {
+        return std::nullopt;
+    }
+    const Auth parsed  = parse_auth (auth);
+    const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed);
+    if (oauth2 == nullptr || !oauth2->config.is_object ()) {
+        return std::nullopt;
+    }
+    const auto& config = oauth2->config;
+
+    // A query-placed token was written into the URL that every transfer copies;
+    // republishing a header would leave the stale one in the query string.
+    if (field (config, "tokenPlacement") == "query") {
+        return std::nullopt;
+    }
+    if (!flag (config, "autoRefreshToken", true)) {
+        return std::nullopt;
+    }
+
+    auto cached = db->get_oauth_token (oauth::cache_key (config));
+    if (!cached || cached->expires_in <= 0) {
+        return std::nullopt;
+    }
+    // A refresh token is the only non-interactive way back for this grant; the
+    // others can simply re-run their grant.
+    if (field (config, "grantType") == "authorization_code" &&
+        cached->refresh_token.empty ()) {
+        return std::nullopt;
+    }
+
+    AuthRefreshPlan plan;
+    plan.config        = config;
+    plan.header_name   = "Authorization";
+    plan.header_value  = oauth2_header_value (config, cached->access_token);
+    plan.expires_at_ms = cached->created_at + cached->expires_in * 1000;
+
+    // A user-supplied Authorization header wins over the token (see
+    // resolve_oauth2), and this run is sending that one - swapping the token
+    // under it would change nothing on the wire.
+    const auto it = request.headers.find (plan.header_name);
+    if (it == request.headers.end () || it->second != plan.header_value) {
+        return std::nullopt;
+    }
+    return plan;
+}
 
 Auth parse_auth (const nlohmann::json& auth) {
     if (!auth.is_object ()) {

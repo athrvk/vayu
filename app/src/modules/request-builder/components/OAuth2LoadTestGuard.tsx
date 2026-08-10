@@ -6,14 +6,21 @@
  */
 
 /**
- * OAuth2LoadTestGuard - warns when a duration-based load test would outlive its
- * OAuth 2.0 access token. The engine acquires the token once at run start and
- * does not refresh mid-run, so a test longer than the token's remaining life
- * starts failing partway through. This is the interim guard for that gap:
+ * OAuth2LoadTestGuard - says whether a duration-based load test will stay
+ * authorized for its whole length.
  *
- *   - covered            → nothing to do
- *   - stale-but-coverable → offer Refresh (a fresh token gives a full window)
+ * The engine now refreshes a header-placed OAuth 2.0 token *during* the run
+ * (#478), so most long runs need no warning at all. What is left is the set of
+ * credentials it cannot renew - a query-placed token, `autoRefreshToken: false`,
+ * an authorization_code grant with no refresh token - where a run longer than
+ * the token still starts failing partway through:
+ *
+ *   - covered              → nothing to do (including "the engine will renew it")
+ *   - stale-but-coverable  → offer Refresh (a fresh token gives a full window)
  *   - longer-than-lifetime → block, with an explicit "start anyway" override
+ *
+ * Which case applies is `isMidRunRefreshable`, which mirrors the engine's own
+ * rule; see oauth2-load-test-coverage.ts.
  *
  * Reports whether the Start button should be gated via onGateChange.
  */
@@ -25,7 +32,7 @@ import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/queries/oauth";
 import { useToastStore } from "@/stores";
 import type { OAuth2Config } from "@/types";
-import { coverageState, fmtDuration } from "./oauth2-load-test-coverage";
+import { coverageState, fmtDuration, isMidRunRefreshable } from "./oauth2-load-test-coverage";
 import { Callout } from "@/components/shared";
 
 interface OAuth2LoadTestGuardProps {
@@ -57,8 +64,14 @@ export default function OAuth2LoadTestGuard({
 
 	// Compute the coverage state (pure decision - see coverageState).
 	const state = useMemo(
-		() => coverageState(durationSeconds, cacheKey != null, token),
-		[durationSeconds, cacheKey, token]
+		() =>
+			coverageState(
+				durationSeconds,
+				cacheKey != null,
+				token,
+				isMidRunRefreshable(config, token)
+			),
+		[durationSeconds, cacheKey, token, config]
 	);
 
 	// Reset the override whenever the situation changes. This is the render-phase
@@ -98,7 +111,9 @@ export default function OAuth2LoadTestGuard({
 			<Callout severity="info" positive>
 				{state.nonExpiring
 					? "Access token does not expire - it covers the full test."
-					: "Access token covers the full test duration."}
+					: state.viaRefresh
+						? "Access token expires during the test - the engine refreshes it mid-run."
+						: "Access token covers the full test duration."}
 			</Callout>
 		);
 	}
@@ -175,8 +190,9 @@ export default function OAuth2LoadTestGuard({
 					this provider&apos;s tokens last only{" "}
 					<strong>{fmtDuration(state.lifetimeMs)}</strong>, shorter than the{" "}
 					<strong>{fmtDuration(state.durationMs)}</strong> test. Requests will fail once
-					it expires - mid-run refresh isn&apos;t supported yet, so shorten the run to
-					avoid failures.
+					it expires - this credential cannot be renewed mid-run (a query-placed token,
+					auto-refresh turned off, or an authorization-code grant with no refresh token),
+					so shorten the run to avoid failures.
 				</>
 			)}
 		</Callout>

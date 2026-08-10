@@ -142,6 +142,15 @@ struct ReportExtras {
     // Per-budget rows verbatim from the summary, already in the report's
     // camelCase shape - the evaluator writes the wire keys.
     nlohmann::json threshold_checks = nlohmann::json::array ();
+    // Whether the run's OAuth 2.0 credential was refreshed while it ran.
+    // `has_auth` false is a run that could not refresh at all (no oauth2 auth,
+    // a non-expiring or query-placed token, or an engine older than mid-run
+    // refresh), which is not the same as a run that watched and never needed to
+    // - so the section is left out rather than reported as zero refreshes.
+    bool has_auth = false;
+    nlohmann::json auth_refreshes = nlohmann::json::array ();
+    size_t auth_refresh_failures  = 0;
+    std::string auth_last_error;
     // What a capacity run's search found, already translated into the report's
     // camelCase shape. `has_capacity` false is every other mode - a run with a
     // fixed target measured a point, not a curve, and reporting a knee of zero
@@ -381,6 +390,18 @@ ReportExtras& extras) {
         read_number (summary["tests"], "sampled", extras.tests_sampled);
         read_number (summary["tests"], "passed", extras.tests_passed);
         read_number (summary["tests"], "failed", extras.tests_failed);
+    }
+
+    if (summary.contains ("auth") && summary["auth"].is_object ()) {
+        const auto& auth = summary["auth"];
+        extras.has_auth  = true;
+        if (auth.contains ("refreshes") && auth["refreshes"].is_array ()) {
+            extras.auth_refreshes = auth["refreshes"];
+        }
+        read_number (auth, "refreshFailures", extras.auth_refresh_failures);
+        if (auth.contains ("lastError") && auth["lastError"].is_string ()) {
+            extras.auth_last_error = auth["lastError"].get<std::string> ();
+        }
     }
 
     if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
@@ -893,6 +914,18 @@ const std::string& run_id) {
             { "passed", extras.thresholds_passed },
             { "failed", extras.thresholds_failed },
             { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
+    }
+
+    // When the run's credential was renewed under it, and what stopped a
+    // renewal that did not happen. A run whose token expired mid-flight shows
+    // up as 401s in the status distribution; this is the section that says why.
+    if (extras.has_auth) {
+        nlohmann::json auth = { { "refreshes", extras.auth_refreshes },
+            { "refreshFailures", extras.auth_refresh_failures } };
+        if (!extras.auth_last_error.empty ()) {
+            auth["lastError"] = extras.auth_last_error;
+        }
+        json_report["auth"] = auth;
     }
 
     // Include sample of request/response results

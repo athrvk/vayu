@@ -20,28 +20,65 @@ export function fmtDuration(ms: number): string {
 	return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 }
 
+import type { OAuth2Config } from "@/types";
+
 /** Minimal token shape the coverage decision needs. */
 export interface CoverageToken {
 	expiresAt: number | null;
 	expiresIn: number;
+	hasRefreshToken: boolean;
 }
 
 export type CoverageState =
 	| { kind: "inert" }
 	| { kind: "no-config" }
 	| { kind: "no-token" }
-	| { kind: "covered"; nonExpiring: boolean; remainingMs?: number }
+	| {
+			kind: "covered";
+			nonExpiring: boolean;
+			remainingMs?: number;
+			/** Covered because the engine renews the token mid-run, not because
+			 *  the cached one outlives the test. */
+			viaRefresh?: boolean;
+	  }
 	| { kind: "refresh"; remainingMs: number; lifetimeMs: number; durationMs: number }
 	| { kind: "too-long"; lifetimeMs: number; durationMs: number };
 
 /**
+ * Whether the engine will keep this credential current for the whole run.
+ *
+ * Mirrors `plan_auth_refresh` (engine/src/http/auth_resolver.cpp) case for
+ * case - the guard must not promise a refresh the engine will not perform, and
+ * must not block a run the engine can carry. Change one, change both.
+ */
+export function isMidRunRefreshable(
+	config: Pick<OAuth2Config, "grantType" | "tokenPlacement" | "autoRefreshToken">,
+	token: CoverageToken | undefined
+): boolean {
+	if (!token || token.expiresIn <= 0) return false;
+	// A query-placed token is baked into the URL of every transfer; no header
+	// swap reaches it.
+	if (config.tokenPlacement === "query") return false;
+	if (config.autoRefreshToken === false) return false;
+	// This grant's only non-interactive way back is a refresh token, and a run
+	// must never pop a browser mid-flight.
+	if (config.grantType === "authorization_code" && !token.hasRefreshToken) return false;
+	return true;
+}
+
+/**
  * Decide whether a duration-based test is covered by the token. Pure so the
  * state machine can be unit-tested without React. `now` is injectable for tests.
+ *
+ * @param refreshable Whether the engine renews the token mid-run
+ *                    ({@link isMidRunRefreshable}). When it does, a test longer
+ *                    than the token is covered rather than blocked.
  */
 export function coverageState(
 	durationSeconds: number | null,
 	hasCacheKey: boolean,
 	token: CoverageToken | undefined,
+	refreshable: boolean,
 	now: number = Date.now()
 ): CoverageState {
 	if (durationSeconds == null || durationSeconds <= 0) return { kind: "inert" };
@@ -54,6 +91,11 @@ export function coverageState(
 	const remainingMs = token.expiresAt - now;
 	const lifetimeMs = token.expiresIn * 1000;
 	if (durationMs <= remainingMs) return { kind: "covered", nonExpiring: false, remainingMs };
+	// The token dies mid-run, and the engine renews it there: nothing to warn
+	// about, and nothing for the user to do.
+	if (refreshable) {
+		return { kind: "covered", nonExpiring: false, remainingMs, viaRefresh: true };
+	}
 	if (durationMs <= lifetimeMs) return { kind: "refresh", remainingMs, lifetimeMs, durationMs };
 	return { kind: "too-long", lifetimeMs, durationMs };
 }
