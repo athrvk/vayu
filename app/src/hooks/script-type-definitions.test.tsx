@@ -109,6 +109,27 @@ describe("useScriptTypeDefinitions", () => {
 		expect(options.strict).toBe(false);
 	});
 
+	/*
+	 * The null half of semantic validation is off on purpose (#443), and the
+	 * option is written down rather than inherited: Monaco does not default it
+	 * on today, but the spread above carries whatever the worker already had,
+	 * and a `strict: true` arriving there would turn it on as a side effect.
+	 *
+	 * Decided on a count, not a preference: over the 54 `pm.*` examples in the
+	 * two script docs plus three realistic scripts, turning it on adds 13
+	 * diagnostics and 8 of them land on the docs' own recommended lines. The
+	 * reasoning lives on the option itself.
+	 */
+	it("leaves strictNullChecks off, written down rather than inherited", async () => {
+		renderHook(() => useScriptTypeDefinitions(), { wrapper });
+		await waitFor(() => expect(setCompilerOptions).toHaveBeenCalled());
+
+		const options = setCompilerOptions.mock.calls[0][0] as {
+			strictNullChecks?: boolean;
+		};
+		expect(options.strictNullChecks).toBe(false);
+	});
+
 	it("turns semantic validation on - that is what squiggles a typo", async () => {
 		renderHook(() => useScriptTypeDefinitions(), { wrapper });
 		await waitFor(() => expect(setDiagnosticsOptions).toHaveBeenCalled());
