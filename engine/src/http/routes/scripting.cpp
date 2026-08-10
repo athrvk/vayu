@@ -61,11 +61,13 @@ nlohmann::json get_script_completions () {
     // ========================================
     // pm.expect() - Chai-style assertions
     // ========================================
-    completions.push_back ({ { "label", "pm.expect" },
-    { "kind", KIND_FUNCTION }, { "insertText", "pm.expect(${1:value})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.expect(value: any)" },
+    completions.push_back ({ { "label", "pm.expect" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.expect(${1:value})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.expect(value: any, message?: string)" },
     { "documentation",
-    "Create a Chai-style expectation for assertions.\n\nChain with:\n- "
+    "Create a Chai-style expectation for assertions.\n\nThe optional second "
+    "argument is prefixed to the failure message, so a failing assertion says "
+    "which value it was about.\n\nChain with:\n- "
     ".to.equal(expected) - strict (===), so two objects with the same contents "
     "are not equal\n- .to.eql(expected) / .to.deep.equal(expected) - deep "
     "equality, key order insensitive\n- .to.be.true / "
