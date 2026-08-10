@@ -735,6 +735,44 @@ URL reached with different credentials does not. Deliberately not persisted and
 capped at `EXPLORER_VIEW_MAX_ENTRIES` (8, matching the schema cache): an
 expansion set is a description of a schema that may not exist next launch.
 
+#### `lib/graphql/reveal-store.ts` - GraphQL Outline Click-to-Scroll
+
+UI-only, in memory: one slot holding the operation the context bar's GraphQL
+outline asked the query editor to scroll to, until something serves it.
+
+**State:**
+```typescript
+{
+  pending: { requestId: string | null; name: string | null; index: number } | null
+}
+```
+
+**Key Methods:**
+```typescript
+const { pending, revealOperation, clearReveal } = useRevealStore();
+```
+
+**A store because the two ends cannot see each other.** The outline lives in the
+context bar, outside `RequestBuilderProvider`; the Monaco instance lives inside
+`GraphQLBody` and stays there, the way the insert machinery applies its edits
+in-component rather than handing the editor out. What crosses the boundary is a
+request to reveal, not an editor.
+
+**Consume-and-clear**, for the reason the insertion effect records: a command
+left in the slot is replayed on the next render and the next remount, and Radix
+remounts the Body tab on every glance at Headers. `GraphQLBody` clears it once
+served **and** when it cannot serve it (the operation was renamed away, which it
+says out loud); the provider clears one naming another request or a request
+whose body is no longer GraphQL, since nothing under it can ever serve those.
+The provider's other half is bringing the Body tab forward - the editor does not
+exist while another tab is on screen.
+
+**A command names its request** for the reason the
+[body drafts](#requestbuildercontext---body-drafts) do: only one request builder
+is mounted at a time, so a mismatch takes a click and a tab switch in the same
+tick, and the cost of not carrying the id is another request's editor jumping to
+a line number that means nothing there.
+
 ## TanStack Query (Server State)
 
 TanStack Query manages server state with automatic caching, refetching, and synchronization. It is the source of truth for collections, requests, environments, globals, and runs.

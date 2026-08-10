@@ -15,7 +15,7 @@
  * key/value modes, which is why it now lives on its own.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	CheckCircle2,
 	AlertCircle,
@@ -65,16 +65,24 @@ import { formatRelativeTime } from "@/utils/helpers";
 import { TIMING } from "@/config/timing";
 import {
 	classifyVariables,
+	findOperationLine,
 	operationNames,
 	parseGraphQLBody,
 	serializeGraphQLBody,
 	type GraphQLBodyParts,
 	type VariablesForm,
 } from "@/lib/graphql/graphql-body";
+import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 
 export interface GraphQLBodyProps {
 	body: string;
 	onBodyChange: (body: string) => void;
+	/**
+	 * Whose body this is. Read only to tell a reveal command written for this
+	 * request from one written for another, for the reason the body drafts carry
+	 * the same field (`utils/body-drafts.ts`).
+	 */
+	requestId: string | null;
 	/**
 	 * The endpoint to introspect: the request as typed plus its scope, which
 	 * the engine composes (`POST /compose`) before the introspection query is
@@ -245,6 +253,7 @@ function PaneTitle({ children }: { children: string }) {
 export function GraphQLBody({
 	body,
 	onBodyChange,
+	requestId,
 	schemaTarget,
 	onEditorMount,
 	variablesDraft,
@@ -288,10 +297,19 @@ export function GraphQLBody({
 
 	const explorerOpen = useExplorerStore((s) => s.open);
 	const setExplorerOpen = useExplorerStore((s) => s.setOpen);
+	const clearReveal = useRevealStore((s) => s.clearReveal);
 	const queryEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+	/*
+	 * State beside the ref, so that a reveal command which arrived before Monaco
+	 * finished loading is served once it has. The editor mounts asynchronously,
+	 * and this component mounts *because* of the command in the tab-was-hidden
+	 * case, so "no editor yet" is the ordinary path rather than the odd one.
+	 */
+	const [queryEditorReady, setQueryEditorReady] = useState(false);
 	const handleQueryMount: OnMount = (editorInstance, monacoInstance) => {
 		onEditorMount(editorInstance, monacoInstance);
 		queryEditorRef.current = editorInstance;
+		setQueryEditorReady(true);
 	};
 
 	/*
@@ -306,10 +324,12 @@ export function GraphQLBody({
 	const [announcement, setAnnouncement] = useState("");
 	const [announcementSeq, setAnnouncementSeq] = useState(0);
 	const [pendingVariables, setPendingVariables] = useState<string[]>([]);
-	const announce = (message: string) => {
+	// Stable, so the reveal effect below can depend on it without re-running per
+	// render. The two setters are stable already; this only says so.
+	const announce = useCallback((message: string) => {
 		setAnnouncement(message);
 		setAnnouncementSeq((n) => n + 1);
-	};
+	}, []);
 
 	/*
 	 * Where to put the caret once the new document has reached the editor.
@@ -452,6 +472,43 @@ export function GraphQLBody({
 		instance.revealPositionInCenterIfOutsideViewport(position);
 		instance.focus();
 	}, [query]);
+
+	/*
+	 * Scroll to the operation the context bar's outline asked for.
+	 *
+	 * Resolved against *this* document rather than trusting a line the outline
+	 * drew: the bar reads the stored request and the editor holds the live
+	 * buffer, so the two differ by whatever autosave has not written yet
+	 * (`findOperationLine`).
+	 *
+	 * The command is cleared once served **and** when it cannot be - an
+	 * operation renamed since the outline was drawn is not found, and a command
+	 * left in the slot is replayed on the next render and on the next remount,
+	 * which the Body tab does on every glance at Headers. The one case that does
+	 * *not* clear is Monaco not having mounted yet: there is nothing to serve the
+	 * command with, and it is served a moment later when the editor arrives.
+	 */
+	useEffect(() => {
+		const serve = (command: OperationRevealCommand | null) => {
+			if (!command || command.requestId !== requestId) return;
+			const instance = queryEditorReady ? queryEditorRef.current : null;
+			if (!instance) return;
+			clearReveal();
+			const line = findOperationLine(query, command);
+			if (line === null) {
+				announce(`${command.name ?? "That operation"} is no longer in this document.`);
+				return;
+			}
+			instance.setPosition({ lineNumber: line, column: 1 });
+			instance.revealLineInCenter(line);
+			instance.focus();
+		};
+		// The slot is read as well as subscribed to: in the case this exists for -
+		// a click from a hidden Body tab - the command was written before this
+		// component was mounted to hear about it.
+		serve(useRevealStore.getState().pending);
+		return useRevealStore.subscribe((s) => serve(s.pending));
+	}, [requestId, query, queryEditorReady, clearReveal, announce]);
 
 	/**
 	 * Insert what the explorer row stands for, and say what happened.

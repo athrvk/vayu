@@ -118,6 +118,7 @@ function renderBody() {
 			<GraphQLBody
 				body={BODY}
 				onBodyChange={() => {}}
+				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
 				variablesDraft={'{"limit": {{n}}}'}

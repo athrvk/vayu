@@ -61,6 +61,7 @@ function harness(initialBody: string) {
 				onBodyChange={(b) => {
 					state.body = b;
 				}}
+				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
 				variablesDraft={state.draft}

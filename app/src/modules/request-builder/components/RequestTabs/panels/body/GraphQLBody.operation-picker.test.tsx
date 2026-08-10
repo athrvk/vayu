@@ -64,6 +64,7 @@ function renderBody(body: string) {
 			<GraphQLBody
 				body={body}
 				onBodyChange={onBodyChange}
+				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={vi.fn()}
 				variablesDraft={null}

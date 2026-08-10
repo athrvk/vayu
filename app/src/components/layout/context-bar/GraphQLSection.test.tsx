@@ -21,6 +21,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import { useSchemaCache, type SchemaTarget } from "@/lib/graphql/schema-cache";
+import { useRevealStore } from "@/lib/graphql/reveal-store";
 import type { Tab } from "@/stores";
 import type { Request } from "@/types";
 
@@ -59,6 +60,7 @@ function show(request: Partial<Request> | undefined, isLoading = false) {
 
 beforeEach(() => {
 	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null, activeTarget: null });
+	useRevealStore.setState({ pending: null });
 	requestQuery.mockReset();
 });
 
@@ -160,5 +162,44 @@ describe("the outline", () => {
 	it("says nothing is defined while the document is mid-edit", () => {
 		show(graphqlRequest(JSON.stringify({ query: "query Broken { user(" })));
 		expect(screen.getByText(/No operation in this document/)).toBeTruthy();
+	});
+});
+
+/*
+ * The rows were plain `<li>` text. What they write is a command for the query
+ * editor, which lives in another module - `GraphQLBody.reveal.test.tsx` is the
+ * other half of this.
+ */
+describe("clicking an operation", () => {
+	const TWO = 'query Users { user(id: "1") { id } }\nmutation Add { deletePost(id: "1") }';
+
+	it("asks the editor to scroll to that operation, naming the request", () => {
+		show(graphqlRequest(JSON.stringify({ query: TWO })));
+
+		fireEvent.click(screen.getByLabelText("Go to mutation Add in the editor"));
+		expect(useRevealStore.getState().pending).toEqual({
+			requestId: "r1",
+			name: "Add",
+			index: 1,
+		});
+	});
+
+	it("names the anonymous operation by its position, since it has no name", () => {
+		show(graphqlRequest(JSON.stringify({ query: '{ user(id: "1") { id } }' })));
+
+		fireEvent.click(screen.getByLabelText("Go to query (anonymous) in the editor"));
+		expect(useRevealStore.getState().pending).toEqual({
+			requestId: "r1",
+			name: null,
+			index: 0,
+		});
+	});
+
+	// Mutation check: turn the row back into an `<li>` with an onClick and this
+	// reddens - the keyboard-only user is who loses the feature that way.
+	it("is a button, so Enter and Space reach it", () => {
+		show(graphqlRequest(JSON.stringify({ query: TWO })));
+		const row = screen.getByLabelText("Go to query Users in the editor");
+		expect(row.tagName).toBe("BUTTON");
 	});
 });
