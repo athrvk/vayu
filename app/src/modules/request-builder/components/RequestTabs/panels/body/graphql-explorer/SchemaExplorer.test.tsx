@@ -60,7 +60,13 @@ function renderExplorer(overrides: Partial<Parameters<typeof SchemaExplorer>[0]>
 }
 
 const rows = () => screen.getAllByRole("treeitem");
-const rowNamed = (name: string) => rows().find((r) => r.getAttribute("data-tree-label") === name);
+const rowNamed = (label: string) => rows().find((r) => r.getAttribute("data-tree-label") === label);
+
+/** The text of a row's name span - the whole name, however it was cut up. */
+const name = (row: HTMLElement) => row.querySelector("[data-tree-name]")!.textContent;
+
+/** A row's description span, clipped or full - null when the node documents nothing. */
+const descriptionOf = (row: HTMLElement) => row.querySelector("[data-tree-description]");
 
 beforeEach(() => {
 	vi.stubGlobal("IntersectionObserver", StubObserver);
@@ -145,6 +151,101 @@ describe("search", () => {
 		expect(screen.getByText(/Nothing matches/)).toBeTruthy();
 		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
 	});
+
+	it("marks the matched run of a name, so a flat list says why each row is in it", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "gacy" } });
+
+		const row = rowNamed("legacySearch")!;
+		expect(row.querySelector("mark")!.textContent).toBe("gacy");
+		// The mark is inside the name, not instead of it: what a screen reader
+		// reads out is the same string it read before highlighting existed.
+		expect(name(row)).toBe("legacySearch");
+	});
+
+	it("leaves a signature-only match unmarked, since its name is not what matched", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "Ranking" } });
+
+		// `Query.search` mentions Ranking only in its argument list.
+		expect(rowNamed("search")!.querySelector("mark")).toBeNull();
+		expect(name(rowNamed("search")!)).toBe("search");
+		// Same render pass, same term - the type whose name matched is marked.
+		expect(rowNamed("Ranking")!.querySelector("mark")!.textContent).toBe("Ranking");
+	});
+
+	it("marks nothing when there is no search", () => {
+		const { view } = renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		expect(view.container.querySelectorAll("mark")).toHaveLength(0);
+	});
+
+	it("finds a row by a word that is only in its description, and marks it there", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "across" } });
+
+		// "Search across users and posts." is on Query.search and nowhere else.
+		const row = rowNamed("search")!;
+		expect(row.querySelector("mark")!.textContent).toBe("across");
+		// The name is not what matched, so the name itself stays unmarked.
+		expect(name(row)).toBe("search");
+	});
+
+	it("shows a description-matched row in full, so the mark is not clipped away", () => {
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "across" } });
+
+		const description = descriptionOf(rowNamed("search")!)!;
+		expect(description.textContent).toBe("Search across users and posts.");
+		expect(description.className).not.toContain("truncate");
+	});
+});
+
+describe("showing the full description on demand", () => {
+	const toggle = () => screen.getByLabelText(/full descriptions/i);
+
+	it("clips a description to one line until asked, then shows all of it", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+
+		const clipped = descriptionOf(rowNamed("search")!)!;
+		expect(clipped.className).toContain("truncate");
+
+		fireEvent.click(toggle());
+
+		const shown = descriptionOf(rowNamed("search")!)!;
+		expect(shown.textContent).toBe("Search across users and posts.");
+		expect(shown.className).not.toContain("truncate");
+		expect(shown.className).toContain("whitespace-normal");
+	});
+
+	it("says which way it is pointing, so the control is not a mystery", () => {
+		renderExplorer();
+		expect(toggle().getAttribute("aria-pressed")).toBe("false");
+		fireEvent.click(toggle());
+		expect(toggle().getAttribute("aria-pressed")).toBe("true");
+	});
+
+	it("adds nothing to a row that documents nothing", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(toggle());
+		// `Query.user` carries no description in the fixture.
+		expect(descriptionOf(rowNamed("user")!)).toBeNull();
+	});
+
+	it("remembers the choice across a tab glance, and per schema", () => {
+		const first = renderExplorer();
+		fireEvent.click(toggle());
+		first.view.unmount();
+
+		renderExplorer();
+		expect(toggle().getAttribute("aria-pressed")).toBe("true");
+		cleanup();
+
+		renderExplorer({ schemaKey: "another-endpoint" });
+		expect(toggle().getAttribute("aria-pressed")).toBe("false");
+	});
 });
 
 describe("the rendered row count is bounded", () => {
@@ -152,7 +253,14 @@ describe("the rendered row count is bounded", () => {
 		const fields = Array.from({ length: 400 }, (_, i) => `field${i}: String`).join("\n");
 		const big = buildSchema(`type Query {\n${fields}\n}`);
 		useExplorerStore.setState({
-			byKey: { [KEY]: { search: "", expanded: ["branch:query"], scrollTop: 0 } },
+			byKey: {
+				[KEY]: {
+					search: "",
+					expanded: ["branch:query"],
+					scrollTop: 0,
+					showDescriptions: false,
+				},
+			},
 			lru: [KEY],
 		});
 

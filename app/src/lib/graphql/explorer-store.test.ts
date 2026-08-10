@@ -21,7 +21,12 @@ beforeEach(() => useExplorerStore.setState({ open: false, byKey: {}, lru: [] }))
 
 describe("per-schema view state", () => {
 	it("starts every schema at an empty view rather than undefined", () => {
-		expect(store().view("never-seen")).toEqual({ search: "", expanded: [], scrollTop: 0 });
+		expect(store().view("never-seen")).toEqual({
+			search: "",
+			expanded: [],
+			scrollTop: 0,
+			showDescriptions: false,
+		});
 	});
 
 	it("toggles an id on and off", () => {
@@ -31,15 +36,27 @@ describe("per-schema view state", () => {
 		expect(store().view("k").expanded).toEqual([]);
 	});
 
-	it("keeps search, expansion and scroll independent of each other", () => {
+	it("keeps search, expansion, scroll and descriptions independent of each other", () => {
 		store().setSearch("k", "post");
 		store().toggleExpanded("k", "branch:types");
 		store().setScrollTop("k", 42);
+		store().toggleDescriptions("k");
 		expect(store().view("k")).toEqual({
 			search: "post",
 			expanded: ["branch:types"],
 			scrollTop: 42,
+			showDescriptions: true,
 		});
+	});
+
+	it("toggles descriptions off again, and keeps two schemas' answers apart", () => {
+		store().toggleDescriptions("k");
+		store().toggleDescriptions("k");
+		expect(store().view("k").showDescriptions).toBe(false);
+
+		store().toggleDescriptions("other");
+		expect(store().view("other").showDescriptions).toBe(true);
+		expect(store().view("k").showDescriptions).toBe(false);
 	});
 });
 
