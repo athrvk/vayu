@@ -118,6 +118,90 @@ TEST (MonitorConfigValidation, LoopbackAndPrivateTargetsAreAllowed) {
 }
 
 // ---------------------------------------------------------------------------
+// The two limits a user can move
+// ---------------------------------------------------------------------------
+
+class MonitorLimitsTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_monitor_limits.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db = std::make_unique<vayu::db::Database> (DB_PATH);
+        db->init ();
+    }
+    void TearDown () override {
+        db.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    void set_config (const std::string& key, const std::string& value) {
+        auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed " << key;
+        entry->value = value;
+        db->save_config_entry (*entry);
+    }
+
+    std::unique_ptr<vayu::db::Database> db;
+};
+
+TEST_F (MonitorLimitsTest, AFreshDatabaseYieldsTheSeededDefaults) {
+    const auto limits = vayu::core::read_monitor_limits (*db);
+    EXPECT_EQ (limits.default_interval_ms, vayu::core::monitor_limits::DEFAULT_INTERVAL_MS);
+    EXPECT_EQ (limits.max_series, vayu::core::monitor_limits::MAX_SERIES);
+}
+
+// The setting has to reach a block that named no interval of its own, or it
+// would be a knob nothing reads on the path clients actually take.
+TEST_F (MonitorLimitsTest, TheConfiguredIntervalIsWhatABlockWithoutOneScrapesAt) {
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorIntervalMs", "5000"));
+    const auto limits = vayu::core::read_monitor_limits (*db);
+    ASSERT_EQ (limits.default_interval_ms, 5000);
+
+    auto config = monitor_config (json{ { "url", "http://localhost:9100/metrics" },
+    { "series", json::array ({ "up" }) } });
+    auto parsed = monitor_config_from (config, limits);
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->interval_ms, 5000);
+
+    // ...and a block that states its own still wins.
+    config["monitor"]["intervalMs"] = 250;
+    EXPECT_EQ (monitor_config_from (config, limits)->interval_ms, 250);
+}
+
+TEST_F (MonitorLimitsTest, TheConfiguredCapIsWhatTheSeriesListIsJudgedAgainst) {
+    auto nine_names = json::array ();
+    for (int i = 0; i < 9; ++i) {
+        nine_names.push_back ("metric_" + std::to_string (i));
+    }
+    auto config = monitor_config (
+    json{ { "url", "http://localhost:9100/metrics" }, { "series", nine_names } });
+
+    // Nine is over the seeded cap of eight...
+    EXPECT_TRUE (
+    validate_monitor_config (config, vayu::core::read_monitor_limits (*db)).has_value ());
+
+    // ...and under a raised one.
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorMaxSeries", "12"));
+    const auto raised = vayu::core::read_monitor_limits (*db);
+    ASSERT_EQ (raised.max_series, 12u);
+    EXPECT_FALSE (validate_monitor_config (config, raised).has_value ());
+    EXPECT_TRUE (monitor_config_from (config, raised).has_value ());
+}
+
+// `POST /config` range-checks both keys, so a value outside the range can only
+// arrive from a hand-edited row - where a 0 interval is a tight scrape loop and
+// a 0 cap rejects every block a user could write.
+TEST_F (MonitorLimitsTest, AHandEditedValueOutOfRangeFallsBackToTheSeed) {
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorIntervalMs", "0"));
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorMaxSeries", "0"));
+
+    const auto limits = vayu::core::read_monitor_limits (*db);
+    EXPECT_EQ (limits.default_interval_ms, vayu::core::monitor_limits::DEFAULT_INTERVAL_MS);
+    EXPECT_EQ (limits.max_series, vayu::core::monitor_limits::MAX_SERIES);
+}
+
+// ---------------------------------------------------------------------------
 // Prometheus exposition parsing
 // ---------------------------------------------------------------------------
 

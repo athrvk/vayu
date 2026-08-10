@@ -98,3 +98,23 @@ describe("buildMonitor", () => {
 		});
 	});
 });
+
+describe("configured limits", () => {
+	it("seeds a blank draft with the cadence the caller resolved", () => {
+		// `monitorIntervalMs` is an engine setting; a draft that ignored it would
+		// leave the setting with no reader on the path this dialog takes, since
+		// it always sends an explicit interval.
+		expect(emptyMonitorDraft(5000).intervalMs).toBe(5000);
+		expect(emptyMonitorDraft().intervalMs).toBe(1000);
+	});
+
+	it("judges the metric list against the configured cap, not a fixed 8", () => {
+		const twelve = Array.from({ length: 12 }, (_, i) => `m${i}`).join("\n");
+		const withTwelve = draft({ url: "http://localhost:9100/metrics", series: twelve });
+
+		expect(monitorError(withTwelve)).toMatch(/at most 8/i);
+		expect(monitorError(withTwelve, 12)).toBeNull();
+		// ...and a lowered cap binds too.
+		expect(monitorError(draft({ url: "http://x/m", series: "a\nb" }), 1)).toMatch(/at most 1/i);
+	});
+});

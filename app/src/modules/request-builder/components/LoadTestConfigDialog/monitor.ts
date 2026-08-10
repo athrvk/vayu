@@ -17,9 +17,7 @@
  */
 
 import type { RunMonitorConfig } from "@/types";
-
-export const MONITOR_INTERVAL_MS = { MIN: 250, MAX: 60_000, DEFAULT: 1000 } as const;
-export const MONITOR_MAX_SERIES = 8;
+import { MONITOR_INTERVAL_MS, MONITOR_MAX_SERIES } from "@/constants/monitor";
 
 /** What the user has typed. `url` blank means "monitor nothing". */
 export interface MonitorDraft {
@@ -30,10 +28,15 @@ export interface MonitorDraft {
 	series: string;
 }
 
-export function emptyMonitorDraft(): MonitorDraft {
+/**
+ * A blank draft. @p intervalMs is the configured default (`monitorIntervalMs`),
+ * passed in rather than read here so this stays a pure function - the dialog
+ * resolves it from engine config, and the seed stands in until that resolves.
+ */
+export function emptyMonitorDraft(intervalMs: number = MONITOR_INTERVAL_MS.DEFAULT): MonitorDraft {
 	return {
 		url: "",
-		intervalMs: MONITOR_INTERVAL_MS.DEFAULT,
+		intervalMs,
 		format: "prometheus",
 		series: "",
 	};
@@ -55,7 +58,7 @@ export function monitorSeriesList(draft: MonitorDraft): string[] {
  * said out loud rather than dropped: a run started with a monitor the client
  * quietly discarded is a chart the user waits the whole run for and never gets.
  */
-export function monitorError(draft: MonitorDraft): string | null {
+export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES): string | null {
 	const url = draft.url.trim();
 	if (url === "") return null;
 
@@ -73,8 +76,8 @@ export function monitorError(draft: MonitorDraft): string | null {
 	if (series.length === 0) {
 		return "Name at least one metric to read from the endpoint, one per line.";
 	}
-	if (series.length > MONITOR_MAX_SERIES) {
-		return `At most ${MONITOR_MAX_SERIES} metrics can be charted; you named ${series.length}.`;
+	if (series.length > maxSeries) {
+		return `At most ${maxSeries} metrics can be charted; you named ${series.length}. Raise "Server Monitoring Metric Limit" in Settings to chart more.`;
 	}
 	return null;
 }

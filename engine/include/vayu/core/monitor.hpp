@@ -32,6 +32,15 @@
 #include <string>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
+
+namespace vayu::db {
+// Only `read_monitor_limits` touches a database, and only by reference - the
+// decision functions below hold none, which is what keeps them total over
+// arbitrary JSON.
+class Database;
+} // namespace vayu::db
+
 namespace vayu::core {
 
 /** Which exposition format the scraped endpoint speaks. */
@@ -42,18 +51,26 @@ enum class MonitorFormat {
     Json,
 };
 
-/** Bounds the route enforces and the run relies on. */
-namespace monitor_limits {
-constexpr int MIN_INTERVAL_MS     = 250;
-constexpr int MAX_INTERVAL_MS     = 60000;
-constexpr int DEFAULT_INTERVAL_MS = 1000;
-/// Each named series is charted on one overlay; past a handful the chart is
-/// unreadable and every extra name costs a scan of the exposition body.
-constexpr size_t MAX_SERIES = 8;
-/// Consecutive failed scrapes before the loop logs once and backs off. Below
-/// this a scrape failure is a gap in the series and nothing else.
-constexpr int FAILURES_BEFORE_BACKOFF = 5;
-} // namespace monitor_limits
+/// The bounds and seeds themselves live in `constants::monitor`, beside every
+/// other tunable's; this is the local spelling.
+namespace monitor_limits = constants::monitor;
+
+/**
+ * @brief The two limits a user can move, resolved from engine config.
+ *
+ * Passed in rather than read here so the functions below stay pure over
+ * arbitrary JSON and hold no `Database` - the same split
+ * `resolve_request_timeout_ms` draws in the execution route, where the caller
+ * resolves the configured default and the decision function only takes a
+ * number. The member defaults are the compile-time seeds, which is what lets a
+ * test (or any caller without a database to hand) omit the argument entirely.
+ */
+struct MonitorLimits {
+    /// Cadence for a block that names no `intervalMs` (`monitorIntervalMs`).
+    int default_interval_ms = monitor_limits::DEFAULT_INTERVAL_MS;
+    /// How many metric names one run may chart (`monitorMaxSeries`).
+    size_t max_series = monitor_limits::MAX_SERIES;
+};
 
 /** A validated monitor block, ready for the scrape loop. */
 struct MonitorConfig {
@@ -64,6 +81,19 @@ struct MonitorConfig {
 };
 
 /**
+ * @brief Read the `monitorIntervalMs` / `monitorMaxSeries` settings, falling
+ *        back to their compile-time seeds.
+ *
+ * One reader for both keys, so the route's gate and the run's own reader cannot
+ * disagree about which limits are in force - the same reason
+ * `read_auth_refresh_tuning` exists. A value outside the range `POST /config`
+ * enforces can only come from a hand-edited row, and is discarded rather than
+ * trusted: a zero interval is a tight scrape loop and a zero cap would reject
+ * every block a user could write.
+ */
+[[nodiscard]] MonitorLimits read_monitor_limits (vayu::db::Database& db);
+
+/**
  * @brief Reject a `monitor` block the run could not act on.
  *
  * Reads @p config (the whole run config) and looks only at its `monitor` key -
@@ -72,8 +102,8 @@ struct MonitorConfig {
  *
  * @return The reason the block is unusable, or `std::nullopt`.
  */
-[[nodiscard]] std::optional<std::string> validate_monitor_config (
-const nlohmann::json& config);
+[[nodiscard]] std::optional<std::string>
+validate_monitor_config (const nlohmann::json& config, const MonitorLimits& limits = {});
 
 /**
  * @brief The monitor block a run should execute, or `std::nullopt` for a run
@@ -83,7 +113,8 @@ const nlohmann::json& config);
  * `validate_monitor_config` and returns nothing rather than throwing, so a
  * hand-edited snapshot yields "no monitor" instead of a dead run thread.
  */
-[[nodiscard]] std::optional<MonitorConfig> monitor_config_from (const nlohmann::json& config);
+[[nodiscard]] std::optional<MonitorConfig>
+monitor_config_from (const nlohmann::json& config, const MonitorLimits& limits = {});
 
 /**
  * @brief Pull the requested series out of one Prometheus exposition body.

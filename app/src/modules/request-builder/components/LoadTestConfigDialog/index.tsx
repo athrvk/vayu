@@ -71,13 +71,9 @@ import {
 	buildThresholds,
 	emptyBudgetDraft,
 } from "./budgets";
-import {
-	MONITOR_INTERVAL_MS,
-	type MonitorDraft,
-	buildMonitor,
-	emptyMonitorDraft,
-	monitorError,
-} from "./monitor";
+import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
+import { MONITOR_INTERVAL_MS } from "@/constants/monitor";
+import { useMonitorSettings } from "@/hooks/useMonitorSettings";
 
 interface SavedLoadTestConfig {
 	mode: LoadTestConfig["mode"];
@@ -296,8 +292,18 @@ export default function LoadTestConfigDialog({
 			}
 	);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
+	/**
+	 * Server monitoring. The cadence and the metric cap are engine settings
+	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
+	 * itself from them rather than from its own numbers - otherwise the cadence
+	 * setting would never apply to a run started here (this dialog always sends
+	 * an explicit interval) and a raised cap would still be refused locally.
+	 * Seeded only on a first run, like the p99 budget above: once a draft has
+	 * been memoed, the interval the user set stays set.
+	 */
+	const monitorSettings = useMonitorSettings();
 	const [monitor, setMonitor] = useState<MonitorDraft>(
-		() => saved.monitor ?? emptyMonitorDraft()
+		() => saved.monitor ?? emptyMonitorDraft(monitorSettings.defaultIntervalMs)
 	);
 	const [monitorOpen, setMonitorOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
@@ -319,7 +325,7 @@ export default function LoadTestConfigDialog({
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
 	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
 	const budgetsError = budgetError(budgets);
-	const monitoringError = monitorError(monitor);
+	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
 	const blockingError =
 		rampDurationError ??
 		startConcurrencyError ??
@@ -923,7 +929,7 @@ export default function LoadTestConfigDialog({
 								<Label htmlFor="lt-monitor-series" className="text-xs">
 									Metrics to chart
 									<span className="ml-1.5 font-normal text-muted-foreground">
-										one name per line, up to 8
+										one name per line, up to {monitorSettings.maxSeries}
 									</span>
 								</Label>
 								<Textarea

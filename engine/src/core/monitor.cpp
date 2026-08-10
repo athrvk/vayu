@@ -13,6 +13,8 @@
 #include <set>
 #include <string_view>
 
+#include "vayu/db/database.hpp"
+
 namespace vayu::core {
 
 namespace {
@@ -34,8 +36,13 @@ bool starts_with_ci (const std::string& text, std::string_view prefix) {
  * the block is unusable, or nullopt. Both public entry points go through here,
  * so the route's gate and the run's reader cannot disagree about a field.
  */
-std::optional<std::string>
-read_monitor_block (const nlohmann::json& monitor, MonitorConfig& out) {
+std::optional<std::string> read_monitor_block (const nlohmann::json& monitor,
+const MonitorLimits& limits,
+MonitorConfig& out) {
+    // The configured cadence stands until the block names its own, so a user
+    // who set `monitorIntervalMs` to 5000 gets 5000 for every run that does not
+    // override it - including one started by a client that omits the field.
+    out.interval_ms = limits.default_interval_ms;
     if (!monitor.is_object ()) {
         return "'monitor' must be an object with a 'url' and a 'series' list";
     }
@@ -95,10 +102,10 @@ read_monitor_block (const nlohmann::json& monitor, MonitorConfig& out) {
         return "'monitor.series' must name at least one metric - a scrape with "
                "nothing to read would record empty samples for the whole run";
     }
-    if (series.size () > monitor_limits::MAX_SERIES) {
-        return "'monitor.series' may name at most " +
-        std::to_string (monitor_limits::MAX_SERIES) + " metrics (got " +
-        std::to_string (series.size ()) + ")";
+    if (series.size () > limits.max_series) {
+        return "'monitor.series' may name at most " + std::to_string (limits.max_series) +
+        " metrics (got " + std::to_string (series.size ()) +
+        ") - raise 'monitorMaxSeries' in settings to chart more";
     }
     for (const auto& entry : series) {
         if (!entry.is_string () || entry.get<std::string> ().empty ()) {
@@ -121,22 +128,43 @@ const nlohmann::json& monitor_block (const nlohmann::json& config) {
 
 } // namespace
 
-std::optional<std::string> validate_monitor_config (const nlohmann::json& config) {
-    const auto& monitor = monitor_block (config);
-    if (monitor.is_null ()) {
-        return std::nullopt;
-    }
-    MonitorConfig parsed;
-    return read_monitor_block (monitor, parsed);
+MonitorLimits read_monitor_limits (vayu::db::Database& db) {
+    const MonitorLimits defaults;
+    MonitorLimits limits;
+
+    const int interval =
+    db.get_config_int ("monitorIntervalMs", defaults.default_interval_ms);
+    limits.default_interval_ms = (interval >= monitor_limits::MIN_INTERVAL_MS &&
+                                 interval <= monitor_limits::MAX_INTERVAL_MS) ?
+    interval :
+    defaults.default_interval_ms;
+
+    const int max_series =
+    db.get_config_int ("monitorMaxSeries", static_cast<int> (defaults.max_series));
+    limits.max_series =
+    max_series > 0 ? static_cast<size_t> (max_series) : defaults.max_series;
+
+    return limits;
 }
 
-std::optional<MonitorConfig> monitor_config_from (const nlohmann::json& config) {
+std::optional<std::string> validate_monitor_config (const nlohmann::json& config,
+const MonitorLimits& limits) {
     const auto& monitor = monitor_block (config);
     if (monitor.is_null ()) {
         return std::nullopt;
     }
     MonitorConfig parsed;
-    if (read_monitor_block (monitor, parsed)) {
+    return read_monitor_block (monitor, limits, parsed);
+}
+
+std::optional<MonitorConfig>
+monitor_config_from (const nlohmann::json& config, const MonitorLimits& limits) {
+    const auto& monitor = monitor_block (config);
+    if (monitor.is_null ()) {
+        return std::nullopt;
+    }
+    MonitorConfig parsed;
+    if (read_monitor_block (monitor, limits, parsed)) {
         return std::nullopt;
     }
     return parsed;

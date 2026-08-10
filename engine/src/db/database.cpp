@@ -1815,6 +1815,33 @@ void Database::seed_default_config () {
     "5000", // 5s - past this a finished run visibly waits on the join
     std::nullopt, now });
 
+    // Server-vitals monitor. Both are read per run - a change applies to the
+    // next run started, no restart. The interval *bounds* (250-60000ms) are
+    // deliberately not settings: they exist to stop a cadence that measures the
+    // scraper rather than the target.
+    upsert_config (ConfigEntry{ "monitorIntervalMs",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer",
+    "Server Monitoring Scrape Interval",
+    "How often a load test scrapes the metrics endpoint it was pointed at, "
+    "when the run does not set its own interval. Each scrape is one request on "
+    "the run's monitor thread, so it never delays the run's own metrics - but a "
+    "cadence faster than the target's own collection interval only re-reads the "
+    "same numbers. Raise it for an endpoint that is expensive to render.",
+    "observability",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS),
+    std::to_string (vayu::core::constants::monitor::MIN_INTERVAL_MS),
+    std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "monitorMaxSeries",
+    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer",
+    "Server Monitoring Metric Limit",
+    "How many metric names one run may chart from its monitored endpoint. Each "
+    "is a line on a single overlay and a name matched against every line of the "
+    "exposition body, so the ceiling is about a readable chart rather than a "
+    "hard cost. The chart has four distinct colours and repeats them past that.",
+    "observability", std::to_string (vayu::core::constants::monitor::MAX_SERIES),
+    "1", "64", std::nullopt, now });
+
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
     // Configuration for the QuickJS sandbox execution, limits, and debugging

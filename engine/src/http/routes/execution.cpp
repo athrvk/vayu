@@ -475,7 +475,8 @@ const vayu::Response& response) {
  *
  * @return The reason the config is invalid, or `std::nullopt` if it is usable.
  */
-std::optional<std::string> validate_run_config (const nlohmann::json& config) {
+std::optional<std::string> validate_run_config (const nlohmann::json& config,
+const vayu::core::MonitorLimits& monitor_limits) {
     if (!config.is_object ()) {
         return "Run config must be a JSON object";
     }
@@ -561,8 +562,10 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
 
     // `monitor` is the other nested object, and its rule lives with the scrape
     // loop for the same reason: `core/monitor.cpp` holds one description of the
-    // block, so a field this accepts is one the run will actually read.
-    if (auto reason = vayu::core::validate_monitor_config (config)) {
+    // block, so a field this accepts is one the run will actually read. Its two
+    // movable limits arrive resolved from the caller, which is what keeps this
+    // function - and the core it delegates to - free of a `Database`.
+    if (auto reason = vayu::core::validate_monitor_config (config, monitor_limits)) {
         return reason;
     }
 
@@ -837,7 +840,8 @@ void register_execution_routes (RouteContext& ctx) {
         // Range-check the numeric config *before* the run row exists, so a
         // rejected request leaves nothing behind. `invalid_run_config` is the
         // specific code this failure carries in place of the per-status default.
-        if (auto invalid = validate_run_config (json)) {
+        if (auto invalid =
+            validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
             vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
             send_error (res, 400, *invalid, "invalid_run_config");
             return;

@@ -503,6 +503,13 @@ const {
 } = useDashboardStore();
 ```
 
+The load-test dialog seeds its scrape cadence and bounds its metric list from
+the engine's `monitorIntervalMs` / `monitorMaxSeries` settings, through
+`useMonitorSettings` - the same read-the-engine's-copy arrangement
+`useLiveChartSettings` uses above, and for a sharper reason: this dialog always
+sends an explicit `intervalMs`, so a renderer-local default would mean the
+setting never applied to a run started here at all.
+
 `monitorSamples` is kept **beside** the ticks rather than merged into them: the
 two are sampled by different clocks (the engine's tick cadence and the user's
 scrape interval), so they are joined onto one x axis at render time by

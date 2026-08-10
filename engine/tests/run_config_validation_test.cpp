@@ -29,12 +29,14 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/core/monitor.hpp"
 
 namespace vayu::http::routes {
 // Declared here rather than in routes.hpp, matching apply_config_update in
 // config_route_test.cpp: the extracted core is an implementation detail of the
 // route, and only its test needs the prototype.
-std::optional<std::string> validate_run_config (const nlohmann::json& config);
+std::optional<std::string> validate_run_config (const nlohmann::json& config,
+const vayu::core::MonitorLimits& monitor_limits = {});
 } // namespace vayu::http::routes
 
 namespace {

@@ -459,6 +459,8 @@ on disk, one in memory:
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+| `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
+| `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 
 In-progress (`running`/`pending`) runs are never pruned.
 
@@ -1743,9 +1745,9 @@ of those three carry anything.
 {
   "monitor": {
     "url": "http://localhost:9100/metrics",  // required; http(s), loopback and private allowed
-    "intervalMs": 1000,                      // optional, default 1000; 250-60000
+    "intervalMs": 1000,                      // optional, defaults to `monitorIntervalMs`; 250-60000
     "format": "prometheus",                  // optional, default "prometheus"; or "json"
-    "series": [                              // required; 1-8 metric names
+    "series": [                              // required; 1 to `monitorMaxSeries` names
       "node_cpu_seconds_total",
       "process_resident_memory_bytes"
     ]
@@ -1770,11 +1772,18 @@ counted as a gap in the report's `monitor.failures`. A failing scrape never
 fails the run; after five consecutive failures the engine logs once and backs
 off to twice the configured interval until one succeeds.
 
+Two of the limits are settings rather than constants: `intervalMs` defaults to
+**`monitorIntervalMs`** when the block omits it, and the `series` ceiling is
+**`monitorMaxSeries`** (see [GET /config](#get-config)). Both are read per run,
+so a change applies to the next run started - no restart. The interval *bounds*
+are fixed, because a cadence below 250ms measures the scraper rather than the
+target and one above a minute records nothing on a short run.
+
 Loopback and private addresses are deliberately allowed: this is a local tool
 scraping the user's own infrastructure. An unusable block (no `url`, a
-non-http(s) scheme, no `series`, more than eight, an out-of-range `intervalMs`,
-an unknown `format`) is a `400` `invalid_run_config` naming the field, before
-the run row is created.
+non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
+`intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
+field, before the run row is created.
 
 #### The `scenario` block (collection runs)
 

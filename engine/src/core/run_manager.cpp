@@ -751,7 +751,7 @@ std::shared_ptr<const ScenarioExecution> scenario) {
         // read), and the run proceeds exactly as it did before the block
         // existed. The totals live on the context so the summary can read them
         // once this thread has been joined.
-        if (auto monitor = monitor_config_from (context->config)) {
+        if (auto monitor = monitor_config_from (context->config, read_monitor_limits (db))) {
             context->monitor_totals = std::make_unique<MonitorTotals> ();
             context->monitor_thread = std::thread (
             [context, &db, cfg = std::move (*monitor)] () mutable {
@@ -1554,7 +1554,7 @@ MonitorConfig config) {
                 if (context->monitor_totals) {
                     context->monitor_totals->record_failure ();
                 }
-                if (consecutive_failures == monitor_limits::FAILURES_BEFORE_BACKOFF) {
+                if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
                     if (!backoff_logged) {
                         vayu::utils::log_warning ("Monitor scrape for run " + context->run_id +
                         " has failed " + std::to_string (consecutive_failures) +
@@ -1565,7 +1565,8 @@ MonitorConfig config) {
                     // Doubled once, not per failure: the point is to stop
                     // hammering an endpoint that is gone, not to drift so far
                     // out that a recovered one is noticed minutes later.
-                    interval_ms = std::min (config.interval_ms * 2, monitor_limits::MAX_INTERVAL_MS);
+                    interval_ms =
+                    std::min (config.interval_ms * 2, constants::monitor::MAX_INTERVAL_MS);
                 }
             } else {
                 consecutive_failures = 0;
