@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from "vitest";
 import { buildSchema } from "graphql";
 import type * as Monaco from "monaco-editor";
 import { applyVariablesSchema, buildVariablesJsonSchema } from "./variables-schema";
+import { templateTwinUri } from "./variables-diagnostics";
 
 const schema = buildSchema(`
   type Query { user(id: ID!, active: Boolean): User }
@@ -39,6 +40,36 @@ describe("buildVariablesJsonSchema", () => {
 
 	it("returns null for an unparseable query", () => {
 		expect(buildVariablesJsonSchema("query: { broken", schema)).toBeNull();
+	});
+
+	/*
+	 * A `{{token}}` is a parse failure to `getOperationFacts`, so before the mask
+	 * one token anywhere cost the pane the schema for *every* variable the query
+	 * declared - no validation, no completion, for a query the engine sends fine.
+	 */
+	it("derives the same schema for a templated query as for the token-free one", () => {
+		const templated = buildVariablesJsonSchema(
+			"query ($id: ID!, $active: Boolean) { user(id: $id, active: {{flag}}) { id } }",
+			schema
+		);
+		const plain = buildVariablesJsonSchema(
+			"query ($id: ID!, $active: Boolean) { user(id: $id, active: true) { id } }",
+			schema
+		);
+		expect(templated).not.toBeNull();
+		expect(templated).toEqual(plain);
+	});
+
+	it("still finds the variables when a token stands where a field would", () => {
+		// The mask puts a GraphQL Name in a token's place, so it survives every
+		// position a Name is grammatical in - a selection is one of them.
+		const js = buildVariablesJsonSchema("query ($id: ID!) { user(id: $id) { {{f}} } }", schema);
+		expect(Object.keys(js?.properties ?? {})).toEqual(["id"]);
+	});
+
+	it("is still null for a query that is broken for some other reason", () => {
+		// Masking must not turn genuinely broken text into a schema.
+		expect(buildVariablesJsonSchema("query ($id: ID!) { user(id: {{x}}", schema)).toBeNull();
 	});
 });
 
@@ -75,12 +106,14 @@ describe("applyVariablesSchema", () => {
 
 	const QUERY = "query ($id: ID!) { user(id: $id) { id } }";
 
-	it("registers the schema against the variables model only", () => {
+	it("registers the schema against the variables model and its masked twin only", () => {
 		const { monaco, applied } = stubMonaco();
 		applyVariablesSchema(monaco, URI, QUERY, schema);
 		expect(applied().validate).toBe(true);
 		expect(applied().schemas).toHaveLength(1);
-		expect(applied().schemas[0].fileMatch).toEqual([URI]);
+		// The twin is the model the worker's markers come from, so a schema that
+		// matched only the visible one would validate nothing anybody sees.
+		expect(applied().schemas[0].fileMatch).toEqual([URI, templateTwinUri(URI)]);
 	});
 
 	it("keeps schemas other editors registered, and its own options", () => {

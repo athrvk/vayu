@@ -323,6 +323,49 @@ export default function RequestBuilderProvider({
 		}
 	}
 
+	/*
+	 * Adopt a name that changed underneath us.
+	 *
+	 * The reset above only fires on a change of `id`, and a rename does not
+	 * change the id - so the name the builder holds was, until this block, a
+	 * snapshot taken when the tab opened. That staleness is why the save payload
+	 * used to omit `name` entirely: an edit made minutes after a sidebar rename
+	 * fired a debounced auto-save carrying the pre-rename name and clobbered it.
+	 *
+	 * Keyed on the incoming *value*, not on the render: while the user types in
+	 * the Info tab the prop is unchanged, so nothing overwrites the local edit.
+	 * When their save lands the mutation writes the detail cache, the prop
+	 * changes, and this adopts the stored (trimmed) name - which also settles
+	 * the post-trim divergence rather than leaving the field permanently dirty
+	 * against its own saved value.
+	 *
+	 * `setRequestState`, not `setRequest`: adopting someone else's write is not
+	 * an unsaved change of ours, and marking it dirty would schedule a save that
+	 * writes back what we just read.
+	 */
+	const [lastKnownName, setLastKnownName] = useState(initialRequest?.name);
+	if (initialRequest?.name !== undefined && initialRequest.name !== lastKnownName) {
+		const adopted = initialRequest.name;
+		setLastKnownName(adopted);
+		setRequestState((prev) => ({ ...prev, name: adopted }));
+	}
+
+	/*
+	 * The other half of that: hand the stored name back when an edit is refused.
+	 *
+	 * `lastKnownName` is the last value the request query delivered, which is
+	 * the only copy of it here - `request.name` is whatever the user has typed.
+	 * Undefined only for a request the provider was handed without one, where
+	 * there is nothing to restore and leaving the field alone is the honest
+	 * answer.
+	 */
+	const restoreStoredName = useCallback(() => {
+		if (lastKnownName === undefined) return;
+		setRequestState((prev) =>
+			prev.name === lastKnownName ? prev : { ...prev, name: lastKnownName }
+		);
+	}, [lastKnownName]);
+
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
 		if (!onSave) return;
@@ -539,6 +582,7 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			restoreStoredName,
 			getBodyDrafts,
 			setBodyDrafts,
 			getVariablesDraft,
@@ -574,6 +618,7 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			restoreStoredName,
 			getBodyDrafts,
 			setBodyDrafts,
 			getVariablesDraft,

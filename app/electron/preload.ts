@@ -130,6 +130,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Interface scale - real page zoom (reflows the viewport).
 	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 
+	// View → Zoom In / Zoom Out / Actual Size. The menu items carry no zoom of
+	// their own: they ask the renderer to move its persisted interface-scale
+	// setting, which is what then applies the zoom. Without that indirection the
+	// accelerators compounded Chromium zoom on top of the setting and were lost
+	// on the next launch.
+	onZoomCommand: (callback: (command: "in" | "out" | "reset") => void) => {
+		const handler = (_event: unknown, command: "in" | "out" | "reset") => callback(command);
+		ipcRenderer.on("menu:zoom", handler);
+		return () => ipcRenderer.removeListener("menu:zoom", handler);
+	},
+
 	// Platform info
 	platform: process.platform,
 

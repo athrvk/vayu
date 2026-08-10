@@ -32,7 +32,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
-| Data rows           | `pm.iterationData.get(name)`, `.toObject()` - read-only, data-driven collection runs only, see below |
+| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, data-driven collection runs only, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -398,6 +398,7 @@ Details, including every case that throws, are in
 
 ```javascript
 pm.iterationData.get('username');  // this iteration's value for that column
+pm.iterationData.has('coupon');    // whether the row carries that column
 pm.iterationData.toObject();       // the whole row
 ```
 
@@ -614,6 +615,28 @@ entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first 
 
 Narrow that suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
+
+#### Optional members, and the one thing the editor cannot yet tell you
+
+A completion entry says a member may be absent by ending its `detail` in
+` | undefined`. The generator reads that one convention in two places: a leaf keeps the
+union (`iteration: number | undefined`), and a surface that has members of its own has no
+union to carry it, so the optionality moves onto the property name -
+`pm.iterationData` is declared **`iterationData?: { ... }`**, because it is `undefined`
+outside a data-driven collection run.
+
+That marker shows in hover today, but it does **not** produce a squiggle: the worker runs
+with `strictNullChecks` off, and without it an optional property is indistinguishable from
+a required one at a use site. So a plain request script calling
+`pm.iterationData.get('x')` still gets no editor error for something that throws at run
+time - the guard the docs recommend (`pm.iterationData ? ... : ...`) is advice, not a rule
+the type system enforces. Turning `strictNullChecks` on would change that for this member
+*and* for every `T | undefined` in the surface at once (`pm.environment.get` among them),
+which is a decision about how noisy this editor should be rather than a detail of the
+declarations - so it is tracked separately, not folded in here.
+
+`pm.execution` has the mirror-image limitation and no fix at all: it is always bound, and
+its methods throw outside a collection run, which no type can express.
 
 ### The second consumer: MCP agents
 

@@ -60,9 +60,20 @@
 						el.style.setProperty("--font-sans", fonts[font]);
 					}
 
-					var scales = { compact: 0.9, comfortable: 1.1 };
-					var factor = scales[localStorage.getItem("vayu-ui-scale")];
-					if (factor) {
+					/*
+						Interface scale is stored as the zoom factor itself. The three
+						preset names it used to store still migrate here, because this
+						script runs before the store that would rewrite them - a user
+						on "comfortable" must not get a frame at 100% first.
+					*/
+					var legacyScales = { compact: 0.9, default: 1, comfortable: 1.1 };
+					var savedScale = localStorage.getItem("vayu-ui-scale");
+					var factor = Object.prototype.hasOwnProperty.call(legacyScales, savedScale)
+						? legacyScales[savedScale]
+						: parseFloat(savedScale);
+					if (factor > 0) {
+						/* Mirrors clampScale in src/constants/appearance.ts. */
+						factor = Math.min(2, Math.max(0.8, Math.round(factor * 10) / 10));
 						if (window.electronAPI && window.electronAPI.setZoomFactor) {
 							window.electronAPI.setZoomFactor(factor);
 						} else {

@@ -377,6 +377,43 @@ session - each entry holds a body plus its raw copy.
 
 **Non-persisted** (responses are reloadable from backend).
 
+#### `appearance-store.ts` - Pre-Paint Interface Preferences
+
+The UI font, the interface scale and the corner roundedness - the three
+preferences `index.html`'s pre-paint script applies before React mounts. Seeded
+from localStorage at module load and written back one key per preference
+(`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`, `vayu-ui-radius`), *not*
+through zustand's `persist`: the pre-paint script reads those exact keys, and
+`SETTINGS_STORAGE_KEYS` clears them on "Reset app settings".
+
+**State:**
+```typescript
+{
+  font: UiFontChoice   // a preset or "custom"
+  fontCustom: string   // used when font === "custom"
+  scale: number        // page-zoom factor, 0.8-2.0 in 0.1 steps
+  radius: UiRadius
+}
+```
+
+Each action both persists and applies (`--font-sans`, `--radius`,
+`webFrame.setZoomFactor`), so there is one write path per preference rather than
+a state update and a separate effect that has to agree with it.
+
+**Why a store and not `useState` in `useAppearance`:** scale has two inputs. The
+Appearance panel's slider and the View menu's `Ctrl`/`Cmd` `+` `-` `0` move the
+same value, and `useAppearance` is mounted twice (the app shell and the panel).
+Per-instance state let the panel keep reading "Default" while the window
+rendered 133%. The menu bridge (`onZoomCommand` → `nudgeScale`/`resetScale`)
+lives in `useMenuActions`, which mounts exactly once - subscribing from
+`useAppearance` would move the zoom two steps per keypress.
+
+The scale range, the legacy-preset migration and the clamp/snap live in
+`constants/appearance.ts` (`clampScale`, `parseScale`, `nudgeScale`). The
+pre-paint script duplicates them by necessity - it runs before any module - and
+`appearance.prepaint.test.ts` executes the real script to keep the duplicate
+honest.
+
 #### `client-settings-store.ts` - Renderer Preferences
 
 Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
@@ -1337,7 +1374,9 @@ const { forceSave, status, isSaving } = useSaveManager({
 
 ### `useEntityDraft()` - Manual Draft/Save Model
 
-The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. Used by all three editing tabs of `CollectionDetail` (`AuthTab`, `InfoTab`, `ScriptTab`), where a save is a deliberate button press rather than a keystroke that persists itself.
+The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. Used by `CollectionDetail`'s `AuthTab` and `ScriptTab`, where a save is a deliberate button press rather than a keystroke that persists itself.
+
+`InfoTab` uses the hook without the button: it wants the draft, the resync and the mutation reset, but commits on blur like the request builder. `reset` therefore has one caller fewer than `draft` does.
 
 **API:**
 ```typescript
@@ -1354,7 +1393,7 @@ const {
 ```
 
 **Behaviour:**
-- **Seeds and resyncs:** the draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`.
+- **Seeds and resyncs:** the draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the name it holds is adopted, not captured](#the-request-name-the-builder-holds-is-adopted-not-captured).
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
 - **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
@@ -1411,7 +1450,34 @@ useDraftSaveContext({
   would report "Saved" for a write that failed.
 - **The save must carry its own validity guard.** A disabled button does not stop
   the store-driven paths, which is why `InfoTab` refuses a blank collection name
-  inside `persist` and not only on the button.
+  inside `persist`. With its buttons gone that guard is now the only one, and it
+  is silent by itself - the tab pairs it with `reportBlankNameRefused()`
+  (`lib/blank-name.ts`), which restores the stored name and reports through
+  `failSave`.
+
+### The request name the builder holds is adopted, not captured
+
+`RequestBuilderProvider` resets its state when the request **id** changes, and a
+rename does not change the id. So the name it held was a snapshot taken when the
+tab opened, and the save payload omitted `name` entirely to keep a debounced
+auto-save from writing that snapshot back over a rename made in the sidebar
+minutes earlier.
+
+The Info tab's name field needs the payload to carry `name`, so the staleness is
+removed rather than routed around: the provider watches the incoming
+`initialRequest.name` (the request query's copy) and adopts it whenever that
+*value* changes, via `setRequestState` - not `setRequest`, because adopting
+someone else's write is not an unsaved change and marking it dirty would schedule
+a save that writes back what it just read. A name the user is typing is untouched,
+because the prop is not what changed.
+
+`restoreStoredName()` on the context is the other half: the Info tab's blank-name
+refusal needs the stored name back, and the provider holds the only copy of it.
+The payload additionally drops a blank `name` key, since the debounced save can
+fire while the field is still empty and the engine does a partial update.
+
+Guarded by `RequestBuilderProvider.name-sync.test.tsx` (adoption, dirtiness, and
+restore) and `save-request-name.test.ts` (the payload).
 
 ## State Flow Examples
 

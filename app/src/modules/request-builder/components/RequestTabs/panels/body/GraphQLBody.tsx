@@ -50,6 +50,7 @@ import {
 	type SchemaTarget,
 } from "@/lib/graphql/schema-cache";
 import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
+import { attachVariablesDiagnostics } from "@/lib/graphql/variables-diagnostics";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import {
 	insertionForNode,
@@ -258,11 +259,32 @@ export function GraphQLBody({
 
 	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
+	/*
+	 * The pane's markers come from a masked twin of its model, so that a
+	 * `{{token}}` - which the badge above says is resolved and sent - stops
+	 * reading as a syntax error (`lib/graphql/variables-diagnostics.ts`). Held in
+	 * a ref because the twin outlives no mount: Radix tears this tab down on
+	 * every glance at another one, and a twin left behind would keep validating a
+	 * model nobody is editing.
+	 */
+	const variablesDiagnostics = useRef<{ dispose: () => void } | null>(null);
 	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
 		onEditorMount(editorInstance, monacoInstance);
 		monacoRef.current = monacoInstance;
-		setVariablesModelUri(editorInstance.getModel()?.uri.toString() ?? null);
+		const model = editorInstance.getModel();
+		setVariablesModelUri(model?.uri.toString() ?? null);
+		variablesDiagnostics.current?.dispose();
+		variablesDiagnostics.current = model
+			? attachVariablesDiagnostics(monacoInstance, model)
+			: null;
 	};
+	useEffect(
+		() => () => {
+			variablesDiagnostics.current?.dispose();
+			variablesDiagnostics.current = null;
+		},
+		[]
+	);
 
 	const explorerOpen = useExplorerStore((s) => s.open);
 	const setExplorerOpen = useExplorerStore((s) => s.setOpen);

@@ -3832,6 +3832,55 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// `has` exists for parity with every other scope reader in the pm surface
+// (pm.environment, pm.globals, pm.collectionVariables, pm.variables, pm.cookies)
+// and with Postman, whose pm.iterationData is a VariableScope. The case it is
+// the only clean answer to is the null column: the row *has* it, which is a
+// different fact from the row not carrying it at all.
+TEST_F (ScriptEngineTest, IterationDataHasAnswersPresenceIncludingANullColumn) {
+    const nlohmann::json row{ { "username", "ada" }, { "nickname", nullptr } };
+    auto ctx = data_test (request, response, env, row);
+
+    auto result = engine.execute (R"JS(
+        pm.test("presence", function() {
+            pm.expect(pm.iterationData.has("username")).to.equal(true);
+            pm.expect(pm.iterationData.has("missing")).to.equal(false);
+            // Present and null: `has` says the row carries it, and `get`
+            // answers null rather than the undefined an absent column gives -
+            // so the two agree and neither has to be read as the other.
+            pm.expect(pm.iterationData.has("nickname")).to.equal(true);
+            pm.expect(pm.iterationData.get("nickname")).to.equal(null);
+            pm.expect(typeof pm.iterationData.get("missing")).to.equal("undefined");
+            // No argument is no such column, the answer pm.variables.has gives.
+            pm.expect(pm.iterationData.has()).to.equal(false);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The same refusal `get` gives, for the same reason: a stashed pm.iterationData
+// called from a later script in a pooled context must not answer about a run
+// that has finished.
+TEST_F (ScriptEngineTest, IterationDataHasThrowsOutsideADataDrivenRun) {
+    const nlohmann::json row{ { "username", "ada" } };
+    auto first = data_test (request, response, env, row);
+    auto first_result = engine.execute ("globalThis.stashed = pm.iterationData;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second_result = engine.execute_test (
+    "globalThis.stashed.has('username');", request, response, env);
+
+    EXPECT_FALSE (second_result.success);
+    // Named, so the message points at the call the script actually made.
+    EXPECT_NE (second_result.error_message.find ("pm.iterationData.has is not available here"),
+    std::string::npos)
+    << second_result.error_message;
+}
+
 TEST_F (ScriptEngineTest, IterationDataToObjectReturnsTheWholeRow) {
     const nlohmann::json row{ { "username", "ada" }, { "attempts", 3 } };
     auto ctx = data_test (request, response, env, row);

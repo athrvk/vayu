@@ -679,14 +679,100 @@ bool is_deliberately_uncompletable (const std::string& name) {
     name == "pm.response.to" || name.rfind ("pm.response.to.", 0) == 0;
 }
 
-// Objects whose members are *data*, not API: the header maps carry one property
-// per header on the wire, so descending into them would demand a completion
-// entry for `Authorization`. Their accessors are guarded by
-// EveryOfferedHeaderMemberIsCallableInTheRuntime above.
-bool is_data_map (const std::string& name) {
-    return name == "pm.request.headers" || name == "pm.response.headers" ||
-    name == "pm.response.cookies";
+std::vector<std::string> split_commas (const std::string& joined) {
+    std::vector<std::string> parts;
+    for (size_t start = 0; start <= joined.size ();) {
+        const size_t comma = joined.find (',', start);
+        const std::string part = joined.substr (
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+        if (!part.empty ()) {
+            parts.push_back (part);
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return parts;
 }
+
+// The walk, as JavaScript. Two levels of plain property reads, plus the two
+// shapes a plain walk cannot reach:
+//
+// - **The data maps.** `pm.request.headers`, `pm.response.headers` and
+//   `pm.response.cookies` carry one property per header or cookie on the wire
+//   *and* their accessors, so descending naively would demand a completion
+//   entry for `Authorization`. The runtime already separates the two, and not
+//   in a side table this test would have to keep in step:
+//   `install_header_methods` defines the accessors **non-enumerable**
+//   (HEADER_METHOD_FLAGS omits JS_PROP_ENUMERABLE) while `define_header_entry`
+//   defines the wire entries with JS_PROP_C_W_E. So the walk descends and
+//   requires exactly the non-enumerable functions - an accessor added tomorrow
+//   is required, a header named `Authorization` is not, and a wire header that
+//   happens to be named `get` overwrites the method as an enumerable string and
+//   is data again, which is what those flags exist to produce.
+// - **The cookie jar**, which is behind a *call* (`pm.cookies.jar()`) and so is
+//   not reachable by property reads at all. There is exactly one such factory,
+//   so it is named here rather than generalised into a machine for finding
+//   factories.
+//
+// `data` collects what was classified as wire data, so the test beside this can
+// assert the split happened rather than a widening that quietly requires
+// everything or nothing.
+constexpr const char* ENUMERATE_PM = R"JS(
+    var names = [];
+    var data = [];
+    var DATA_MAPS = ['pm.request.headers', 'pm.response.headers', 'pm.response.cookies'];
+
+    function descend(path, value) {
+        var isDataMap = DATA_MAPS.indexOf(path) !== -1;
+        var members = Object.getOwnPropertyNames(value).sort();
+        for (var i = 0; i < members.length; i++) {
+            var member = members[i];
+            if (!isDataMap) {
+                names.push(path + '.' + member);
+                continue;
+            }
+            // API on a data map is what the runtime hid from enumeration and
+            // bound as a function; everything else is a header, a cookie, an
+            // array index or `length`.
+            var descriptor = Object.getOwnPropertyDescriptor(value, member);
+            if (!descriptor.enumerable && typeof value[member] === 'function') {
+                names.push(path + '.' + member);
+            } else {
+                data.push(path + '.' + member);
+            }
+        }
+    }
+
+    var top = Object.getOwnPropertyNames(pm).sort();
+    for (var t = 0; t < top.length; t++) {
+        var key = top[t];
+        names.push('pm.' + key);
+        var value = pm[key];
+        if (value === null || typeof value !== 'object') continue;
+        descend('pm.' + key, value);
+
+        // One more level, which is where the data maps and the header
+        // accessors live.
+        var members = Object.getOwnPropertyNames(value).sort();
+        for (var m = 0; m < members.length; m++) {
+            var nested = value[members[m]];
+            if (nested === null || typeof nested !== 'object') continue;
+            descend('pm.' + key + '.' + members[m], nested);
+        }
+    }
+
+    // The jar, reached the only way it can be.
+    var jar = pm.cookies.jar();
+    var jarMembers = Object.getOwnPropertyNames(jar).sort();
+    for (var j = 0; j < jarMembers.length; j++) {
+        names.push('pm.cookies.jar().' + jarMembers[j]);
+    }
+
+    pm.environment.set('bound', names.join(','));
+    pm.environment.set('data', data.join(','));
+)JS";
 
 TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
     const auto completions = get_script_completions ();
@@ -694,48 +780,23 @@ TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
     FullyBoundContext bound;
     vayu::runtime::ScriptEngine engine;
 
-    // Walk `pm` two levels deep and report what is there. Two levels is what
-    // the surfaces are shaped like - `pm.<namespace>.<member>` - and going
-    // deeper reaches only the header maps and the assertion chain, both
-    // excluded above and both guarded separately.
-    auto enumerated = engine.execute (R"JS(
-        var names = [];
-        var top = Object.getOwnPropertyNames(pm).sort();
-        for (var i = 0; i < top.length; i++) {
-            var key = top[i];
-            names.push('pm.' + key);
-            var value = pm[key];
-            if (value === null || typeof value !== 'object') continue;
-            var members = Object.getOwnPropertyNames(value).sort();
-            for (var j = 0; j < members.length; j++) {
-                names.push('pm.' + key + '.' + members[j]);
-            }
-        }
-        pm.environment.set('bound', names.join(','));
-    )JS",
-    bound.ctx);
+    auto enumerated = engine.execute (ENUMERATE_PM, bound.ctx);
     ASSERT_TRUE (enumerated.success) << enumerated.error_message;
 
-    const std::string bound_names = bound.env["bound"].value;
+    const auto bound_names = split_commas (bound.env["bound"].value);
     ASSERT_FALSE (bound_names.empty ())
     << "the runtime enumeration found nothing, so this guard proved nothing";
 
     std::vector<std::string> missing;
     int checked = 0;
-    for (size_t start = 0; start <= bound_names.size ();) {
-        const size_t comma = bound_names.find (',', start);
-        const std::string name = bound_names.substr (
-        start, comma == std::string::npos ? std::string::npos : comma - start);
-        if (!name.empty () && !is_deliberately_uncompletable (name) && !is_data_map (name)) {
-            checked++;
-            if (find_by_label (completions, name) == nullptr) {
-                missing.push_back (name);
-            }
+    for (const auto& name : bound_names) {
+        if (is_deliberately_uncompletable (name)) {
+            continue;
         }
-        if (comma == std::string::npos) {
-            break;
+        checked++;
+        if (find_by_label (completions, name) == nullptr) {
+            missing.push_back (name);
         }
-        start = comma + 1;
     }
 
     EXPECT_GT (checked, 40)
@@ -752,14 +813,68 @@ TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
     << report;
 }
 
+// The widening above trades one silent hole for a noisy false positive unless
+// both halves hold, so both are asserted rather than left to the suite being
+// green: the depth-3 accessors have to be *reached* (a walk that stops at two
+// levels passes the guard by checking nothing there), and a header name on the
+// wire must not be demanded as a completion (a walk that descends
+// indiscriminately would demand `Authorization`).
+TEST (ScriptCompletions, TheWalkSeparatesDepthThreeAccessorsFromWireEntries) {
+    FullyBoundContext bound;
+    vayu::runtime::ScriptEngine engine;
+
+    auto enumerated = engine.execute (ENUMERATE_PM, bound.ctx);
+    ASSERT_TRUE (enumerated.success) << enumerated.error_message;
+
+    const auto required = split_commas (bound.env["bound"].value);
+    const auto wire     = split_commas (bound.env["data"].value);
+    ASSERT_FALSE (required.empty ());
+    ASSERT_FALSE (wire.empty ())
+    << "nothing was classified as wire data, so the split below proves nothing";
+
+    auto is_required = [&required] (const std::string& name) {
+        return std::find (required.begin (), required.end (), name) != required.end ();
+    };
+    auto is_wire = [&wire] (const std::string& name) {
+        return std::find (wire.begin (), wire.end (), name) != wire.end ();
+    };
+
+    // The API three levels down, which the two-level walk never saw.
+    for (const char* accessor : { "pm.request.headers.get", "pm.request.headers.has",
+         "pm.request.headers.add", "pm.request.headers.upsert",
+         "pm.request.headers.remove", "pm.response.headers.get",
+         "pm.response.headers.has", "pm.response.cookies.get",
+         "pm.response.cookies.has", "pm.response.cookies.toObject",
+         "pm.cookies.jar().get", "pm.cookies.jar().set",
+         "pm.cookies.jar().unset", "pm.cookies.jar().clear" }) {
+        EXPECT_TRUE (is_required (accessor))
+        << accessor << " is bound by the runtime but the walk never required it";
+    }
+
+    // And the data beside it, which must not be. FullyBoundContext puts each of
+    // these on the wire, so a walk that stopped classifying would fail here.
+    for (const char* entry : { "pm.request.headers.Authorization",
+         "pm.response.headers.content-type", "pm.response.headers.set-cookie",
+         "pm.response.cookies.0", "pm.response.cookies.length" }) {
+        EXPECT_TRUE (is_wire (entry))
+        << entry << " is a wire entry but the walk did not classify it as one";
+        EXPECT_FALSE (is_required (entry))
+        << entry << " is on the wire, not API - demanding a completion for it "
+                    "would make every response header a false positive";
+    }
+}
+
 // The named half of the same check. The guard above reads the runtime, so a
 // surface deleted from both sides at once would pass it; this pins the entries
 // #418 requires by name, the way the cookie jar's write half is pinned.
 TEST (ScriptCompletions, TheIterationDataAccessorsAreOffered) {
     const auto completions = get_script_completions ();
 
+    // `has` joined get / toObject in #435 - every other scope reader in the pm
+    // surface answers it, and it is the one way to ask about a column whose
+    // value is null without knowing how a null column comes back.
     for (const char* expected : { "pm.iterationData", "pm.iterationData.get",
-         "pm.iterationData.toObject" }) {
+         "pm.iterationData.has", "pm.iterationData.toObject" }) {
         const auto* item = find_by_label (completions, expected);
         ASSERT_NE (item, nullptr) << expected << " is bound by the runtime but not offered";
         // A completion that does not say so would promise a row in a plain
@@ -768,11 +883,6 @@ TEST (ScriptCompletions, TheIterationDataAccessorsAreOffered) {
         EXPECT_NE (documentation.find ("undefined"), std::string::npos)
         << expected << " does not say it is absent outside a data-driven run: " << documentation;
     }
-
-    // `has` is not offered because the runtime does not bind it - the row
-    // accessors are get / toObject. Offering it would be the #182 defect.
-    EXPECT_EQ (find_by_label (completions, "pm.iterationData.has"), nullptr)
-    << "pm.iterationData.has is offered but the runtime binds only get/toObject";
 }
 
 } // namespace

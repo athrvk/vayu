@@ -37,7 +37,7 @@ vi.mock("@/hooks/useAppearance", () => ({
 		setFont: vi.fn(),
 		fontCustom: "",
 		setFontCustom: vi.fn(),
-		scale: "default",
+		scale: 1,
 		setScale: vi.fn(),
 		radius: "default",
 		setRadius: vi.fn(),

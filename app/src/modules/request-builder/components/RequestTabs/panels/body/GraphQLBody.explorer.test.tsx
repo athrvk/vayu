@@ -56,6 +56,13 @@ function fakeEditor(language: string) {
 		getOffsetAt: (p: { lineNumber: number; column: number }) => offsetAt(text(), p),
 		getPositionAt: (o: number) => positionAt(text(), o),
 		uri: { toString: () => `inmemory://${language}` },
+		// The rest is what `attachVariablesDiagnostics` needs of the pane's
+		// model to hang its masked twin off it.
+		getValue: text,
+		setValue: () => {},
+		isDisposed: () => false,
+		onDidChangeContent: () => ({ dispose: () => {} }),
+		onWillDispose: () => ({ dispose: () => {} }),
 	};
 	return {
 		getModel: () => model,
@@ -67,17 +74,46 @@ function fakeEditor(language: string) {
 }
 
 /**
- * Just the JSON-language surface `applyVariablesSchema` writes to. Mounting the
- * variables editor is what makes that run at all, so a stub that lacks it fails
- * every case here rather than the one it belongs to.
+ * The Monaco surface the variables pane's mount touches: the JSON language
+ * defaults `applyVariablesSchema` writes to, and the model registry
+ * `attachVariablesDiagnostics` creates its masked twin in. Mounting the editor
+ * is what makes both run, so a stub that lacks either fails every case in this
+ * file rather than the one it belongs to.
  */
 function monacoStub() {
+	const models = new Map<string, { isDisposed: () => boolean; dispose: () => void }>();
 	return {
+		Uri: { parse: (uri: string) => ({ toString: () => uri }) },
 		json: {
 			jsonDefaults: {
 				diagnosticsOptions: { schemas: [] as unknown[] },
 				setDiagnosticsOptions: () => {},
 			},
+		},
+		editor: {
+			createModel: (value: string, _language: string, uri: { toString: () => string }) => {
+				let disposed = false;
+				let text = value;
+				const model = {
+					uri,
+					getValue: () => text,
+					setValue: (next: string) => {
+						text = next;
+					},
+					isDisposed: () => disposed,
+					onDidChangeContent: () => ({ dispose: () => {} }),
+					onWillDispose: () => ({ dispose: () => {} }),
+					dispose: () => {
+						disposed = true;
+					},
+				};
+				models.set(uri.toString(), model);
+				return model;
+			},
+			getModel: (uri: { toString: () => string }) => models.get(uri.toString()) ?? null,
+			getModelMarkers: () => [],
+			setModelMarkers: () => {},
+			onDidChangeMarkers: () => ({ dispose: () => {} }),
 		},
 	};
 }

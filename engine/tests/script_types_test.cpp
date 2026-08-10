@@ -135,6 +135,30 @@ TEST (ScriptTypesTest, OptionalFieldsKeepTheirUnderlyingType) {
     EXPECT_FALSE (contains (dts, "void | undefined"));
 }
 
+// A surface that has members has no union to carry `| undefined` in, so the
+// optionality moves onto the property name. `pm.iterationData` is undefined
+// outside a data-driven collection run - the documented, deliberate design -
+// and the generated declarations described it as always present, so a plain
+// request script calling `pm.iterationData.get('x')` got no squiggle for
+// something that throws at run time.
+TEST (ScriptTypesTest, AnOptionalSurfaceIsDeclaredOptional) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "iterationData?: {"))
+    << "pm.iterationData is undefined outside a data-driven run and the "
+       "declarations do not say so";
+
+    // And the marker is not sprayed over every surface: the ones that are
+    // always bound must stay required, or the declarations would invite a
+    // needless guard on `pm.response` and `pm.info`.
+    for (const char* required : { "response: {", "request: {", "info: {",
+         "environment: {", "cookies: {", "execution: {" }) {
+        EXPECT_TRUE (contains (dts, required))
+        << required << " lost its always-present declaration";
+    }
+    EXPECT_FALSE (contains (dts, "response?: {"));
+    EXPECT_FALSE (contains (dts, "info?: {"));
+}
+
 TEST (ScriptTypesTest, ReadsReturnTypesFromTheDetailString) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "get(name: string): string | undefined;"));

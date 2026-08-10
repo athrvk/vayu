@@ -26,12 +26,14 @@ import {
 	Squircle,
 } from "lucide-react";
 import {
+	Button,
 	Card,
 	CardContent,
 	CardDescription,
 	CardHeader,
 	CardTitle,
 	Eyebrow,
+	Kbd,
 	Skeleton,
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
@@ -40,13 +42,18 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import {
+	DEFAULT_UI_SCALE,
 	UI_FONTS,
-	UI_SCALES,
 	UI_RADII,
+	UI_SCALE_MAX,
+	UI_SCALE_MIN,
+	UI_SCALE_STEP,
 	customSansStack,
+	formatScale,
 	type UiFontChoice,
 } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
+import { modKey } from "@/lib/platform";
 import { ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
@@ -269,32 +276,36 @@ export default function AppearancePanel() {
 							<Maximize2 className="w-3.5 h-3.5" />
 							Scale
 						</Eyebrow>
-						<div className="grid grid-cols-3 gap-3">
-							{UI_SCALES.map((option) => {
-								const isSelected = scale === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setScale(option.value)}
-										className={cn(
-											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<span className="text-sm font-medium">{option.label}</span>
-										<span className="text-xs text-muted-foreground">
-											{option.description}
-										</span>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
-							})}
+						<div className="flex items-center gap-3">
+							<input
+								id="ui-scale"
+								type="range"
+								min={UI_SCALE_MIN * 100}
+								max={UI_SCALE_MAX * 100}
+								step={UI_SCALE_STEP * 100}
+								value={Math.round(scale * 100)}
+								onChange={(e) => setScale(Number(e.target.value) / 100)}
+								aria-label="Interface scale"
+								className="w-full accent-primary"
+							/>
+							<span className="w-11 shrink-0 text-right text-sm font-mono tabular-nums">
+								{formatScale(scale)}
+							</span>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setScale(DEFAULT_UI_SCALE)}
+								disabled={scale === DEFAULT_UI_SCALE}
+							>
+								Reset
+							</Button>
 						</div>
+						<p className="text-xs text-muted-foreground mt-2">
+							Zooms the whole interface. <Kbd size="sm">{modKey}</Kbd>{" "}
+							<Kbd size="sm">+</Kbd> / <Kbd size="sm">-</Kbd> / <Kbd size="sm">0</Kbd>{" "}
+							change this same setting. Code font size is a separate control in Editor
+							settings.
+						</p>
 					</div>
 
 					<div>
