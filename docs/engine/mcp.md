@@ -307,6 +307,19 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   path on the user's machine, which an agent cannot choose for them or verify,
   so the tools state the limit rather than inventing a shape for it. A stored
   file part is left alone unless `body` replaces the whole body.
+- **What actually went out** - the engine adds headers an agent never wrote: the
+  body-implied `Content-Type` (a `graphql` body sends `application/json`, an
+  `x-www-form-urlencoded` one sends its own type), a default `User-Agent`, and
+  the `Cookie` line the jar matched for the environment. So the request an agent
+  composed is not the request that was sent, and asserting on the composed one
+  is how a correct request gets reported as wrong. `requestHeaders` in the
+  result is the sent record - composed plus those first two, minus a
+  `form-data` `Content-Type` libcurl writes itself - and `rawRequest` is the
+  full wire frame including the `Cookie` line and libcurl's own `Accept` /
+  `Content-Length`. Both are passed through verbatim; read them rather than the
+  request the call sent. A `postRequestScript` reads the same set as
+  `pm.request.headers` (see
+  [scripting.md](scripting.md#request-object-pmrequest)).
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`

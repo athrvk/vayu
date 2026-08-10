@@ -471,6 +471,13 @@ back and applied to the same `Request` before `client.send()`
 (`apply_pm_request_writeback`). In a **test** script it stays a read-only record: the
 request has already gone out, so nothing is written back and a mutation there is discarded.
 
+The two hooks therefore read **different header sets**, matching Postman: a pre-request
+script sees the composed headers it is there to edit, and a test script sees the ones that
+were actually sent - including the `Content-Type` the engine derives from the body mode and
+the default `User-Agent`, neither of which exists yet when the pre-request script runs
+(#483). A `form-data` `Content-Type` appears in neither, because libcurl writes that one
+itself with the boundary.
+
 ```javascript
 pm.request.headers['X-Signature'] = sign(pm.request.body);
 delete pm.request.headers['Authorization'];

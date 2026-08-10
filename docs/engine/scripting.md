@@ -270,6 +270,29 @@ pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (string, if any)
 ```
 
+**`headers` is a different set in each hook, and that is the point.** A
+pre-request script sees the **composed** headers - the set it is there to edit,
+and the set the write-back applies back onto the request. A test script sees the
+**sent record**: those same headers as the transfer actually issued them, which
+means the ones the engine derives at send time are there too - the body-implied
+`Content-Type` (`graphql` -> `application/json`, `x-www-form-urlencoded` ->
+`application/x-www-form-urlencoded`) and the default `User-Agent`. So a test
+asserting on the Content-Type a GraphQL request sent reads the header the engine
+supplied, rather than the `undefined` it read before (#483).
+
+Three consequences worth knowing:
+
+- **An authored header is never overridden.** The engine only derives a
+  Content-Type the request does not declare, so what a script reads back is what
+  its author wrote.
+- **A `form-data` Content-Type is absent, not blank.** libcurl writes that one
+  itself, boundary and all, so the engine suppresses an authored one and does
+  not report as sent what it did not send. The script's view matches the
+  response pane's Headers tab exactly.
+- **`Cookie` is not here.** It is wire-only by design; `pm.cookies` is the
+  cookie surface, and the response's raw view is the full wire frame (which also
+  carries libcurl's own `Accept`, `Host` and `Content-Length`).
+
 `body` is a string for every mode, including the two whose content is a list of
 fields rather than text. A form body reads as its **enabled** fields encoded
 `key=value&…`:

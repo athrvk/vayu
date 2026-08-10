@@ -1560,7 +1560,18 @@ transfer's last outbound header frame and followed by the request body. So it
 carries what libcurl added on its own - the `Cookie` line the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`, which stays the *composed* headers. Values are not redacted:
+`requestHeaders`.
+
+**`requestHeaders` is the sent record**: the composed headers as the transfer
+issued them. It carries the two the engine derives at send time - the
+body-implied `Content-Type` and the default `User-Agent` - and drops a
+`form-data` `Content-Type`, which libcurl writes itself with the boundary. It
+does not carry libcurl's own additions or the jar's `Cookie` line; those are
+`rawRequest`'s alone. A test script's `pm.request.headers` reads this same set
+(see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion
+about what went out and the response pane's Headers tab cannot disagree.
+
+Values in `rawRequest` are not redacted:
 this field exists to say exactly what went out. On a followed redirect it is the
 final hop, matching the response beside it. A transfer that failed before
 sending anything (DNS failure, connection refused) has no frame to read, and
