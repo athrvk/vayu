@@ -1249,6 +1249,39 @@ describe("dispatchTool", () => {
 		}
 	);
 
+	/**
+	 * The owner scenario behind #417: a bare GraphQL document handed to
+	 * `run_request`. The envelope is the *engine's* to apply
+	 * (`http/graphql_body.cpp`, pinned end to end by
+	 * `graphql_body_test.cpp::ABareDocumentIsEnvelopedOnTheWire`), so what this
+	 * layer owes is the document unchanged under `mode: "graphql"` - the one
+	 * hop the engine test cannot see. Mutation check: envelope it here, or let
+	 * `graphql` fall into `FORM_BODY_MODES` and arrive as `fields`, and the
+	 * body assertion reddens.
+	 */
+	test("run_request sends a bare graphql document to the engine as stored", async () => {
+		const query = "query Hero { hero { name } }";
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{
+				url: "https://api.example.com/graphql",
+				method: "POST",
+				body: query,
+				bodyType: "graphql",
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.body).toEqual({ mode: "graphql", content: query });
+		// Named separately from the toEqual above: the failure this guards
+		// against is a well-meant `{"query": ...}` wrap here, which would leave
+		// the engine wrapping it a second time.
+		expect(payload.body.content).not.toContain('"query"');
+		expect(firstText(res)).toContain("200");
+	});
+
 	test("create_request stores a form body as fields", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -1347,6 +1380,16 @@ describe("dispatchTool", () => {
 		expect(loadRun).toBeDefined();
 		expect(Object.keys(loadRun!.inputSchema)).not.toContain("preRequestScript");
 		expect(Object.keys(loadRun!.inputSchema)).toContain("tests");
+	});
+
+	test("start_load_run states that scenario runs are out of its scope", () => {
+		// The tool loads one target. Collection/scenario load runs exist and are
+		// app-dialog-only (`RunCollectionDialog.tsx`), and an agent reading the
+		// tool list has no other place to learn that - so silence here reads as
+		// "scenarios are not a thing", not as "not here".
+		const loadRun = TOOLS.find((t) => t.name === "start_load_run");
+		expect(loadRun?.description).toMatch(/scenario/i);
+		expect(loadRun?.description).toMatch(/Run Collection dialog/);
 	});
 
 	test("both execute-shaped tools name the validation script the same way", () => {

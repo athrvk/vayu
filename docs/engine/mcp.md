@@ -351,6 +351,13 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   has no such hook - so the composed `preRequestScripts` are stripped from the
   payload and the count of dropped scripts is reported in the tool's result
   rather than passing silently.
+- **Scenario runs are out of scope** - `start_load_run` loads a *single* target
+  (a URL, or one saved request). A scenario load run - a collection's ordered
+  sequence of requests, driven as one run - is started from the app's **Run
+  Collection** dialog only; no MCP tool starts one, and `collectionId` here
+  scopes variable resolution rather than naming a sequence to run. The tool's
+  own description says so, because a tool list that is silent about scenarios
+  reads as "scenarios do not exist" rather than "not from here".
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved
