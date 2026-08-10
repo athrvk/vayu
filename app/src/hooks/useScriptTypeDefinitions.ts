@@ -84,6 +84,36 @@ export function useScriptTypeDefinitions() {
 			// hover and signature help both need.
 			checkJs: true,
 			noEmit: true,
+			/*
+			 * Off deliberately, and *set* rather than left to Monaco's default:
+			 * the default is what it is today, and a `getCompilerOptions()` that
+			 * ever carried `strict: true` would turn this on as a side effect.
+			 *
+			 * The engine declares the surface's optionality truthfully
+			 * (`iterationData?: { ... }`, `get(name): string | undefined`), and
+			 * with this flag on the worker would report every one of those at
+			 * once. Measured against the real declarations over 57 scripts - the
+			 * 54 `pm.*` examples in `docs/engine/scripting.md` and
+			 * `docs/app/pm-api-compatibility.md`, plus three realistic ones: 13
+			 * new diagnostics, of which **8 land on the docs' own recommended
+			 * lines** (`pm.iterationData.get('username')`, correct inside the
+			 * data-driven run those examples are about). Two more are on code
+			 * that works: `pm.info.iteration > 0` is simply `false` outside a
+			 * run, and `pm.response.errorMessage` cannot be narrowed by a truthy
+			 * check on its sibling `pm.response.errorCode`.
+			 *
+			 * Suppressing the noise is not on offer, because the noise and the
+			 * catch share a code: `18048` fires for `pm.iterationData.get(...)`
+			 * - the case this was wanted for - and for `token.trim()` alike, and
+			 * the remaining code is `2345`, which is the argument checking this
+			 * whole feature exists to provide.
+			 *
+			 * So the guard the docs recommend stays advice rather than a rule.
+			 * This is the same trade SUPPRESSED_DIAGNOSTICS makes below, one
+			 * level up: a real mistake goes unreported in exchange for not
+			 * crying wolf on correct code. See issue #443.
+			 */
+			strictNullChecks: false,
 		});
 
 		/*

@@ -616,7 +616,7 @@ entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first 
 Narrow that suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
 
-#### Optional members, and the one thing the editor cannot yet tell you
+#### Optional members, and why the editor states them without enforcing them
 
 A completion entry says a member may be absent by ending its `detail` in
 ` | undefined`. The generator reads that one convention in two places: a leaf keeps the
@@ -625,15 +625,38 @@ union to carry it, so the optionality moves onto the property name -
 `pm.iterationData` is declared **`iterationData?: { ... }`**, because it is `undefined`
 outside a data-driven collection run.
 
-That marker shows in hover today, but it does **not** produce a squiggle: the worker runs
-with `strictNullChecks` off, and without it an optional property is indistinguishable from
-a required one at a use site. So a plain request script calling
-`pm.iterationData.get('x')` still gets no editor error for something that throws at run
-time - the guard the docs recommend (`pm.iterationData ? ... : ...`) is advice, not a rule
-the type system enforces. Turning `strictNullChecks` on would change that for this member
-*and* for every `T | undefined` in the surface at once (`pm.environment.get` among them),
-which is a decision about how noisy this editor should be rather than a detail of the
-declarations - so it is tracked separately, not folded in here.
+That marker shows in hover, and deliberately does **not** produce a squiggle: the worker
+runs with `strictNullChecks` **off**, and without it an optional property is
+indistinguishable from a required one at a use site. So a plain request script calling
+`pm.iterationData.get('x')` gets no editor error for something that throws at run time -
+the guard the docs recommend (`pm.iterationData ? ... : ...`) is advice, not a rule the
+type system enforces.
+
+That is a decision (#443), not an oversight, and `useScriptTypeDefinitions` now sets
+`strictNullChecks: false` explicitly rather than relying on the default, so a `strict:
+true` arriving through the spread of Monaco's existing options cannot turn it on as a side
+effect. It was taken on a count. Compiling **57 scripts** against the real generated
+declarations - the 54 `pm.*` examples in this page and
+[`docs/engine/scripting.md`](../engine/scripting.md), plus three realistic ones - turning
+the flag on adds **13 diagnostics**:
+
+| What | Count | Verdict |
+|------|------:|---------|
+| `pm.iterationData.get/has/toObject` unguarded | 7 | Correct inside the data-driven run those examples are about |
+| An optional string used straight - `pm.environment.get(...)` into `.trim()` and `pm.crypto.hmacSha256`, `pm.request.body` into `JSON.parse` | 4 | A real crash when the value is absent, and the idiom every script uses |
+| `pm.info.iteration > 0` | 1 | Works: the comparison is `false` outside a run |
+| `pm.response.errorMessage` after a truthy `pm.response.errorCode` | 1 | Correlated siblings, which no narrowing can see |
+
+Eight of the thirteen land on lines these docs publish as the way to use the API. Nor can
+the noise be suppressed away while the catch is kept: `18048` is the code for
+`pm.iterationData.get(...)` - the case the flag was wanted for - *and* for `token.trim()`,
+and the remaining code is `2345`, which is the argument checking the whole feature exists
+to provide. A script editor is JavaScript, so there is no `!` for an author to say "I know
+it is set"; the escape is restructuring the code.
+
+So the trade is the one the suppression list above already makes, one level up: a real
+mistake goes unreported in exchange for not crying wolf on correct code. Revisiting it
+means re-running that count, not re-arguing it.
 
 `pm.execution` has the mirror-image limitation and no fix at all: it is always bound, and
 its methods throw outside a collection run, which no type can express.
