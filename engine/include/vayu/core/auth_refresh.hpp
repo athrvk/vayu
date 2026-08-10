@@ -123,6 +123,9 @@ struct AuthRefreshTuning {
     int64_t retry_ms = constants::server::OAUTH2_REFRESH_RETRY_MS;
     /// Ceiling on that backoff.
     int64_t retry_max_ms = constants::server::OAUTH2_REFRESH_RETRY_MAX_MS;
+    /// How often the watchdog wakes while waiting, to notice the run has ended
+    /// - what bounds how long a finished run waits to join it.
+    int64_t poll_interval_ms = constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS;
 };
 
 /**

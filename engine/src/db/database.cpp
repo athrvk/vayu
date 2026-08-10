@@ -1762,6 +1762,20 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
     "1000", "3600000", std::nullopt, now });
 
+    upsert_config (ConfigEntry{ "oauth2RefreshPollIntervalMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
+    "integer", "OAuth 2.0 Refresh Poll Interval",
+    "How often the renewal watchdog wakes while it waits, to notice that the "
+    "run has ended. A finished run joins that thread before it writes its "
+    "report, so this is what bounds how long the run's last moments take. "
+    "Lower costs a few more wakeups per second on one sleeping thread and "
+    "nothing on the request path; raise it only to quiet a very long soak.",
+    "network_performance",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
+    "10",   // 10ms - below this the wakeups outweigh what they save
+    "5000", // 5s - past this a finished run visibly waits on the join
+    std::nullopt, now });
+
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
     // Configuration for the QuickJS sandbox execution, limits, and debugging

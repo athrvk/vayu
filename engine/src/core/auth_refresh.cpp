@@ -28,19 +28,18 @@ int64_t now_ms () {
     .count ();
 }
 
-/// Sleep in slices so a stop is honoured promptly: the worker joins this thread
-/// on the way out, and a watchdog asleep until the next expiry would hold a
-/// finished run open for the rest of the token's life.
-constexpr int64_t SLICE_MS = 100;
-
+/// Sleep in slices of `poll_ms` so a stop is honoured promptly: the worker
+/// joins this thread on the way out, and a watchdog asleep until the next
+/// expiry would hold a finished run open for the rest of the token's life.
+///
 /// @return false if the run ended while waiting.
-bool wait_while_running (const std::shared_ptr<RunContext>& context, int64_t delay_ms) {
+bool wait_while_running (const std::shared_ptr<RunContext>& context, int64_t delay_ms, int64_t poll_ms) {
     int64_t waited = 0;
     while (waited < delay_ms) {
         if (!context->is_running.load () || context->should_stop.load ()) {
             return false;
         }
-        const int64_t slice = std::min (SLICE_MS, delay_ms - waited);
+        const int64_t slice = std::min (poll_ms, delay_ms - waited);
         std::this_thread::sleep_for (std::chrono::milliseconds (slice));
         waited += slice;
     }
@@ -123,6 +122,8 @@ AuthRefreshTuning read_auth_refresh_tuning (vayu::db::Database& db) {
     tuning.min_interval_ms = read ("oauth2RefreshMinIntervalMs", defaults.min_interval_ms);
     tuning.retry_ms = read ("oauth2RefreshRetryMs", defaults.retry_ms);
     tuning.retry_max_ms = read ("oauth2RefreshRetryMaxMs", defaults.retry_max_ms);
+    tuning.poll_interval_ms =
+    read ("oauth2RefreshPollIntervalMs", defaults.poll_interval_ms);
     return tuning;
 }
 
@@ -146,8 +147,8 @@ const AuthRefreshTuning& tuning) {
         if (expires_at <= 0) {
             return; // The published token does not expire - nothing left to do.
         }
-        if (!wait_while_running (
-            context, auth_refresh_delay_ms (expires_at, now_ms (), tuning))) {
+        if (!wait_while_running (context,
+            auth_refresh_delay_ms (expires_at, now_ms (), tuning), tuning.poll_interval_ms)) {
             return;
         }
 
@@ -162,7 +163,7 @@ const AuthRefreshTuning& tuning) {
             state->record_failure (message);
             vayu::utils::log_warning ("OAuth2 mid-run refresh failed for run " +
             context->run_id + " - " + message);
-            if (!wait_while_running (context, retry_ms)) {
+            if (!wait_while_running (context, retry_ms, tuning.poll_interval_ms)) {
                 return;
             }
             retry_ms = std::min (retry_ms * 2, tuning.retry_max_ms);

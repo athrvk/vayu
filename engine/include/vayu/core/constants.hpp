@@ -207,6 +207,12 @@ constexpr int64_t OAUTH2_REFRESH_RETRY_MS = 5000;
 /// Ceiling on that backoff, so a token endpoint that is down for an hour costs
 /// the run a bounded number of attempts rather than one every five seconds.
 constexpr int64_t OAUTH2_REFRESH_RETRY_MAX_MS = 60000;
+/// How often the refresh watchdog wakes while waiting, to notice that the run
+/// has ended. The worker joins the thread on its way out, so this is what
+/// bounds how long a finished run waits for it: without the slice, a watchdog
+/// asleep until the next expiry would hold the run open for the rest of the
+/// token's life. Lower costs a few more wakeups per second on one thread.
+constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 } // namespace server
 
 /**

@@ -252,11 +252,11 @@ class AuthRefreshTuningTest : public ::testing::Test {
 };
 
 // Every knob the watchdog reads is a seeded setting, so the Settings UI - which
-// renders engine entries dynamically from GET /config - offers all four rather
+// renders engine entries dynamically from GET /config - offers all five rather
 // than leaving them hardcoded.
 TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
     for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
-         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs" }) {
+         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs" }) {
         const auto entry = db->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key << " is not offered in Settings";
         EXPECT_EQ (entry->type, "integer") << key;
@@ -275,6 +275,8 @@ TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
     vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
     EXPECT_EQ (tuning.retry_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS);
     EXPECT_EQ (tuning.retry_max_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS);
+    EXPECT_EQ (tuning.poll_interval_ms,
+    vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS);
 }
 
 // Mutation check for the reader: revert any one key to its constant and the
@@ -282,7 +284,7 @@ TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
 TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
     const std::pair<const char*, int> edits[] = { { "oauth2RefreshLeadMs", 12'345 },
         { "oauth2RefreshMinIntervalMs", 321 }, { "oauth2RefreshRetryMs", 777 },
-        { "oauth2RefreshRetryMaxMs", 99'000 } };
+        { "oauth2RefreshRetryMaxMs", 99'000 }, { "oauth2RefreshPollIntervalMs", 42 } };
     for (const auto& [key, value] : edits) {
         auto entry = db->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key;
@@ -295,6 +297,7 @@ TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
     EXPECT_EQ (tuning.min_interval_ms, 321);
     EXPECT_EQ (tuning.retry_ms, 777);
     EXPECT_EQ (tuning.retry_max_ms, 99'000);
+    EXPECT_EQ (tuning.poll_interval_ms, 42);
 }
 
 // A hand-edited row is the only way a non-positive value reaches the reader
@@ -302,7 +305,7 @@ TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
 // make the schedule a tight loop against the token endpoint.
 TEST_F (AuthRefreshTuningTest, ANonPositiveStoredValueFallsBackToTheDefault) {
     for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
-         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs" }) {
+         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs" }) {
         auto entry = db->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key;
         entry->value = "0";
@@ -315,6 +318,8 @@ TEST_F (AuthRefreshTuningTest, ANonPositiveStoredValueFallsBackToTheDefault) {
     vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS);
     EXPECT_EQ (tuning.retry_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS);
     EXPECT_EQ (tuning.retry_max_ms, vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS);
+    EXPECT_EQ (tuning.poll_interval_ms,
+    vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS);
 }
 
 // ---------------------------------------------------------------------------
