@@ -812,6 +812,47 @@ TEST_F (RunsRouteTest, ReportOmitsThresholdValidationWhenNoBudgetWasDeclared) {
     EXPECT_FALSE (body.contains ("thresholdValidation"));
 }
 
+// Mid-run OAuth 2.0 refresh (#478), round-tripped through the stored summary:
+// the section is what explains 401s that appear partway through a run, so it
+// has to survive the write/read pair, not merely be produced.
+TEST_F (RunsRouteTest, ReportCarriesTheAuthRefreshSection) {
+    seed ({ .id = "run_auth", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    inputs.auth = nlohmann::json{ { "refreshes", { { { "atSeconds", 3620.4 } } } },
+        { "refreshFailures", 1 }, { "lastError", "oauth2_provider_error: invalid_grant" } };
+    db_->update_run_summary (
+    "run_auth", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_auth");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("auth"));
+    const auto& auth = body["auth"];
+    ASSERT_TRUE (auth["refreshes"].is_array ());
+    ASSERT_EQ (auth["refreshes"].size (), 1u);
+    EXPECT_DOUBLE_EQ (auth["refreshes"][0]["atSeconds"].get<double> (), 3620.4);
+    EXPECT_EQ (auth["refreshFailures"].get<size_t> (), 1u);
+    EXPECT_EQ (auth["lastError"].get<std::string> (),
+    "oauth2_provider_error: invalid_grant");
+}
+
+// A run that could not refresh at all keeps the section out entirely - and so
+// does every run recorded before mid-run refresh existed. "Never watching" and
+// "watched and never needed to" are different answers; only the absent section
+// can say the first.
+TEST_F (RunsRouteTest, ReportOmitsAuthWhenTheRunCouldNotRefresh) {
+    seed ({ .id = "run_no_auth_section", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    inputs.auth = std::nullopt;
+    db_->update_run_summary (
+    "run_no_auth_section", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_no_auth_section");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("auth"));
+}
+
 // A summary that is not a JSON object is treated as absent. There is no second
 // aggregate source any more, so the report stands on the run's sampled results
 // - which is a report, not a 500 and not an empty run.

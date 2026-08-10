@@ -647,6 +647,19 @@ a run that dropped nothing, so the note stays out rather than asserting a
 completeness it cannot verify - the same absent-vs-zero rule
 `httpVersionDowngraded` follows above.
 
+`report.auth` follows that rule too. The engine refreshes a header-placed
+OAuth 2.0 token *while a load run is going*, and this section is what it did:
+`refreshes[].atSeconds` per renewal, plus `refreshFailures` and a `lastError`
+when one was refused. `LoadTestDetail` renders it as a one-line note in the
+header (`authRefreshNote`), a warning when a refresh failed - that failure is
+what explains 401s appearing partway through an otherwise healthy run. Absent
+means the run could never refresh (no OAuth 2.0 auth, a non-expiring or
+query-placed token, `autoRefreshToken: false`, or an older sidecar); present
+with an empty `refreshes` means it was watched and never needed to. The same
+eligibility rule decides whether `OAuth2LoadTestGuard` still blocks a run
+longer than its token - `isMidRunRefreshable` mirrors the engine's
+`plan_auth_refresh`, and the two must change together.
+
 ### Load Test Execution
 
 1. **User Action**: Configures and starts load test

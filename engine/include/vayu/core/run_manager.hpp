@@ -21,6 +21,7 @@
 #include <thread>
 #include <vector>
 
+#include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -97,6 +98,16 @@ struct RunContext {
     // itself and terminate. RunManager owns the handle instead - see
     // `run_workers_` - and joins it from a thread that is never the worker.
     std::thread metrics_thread;
+    // Refreshes the run's OAuth 2.0 credential before it expires. Spawned only
+    // when the run's auth can actually be refreshed (see
+    // `http::plan_auth_refresh`), joined everywhere metrics_thread is - it
+    // holds a shared_ptr to this context and calls a blocking HTTP client, so
+    // an unjoined one outlives the database it acquires through.
+    std::thread auth_refresh_thread;
+    // The credential that thread publishes and the strategy thread sends. Null
+    // for every run without mid-run refresh, which is the inert case
+    // everywhere: no thread, no swap, no report section.
+    std::shared_ptr<AuthRefreshState> auth_refresh;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
     nlohmann::json config;
@@ -276,6 +287,17 @@ struct RunContext {
     size_t max_errors                = constants::metrics_collector::DEFAULT_MAX_ERRORS,
     CaptureDefaults capture_defaults = {});
     ~RunContext ();
+
+    /**
+     * @brief Join the run's auxiliary threads (metrics tick, auth refresh).
+     *
+     * Both watch `is_running`, so the caller clears it first. They are joined
+     * through one helper because the run has four exit paths - two inner
+     * failure returns, the normal end, and the outer catch - and a thread added
+     * to the spawn site but missed at one of them outlives the database it
+     * writes through.
+     */
+    void join_aux_threads ();
 };
 
 /**
@@ -455,6 +477,12 @@ struct RunSummaryInputs {
     // which leaves the report's scenario section out entirely rather than
     // showing it zeros - the section exists to say what a sequence did.
     std::optional<nlohmann::json> scenario;
+    // When and whether this run's OAuth 2.0 credential was refreshed while it
+    // ran, under the summary's `auth` key. Absent for every run that could not
+    // refresh at all (no oauth2 auth, a non-expiring or query-placed token, the
+    // user's opt-out) - which is what distinguishes "never needed to" from
+    // "was never watching".
+    std::optional<nlohmann::json> auth;
 };
 
 /**
@@ -629,5 +657,22 @@ vayu::db::Database* db_ptr,
 bool verbose,
 RunManager& manager);
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr);
+
+/**
+ * @brief Keep a run's OAuth 2.0 credential valid for as long as the run lasts.
+ *
+ * Sleeps until @p lead_ms before the published token expires, re-acquires
+ * (forced, so the cache cannot hand back the one that is about to die),
+ * publishes the new header on `context->auth_refresh` and re-arms from the new
+ * expiry. A failed refresh is recorded and retried with a backoff; it never
+ * fails the run, because the honest report of a 401 storm is the target's own
+ * status codes plus the `auth` section saying the refresh did not happen.
+ *
+ * Returns as soon as the run stops, or once the published token no longer
+ * expires. Inert (returns immediately) when the run has no `auth_refresh`.
+ */
+void run_auth_refresh (std::shared_ptr<RunContext> context,
+vayu::db::Database* db_ptr,
+int64_t lead_ms);
 
 } // namespace vayu::core

@@ -189,6 +189,24 @@ constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
 /// the use-after-free the drain exists to prevent. Matches the 5s the daemon
 /// waited before the drain was ordered.
 constexpr int64_t RUN_SHUTDOWN_GRACE_MS = 5000;
+/// How far ahead of an OAuth 2.0 token's expiry a run refreshes it (config key
+/// `oauth2RefreshLeadMs`). Comfortably wider than the 45s skew
+/// `oauth::is_expired` already applies, so the new credential is published
+/// while the old one is still being accepted and no request falls in the gap.
+constexpr int64_t OAUTH2_REFRESH_LEAD_MS = 60000;
+/// Floor on the wait between two mid-run refreshes. A token whose whole
+/// lifetime is shorter than the lead is always inside its refresh window, so
+/// without a floor the watchdog would re-acquire in a tight loop and hammer the
+/// token endpoint on the run's behalf.
+constexpr int64_t OAUTH2_REFRESH_MIN_INTERVAL_MS = 1000;
+/// First wait after a failed mid-run refresh, doubled per consecutive failure
+/// up to OAUTH2_REFRESH_RETRY_MAX_MS. The run keeps sending the credential it
+/// has - a failed refresh is reported, never fatal - so retrying is about
+/// recovering from a token endpoint that blipped, not about the run's fate.
+constexpr int64_t OAUTH2_REFRESH_RETRY_MS = 5000;
+/// Ceiling on that backoff, so a token endpoint that is down for an hour costs
+/// the run a bounded number of attempts rather than one every five seconds.
+constexpr int64_t OAUTH2_REFRESH_RETRY_MAX_MS = 60000;
 } // namespace server
 
 /**

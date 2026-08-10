@@ -251,6 +251,32 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
     }
 }
 
+// The request every submission copies, plus the credential swap that keeps it
+// current. Owned by the strategy because the strategy thread is the event
+// loop's sole producer and `EventLoop::submit` copies the request wholesale at
+// submit time: a value written here reaches every later transfer and none of
+// the ones already queued, with no lock on the submission path.
+//
+// A run without mid-run refresh (the common case - see plan_auth_refresh) never
+// enters the swap at all: `current()` is then a relaxed load short-circuited on
+// a null state.
+class SubmissionRequest {
+    public:
+    SubmissionRequest (const std::shared_ptr<RunContext>& context, const vayu::Request& request)
+    : state_ (context->auth_refresh), request_ (request) {
+    }
+
+    const vayu::Request& current () {
+        sync_auth_header (state_, request_, seen_generation_);
+        return request_;
+    }
+
+    private:
+    std::shared_ptr<AuthRefreshState> state_;
+    vayu::Request request_;
+    uint64_t seen_generation_ = 0;
+};
+
 } // namespace
 
 // Declared in load_strategy.hpp - the scenario load executor drives the same
@@ -319,6 +345,7 @@ class ConstantLoadStrategy : public LoadStrategy {
     const vayu::Request& request) override {
         const auto& config  = context->config;
         int64_t duration_ms = duration_field_ms (config, "duration", 60000);
+        SubmissionRequest live (context, request);
 
         // Check for targetRps - if specified, use rate-limited mode
         double target_rps = config.value ("rps", 0.0);
@@ -387,7 +414,7 @@ class ConstantLoadStrategy : public LoadStrategy {
                     }
 
                     for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
-                        context->event_loop->submit (request,
+                        context->event_loop->submit (live.current (),
                         [context, &db] (size_t, vayu::Result<vayu::Response> result) {
                             handle_result (context, db, std::move (result));
                         });
@@ -436,8 +463,8 @@ class ConstantLoadStrategy : public LoadStrategy {
             vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
             vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
 
-            auto submit_one = [&context, &db, &request] () {
-                context->event_loop->submit (request,
+            auto submit_one = [&context, &db, &live] () {
+                context->event_loop->submit (live.current (),
                 [context, &db] (size_t, vayu::Result<vayu::Response> result) {
                     handle_result (context, db, std::move (result));
                 });
@@ -463,6 +490,7 @@ class IterationsLoadStrategy : public LoadStrategy {
     vayu::db::Database& db,
     const vayu::Request& request) override {
         const auto& config = context->config;
+        SubmissionRequest live (context, request);
         size_t iterations = static_cast<size_t> (config.value ("iterations", 1000));
         size_t concurrency = static_cast<size_t> (config.value ("concurrency", 10));
 
@@ -472,8 +500,8 @@ class IterationsLoadStrategy : public LoadStrategy {
 
         context->requests_expected = iterations;
 
-        auto submit_one = [&context, &db, &request] () {
-            context->event_loop->submit (request,
+        auto submit_one = [&context, &db, &live] () {
+            context->event_loop->submit (live.current (),
             [context, &db] (size_t, vayu::Result<vayu::Response> result) {
                 handle_result (context, db, std::move (result));
             });
@@ -506,6 +534,7 @@ class RampUpLoadStrategy : public LoadStrategy {
     vayu::db::Database& db,
     const vayu::Request& request) override {
         const auto& config = context->config;
+        SubmissionRequest live (context, request);
 
         int64_t duration_ms = duration_field_ms (config, "duration", 60000);
         int64_t ramp_duration_ms = duration_field_ms (config, "rampUpDuration", 10000);
@@ -522,8 +551,8 @@ class RampUpLoadStrategy : public LoadStrategy {
         vayu::utils::log_info ("  Start Concurrency: " + std::to_string (start_concurrency));
         vayu::utils::log_info ("  Target Concurrency: " + std::to_string (target_concurrency));
 
-        auto submit_one = [&context, &db, &request] () {
-            context->event_loop->submit (request,
+        auto submit_one = [&context, &db, &live] () {
+            context->event_loop->submit (live.current (),
             [context, &db] (size_t, vayu::Result<vayu::Response> result) {
                 handle_result (context, db, std::move (result));
             });

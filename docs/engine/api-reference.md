@@ -2665,7 +2665,8 @@ A run that is already finished answers `{"status": "<status>", "runId": ...,
 Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
 only when a test script ran, `thresholdValidation` only when the run declared
-[budgets](#the-thresholds-block-passfail-budgets)).
+[budgets](#the-thresholds-block-passfail-budgets), `auth` only when the run's
+OAuth 2.0 credential could be refreshed mid-run).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -2740,9 +2741,20 @@ alone rather than erroring. **The response shape is the same either way.**
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
+  "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**`auth`** appears only for a run whose OAuth 2.0 credential could be renewed
+while it ran - a header-placed, expiring token with `autoRefreshToken` on (see
+[db-schema.md](db-schema.md#oauth_tokens) for the full eligibility list). Each
+entry in `refreshes` is when a renewal landed, in seconds from the run's start.
+`refreshFailures` plus a `lastError` string is the other half of the answer: the
+run kept sending the credential it had, so 401s in `statusCodes` from that point
+on are explained here rather than by the target. The section is **absent** for a
+run that could never refresh, which is not the same claim as a run that watched
+and never needed to (that one reports an empty `refreshes` array).
 
 **A scenario run adds a `scenario` section** and no other run type carries one:
 

@@ -276,6 +276,7 @@ add_library(vayu_core STATIC
     src/utils/metrics_helper.cpp
     src/utils/id.cpp
     src/db/database.cpp
+    src/core/auth_refresh.cpp
     src/core/load_strategy.cpp
     src/core/scenario_data.cpp
     src/core/scenario_load.cpp
@@ -469,6 +470,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_compose_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
+        tests/auth_refresh_test.cpp
         tests/request_builder_test.cpp
         tests/oauth_client_test.cpp
         tests/oauth_route_test.cpp

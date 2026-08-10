@@ -437,12 +437,19 @@ RunContext::~RunContext () {
     // Wake the closed-loop controller so it observes should_stop without
     // waiting for its 50ms safety-net timeout before the join below.
     notify_refill ();
-    // The worker joins this itself before it returns; the join here only covers
-    // a context destroyed before its worker ever ran. The *worker* thread is
-    // owned by RunManager (run_workers_), never by the context - see the
-    // declaration for why.
+    // The worker joins these itself before it returns; the join here only
+    // covers a context destroyed before its worker ever ran. The *worker*
+    // thread is owned by RunManager (run_workers_), never by the context - see
+    // the declaration for why.
+    join_aux_threads ();
+}
+
+void RunContext::join_aux_threads () {
     if (metrics_thread.joinable ()) {
         metrics_thread.join ();
+    }
+    if (auth_refresh_thread.joinable ()) {
+        auth_refresh_thread.join ();
     }
 }
 
@@ -829,12 +836,32 @@ RunManager& manager) {
                 : "Load test auth resolution failed: " + built.error_message);
                 db.update_run_status (context->run_id, vayu::RunStatus::Failed);
                 context->is_running = false;
-                if (context->metrics_thread.joinable ())
-                    context->metrics_thread.join ();
+                context->join_aux_threads ();
                 manager.retain_run (context->run_id);
                 return;
             }
             request = std::move (built.request);
+
+            // A run that outlives its OAuth 2.0 token used to become a 401
+            // storm the report never explained. Armed here, while the token
+            // this run just resolved is still the one in the cache, and inert
+            // for every auth that cannot be refreshed mid-run - see
+            // plan_auth_refresh for that list.
+            //
+            // A scenario load run is deliberately not covered: each of its
+            // steps resolved its own auth at plan time, before this run row
+            // existed, so there is no single credential to keep current.
+            if (auto plan = vayu::http::plan_auth_refresh (
+                request, config.value ("auth", nlohmann::json ()), db_ptr)) {
+                context->auth_refresh =
+                std::make_shared<AuthRefreshState> (std::move (*plan));
+                const auto lead_ms = static_cast<int64_t> (db.get_config_int (
+                "oauth2RefreshLeadMs",
+                static_cast<int> (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS)));
+                context->auth_refresh_thread = std::thread ([context, db_ptr, lead_ms] () {
+                    run_auth_refresh (context, db_ptr, lead_ms);
+                });
+            }
         }
 
         // Execute Load Strategy
@@ -852,7 +879,7 @@ RunManager& manager) {
             vayu::utils::log_error ("Load test failed: " + std::string (e.what ()));
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
-            if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
+            context->join_aux_threads ();
             manager.retain_run (context->run_id);
             return;
         }
@@ -889,10 +916,9 @@ RunManager& manager) {
         // Stop background metrics collection and wait for thread to finish
         context->is_running = false;
 
-        // Properly join the metrics thread to ensure it's done writing to DB
-        if (context->metrics_thread.joinable ()) {
-            context->metrics_thread.join ();
-        }
+        // Properly join the auxiliary threads to ensure the tick thread is
+        // done writing to the DB and the refresh watchdog has let go of it.
+        context->join_aux_threads ();
 
         // Calculate cleanup overhead (time from test end to after cleanup)
         auto cleanup_end = std::chrono::steady_clock::now ();
@@ -972,6 +998,11 @@ RunManager& manager) {
             // is about to store, or a report could print a p99 its own verdict
             // disagrees with. A run stopped early is judged on what it measured.
             inputs.thresholds = evaluate_thresholds (context->config, inputs);
+            // What the refresh watchdog did, for a run that had one. Read after
+            // the join above, so the tallies are final.
+            if (context->auth_refresh) {
+                inputs.auth = context->auth_refresh->summary ();
+            }
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -1013,7 +1044,7 @@ RunManager& manager) {
         // failure paths do. Deferring the join to ~RunContext instead would run
         // it under RunManager::mutex_ during a later sweep eviction.
         context->is_running = false;
-        if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
+        context->join_aux_threads ();
 
         vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
 
@@ -1048,6 +1079,9 @@ RunManager& manager) {
             inputs.latency_avg_ms   = mc.average_latency ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
+            if (context->auth_refresh) {
+                inputs.auth = context->auth_refresh->summary ();
+            }
 
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
@@ -1174,6 +1208,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // executors. Omitted for a single-request load run, which has no sequence.
     if (inputs.scenario.has_value ()) {
         summary["scenario"] = *inputs.scenario;
+    }
+    // Whether this run's OAuth 2.0 credential was kept current, and at what
+    // cost. Omitted for every run that could not refresh at all, so an absent
+    // section reads as "this run was never watching" rather than as a run that
+    // watched and saw nothing.
+    if (inputs.auth.has_value ()) {
+        summary["auth"] = *inputs.auth;
     }
     return summary;
 }

@@ -11,6 +11,7 @@
 #include "vayu/types.hpp"
 
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -90,5 +91,54 @@ vayu::db::Database* db);
  *        other mode.
  */
 AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db);
+
+/**
+ * @brief The `Authorization` value an oauth2 config places for an access token.
+ *
+ * One copy of the `headerPrefix` rule, shared by the initial resolution and by
+ * every mid-run refresh - a second copy would let a run's later headers drift
+ * in shape from its first.
+ */
+std::string oauth2_header_value (const nlohmann::json& config,
+const std::string& access_token);
+
+/**
+ * @brief What a long run needs in order to keep its OAuth 2.0 header valid
+ *        past the token's expiry.
+ *
+ * Filled from the token `apply_auth` just placed on @p request, so it describes
+ * the credential the run is actually sending - not what the config asks for.
+ * The run's refresh watchdog re-acquires with this config and republishes
+ * `header_value`; see `vayu::core::run_auth_refresh`.
+ */
+struct AuthRefreshPlan {
+    nlohmann::json config;      ///< The oauth2 config block, as acquire_token takes it.
+    std::string header_name;    ///< Header the token was placed on.
+    std::string header_value;   ///< Value currently on the built request.
+    int64_t expires_at_ms = 0;  ///< Absolute expiry (ms since epoch) of that token.
+};
+
+/**
+ * @brief Decide whether a built request's auth can be refreshed mid-run.
+ *
+ * Returns nothing - the run then behaves exactly as it did before mid-run
+ * refresh existed - when any of these hold:
+ *   - the mode is not `oauth2`, or the token cache has no token for it;
+ *   - the token never expires (`expires_in <= 0`);
+ *   - `autoRefreshToken` is false (the user's explicit opt-out);
+ *   - `tokenPlacement` is `query` - the value is baked into the URL every
+ *     transfer copies, which no header swap can reach;
+ *   - the grant is `authorization_code` with no refresh token, which cannot be
+ *     re-obtained without a browser;
+ *   - the request does not actually carry the token (a user-supplied
+ *     `Authorization` header won, so refreshing it would change nothing).
+ *
+ * @param request The request `apply_auth` has already resolved.
+ * @param auth    The same raw `auth` object that was applied.
+ * @param db      Token-cache handle; null yields nothing.
+ */
+std::optional<AuthRefreshPlan> plan_auth_refresh (const vayu::Request& request,
+const nlohmann::json& auth,
+vayu::db::Database* db);
 
 } // namespace vayu::http
