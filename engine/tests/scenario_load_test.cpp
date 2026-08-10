@@ -1,0 +1,501 @@
+/**
+ * @file tests/scenario_load_test.cpp
+ * @brief The load-mode scenario executor: the per-VU state machine, per-VU
+ *        cookies and per-step histograms (issue #357).
+ *
+ * These drive `execute_scenario_load` directly against an in-process mock,
+ * which is what lets them assert the *sequence* a virtual user actually sent
+ * rather than only the totals a run reports. The mock records every path and
+ * `Cookie` header it saw, in order, because the two properties this phase turns
+ * on - a VU walks its own plan, and two VUs never share a session - are not
+ * visible in any aggregate.
+ */
+
+#include "vayu/core/scenario_load.hpp"
+
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <httplib.h>
+
+#include "temp_database.hpp"
+#include "vayu/core/run_manager.hpp"
+#include "vayu/db/database.hpp"
+#include "vayu/http/client.hpp"
+#include "vayu/http/event_loop.hpp"
+
+namespace {
+
+using nlohmann::json;
+
+/**
+ * @brief A mock that issues a distinct session per `/login` and echoes back the
+ *        `Cookie` header every other path was called with.
+ *
+ * `/login` can be made to wait for a second concurrent caller, which is what
+ * makes "two VUs overlapped, and still did not share a session" a deterministic
+ * assertion rather than a race the test hopes to win.
+ */
+class ScenarioMockServer {
+    public:
+    struct Hit {
+        std::string path;
+        std::string cookie; // The `Cookie` header as received; "" when absent.
+    };
+
+    explicit ScenarioMockServer (size_t login_rendezvous = 0)
+    : login_rendezvous_ (login_rendezvous) {
+        svr.new_task_queue = [] { return new httplib::ThreadPool (64); };
+
+        svr.Get ("/login", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/login");
+            if (login_rendezvous_ > 0) {
+                std::unique_lock<std::mutex> lock (rendezvous_mtx_);
+                ++waiting_;
+                rendezvous_cv_.notify_all ();
+                // Bounded, so a single-VU run (or a lost wakeup) cannot wedge
+                // the binary - the assertion, not the timeout, is what fails.
+                rendezvous_cv_.wait_for (lock, std::chrono::seconds (5),
+                [this] { return waiting_ >= login_rendezvous_; });
+            }
+            const size_t id = ++session_counter_;
+            res.set_header ("Set-Cookie", "sid=" + std::to_string (id) + "; Path=/");
+            res.set_content ("{}", "application/json");
+        });
+
+        for (const char* path : { "/echo", "/s0", "/s1", "/s2" }) {
+            svr.Get (path, [this, path] (const httplib::Request& req, httplib::Response& res) {
+                record (req, path);
+                res.set_content ("{}", "application/json");
+            });
+        }
+
+        port   = svr.bind_to_any_port ("127.0.0.1");
+        thread = std::thread ([this] () { svr.listen_after_bind (); });
+        svr.wait_until_ready ();
+    }
+
+    ~ScenarioMockServer () {
+        {
+            std::lock_guard<std::mutex> lock (rendezvous_mtx_);
+            login_rendezvous_ = 0;
+        }
+        rendezvous_cv_.notify_all ();
+        svr.stop ();
+        if (thread.joinable ())
+            thread.join ();
+    }
+
+    [[nodiscard]] std::string url (const std::string& path) const {
+        return "http://127.0.0.1:" + std::to_string (port) + path;
+    }
+
+    [[nodiscard]] std::vector<Hit> hits () const {
+        std::lock_guard<std::mutex> lock (hits_mtx_);
+        return hits_;
+    }
+
+    [[nodiscard]] std::vector<Hit> hits_for (const std::string& path) const {
+        std::vector<Hit> matching;
+        for (const auto& hit : hits ()) {
+            if (hit.path == path)
+                matching.push_back (hit);
+        }
+        return matching;
+    }
+
+    private:
+    void record (const httplib::Request& req, const std::string& path) {
+        std::lock_guard<std::mutex> lock (hits_mtx_);
+        hits_.push_back ({ path, req.get_header_value ("Cookie") });
+    }
+
+    httplib::Server svr;
+    std::thread thread;
+    int port = 0;
+
+    mutable std::mutex hits_mtx_;
+    std::vector<Hit> hits_;
+
+    std::atomic<size_t> session_counter_{ 0 };
+    std::mutex rendezvous_mtx_;
+    std::condition_variable rendezvous_cv_;
+    size_t login_rendezvous_ = 0;
+    size_t waiting_          = 0;
+};
+
+const std::string TEST_DB_PATH = "test_scenario_load.db";
+
+class ScenarioLoadTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        vayu::http::global_init ();
+        cleanup ();
+        db_ = std::make_unique<vayu::db::Database> (TEST_DB_PATH);
+        db_->init ();
+    }
+
+    void TearDown () override {
+        db_.reset ();
+        vayu::http::global_cleanup ();
+        cleanup ();
+    }
+
+    static void cleanup () {
+        vayu::tests::remove_database_files (TEST_DB_PATH);
+    }
+
+    /// A plan whose steps hit @p urls in order, named `step0`, `step1`, ...
+    static vayu::core::ScenarioExecution plan_over (const std::vector<std::string>& urls) {
+        vayu::core::ScenarioExecution execution;
+        execution.request.source        = "collection";
+        execution.request.collection_id = "col_test";
+        for (size_t i = 0; i < urls.size (); ++i) {
+            vayu::core::ScenarioStep step;
+            step.index              = i;
+            step.request_id         = "req_" + std::to_string (i);
+            step.name               = "step" + std::to_string (i);
+            step.request.method     = vayu::HttpMethod::GET;
+            step.request.url        = urls[i];
+            step.request.timeout_ms = 5000;
+            step.stored_url         = urls[i];
+            execution.plan.steps.push_back (std::move (step));
+        }
+        return execution;
+    }
+
+    /// Run the executor to completion and drain, the way `execute_load_test`
+    /// does around it - the tallies are only final after the drain.
+    ///
+    /// @param pool_size The event loop's `max_concurrent`, which is also the
+    ///        number of curl handles pre-created per worker. The cookie tests
+    ///        set it to exactly the virtual-user count so the pool *wraps* and
+    ///        every transfer after the first reuses a handle a previous one
+    ///        finished with. At the default (hundreds) a short test never
+    ///        reuses a handle at all, so it could not observe a session leaking
+    ///        through one - the pool would be doing the isolating, not the code
+    ///        under test.
+    std::shared_ptr<vayu::core::ScenarioLoadState> run (const json& config,
+    const vayu::core::ScenarioExecution& execution,
+    size_t pool_size = 500) {
+        auto context =
+        std::make_shared<vayu::core::RunContext> ("test-scenario-load", config);
+        vayu::http::EventLoopConfig loop_config;
+        loop_config.max_concurrent = pool_size;
+        loop_config.max_per_host   = 500;
+        context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+        context->event_loop->start ();
+
+        auto state = vayu::core::execute_scenario_load (context, *db_, execution);
+        context->event_loop->stop (true, std::chrono::milliseconds (10000));
+        context_ = context;
+        return state;
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    std::shared_ptr<vayu::core::RunContext> context_;
+};
+
+} // namespace
+
+// ============================================================================
+// Mode validation - the one rule with teeth
+// ============================================================================
+
+TEST (ScenarioLoadConfig, ConstantRpsIsRefusedForAScenario) {
+    const json config = { { "scenario", { { "collectionId", "c" } } },
+        { "mode", "constant_rps" }, { "duration", "10s" } };
+
+    ASSERT_TRUE (vayu::core::is_scenario_load_run (config));
+    const auto refusal = vayu::core::validate_scenario_load_config (config);
+    ASSERT_TRUE (refusal.has_value ())
+    << "constant_rps with a scenario must be refused, not silently run "
+       "closed-loop";
+    EXPECT_NE (refusal->find ("constant_rps"), std::string::npos)
+    << "the refusal must name the mode it refused: " << *refusal;
+}
+
+TEST (ScenarioLoadConfig, AnArrivalRateIsRefusedOnEveryScenarioMode) {
+    // `rps` is what puts ConstantLoadStrategy on its open-loop path regardless
+    // of the declared mode, so refusing only `mode: constant_rps` would leave
+    // the open-loop door open.
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations" }) {
+        const json config = { { "scenario", { { "collectionId", "c" } } },
+            { "mode", mode }, { "targetRps", 500.0 } };
+        EXPECT_TRUE (vayu::core::validate_scenario_load_config (config).has_value ())
+        << "targetRps was accepted on scenario mode " << mode;
+    }
+}
+
+TEST (ScenarioLoadConfig, TheClosedLoopModesAreAccepted) {
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations" }) {
+        const json config = { { "scenario", { { "collectionId", "c" } } },
+            { "mode", mode }, { "duration", "5s" } };
+        EXPECT_FALSE (vayu::core::validate_scenario_load_config (config).has_value ())
+        << "scenario mode " << mode << " was refused";
+    }
+}
+
+TEST (ScenarioLoadConfig, AScenarioWithoutAModeIsStillADesignModeRun) {
+    // The absence of `mode` cannot start meaning something new: every caller
+    // sent exactly this shape before load-mode scenarios existed.
+    const json config = { { "scenario", { { "collectionId", "c" } } } };
+    EXPECT_FALSE (vayu::core::is_scenario_load_run (config));
+
+    const json load_config = { { "mode", "constant_concurrency" } };
+    EXPECT_FALSE (vayu::core::is_scenario_load_run (load_config))
+    << "a single-request load run has no scenario to execute";
+}
+
+// ============================================================================
+// The virtual-user state machine
+// ============================================================================
+
+// A VU walks every step of its iteration in order, then starts the next
+// iteration at step 0. One VU makes the recorded order the VU's own order.
+TEST_F (ScenarioLoadTest, AVirtualUserWalksItsPlanInOrderThenRestartsAtStepZero) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    std::vector<std::string> order;
+    for (const auto& hit : server.hits ()) {
+        order.push_back (hit.path);
+    }
+    EXPECT_EQ (order,
+    (std::vector<std::string>{ "/s0", "/s1", "/s2", "/s0", "/s1", "/s2", "/s0", "/s1", "/s2" }));
+    EXPECT_EQ (state->iterations_completed.load (), 3u);
+    EXPECT_EQ (state->iterations_abandoned.load (), 0u);
+    EXPECT_EQ (state->steps_executed.load (), 9u);
+}
+
+// `iterations` is a total across the pool, and a VU is never abandoned partway
+// through a sequence to reach it: every started iteration ran to its last step.
+TEST_F (ScenarioLoadTest, AnIterationsRunStopsStartingIterationsWithoutStrandingOne) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 4 },
+        { "concurrency", 3 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (state->iterations_started, 4u);
+    EXPECT_EQ (state->iterations_completed.load (), 4u);
+    EXPECT_EQ (state->steps_executed.load (), 12u)
+    << "4 iterations x 3 steps; a VU stopped mid-sequence would send fewer";
+    EXPECT_EQ (server.hits_for ("/s2").size (), 4u)
+    << "every started iteration must reach its last step";
+}
+
+// Per-VU cookies, and the iteration boundary that clears them. One VU, so the
+// order is deterministic: login, echo, login, echo.
+TEST_F (ScenarioLoadTest, CookiesRideAnIterationAndAreClearedAtTheNextOne) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/login"), server.url ("/echo") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    // One handle in the pool, so every step after the first reuses the handle
+    // the previous one left behind - which is where a cookie engine that is
+    // enabled but never flushed leaks one VU's session into the next request.
+    run (config, execution, /*pool_size=*/1);
+
+    const auto logins = server.hits_for ("/login");
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (logins.size (), 2u);
+    ASSERT_EQ (echoes.size (), 2u);
+
+    // The session the step before it established reaches the next step - which
+    // is the whole point of a multi-step load run.
+    EXPECT_EQ (echoes[0].cookie, "sid=1");
+    EXPECT_EQ (echoes[1].cookie, "sid=2");
+
+    // Empty at the start of each iteration: a new iteration is a new user, not
+    // the same one logging in twice.
+    EXPECT_EQ (logins[0].cookie, "");
+    EXPECT_EQ (logins[1].cookie, "")
+    << "the second iteration's first step carried the first iteration's "
+       "session - per-VU cookies are not being cleared at the iteration "
+       "boundary";
+}
+
+// Two VUs, both held inside `/login` at the same time, must still leave with
+// their own session. A shared jar - or a cookie engine left on a pooled handle
+// - hands one of them the other's.
+TEST_F (ScenarioLoadTest, TwoVirtualUsersDoNotShareCookieState) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    const auto execution = plan_over ({ server.url ("/login"), server.url ("/echo") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    // Two handles for two VUs: the pool wraps, so the second iteration's
+    // transfers run on handles the first iteration's finished with.
+    run (config, execution, /*pool_size=*/2);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    EXPECT_NE (echoes[0].cookie, "")
+    << "no session reached the second step at all";
+    EXPECT_NE (echoes[0].cookie, echoes[1].cookie)
+    << "both virtual users sent the same session - cookie state is shared "
+       "between VUs rather than private to each";
+}
+
+// An errored step ends its iteration and the VU starts the next one. A VU that
+// stranded instead would send step 0 once and then nothing, permanently
+// shrinking effective concurrency.
+TEST_F (ScenarioLoadTest, AnErroredStepEndsItsIterationWithoutStrandingTheVirtualUser) {
+    ScenarioMockServer server;
+    // Port 1 on loopback refuses immediately - a transport error, not a 5xx, so
+    // the failure is the one that ends an iteration.
+    const auto execution = plan_over (
+    { server.url ("/s0"), "http://127.0.0.1:1/unreachable", server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), 3u)
+    << "the virtual user was stranded by the errored step - it never started "
+       "another iteration";
+    EXPECT_EQ (server.hits_for ("/s2").size (), 0u)
+    << "the iteration continued past a step that errored";
+    EXPECT_EQ (state->iterations_abandoned.load (), 3u);
+    EXPECT_EQ (state->iterations_completed.load (), 0u);
+    EXPECT_EQ (state->steps_errored.load (), 3u);
+}
+
+// ============================================================================
+// Per-step metrics
+// ============================================================================
+
+// One histogram per step, and the whole-run aggregate is their union: every
+// completion is counted exactly once, in exactly one step.
+TEST_F (ScenarioLoadTest, PerStepHistogramsPartitionTheRunsCompletions) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 5 },
+        { "concurrency", 2 } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (state->steps.step_count (), 3u)
+    << "histograms are allocated once from the plan's step count";
+
+    size_t union_of_steps = 0;
+    for (size_t i = 0; i < state->steps.step_count (); ++i) {
+        EXPECT_EQ (state->steps.completed (i), 5u) << "step " << i;
+        EXPECT_EQ (state->steps.errors (i), 0u) << "step " << i;
+        EXPECT_GT (state->steps.percentiles (i).p50, 0.0)
+        << "step " << i << " recorded no latency";
+        union_of_steps += state->steps.completed (i);
+    }
+    EXPECT_EQ (union_of_steps, context_->total_requests ())
+    << "the per-step histograms and the run aggregate disagree about how many "
+       "completions there were";
+}
+
+// A step no VU ever reached reports zeros, not the INT64_MAX an empty
+// HdrHistogram answers `min` with.
+TEST_F (ScenarioLoadTest, AnUnreachedStepReportsZeroesRatherThanAnEmptyHistogramsMin) {
+    ScenarioMockServer server;
+    const auto execution = plan_over (
+    { server.url ("/s0"), "http://127.0.0.1:1/unreachable", server.url ("/s2") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (state->steps.completed (2), 0u);
+    const auto unreached = state->steps.percentiles (2);
+    EXPECT_EQ (unreached.min, 0.0);
+    EXPECT_EQ (unreached.max, 0.0);
+}
+
+// The breakdown carries each step's identity beside its numbers, and the
+// summary keeps the keys the report route already reads for a scenario run.
+TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenarioKeys) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    // Shared with the design-mode runner's payload, so one report section
+    // covers both executors.
+    EXPECT_EQ (summary["iterations"], 2);
+    EXPECT_EQ (summary["iterations_completed"], 2);
+    EXPECT_EQ (summary["steps_executed"], 4);
+    EXPECT_EQ (summary["errored"], 0);
+    // This mode's own.
+    EXPECT_EQ (summary["virtual_users"], 1);
+
+    ASSERT_TRUE (summary["steps"].is_array ());
+    ASSERT_EQ (summary["steps"].size (), 2u);
+    EXPECT_EQ (summary["steps"][0]["index"], 0);
+    EXPECT_EQ (summary["steps"][0]["name"], "step0");
+    EXPECT_EQ (summary["steps"][0]["requestId"], "req_0");
+    EXPECT_EQ (summary["steps"][0]["method"], "GET");
+    EXPECT_EQ (summary["steps"][0]["executed"], 2);
+    EXPECT_EQ (summary["steps"][1]["name"], "step1");
+    EXPECT_TRUE (summary["steps"][0]["latency"].contains ("p99"));
+}
+
+// Scripts stay deferred, and a load-mode scenario runs none of them: the run
+// must not claim a validation it never performed. `pm.execution` therefore
+// throws for the same reason it does in any load run - there is no live
+// sequence for a script to redirect.
+TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScripts) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    // A step that carries scripts, so "none ran" is a property of the executor
+    // rather than of an empty plan.
+    execution.plan.steps[0].pre_script  = "pm.environment.set('x', '1');";
+    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    EXPECT_TRUE (context_->test_script.empty ())
+    << "a scenario load run must not acquire a run-level test script";
+    EXPECT_EQ (context_->metrics_collector->response_samples ().size (), 0u)
+    << "responses were sampled for a script validation pass that cannot run";
+}
+
+// `concurrency` is the number of virtual users, and in-flight is bounded by it
+// by construction - which is why maxInFlight is moot for a scenario run.
+TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+
+    const size_t VUS  = 8;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", VUS } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (state->vus.size (), VUS);
+    EXPECT_LE (context_->peak_in_flight.load (), VUS)
+    << "in-flight exceeded the virtual-user count, so a VU sent two steps at "
+       "once";
+    EXPECT_GT (state->steps_executed.load (), 0u);
+}

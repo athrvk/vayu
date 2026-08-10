@@ -22,6 +22,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -757,6 +758,24 @@ void register_execution_routes (RouteContext& ctx) {
         // resolve_scenario further down, beside the shared numeric validation.
         const bool is_scenario =
         json.contains ("scenario") && !json["scenario"].is_null ();
+        // A `scenario` block with a load `mode` beside it is a load-mode
+        // scenario: the same plan, driven by virtual users on the event loop
+        // instead of one sequence through the client. Without a mode it is the
+        // design-mode collection run every caller sent before phase 6, so the
+        // absence of `mode` cannot start meaning something new.
+        const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
+
+        // Refused before the run row exists, and never quietly downgraded to a
+        // closed-loop mode: a run that measured something other than what was
+        // asked for is worse than no run at all.
+        if (is_scenario_load) {
+            if (auto invalid = vayu::core::validate_scenario_load_config (json)) {
+                vayu::utils::log_warning (
+                "POST /runs - Invalid scenario load config: " + *invalid);
+                send_error (res, 400, *invalid, "invalid_run_config");
+                return;
+            }
+        }
 
         // Validate required fields
         if (!is_scenario) {
@@ -861,7 +880,16 @@ void register_execution_routes (RouteContext& ctx) {
         std::string run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
         run.id     = run_id;
-        run.type   = is_scenario ? vayu::RunType::Scenario : vayu::RunType::Load;
+        // A scenario *load* run is a load run whose target happens to be a
+        // sequence: it publishes metric ticks, reports RPS and percentiles, and
+        // stores no per-step `results` rows - so `Scenario`, which is what the
+        // app reads to render a step list instead of the dashboard, would point
+        // every consumer at the wrong view of it. The step breakdown reaches
+        // the report through the summary's `scenario` object instead, and the
+        // snapshot still carries the manifest, so the list row still says which
+        // collection ran.
+        run.type = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
+                                                        vayu::RunType::Load;
         run.status = vayu::RunStatus::Pending;
         run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
         if (is_scenario) {
@@ -938,10 +966,16 @@ void register_execution_routes (RouteContext& ctx) {
         // Start run via RunManager. A refusal means the daemon is draining its
         // workers for shutdown; the row exists but nothing will ever run it, so
         // say so rather than returning a 202 for a run that never starts.
-        const bool started = is_scenario ?
+        // A load-mode scenario takes the load path: same event loop, metrics
+        // thread, drain and summary as a single-request run, with the virtual-
+        // user state machine in place of a LoadStrategy. Only the design-mode
+        // sequential runner needs the cookie jar, which is why only it is
+        // handed one.
+        const bool started = (is_scenario && !is_scenario_load) ?
         ctx.run_manager.start_scenario_run (run_id, json, scenario_execution,
         ctx.db, ctx.cookie_jar, ctx.verbose) :
-        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose);
+        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
+        is_scenario_load ? scenario_execution : nullptr);
         if (!started) {
             send_error (res, 503, "Engine is shutting down");
             return;
@@ -950,7 +984,8 @@ void register_execution_routes (RouteContext& ctx) {
         nlohmann::json response;
         response["runId"]   = run_id;
         response["status"]  = to_string (vayu::RunStatus::Pending);
-        response["message"] = is_scenario ? "Collection run started" : "Load test started";
+        response["message"] = is_scenario_load ? "Scenario load test started" :
+        (is_scenario ? "Collection run started" : "Load test started");
 
         res.status = 202;
         res.set_content (response.dump (), "application/json");

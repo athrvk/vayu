@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
-import { useSessionStore, useTabsStore } from "@/stores";
+import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import type { Collection } from "@/types";
 
 const mutate = vi.fn();
@@ -36,8 +36,10 @@ vi.mock("@/queries", () => ({
 }));
 
 const startMonitoring = vi.fn();
+const startLoadMonitoring = vi.fn();
 vi.mock("@/services", () => ({
 	scenarioRunService: { startMonitoring: (id: string) => startMonitoring(id) },
+	loadTestService: { startMonitoring: (id: string) => startLoadMonitoring(id) },
 }));
 
 const COLLECTION = {
@@ -56,6 +58,7 @@ function succeedWith(runId: string) {
 beforeEach(() => {
 	mutate.mockClear();
 	startMonitoring.mockClear();
+	startLoadMonitoring.mockClear();
 	startRunState.isPending = false;
 	startRunState.error = null;
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
@@ -287,5 +290,97 @@ describe("a data file", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		expect(mutate.mock.calls[0][0].scenario.data).toHaveLength(12);
+	});
+});
+
+/*
+ * The load-test option (issue #357). Same plan, a different executor - so what
+ * matters here is that the payload says which one, and that the live surface
+ * follows: a load run publishes metric ticks and no `step` events, so attaching
+ * the runner tab's stream to it would leave the user watching a view that can
+ * never fill.
+ */
+describe("running the sequence as a load test", () => {
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+
+	it("sends a closed-loop mode, the virtual-user count and the duration", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		fireEvent.change(screen.getByRole("spinbutton", { name: /virtual users/i }), {
+			target: { value: "25" },
+		});
+		fireEvent.change(screen.getByRole("spinbutton", { name: /duration/i }), {
+			target: { value: "45" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).toMatchObject({
+			mode: "constant_concurrency",
+			concurrency: 25,
+			duration: "45s",
+			scenario: { source: "collection", collectionId: "col_1" },
+		});
+	});
+
+	it("sends no mode at all when the switch is off", () => {
+		// The engine reads the *presence* of `mode` as "this is a load run", so a
+		// design-mode payload must not carry one - not even a falsy one.
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("mode");
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("concurrency");
+	});
+
+	it("drops the pass count, which a duration-bounded run has no use for", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.change(screen.getByRole("spinbutton", { name: /iterations/i }), {
+			target: { value: "7" },
+		});
+		enableLoadTest();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+		// ...and the field itself is gone, rather than sitting there greyed out
+		// still showing a number that no longer applies.
+		expect(screen.queryByRole("spinbutton", { name: /iterations/i })).toBeNull();
+	});
+
+	it("attaches the metrics stream and the dashboard, not the runner tab", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		succeedWith("run_load_7");
+
+		expect(startLoadMonitoring).toHaveBeenCalledWith("run_load_7");
+		expect(startMonitoring).not.toHaveBeenCalled();
+		expect(useDashboardStore.getState().currentRunId).toBe("run_load_7");
+		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ type: "dashboard" });
+	});
+
+	it("refuses a virtual-user count or a duration the engine would reject", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		const run = screen.getByRole("button", { name: /^run$/i });
+
+		for (const bad of ["0", "1.5", "", "-3"]) {
+			fireEvent.change(screen.getByRole("spinbutton", { name: /virtual users/i }), {
+				target: { value: bad },
+			});
+			expect(run).toHaveProperty("disabled", true);
+		}
+		fireEvent.change(screen.getByRole("spinbutton", { name: /virtual users/i }), {
+			target: { value: "5" },
+		});
+		fireEvent.change(screen.getByRole("spinbutton", { name: /duration/i }), {
+			target: { value: "0" },
+		});
+		expect(run).toHaveProperty("disabled", true);
+		expect(screen.getByText(/greater than zero seconds/i)).toBeTruthy();
+
+		fireEvent.click(run);
+		expect(mutate).not.toHaveBeenCalled();
 	});
 });

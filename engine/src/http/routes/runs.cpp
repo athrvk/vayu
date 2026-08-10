@@ -159,6 +159,15 @@ struct ReportExtras {
     // first, so a non-zero count here means successes are missing from
     // `results[]`, never a failure.
     size_t steps_dropped = 0;
+    // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
+    // for this run; `iterations_abandoned` is how many an errored step ended
+    // before the plan's last step, which is what explains a breakdown that
+    // thins towards the end of the sequence.
+    size_t virtual_users        = 0;
+    size_t iterations_abandoned = 0;
+    // Per-step latency and counts, verbatim from the summary. Empty for a
+    // design-mode run, which reports its steps as `results[]` rows instead.
+    nlohmann::json step_breakdown = nlohmann::json::array ();
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
@@ -278,6 +287,14 @@ ReportExtras& extras) {
         read_number (scenario, "errored", extras.steps_errored);
         read_number (scenario, "steps_stored", extras.steps_stored);
         read_number (scenario, "steps_dropped", extras.steps_dropped);
+        // Load-mode only: the design-mode runner writes neither, and a load run
+        // stores no per-step `results` rows at all - the breakdown *is* how a
+        // scenario load run says what each step did.
+        read_number (scenario, "virtual_users", extras.virtual_users);
+        read_number (scenario, "iterations_abandoned", extras.iterations_abandoned);
+        if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
+            extras.step_breakdown = scenario["steps"];
+        }
     }
 
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
@@ -744,6 +761,15 @@ const std::string& run_id) {
             { "errored", extras.steps_errored },
             { "stepsStored", extras.steps_stored },
             { "stepsDropped", extras.steps_dropped } };
+        // Added only when the run actually has them, so a design-mode run's
+        // section keeps the exact shape the app already renders.
+        if (extras.virtual_users > 0) {
+            json_report["scenario"]["virtualUsers"] = extras.virtual_users;
+            json_report["scenario"]["iterationsAbandoned"] = extras.iterations_abandoned;
+        }
+        if (!extras.step_breakdown.empty ()) {
+            json_report["scenario"]["steps"] = extras.step_breakdown;
+        }
     }
 
     if (extras.has_tests) {

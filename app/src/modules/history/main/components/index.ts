@@ -12,6 +12,7 @@
 export { default as LatencyMetric } from "./LatencyMetric";
 export { default as SampleRequestCard } from "./SampleRequestCard";
 export { default as ScenarioStepCard } from "./ScenarioStepCard";
+export { default as ScenarioStepsTab } from "./ScenarioStepsTab";
 export { default as OverviewTab } from "./OverviewTab";
 export { default as PerformanceTab } from "./PerformanceTab";
 export { default as SamplesTab } from "./SamplesTab";

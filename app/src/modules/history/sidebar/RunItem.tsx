@@ -105,8 +105,14 @@ export default function RunItem({
 	 * render what the payload carries: a run recorded before the engine sent
 	 * this key is still `type: "scenario"` and still has nothing to show, and
 	 * falling back to the id-less shape is the honest answer for it.
+	 *
+	 * Not gated on `run.type === "scenario"` either, and that is the point: a
+	 * scenario *load* run is `type: "load"` - it publishes ticks and reports
+	 * percentiles like any load run - but it has no url and no method, for the
+	 * same reason a collection run has none. Reading the descriptor wherever the
+	 * summary offers one is what keeps its row from being a bare status.
 	 */
-	const scenario = run.type === "scenario" ? run.summary?.scenario : undefined;
+	const scenario = run.summary?.scenario;
 	// The name if the collection is still there, the id if it is not, and a
 	// plain label if the run predates the descriptor. Never a blank line.
 	const scenarioLabel = collectionName ?? scenario?.collectionId ?? null;
@@ -242,8 +248,11 @@ export default function RunItem({
 					</div>
 				)}
 
-				{/* What ran, for a collection run - the row's only identity. */}
-				{run.type === "scenario" && scenarioLabel && (
+				{/* What ran, for a run whose work is a sequence - the row's only
+				    identity. Gated on the descriptor rather than on the run type,
+				    so a scenario *load* run (`type: "load"`, no url, no method)
+				    gets it too. */}
+				{scenario && scenarioLabel && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0">
 						<Folder className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
 						<p

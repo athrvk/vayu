@@ -120,7 +120,6 @@ nav:
   - Design Notes:
       - Request Storage: request-storage-design.md
       - Lock Files: lock-file-handling.md
-      - Collection Runner: plans/collection-runner-design.md
       - Deferred Work: plans/pending-backlog.md
 
 markdown_extensions:

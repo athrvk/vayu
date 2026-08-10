@@ -18,6 +18,12 @@ Against `/fast` on loopback, tuned Vayu reaches ~45k req/s (vs `wrk` ~51k), but 
 
 **Needs:** lower the default `workers`; make the connection cap a **global budget** (or auto-derive from workers); bound the default `maxInFlight`. (Confirmed PR #10 is NOT the cause; ceiling is long-standing architecture. The branch-only 12-worker collapse was traced to added per-completion CPU and only bites at `workers=ncpu`.) Needs a spec.
 
+**The `maxInFlight` bound applies to single-request load runs only.** A scenario
+load run bounds in-flight by its virtual-user count by construction, so
+`maxInFlight` is moot there and is ignored with a warning - whichever of the two
+lands second must not generalise its rule over both. See
+`docs/engine/architecture.md` → *Scenario load runs*.
+
 ---
 
 ## MCP
@@ -48,24 +54,6 @@ by-id compose path now also builds the part list engine-side. See
 `docs/engine/api-reference.md` → *POST /compose*, `docs/engine/architecture.md`
 → *Request composition boundary*, and `docs/engine/mcp.md` → *Request
 composition* for the current state.
-
----
-
-## Approved multi-phase designs (not deferred - scheduled)
-
-### Collection runner / scenario primitive
-
-Approved design-first via issue #340; the decisions live in
-[collection-runner-design.md](collection-runner-design.md), which phases the
-work into six implementer-ready sub-issues (plan resolution -> design-mode
-runner -> runner UI -> flow control -> `pm.iterationData` -> load-mode
-scenarios). Listed here because the phases stretch past one release, not because
-anything is deferred. Two coordination points worth knowing from this file's
-side: phase 6 (load-mode scenarios) shares the hot path **P1** re-tunes and must
-land after or with it, and the design rules `maxInFlight` moot for scenario runs
-- so P1's `maxInFlight` bound applies to single-request load runs only, not to
-scenarios. Flow control (#303) is phases 4-5 and is no longer blocked on a
-product decision.
 
 ---
 

@@ -829,6 +829,37 @@ export interface LoadTestMetrics {
 	status_codes?: Record<string, number>;
 }
 
+/**
+ * One plan step's numbers in a scenario load run's report, from the summary's
+ * `scenario.steps` array (`build_step_breakdown`,
+ * `engine/src/core/scenario_load.cpp`).
+ *
+ * Carries the step's identity beside its latency because a breakdown indexed
+ * only by position is unreadable next to a forty-step sequence.
+ */
+export interface RunScenarioStepStat {
+	/** Position in the plan, 0-based and stable for the run. */
+	index: number;
+	/** `requests.name` - what the sequence calls this step. */
+	name: string;
+	requestId: string;
+	method: string;
+	/** Step executions across every virtual user and iteration. */
+	executed: number;
+	/**
+	 * Of those, the ones that errored. An errored step ends its iteration, so a
+	 * non-zero count here is also why the steps after it ran fewer times.
+	 */
+	errors: number;
+	latency: {
+		min: number;
+		p50: number;
+		p95: number;
+		p99: number;
+		max: number;
+	};
+}
+
 export interface RunReport {
 	metadata?: {
 		runId: string;
@@ -1009,6 +1040,29 @@ export interface RunReport {
 		/** Step rows the run kept - the length `results[]` should have. */
 		stepsStored: number;
 		stepsDropped: number;
+		/**
+		 * Load-mode only (issue #357): what `concurrency` meant for this run.
+		 * A scenario load run's `concurrency` is its number of virtual users,
+		 * each walking the plan on its own with its own cookies.
+		 *
+		 * Its presence is what separates a scenario *load* run's report from a
+		 * design-mode collection run's - the latter has no VUs and no
+		 * breakdown, and reports its steps as `results[]` rows instead.
+		 */
+		virtualUsers?: number;
+		/**
+		 * Iterations an errored step ended before the plan's last step. Counted
+		 * apart from `iterationsCompleted` because it is what explains a
+		 * breakdown that thins towards the end of the sequence.
+		 */
+		iterationsAbandoned?: number;
+		/**
+		 * Per-step latency and counts, in plan order. Load-mode only: a
+		 * scenario load run stores no per-step `results` rows (it would be one
+		 * row per step per iteration per VU), so this breakdown *is* how it
+		 * says what each step did.
+		 */
+		steps?: RunScenarioStepStat[];
 	};
 	results?: Array<{
 		/**
