@@ -91,6 +91,85 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 }
 
 /**
+ * Whether `host` names a machine on the user's own network - loopback, an
+ * RFC1918 / RFC4193 private address, or a link-local one.
+ *
+ * The host arrives from `URL.hostname`, which normalises the alternate IPv4
+ * spellings (`http://2130706433/` reports `127.0.0.1`) and brackets an IPv6
+ * literal, so this reads the canonical form rather than the typed one.
+ *
+ * Textual, like the allowlist itself: a DNS name that *resolves* to a private
+ * address is not one of these, and stays subject to the allowlist. Resolving it
+ * here would make the guard's answer depend on the network it is asked on.
+ */
+function isPrivateHost(host: string): boolean {
+	if (host === "localhost" || host.endsWith(".localhost")) return true;
+
+	if (host.startsWith("[") && host.endsWith("]")) {
+		// `::ffff:127.0.0.1` is a v4 address wearing a v6 spelling, so it is
+		// classified as the v4 one rather than falling through as "not private".
+		const address = host.slice(1, -1).replace(/^::ffff:/, "");
+		if (/^\d+\.\d+\.\d+\.\d+$/.test(address)) return isPrivateIpv4(address);
+		if (address === "::1" || address === "::") return true;
+		// fc00::/7 (unique local) and fe80::/10 (link local).
+		return /^f[cd][0-9a-f]{2}:/.test(address) || /^fe[89ab][0-9a-f]:/.test(address);
+	}
+
+	return /^\d+\.\d+\.\d+\.\d+$/.test(host) && isPrivateIpv4(host);
+}
+
+/** RFC1918, loopback, link-local and the unspecified address, in dotted quad. */
+function isPrivateIpv4(address: string): boolean {
+	const parts = address.split(".").map(Number);
+	if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+		return false;
+	}
+	const [a, b] = parts;
+	if (a === 0 || a === 127) return true; // unspecified / loopback
+	if (a === 10) return true;
+	if (a === 172 && b >= 16 && b <= 31) return true;
+	if (a === 192 && b === 168) return true;
+	if (a === 169 && b === 254) return true; // link local
+	return false;
+}
+
+/**
+ * Enforce the allowlist against a run's **monitor** endpoint - the second host
+ * a monitored run contacts, which is not the target's and is not covered by the
+ * check on it.
+ *
+ * **The decision, stated rather than implied:** a loopback or private-network
+ * monitor URL is exempt from the allowlist; a public one is not. The allowlist
+ * exists to stop an agent generating traffic against third parties it was never
+ * pointed at, and a private address is by definition the user's own network -
+ * which is also the whole feature, since the endpoint a load run wants beside it
+ * is the target's own `localhost:9100`. Requiring that host to be allowlisted
+ * would make the capability unreachable in the case it was built for. The
+ * engine draws the same line for the same reason (`read_monitor_block`,
+ * `engine/src/core/monitor.cpp`).
+ *
+ * A public monitor host is a request to some third party at one GET per scrape
+ * for the life of the run, which is exactly what the allowlist is for, so it
+ * goes through the same check the target URL does.
+ */
+export function checkMonitorHost(url: string, config: McpSafetyConfig): GuardResult {
+	const host = extractHost(url);
+	if (!host) {
+		return {
+			ok: false,
+			error: "Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying.",
+		};
+	}
+	if (isPrivateHost(host)) return OK;
+	const gate = checkAllowlist(url, config);
+	if (gate.ok) return OK;
+	return {
+		ok: false,
+		error: `The monitor endpoint is a second host this run would contact, once per scrape: ${gate.error} (A loopback or private-network monitor URL needs no allowlist entry.)`,
+	};
+}
+
+/**
  * The duration *grammar* only: "60s", "5m", "1h", "500ms", or a bare number of
  * seconds, into seconds. Null when the text is not a duration at all.
  *

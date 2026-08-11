@@ -159,7 +159,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity` |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity` |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
@@ -175,6 +175,19 @@ Notes:
   the 60s other modes fall back to), so a cap between those two values still
   injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+- **`start_load_run`'s `monitor` block** scrapes the target's own metrics
+  endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
+  and the `series` names to read), so an agent asked why a target slowed down
+  can read its CPU on the same timeline as p99 - the report comes back with a
+  `monitor` section carrying per-series min/max/avg plus the sample and
+  failed-scrape counts. The block is forwarded verbatim: its value ranges are
+  the engine's (`validate_run_config`), and `monitor.series`' ceiling is the
+  `monitorMaxSeries` **setting**, so a second copy of those bounds in the tool
+  schema would refuse blocks the engine accepts the moment a user raises it.
+  **The monitor endpoint is a second host**, and it takes the allowlist
+  decision described under [Safety](#safety-model) rather than the target's
+  check by extension. The scrape needs no cap of its own: the monitor thread is
+  joined when the run ends, so whatever bounds the run bounds it.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (the engine marks these in each
@@ -524,6 +537,17 @@ configurable in **Settings → MCP** and persisted.
   scheme (`localhost:3000/api` matches the entry `localhost`). An IPv6 target is
   stored and shown in its canonical bracketed form - typing `::1` stores `[::1]`,
   which is what a URL parses to.
+  A run's **`monitor.url` is a second host** and gets its own check, with one
+  deliberate exemption: a **loopback or private-network** monitor endpoint
+  (`localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`,
+  `::1`, `fc00::/7`, `fe80::/10`) needs no allowlist entry, while a public one
+  is checked exactly as the target URL is. The allowlist exists to stop an agent
+  generating traffic against third parties it was never pointed at, and a
+  private address is by definition the user's own network - which is also the
+  feature's own case, since the endpoint a load run wants beside it is the
+  target's own `localhost:9100`. The test is textual, like the allowlist itself:
+  a DNS name that *resolves* to a private address still needs an entry, because
+  resolving it here would make the answer depend on the network it was asked on.
   Because the check happens here, before the engine is called, a request sent
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See

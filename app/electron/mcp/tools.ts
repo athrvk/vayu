@@ -22,7 +22,12 @@ import type { EngineClient } from "./engine-client.js";
 import { EngineRequestError, EngineTimeoutError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
-import { checkAllowlist, checkLoadCaps, defaultDurationUnderCap } from "./safety.js";
+import {
+	checkAllowlist,
+	checkLoadCaps,
+	checkMonitorHost,
+	defaultDurationUnderCap,
+} from "./safety.js";
 import { compareReports } from "./compare.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
@@ -1847,6 +1852,42 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
 				),
+			// Shaped exactly as the engine's `monitor` block and forwarded
+			// verbatim. The value bounds are deliberately not mirrored here the
+			// way `thresholds`' are: `monitor.series`' ceiling is the
+			// `monitorMaxSeries` **setting**, so a second copy in this schema
+			// would refuse blocks the engine accepts as soon as the user raises
+			// it - and `validate_run_config` already answers each one by field
+			// name. This layer types the shape; the engine owns the ranges.
+			monitor: z
+				.object({
+					url: z
+						.string()
+						.describe(
+							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one is checked against the allowlist like the target URL is."
+						),
+					intervalMs: z
+						.number()
+						.optional()
+						.describe(
+							"Scrape cadence in ms, 250-60000 (default: the engine's setting)."
+						),
+					format: z
+						.enum(["prometheus", "json"])
+						.optional()
+						.describe(
+							'Body format: "prometheus" text exposition, or "json" (a flat object of numbers). Default "prometheus".'
+						),
+					series: z
+						.array(z.string())
+						.describe(
+							'Metric names to read out of each scrape, e.g. ["process_cpu_seconds_total"]. At least one; the ceiling is the `monitorMaxSeries` setting (8 by default).'
+						),
+				})
+				.optional()
+				.describe(
+					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus the sample and failed-scrape counts. Omit for a run that measures only the client side."
+				),
 			requestId: z
 				.string()
 				.optional()
@@ -1875,6 +1916,15 @@ export const TOOLS: McpTool[] = [
 			}
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
+
+			// A monitored run contacts a second host, so it gets a second gate.
+			// The scrape needs no duration cap of its own: the monitor thread is
+			// joined when the run ends, so whatever bounds the run bounds it.
+			const monitor = args.monitor as { url?: unknown } | undefined;
+			if (monitor && typeof monitor === "object") {
+				const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config);
+				if (!monitorGate.ok) return errorResult(monitorGate.error!);
+			}
 
 			// One mode string for both the guard and the payload: which strategy
 			// the engine picks decides which cap applies, so a guard reading a
@@ -1917,6 +1967,12 @@ export const TOOLS: McpTool[] = [
 			// `thresholdValidation`. Zod has already bounded every value.
 			if (args.thresholds && typeof args.thresholds === "object") {
 				payload.thresholds = args.thresholds;
+			}
+			// Same posture as `thresholds`: the keys are the engine's own and
+			// `validate_run_config` is what judges the values, so the block
+			// travels unchanged rather than being rebuilt field by field here.
+			if (monitor && typeof monitor === "object") {
+				payload.monitor = monitor;
 			}
 			// An omitted duration is 60s engine-side, not "unbounded" and not
 			// "capped" - so a cap under 60s has to be sent as an explicit field
