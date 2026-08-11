@@ -427,6 +427,7 @@ if(VAYU_BUILD_TESTS)
         tests/json_test.cpp
         tests/script_engine_test.cpp
         tests/script_expect_message_test.cpp
+        tests/script_assertion_error_test.cpp
         tests/script_completions_test.cpp
         tests/script_types_test.cpp
         tests/event_loop_test.cpp
