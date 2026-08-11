@@ -793,10 +793,12 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 /**
  * @brief Scrape @p config's metrics endpoint for the life of the run.
  *
- * Runs on `RunContext::monitor_thread`. Each pass GETs the URL with a timeout
- * well under the interval, stores what it read as a `monitor_samples` row and
- * publishes it as a live `monitor` SSE frame, then sleeps out the rest of the
- * interval in short slices so a finishing run is never held up by a long one.
+ * Runs on `RunContext::monitor_thread`. Each pass GETs the URL on the budget
+ * `resolve_scrape_timeout_ms` settles (three quarters of the interval, or
+ * `monitorScrapeTimeoutMs` where the user set one), stores what it read as a
+ * `monitor_samples` row and publishes it as a live `monitor` SSE frame, then
+ * sleeps out the rest of the interval in short slices so a finishing run is
+ * never held up by a long one.
  *
  * A failed scrape is a **gap**: it is counted, it never throws outward, and it
  * never fails the run. After `FAILURES_BEFORE_BACKOFF` consecutive failures it

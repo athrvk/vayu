@@ -56,6 +56,19 @@ class SlowMockServer {
             "application/json");
         });
 
+        // The same exposition, rendered slowly - the heavyweight `/metrics` a
+        // loaded target serves, which is exactly when a run wants vitals. The
+        // delay sits between three quarters of `VITALS_SLOW_INTERVAL_MS` and
+        // the interval itself, so the derived scrape budget times it out and a
+        // configured one does not.
+        svr.Get ("/vitals-slow", [this] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (VITALS_SLOW_DELAY_MS));
+            const int n = ++scrapes;
+            res.set_content ("vayu_test_cpu 4\n"
+                             "vayu_test_rss_bytes " + std::to_string (n * 1000) + "\n",
+            "text/plain");
+        });
+
         // An upstream that never answers on its own - what a stop must not wait
         // for. The handler only returns once the fixture is torn down (or after
         // a hard cap, so a leaked handler cannot wedge the test binary).
@@ -107,6 +120,18 @@ class SlowMockServer {
     std::string vitals_json_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/vitals.json";
     }
+
+    std::string vitals_slow_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/vitals-slow";
+    }
+
+    /// The cadence `/vitals-slow` is meant to be scraped at, and the delay it
+    /// answers on. Three quarters of the interval is 1500ms, so the derived
+    /// budget times the endpoint out with 200ms to spare, and a configured
+    /// budget of anything up to the interval clears it with 300ms to spare -
+    /// margins wide enough that a loaded CI host does not flip either verdict.
+    static constexpr int VITALS_SLOW_INTERVAL_MS = 2000;
+    static constexpr int VITALS_SLOW_DELAY_MS    = 1700;
 
     /// How many times either vitals endpoint has been scraped.
     int scrape_count () const {

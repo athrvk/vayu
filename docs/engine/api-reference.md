@@ -481,6 +481,7 @@ on disk, one in memory:
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
+| `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
 
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
@@ -2048,12 +2049,19 @@ counted as a gap in the report's `monitor.failures`. A failing scrape never
 fails the run; after five consecutive failures the engine logs once and backs
 off to twice the configured interval until one succeeds.
 
-Two of the limits are settings rather than constants: `intervalMs` defaults to
-**`monitorIntervalMs`** when the block omits it, and the `series` ceiling is
-**`monitorMaxSeries`** (see [GET /config](#get-config)). Both are read per run,
-so a change applies to the next run started - no restart. The interval *bounds*
-are fixed, because a cadence below 250ms measures the scraper rather than the
-target and one above a minute records nothing on a short run.
+Three of the limits are settings rather than constants: `intervalMs` defaults to
+**`monitorIntervalMs`** when the block omits it, the `series` ceiling is
+**`monitorMaxSeries`**, and how long a single scrape may take is
+**`monitorScrapeTimeoutMs`** (see [GET /config](#get-config)). All three are read
+per run, so a change applies to the next run started - no restart. The interval
+*bounds* are fixed, because a cadence below 250ms measures the scraper rather
+than the target and one above a minute records nothing on a short run.
+
+The scrape budget has no field on the block: it is about the endpoint being
+scraped, which is the same one run after run, so it lives with the other engine
+settings. Left at its default of `0` it tracks the cadence at three quarters of
+it - raise it when a heavyweight `/metrics` renders too slowly for that, and the
+cadence stays where you set it.
 
 Loopback and private addresses are deliberately allowed: this is a local tool
 scraping the user's own infrastructure. An unusable block (no `url`, a
