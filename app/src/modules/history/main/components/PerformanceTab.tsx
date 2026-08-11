@@ -24,6 +24,7 @@ import {
 	ResponseTimeVsConcurrencyChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
+import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
 import LatencyMetric from "./LatencyMetric";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import type { PerformanceTabProps } from "../../types";
@@ -125,6 +126,21 @@ export default function PerformanceTab({
 					</div>
 				</CardContent>
 			</Card>
+
+			{/* Per-phase percentiles. Its own card rather than rows inside Latency
+			    Distribution: those are whole-request percentiles and these split
+			    one request across five phases, so a p99 here is not comparable to
+			    the p99 above. Absent section = no card, as everywhere else. */}
+			{report.timingBreakdown?.phases && (
+				<Card>
+					<CardHeader>
+						<CardTitle className="text-base">Phase Latency Percentiles</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<PhasePercentiles report={report} />
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Rate Control */}
 			{report.rateControl && isRateLimitedRun(derived.mode, derived.targetRps) && (

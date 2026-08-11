@@ -550,6 +550,19 @@ std::optional<std::string> validate_run_config (const nlohmann::json& config) {
         }
     }
 
+    // `phase_histograms` is read with `config.value (..., bool)` inside
+    // RunContext's constructor, which throws `type_error.302` on a string -
+    // after the run row exists, which is the stranded-`pending` failure this
+    // whole function is here to prevent. One field rather than a table: its two
+    // boolean siblings (`save_timing_breakdown`, `capture_response_bodies`)
+    // carry the same exposure and predate this guard, so widening it to them is
+    // a behaviour change for existing callers and belongs in its own change.
+    if (config.contains ("phase_histograms") && !config["phase_histograms"].is_null () &&
+    !config["phase_histograms"].is_boolean ()) {
+        return std::string ("'phase_histograms' must be a boolean (got ") +
+        config["phase_histograms"].type_name () + ")";
+    }
+
     // `thresholds` is the one nested object here, so it gets its own pass
     // rather than a row in the flat table above. The rule lives with the
     // evaluator (`core/threshold_eval.cpp`), which reads the same metric table

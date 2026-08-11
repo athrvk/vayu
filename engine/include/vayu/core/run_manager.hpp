@@ -84,10 +84,17 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
  * anything whose default lives in `config_entries` is resolved by the caller
  * and handed in, the way `maxStoredErrors` always has been. A run's own config
  * still overrides these; they are only what it falls back to.
+ *
+ * Named for that role rather than for capture, which is what the first two
+ * fields happen to be about - `phase_histograms` reaches RunContext by the
+ * same route for the same reason and is not a capture knob.
  */
-struct CaptureDefaults {
+struct EngineDefaults {
     size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
     size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+    /// Config key `phaseHistograms`. Whether the run feeds the five per-phase
+    /// histograms behind the report's `timingBreakdown.phases`.
+    bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 };
 
 struct RunContext {
@@ -343,7 +350,7 @@ struct RunContext {
     RunContext (const std::string& id,
     nlohmann::json cfg,
     size_t max_errors                = constants::metrics_collector::DEFAULT_MAX_ERRORS,
-    CaptureDefaults capture_defaults = {});
+    EngineDefaults engine_defaults = {});
     ~RunContext ();
 
     /**
@@ -517,6 +524,12 @@ struct RunSummaryInputs {
     std::map<int, size_t> status_codes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Whole-run percentiles for each of the five network phases, indexed by
+    // TimingPhase. Absent when the run recorded none (the `phaseHistograms`
+    // toggle off, or nothing successful completed), which keeps the report's
+    // `timingBreakdown.phases` object out rather than showing five zeroed
+    // distributions - the same absent-not-zeros rule `capacity` follows.
+    std::optional<std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>> phases;
     // Transfers that asked for HTTP/2 and negotiated something older. The one
     // figure here that is about the report's own validity rather than about
     // performance - see MetricsCollector::record_http_version_downgrade.

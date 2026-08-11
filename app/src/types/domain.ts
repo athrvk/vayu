@@ -1010,12 +1010,37 @@ export interface RunReport {
 		actualRps: number;
 		achievement: number;
 	};
+	/**
+	 * Two independent halves, either of which can be present without the other.
+	 *
+	 * The `avg*` fields are means over the run's **retained trace sample** (the
+	 * 1-in-N successes `save_timing_breakdown` stores, plus any slow-request
+	 * outliers), so they are absent for a run that stored no traces. `phases`
+	 * comes from histograms fed by **every** completion, so it is present for
+	 * such a run and absent only when the engine's `phaseHistograms` setting was
+	 * off, nothing succeeded, or the run predates the bank.
+	 *
+	 * Read each half by its own key. Treating the object's presence as proof of
+	 * either is what makes a phases-only report render as five zeroed averages.
+	 */
 	timingBreakdown?: {
-		avgDnsMs: number;
-		avgConnectMs: number;
-		avgTlsMs: number;
-		avgFirstByteMs: number;
-		avgDownloadMs: number;
+		avgDnsMs?: number;
+		avgConnectMs?: number;
+		avgTlsMs?: number;
+		avgFirstByteMs?: number;
+		avgDownloadMs?: number;
+		/**
+		 * Whole-run percentiles per network phase, over every completion rather
+		 * than over the trace sample. `count` is how many completions each
+		 * distribution holds - identical across the five, since they are fed
+		 * together.
+		 */
+		phases?: Partial<
+			Record<
+				"dns" | "connect" | "tls" | "firstByte" | "download",
+				{ p50: number; p95: number; p99: number; max: number; count: number }
+			>
+		>;
 	};
 	slowRequests?: {
 		count: number;

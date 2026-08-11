@@ -52,6 +52,8 @@ import {
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
+import { PhasePercentiles } from "./charts/PhasePercentiles";
+import { hasPhaseAverages } from "@/components/shared/response-viewer/timing-phases";
 
 function MetricsView({
 	metrics,
@@ -467,10 +469,27 @@ function MetricsView({
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
 						<span className="text-[10px] font-mono text-muted-foreground">
-							{finalReport?.timingBreakdown ? "from timing samples" : "-"}
+							{hasPhaseAverages(finalReport?.timingBreakdown)
+								? "from timing samples"
+								: "-"}
 						</span>
 					</div>
 					<TimingWaterfall report={finalReport} />
+					{/* Percentiles under the averages, separated by a rule and its
+					    own heading: they are the same five phases measured over a
+					    different population (every completion, not the trace
+					    sample), so running them together as more rows would invite
+					    a column-to-column comparison that is not valid. Renders
+					    nothing when the run recorded no distributions. */}
+					{finalReport?.timingBreakdown?.phases && (
+						<div className="mt-3.5 pt-3.5 border-t border-border">
+							<h3 className="text-xs font-semibold text-foreground mb-3">
+								Phase percentiles
+								<InfoChip tip={TOOLTIPS.phasePercentiles} />
+							</h3>
+							<PhasePercentiles report={finalReport} />
+						</div>
+					)}
 				</div>
 			</div>
 

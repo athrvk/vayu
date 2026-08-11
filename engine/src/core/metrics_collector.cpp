@@ -105,6 +105,29 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
     }
     interval_recorder_ready_ = true;
 
+    // Per-phase bank. Allocated only when enabled, so "off" is a null pointer
+    // rather than a flag consulted per completion, and phase_percentiles() has
+    // nothing to report from. A partial failure closes what it built and
+    // leaves the bank null: the run is still fully measurable without phase
+    // percentiles, which is not true of the two histograms above.
+    if (config_.phase_histograms) {
+        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+            if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+                constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+                &phase_histograms_[i]) != 0 ||
+            phase_histograms_[i] == nullptr) {
+                for (size_t j = 0; j < i; ++j) {
+                    hdr_close (phase_histograms_[j]);
+                }
+                phase_histograms_.fill (nullptr);
+                vayu::utils::log_warning ("Run " + run_id_ +
+                ": failed to initialize per-phase histograms; the report will "
+                "carry averages only");
+                break;
+            }
+        }
+    }
+
     // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
 
@@ -158,6 +181,12 @@ MetricsCollector::~MetricsCollector () {
     if (interval_recorder_ready_) {
         hdr_interval_recorder_destroy (&interval_recorder_);
         interval_recorder_ready_ = false;
+    }
+    for (auto*& histogram : phase_histograms_) {
+        if (histogram != nullptr) {
+            hdr_close (histogram);
+            histogram = nullptr;
+        }
     }
 }
 
@@ -229,7 +258,8 @@ double latency_ms,
 double queue_wait_ms,
 const std::string& trace_data,
 SuccessTraceReason trace_reason,
-const Response* capture_source) {
+const Response* capture_source,
+const Timing* phases) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     atomic_add_double (total_latency_sum_, latency_ms);
@@ -249,6 +279,28 @@ const Response* capture_source) {
     hdr_record_value_atomic (latency_histogram_, latency_us);
     // Also feed the rolling-window recorder for the live per-tick percentiles.
     hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
+
+    // Per-phase bank, fed before the retention gate below and independently of
+    // it: a phase distribution drawn from the completions that happened to be
+    // sampled is the biased answer this bank exists to replace.
+    //
+    // A phase that did not happen still records its 0. That is not the same
+    // claim as "TLS was free" - a run over plain HTTP records five million
+    // zeroes into the TLS histogram and its p99 is 0, which is the truthful
+    // reading of "this run did no handshakes". The distinction the report has
+    // to keep is present-vs-absent *section*, which phase_percentiles() owns.
+    if (phases != nullptr && phase_histograms_[0] != nullptr) {
+        const std::array<double, TIMING_PHASE_COUNT> values = { phases->dns_ms,
+            phases->connect_ms, phases->tls_ms, phases->first_byte_ms, phases->download_ms };
+        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+            // Clamped at 0 rather than at 1 like the latency histogram above:
+            // a 0ms phase is the common case (a reused connection does no DNS
+            // and no handshake), so flooring it to 1us would inflate every
+            // percentile of the phases that legitimately did not run.
+            hdr_record_value_atomic (phase_histograms_[i],
+            static_cast<int64_t> (std::max (0.0, values[i]) * 1000.0));
+        }
+    }
 
     // Store the trace the caller built, in whichever budget asked for it. The
     // sampling decision happened before the trace was serialised (see
@@ -537,6 +589,36 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     result.p99  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.0));
     result.p999 = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.9));
 
+    return result;
+}
+
+std::optional<std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>>
+MetricsCollector::phase_percentiles () const {
+    // The five are allocated and fed together, so the first answers for all of
+    // them: a null bank is the toggle off, an empty one is a run where nothing
+    // successful completed. Both are "no distribution to report", which is
+    // what the absent section says.
+    if (phase_histograms_[0] == nullptr || phase_histograms_[0]->total_count == 0) {
+        return std::nullopt;
+    }
+
+    auto us_to_ms = [] (int64_t us) -> double {
+        return static_cast<double> (us) / 1000.0;
+    };
+
+    std::array<Percentiles, TIMING_PHASE_COUNT> result;
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        auto* histogram  = phase_histograms_[i];
+        result[i].count = static_cast<size_t> (histogram->total_count);
+        result[i].min   = us_to_ms (hdr_min (histogram));
+        result[i].max   = us_to_ms (hdr_max (histogram));
+        result[i].p50   = us_to_ms (hdr_value_at_percentile (histogram, 50.0));
+        result[i].p75   = us_to_ms (hdr_value_at_percentile (histogram, 75.0));
+        result[i].p90   = us_to_ms (hdr_value_at_percentile (histogram, 90.0));
+        result[i].p95   = us_to_ms (hdr_value_at_percentile (histogram, 95.0));
+        result[i].p99   = us_to_ms (hdr_value_at_percentile (histogram, 99.0));
+        result[i].p999  = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
+    }
     return result;
 }
 
