@@ -1537,9 +1537,23 @@ MonitorConfig config) {
 
     // A scrape must not outlive its own cadence: the sample a late answer
     // carries is no longer about the moment it was asked for, and the loop
-    // would spend the whole run behind itself. Three quarters of the interval
-    // leaves room to store the row and come back round.
-    const int timeout_ms = std::max (100, config.interval_ms * 3 / 4);
+    // would spend the whole run behind itself. Derived from the interval unless
+    // `monitorScrapeTimeoutMs` says otherwise - an exposition that takes longer
+    // to render than the derivation allows would otherwise fail every scrape,
+    // and the only way out was slowing the cadence, which also thins the data.
+    const int timeout_ms =
+    resolve_scrape_timeout_ms (config.interval_ms, config.scrape_timeout_ms);
+    if (config.scrape_timeout_ms > timeout_ms) {
+        // Said once, at the top: the setting is engine-wide but the cap is the
+        // interval of *this* block, so a value that is fine for a slow run is
+        // shortened on a fast one, and silence would look like the setting had
+        // not taken.
+        vayu::utils::log_warning ("Monitor scrape timeout for run " +
+        context->run_id + " capped at the scrape interval (" +
+        std::to_string (timeout_ms) + "ms); 'monitorScrapeTimeoutMs' is " +
+        std::to_string (config.scrape_timeout_ms) + "ms, which is longer than this run's " +
+        std::to_string (config.interval_ms) + "ms cadence");
+    }
 
     // No cookie jar: this is the engine talking on its own behalf, like the
     // OAuth token call and the update check (see ClientConfig::cookie_jar).

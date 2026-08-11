@@ -265,12 +265,12 @@ constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 /**
  * @brief The server-vitals monitor a run may scrape alongside its own metrics.
  *
- * The two a user reaches for are config-backed (`monitorIntervalMs`,
- * `monitorMaxSeries`) and these are their seeds. The other three are rails
- * rather than preferences: the interval bounds exist to stop a cadence that
- * measures the scraper instead of the target, and the backoff threshold is how
- * politely the loop gives up on a dead endpoint - the same reason
- * `threshold_eval`'s budget ranges are constants.
+ * The three a user reaches for are config-backed (`monitorIntervalMs`,
+ * `monitorMaxSeries`, `monitorScrapeTimeoutMs`) and these are their seeds. The
+ * rest are rails rather than preferences: the interval bounds exist to stop a
+ * cadence that measures the scraper instead of the target, and the backoff
+ * threshold is how politely the loop gives up on a dead endpoint - the same
+ * reason `threshold_eval`'s budget ranges are constants.
  */
 namespace monitor {
 /// Floor on `monitor.intervalMs`. Below this the scrape's own latency is a
@@ -286,6 +286,13 @@ constexpr size_t MAX_SERIES = 8;
 /// Consecutive failed scrapes before the loop logs once and backs off. Below
 /// this a scrape failure is a gap in the series and nothing else.
 constexpr int FAILURES_BEFORE_BACKOFF = 5;
+/// `monitorScrapeTimeoutMs` seed. Zero is the sentinel for "derive from the
+/// interval", which is what keeps the timeout tracking a cadence the user
+/// changes later; see `resolve_scrape_timeout_ms`.
+constexpr int DEFAULT_SCRAPE_TIMEOUT_MS = 0;
+/// Floor the derivation never goes below, for an interval small enough that
+/// three quarters of it would time out before a loopback endpoint could answer.
+constexpr int MIN_DERIVED_SCRAPE_TIMEOUT_MS = 100;
 } // namespace monitor
 
 /**

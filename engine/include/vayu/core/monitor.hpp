@@ -56,7 +56,7 @@ enum class MonitorFormat {
 namespace monitor_limits = constants::monitor;
 
 /**
- * @brief The two limits a user can move, resolved from engine config.
+ * @brief The three limits a user can move, resolved from engine config.
  *
  * Passed in rather than read here so the functions below stay pure over
  * arbitrary JSON and hold no `Database` - the same split
@@ -70,6 +70,9 @@ struct MonitorLimits {
     int default_interval_ms = monitor_limits::DEFAULT_INTERVAL_MS;
     /// How many metric names one run may chart (`monitorMaxSeries`).
     size_t max_series = monitor_limits::MAX_SERIES;
+    /// How long one scrape may take (`monitorScrapeTimeoutMs`), `0` meaning
+    /// "derive from the interval" - see `resolve_scrape_timeout_ms`.
+    int scrape_timeout_ms = monitor_limits::DEFAULT_SCRAPE_TIMEOUT_MS;
 };
 
 /** A validated monitor block, ready for the scrape loop. */
@@ -78,20 +81,45 @@ struct MonitorConfig {
     int interval_ms      = monitor_limits::DEFAULT_INTERVAL_MS;
     MonitorFormat format = MonitorFormat::Prometheus;
     std::vector<std::string> series;
+    /// The configured `monitorScrapeTimeoutMs`, carried unresolved so the loop
+    /// resolves it against the interval this block actually runs at. `0` is the
+    /// derive sentinel, which is why a default-constructed config scrapes on
+    /// exactly the timeout the loop used before the setting existed.
+    int scrape_timeout_ms = monitor_limits::DEFAULT_SCRAPE_TIMEOUT_MS;
 };
 
 /**
- * @brief Read the `monitorIntervalMs` / `monitorMaxSeries` settings, falling
- *        back to their compile-time seeds.
+ * @brief Read the `monitorIntervalMs` / `monitorMaxSeries` /
+ *        `monitorScrapeTimeoutMs` settings, falling back to their compile-time
+ *        seeds.
  *
- * One reader for both keys, so the route's gate and the run's own reader cannot
- * disagree about which limits are in force - the same reason
+ * One reader for all three keys, so the route's gate and the run's own reader
+ * cannot disagree about which limits are in force - the same reason
  * `read_auth_refresh_tuning` exists. A value outside the range `POST /config`
  * enforces can only come from a hand-edited row, and is discarded rather than
  * trusted: a zero interval is a tight scrape loop and a zero cap would reject
  * every block a user could write.
  */
 [[nodiscard]] MonitorLimits read_monitor_limits (vayu::db::Database& db);
+
+/**
+ * @brief How long one scrape of a @p interval_ms cadence may take.
+ *
+ * @p configured_timeout_ms is `monitorScrapeTimeoutMs` as the user set it.
+ * Zero - the seeded default - derives the timeout from the cadence at three
+ * quarters of it, so a user who slows the interval gets a proportionally longer
+ * scrape without touching a second setting. Any positive value is honoured as
+ * written, because how long you are willing to wait for your own metrics
+ * endpoint is not something this engine can second-guess; the one thing it may
+ * not do is outlive its own cadence, so it is capped at @p interval_ms. Past
+ * that the loop would spend the run behind itself, carrying samples that are no
+ * longer about the moment they were asked for.
+ *
+ * Pure and total: a nonsensical interval yields a nonsensical-but-safe timeout
+ * rather than a division by zero, because a hand-edited snapshot reaches the
+ * loop through `monitor_config_from`.
+ */
+[[nodiscard]] int resolve_scrape_timeout_ms (int interval_ms, int configured_timeout_ms);
 
 /**
  * @brief Reject a `monitor` block the run could not act on.
