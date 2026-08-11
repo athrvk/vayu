@@ -12,7 +12,7 @@
  */
 
 export { UPlotChart } from "./UPlotChart";
-export type { UPlotChartProps, UPlotSeriesSpec, Marker } from "./UPlotChart";
+export type { UPlotChartProps, UPlotSeriesSpec, Marker, Annotation } from "./UPlotChart";
 export { CHART_SYNC } from "./syncKeys";
 export {
 	LatencyPercentilesChart,
@@ -23,4 +23,7 @@ export {
 	ServerVitalsChart,
 } from "./TimeSeriesCharts";
 export { ResponseTimeVsConcurrencyChart, HdrPercentileChart } from "./ScatterAndDistribution";
+// Exported for the panels that print the same numbers a chart plots - a summary
+// beside a line has to spell its peak the way the line's tooltip does.
+export { fmtVitals } from "./formatters";
 export { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";

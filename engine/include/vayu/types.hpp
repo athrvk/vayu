@@ -887,6 +887,17 @@ struct Run {
     // default so sync_schema can ALTER TABLE ADD COLUMN it onto an existing
     // runs table (same pattern as requests.follow_redirects).
     std::string summary; // TEXT NOT NULL DEFAULT ''
+    // Pinned as a known-good run to compare later runs against. Set through
+    // `PUT /runs/:id/baseline`; the engine stays policy-free about *which*
+    // baseline applies to a run (a client picks that, by request), so several
+    // runs may carry the flag at once.
+    //
+    // Retention reads it: `prune_runs` never deletes a baseline and never
+    // counts one toward the retained-run cap, because a pin the cap can expire
+    // is not a pin. Defaulted (and stored with a `default_value`) so
+    // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
+    // the same pattern as `summary` above and `requests.follow_redirects`.
+    bool baseline = false; // INTEGER NOT NULL DEFAULT 0
 };
 
 /**
@@ -989,6 +1000,33 @@ struct PendingResultBody {
     bool truncated     = false;
     bool binary        = false;
     std::string content_type;
+};
+
+/**
+ * @brief One request captured by a webhook inbox listener (issue #480).
+ *
+ * The inbox itself is process-lifetime state on `InboxManager` - the rows are
+ * here because a capture list is paged and must not grow a running daemon's
+ * heap without bound. `Database::clear_inbox_requests_all` runs at `init()` for
+ * exactly that reason: no inbox survives a restart, so neither may its rows.
+ *
+ * `body` holds at most `constants::inbox::MAX_BODY_BYTES`; `body_truncated`
+ * says the stored bytes are a prefix, and `body_bytes` is the size as received.
+ * Both are stored rather than derived because a truncated capture that looked
+ * complete is the failure mode this table exists to avoid.
+ */
+struct InboxRequest {
+    int id = 0; // PK, autoincrement - also the SSE event id
+    std::string inbox_id;
+    int64_t received_at = 0; // Unix ms
+    std::string method;
+    std::string path;
+    std::string query;   // raw query string, without the '?'
+    std::string headers; // JSON object
+    std::string body;    // stored bytes, already truncated to the cap
+    int64_t body_bytes  = 0;
+    bool body_truncated = false;
+    std::string remote_addr;
 };
 
 /**

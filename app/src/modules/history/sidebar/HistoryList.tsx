@@ -18,6 +18,7 @@ import {
 import {
 	useRunsQuery,
 	useDeleteRunMutation,
+	useSetRunBaselineMutation,
 	flattenRunPages,
 	runsTotal,
 	useCollectionsQuery,
@@ -101,10 +102,12 @@ export default function HistoryList() {
 		isFetchingNextPage,
 	} = useRunsQuery(debouncedSearch);
 	const deleteRunMutation = useDeleteRunMutation();
+	const setBaselineMutation = useSetRunBaselineMutation();
 	const showToast = useToastStore((s) => s.showToast);
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
+	const [pinningId, setPinningId] = useState<string | null>(null);
 
 	// Flatten (de-duped) the loaded pages, then apply the client-side type/
 	// status/sort filters over them. `total` is the server's count for the
@@ -160,6 +163,32 @@ export default function HistoryList() {
 	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
 		event.stopPropagation();
 		setDeleteConfirmRunId(runId);
+	};
+
+	/**
+	 * Pin or unpin without a confirmation step: unlike a delete, both
+	 * directions are one click away from being undone, and the pin is visible
+	 * on the row either way.
+	 */
+	const handleToggleBaseline = async (
+		runId: string,
+		baseline: boolean,
+		event: React.MouseEvent
+	) => {
+		event.stopPropagation();
+		setPinningId(runId);
+		try {
+			await setBaselineMutation.mutateAsync({ runId, baseline });
+		} catch {
+			// Same reason the delete path toasts: a silent rejection leaves the
+			// row exactly as it was, which reads as the click not registering.
+			showToast(
+				baseline ? "Couldn't pin this run as the baseline." : "Couldn't unpin this run.",
+				"error"
+			);
+		} finally {
+			setPinningId(null);
+		}
 	};
 
 	const handleConfirmDelete = async () => {
@@ -324,7 +353,9 @@ export default function HistoryList() {
 									run={run}
 									onSelect={navigateToRunDetail}
 									onDelete={handleDeleteClick}
+									onToggleBaseline={handleToggleBaseline}
 									isDeleting={deletingId === run.id}
+									isTogglingBaseline={pinningId === run.id}
 									isSelected={selectedRunId === run.id}
 									collectionName={collectionName(run)}
 								/>

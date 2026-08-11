@@ -47,7 +47,9 @@ export {
 	useRecentDesignRunsQuery,
 	RECENT_DESIGN_RUN_LIMIT,
 	useLastCollectionRunQuery,
+	useBaselineRunQuery,
 	useDeleteRunMutation,
+	useSetRunBaselineMutation,
 	useStartScenarioRunMutation,
 	useInvalidateRuns,
 	isRunNotFound,
@@ -68,6 +70,16 @@ export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 
 // Cookie jar
 export { useCookiesQuery, useClearCookiesMutation } from "./cookies";
+
+// Webhook inbox
+export {
+	useInboxesQuery,
+	useInboxCapturesQuery,
+	useStartInboxMutation,
+	useStopInboxMutation,
+	useUpdateInboxResponseMutation,
+	useClearInboxCapturesMutation,
+} from "./inbox";
 
 // Health & Config
 export { useHealthQuery } from "./health";

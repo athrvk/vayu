@@ -147,6 +147,7 @@ describe("the variables icon", () => {
 				onNewRequest={() => {}}
 				onHistory={() => {}}
 				onVariables={() => {}}
+				onInbox={() => {}}
 			/>
 		);
 		const tile = screen.getByRole("button", { name: /Variables/ });

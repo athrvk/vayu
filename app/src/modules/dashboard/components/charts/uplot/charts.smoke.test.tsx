@@ -106,6 +106,47 @@ describe("centralized uPlot charts - smoke", () => {
 		unmount();
 	});
 
+	it("mounts the time charts with anomaly windows attached", () => {
+		// The band drawing itself is asserted against a recording context in
+		// plugins.annotations.test.ts; what this covers is the prop reaching a real
+		// chart through the semantic wrapper without tearing the plot down.
+		const anomalies = [
+			{
+				kind: "latency_spike" as const,
+				startSeconds: 2,
+				endSeconds: 4,
+				magnitude: 4.2,
+				label: "p99 4.2x baseline for 2s",
+			},
+			{
+				kind: "first_5xx" as const,
+				startSeconds: 3,
+				endSeconds: 3,
+				magnitude: 1,
+				label: "first 503 response",
+			},
+		];
+		expect(anomalies.length).toBeGreaterThan(0);
+
+		for (const node of [
+			<LatencyPercentilesChart key="a" history={history} anomalies={anomalies} />,
+			<RequestRateChart key="b" history={history} anomalies={anomalies} />,
+			<ErrorRateChart key="c" history={history} anomalies={anomalies} />,
+			<ServerVitalsChart
+				key="d"
+				history={history}
+				samples={history.map((m) => ({
+					timestamp: m.timestamp,
+					series: { cpu: m.current_concurrency / 10 },
+				}))}
+				anomalies={anomalies}
+			/>,
+		]) {
+			const { unmount } = render(node);
+			unmount();
+		}
+	});
+
 	// The row must disappear for a run that scraped nothing, rather than render
 	// an empty plot frame on every dashboard.
 	it("renders nothing when the run has no monitor samples", () => {

@@ -9,6 +9,7 @@
  * Components barrel export
  */
 
+export { default as BaselineComparison } from "./BaselineComparison";
 export { default as LatencyMetric } from "./LatencyMetric";
 export { default as SampleRequestCard } from "./SampleRequestCard";
 export { default as ScenarioStepCard } from "./ScenarioStepCard";
@@ -17,3 +18,4 @@ export { default as OverviewTab } from "./OverviewTab";
 export { default as PerformanceTab } from "./PerformanceTab";
 export { default as SamplesTab } from "./SamplesTab";
 export { default as HistoricalChartsSection } from "./HistoricalChartsSection";
+export { RunEvents } from "./RunEvents";

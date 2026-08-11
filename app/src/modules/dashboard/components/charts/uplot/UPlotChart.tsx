@@ -28,10 +28,17 @@ import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { readUplotTheme, currentThemeKey, type ColorRole } from "./uplotTheme";
-import { markersPlugin, tooltipPlugin, type Marker, type ValueFormatter } from "./plugins";
+import {
+	markersPlugin,
+	annotationsPlugin,
+	tooltipPlugin,
+	type Marker,
+	type Annotation,
+	type ValueFormatter,
+} from "./plugins";
 import { subscribeFocus, publishFocus, type FocusValue } from "./chartFocus";
 
-export type { Marker } from "./plugins";
+export type { Marker, Annotation } from "./plugins";
 
 export type ScaleKey = "y" | "y2";
 
@@ -78,6 +85,8 @@ export interface UPlotChartProps {
 	y2Format?: (v: number) => string;
 	/** Reference markers: breakpoint (vertical), target/SLO (horizontal). */
 	markers?: Marker[];
+	/** Shaded x-axis windows: the run's detected anomaly spans. */
+	annotations?: Annotation[];
 	/** Shared key → hover/zoom on one chart drives every chart with the same key. */
 	syncKey?: string;
 	/**
@@ -122,6 +131,7 @@ export function UPlotChart({
 	yFormat = defaultY,
 	y2Format = (v) => `${Math.round(v)}`,
 	markers = [],
+	annotations = [],
 	syncKey,
 	xValueSync = true,
 	focusTimes,
@@ -130,6 +140,7 @@ export function UPlotChart({
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const plotRef = useRef<uPlot | null>(null);
 	const markersRef = useRef<Marker[]>(markers);
+	const annotationsRef = useRef<Annotation[]>(annotations);
 	// Cross-chart focus (scatter ↔ time). A stable identity so a chart ignores its
 	// own echo; a suppress flag so applying an external focus never re-publishes
 	// (this is what makes the pub/sub loop-safe).
@@ -141,6 +152,14 @@ export function UPlotChart({
 		markersRef.current = markers;
 		plotRef.current?.redraw();
 	}, [markers]);
+
+	// Same ref-and-redraw path as markers, and for the same reason: annotations
+	// change as a run streams, and re-creating the plot for each new window would
+	// drop the user's zoom.
+	useEffect(() => {
+		annotationsRef.current = annotations;
+		plotRef.current?.redraw();
+	}, [annotations]);
 
 	useEffect(() => {
 		focusTimesRef.current = focusTimes;
@@ -280,6 +299,9 @@ export function UPlotChart({
 					],
 				},
 				plugins: [
+					// Bands first: they are a background wash, and the markers' dashed
+					// rules must stay legible over them.
+					annotationsPlugin(() => annotationsRef.current, theme),
 					markersPlugin(() => markersRef.current, theme),
 					tooltipPlugin({
 						theme,

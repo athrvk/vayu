@@ -59,6 +59,42 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 - Server-Sent Events (SSE) for real-time metrics streaming
 - Single-threaded request handling (non-blocking I/O)
 
+### Listeners
+
+This is the engine's whole listener inventory. The management API is the only long-lived one;
+three more are opened on demand, and the rule that separates them is where each may bind.
+
+| Listener | Bind | Opened by | Serves |
+|----------|------|-----------|--------|
+| Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
+| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
+| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
+| [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response |
+
+**The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
+are different reasons:
+
+- The **management API** has no route authentication and answers `Access-Control-Allow-Origin: *`
+  (`server.cpp`), so anything that can reach it can read every stored request, every credential the
+  database holds, and start runs against arbitrary targets.
+- A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization
+  code; publishing either would publish a credential.
+- An **inbox** serves none of that - it accepts a request, stores it, and replies with what the user
+  configured - so exposing it to a LAN exposes capture-and-echo and nothing more. A webhook source
+  on another host is a real case; a management API on another host is not one worth the blast
+  radius.
+
+Even so, wide is never the default: `bind` outside 127.0.0.0/8 and `::1` is refused unless the
+caller sends `"confirmNonLoopback": true`, and the inbox then reports `loopback: false` on every
+read so the UI can badge it. A capture is stored in plaintext like the rest of the request store -
+a webhook payload can carry a signature or a token, and nothing here treats it as credential-grade.
+
+Each on-demand listener is owned by a manager that is a **member of `Server`, declared before
+`server_`** (`engine/include/vayu/http/server.hpp`). Members are destroyed in reverse order, so the
+route lambdas holding references to a manager are gone before its destructor stops and joins the
+listener threads - and the `Database` those threads write to, being external to `Server`, is still
+alive at that point.
+
 ### Event Loop (`curl_multi`)
 
 The event loop manages concurrent HTTP request execution using libcurl's multi interface.
@@ -281,6 +317,21 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
+- **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
+  `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
+  and `/authorize`, so auth flows are exercisable offline with no real identity
+  provider. It mints HS256 JWTs with a random per-issuer key (libsodium again),
+  auto-approves `/authorize` with PKCE S256 verification, rotates refresh
+  tokens, and can be flipped between healthy and `slow` / `server_error` /
+  `invalid_client` while running. In-memory only and owned by the `Server`, on
+  the same reverse-member-order rule as the authorize manager.
+
+**Listener inventory.** Both auth listeners are spawned, loopback-bound and
+short-lived - the interactive-auth callback (one per attempt, 5-minute TTL) and
+mock issuers (at most 8, until stopped) - and neither may ever bind wider than
+`127.0.0.1`, because one carries an authorization code and the other hands out
+bearer tokens. The full inventory, including the one listener that *may* bind
+wider and why, is [above](#listeners).
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See
@@ -786,7 +837,9 @@ data/
 
 ## Security
 
-- **Local-only binding**: Server only listens on `127.0.0.1`
+- **Local-only binding**: the management API only listens on `127.0.0.1`. A
+  [webhook inbox](#listeners) is the single listener that may bind wider, and only when the
+  caller confirms it explicitly; it serves no engine route.
 - **Script sandboxing**: QuickJS contexts have no filesystem/network access
 - **Single instance**: File lock prevents multiple daemon instances
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens

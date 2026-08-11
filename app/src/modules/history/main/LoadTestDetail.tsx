@@ -37,9 +37,16 @@ import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore } from "@/stores";
-import { OverviewTab, PerformanceTab, SamplesTab, ScenarioStepsTab } from "./components";
+import {
+	BaselineComparison,
+	OverviewTab,
+	PerformanceTab,
+	SamplesTab,
+	ScenarioStepsTab,
+} from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
 import type { LoadTestDetailProps, MonitorSeriesResponse, TimeSeriesResponse } from "../types";
 
@@ -144,6 +151,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		if (timeSeries.length < 2) return base;
 		return { ...base, breakpoint: computeBreakpoint(timeSeries, sloThresholdMs) };
 	}, [report, timeSeries, sloThresholdMs]);
+
+	// The run's degradation windows, from the same series the charts plot. Derived
+	// once here and handed to both tabs: Overview names them, Performance shades
+	// them, and neither re-derives.
+	const anomalies = useMemo(() => detectAnomalies(timeSeries), [timeSeries]);
 
 	// One line on whether the run's OAuth 2.0 credential was kept current - the
 	// answer to 401s that appear partway through an otherwise healthy run.
@@ -270,6 +282,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</div>
 				)}
 
+				{/* How this run compares with the one pinned as its baseline.
+				    Absent when nothing is pinned, or when this run is the pin -
+				    see BaselineComparison. */}
+				<BaselineComparison report={report} runId={runId} />
+
 				{/* What kept the run authorized. Drawn only when the engine was able to
 				    refresh at all - a run without the section reports nothing here,
 				    exactly as every run did before mid-run refresh existed. */}
@@ -357,7 +374,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				<ScrollArea className="flex-1">
 					<div className="p-6">
 						<TabsContent value="overview" className="mt-0 space-y-4">
-							<OverviewTab report={report} derived={derived} />
+							<OverviewTab report={report} derived={derived} anomalies={anomalies} />
 						</TabsContent>
 
 						<TabsContent value="performance" className="mt-0 space-y-4">
@@ -365,6 +382,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								report={report}
 								runId={runId}
 								derived={derived}
+								anomalies={anomalies}
 								timeSeries={timeSeries}
 								monitorSamples={monitorSamples}
 								isLoadingSeries={isLoadingSeries}

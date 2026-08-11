@@ -18,10 +18,11 @@ import { formatNumber } from "@/utils";
 import { CapacitySummary, ThresholdVerdict } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
+import { RunEvents } from "./RunEvents";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
-export default function OverviewTab({ report, derived }: TabProps) {
+export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 	return (
 		<>
 			{/* Mode-adaptive summary - same hero cards + stat row the live dashboard shows.
@@ -39,6 +40,12 @@ export default function OverviewTab({ report, derived }: TabProps) {
 			    rather than below the charts: "what can it take" is the question
 			    the run was started to answer. Absent for every other mode. */}
 			<CapacitySummary capacity={report.capacity} />
+
+			{/* When the run went wrong, in words. Above the status/error totals
+			    because those are cumulative and this is the thing they hide: a
+			    3-second collapse and a steady 0.4% failure rate can produce the
+			    same summary row. */}
+			<RunEvents anomalies={anomalies} />
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (

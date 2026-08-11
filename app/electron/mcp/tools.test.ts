@@ -47,6 +47,10 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue([]),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
+		getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: "req_1", baseline: false }),
+		listBaselineRuns: vi
+			.fn()
+			.mockResolvedValue({ data: [{ id: "run_pinned", baseline: true }] }),
 		composeRequest: identityCompose(),
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
@@ -1462,6 +1466,99 @@ describe("dispatchTool", () => {
 		expect(payload.thresholds).toEqual({ latencyP99Ms: 50, maxErrorRatePct: 0.1 });
 	});
 
+	test("start_load_run forwards the monitor block to /runs unchanged", async () => {
+		// The keys are the engine's own and `validate_run_config` is what judges
+		// them, so anything renamed or dropped on this path is a scrape the run
+		// silently never performs.
+		const client = fakeClient();
+		const monitor = {
+			url: "http://localhost:9100/metrics",
+			intervalMs: 2000,
+			format: "prometheus" as const,
+			series: ["process_cpu_seconds_total", "go_memstats_heap_inuse_bytes"],
+		};
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.monitor).toEqual(monitor);
+	});
+
+	test("start_load_run sends no monitor key when none was asked for", () => {
+		const parsed = parseArgs("start_load_run", { url: "https://api.example.com" });
+		expect(parsed.monitor).toBeUndefined();
+	});
+
+	test("start_load_run allows a loopback monitor beside a non-loopback target", async () => {
+		// The allowlist decision, in the shape that motivates it: the target is a
+		// public host on the list, the vitals endpoint is the machine's own
+		// exporter and is on no list at all.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor: { url: "http://127.0.0.1:9100/metrics", series: ["up"] },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+	});
+
+	test("start_load_run refuses a public monitor host that is not allowlisted", async () => {
+		// The other half of the same decision - and the run must not start, since
+		// a refusal that still generated load would be no guard at all.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor: { url: "https://metrics.evil.test/m", series: ["up"] },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/monitor endpoint is a second host/i);
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+	});
+
+	test("start_load_run leaves the monitor block's ranges to the engine", () => {
+		// Deliberate: `monitor.series`' ceiling is the `monitorMaxSeries` setting,
+		// so a copy of it here would refuse blocks the engine accepts. The schema
+		// types the shape only - a wrong *type* is still caught.
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { url: "http://localhost:9100/m", intervalMs: 1, series: ["a"] },
+			})
+		).not.toThrow();
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { url: "http://localhost:9100/m", series: "cpu" },
+			})
+		).toThrow();
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { series: ["a"] },
+			})
+		).toThrow();
+	});
+
 	test("start_load_run sends no thresholds key when none were declared", () => {
 		// An empty object is a 400 from POST /runs, so "no budgets" has to be
 		// an absent key rather than an empty one.
@@ -2054,6 +2151,93 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		expect(client.getRunReport).toHaveBeenCalledTimes(2);
 		expect(firstText(res)).toContain("run_a");
+		// An explicit base is used as given - no baseline lookup happens.
+		expect(client.listBaselineRuns).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * Omitting the base is the "did my change regress?" shape: the agent knows
+	 * the run it just started and not which older run is the reference. It
+	 * resolves through the same endpoint the history view's strip uses, so the
+	 * two cannot answer the question about different pairs of runs.
+	 */
+	test("compare_runs falls back to the target's pinned baseline", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBeFalsy();
+		expect(client.getRun).toHaveBeenCalledWith("run_b", undefined);
+		expect(client.listBaselineRuns).toHaveBeenCalledWith("req_1", undefined);
+		expect(client.getRunReport).toHaveBeenCalledWith("run_pinned", undefined);
+		expect(firstText(res)).toContain("run_pinned");
+	});
+
+	test("compare_runs says so when the request has no baseline pinned", async () => {
+		const client = fakeClient({ listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }) });
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/No run is pinned as the baseline/i);
+		// And nothing was compared against a run nobody chose.
+		expect(client.getRunReport).not.toHaveBeenCalled();
+	});
+
+	test("compare_runs says so when the target ran no saved request", async () => {
+		const client = fakeClient({
+			getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: null }),
+		});
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/did not run a saved request/i);
+		expect(client.listBaselineRuns).not.toHaveBeenCalled();
+	});
+
+	test("compare_runs refuses to compare the baseline with itself", async () => {
+		const client = fakeClient({
+			listBaselineRuns: vi
+				.fn()
+				.mockResolvedValue({ data: [{ id: "run_b", baseline: true }] }),
+		});
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/is itself the baseline/i);
+		expect(client.getRunReport).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The direction label is the half of a delta a number cannot carry, and an
+	 * agent reading `delta: -12` has no other way to know whether that is good.
+	 */
+	test("compare_runs labels which direction is an improvement", async () => {
+		const client = fakeClient({
+			getRunReport: vi.fn().mockResolvedValue({
+				latency: { p99: 40 },
+				summary: { avgRps: 100, totalRequests: 10 },
+				statusCodes: {},
+			}),
+		});
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+
+		const parsed = JSON.parse(firstText(res)) as {
+			latency: Array<{ metric: string; direction: string }>;
+			throughput: Array<{ metric: string; direction: string }>;
+			reliability: Array<{ metric: string; direction: string }>;
+		};
+		expect(parsed.latency.find((m) => m.metric === "latency.p99")?.direction).toBe(
+			"lower-is-better"
+		);
+		expect(parsed.throughput.find((m) => m.metric === "summary.avgRps")?.direction).toBe(
+			"higher-is-better"
+		);
+		expect(
+			parsed.reliability.find((m) => m.metric === "summary.totalRequests")?.direction
+		).toBe("neutral");
 	});
 });
 

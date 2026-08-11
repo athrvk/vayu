@@ -238,16 +238,33 @@ export class EngineClient {
 	}
 
 	/**
-	 * One run row by id (`GET /runs/:id`), carrying its `status` and its
-	 * `configSnapshot` rather than the list row's compact `summary`.
+	 * One run's row (`GET /runs/:id`), carrying its `status` and its
+	 * `configSnapshot` rather than the list row's compact `summary`, plus which
+	 * saved request it ran and whether it is pinned as a baseline.
 	 *
-	 * This is how the CI gate learns a run has stopped running: `POST /runs`
-	 * returns as soon as the run is accepted, and the live-metrics stream says
-	 * what is happening, not whether it is over. The status is the only field
-	 * that reaches a terminal value exactly once.
+	 * Two readers: `compare_runs` takes the saved request id to find a target's
+	 * baseline when the caller named none, and the CI gate takes the status to
+	 * learn a run has stopped running - `POST /runs` returns as soon as the run
+	 * is accepted, and the live-metrics stream says what is happening, not
+	 * whether it is over. The status is the only field that reaches a terminal
+	 * value exactly once.
 	 */
 	getRun(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/runs/${encodeURIComponent(runId)}`, undefined, signal);
+	}
+
+	/**
+	 * The runs pinned as baselines for one saved request, newest first. One row
+	 * is all any caller needs - "the baseline" is the most recent pin - so the
+	 * page is bounded to it rather than to the 100 `listRuns` allows.
+	 */
+	listBaselineRuns(requestId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/runs?baseline=true&limit=1&offset=0&requestId=${encodeURIComponent(requestId)}`,
+			undefined,
+			signal
+		);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {

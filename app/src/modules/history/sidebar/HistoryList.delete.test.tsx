@@ -66,6 +66,9 @@ vi.mock("@/queries", () => ({
 		isFetchingNextPage: false,
 	}),
 	useDeleteRunMutation: () => ({ mutateAsync, isPending: false }),
+	// The pin is not what these cases are about; the list only needs the hook
+	// to exist, since RunItem is stubbed below.
+	useSetRunBaselineMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	flattenRunPages: (d: { pages?: Array<{ data: unknown[] }> } | undefined) =>
 		d?.pages?.flatMap((p) => p.data) ?? [],
 	runsTotal: (d: { pages?: Array<{ pagination: { total: number } }> } | undefined) =>

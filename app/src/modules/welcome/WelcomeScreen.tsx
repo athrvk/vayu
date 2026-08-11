@@ -162,6 +162,7 @@ export default function WelcomeScreen() {
 						onNewRequest={handleNewRequest}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
+						onInbox={() => openTab({ type: "inbox", entityId: null })}
 					/>
 				)}
 			</div>

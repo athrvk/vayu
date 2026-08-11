@@ -79,6 +79,7 @@ export const API_ENDPOINTS = {
 		requestId?: string;
 		collectionId?: string;
 		q?: string;
+		baseline?: boolean;
 	}) => {
 		const qs = new URLSearchParams();
 		if (params.limit !== undefined) qs.set("limit", String(params.limit));
@@ -88,10 +89,16 @@ export const API_ENDPOINTS = {
 		if (params.requestId) qs.set("requestId", params.requestId);
 		if (params.collectionId) qs.set("collectionId", params.collectionId);
 		if (params.q) qs.set("q", params.q);
+		// Tested for `undefined` rather than truthiness: `baseline: false` is a
+		// real question ("the runs that are not pinned"), and a falsy check
+		// would drop it and answer with every run instead.
+		if (params.baseline !== undefined) qs.set("baseline", String(params.baseline));
 		const s = qs.toString();
 		return s ? `/runs?${s}` : `/runs`;
 	},
 	RUN_BY_ID: (id: string) => `/runs/${id}`,
+	/** Pin or unpin a run as the baseline later runs are compared against. */
+	RUN_BASELINE: (id: string) => `/runs/${id}/baseline`,
 	RUN_REPORT: (id: string) => `/runs/${id}/report`,
 	RUN_STOP: (id: string) => `/runs/${id}/stop`,
 	// The response headers and body captured for a run's retained samples.
@@ -119,6 +126,20 @@ export const API_ENDPOINTS = {
 	// (the import path no longer creates items one POST at a time).
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_APPLY: `/import/apply`,
+
+	// Webhook inbox (issue #480). The engine hosts the listener; these drive its
+	// lifecycle and read what it captured. START is a verb path rather than a
+	// POST to `/inbox` because an inbox is not a stored resource - it exists for
+	// as long as the engine process does, so the create/update split #95 draws
+	// for collections and requests does not apply.
+	INBOX: `/inbox`,
+	INBOX_START: `/inbox/start`,
+	INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,
+	INBOX_BY_ID: (inboxId: string) => `/inbox/${inboxId}`,
+	INBOX_CAPTURES: (inboxId: string, limit: number, offset: number) =>
+		`/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,
+	INBOX_CAPTURES_CLEAR: (inboxId: string) => `/inbox/${inboxId}/requests`,
+	INBOX_LIVE: (inboxId: string) => `/inbox/${inboxId}/live`,
 
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,

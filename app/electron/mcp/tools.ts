@@ -22,7 +22,12 @@ import type { EngineClient } from "./engine-client.js";
 import { EngineRequestError, EngineTimeoutError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
-import { checkAllowlist, checkLoadCaps, defaultDurationUnderCap } from "./safety.js";
+import {
+	checkAllowlist,
+	checkLoadCaps,
+	checkMonitorHost,
+	defaultDurationUnderCap,
+} from "./safety.js";
 import { compareReports } from "./compare.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
@@ -271,6 +276,55 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
 	return errorResult(
 		"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
 	);
+}
+
+/**
+ * The run pinned as baseline for whatever saved request @p targetRunId ran -
+ * `compare_runs`'s answer when the caller named no base.
+ *
+ * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&
+ * requestId=...` is ordered newest-first, so "the baseline" is its first row.
+ * That is the same question the history view's vs-baseline strip asks, so an
+ * agent and the UI compare a run against the same pin.
+ *
+ * Every way this can fail to find one throws a message naming the fix, because
+ * the alternative - silently comparing against some other run - is a wrong
+ * answer presented as a right one. A run that has no saved request behind it
+ * (an ad-hoc load run) has nothing to resolve *through*, which is a different
+ * problem from a request with no pin, and says so.
+ */
+async function resolveBaseline(
+	targetRunId: string,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<string> {
+	const run = (await ctx.client.getRun(targetRunId, signal)) as Record<string, unknown> | null;
+	const requestId = run && typeof run.requestId === "string" ? run.requestId : null;
+	if (!requestId) {
+		throw new ToolArgError(
+			`Run ${targetRunId} did not run a saved request, so it has no baseline to resolve. ` +
+				`Pass "baseRunId" explicitly.`
+		);
+	}
+
+	const page = (await ctx.client.listBaselineRuns(requestId, signal)) as {
+		data?: Array<Record<string, unknown>>;
+	} | null;
+	const baseline = page?.data?.[0];
+	const baseRunId = baseline && typeof baseline.id === "string" ? baseline.id : null;
+	if (!baseRunId) {
+		throw new ToolArgError(
+			`No run is pinned as the baseline for request ${requestId}. Pin one in Vayu's ` +
+				`history sidebar, or pass "baseRunId" explicitly.`
+		);
+	}
+	if (baseRunId === targetRunId) {
+		throw new ToolArgError(
+			`Run ${targetRunId} is itself the baseline for request ${requestId}; there is ` +
+				`nothing to compare it against. Pass "baseRunId" to compare it with another run.`
+		);
+	}
+	return baseRunId;
 }
 
 // --- Confirmation gate -------------------------------------------------------
@@ -624,8 +678,8 @@ const LOAD_RUN_DURATION_FIELDS = ["duration", "rampUpDuration", "stepDuration"] 
 
 /**
  * The `POST /runs` payload for a load run described the way `start_load_run`
- * describes one: composed engine-side, then the mode, the strategy fields and
- * the pass/fail budgets laid on top.
+ * describes one: composed engine-side, then the mode, the strategy fields, the
+ * pass/fail budgets and the monitor block laid on top.
  *
  * **No safety guard is applied here** - not the allowlist, not the caps, not
  * the duration default that keeps an omitted duration under one. Those are the
@@ -666,6 +720,13 @@ export async function buildLoadRunPayload(
 	// on the gate).
 	if (args.thresholds && typeof args.thresholds === "object") {
 		payload.thresholds = args.thresholds;
+	}
+	// Same posture as `thresholds`: the keys are the engine's own, so the block
+	// travels unchanged rather than being rebuilt field by field here. Whether
+	// the monitor's host is one this caller may scrape is a *guard*, and stays
+	// with the caller that has an allowlist - `start_load_run`.
+	if (args.monitor && typeof args.monitor === "object") {
+		payload.monitor = args.monitor;
 	}
 
 	const loadParams: LoadRunParams = {
@@ -784,6 +845,10 @@ const metricDeltaSchema = z.object({
 	target: z.number().nullable(),
 	delta: z.number().nullable(),
 	pctChange: z.number().nullable(),
+	// Which way is an improvement. Without it a reader has to know that falling
+	// latency is good and falling throughput is not; `neutral` marks the metric
+	// (total requests) where neither direction is a verdict.
+	direction: z.enum(["lower-is-better", "higher-is-better", "neutral"]),
 });
 
 const runComparisonSchema = z.object({
@@ -1932,6 +1997,42 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
 				),
+			// Shaped exactly as the engine's `monitor` block and forwarded
+			// verbatim. The value bounds are deliberately not mirrored here the
+			// way `thresholds`' are: `monitor.series`' ceiling is the
+			// `monitorMaxSeries` **setting**, so a second copy in this schema
+			// would refuse blocks the engine accepts as soon as the user raises
+			// it - and `validate_run_config` already answers each one by field
+			// name. This layer types the shape; the engine owns the ranges.
+			monitor: z
+				.object({
+					url: z
+						.string()
+						.describe(
+							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one is checked against the allowlist like the target URL is."
+						),
+					intervalMs: z
+						.number()
+						.optional()
+						.describe(
+							"Scrape cadence in ms, 250-60000 (default: the engine's setting)."
+						),
+					format: z
+						.enum(["prometheus", "json"])
+						.optional()
+						.describe(
+							'Body format: "prometheus" text exposition, or "json" (a flat object of numbers). Default "prometheus".'
+						),
+					series: z
+						.array(z.string())
+						.describe(
+							'Metric names to read out of each scrape, e.g. ["process_cpu_seconds_total"]. At least one; the ceiling is the `monitorMaxSeries` setting (8 by default).'
+						),
+				})
+				.optional()
+				.describe(
+					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus the sample and failed-scrape counts. Omit for a run that measures only the client side."
+				),
 			requestId: z
 				.string()
 				.optional()
@@ -1961,6 +2062,15 @@ export const TOOLS: McpTool[] = [
 			}
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
+
+			// A monitored run contacts a second host, so it gets a second gate.
+			// The scrape needs no duration cap of its own: the monitor thread is
+			// joined when the run ends, so whatever bounds the run bounds it.
+			const monitor = args.monitor as { url?: unknown } | undefined;
+			if (monitor && typeof monitor === "object") {
+				const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config);
+				if (!monitorGate.ok) return errorResult(monitorGate.error!);
+			}
 
 			// The guard reads the very params the payload was built from, so the
 			// strategy it caps is the strategy the engine will pick - a guard
@@ -2053,7 +2163,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request.",
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,
@@ -2061,14 +2171,20 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			baseRunId: z.string().describe("Baseline run ID (e.g. main)."),
+			baseRunId: z
+				.string()
+				.optional()
+				.describe(
+					"Baseline run ID (e.g. main). Omit to use the run pinned as baseline for the target's saved request."
+				),
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},
 		outputSchema: runComparisonSchema,
 		handler: async (args, ctx, signal) => {
-			const baseRunId = requireStr(args, "baseRunId");
 			const targetRunId = requireStr(args, "targetRunId");
 			try {
+				const baseRunId =
+					str(args, "baseRunId") || (await resolveBaseline(targetRunId, ctx, signal));
 				const [base, target] = await Promise.all([
 					ctx.client.getRunReport(baseRunId, signal),
 					ctx.client.getRunReport(targetRunId, signal),
@@ -2081,6 +2197,10 @@ export const TOOLS: McpTool[] = [
 				);
 				return structuredResult(comparison as unknown as Record<string, unknown>);
 			} catch (err) {
+				// A baseline that could not be resolved is an argument problem the
+				// caller can fix, not an engine failure - it must not be reported
+				// as one.
+				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
 		},

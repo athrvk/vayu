@@ -32,7 +32,8 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
-    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   ├── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   └── <InboxView />                // type="inbox"       modules/inbox/
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; sections from context-bar/registry.ts; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
@@ -309,19 +310,23 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
 
-**`charts/`** - all time-series, scatter, and distribution plots are centralized in **`charts/uplot/`** and built on a single Canvas primitive, `UPlotChart.tsx` (uPlot). Import them from `charts/uplot/index.ts` so live and history render identical components: `LatencyPercentilesChart` (p50/p95/p99), `LatencyBreakdownChart` (wire/queue-wait split), `RequestRateChart` (configured-vs-achieved throughput), `ConnectionsChart`, `ErrorRateChart` (from `TimeSeriesCharts.tsx`); `ResponseTimeVsConcurrencyChart` (ramp_up capacity discovery w/ breakpoint marker) and `HdrPercentileChart` (from `ScatterAndDistribution.tsx`); and `StatusCodesOverTimeChart` (stacked). Supporting modules in the same folder: `buildData.ts` (series → uPlot data), `chartFocus.ts` + `syncKeys.ts` (scatter↔time cross-highlight/cursor sync), `plugins.ts`, `formatters.ts`, and `uplotTheme.ts` (CSS-token-driven theming). Outside `uplot/`, `HdrPercentilePlot.tsx` is now just the loading skeleton (`SkeletonHdrPlot`), and `TimingWaterfall.tsx` remains an SVG chart.
+**`charts/`** - all time-series, scatter, and distribution plots are centralized in **`charts/uplot/`** and built on a single Canvas primitive, `UPlotChart.tsx` (uPlot). Import them from `charts/uplot/index.ts` so live and history render identical components: `LatencyPercentilesChart` (p50/p95/p99), `LatencyBreakdownChart` (wire/queue-wait split), `RequestRateChart` (configured-vs-achieved throughput), `ConnectionsChart`, `ErrorRateChart`, `ServerVitalsChart` (scraped server metrics joined onto the run timeline) (from `TimeSeriesCharts.tsx`); `ResponseTimeVsConcurrencyChart` (ramp_up capacity discovery w/ breakpoint marker) and `HdrPercentileChart` (from `ScatterAndDistribution.tsx`); and `StatusCodesOverTimeChart` (stacked). Supporting modules in the same folder: `buildData.ts` (series → uPlot data), `chartFocus.ts` + `syncKeys.ts` (scatter↔time cross-highlight/cursor sync), `plugins.ts`, `formatters.ts`, and `uplotTheme.ts` (CSS-token-driven theming). `plugins.ts` carries the two overlay layers `UPlotChart` registers for every chart: `markersPlugin` pins a single value (`Marker` - the capacity breakpoint, the target RPS, the SLO) and `annotationsPlugin` shades a span (`Annotation` - the detected anomaly windows, drawn under the markers so a dashed rule stays legible over a band). The time-series wrappers take the domain shapes (`breakpoint`, `anomalies`) and map them onto those chart-layer ones, so a caller never assembles a marker or a band by hand. Outside `uplot/`, `HdrPercentilePlot.tsx` is now just the loading skeleton (`SkeletonHdrPlot`), and `TimingWaterfall.tsx` remains an SVG chart.
 
 **`stats/`** - `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set; `ModeStatCards.tsx`, `StatCard.tsx`.
 
 **`hooks/`** - `useMode.ts` (run-config → mode discriminator).
 
-**`utils/`** - `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
+**`utils/`** - `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `detectAnomalies.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
+
+`detectAnomalies.ts` is the run's degradation windows - latency spikes, error bursts, throughput drops and the first 5xx - scanned out of the same per-tick series the charts plot, with fixed factors over a trailing median and nothing tunable. It is derived once per view (`MetricsView` live, `LoadTestDetail` for a stored run) and passed down, so no card or chart re-derives it. Two readings of one detection: the charts shade the windows, and the history Overview's `RunEvents` card states them in words. Both are absent for a clean run.
 
 ## History (`modules/history/`)
 
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
+
+A **load run's** row also carries the baseline pin: a Pin action beside Delete (`useSetRunBaselineMutation` → `PUT /runs/:id/baseline`) and, once pinned, a "Baseline" chip that stays visible rather than appearing on hover - the pin is state, not an affordance. Only load runs offer it: a baseline exists to be diffed, and only a load run has percentiles, throughput and an error rate to diff. Pinning also exempts the run from the engine's retention, so the promise is worth making only where it buys something. No confirmation dialog, unlike Delete - both directions are one click from being undone.
 
 A **collection run's** row is a different shape, because it has no url and no method: a folder icon and the collection's name, over a chip line of step count, iterations (omitted when 1, the default) and sub-folders. The badge slot beside Delete is deliberately **empty** for one. That slot marks the types whose identity line would otherwise look alike - load and design both print a bare URL, so load carries the ⚡ - and a collection run's identity is already unmistakable, so a badge there would be the third glyph in one card saying the same thing, after the folder icon and the step count. Guarded by a test asserting no two icons in the card are the same glyph.
 
@@ -332,6 +337,8 @@ A **collection run** row has no url and no method - its work is a sequence - so 
 `HistoryDetail` fetches the **run** (`useRunQuery`) and asks for the report only when the run is a load run. `GET /runs/:id/report` is a load-test aggregate: against a design run its percentiles all come from one sample and `metadata.configuration` is absent, so it cannot say what a design run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a design run it also carries the stored exchange. The header shows the run's identity, type and status but **not** its URL - the builder below renders its own URL bar, and two stacked read as a bug. A **scenario** run is not gated on its report either, for a different reason: while the sequence is still executing the live `step` stream is the content, so waiting for a report that does not yet describe a finished run would hold the tab on a skeleton for the length of the run. `ScenarioRunView` asks for the report itself.
 
 `DesignRunView.tsx` renders `RequestBuilderProvider` + `RequestBuilderLayout` with starting values from `design-run-seed.ts` (`seedFromRun`), the stored exchange as `initialResponse`, and the run's recorded collection script parts as `inheritedPreScripts` / `inheritedPostScripts`. It **holds the pane until `useRequestQuery` settles**, and tells a genuine deletion from a transport failure before seeding: `seedFromRun` reads a falsy live request as "deleted", so a query in flight, a deletion and an unreachable engine all look alike unless kept apart. The provider re-seeds only on a change of `initialRequest.id` - null for every detached copy - so an early or wrong seed would stick. Loading holds the pane; a genuine deletion (the `RequestNotFoundError` sentinel from `useRequestQuery`, matched via `isRequestNotFound` not a message string) seeds the orphan copy that replays the recorded wire headers; any other settled error is a transport failure and renders `ErrorState` with a retry rather than guessing a copy. The run's recorded auth **mode** (`seed.recordedAuthMode`, all that survives storage) is shown read-only beside the copy, so a user can see when the request's current auth differs from what the run sent. A run recorded before script parts existed passes its one glued string as `legacyPreScript` / `legacyPostScript`; `LegacyScriptNotice` shows it whole with a note that its parts cannot be separated, and the replay sends it as a single request-origin part. **The copy is detached** by two independent gates - `id: null` and no `onSave` - so editing it cannot rewrite the saved request. Sending again replays the recorded collection parts unchanged plus the edited request part, under the same `requestId`. `SaveRunToRequestDialog.tsx` + `save-run-to-request.ts` write chosen values back behind a confirm; they never write auth (only the mode survives storage) and never write scripts for a run stored before script parts existed.
+
+`LoadTestDetail.tsx`'s header carries `components/BaselineComparison.tsx`, the **vs-baseline strip**: the open run's p99, throughput and error rate against the run pinned for the same request, each delta coloured by `MetricDelta.direction` rather than by its sign (latency up is a regression, throughput up is not). It resolves the pin itself (`useBaselineRunQuery`: by `requestId`, or by url+method for a run of an unsaved request) and fetches the run row from the shared cache the pane above already filled, so it stays self-contained instead of threading a prop through every call site. It renders **nothing** when no run is pinned, when the open run *is* the pin, or before the baseline's report has loaded - a strip of zeros would claim "nothing changed" about runs that were never compared. The diff comes from `lib/run-compare.ts`, mirrored by the MCP tool's `electron/mcp/compare.ts` and pinned to it by `compare.conformance.test.ts`.
 
 `ScenarioRunView.tsx` is the collection-run tab: the sequence, step by step, plus a four-number summary. It is deliberately **not** `LoadTestDetail` - a scenario run's `results[]` are step executions of *different* requests, so the load report's percentiles and status distribution would describe a sequence as though it were one request repeated.
 
@@ -369,11 +376,13 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | Component | Role |
 |---|---|
 | `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
+| `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`); silent for a clean run |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
+| `MonitorSummary.tsx` | Per-series min/avg/max for the run's server-vitals scrape, under the Performance tab's chart. Present whenever `report.monitor` is - including the run whose every scrape failed, which has a failure count and no line to draw, and read as an unexplained empty chart before it |
 
 A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is `type: "load"`, publishes ticks and reports percentiles like any load run, and its target simply happens to be a sequence. Two things follow, both keyed off `report.scenario.steps` being present rather than off a run-type flag - that array is what this pane actually needs to render. It has no single method and URL, so the header strip says what the sequence was instead of the "GET Unknown URL" fallback, which the reader cannot tell apart from a broken run. And it stores no per-step `results` rows - one row per step per iteration per virtual user is what a load run exists not to keep - so `ScenarioStepsTab.tsx` renders the engine's per-step histogram breakdown, the only per-step record such a run has. Its `(n short)` marker is the visible shape of an errored step ending its iterations early, which otherwise reads as a run that simply lost requests. The **Tests** column is the deferred per-step validation - each step's own post-request script replayed after the run against that step's sampled responses - and shows a dash, never a `0`, for a step that asserted nothing: the engine omits the object rather than writing zeros, because "no assertions" and "no failures" are different answers.
 
@@ -395,6 +404,36 @@ Adding an app panel is three edits and no branching: a member on `ClientSettings
 
 `LoadTestingPanel.tsx` is the ceilings the load-test dialog offers - the app's own policy, clamped to the engine's crash guards on the way into `client-settings-store`. The engine's bounds themselves are deliberately **not** settings; see `docs/app/api-integration.md` (Dialog ceilings are a user setting).
 
+## Webhook Inbox (`modules/inbox/`)
+
+The receiving half of the app (issue #480): an engine-hosted listener that records the requests
+sent to it, so building a webhook consumer needs no cloud tunnel. Engine contract:
+`docs/engine/api-reference.md` (Webhook Inbox).
+
+- `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop, the URL with a copy control, the
+  running/live badge, the capture list and the detail pane.
+- `CannedResponseControls.tsx` - reply status and delay. Its own component so the two fields can be
+  drafts (typing `50` on the way to `500` must not push a 50 at the next caller) and so re-seeding
+  them from the engine is a remount - `InboxView` keys it on the served values - rather than a
+  `setState` inside an effect.
+- `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
+  A capture is an exchange with no response, which that viewer already handles; a request you
+  received should read like one you sent.
+- `useInboxLive.ts` - the SSE stream. New captures are merged into the same query cache
+  `useInboxCapturesQuery` fills, not kept in a second list beside it - two lists would need
+  reconciling on every clear, and whichever the detail pane read would decide which was true.
+- `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
+
+**One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
+tab, and the engine permits a single live stream per inbox (each holds a pool thread), so a surface
+watching several at once would spend threads on lists nobody reads. The tab is a singleton and is
+never dirty - both stated explicitly in `tabs-store`, since a *missing* answer reads the same as
+"clean" and is what once made a dirty Settings tab LRU-evictable
+(`components/layout/tab-type-coverage.test.ts` guards all three switches).
+
+**Entry point:** the `Inbox` tile on the welcome Launcher. It has no Drawer view to switch to -
+an inbox is not a stored record - so there is nothing for a Dock button to act on.
+
 ## Welcome (`modules/welcome/`)
 
 Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
@@ -404,7 +443,8 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is five tiles: New
+  request, Import, History, Variables, Inbox.
 
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 

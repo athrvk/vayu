@@ -64,6 +64,12 @@ import type {
 	OAuth2AuthorizeStartRequest,
 	OAuth2AuthorizeStartResponse,
 	OAuth2AuthorizeStatusResponse,
+	Inbox,
+	InboxCannedResponse,
+	InboxCapturesResponse,
+	ListInboxesResponse,
+	StartInboxRequest,
+	ClearInboxCapturesResponse,
 } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
@@ -74,6 +80,7 @@ import {
 	STATS_PAGE_LIMIT,
 	RUN_SAMPLES_PAGE_LIMIT,
 	RUNS_PAGE_LIMIT,
+	INBOX_CAPTURES_PAGE_LIMIT,
 } from "@/config/network";
 
 /**
@@ -266,6 +273,48 @@ export const apiService = {
 		);
 	},
 
+	// Webhook inbox (issue #480)
+	async listInboxes(): Promise<Inbox[]> {
+		const response = await httpClient.get<ListInboxesResponse>(API_ENDPOINTS.INBOX);
+		return response.data;
+	},
+
+	async startInbox(request: StartInboxRequest = {}): Promise<Inbox> {
+		return await httpClient.post<Inbox>(API_ENDPOINTS.INBOX_START, request);
+	},
+
+	async stopInbox(inboxId: string): Promise<Inbox> {
+		return await httpClient.post<Inbox>(API_ENDPOINTS.INBOX_STOP(inboxId), {});
+	},
+
+	/**
+	 * Update the canned response, live. Merge-patch: an omitted field keeps the
+	 * value the inbox is serving, so changing the status does not silently drop
+	 * the headers a caller configured.
+	 */
+	async updateInboxResponse(
+		inboxId: string,
+		response: Partial<InboxCannedResponse>
+	): Promise<Inbox> {
+		return await httpClient.put<Inbox>(API_ENDPOINTS.INBOX_BY_ID(inboxId), response);
+	},
+
+	async listInboxCaptures(
+		inboxId: string,
+		limit = INBOX_CAPTURES_PAGE_LIMIT,
+		offset = 0
+	): Promise<InboxCapturesResponse> {
+		return await httpClient.get<InboxCapturesResponse>(
+			API_ENDPOINTS.INBOX_CAPTURES(inboxId, limit, offset)
+		);
+	},
+
+	async clearInboxCaptures(inboxId: string): Promise<ClearInboxCapturesResponse> {
+		return await httpClient.delete<ClearInboxCapturesResponse>(
+			API_ENDPOINTS.INBOX_CAPTURES_CLEAR(inboxId)
+		);
+	},
+
 	// Execution
 	/**
 	 * Compose a request engine-side (`POST /compose`): `{{variables}}` and
@@ -338,9 +387,19 @@ export const apiService = {
 			requestId,
 			collectionId,
 			q,
+			baseline,
 		} = params;
 		return await httpClient.get<RunListResponse>(
-			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, collectionId, q })
+			API_ENDPOINTS.RUNS_LIST({
+				limit,
+				offset,
+				type,
+				status,
+				requestId,
+				collectionId,
+				q,
+				baseline,
+			})
 		);
 	},
 
@@ -398,6 +457,14 @@ export const apiService = {
 
 	async deleteRun(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.RUN_BY_ID(id));
+	},
+
+	/**
+	 * Pin or unpin a run as the baseline for its request. Answers the updated
+	 * list row, so a caller can patch its cached row instead of re-listing.
+	 */
+	async setRunBaseline(id: string, baseline: boolean): Promise<Run> {
+		return await httpClient.put<Run>(API_ENDPOINTS.RUN_BASELINE(id), { baseline });
 	},
 
 	/**

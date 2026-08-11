@@ -26,6 +26,7 @@ import {
 } from "@/modules/dashboard/components/charts/uplot";
 import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
 import LatencyMetric from "./LatencyMetric";
+import MonitorSummary from "./MonitorSummary";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import type { PerformanceTabProps } from "../../types";
 
@@ -33,6 +34,7 @@ export default function PerformanceTab({
 	report,
 	runId,
 	derived,
+	anomalies,
 	timeSeries,
 	monitorSamples,
 	isLoadingSeries,
@@ -58,6 +60,7 @@ export default function PerformanceTab({
 					isFetchingMore={isFetchingMore}
 					progress={progress}
 					breakpoint={derived.breakpoint}
+					anomalies={anomalies}
 				/>
 			)}
 
@@ -94,10 +97,26 @@ export default function PerformanceTab({
 								isCompleted
 								syncKey={CHART_SYNC.history}
 								breakpoint={derived.breakpoint}
+								anomalies={anomalies}
 							/>
 						</CardContent>
 					</Card>
 				))}
+
+			{/* What the scrape recorded, beside the chart that drew it. Present
+			    whenever the run monitored anything - including a run whose every
+			    scrape failed, which has a section, a failure count and no line
+			    above it, and until now read as an unexplained empty chart. */}
+			{report.monitor && (
+				<Card>
+					<CardHeader>
+						<CardTitle className="text-base">Server Vitals Summary</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<MonitorSummary monitor={report.monitor} />
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Latency Statistics */}
 			<Card>

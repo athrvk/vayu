@@ -12,6 +12,7 @@ import { describe, expect, test } from "vitest";
 import {
 	extractHost,
 	checkAllowlist,
+	checkMonitorHost,
 	parseDurationSeconds,
 	checkLoadCaps,
 	defaultDurationUnderCap,
@@ -90,6 +91,67 @@ describe("checkAllowlist", () => {
 	test("allowAll still rejects an unresolvable host (unresolved variables)", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
 		expect(checkAllowlist("{{baseUrl}}/x", config).ok).toBe(false);
+	});
+});
+
+describe("checkMonitorHost", () => {
+	// The decision this pins: a run's monitor endpoint is a *second* host, and it
+	// is exempt from the allowlist only while it names the user's own network.
+	// The feature exists to scrape the target's own localhost:9100, so requiring
+	// an entry for that would make it unreachable in its own case; a public
+	// monitor host is third-party traffic and gets the check the target gets.
+	const empty = DEFAULT_MCP_SAFETY_CONFIG;
+
+	test.each([
+		"http://localhost:9100/metrics",
+		"http://127.0.0.1:9100/metrics",
+		"http://127.99.1.2:9100/metrics",
+		"http://[::1]:9100/metrics",
+		"http://10.0.3.4:9100/metrics",
+		"http://172.16.0.9:9100/metrics",
+		"http://172.31.255.1:9100/metrics",
+		"http://192.168.1.50:9100/metrics",
+		"http://169.254.10.1:9100/metrics",
+		"http://[fd00::1]:9100/metrics",
+		"http://[fe80::1]:9100/metrics",
+		// WHATWG URL normalises the alternate IPv4 spellings, so the guard reads
+		// 127.0.0.1 here rather than a string it would not recognise.
+		"http://2130706433:9100/metrics",
+	])("exempts the private/loopback endpoint %s from an empty allowlist", (url) => {
+		expect(checkMonitorHost(url, empty).ok).toBe(true);
+	});
+
+	test.each([
+		"http://172.15.0.1:9100/metrics", // just below the RFC1918 block
+		"http://172.32.0.1:9100/metrics", // just above it
+		"http://192.169.1.1:9100/metrics",
+		"http://11.0.0.1:9100/metrics",
+		"http://[2001:db8::1]:9100/metrics",
+		"https://metrics.example.com/metrics",
+		// A name that may well resolve to a private address: the guard is textual,
+		// like the allowlist itself, so this needs an entry rather than a lookup.
+		"http://prometheus.internal/metrics",
+	])("requires an allowlist entry for the public endpoint %s", (url) => {
+		const res = checkMonitorHost(url, empty);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/monitor endpoint is a second host/i);
+	});
+
+	test("accepts a public monitor host that is on the allowlist", () => {
+		const config = resolveSafetyConfig({ allowlist: ["metrics.example.com"] });
+		expect(checkMonitorHost("https://metrics.example.com/m", config).ok).toBe(true);
+	});
+
+	test("refuses a monitor URL whose host cannot be determined", () => {
+		const config = resolveSafetyConfig({ allowlist: ["metrics.example.com"] });
+		const res = checkMonitorHost("{{vitalsUrl}}/metrics", config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/monitor\.url/i);
+	});
+
+	test("allowAll covers the monitor host too", () => {
+		const config = resolveSafetyConfig({ allowAll: true });
+		expect(checkMonitorHost("https://metrics.example.com/m", config).ok).toBe(true);
 	});
 });
 

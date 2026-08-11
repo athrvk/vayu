@@ -8,7 +8,7 @@
 import type React from "react";
 import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
-import { Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge } from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
@@ -27,6 +27,8 @@ import {
 	Repeat,
 	Folder,
 	FolderTree,
+	Pin,
+	PinOff,
 } from "lucide-react";
 
 /**
@@ -43,7 +45,13 @@ interface RunItemProps {
 	run: Run;
 	onSelect: (runId: string) => void;
 	onDelete: (runId: string, event: React.MouseEvent) => void;
+	/**
+	 * Pin or unpin this run as its request's baseline. Absent for run types
+	 * that have nothing to compare against - see the action's own comment.
+	 */
+	onToggleBaseline?: (runId: string, baseline: boolean, event: React.MouseEvent) => void;
 	isDeleting: boolean;
+	isTogglingBaseline?: boolean;
 	isSelected?: boolean;
 	/**
 	 * The name of the collection a scenario run ran, resolved by the list from
@@ -61,7 +69,9 @@ export default function RunItem({
 	run,
 	onSelect,
 	onDelete,
+	onToggleBaseline,
 	isDeleting,
+	isTogglingBaseline = false,
 	isSelected = false,
 	collectionName,
 }: RunItemProps) {
@@ -186,6 +196,20 @@ export default function RunItem({
 						<span className="text-xs text-muted-foreground min-w-0 break-words">
 							{formatTime(run.startTime)}
 						</span>
+						{/* `variant="chip"` because this badge paints its own
+						    background: every other variant pairs `bg-x` with a
+						    `hover:bg-x/80` that tailwind-merge would leave
+						    behind, turning the chip the accent colour under the
+						    pointer. */}
+						{run.baseline && (
+							<Badge
+								variant="chip"
+								className="shrink-0 gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-medium"
+							>
+								<Pin className="w-2.5 h-2.5" />
+								Baseline
+							</Badge>
+						)}
 					</div>
 					{/* z-10: sits above the stretched activator below, so delete
 					    stays clickable while the rest of the card selects the run. */}
@@ -212,6 +236,47 @@ export default function RunItem({
 						 */}
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+						)}
+						{/*
+						 * Pin as baseline. Offered for a load run and nothing
+						 * else, because a baseline exists to be diffed and only
+						 * a load run has a report with percentiles, throughput
+						 * and an error rate to diff. A pinned run also stops
+						 * being pruned, which is a promise worth making only
+						 * where it buys something.
+						 *
+						 * Stays visible once pinned - the pin is state, not a
+						 * hover affordance, and a row whose only sign of it
+						 * vanished with the pointer would read as unpinned.
+						 */}
+						{onToggleBaseline && run.type === "load" && (
+							<Button
+								variant="rowAction"
+								size="icon"
+								onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
+								disabled={isTogglingBaseline}
+								aria-label={run.baseline ? "Unpin baseline" : "Pin as baseline"}
+								aria-pressed={!!run.baseline}
+								title={
+									run.baseline
+										? "Unpin this run as the baseline"
+										: "Pin this run as the baseline later runs are compared against"
+								}
+								className={cn(
+									"h-6 w-6 transition-opacity",
+									run.baseline || isTogglingBaseline
+										? "opacity-100"
+										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+								)}
+							>
+								{isTogglingBaseline ? (
+									<Loader2 className="w-3 h-3 animate-spin" />
+								) : run.baseline ? (
+									<PinOff className="w-3 h-3" />
+								) : (
+									<Pin className="w-3 h-3" />
+								)}
+							</Button>
 						)}
 						<Button
 							variant="rowActionDestructive"
