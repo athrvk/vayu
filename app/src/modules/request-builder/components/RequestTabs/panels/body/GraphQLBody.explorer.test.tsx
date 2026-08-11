@@ -29,12 +29,15 @@ import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import { parseGraphQLBody } from "@/lib/graphql/graphql-body";
 import {
 	editorPositions as positions,
+	editorReveals as reveals,
+	editorSelections as selections,
 	editorValues as values,
 	fakeEditor,
 	monacoStub,
 	offsetAt,
 	resetEditorStubs,
 } from "@/test/monaco-editor-stub";
+import { useLayoutStore } from "@/stores";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
@@ -125,6 +128,7 @@ beforeEach(() => {
 	vi.stubGlobal("IntersectionObserver", StubObserver);
 	resetEditorStubs();
 	useExplorerStore.setState({ open: true, byKey: {}, lru: [] });
+	useLayoutStore.setState({ graphqlVariablesCollapsed: false, graphqlVariablesSize: 35 });
 	/*
 	 * A schema already in hand, so mounting introspects nothing: `ensureSchema`
 	 * returns on any entry that is not `idle`, which is also what keeps this
@@ -156,13 +160,43 @@ describe("the pane is only there when it has something to browse", () => {
 		expect(screen.queryByTestId("graphql-explorer")).toBeNull();
 	});
 
-	it("is toggled from the query pane header", () => {
+	it("opens from the query header's chip and closes from its own header", () => {
 		useExplorerStore.setState({ open: false });
 		mount("");
 		fireEvent.click(screen.getByLabelText("Browse schema"));
 		expect(screen.getByTestId("graphql-explorer")).toBeTruthy();
+		// Closing is the pane's own business now - the Query header carries no
+		// schema control while the pane that owns the subject is open.
 		fireEvent.click(screen.getByLabelText("Hide schema"));
 		expect(screen.queryByTestId("graphql-explorer")).toBeNull();
+	});
+});
+
+describe("one schema affordance, in one place", () => {
+	it("shows a single chip in the Query header while the explorer is closed", () => {
+		useExplorerStore.setState({ open: false });
+		mount("");
+
+		// Mutation check: put the old badge + Refresh + toggle trio back in the
+		// Query header and the second of these fails - Refresh returns to a
+		// header whose subject lives in the pane beside it.
+		expect(screen.getAllByLabelText("Browse schema")).toHaveLength(1);
+		expect(screen.queryByLabelText("Refresh schema")).toBeNull();
+	});
+
+	it("never shows two Refreshes at once, because the open pane owns the only one", () => {
+		mount("");
+		expect(screen.getAllByLabelText("Refresh schema")).toHaveLength(1);
+		expect(screen.queryByLabelText("Browse schema")).toBeNull();
+	});
+
+	it("still offers the way in before anything is known about the schema", () => {
+		// `idle` is the state the badge itself renders nothing for - the chip
+		// falls back to a plain label so the pane is still reachable.
+		useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null });
+		useExplorerStore.setState({ open: false });
+		mount("");
+		expect(screen.getByLabelText("Browse schema")).toBeTruthy();
 	});
 });
 
@@ -250,6 +284,28 @@ describe("the Variables pane", () => {
 		);
 	});
 
+	it("opens itself when an insertion leaves variables needing a value", () => {
+		useLayoutStore.setState({ graphqlVariablesCollapsed: true });
+		const body = JSON.stringify({ query: "", variables: '{"id": {{userId}}}' });
+		mount(body);
+		insert("Query", "search");
+
+		// The badge names variables the user now has to type values into, and
+		// typing needs the editor - the one moment the badge alone is not enough.
+		expect(useLayoutStore.getState().graphqlVariablesCollapsed).toBe(false);
+		expect(screen.getByTitle(/not plain JSON/)).toBeTruthy();
+	});
+
+	it("stays collapsed for an insertion that wrote its variables", () => {
+		useLayoutStore.setState({ graphqlVariablesCollapsed: true });
+		mount("");
+		insert("Query", "user");
+
+		// `{}` merges cleanly, so nothing is pending and nothing demands the
+		// pane - a collapse the user chose is not undone by every click.
+		expect(useLayoutStore.getState().graphqlVariablesCollapsed).toBe(true);
+	});
+
 	it("drops the badge once the user has touched the pane", () => {
 		const body = JSON.stringify({ query: "", variables: '{"id": {{userId}}}' });
 		mount(body);
@@ -295,6 +351,34 @@ describe("what the pane says out loud", () => {
 
 		expect(view.announcement()).toContain("part of an argument");
 		expect(view.bodies).toHaveLength(0);
+	});
+
+	it("shows a leaf that is already selected instead of adding it twice", () => {
+		const body = JSON.stringify({
+			query: `query Existing {\n  user(id: "1") {\n    id\n    handle\n  }\n}\n`,
+		});
+		const view = mount(body);
+		positions.set("graphql", { lineNumber: 4, column: 5 });
+
+		fireEvent.click(rowNamed("Query").querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("user").querySelector("[data-tree-toggle]")!);
+		act(() => {
+			fireEvent.click(rowNamed("handle").querySelector("[data-tree-activate]")!);
+		});
+
+		// Mutation check: drop the already-present branch and the document grows
+		// a second `handle` line the user cannot tell from the first.
+		expect(view.bodies).toHaveLength(0);
+		expect(view.announcement()).toBe("handle is already selected.");
+		// Selected rather than merely scrolled to: the editor's own selection is
+		// what marks the line, so there is no second highlight to maintain.
+		expect(selections.get("graphql")).toEqual({
+			startLineNumber: 4,
+			startColumn: 5,
+			endLineNumber: 4,
+			endColumn: 11,
+		});
+		expect(reveals.get("graphql")).toEqual([4]);
 	});
 
 	it("inserts a type as a fragment", () => {

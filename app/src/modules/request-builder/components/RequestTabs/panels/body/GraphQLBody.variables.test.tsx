@@ -20,9 +20,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, cleanup } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { useSchemaCache, type SchemaTarget } from "@/lib/graphql/schema-cache";
+import { useLayoutStore } from "@/stores";
 
 /** The `onChange` of each mocked editor, by the language it mounted with. */
 const editors = new Map<string, (value: string) => void>();
@@ -90,9 +91,13 @@ function harness(initialBody: string) {
 	return { state, view };
 }
 
+/** The Variables pane's header, which is also the control that collapses it. */
+const variablesHeader = () => screen.getByRole("button", { name: /Variables/ });
+
 beforeEach(() => {
 	editors.clear();
 	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null });
+	useLayoutStore.setState({ graphqlVariablesCollapsed: false, graphqlVariablesSize: 35 });
 });
 afterEach(cleanup);
 
@@ -152,5 +157,71 @@ describe("the variables badge", () => {
 		expect(screen.getByText("Templated").getAttribute("title")).toMatch(/resolved and sent/i);
 		// And it genuinely reached the body, which is the half the badge asserts.
 		expect(state.body).toBe('{"query":"q","variables":{"limit":{{n}}}}');
+	});
+});
+
+/**
+ * The pane's height is a preference, and one the Radix unmount must not eat.
+ *
+ * jsdom has no layout, so the panel's own pixels are not what these read - the
+ * store is, because the store is deliberately the source of truth here for
+ * exactly the reason these cases exercise: the panel's memory dies with the
+ * mount and the user's does not.
+ */
+describe("collapsing the variables pane", () => {
+	it("collapses from its header and says which way it is pointing", () => {
+		const { view } = harness('{"query":"q"}');
+		view.mount();
+		expect(variablesHeader().getAttribute("aria-expanded")).toBe("true");
+
+		fireEvent.click(variablesHeader());
+
+		expect(variablesHeader().getAttribute("aria-expanded")).toBe("false");
+		expect(useLayoutStore.getState().graphqlVariablesCollapsed).toBe(true);
+	});
+
+	it("opens again from the same header, and keeps the height it remembers", () => {
+		useLayoutStore.setState({ graphqlVariablesCollapsed: true, graphqlVariablesSize: 60 });
+		const { view } = harness('{"query":"q"}');
+		view.mount();
+		expect(variablesHeader().getAttribute("aria-expanded")).toBe("false");
+
+		fireEvent.click(variablesHeader());
+
+		expect(variablesHeader().getAttribute("aria-expanded")).toBe("true");
+		/*
+		 * Reopening is not a resize, so the remembered height survives it - the
+		 * value the panel is then told to come back to. The pixels themselves
+		 * are not asserted anywhere: jsdom has no layout, and a panel in it
+		 * reports the same degenerate size whatever it was given.
+		 */
+		expect(useLayoutStore.getState().graphqlVariablesSize).toBe(60);
+	});
+
+	it("stays collapsed across the unmount a tab glance causes", () => {
+		const { view } = harness('{"query":"q"}');
+		view.mount();
+		fireEvent.click(variablesHeader());
+
+		cleanup();
+		view.mount();
+
+		// Mutation check: hold `collapsed` in component state instead of the
+		// store and the pane comes back open, after a glance the user did not
+		// think of as leaving - the same loss `explorer-store` was written for.
+		expect(variablesHeader().getAttribute("aria-expanded")).toBe("false");
+	});
+
+	it("keeps the pane's badge readable while it is collapsed", () => {
+		const { view } = harness('{"query":"q"}');
+		view.mount();
+		view.type('{"limit": ');
+
+		fireEvent.click(variablesHeader());
+
+		// "Not sent" is the state a collapsed pane most needs to admit to: the
+		// request goes out without the variables and the editor is not on screen
+		// to hint at it.
+		expect(screen.getByText("Not sent")).toBeTruthy();
 	});
 });

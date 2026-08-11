@@ -15,11 +15,17 @@
  * to be next to the cursor it inserts at. The bar gets the *status* half in its
  * own section - freshness and an outline are glanceable, browsing is not.
  *
+ * **Every schema affordance lives in this header.** Status, freshness, refresh,
+ * search and the control that closes the pane again - one subject, one place.
+ * Three of them were here already and the other two sat in the Query pane's
+ * header, which meant a visible Refresh in each corner doing the same thing and
+ * the schema's state described twice in two vocabularies (#455). The Query
+ * header now carries one chip, and only while this pane is closed.
+ *
  * **It adds no introspection of its own.** The pane renders whatever the schema
- * cache is holding, and its Refresh button is the same one the query pane's
- * header already offers. #382 made the body-tab lifecycle the whole consent
- * budget for talking to the endpoint, and a pane that fetched on open would
- * quietly widen it.
+ * cache is holding. #382 made the body-tab lifecycle the whole consent budget
+ * for talking to the endpoint, and a pane that fetched on open would quietly
+ * widen it.
  *
  * Search, expansion and scroll live in `explorer-store`, not in this component:
  * Radix unmounts the whole Body tab whenever the user glances at Headers, and
@@ -32,11 +38,11 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Loader2,
+	PanelRightClose,
 	RefreshCw,
 	Search,
 	Text,
 } from "lucide-react";
-import type { GraphQLSchema } from "graphql";
 import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
@@ -48,7 +54,8 @@ import {
 	visibleRows,
 	type SchemaTreeNode,
 } from "@/lib/graphql/schema-tree";
-import type { SchemaStatus } from "@/lib/graphql/schema-cache";
+import type { SchemaEntry } from "@/lib/graphql/schema-cache";
+import { SchemaStatusBadge } from "../SchemaStatusBadge";
 import { formatRelativeTime } from "@/utils/helpers";
 import { cn } from "@/lib/utils";
 
@@ -73,13 +80,20 @@ interface ExplorerRowModel {
 }
 
 export interface SchemaExplorerProps {
-	schema: GraphQLSchema | null;
-	status: SchemaStatus;
-	/** When the schema in hand was fetched, or null when there is none. */
-	fetchedAt: number | null;
+	/**
+	 * The cache's own snapshot - status, schema, failure and freshness together.
+	 *
+	 * One object rather than four props for the reason `GraphQLBody` reads it as
+	 * one: they are four faces of a single state, and passed separately they can
+	 * be rendered a render apart from each other. It is also what the status
+	 * badge takes, so this header hands it straight on.
+	 */
+	entry: SchemaEntry | null;
 	/** The schema's cache identity - what the view state is remembered under. */
 	schemaKey: string;
 	onRefresh: () => void;
+	/** Close the pane. The only control that does; the Query header has none. */
+	onClose: () => void;
 	/**
 	 * Insert this row into the query document. The explorer does not know what
 	 * the document is; it knows which row was activated.
@@ -88,13 +102,16 @@ export interface SchemaExplorerProps {
 }
 
 export function SchemaExplorer({
-	schema,
-	status,
-	fetchedAt,
+	entry,
 	schemaKey,
 	onRefresh,
+	onClose,
 	onInsert,
 }: SchemaExplorerProps) {
+	const schema = entry?.schema ?? null;
+	const status = entry?.status ?? "idle";
+	const fetchedAt = entry?.fetchedAt ?? null;
+
 	const view = useExplorerStore((s) => s.byKey[schemaKey]);
 	const search = view?.search ?? "";
 	const showDescriptions = view?.showDescriptions ?? false;
@@ -184,18 +201,16 @@ export function SchemaExplorer({
 
 	return (
 		<div className="flex flex-col h-full min-h-0 bg-panel" data-testid="graphql-explorer">
-			<div className="flex items-center gap-1 px-2 py-1 border-b border-border shrink-0">
-				<div className="relative flex-1 min-w-0">
-					<Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-					<Input
-						ref={searchRef}
-						value={search}
-						onChange={(e) => setSearch(schemaKey, e.target.value)}
-						placeholder="Search schema"
-						aria-label="Search schema"
-						className="h-6 pl-6 text-[11px]"
-					/>
-				</div>
+			{/*
+			 * Two rows rather than one. Five affordances now live here and the
+			 * pane is as narrow as 18% of the editor area; sharing a single row
+			 * left the search box - the one control that wants width - competing
+			 * with the status text for it.
+			 */}
+			<div className="flex items-center gap-1 px-2 h-7 border-b border-border shrink-0">
+				<span className="flex-1 min-w-0 truncate">
+					<SchemaStatusBadge entry={entry} />
+				</span>
 				{/*
 				 * Descriptions are clipped to one line by default and the full
 				 * text is only in the row's native tooltip, which is no use to
@@ -225,6 +240,26 @@ export function SchemaExplorer({
 					onClick={onRefresh}
 					disabled={status === "loading"}
 				/>
+				<TooltipIconButton
+					label="Hide schema"
+					className="h-6 w-6 shrink-0"
+					icon={<PanelRightClose className="w-3 h-3" />}
+					onClick={onClose}
+				/>
+			</div>
+
+			<div className="flex items-center px-2 py-1 border-b border-border shrink-0">
+				<div className="relative flex-1 min-w-0">
+					<Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+					<Input
+						ref={searchRef}
+						value={search}
+						onChange={(e) => setSearch(schemaKey, e.target.value)}
+						placeholder="Search schema"
+						aria-label="Search schema"
+						className="h-6 pl-6 text-[11px]"
+					/>
+				</div>
 			</div>
 
 			{/*
