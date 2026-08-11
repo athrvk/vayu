@@ -1951,8 +1951,8 @@ void Database::seed_default_config () {
     "5000", // 5s - past this a finished run visibly waits on the join
     std::nullopt, now });
 
-    // Server-vitals monitor. Both are read per run - a change applies to the
-    // next run started, no restart. The interval *bounds* (250-60000ms) are
+    // Server-vitals monitor. All three are read per run - a change applies to
+    // the next run started, no restart. The interval *bounds* (250-60000ms) are
     // deliberately not settings: they exist to stop a cadence that measures the
     // scraper rather than the target.
     upsert_config (ConfigEntry{ "monitorIntervalMs",
@@ -1977,6 +1977,22 @@ void Database::seed_default_config () {
     "hard cost. The chart has four distinct colours and repeats them past that.",
     "observability", std::to_string (vayu::core::constants::monitor::MAX_SERIES),
     "1", "64", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "monitorScrapeTimeoutMs",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS),
+    "integer", "Server Monitoring Scrape Timeout",
+    "How long one scrape of the metrics endpoint may take before it counts as "
+    "a gap in the series. Leave it at 0 to derive the budget from the scrape "
+    "interval - three quarters of it - which is what most endpoints want. Set "
+    "it explicitly for an exposition that is slow to render: one that takes "
+    "longer than three quarters of the interval fails every scrape today, and "
+    "the only other way out is a slower cadence, which also thins the data. A "
+    "value longer than the interval a run scrapes at is shortened to it, "
+    "because a scrape that outlives its own cadence puts the loop behind "
+    "itself.",
+    "observability", std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS),
+    "0", std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS),
+    std::nullopt, now });
 
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION

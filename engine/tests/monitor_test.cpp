@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -33,6 +34,7 @@ using vayu::core::MonitorFormat;
 using vayu::core::MonitorTotals;
 using vayu::core::parse_json_metrics;
 using vayu::core::parse_prometheus_exposition;
+using vayu::core::resolve_scrape_timeout_ms;
 using vayu::core::validate_monitor_config;
 using vayu::tests::SlowMockServer;
 using Clock = std::chrono::steady_clock;
@@ -118,7 +120,7 @@ TEST (MonitorConfigValidation, LoopbackAndPrivateTargetsAreAllowed) {
 }
 
 // ---------------------------------------------------------------------------
-// The two limits a user can move
+// The limits a user can move
 // ---------------------------------------------------------------------------
 
 class MonitorLimitsTest : public ::testing::Test {
@@ -149,6 +151,68 @@ TEST_F (MonitorLimitsTest, AFreshDatabaseYieldsTheSeededDefaults) {
     const auto limits = vayu::core::read_monitor_limits (*db);
     EXPECT_EQ (limits.default_interval_ms, vayu::core::monitor_limits::DEFAULT_INTERVAL_MS);
     EXPECT_EQ (limits.max_series, vayu::core::monitor_limits::MAX_SERIES);
+    EXPECT_EQ (limits.scrape_timeout_ms, 0)
+    << "the seeded scrape timeout must be the derive sentinel, or an upgraded "
+       "install would silently change the budget its runs already scrape on";
+}
+
+// The setting is worth nothing if it stops at `MonitorLimits`: the loop reads
+// it off the `MonitorConfig` the run is started with.
+TEST_F (MonitorLimitsTest, TheConfiguredScrapeTimeoutReachesTheBlockTheRunExecutes) {
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorScrapeTimeoutMs", "1800"));
+    const auto limits = vayu::core::read_monitor_limits (*db);
+    ASSERT_EQ (limits.scrape_timeout_ms, 1800);
+
+    auto config = monitor_config (json{ { "url", "http://localhost:9100/metrics" },
+    { "series", json::array ({ "up" }) } });
+    auto parsed = monitor_config_from (config, limits);
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->scrape_timeout_ms, 1800);
+}
+
+// `POST /config` range-checks the key, so anything outside 0-60000 is a
+// hand-edited row: a negative budget is not a shorter one, and one past the
+// longest cadence the engine scrapes at could never be reached.
+TEST_F (MonitorLimitsTest, AHandEditedScrapeTimeoutOutOfRangeFallsBackToTheSentinel) {
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorScrapeTimeoutMs", "-1"));
+    EXPECT_EQ (vayu::core::read_monitor_limits (*db).scrape_timeout_ms, 0);
+
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorScrapeTimeoutMs", "60001"));
+    EXPECT_EQ (vayu::core::read_monitor_limits (*db).scrape_timeout_ms, 0);
+}
+
+// ---------------------------------------------------------------------------
+// The scrape budget itself
+// ---------------------------------------------------------------------------
+
+// The sentinel must reproduce the hardcoded formula exactly: an install that
+// never touches the setting has to scrape on the budget it always did.
+TEST (ScrapeTimeout, ZeroDerivesThreeQuartersOfTheIntervalAsItAlwaysDid) {
+    for (const int interval : { 250, 500, 1000, 2000, 60000 }) {
+        EXPECT_EQ (resolve_scrape_timeout_ms (interval, 0),
+        std::max (100, interval * 3 / 4))
+        << "interval " << interval;
+    }
+    // The floor, for an interval only a hand-edited snapshot could carry.
+    EXPECT_EQ (resolve_scrape_timeout_ms (10, 0), 100);
+}
+
+// The whole point of the setting: an exposition slower than three quarters of
+// the interval gets the budget it needs without the cadence moving.
+TEST (ScrapeTimeout, AConfiguredBudgetIsHonouredAsWritten) {
+    EXPECT_EQ (resolve_scrape_timeout_ms (2000, 1950), 1950);
+    EXPECT_EQ (resolve_scrape_timeout_ms (2000, 1600), 1600);
+    // Shorter than the derivation is a choice too - a user who would rather
+    // have a gap than a stale sample.
+    EXPECT_EQ (resolve_scrape_timeout_ms (2000, 200), 200);
+}
+
+// A scrape may not outlive its own cadence, whatever the setting says: past
+// that the loop spends the run behind itself.
+TEST (ScrapeTimeout, ABudgetLongerThanTheCadenceIsCappedAtIt) {
+    EXPECT_EQ (resolve_scrape_timeout_ms (1000, 5000), 1000);
+    EXPECT_EQ (resolve_scrape_timeout_ms (1000, 1000), 1000);
+    EXPECT_EQ (resolve_scrape_timeout_ms (250, 60000), 250);
 }
 
 // The setting has to reach a block that named no interval of its own, or it
@@ -352,6 +416,13 @@ class MonitorRunTest : public ::testing::Test {
         db->create_run (row);
     }
 
+    void set_config (const std::string& key, const std::string& value) {
+        auto entry = db->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed " << key;
+        entry->value = value;
+        db->save_config_entry (*entry);
+    }
+
     // A short run against the fast endpoint, with the monitor block under test.
     json run_config (json monitor) const {
         return json{ { "mode", "constant_rps" }, { "duration", "3s" },
@@ -485,6 +556,60 @@ TEST_F (MonitorRunTest, AHangingEndpointStallsNeitherTheRunNorTheTicks) {
     ASSERT_TRUE (summary.contains ("monitor"));
     EXPECT_EQ (summary["monitor"]["samples"].get<size_t> (), 0u);
     EXPECT_GT (summary["monitor"]["failures"].get<size_t> (), 0u);
+}
+
+// The failure the setting exists for, both halves of it. An exposition that
+// takes longer to render than three quarters of the interval reads as
+// permanently down, and the only way out used to be a slower cadence - which
+// also thins the data. Raising `monitorScrapeTimeoutMs` clears it at the same
+// cadence. Mutation-check: put the hardcoded `max(100, interval*3/4)` back in
+// `collect_monitor` and the second half of this test records nothing.
+TEST_F (MonitorRunTest, ASlowExpositionScrapesOnceTheBudgetIsRaisedAtTheSameCadence) {
+    const json monitor = json{ { "url", server->vitals_slow_url () },
+        { "intervalMs", SlowMockServer::VITALS_SLOW_INTERVAL_MS },
+        { "series", json::array ({ "vayu_test_cpu" }) } };
+
+    // Derived (the seeded sentinel): three quarters of 2000ms is less than the
+    // 1700ms the endpoint takes, so every scrape is a gap.
+    const std::string derived_run = "run-monitor-slow-derived";
+    create_run_row (derived_run);
+    {
+        vayu::core::RunManager manager;
+        ASSERT_TRUE (manager.start_run (derived_run, run_config (monitor), *db, false));
+        wait_for_terminal (derived_run, 25000);
+        manager.shutdown (std::chrono::milliseconds (20000));
+    }
+    EXPECT_EQ (db->count_monitor_samples (derived_run), 0)
+    << "the derived budget outlasted an exposition slower than three quarters "
+       "of the interval";
+
+    // Raised, with the cadence untouched.
+    ASSERT_NO_FATAL_FAILURE (set_config ("monitorScrapeTimeoutMs",
+    std::to_string (SlowMockServer::VITALS_SLOW_INTERVAL_MS - 50)));
+
+    const std::string raised_run = "run-monitor-slow-raised";
+    create_run_row (raised_run);
+    {
+        vayu::core::RunManager manager;
+        ASSERT_TRUE (manager.start_run (raised_run, run_config (monitor), *db, false));
+        wait_for_terminal (raised_run, 25000);
+        manager.shutdown (std::chrono::milliseconds (20000));
+    }
+    EXPECT_GE (db->count_monitor_samples (raised_run), 1)
+    << "the raised budget did not reach the scrape loop";
+
+    auto samples = db->get_monitor_samples_paginated (raised_run, 5000, 0);
+    ASSERT_FALSE (samples.empty ());
+    EXPECT_DOUBLE_EQ (
+    json::parse (samples.front ().payload)["series"]["vayu_test_cpu"].get<double> (), 4.0);
+
+    // The cadence is the one the run asked for either way: the setting buys a
+    // longer scrape, not a slower one.
+    auto stored = db->get_run (raised_run);
+    ASSERT_TRUE (stored.has_value ());
+    auto summary = json::parse (stored->summary);
+    ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
+    EXPECT_GE (summary["monitor"]["samples"].get<size_t> (), 1u);
 }
 
 TEST_F (MonitorRunTest, ARunWithoutAMonitorScrapesNothingAndReportsNoSection) {

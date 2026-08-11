@@ -43,6 +43,10 @@ MonitorConfig& out) {
     // who set `monitorIntervalMs` to 5000 gets 5000 for every run that does not
     // override it - including one started by a client that omits the field.
     out.interval_ms = limits.default_interval_ms;
+    // The block has no timeout field of its own to override this: the scrape
+    // budget is an engine setting because it is about the endpoint being
+    // scraped, which is the same one run after run.
+    out.scrape_timeout_ms = limits.scrape_timeout_ms;
     if (!monitor.is_object ()) {
         return "'monitor' must be an object with a 'url' and a 'series' list";
     }
@@ -144,7 +148,28 @@ MonitorLimits read_monitor_limits (vayu::db::Database& db) {
     limits.max_series =
     max_series > 0 ? static_cast<size_t> (max_series) : defaults.max_series;
 
+    // A negative budget is not a shorter one, and a value past the longest
+    // cadence the engine will scrape at could never be reached anyway - both
+    // fall back to the derive sentinel rather than to a timeout the user did
+    // not choose.
+    const int scrape_timeout =
+    db.get_config_int ("monitorScrapeTimeoutMs", defaults.scrape_timeout_ms);
+    limits.scrape_timeout_ms =
+    (scrape_timeout >= 0 && scrape_timeout <= monitor_limits::MAX_INTERVAL_MS) ?
+    scrape_timeout :
+    defaults.scrape_timeout_ms;
+
     return limits;
+}
+
+int resolve_scrape_timeout_ms (int interval_ms, int configured_timeout_ms) {
+    if (configured_timeout_ms <= 0) {
+        // Three quarters of the interval leaves room to store the row and come
+        // back round.
+        return std::max (
+        monitor_limits::MIN_DERIVED_SCRAPE_TIMEOUT_MS, interval_ms * 3 / 4);
+    }
+    return std::min (configured_timeout_ms, interval_ms);
 }
 
 std::optional<std::string> validate_monitor_config (const nlohmann::json& config,
