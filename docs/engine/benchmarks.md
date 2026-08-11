@@ -291,7 +291,7 @@ DB. Note this is the same direction as, but far smaller than, the 30-40% UI
 contention figure this page previously carried - that larger figure was not
 reproduced and should not be quoted.
 
-## Config semantics: live, restart-gated, and dead
+## Config semantics: live, restart-gated, and retired
 
 Every entry below was verified by locating the read site in the engine source.
 This matters because the seeded labels are wrong in places.
@@ -307,9 +307,15 @@ This matters because the seeded labels are wrong in places.
 | `maxResponseBodyBytes` | `core/run_manager.cpp` | Per run |
 | `oauth2RefreshLeadMs`, `oauth2RefreshMinIntervalMs`, `oauth2RefreshRetryMs`, `oauth2RefreshRetryMaxMs`, `oauth2RefreshPollIntervalMs` | `core/auth_refresh.cpp` (read at `core/run_manager.cpp`) | Per run. Mid-run OAuth 2.0 renewal: lead time, floor between renewals, the retry backoff's first wait and ceiling, and how often the watchdog wakes to notice the run ended |
 | `inboxMaxBodyBytes`, `inboxMaxCaptures`, `inboxLivePollIntervalMs` | `http/routes/inbox.cpp` (`read_inbox_limits`) | **Per inbox.** Resolved when `POST /inbox/start` runs; a running inbox keeps what it was started with |
-| `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize`, `dbTempStore`, `dbMmapSize`, `dbWalAutocheckpoint` | `db/database.cpp` | DB open. **Restart required** |
-| `maxConnections` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |
-| `statsInterval` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |
+| `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize` | `db/database.cpp` | DB open. **Restart required.** `dbCacheSize` is per-connection state, so it is re-applied to every connection from the value read at startup |
+
+The dead entries this table used to list - `maxConnections` and `statsInterval`,
+plus `tcpKeepAliveIdle` / `tcpKeepAliveInterval`, `maxJsonFieldSize`, the three
+`sse*` keys, and the three database PRAGMAs with no tuning story
+(`dbTempStore`, `dbMmapSize`, `dbWalAutocheckpoint`) - were retired in
+[#519](https://github.com/athrvk/vayu/issues/519). They no longer seed, and an
+upgraded database sheds the rows. The behaviour they claimed to control is
+unchanged: each one's constant is still what the engine applies.
 
 `loop_config.max_concurrent` is set from the run's `concurrency`, which is why
 `eventLoopMaxConcurrent` acts only as a default for runs that do not specify one.
@@ -374,7 +380,7 @@ For load testing this class of target on this machine:
 | `eventLoopMaxPerHost` | 500 | Not binding at c=64; removes any doubt |
 | `dnsCacheTimeout` | 3600 | Target hostname never needs re-resolution |
 | `scriptEnableConsole` | false | Matters only when scripts run |
-| `dbSynchronous` / `dbTempStore` | 0 / 2 | Already optimal by default |
+| `dbSynchronous` | 0 (Off) | Already optimal by default |
 | measurement method | standalone engine | Worth ~9% versus running through the app |
 
 ## Reproduce it

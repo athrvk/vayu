@@ -704,7 +704,7 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 
 | Column          | Type    | Notes                                                  |
 |-----------------|---------|--------------------------------------------------------|
-| `key`           | TEXT PK | e.g. `workers`, `maxConnections`, `liveTickIntervalMs` |
+| `key`           | TEXT PK | e.g. `workers`, `dbCacheSize`, `liveTickIntervalMs` |
 | `value`         | TEXT    | Current value (parsed per `type`)                      |
 | `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"` / `"enum"` |
 | `label`         | TEXT    | Display label                                          |

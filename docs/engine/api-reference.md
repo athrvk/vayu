@@ -410,11 +410,11 @@ min/max/options):
       "value": "8",
       "type": "integer",
       "label": "Worker Threads",
-      "description": "Number of worker threads for load generation.",
-      "category": "performance",
+      "description": "Number of background worker threads. Higher values improve throughput on multi-core systems but increase RAM usage. Default equals CPU core count.",
+      "category": "general_engine",
       "default": "8",
       "min": "1",
-      "max": "256",
+      "max": "128",
       "requiresRestart": true,
       "advanced": false,
       "updatedAt": 1234567890
@@ -461,10 +461,13 @@ hand-maintained value-to-label map. `value` and `default` are always strings;
   live and still settable; the app renders these collapsed under an "Advanced"
   section at the bottom of their category.
 
-`defaultHttpVersion` is the only seeded `enum` entry today: the protocol a
+Two entries are seeded as `enum` today. `defaultHttpVersion` is the protocol a
 **newly created** request starts with (see [POST /requests](#post-requests)).
 It is a write-time seed only - changing it never alters a request that already
-exists, and it is never consulted at execution time.
+exists, and it is never consulted at execution time. `dbSynchronous` is
+SQLite's durability level, whose three values (`"0"` Off, `"1"` Normal, `"2"`
+Full) are an enumeration rather than a range; it is stored as an `enum` so the
+panel draws a picker instead of an integer box the description has to explain.
 
 The Settings panel renders entries dynamically, so new keys appear without app
 changes. These `observability` keys govern how much a run keeps - most of them
@@ -510,7 +513,7 @@ entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`;
 range, nothing is applied and the response is `400` with the specific reason(s):
 
 ```json
-{ "error": { "code": "invalid_config", "message": "'workers' must be at most 256 (got 9999)" } }
+{ "error": { "code": "invalid_config", "message": "'workers' must be at most 128 (got 9999)" } }
 ```
 
 **Success response:** `200` - the full updated entries array (same shape as

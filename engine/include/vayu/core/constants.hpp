@@ -195,8 +195,6 @@ constexpr size_t SLO_BREACH_WINDOWS = 2;
  * @brief Server configuration
  */
 namespace server {
-/// Maximum total connections allowed
-constexpr size_t MAX_CONNECTIONS = 10000;
 /// Default request timeout in milliseconds
 constexpr int DEFAULT_TIMEOUT_MS = 30000;
 /// Interval for collecting statistics in milliseconds
@@ -294,18 +292,6 @@ constexpr int DEFAULT_SCRAPE_TIMEOUT_MS = 0;
 /// three quarters of it would time out before a loopback endpoint could answer.
 constexpr int MIN_DERIVED_SCRAPE_TIMEOUT_MS = 100;
 } // namespace monitor
-
-/**
- * @brief Server-Sent Events (SSE) configuration
- */
-namespace sse {
-/// Maximum retry interval for SSE reconnection in milliseconds
-constexpr int MAX_RETRY_MS = 30000;
-/// Connection timeout for SSE in milliseconds
-constexpr int CONNECT_TIMEOUT_MS = 30000;
-/// Whether to send Last-Event-ID header on reconnect
-constexpr bool SEND_LAST_EVENT_ID = true;
-} // namespace sse
 
 /**
  * @brief Script engine configuration

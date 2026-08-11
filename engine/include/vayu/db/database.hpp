@@ -346,6 +346,18 @@ class Database {
     std::vector<ConfigEntry> get_all_config_entries ();
     void seed_default_config (); // Initialize default config values if empty
 
+    /**
+     * @brief SQLite page-cache size in force on the last connection opened, in
+     * bytes (0 before the first one).
+     *
+     * `cache_size` is per-connection state, so the value from `dbCacheSize` is
+     * re-applied every time sqlite_orm opens a connection and then read back
+     * from SQLite - this reports the answer, not the request. It is the only
+     * way to observe that the setting reached the database, which is what makes
+     * the wiring testable and the startup line honest about what it applied.
+     */
+    int applied_cache_size_bytes () const;
+
     // Type-safe config getters (replaces ConfigManager)
     int get_config_int (const std::string& key, int default_value = 0);
     std::string get_config_string (const std::string& key,
