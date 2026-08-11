@@ -99,6 +99,14 @@ join, release - through one shared `ManagedListener`
 one of three copies; what stays per-manager is the route registration, the error each bind failure
 answers with, and the OAuth attempt TTL sweep.
 
+That shared listener is also what keeps two of them off one port. Every live listener claims its
+address:port there, and an **explicitly requested** port a live listener already holds is refused
+before the bind, naming the holder. The bind cannot report it: cpp-httplib sets `SO_REUSEPORT`, so
+on Linux a second bind on the same `127.0.0.1:port` succeeds and the kernel load-balances arriving
+connections across both accept loops - two inboxes on one port, each capturing a random half of the
+webhooks and neither list showing the rest. An ephemeral request needs no check, since the kernel
+does not hand out a port it is already using.
+
 ### Event Loop (`curl_multi`)
 
 The event loop manages concurrent HTTP request execution using libcurl's multi interface.

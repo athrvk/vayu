@@ -668,18 +668,26 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
 
     // 127.0.0.1 only, never configurable: the issuer mints bearer tokens and
     // the engine has no route auth, so a wider bind would hand them to the LAN.
-    const int port = issuer->listener.start ("127.0.0.1", issuer->settings.port);
-    if (port <= 0) {
-        out.ok            = false;
-        out.http_status   = 500;
-        out.error_code    = "mock_issuer_bind_failed";
-        out.error_message = issuer->settings.port == 0 ?
-        "Could not bind a local port for the mock issuer" :
+    const auto started = issuer->listener.start (
+    "127.0.0.1", issuer->settings.port, "mock issuer " + issuer->id);
+    if (started.port <= 0) {
+        const std::string requested =
         "Could not bind 127.0.0.1:" + std::to_string (issuer->settings.port);
+        out.ok          = false;
+        out.http_status = 500;
+        out.error_code  = "mock_issuer_bind_failed";
+        if (!started.held_by.empty ()) {
+            out.error_message =
+            requested + " - " + started.held_by + " is already listening there";
+        } else {
+            out.error_message = issuer->settings.port == 0 ?
+            "Could not bind a local port for the mock issuer" :
+            requested;
+        }
         return out;
     }
-    issuer->port       = port;
-    issuer->issuer_url = "http://127.0.0.1:" + std::to_string (port);
+    issuer->port       = started.port;
+    issuer->issuer_url = "http://127.0.0.1:" + std::to_string (started.port);
 
     out.issuer_id     = issuer->id;
     out.issuer_url    = issuer->issuer_url;

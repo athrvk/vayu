@@ -330,6 +330,39 @@ TEST_F (InboxListenerTest, StopFreesTheListenerAndKeepsTheHistory) {
     << "a stopped inbox must refuse further connections";
 }
 
+TEST_F (InboxListenerTest, ASecondInboxCannotShareARunningInboxsPort) {
+    // Without the listener's port guard this second start succeeds on Linux -
+    // cpp-httplib binds with SO_REUSEPORT - and the kernel then splits the
+    // webhooks between the two inboxes, each list silently missing half (#512).
+    auto first = start ();
+
+    InboxStartRequest contender;
+    contender.port     = first.info.port;
+    const auto refused = manager_->start (*db_, contender);
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 409);
+    EXPECT_EQ (refused.error_code, "inbox_bind_failed");
+    EXPECT_NE (refused.error_message.find (first.info.inbox_id), std::string::npos)
+    << "the refusal must name the holder: " << refused.error_message;
+    EXPECT_EQ (manager_->list ().size (), 1u)
+    << "a refused start left a record";
+
+    // Nothing was split away: every request sent to that port is in the one
+    // inbox that owns it.
+    auto client = client_for (first.info);
+    for (int i = 0; i < 8; ++i) {
+        ASSERT_TRUE (client.Post ("/hook", "{}", "application/json")) << i;
+    }
+    EXPECT_EQ (db_->count_inbox_requests (first.info.inbox_id), 8);
+
+    // The claim lasts exactly as long as the listener: once it stops, the same
+    // explicit port starts a new inbox.
+    ASSERT_TRUE (manager_->stop (first.info.inbox_id));
+    const auto reused = manager_->start (*db_, contender);
+    EXPECT_TRUE (reused.ok) << reused.error_message;
+    EXPECT_EQ (reused.info.port, first.info.port);
+}
+
 TEST_F (InboxListenerTest, TearsDownCleanlyWithAListenerStillRunning) {
     auto started = start ();
     auto client  = client_for (started.info);

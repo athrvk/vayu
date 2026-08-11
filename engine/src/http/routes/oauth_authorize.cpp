@@ -240,7 +240,10 @@ const nlohmann::json& config, const std::string& mode) {
             res.set_content (body, "text/html");
         });
 
-        const int port = attempt->listener.start ("127.0.0.1");
+        // Ephemeral only, so the port guard never refuses this one; the label
+        // is what another listener asking for this port would be told.
+        const int port =
+        attempt->listener.start ("127.0.0.1", 0, "OAuth callback " + attempt_id).port;
         if (port <= 0) {
             out.ok            = false;
             out.http_status   = 500;

@@ -513,6 +513,32 @@ TEST_F (MockIssuerTest, UpdateAndStopReportUnknownIds) {
     EXPECT_FALSE (mgr.update ("issuer_nope", json{ { "failureMode", "none" } }).found);
 }
 
+TEST_F (MockIssuerTest, ASecondIssuerCannotShareARunningIssuersPort) {
+    // SO_REUSEPORT makes the bind itself succeed on Linux, so without the
+    // listener's port guard both issuers would run on one port and the kernel
+    // would hand each of them a random half of the token requests (#512).
+    MockIssuerManager mgr;
+    const auto first = mgr.start (json::object ());
+    ASSERT_TRUE (first.ok) << first.error_message;
+    const int port = mgr.list ()["issuers"][0]["port"].get<int> ();
+
+    const auto refused = mgr.start (json{ { "port", port } });
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 500);
+    EXPECT_EQ (refused.error_code, "mock_issuer_bind_failed");
+    EXPECT_NE (refused.error_message.find (first.issuer_id), std::string::npos)
+    << "the refusal must name the holder: " << refused.error_message;
+    EXPECT_EQ (mgr.list ()["issuers"].size (), 1u)
+    << "a refused start left a record";
+
+    // An explicitly requested port that is genuinely free still starts: the
+    // guard holds the port only while its issuer runs.
+    ASSERT_TRUE (mgr.stop (first.issuer_id));
+    const auto restarted = mgr.start (json{ { "port", port } });
+    EXPECT_TRUE (restarted.ok) << restarted.error_message;
+    EXPECT_EQ (mgr.list ()["issuers"][0]["port"].get<int> (), port);
+}
+
 TEST_F (MockIssuerTest, RefusesMoreIssuersThanTheBudget) {
     MockIssuerManager mgr;
     for (size_t i = 0; i < vayu::core::constants::mock_issuer::MAX_ISSUERS; ++i) {
