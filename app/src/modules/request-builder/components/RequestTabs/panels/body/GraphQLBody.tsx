@@ -16,7 +16,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Braces, ChevronDown, ChevronRight, PanelRightOpen } from "lucide-react";
+import {
+	AlertCircle,
+	Braces,
+	ChevronDown,
+	ChevronRight,
+	Loader2,
+	PanelRightOpen,
+	RefreshCw,
+} from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { editor } from "monaco-editor";
@@ -31,6 +39,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	schemaCacheKey,
@@ -220,9 +229,32 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
  *
  * A schema nothing has been said about yet still needs the way in, so the chip
  * falls back to a plain label rather than the badge's `null`.
+ *
+ * **Refresh rides inside the chip rather than beside it.** #455 made "no
+ * duplicated Refresh" structural by moving the only one into the explorer, which
+ * left a blind refresh - the endpoint changed, or an `Authorization` was typed
+ * by hand, and the cache key cannot see either - costing open-the-pane plus
+ * refresh plus close again (#507). The rule the consolidation was really after
+ * is *one standing Refresh*, not *one Refresh*: this one is transparent at rest
+ * and appears on hover or keyboard focus, so no state ever shows two at once,
+ * and it calls the same `onRefresh` the explorer's does rather than a second
+ * copy of the call.
+ *
+ * The two are separate `<button>`s inside one visual chip because a button
+ * cannot nest in a button - the group is what makes them read as a single
+ * control.
  */
-function SchemaChip({ entry, onOpen }: { entry: SchemaEntry | null; onOpen: () => void }) {
-	const idle = (entry?.status ?? "idle") === "idle";
+function SchemaChip({
+	entry,
+	onOpen,
+	onRefresh,
+}: {
+	entry: SchemaEntry | null;
+	onOpen: () => void;
+	onRefresh: () => void;
+}) {
+	const status = entry?.status ?? "idle";
+	const loading = status === "loading";
 	/*
 	 * The badge carries the status sentence in its own `title`, so the chip
 	 * wears no second tooltip: a Radix tooltip over an element that already has
@@ -230,22 +262,43 @@ function SchemaChip({ entry, onOpen }: { entry: SchemaEntry | null; onOpen: () =
 	 * built to stop. `aria-label` names the action the text cannot.
 	 */
 	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			aria-label="Browse schema"
-			aria-expanded={false}
-			className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-		>
-			{idle ? (
-				<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
-					Schema
-				</BadgeText>
-			) : (
-				<SchemaStatusBadge entry={entry} />
-			)}
-			<PanelRightOpen className="w-3 h-3" />
-		</button>
+		<span className="group flex items-center gap-1">
+			<button
+				type="button"
+				onClick={onOpen}
+				aria-label="Browse schema"
+				aria-expanded={false}
+				className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+			>
+				{status === "idle" ? (
+					<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
+						Schema
+					</BadgeText>
+				) : (
+					<SchemaStatusBadge entry={entry} />
+				)}
+				<PanelRightOpen className="w-3 h-3" />
+			</button>
+			{/*
+			 * `focus-visible:opacity-100` is not decoration: revealed on hover
+			 * alone, a keyboard user tabs onto a fully transparent control and
+			 * Enter refetches the schema with nothing on screen to say so
+			 * (`keyboard-reachability.test.tsx`).
+			 */}
+			<TooltipIconButton
+				label="Refresh schema"
+				className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+				icon={
+					loading ? (
+						<Loader2 className="w-3 h-3 animate-spin" />
+					) : (
+						<RefreshCw className="w-3 h-3" />
+					)
+				}
+				onClick={onRefresh}
+				disabled={loading}
+			/>
+		</span>
 	);
 }
 
@@ -669,14 +722,18 @@ export function GraphQLBody({
 							</Select>
 						)}
 						{/*
-						 * One control about the schema, and only while the pane
-						 * that owns the subject is closed. With the explorer open
-						 * this header is the operation picker and nothing else -
-						 * status, freshness and Refresh are all a pane away, where
-						 * they cannot be visible twice at once.
+						 * One chip about the schema, and only while the pane that
+						 * owns the subject is closed. With the explorer open this
+						 * header is the operation picker and nothing else - status,
+						 * freshness and Refresh are all a pane away, where no two
+						 * of them can stand on screen at once.
 						 */}
 						{schemaTarget.url && !showExplorer && (
-							<SchemaChip entry={entry} onOpen={() => setExplorerOpen(true)} />
+							<SchemaChip
+								entry={entry}
+								onOpen={() => setExplorerOpen(true)}
+								onRefresh={refresh}
+							/>
 						)}
 					</div>
 				</PaneHeader>

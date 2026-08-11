@@ -172,21 +172,45 @@ describe("the pane is only there when it has something to browse", () => {
 	});
 });
 
-describe("one schema affordance, in one place", () => {
-	it("shows a single chip in the Query header while the explorer is closed", () => {
+/**
+ * A Refresh that is on screen at rest - the thing #455 allows exactly one of.
+ *
+ * The chip's own Refresh is transparent until hover or focus, so it is a Refresh
+ * that exists without standing. jsdom applies no stylesheet, so the reveal is
+ * read off the class list rather than from a computed opacity, the way the
+ * keyboard-reachability guard reads its own.
+ */
+const standingRefreshes = () =>
+	screen.queryAllByLabelText("Refresh schema").filter((b) => !b.className.includes("opacity-0"));
+
+describe("one standing schema Refresh, in one place", () => {
+	it("shows a single chip in the Query header while the explorer is closed, and no standing Refresh", () => {
 		useExplorerStore.setState({ open: false });
 		mount("");
 
 		// Mutation check: put the old badge + Refresh + toggle trio back in the
-		// Query header and the second of these fails - Refresh returns to a
-		// header whose subject lives in the pane beside it.
+		// Query header and the second of these fails - a Refresh returns to a
+		// header whose subject lives in the pane beside it, standing at rest.
 		expect(screen.getAllByLabelText("Browse schema")).toHaveLength(1);
-		expect(screen.queryByLabelText("Refresh schema")).toBeNull();
+		expect(standingRefreshes()).toHaveLength(0);
 	});
 
-	it("never shows two Refreshes at once, because the open pane owns the only one", () => {
+	it("hides the chip's Refresh until it is hovered or focused, without dropping it from the tab order", () => {
+		useExplorerStore.setState({ open: false });
 		mount("");
-		expect(screen.getAllByLabelText("Refresh schema")).toHaveLength(1);
+
+		const refresh = screen.getByLabelText("Refresh schema");
+		// Mutation check: drop `focus-visible:opacity-100` and a keyboard user
+		// tabs onto a fully transparent control that refetches on Enter.
+		expect(refresh.className).toContain("group-hover:opacity-100");
+		expect(refresh.className).toContain("focus-visible:opacity-100");
+		refresh.focus();
+		expect(document.activeElement).toBe(refresh);
+	});
+
+	it("never shows two standing Refreshes at once, because the open pane owns the only one", () => {
+		mount("");
+		expect(standingRefreshes()).toHaveLength(1);
 		expect(screen.queryByLabelText("Browse schema")).toBeNull();
 	});
 
@@ -197,6 +221,42 @@ describe("one schema affordance, in one place", () => {
 		useExplorerStore.setState({ open: false });
 		mount("");
 		expect(screen.getByLabelText("Browse schema")).toBeTruthy();
+	});
+});
+
+describe("refreshing the schema from the closed chip", () => {
+	it("calls the cache's one refresh path, and leaves the explorer closed", () => {
+		const refreshSchema = vi.fn();
+		useSchemaCache.setState({ refreshSchema });
+		useExplorerStore.setState({ open: false });
+		mount("");
+
+		fireEvent.click(screen.getByLabelText("Refresh schema"));
+
+		// The same call the explorer's Refresh makes, on the same target - one
+		// implementation, two entry points. Mutation check: point the chip at a
+		// second copy of the introspection call and the target assertion breaks.
+		expect(refreshSchema).toHaveBeenCalledWith(TARGET);
+		// Refreshing is not browsing: the blind refresh #507 is about must not
+		// cost the pane opening on top of it.
+		expect(screen.queryByTestId("graphql-explorer")).toBeNull();
+	});
+
+	it("spins and refuses a second click while a refresh is in flight", () => {
+		const refreshSchema = vi.fn();
+		const key = schemaCacheKey(TARGET);
+		useSchemaCache.setState({
+			byKey: { [key]: { status: "loading", schema: null, error: null, fetchedAt: null } },
+			refreshSchema,
+		});
+		useExplorerStore.setState({ open: false });
+		mount("");
+
+		const refresh = screen.getByLabelText("Refresh schema");
+		expect(refresh).toBeDisabled();
+		expect(refresh.querySelector(".animate-spin")).toBeTruthy();
+		fireEvent.click(refresh);
+		expect(refreshSchema).not.toHaveBeenCalled();
 	});
 });
 
