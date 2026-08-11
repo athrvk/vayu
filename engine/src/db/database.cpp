@@ -35,6 +35,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -369,31 +370,40 @@ struct Database::Impl {
     Storage storage;
     std::recursive_mutex mutex;
 
+    /// Page cache the open callback gives every connection, in bytes. Seeded
+    /// with the compile-time default and overwritten once, from `dbCacheSize`,
+    /// while `init` runs - which is exactly why that entry is restart-required:
+    /// a later write to the config row never reaches this member.
+    /// Atomic because sqlite_orm opens connections from whichever thread needs
+    /// one, so the callback reads this concurrently with that one write.
+    std::atomic<int> cache_size_bytes{ vayu::core::constants::database::CACHE_SIZE_BYTES };
+
+    /// What SQLite reported back after the most recent open, in bytes (0 until
+    /// the first connection). Read back rather than echoed, so it states the
+    /// size in force instead of the size requested.
+    std::atomic<int> applied_cache_size_bytes{ 0 };
+
     Impl (const std::string& path) : storage (make_storage (path)) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
             std::filesystem::create_directories (db_path.parent_path ());
         }
 
-        // Set on_open callback to apply database optimizations when connection is established
-        // Note: These use default constants. To use custom values from UI settings,
-        // users must restart the engine after changing settings.
-        storage.on_open = [] (sqlite3* db) {
+        // Applied on every connection sqlite_orm opens, since a PRAGMA is
+        // per-connection state. Only `cache_size` is configurable; the other
+        // three are engine defaults with no user story (their config entries
+        // were retired in #519) and stay compile-time constants.
+        storage.on_open = [this] (sqlite3* db) {
             char* err_msg = nullptr;
             std::stringstream sql;
 
-            // Use default constants for database optimizations
-            // These settings require engine restart to take effect and are
-            // applied from constants at startup. Users can change them via
-            // Settings UI, but changes only apply after restarting the engine.
-            int cache_size_bytes = vayu::core::constants::database::CACHE_SIZE_BYTES;
             int temp_store   = vayu::core::constants::database::TEMP_STORE;
             size_t mmap_size = vayu::core::constants::database::MMAP_SIZE_BYTES;
             int wal_checkpoint = vayu::core::constants::database::WAL_AUTOCHECKPOINT;
 
             // Apply optimizations
             // SQLite cache_size PRAGMA uses negative KB values (e.g., -64000 = 64MB)
-            int cache_size_kb = -(cache_size_bytes / 1024);
+            int cache_size_kb = -(cache_size_bytes.load () / 1024);
             sql << "PRAGMA cache_size = " << cache_size_kb << ";";
             int rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
@@ -403,6 +413,20 @@ struct Database::Impl {
                 err_msg = nullptr;
             }
             sql.str ("");
+
+            // Read the size back instead of trusting the write: a rejected
+            // PRAGMA is silent, and only the connection can say what it holds.
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2 (db, "PRAGMA cache_size;", -1, &stmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_step (stmt) == SQLITE_ROW) {
+                    // Negative means KB, positive means pages - we always set
+                    // the negative form, so a positive answer means the write
+                    // did not take and the size in bytes is not knowable here.
+                    const int reported = sqlite3_column_int (stmt, 0);
+                    applied_cache_size_bytes.store (reported < 0 ? -reported * 1024 : 0);
+                }
+                sqlite3_finalize (stmt);
+            }
 
             sql << "PRAGMA temp_store = " << temp_store << ";";
             rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
@@ -571,9 +595,16 @@ void Database::init () {
     // Seed default configuration values if empty (must be before reading config)
     seed_default_config ();
 
-    // Apply database optimizations from config (or use defaults)
-    // Note: These settings require engine restart to take effect
-    // The on_open callback applies defaults; config values are read here for runtime adjustments
+    // Apply the three configurable database PRAGMAs. All are read once, here,
+    // so a later write to any of them reaches the engine on the next start -
+    // which is what their restart-required flag promises.
+    //
+    // `cache_size` is per-connection state, so it cannot be applied once like
+    // the other two: it is handed to the open callback, which re-applies it to
+    // every connection sqlite_orm opens. Setting it before the first read below
+    // means that read already carries it.
+    impl_->cache_size_bytes.store (
+    get_config_int ("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
 
     // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
     int synchronous =
@@ -585,21 +616,8 @@ void Database::init () {
     get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
     impl_->storage.pragma.busy_timeout (busy_timeout);
 
-    // Log current configuration (other PRAGMAs are set in on_open callback and require restart)
-    int cache_size_bytes =
-    get_config_int ("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES);
-    int temp_store =
-    get_config_int ("dbTempStore", vayu::core::constants::database::TEMP_STORE);
-    int mmap_size      = get_config_int ("dbMmapSize",
-         static_cast<int> (vayu::core::constants::database::MMAP_SIZE_BYTES));
-    int wal_checkpoint = get_config_int (
-    "dbWalAutocheckpoint", vayu::core::constants::database::WAL_AUTOCHECKPOINT);
-
     vayu::utils::log_debug ("Database initialized with WAL mode (cache=" +
-    std::to_string (cache_size_bytes / 1024) +
-    "KB, mmap=" + std::to_string (mmap_size / 1024 / 1024) + "MB, " +
-    "temp_store=" + std::to_string (temp_store) + ", " +
-    "wal_checkpoint=" + std::to_string (wal_checkpoint) + " pages, " +
+    std::to_string (applied_cache_size_bytes () / 1024) + "KB, " +
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
     "synchronous=" + std::to_string (synchronous) + ")");
 
@@ -1540,6 +1558,12 @@ std::vector<ConfigEntry> Database::get_all_config_entries () {
     return impl_->storage.get_all<ConfigEntry> ();
 }
 
+int Database::applied_cache_size_bytes () const {
+    // No DB mutex: the value is an atomic the open callback writes, and taking
+    // the mutex here would order this read behind whatever query is running.
+    return impl_->applied_cache_size_bytes.load ();
+}
+
 // Type-safe config getters (replaces ConfigManager)
 int Database::get_config_int (const std::string& key, int default_value) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -1603,6 +1627,17 @@ std::string http_version_options_json () {
     }
     return options.dump ();
 }
+
+// The `{value,label}` array for "dbSynchronous". SQLite's synchronous levels
+// are its own enumeration, not ours, so the list is literal - but it belongs in
+// the `options` column rather than spelled out as "0 = Off, 1 = ..." prose over
+// an integer input, which is what the entry used to do.
+std::string db_synchronous_options_json () {
+    const nlohmann::json options = { { { "value", "0" }, { "label", "Off" } },
+        { { "value", "1" }, { "label", "Normal" } },
+        { { "value", "2" }, { "label", "Full" } } };
+    return options.dump ();
+}
 } // namespace
 
 void Database::seed_default_config () {
@@ -1617,7 +1652,35 @@ void Database::seed_default_config () {
     //                      script context pool is grown lazily and never read a
     //                      bound (issue #112). A user could set it 1..256 and
     //                      change nothing.
-    for (const char* retired : { "requestBatchSize", "contextPoolSize" }) {
+    //
+    // The 2026-08 sweep (#519) retired eleven more. Each was verified by
+    // searching the engine for a reader; where the constant behind the key kept
+    // its own callers, the constant stayed and only the knob went.
+    //
+    //   maxConnections       - no reader anywhere; the server enforces no such
+    //                          global limit.
+    //   tcpKeepAliveIdle     - curl_utils sets both CURL keep-alive options from
+    //   tcpKeepAliveInterval   constants and never consults the config.
+    //   statsInterval        - superseded by liveTickIntervalMs, which shares its
+    //                          default and its purpose and is the one that is
+    //                          read. Two rows, one mechanism.
+    //   maxJsonFieldSize     - json.cpp caps stored fields at the constant, so
+    //                          the "increase only if..." escape hatch the
+    //                          description offered did not exist.
+    //   sseConnectTimeout    - the dashboard's reconnect logic is renderer-side
+    //   sseMaxRetry            and never asked the engine for these; the sse::*
+    //   sseSendLastEventId     constants existed only to seed them.
+    //   dbTempStore          - all three are PRAGMAs the open callback applies
+    //   dbMmapSize             from constants. Wiring them buys nothing: the
+    //   dbWalAutocheckpoint    defaults are already the measured optimum (see
+    //                          docs/engine/benchmarks.md) and none has a user
+    //                          story. dbCacheSize, the one that does, is wired
+    //                          instead of retired.
+    for (const char* retired : { "requestBatchSize", "contextPoolSize",
+             "maxConnections", "tcpKeepAliveIdle", "tcpKeepAliveInterval",
+             "statsInterval", "maxJsonFieldSize", "sseConnectTimeout",
+             "sseMaxRetry", "sseSendLastEventId", "dbTempStore", "dbMmapSize",
+             "dbWalAutocheckpoint" }) {
         impl_->storage.remove_all<ConfigEntry> (
         where (c (&ConfigEntry::key) == std::string (retired)));
     }
@@ -1682,14 +1745,6 @@ void Database::seed_default_config () {
     "Default equals CPU core count.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
     "1", "128", std::nullopt, now }));
-
-    upsert_config (restart_required (ConfigEntry{ "maxConnections",
-    std::to_string (vayu::core::constants::server::MAX_CONNECTIONS), "integer",
-    "Maximum Connections",
-    "Global limit for simultaneous internal connections. Increasing "
-    "beyond system limits (ulimit) may cause instability.",
-    "general_engine", std::to_string (vayu::core::constants::server::MAX_CONNECTIONS),
-    "100", "100000", std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
@@ -1771,90 +1826,38 @@ void Database::seed_default_config () {
     upsert_config (restart_required (ConfigEntry{ "dbCacheSize",
     std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "integer", "Database Cache Size",
-    "Memory used to cache test results and metrics during high-RPS load tests. "
-    "Larger values reduce disk writes when storing thousands of results per "
-    "second, "
-    "improving test throughput. "
-    "Recommended: 64-128MB for tests generating 10K+ results/second. Default: "
-    "64MB.",
+    "Memory SQLite keeps per connection for recently used database pages. A "
+    "larger cache spares repeated reads while a high-RPS run writes results and "
+    "the dashboard queries them. 64 to 128 megabytes suits runs storing 10,000 "
+    "or more results a second.",
     "database_performance", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "1048576",    // min: 1MB in bytes
     "1073741824", // max: 1GB in bytes
     std::nullopt, now }));
 
-    upsert_config (restart_required (ConfigEntry{ "dbTempStore",
-    std::to_string (vayu::core::constants::database::TEMP_STORE), "integer",
-    "Temporary Tables Storage",
-    "Where temporary data is stored when generating test reports and "
-    "aggregating metrics. "
-    "Options: 0 = Default (file), 1 = Always use file, 2 = Always use memory. "
-    "Memory (2) significantly speeds up report generation and metric "
-    "calculations during "
-    "active tests. "
-    "Recommended for high-frequency reporting. Default: Memory.",
-    "database_performance", std::to_string (vayu::core::constants::database::TEMP_STORE),
-    "0", "2", std::nullopt, now }));
-
-    upsert_config (restart_required (ConfigEntry{ "dbMmapSize",
-    std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
-    "integer", "Memory-Mapped I/O Size",
-    "Amount of database file accessed directly from memory when reading "
-    "test results and metrics. "
-    "Example: 268435456 = 256MB. Speeds up dashboard updates and report "
-    "generation by avoiding disk reads. "
-    "Larger values improve real-time metric streaming performance. "
-    "Recommended: 256-512MB for large test runs. "
-    "Default: 256MB.",
-    "database_performance", std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
-    "0",          // min: disabled
-    "1073741824", // max: 1GB
-    std::nullopt, now }));
-
-    upsert_config (restart_required (ConfigEntry{ "dbWalAutocheckpoint",
-    std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
-    "integer", "WAL Checkpoint Frequency",
-    "How often SQLite saves accumulated test results to the main database file "
-    "(in pages). "
-    "During high-RPS tests, results accumulate in the WAL file. Lower values "
-    "save more "
-    "frequently (reduces WAL size, but may slow writes). "
-    "Higher values batch saves less often (faster result storage, but WAL file "
-    "grows larger). "
-    "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages.",
-    "database_performance", std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
-    "100", "10000", std::nullopt, now }));
-
     upsert_config (restart_required (advanced (ConfigEntry{ "dbBusyTimeout",
     std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "integer", "Database Lock Wait Time",
-    "How long SQLite waits (in milliseconds) when multiple threads try to "
-    "write test results "
-    "simultaneously. "
-    "During high-concurrency load tests, result storage threads compete for "
-    "database access. "
-    "Higher values prevent 'database is locked' errors but may delay error "
-    "reporting. "
-    "Recommended: 10-30 seconds for tests with 100+ concurrent requests. "
-    "Default: 10 seconds. ",
+    "How long a thread waits for the database when another one is writing to "
+    "it. Result-storage threads compete for it during a high-concurrency run, "
+    "and a longer wait turns a 'database is locked' failure into a pause "
+    "instead. 10 to 30 seconds suits runs at 100 or more concurrent requests.",
     "database_performance", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "1000",  // min: 1 second
     "60000", // max: 60 seconds
     std::nullopt, now })));
 
     upsert_config (restart_required (ConfigEntry{ "dbSynchronous",
-    std::to_string (vayu::core::constants::database::SYNCHRONOUS), "integer",
+    std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum",
     "Data Safety Mode",
-    "How aggressively SQLite ensures test results are written to disk. "
-    "Options: 0 = Off (fastest; the database stays consistent after a crash, "
-    "but the most recent results may be lost on power failure or OS crash - "
-    "acceptable for test telemetry), 1 = Normal (balanced), 2 = Full (safest, "
-    "slowest). "
-    "For load testing, Off (0) is recommended - it maximizes write throughput "
-    "for storing results while keeping the database uncorrupted. "
-    "This setting directly impacts how fast results can be saved during "
-    "high-RPS tests. Default: Off.",
+    "How hard SQLite works to get results onto disk before reporting them "
+    "written. Off is the fastest and the default: the database stays "
+    "uncorrupted through a crash, but the last few results may be lost to a "
+    "power cut, which is an acceptable trade for test telemetry. Normal and "
+    "Full buy durability back at the cost of write throughput during a "
+    "high-RPS run.",
     "database_performance", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
-    "0", "2", std::nullopt, now }));
+    std::nullopt, std::nullopt, db_synchronous_options_json (), now }));
 
     // =========================================================================
     // NETWORK & CONNECTIVITY CONFIGURATION
@@ -1870,7 +1873,8 @@ void Database::seed_default_config () {
     "1", "10000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "eventLoopMaxPerHost",
-    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max connections per host (per worker)",
+    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer",
+    "Max Connections Per Host (Per Worker)",
     "Concurrency limit for a specific target API host. Critical for respecting "
     "target rate limits. "
     "Lower values are gentler on the target; higher values maximize "
@@ -1889,25 +1893,6 @@ void Database::seed_default_config () {
     "0",    // Disable cache
     "3600", // 1 hour
     std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "tcpKeepAliveIdle",
-    std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
-    "integer", "TCP Keep-Alive Idle Time",
-    "Time before sending keep-alive probes on idle connections. Prevents "
-    "firewall drops. "
-    "Lower values detect dead connections faster.",
-    "network_performance",
-    std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
-    "1", "300", std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "tcpKeepAliveInterval",
-    std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
-    "integer", "TCP Keep-Alive Interval",
-    "Frequency of probes after idle timeout is reached. "
-    "Usually set to the same value as Keep-Alive Idle Time.",
-    "network_performance",
-    std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
-    "1", "300", std::nullopt, now });
 
     // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
     // before it expires, so a run longer than its token does not turn into a
@@ -2067,15 +2052,6 @@ void Database::seed_default_config () {
     // Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "statsInterval",
-    std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "integer", "Statistics Collection Interval",
-    "Frequency of metric aggregation. Lower values = smoother UI but higher "
-    "CPU overhead. "
-    "Recommended: 100-500ms for most use cases.",
-    "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "10", "10000", std::nullopt, now });
-
     upsert_config (ConfigEntry{ "liveTickIntervalMs",
     std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
     "integer", "Live Metrics Tick Interval (ms)",
@@ -2095,8 +2071,8 @@ void Database::seed_default_config () {
     "mid-run. One setting drives both, so they cannot disagree; the dashboard's "
     "Live Dashboard panel edits this same value. Expressed as time, so it "
     "survives a change to the tick interval. 0 means the full run (no time "
-    "limit). Memory is bounded at 20,000 ticks per run either way, so a fast "
-    "tick interval reaches that ceiling before a long window does.",
+    "limit). Live Metrics Tick Ceiling is the memory backstop either way, so a "
+    "fast tick interval reaches that ceiling before a long window does.",
     "observability",
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
     "0", "3600000", std::nullopt, now });
@@ -2141,19 +2117,6 @@ void Database::seed_default_config () {
     "stored report immediately).",
     "observability", "60000",
     "0", "600000", std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "maxJsonFieldSize",
-    std::to_string (vayu::core::constants::json::MAX_FIELD_SIZE), "integer", "Maximum JSON Field Size",
-    "Maximum size for JSON strings stored in saved requests (params, "
-    "headers, body, auth) when loading from database. "
-    "Fields exceeding this limit are returned as empty objects or "
-    "strings to prevent out-of-memory errors. "
-    "Default 10MB. Increase only if saved requests with very large JSON "
-    "fields fail to load properly.",
-    "observability", std::to_string (vayu::core::constants::json::MAX_FIELD_SIZE),
-    "1024",      // 1KB
-    "104857600", // 100MB
-    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxTraceBodyBytes",
     std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
@@ -2241,28 +2204,6 @@ void Database::seed_default_config () {
     "file on disk. In-progress runs are never pruned. Default 30.",
     "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
     "0", "3650", std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "sseConnectTimeout",
-    std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS), "integer", "SSE Connection Timeout",
-    "Timeout for establishing dashboard live streams. "
-    "Increase if the UI shows connection errors during heavy load tests. "
-    "Value is in milliseconds (30000 = 30 seconds).",
-    "observability", std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
-    "1000", "300000", std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "sseMaxRetry",
-    std::to_string (vayu::core::constants::sse::MAX_RETRY_MS), "integer", "SSE Max Retry Interval",
-    "Max exponential backoff wait time for dashboard reconnection. "
-    "Lower values reconnect faster but may cause rapid retries if the engine "
-    "is busy.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_RETRY_MS),
-    "1000", "300000", std::nullopt, now });
-
-    upsert_config (ConfigEntry{ "sseSendLastEventId",
-    vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false", "boolean",
-    "SSE Send Last Event ID", "Resumes data streams from the last received event. Disable if using incompatible proxies.",
-    "observability", vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
-    std::nullopt, std::nullopt, std::nullopt, now });
 
     // Webhook inbox. All three are read once when an inbox starts, so a change
     // applies to the next inbox started - no restart. The running listener keeps

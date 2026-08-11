@@ -69,15 +69,13 @@ export function parseSizeToBytes(sizeStr: string): number | null {
 
 /**
  * Check if a config key is size-related
+ *
+ * Engine keys only, and only ones the engine still seeds - `maxJsonFieldSize`
+ * and `dbMmapSize` were retired in #519 and dropped from here with them, since
+ * an entry naming a key that no longer arrives can never match.
  */
 export function isSizeConfig(key: string): boolean {
-	const sizeKeys = [
-		"scriptMemoryLimit",
-		"scriptStackSize",
-		"maxJsonFieldSize",
-		"dbCacheSize",
-		"dbMmapSize",
-	];
+	const sizeKeys = ["scriptMemoryLimit", "scriptStackSize", "dbCacheSize"];
 	return sizeKeys.includes(key);
 }
 

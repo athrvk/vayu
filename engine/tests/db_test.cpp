@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 
 namespace vayu::db {
@@ -258,6 +259,75 @@ TEST_F (DatabaseTest, SeedRemovesRetiredContextPoolSizeEntry) {
     db.seed_default_config ();
 
     EXPECT_FALSE (db.get_config_entry ("contextPoolSize").has_value ());
+}
+
+// The 2026-08 sweep (#519) retired eleven more keys at once: nothing read them,
+// so a user could turn any of them and change nothing. Pinned as a list rather
+// than one test per key - the guarantee is identical for all of them, and a key
+// added to the retirement list without its row being deleted is the only way
+// this can regress.
+TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
+    const std::vector<std::string> retired = { "maxConnections", "tcpKeepAliveIdle",
+        "tcpKeepAliveInterval", "statsInterval", "maxJsonFieldSize",
+        "sseConnectTimeout", "sseMaxRetry", "sseSendLastEventId", "dbTempStore",
+        "dbMmapSize", "dbWalAutocheckpoint" };
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    for (const auto& key : retired) {
+        EXPECT_FALSE (db.get_config_entry (key).has_value ())
+        << "a fresh seed must not create the retired key '" << key << "'";
+
+        ConfigEntry stale;
+        stale.key           = key;
+        stale.value         = "1";
+        stale.type          = "integer";
+        stale.label         = "Left behind";
+        stale.description   = "left behind by an older version";
+        stale.category      = "general_engine";
+        stale.default_value = "1";
+        stale.updated_at    = 1;
+        db.save_config_entry (stale);
+        ASSERT_TRUE (db.get_config_entry (key).has_value ());
+    }
+
+    db.seed_default_config ();
+
+    for (const auto& key : retired) {
+        EXPECT_FALSE (db.get_config_entry (key).has_value ())
+        << "an upgraded database must shed the retired key '" << key << "'";
+    }
+}
+
+// "dbCacheSize" survived the sweep by being wired: it is the one database
+// PRAGMA with a tuning story, and until #519 the seed logged the configured
+// value while the connection got the compile-time constant. `cache_size` is
+// per-connection state, so the check is on a *reopened* database - which is
+// also the restart the entry's flag demands.
+TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
+    constexpr int kConfigured = 128 * 1024 * 1024;
+    constexpr int kDefault    = vayu::core::constants::database::CACHE_SIZE_BYTES;
+    static_assert (kConfigured != kDefault, "the test value must differ from the default");
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        EXPECT_EQ (db.applied_cache_size_bytes (), kDefault)
+        << "an unconfigured database opens at the compile-time default";
+
+        auto entry = db.get_config_entry ("dbCacheSize");
+        ASSERT_TRUE (entry.has_value ()) << "the entry survived the sweep";
+        entry->value = std::to_string (kConfigured);
+        db.save_config_entry (*entry);
+
+        EXPECT_EQ (db.applied_cache_size_bytes (), kDefault)
+        << "the running engine keeps the old size - that is what requiresRestart means";
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    EXPECT_EQ (reopened.applied_cache_size_bytes (), kConfigured);
 }
 
 // The "options" column is new (Task 4); an existing on-disk database predates
