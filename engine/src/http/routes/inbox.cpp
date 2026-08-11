@@ -25,7 +25,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <chrono>
+#include <cstddef>
+#include <optional>
+#include <string_view>
 #include <thread>
 
 namespace vayu::http {
@@ -107,12 +111,56 @@ InboxLimits read_inbox_limits (vayu::db::Database& db) {
     return limits;
 }
 
+namespace {
+
+/**
+ * The first octet of @p bind when it is a dotted-quad IPv4 literal, otherwise
+ * `std::nullopt`.
+ *
+ * A parse rather than a prefix match: a *hostname* like `127.example.com` also
+ * starts with `127.` but resolves wherever DNS says, so treating it as loopback
+ * would bind wide while reporting `loopback: true` and skipping the
+ * confirmation gate. Shorthand forms (`127.1`) are not addresses here either -
+ * they only cost their user an explicit `confirmNonLoopback`, which is the safe
+ * direction to be wrong in.
+ */
+std::optional<unsigned> ipv4_first_octet (std::string_view bind) {
+    unsigned first    = 0;
+    std::size_t start = 0;
+    for (int octet = 0; octet < 4; ++octet) {
+        const std::size_t dot = bind.find ('.', start);
+        const bool is_last    = octet == 3;
+        if (is_last == (dot != std::string_view::npos)) {
+            return std::nullopt; // A missing separator, or a fifth octet.
+        }
+        const std::string_view part =
+        bind.substr (start, is_last ? std::string_view::npos : dot - start);
+        if (part.empty () || part.size () > 3) {
+            return std::nullopt;
+        }
+        unsigned value        = 0;
+        const auto* const end = part.data () + part.size ();
+        const auto [ptr, ec]  = std::from_chars (part.data (), end, value);
+        if (ec != std::errc () || ptr != end || value > 255) {
+            return std::nullopt;
+        }
+        if (octet == 0) {
+            first = value;
+        }
+        start = dot + 1;
+    }
+    return first;
+}
+
+} // namespace
+
 bool is_loopback_bind (const std::string& bind) {
     if (bind == "localhost" || bind == "::1" || bind == "[::1]") {
         return true;
     }
     // The whole of 127.0.0.0/8 is loopback, not just the canonical address.
-    return bind.rfind ("127.", 0) == 0;
+    const auto first = ipv4_first_octet (bind);
+    return first.has_value () && *first == 127;
 }
 
 // ---------------------------------------------------------------------------

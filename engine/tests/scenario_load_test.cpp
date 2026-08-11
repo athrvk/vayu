@@ -249,6 +249,19 @@ TEST (ScenarioLoadConfig, ConstantRpsIsRefusedForAScenario) {
     << "the refusal must name the mode it refused: " << *refusal;
 }
 
+TEST (ScenarioLoadConfig, CapacityIsRefusedForAScenario) {
+    const json config = { { "scenario", { { "collectionId", "c" } } },
+        { "mode", "capacity" }, { "duration", "10s" } };
+
+    ASSERT_TRUE (vayu::core::is_scenario_load_run (config));
+    const auto refusal = vayu::core::validate_scenario_load_config (config);
+    ASSERT_TRUE (refusal.has_value ())
+    << "capacity with a scenario must be refused: the search judges one "
+       "windowed p99 and a sequence has one per step";
+    EXPECT_NE (refusal->find ("capacity"), std::string::npos)
+    << "the refusal must name the mode it refused: " << *refusal;
+}
+
 TEST (ScenarioLoadConfig, AnArrivalRateIsRefusedOnEveryScenarioMode) {
     // `rps` is what puts ConstantLoadStrategy on its open-loop path regardless
     // of the declared mode, so refusing only `mode: constant_rps` would leave

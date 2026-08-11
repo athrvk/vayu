@@ -112,6 +112,36 @@ TEST (InboxParseStart, NonLoopbackBindNeedsExplicitConfirmation) {
     EXPECT_FALSE (vayu::http::is_loopback_bind ("192.168.1.4"));
 }
 
+// A hostname is not an address, however it starts (issue #504). Classifying
+// `127.example.com` by its prefix bound it wherever DNS pointed while the
+// response - and the UI badge reading it - said `loopback: true`.
+//
+// Mutation check: restore `bind.rfind ("127.", 0) == 0` and both halves fail.
+TEST (InboxParseStart, ALoopbackLookingHostnameIsNotLoopback) {
+    for (const char* host : { "127.example.com", "127.0.0.1.evil.test", "127.", "127",
+         "127.0.0", "127.0.0.1.2", "127.0.0.256", "1270.0.0.1", "notlocalhost" }) {
+        EXPECT_FALSE (vayu::http::is_loopback_bind (host))
+        << host << " was classified as loopback";
+    }
+    // The gate follows the classification: a non-loopback bind is refused
+    // without confirmation and accepted with it.
+    InboxStartRequest out;
+    auto refused =
+    vayu::http::parse_inbox_start (json{ { "bind", "127.example.com" } }, out);
+    ASSERT_TRUE (refused.has_value ())
+    << "a hostname starting 127. was bound without confirmation";
+    EXPECT_EQ (refused->code, "inbox_non_loopback_bind");
+
+    auto accepted = vayu::http::parse_inbox_start (
+    json{ { "bind", "127.example.com" }, { "confirmNonLoopback", true } }, out);
+    EXPECT_FALSE (accepted.has_value ());
+    EXPECT_EQ (out.bind, "127.example.com");
+
+    // The whole of 127.0.0.0/8 still needs no confirmation.
+    EXPECT_TRUE (vayu::http::is_loopback_bind ("127.255.255.254"));
+    EXPECT_TRUE (vayu::http::is_loopback_bind ("127.000.000.001"));
+}
+
 TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
     InboxCannedResponse current;
     current.status   = 500;
