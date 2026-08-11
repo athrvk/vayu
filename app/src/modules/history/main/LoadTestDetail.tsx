@@ -38,11 +38,11 @@ import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
-import { useRunTimeSeriesQuery } from "@/queries/runs";
+import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore } from "@/stores";
 import { OverviewTab, PerformanceTab, SamplesTab, ScenarioStepsTab } from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
-import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
+import type { LoadTestDetailProps, MonitorSeriesResponse, TimeSeriesResponse } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
@@ -104,6 +104,29 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const timeSeries = useMemo(
 		() => timeSeriesData?.pages?.flatMap((page: TimeSeriesResponse) => page.data) ?? [],
 		[timeSeriesData]
+	);
+
+	// Server vitals, only for a run that actually recorded some: the report's
+	// `monitor` section is the run's own record of what the scrape did, so a run
+	// that monitored nothing (or whose every scrape failed) never issues the
+	// fetch at all.
+	const hasMonitorSamples = (report.monitor?.samples ?? 0) > 0;
+	const {
+		data: monitorData,
+		isFetchingNextPage: isFetchingMonitorPage,
+		hasNextPage: hasMoreMonitor,
+		fetchNextPage: fetchMoreMonitor,
+	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples);
+
+	useEffect(() => {
+		if (hasMoreMonitor && !isFetchingMonitorPage) {
+			fetchMoreMonitor();
+		}
+	}, [hasMoreMonitor, isFetchingMonitorPage, fetchMoreMonitor]);
+
+	const monitorSamples = useMemo(
+		() => monitorData?.pages?.flatMap((page: MonitorSeriesResponse) => page.data) ?? [],
+		[monitorData]
 	);
 
 	const seriesProgress = useMemo(() => {
@@ -350,6 +373,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								derived={derived}
 								anomalies={anomalies}
 								timeSeries={timeSeries}
+								monitorSamples={monitorSamples}
 								isLoadingSeries={isLoadingSeries}
 								isFetchingMore={isFetchingNextPage}
 								progress={seriesProgress}

@@ -16,7 +16,7 @@
 
 import { useMemo } from "react";
 import type uPlot from "uplot";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, MonitorSample } from "@/types";
 import {
 	buildLatencyChartData,
 	buildPercentileChartData,
@@ -24,6 +24,7 @@ import {
 } from "../../../utils/metricsTransforms";
 import type { Breakpoint } from "../../../utils/computeBreakpoint";
 import type { Anomaly, AnomalyKind } from "../../../utils/detectAnomalies";
+import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
 import type { ColorRole } from "./uplotTheme";
 import { UPlotChart, type UPlotSeriesSpec, type Marker, type Annotation } from "./UPlotChart";
 import {
@@ -34,7 +35,17 @@ import {
 	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
-import { axisMs, axisRate, axisPct, fmtMs, fmtRate, fmtCount, fmtPct } from "./formatters";
+import {
+	axisMs,
+	axisRate,
+	axisPct,
+	axisVitals,
+	fmtMs,
+	fmtRate,
+	fmtCount,
+	fmtPct,
+	fmtVitals,
+} from "./formatters";
 import { useClientSettingsStore } from "@/stores";
 
 interface BaseProps {
@@ -330,6 +341,74 @@ export function ErrorRateChart({
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={breakpointMarker(breakpoint)}
+			annotations={annotations}
+		/>
+	);
+}
+
+/**
+ * The categorical hues legible as a line on both grounds, in the order the
+ * vitals overlay assigns them. A run names its own metrics, so a series gets a
+ * colour by position - there is no semantic mapping to make. A run may name up
+ * to eight metrics, so past four the cycle repeats; the tooltip names every
+ * series, which is what keeps a repeated hue readable.
+ */
+const VITALS_ROLES: UPlotSeriesSpec["role"][] = [
+	"categorical",
+	"categorical-2",
+	"categorical-3",
+	"categorical-4",
+];
+
+/**
+ * Server vitals scraped from the target during the run, on the run's own
+ * timeline.
+ *
+ * Not bucketed like the charts above: those average a metric the engine emits
+ * every tick, while these are point readings on the user's scrape cadence -
+ * averaging two of them into a bucket would report a number the target never
+ * exported. The resampling onto the tick x axis (and the gaps where a scrape
+ * failed) is `joinMonitorToTimeline`'s, so this component only paints.
+ *
+ * Renders nothing when the run scraped nothing, which is what keeps the row out
+ * of a dashboard for a run that configured no monitor.
+ */
+export function ServerVitalsChart({
+	history,
+	samples,
+	isCompleted,
+	syncKey,
+	height,
+	anomalies,
+}: BaseProps & { samples: MonitorSample[] }) {
+	// The most useful place a degradation window can be shaded: this row is where
+	// "the p99 spike at t=41" gets answered with what the server was doing then.
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const { data, series } = useMemo(() => {
+		const joined = joinMonitorToTimeline(history, samples);
+		const aligned: uPlot.AlignedData = [
+			joined.times,
+			...joined.columns.map((col) => col as (number | null)[]),
+		] as uPlot.AlignedData;
+		const spec: UPlotSeriesSpec[] = joined.names.map((name, i) => ({
+			label: name,
+			role: VITALS_ROLES[i % VITALS_ROLES.length],
+			width: 1.8,
+			format: fmtVitals,
+		}));
+		return { data: aligned, series: spec };
+	}, [history, samples]);
+
+	if (series.length === 0 || data[0].length < 2) return null;
+	return (
+		<UPlotChart
+			data={data}
+			series={series}
+			xTime
+			height={height}
+			yFormat={axisVitals}
+			isLive={!isCompleted}
+			syncKey={syncKey}
 			annotations={annotations}
 		/>
 	);

@@ -28,6 +28,18 @@ vi.mock("../OAuth2LoadTestGuard", () => ({
 	default: () => null,
 }));
 
+/**
+ * The dialog seeds its scrape cadence and metric cap from the engine's
+ * `monitorIntervalMs` / `monitorMaxSeries` settings, so it reads the config
+ * query. Mocked rather than wrapped in a provider, the convention the hook
+ * tests use - and `configEntries` is mutable so a test can move a setting and
+ * assert the dialog followed it.
+ */
+let configEntries: { key: string; value: string }[] = [];
+vi.mock("@/queries", () => ({
+	useConfigQuery: () => ({ data: { entries: configEntries } }),
+}));
+
 function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> = {}) {
 	const onStart = vi.fn();
 	render(
@@ -55,6 +67,7 @@ const started = (onStart: ReturnType<typeof vi.fn>): LoadTestConfig => {
 beforeEach(() => {
 	cleanup();
 	localStorage.clear();
+	configEntries = [];
 	// The ceilings store is module-level and persists across tests in this
 	// file; clearing localStorage does not roll it back.
 	useClientSettingsStore.getState().setLoadTestCeilings(DEFAULT_LOAD_TEST_CEILINGS);
@@ -516,5 +529,105 @@ describe("pass/fail budgets", () => {
 		openBudgets();
 		expect(p99().value).toBe("");
 		expect(started(second.onStart).thresholds).toBeUndefined();
+	});
+});
+
+/**
+ * Server monitoring: the run's optional second data source. The rules live in
+ * `monitor.ts` and are tested there; these pin the wiring - that what the user
+ * types reaches the payload, that an incomplete block stops the run here rather
+ * than at the engine's 400, and that a run without one is unchanged.
+ */
+describe("server monitoring", () => {
+	const openMonitoring = () =>
+		fireEvent.click(screen.getByRole("button", { name: /server monitoring/i }));
+	const url = () => screen.getByLabelText(/metrics endpoint/i) as HTMLInputElement;
+	const metrics = () => screen.getByLabelText(/metrics to chart/i) as HTMLTextAreaElement;
+
+	it("sends nothing when no endpoint is given", () => {
+		const { onStart } = open();
+		expect(started(onStart).monitor).toBeUndefined();
+	});
+
+	it("sends the block the user typed", () => {
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), {
+			target: { value: "node_cpu_seconds_total\nprocess_resident_memory_bytes" },
+		});
+
+		expect(started(onStart).monitor).toEqual({
+			url: "http://localhost:9100/metrics",
+			intervalMs: 1000,
+			format: "prometheus",
+			series: ["node_cpu_seconds_total", "process_resident_memory_bytes"],
+		});
+	});
+
+	it("blocks Start on an endpoint with no metrics instead of dropping the block", () => {
+		// The engine rejects `series: []`, so a silently dropped block would be a
+		// run the user believes is monitored and a chart that never appears.
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+		expect(onStart).not.toHaveBeenCalled();
+		expect(screen.getByText(/server monitoring is incomplete/i)).toBeInTheDocument();
+	});
+
+	it("seeds the interval from the engine setting rather than its own number", () => {
+		// `monitorIntervalMs` would otherwise be a setting with no reader on this
+		// path: the dialog always sends an explicit interval, so a hardcoded
+		// default here means the engine's copy never applies to a run started
+		// from the app.
+		configEntries = [{ key: "monitorIntervalMs", value: "5000" }];
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), { target: { value: "up" } });
+
+		expect(started(onStart).monitor?.intervalMs).toBe(5000);
+	});
+
+	it("accepts as many metrics as the engine setting allows", () => {
+		// The cap is `monitorMaxSeries`; a dialog holding its own 8 would refuse a
+		// list the engine was just configured to accept.
+		configEntries = [{ key: "monitorMaxSeries", value: "12" }];
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), {
+			target: { value: Array.from({ length: 10 }, (_, i) => `m${i}`).join("\n") },
+		});
+
+		expect(started(onStart).monitor?.series).toHaveLength(10);
+	});
+
+	it("blocks Start past the configured cap", () => {
+		configEntries = [{ key: "monitorMaxSeries", value: "2" }];
+		const { onStart } = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), { target: { value: "a\nb\nc" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+		expect(onStart).not.toHaveBeenCalled();
+		expect(screen.getByText(/at most 2 metrics/i)).toBeInTheDocument();
+	});
+
+	it("remembers the endpoint across dialog opens - it is a property of the target", () => {
+		const first = open();
+		openMonitoring();
+		fireEvent.change(url(), { target: { value: "http://localhost:9100/metrics" } });
+		fireEvent.change(metrics(), { target: { value: "up" } });
+		expect(started(first.onStart).monitor?.series).toEqual(["up"]);
+
+		cleanup();
+		open();
+		openMonitoring();
+		expect(url().value).toBe("http://localhost:9100/metrics");
+		expect(metrics().value).toBe("up");
 	});
 });

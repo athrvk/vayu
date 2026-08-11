@@ -459,6 +459,8 @@ on disk, one in memory:
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+| `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
+| `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 
 In-progress (`running`/`pending`) runs are never pruned.
 
@@ -1676,6 +1678,7 @@ Start a load test run (Vayu Mode).
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
   "thresholds": {},          // Optional pass/fail budgets - see below
+  "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
   "httpVersion": "auto"      // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
@@ -1728,6 +1731,59 @@ of nothing but HTTP 500s has a transport error rate of zero.
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `completed` / `stopped`
 whatever the verdict says. A failing budget is reported, never a failed run.
+
+#### The `monitor` block (server vitals)
+
+A run may name a metrics endpoint on the target, which the engine scrapes for
+the life of the run on **its own thread**. The samples are stored per run and
+served by [`GET /runs/:runId/monitor`](#get-runsrunidmonitor), streamed live as
+`monitor` frames on [`GET /runs/:runId/live`](#get-runsrunidlive), and summarised
+in the report's `monitor` section. Without the block nothing is scraped and none
+of those three carry anything.
+
+```jsonc
+{
+  "monitor": {
+    "url": "http://localhost:9100/metrics",  // required; http(s), loopback and private allowed
+    "intervalMs": 1000,                      // optional, defaults to `monitorIntervalMs`; 250-60000
+    "format": "prometheus",                  // optional, default "prometheus"; or "json"
+    "series": [                              // required; 1 to `monitorMaxSeries` names
+      "node_cpu_seconds_total",
+      "process_resident_memory_bytes"
+    ]
+  }
+}
+```
+
+`format` decides how the body is read:
+
+- **`prometheus`** - the text exposition format. Comment and blank lines are
+  skipped, a trailing exposition timestamp is ignored, and a value that is not a
+  finite number (`NaN`, `+Inf`) is dropped. **Samples sharing a name across
+  label sets are summed**, so `node_cpu_seconds_total{cpu="0"}` and
+  `{cpu="1"}` chart as one series.
+- **`json`** - a flat object of numbers, where `series` lists the keys to read.
+  A key that is absent or non-numeric is skipped.
+
+A name the body does not carry is **absent** from that sample rather than zero,
+and a scrape that reads nothing at all - a transport failure, an unreadable
+body, or a body carrying none of the requested names - stores no row and is
+counted as a gap in the report's `monitor.failures`. A failing scrape never
+fails the run; after five consecutive failures the engine logs once and backs
+off to twice the configured interval until one succeeds.
+
+Two of the limits are settings rather than constants: `intervalMs` defaults to
+**`monitorIntervalMs`** when the block omits it, and the `series` ceiling is
+**`monitorMaxSeries`** (see [GET /config](#get-config)). Both are read per run,
+so a change applies to the next run started - no restart. The interval *bounds*
+are fixed, because a cadence below 250ms measures the scraper rather than the
+target and one above a minute records nothing on a short run.
+
+Loopback and private addresses are deliberately allowed: this is a local tool
+scraping the user's own infrastructure. An unusable block (no `url`, a
+non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
+`intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
+field, before the run row is created.
 
 #### The `scenario` block (collection runs)
 
@@ -2297,6 +2353,40 @@ engine writes the tick object once, at write time. Two things follow:
 A run with no ticks returns `200` with an empty `data` array - only a run that
 does not exist is a `404`.
 
+### GET /runs/:runId/monitor
+
+Paginated **server vitals** scraped during the run - the samples the
+[`monitor` block](#the-monitor-block-server-vitals) collected. Same
+`{data, pagination}` envelope and the same `limit` / `offset` rules as
+`GET /runs/:runId/metrics`, so one pagination reader covers both.
+
+Its own endpoint rather than extra keys on the tick objects: that key set is the
+`/metrics` contract, and these samples land on the user's scrape cadence rather
+than the tick cadence, so they do not line up row for row.
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "timestamp": 1234567890,
+      "series": { "node_cpu_seconds_total": 3.75, "process_resident_memory_bytes": 1048576 }
+    }
+  ],
+  "pagination": { "total": 1, "limit": 5000, "offset": 0, "hasMore": false, "returned": 1 }
+}
+```
+
+`timestamp` is wall-clock Unix ms - when the engine scraped, not an elapsed
+offset - because a tick's `elapsed_seconds` is measured from the run's first
+*persisted* tick while the scrape starts with the run; joining the two series
+onto one timeline is what the wall clock is for. A series the target did not
+report in that scrape is **absent** from its `series` object rather than zero.
+
+A run that configured no monitor returns `200` with an empty `data` array; only
+a run that does not exist is a `404`. Samples are deleted with the run, like
+every other child row.
+
 ### GET /stats/:runId (deprecated)
 
 > **Prefer `GET /runs/:runId/live`** (above) for live dashboards - it replays a retained
@@ -2385,6 +2475,23 @@ data: {"event":"complete","runId":"run_1234567890"}
 and after a reload. A scenario run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
+
+**A run with a [`monitor` block](#the-monitor-block-server-vitals) also streams
+`monitor` events**, one per successful scrape, interleaved with its `metrics`
+ticks on the same ring and the same monotonic `id:` numbering - so
+`Last-Event-ID` resume replays both kinds in the order they happened:
+
+```
+event: monitor
+id: 12
+data: {"timestamp":1234567890,
+       "series":{"node_cpu_seconds_total":3.75,"process_resident_memory_bytes":1048576}}
+```
+
+The payload is byte-identical to one `data[]` entry of
+[`GET /runs/:runId/monitor`](#get-runsrunidmonitor), so the live overlay and the
+history overlay are drawn from the same rows. A scrape that read nothing emits
+no frame.
 
 **Field reference** (all keys emitted by `MetricsCollector::get_current_stats()`):
 
@@ -2766,6 +2873,12 @@ alone rather than erroring. **The response shape is the same either way.**
     "exemplarsDropped": 0, "sampleBodiesDropped": 12,
     "responseBodiesCaptured": 23
   },
+  "monitor": {
+    "samples": 60, "failures": 0,
+    "series": {
+      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 60 }
+    }
+  },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
   "thresholdValidation": {
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
@@ -2865,6 +2978,16 @@ spent. `exemplarsDropped` counts per-status exemplars refused because
 `max_exemplar_results` was full, which only a target answering with more
 distinct status codes than that limit can reach. All three are absent on runs
 recorded before 0.15.0.
+
+`monitor` is present only for a run that declared a
+[`monitor` block](#the-monitor-block-server-vitals) - absent is "this run
+scraped nothing", never "the target reported zeros". `samples` counts successful
+scrapes and `failures` counts the ones that read nothing, so a section with
+`samples: 0` and a non-zero `failures` says the endpoint was unreachable for the
+whole run rather than that the run was not monitored. A series that never
+produced a reading is absent from `series` for the same reason. The per-sample
+readings are served separately by
+[`GET /runs/:runId/monitor`](#get-runsrunidmonitor).
 
 `results[].id` is the `results` row id, and the join key against
 `GET /runs/:runId/samples`. It is absent on reports served by an engine older

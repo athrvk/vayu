@@ -50,6 +50,13 @@ vi.mock("@/queries/runs", () => ({
 		fetchNextPage: vi.fn(),
 		hasNextPage: false,
 	}),
+	// Server vitals are a separate query on this pane; these runs scrape nothing.
+	useRunMonitorSeriesQuery: () => ({
+		data: undefined,
+		isFetchingNextPage: false,
+		fetchNextPage: vi.fn(),
+		hasNextPage: false,
+	}),
 }));
 
 function renderDetail(ui: ReactElement) {

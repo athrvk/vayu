@@ -20,6 +20,7 @@ export {
 	RequestRateChart,
 	ConnectionsChart,
 	ErrorRateChart,
+	ServerVitalsChart,
 } from "./TimeSeriesCharts";
 export { ResponseTimeVsConcurrencyChart, HdrPercentileChart } from "./ScatterAndDistribution";
 export { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";

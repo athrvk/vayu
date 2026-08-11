@@ -47,6 +47,9 @@ import {
 	Input,
 	Label,
 	Switch,
+	Textarea,
+	ToggleGroup,
+	ToggleGroupItem,
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
@@ -68,6 +71,9 @@ import {
 	buildThresholds,
 	emptyBudgetDraft,
 } from "./budgets";
+import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
+import { MONITOR_INTERVAL_MS } from "@/constants/monitor";
+import { useMonitorSettings } from "@/hooks/useMonitorSettings";
 
 interface SavedLoadTestConfig {
 	mode: LoadTestConfig["mode"];
@@ -90,6 +96,13 @@ interface SavedLoadTestConfig {
 	 * undone by the next dialog open.
 	 */
 	budgets: BudgetDraft;
+	/**
+	 * The monitoring endpoint, memoed for the same reason the budgets are: it is
+	 * a property of the *target* rather than of one run, so retyping a
+	 * `/metrics` URL and its metric names for every run is the same friction the
+	 * memo exists to remove.
+	 */
+	monitor: MonitorDraft;
 }
 
 function loadSavedConfig(): Partial<SavedLoadTestConfig> {
@@ -279,6 +292,20 @@ export default function LoadTestConfigDialog({
 			}
 	);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
+	/**
+	 * Server monitoring. The cadence and the metric cap are engine settings
+	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
+	 * itself from them rather than from its own numbers - otherwise the cadence
+	 * setting would never apply to a run started here (this dialog always sends
+	 * an explicit interval) and a raised cap would still be refused locally.
+	 * Seeded only on a first run, like the p99 budget above: once a draft has
+	 * been memoed, the interval the user set stays set.
+	 */
+	const monitorSettings = useMonitorSettings();
+	const [monitor, setMonitor] = useState<MonitorDraft>(
+		() => saved.monitor ?? emptyMonitorDraft(monitorSettings.defaultIntervalMs)
+	);
+	const [monitorOpen, setMonitorOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
 	const [oauthGated, setOauthGated] = useState(false);
 	const [recordingOpen, setRecordingOpen] = useState(false);
@@ -298,8 +325,13 @@ export default function LoadTestConfigDialog({
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
 	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
 	const budgetsError = budgetError(budgets);
+	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
 	const blockingError =
-		rampDurationError ?? startConcurrencyError ?? capacityRangeError ?? budgetsError;
+		rampDurationError ??
+		startConcurrencyError ??
+		capacityRangeError ??
+		budgetsError ??
+		monitoringError;
 
 	const notices = useMemo(() => {
 		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
@@ -323,6 +355,18 @@ export default function LoadTestConfigDialog({
 				node: (
 					<Callout severity="blocking" title="A budget is out of range">
 						{budgetsError}
+					</Callout>
+				),
+			});
+		}
+
+		if (monitoringError) {
+			list.push({
+				key: "monitor",
+				severity: "blocking",
+				node: (
+					<Callout severity="blocking" title="Server monitoring is incomplete">
+						{monitoringError}
 					</Callout>
 				),
 			});
@@ -387,6 +431,7 @@ export default function LoadTestConfigDialog({
 		startConcurrencyError,
 		capacityRangeError,
 		budgetsError,
+		monitoringError,
 		hasPreRequestScript,
 		hasDynamicVariables,
 	]);
@@ -411,6 +456,7 @@ export default function LoadTestConfigDialog({
 			slowThreshold,
 			saveTimingBreakdown,
 			budgets,
+			monitor,
 		});
 
 		const config: LoadTestConfig = {
@@ -425,6 +471,8 @@ export default function LoadTestConfigDialog({
 			// Absent when nothing was declared - the engine rejects an empty
 			// object rather than starting a run no verdict can be computed for.
 			thresholds: buildThresholds(budgets),
+			// Absent when no endpoint was given, for the same reason.
+			monitor: buildMonitor(monitor),
 		};
 
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
@@ -789,6 +837,118 @@ export default function LoadTestConfigDialog({
 									hint={field.hint}
 								/>
 							))}
+						</CollapsibleContent>
+					</Collapsible>
+
+					{/*
+					 * Server monitoring, in the same card treatment as the two
+					 * disclosures above. Last of the three because it is about the
+					 * *target* rather than about the load: a run is fully specified
+					 * without it, and it adds a second series to the charts rather
+					 * than changing what is sent.
+					 */}
+					<Collapsible
+						open={monitorOpen}
+						onOpenChange={setMonitorOpen}
+						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
+					>
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
+							<span>Server monitoring</span>
+							<span className="text-[11px] font-normal text-muted-foreground">
+								{monitorOpen ? "Hide" : "Show"}
+							</span>
+						</CollapsibleTrigger>
+						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
+							<p className="text-[11px] leading-relaxed text-muted-foreground">
+								Scrape the target&apos;s own metrics during the run and chart them
+								on the same timeline as p99 and throughput - so a climb in latency
+								can be read against the server&apos;s CPU or memory. Leave the URL
+								blank to run without it.
+							</p>
+							<div className="space-y-1.5">
+								<Label htmlFor="lt-monitor-url" className="text-xs">
+									Metrics endpoint
+									<span className="ml-1 font-normal text-muted-foreground">
+										(optional)
+									</span>
+								</Label>
+								<Input
+									id="lt-monitor-url"
+									type="text"
+									value={monitor.url}
+									onChange={(e) =>
+										setMonitor((prev) => ({ ...prev, url: e.target.value }))
+									}
+									placeholder="http://localhost:9100/metrics"
+									className="h-9 text-sm"
+								/>
+							</div>
+
+							<NumberField
+								id="lt-monitor-interval"
+								label="Scrape interval"
+								unit="ms"
+								value={monitor.intervalMs}
+								onChange={(raw) =>
+									setMonitor((prev) => ({ ...prev, intervalMs: Number(raw) }))
+								}
+								min={MONITOR_INTERVAL_MS.MIN}
+								max={MONITOR_INTERVAL_MS.MAX}
+								hint="Each scrape is one request to the endpoint, on its own thread - it never delays the run's own metrics."
+							/>
+
+							<div className="space-y-1.5">
+								<Label className="text-xs">Response format</Label>
+								{/*
+								    A segmented control rather than a two-row select:
+								    it is a binary choice, and `ToggleGroup` is the
+								    app's primitive for one (roving focus and the
+								    `data-[state=]` variants come with it).
+								 */}
+								<ToggleGroup
+									size="sm"
+									value={monitor.format}
+									onValueChange={(value) => {
+										// Radix emits "" when the active item is
+										// clicked again; a format is not optional, so
+										// that deselection is ignored rather than
+										// leaving the draft with no format at all.
+										if (value === "prometheus" || value === "json") {
+											setMonitor((prev) => ({ ...prev, format: value }));
+										}
+									}}
+								>
+									<ToggleGroupItem value="prometheus">
+										Prometheus text
+									</ToggleGroupItem>
+									<ToggleGroupItem value="json">Flat JSON</ToggleGroupItem>
+								</ToggleGroup>
+							</div>
+
+							<div className="space-y-1.5">
+								<Label htmlFor="lt-monitor-series" className="text-xs">
+									Metrics to chart
+									<span className="ml-1.5 font-normal text-muted-foreground">
+										one name per line, up to {monitorSettings.maxSeries}
+									</span>
+								</Label>
+								<Textarea
+									id="lt-monitor-series"
+									value={monitor.series}
+									onChange={(e) =>
+										setMonitor((prev) => ({ ...prev, series: e.target.value }))
+									}
+									rows={3}
+									placeholder={
+										"node_cpu_seconds_total\nprocess_resident_memory_bytes"
+									}
+									className="font-mono text-xs"
+								/>
+								<p className="text-[11px] text-muted-foreground">
+									A Prometheus name is matched across its labels and the values
+									summed, so a whole family charts as one line.
+								</p>
+							</div>
 						</CollapsibleContent>
 					</Collapsible>
 

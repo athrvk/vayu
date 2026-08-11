@@ -9,7 +9,7 @@
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
-import type { LoadTestMetrics, ScenarioStepEvent, StepOutcome } from "@/types";
+import type { LoadTestMetrics, MonitorSample, ScenarioStepEvent, StepOutcome } from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
 interface RawSseMetrics {
@@ -90,11 +90,35 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 	};
 }
 
+/**
+ * Narrow a raw `monitor` frame to one scrape, or reject it.
+ *
+ * Same rule as {@link parseStepEvent}: a frame this client cannot read is
+ * dropped rather than coerced. A sample defaulted to `timestamp: 0` would join
+ * onto the very start of the run's timeline and draw a reading the target never
+ * gave at a moment it was never asked; non-numeric series entries are dropped
+ * individually, because the rest of the scrape is still real data.
+ */
+export function parseMonitorEvent(raw: unknown): MonitorSample | null {
+	if (typeof raw !== "object" || raw === null) return null;
+	const e = raw as Record<string, unknown>;
+	if (typeof e.timestamp !== "number") return null;
+	if (typeof e.series !== "object" || e.series === null) return null;
+	const series: Record<string, number> = {};
+	for (const [name, value] of Object.entries(e.series as Record<string, unknown>)) {
+		if (typeof value === "number" && Number.isFinite(value)) series[name] = value;
+	}
+	if (Object.keys(series).length === 0) return null;
+	return { timestamp: e.timestamp, series };
+}
+
 export type SSEMessageHandler = (metrics: LoadTestMetrics) => void;
 export type SSEErrorHandler = (error: Error) => void;
 export type SSECloseHandler = () => void;
 /** One step execution of a scenario run, from the `step` event. */
 export type SSEStepHandler = (step: ScenarioStepEvent) => void;
+/** One scrape of the run's monitored endpoint, from the `monitor` event. */
+export type SSEMonitorHandler = (sample: MonitorSample) => void;
 
 export class SSEClient {
 	private eventSource: EventSource | null = null;
@@ -133,15 +157,18 @@ export class SSEClient {
 	 * One client for both run types, because there is one stream: a load run
 	 * publishes `metrics` ticks and a scenario run publishes `step` events, on
 	 * the same ring with the same monotonic ids, and both end with `complete`.
-	 * `onStep` is optional so a load-test caller says nothing about steps rather
-	 * than passing a handler it has no use for.
+	 * `onStep` and `onMonitor` are optional so a caller says nothing about the
+	 * events it has no use for rather than passing handlers it will not read: a
+	 * load run emits no steps, and only a run configured with a `monitor` block
+	 * emits scrapes.
 	 */
 	connect(
 		runId: string,
 		onMessage: SSEMessageHandler,
 		onError: SSEErrorHandler,
 		onClose: SSECloseHandler,
-		onStep?: SSEStepHandler
+		onStep?: SSEStepHandler,
+		onMonitor?: SSEMonitorHandler
 	): void {
 		// Close existing connection
 		this.disconnect();
@@ -188,6 +215,20 @@ export class SSEClient {
 						if (step) onStep(step);
 					} catch (error) {
 						console.error("Failed to parse step:", error);
+					}
+				});
+			}
+
+			// Server vitals scraped alongside the run. Registered only when a
+			// caller asked for them - a run without a monitor block never
+			// emits one, so an unconditional listener would be dead wiring.
+			if (onMonitor) {
+				this.eventSource.addEventListener("monitor", (event) => {
+					try {
+						const sample = parseMonitorEvent(JSON.parse(event.data));
+						if (sample) onMonitor(sample);
+					} catch (error) {
+						console.error("Failed to parse monitor sample:", error);
 					}
 				});
 			}

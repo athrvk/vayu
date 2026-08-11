@@ -54,6 +54,27 @@ unchanged. It prefixes assertion failures only - a call the script wrote wrong
 (`.to.be.above()` with no argument) reports the misuse on its own, since the
 message describes a value, not a typo.
 
+**A failed assertion throws an `AssertionError`**, the name chai uses, so a
+script that inspects what it caught takes the same branch it does in Postman:
+
+```javascript
+try {
+  pm.expect(1).to.equal(2);        // AssertionError: Expected 1 to equal 2
+} catch (e) {
+  e.name;                          // 'AssertionError'
+  e instanceof Error;              // true
+}
+```
+
+QuickJS has no `AssertionError` class, so this is an `Error` with that `name`
+and the stack a native throw carries; no `AssertionError` global is exposed,
+because chai's is a property of the `chai` module rather than a global and Vayu
+does not ship that module. The same name comes off the
+[response assertions](#response-assertions), which are chai in Postman too.
+**A mistake in the script text is still a `TypeError`** - a matcher called with
+no argument, a name nothing implements - because nothing was asserted: the call
+itself was wrong.
+
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
 `deep.equal`) compares contents recursively and does not care about key order.

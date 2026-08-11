@@ -15,18 +15,21 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Loader2 } from "lucide-react";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, MonitorSample } from "@/types";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 import {
 	RequestRateChart,
 	ConnectionsChart,
 	StatusCodesOverTimeChart,
+	ServerVitalsChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
 
 interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
+	/** Server vitals scraped during the run; empty when it monitored nothing. */
+	monitorSamples?: MonitorSample[];
 	isLoading?: boolean;
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
@@ -38,6 +41,7 @@ const SYNC_KEY = CHART_SYNC.history;
 
 export default function HistoricalChartsSection({
 	data,
+	monitorSamples = [],
 	isLoading,
 	isFetchingMore,
 	progress,
@@ -121,6 +125,25 @@ export default function HistoricalChartsSection({
 					<StatusCodesOverTimeChart history={data} isCompleted syncKey={SYNC_KEY} />
 				</CardContent>
 			</Card>
+
+			{/* The same row the live dashboard draws, on the same sync group -
+			    absent for a run that scraped nothing rather than an empty card. */}
+			{monitorSamples.length > 0 && (
+				<Card>
+					<CardHeader className="pb-2">
+						<CardTitle className="text-base">Server Vitals</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<ServerVitalsChart
+							history={data}
+							samples={monitorSamples}
+							isCompleted
+							syncKey={SYNC_KEY}
+							anomalies={anomalies}
+						/>
+					</CardContent>
+				</Card>
+			)}
 		</div>
 	);
 }

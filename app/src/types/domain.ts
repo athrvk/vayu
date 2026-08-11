@@ -711,6 +711,26 @@ export interface RunThresholds {
 	minThroughputRps?: number;
 }
 
+/**
+ * The server-vitals endpoint a run scrapes alongside its own metrics, so the
+ * target's CPU or memory can be read on the same timeline as p99 and rps.
+ *
+ * Keys are the engine's own (`monitor` on `POST /runs`), which is why they are
+ * camelCase where the rest of `LoadTestConfig` is not - the same reason
+ * {@link RunThresholds} is. The engine rejects a block with no `series`, so the
+ * whole object is omitted rather than sent empty when monitoring is off.
+ */
+export interface RunMonitorConfig {
+	/** http(s) URL of a Prometheus `/metrics` or flat-JSON status endpoint. */
+	url: string;
+	/** Scrape cadence; the engine accepts 250-60000, defaulting to 1000. */
+	intervalMs?: number;
+	/** `prometheus` (text exposition) or `json` (flat object of numbers). */
+	format?: "prometheus" | "json";
+	/** Metric names to read out of the body - at least one, at most eight. */
+	series: string[];
+}
+
 export interface LoadTestConfig {
 	duration_seconds?: number;
 	rps?: number;
@@ -734,6 +754,8 @@ export interface LoadTestConfig {
 	max_in_flight?: number;
 	/** Absent when the run declared no budgets - never an empty object. */
 	thresholds?: RunThresholds;
+	/** Absent when the run monitors no endpoint - never an empty object. */
+	monitor?: RunMonitorConfig;
 	/**
 	 * Capacity only: the p99 budget the search looks for the edge of, in ms.
 	 * Prefilled from the client-side `sloThresholdMs` setting, so the number
@@ -743,6 +765,21 @@ export interface LoadTestConfig {
 	slo_ms?: number;
 	/** Capacity only: how long each concurrency level is held before it is judged. */
 	step_duration_seconds?: number;
+}
+
+/**
+ * One scrape of a run's monitored endpoint, as `GET /runs/:id/monitor` returns
+ * it and as the live `monitor` SSE frame carries it - one shape for both, so
+ * the live overlay and the history overlay are drawn from identical rows.
+ *
+ * `timestamp` (Unix ms) rather than an elapsed offset is what the join onto the
+ * run's own timeline uses: a tick's `elapsed_seconds` is measured from the
+ * first *persisted* tick, while the scrape starts with the run.
+ */
+export interface MonitorSample {
+	timestamp: number;
+	/** Metric name -> value, for the names the run asked for. */
+	series: Record<string, number>;
 }
 
 /**
@@ -1027,6 +1064,20 @@ export interface RunReport {
 		testsPassed: number;
 		testsFailed: number;
 		successRate: number;
+	};
+	/**
+	 * What the run's server-vitals scrape recorded ({@link RunMonitorConfig}).
+	 *
+	 * `undefined` is a run that monitored nothing - not a target that reported
+	 * zeros - so a report without it renders exactly as it did before the
+	 * monitor existed. `samples` is what the history view gates its
+	 * `GET /runs/:id/monitor` fetch on: a run whose every scrape failed has a
+	 * section, a `failures` count, and no series to draw.
+	 */
+	monitor?: {
+		samples: number;
+		failures: number;
+		series: Record<string, { min: number; max: number; avg: number; count: number }>;
 	};
 	/**
 	 * The run's verdict against the budgets it declared ({@link RunThresholds}).

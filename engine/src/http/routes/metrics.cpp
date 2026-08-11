@@ -43,17 +43,17 @@ size_t returned) {
  * construction - a page boundary can no longer land inside a tick and hand the
  * client a half-populated bucket.
  */
-nlohmann::json tick_time_series (vayu::db::Database& db,
+template <typename Row>
+nlohmann::json stored_payload_series (const std::vector<Row>& rows,
+const char* kind,
 const std::string& run_id,
 int64_t total_count,
 int64_t limit,
 int64_t offset) {
-    auto ticks = db.get_metric_ticks_paginated (run_id, limit, offset);
-
     nlohmann::json data_array = nlohmann::json::array ();
-    for (const auto& tick : ticks) {
+    for (const auto& row : rows) {
         try {
-            auto payload = nlohmann::json::parse (tick.payload);
+            auto payload = nlohmann::json::parse (row.payload);
             if (!payload.is_object ()) {
                 throw std::runtime_error ("payload is not an object");
             }
@@ -62,12 +62,21 @@ int64_t offset) {
             // A payload this engine wrote always parses; a corrupt one is a
             // damaged row, not a client error - skip it loudly rather than
             // failing the whole page.
-            vayu::utils::log_warning ("Skipping unreadable metric tick for run " +
-            run_id + " (id=" + std::to_string (tick.id) + "): " + e.what ());
+            vayu::utils::log_warning (std::string ("Skipping unreadable ") + kind +
+            " for run " + run_id + " (id=" + std::to_string (row.id) + "): " + e.what ());
         }
     }
     return time_series_envelope (
-    std::move (data_array), total_count, limit, offset, ticks.size ());
+    std::move (data_array), total_count, limit, offset, rows.size ());
+}
+
+nlohmann::json tick_time_series (vayu::db::Database& db,
+const std::string& run_id,
+int64_t total_count,
+int64_t limit,
+int64_t offset) {
+    return stored_payload_series (db.get_metric_ticks_paginated (run_id, limit, offset),
+    "metric tick", run_id, total_count, limit, offset);
 }
 
 } // namespace
@@ -100,6 +109,30 @@ const std::string& run_id, int64_t limit, int64_t offset) {
     // pagination total, so this is not an extra query.
     const int64_t tick_count = db.count_metric_ticks (run_id);
     return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
+}
+
+/**
+ * Testable core of `GET /runs/:id/monitor` - the external server vitals scraped
+ * during a run, in the same `{data, pagination}` envelope the tick series uses.
+ *
+ * Its own endpoint rather than extra keys on the tick objects: those keys are
+ * the `GET /runs/:id/metrics` contract, and monitor samples arrive on the
+ * user's scrape cadence rather than the tick cadence, so they do not line up
+ * row for row. A run that configured no monitor returns an empty `data` array,
+ * not a 404 - the run exists and simply scraped nothing. A missing run is the
+ * same definitive 404 the tick series returns.
+ */
+std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
+const std::string& run_id, int64_t limit, int64_t offset) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, error_body (404, "Run not found") };
+    }
+
+    const int64_t sample_count = db.count_monitor_samples (run_id);
+    return { 200,
+        stored_payload_series (db.get_monitor_samples_paginated (run_id, limit, offset),
+        "monitor sample", run_id, sample_count, limit, offset) };
 }
 
 namespace {
@@ -200,6 +233,37 @@ void register_metrics_routes (RouteContext& ctx) {
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * GET /runs/:runId/monitor
+     * Returns the paginated server-vitals series scraped during the run, for
+     * the same charts the live `monitor` SSE frames feed.
+     *
+     * Query Parameters:
+     * - limit: Max records per page (default 5000, capped at 50000)
+     * - offset: Skip N records (default 0)
+     */
+    ctx.server.Get (R"(/runs/([^/]+)/monitor)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string run_id = req.matches[1];
+        vayu::utils::log_info (
+        "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
+        auto [limit, offset] = parse_time_series_pagination (req);
+        try {
+            auto [status, body] =
+            run_monitor_series_response (ctx.db, run_id, limit, offset);
+            if (status == 404) {
+                vayu::utils::log_warning (
+                "GET /runs/:id/monitor - Run not found: " + run_id);
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /runs/:id/monitor - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

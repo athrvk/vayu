@@ -28,6 +28,7 @@ import {
 	ResponseTimeVsConcurrencyChart,
 	StatusCodesOverTimeChart,
 	HdrPercentileChart,
+	ServerVitalsChart,
 } from "./index";
 
 function series(n: number): LoadTestMetrics[] {
@@ -67,6 +68,14 @@ describe("centralized uPlot charts - smoke", () => {
 			<ResponseTimeVsConcurrencyChart key="f" history={history} />,
 			<StatusCodesOverTimeChart key="g" history={history} />,
 			<HdrPercentileChart key="h" report={report} />,
+			<ServerVitalsChart
+				key="i"
+				history={history}
+				samples={history.map((m) => ({
+					timestamp: m.timestamp,
+					series: { cpu: m.current_concurrency / 10, rss: 1e9 + m.timestamp },
+				}))}
+			/>,
 		];
 		for (const node of cases) {
 			const { unmount } = render(node);
@@ -123,10 +132,26 @@ describe("centralized uPlot charts - smoke", () => {
 			<LatencyPercentilesChart key="a" history={history} anomalies={anomalies} />,
 			<RequestRateChart key="b" history={history} anomalies={anomalies} />,
 			<ErrorRateChart key="c" history={history} anomalies={anomalies} />,
+			<ServerVitalsChart
+				key="d"
+				history={history}
+				samples={history.map((m) => ({
+					timestamp: m.timestamp,
+					series: { cpu: m.current_concurrency / 10 },
+				}))}
+				anomalies={anomalies}
+			/>,
 		]) {
 			const { unmount } = render(node);
 			unmount();
 		}
+	});
+
+	// The row must disappear for a run that scraped nothing, rather than render
+	// an empty plot frame on every dashboard.
+	it("renders nothing when the run has no monitor samples", () => {
+		const { container } = render(<ServerVitalsChart history={history} samples={[]} />);
+		expect(container.innerHTML).toBe("");
 	});
 
 	it("returns null below 2 points", () => {
