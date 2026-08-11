@@ -288,6 +288,24 @@ describe("useRunsQuery", () => {
 		await waitFor(() => expect(listRuns).toHaveBeenCalled());
 		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ q: undefined }));
 	});
+
+	/*
+	 * `baseline` is tri-state on the wire: unset lists both, `false` lists only
+	 * *unpinned* runs. So the off state has to omit the param, not send `false`
+	 * - that would hide every pinned run from the default list.
+	 */
+	it("asks for pinned runs only when the pinned filter is on", async () => {
+		listRuns.mockResolvedValue(page([]));
+
+		renderHook(() => useRunsQuery(undefined, true), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ baseline: true }));
+
+		listRuns.mockClear();
+		renderHook(() => useRunsQuery(undefined, false), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ baseline: undefined }));
+	});
 });
 
 describe("flattenRunPages", () => {

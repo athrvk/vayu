@@ -97,6 +97,37 @@ export interface RunComparison {
 	statusCodes: Record<string, { base: number; target: number }>;
 }
 
+/**
+ * The status-code mix as `[code, count]` pairs, from either wire shape.
+ *
+ * The engine's report carries `std::map<int, size_t> status_codes`, and a map
+ * whose keys are not strings cannot be a JSON object - nlohmann renders it as
+ * an **array of `[code, count]` pairs**. Reports reaching this side have been
+ * through `RunReportTransformer.toFrontend`, which folds that array into a
+ * record, so the record form is what the strip actually reads; the array form
+ * is what the MCP mirror reads, straight off `GET /runs/:id/report`.
+ *
+ * Both shapes are read here anyway, because the mirror reads both and a
+ * difference between the two implementations is the defect this pair exists to
+ * prevent - an agent and the UI must not report different mixes for the same
+ * pair of runs. The array check comes first: an array is an object too.
+ */
+function statusCodeEntries(codes: unknown): [string, unknown][] {
+	if (Array.isArray(codes)) {
+		const pairs: [string, unknown][] = [];
+		for (const entry of codes) {
+			// A pair that is not a pair says nothing about any code, so it is
+			// dropped rather than keyed under an index.
+			if (Array.isArray(entry) && entry.length >= 2) pairs.push([String(entry[0]), entry[1]]);
+		}
+		return pairs;
+	}
+	if (codes && typeof codes === "object") {
+		return Object.entries(codes as Record<string, unknown>);
+	}
+	return [];
+}
+
 /** Compare two engine run reports and return a structured delta. */
 export function compareReports(
 	baseRunId: string,
@@ -138,12 +169,9 @@ export function compareReports(
 
 	const statusCodes: Record<string, { base: number; target: number }> = {};
 	const collect = (report: Report, key: "base" | "target") => {
-		const codes = report.statusCodes;
-		if (codes && typeof codes === "object") {
-			for (const [code, count] of Object.entries(codes as Record<string, unknown>)) {
-				if (!statusCodes[code]) statusCodes[code] = { base: 0, target: 0 };
-				if (typeof count === "number") statusCodes[code][key] = count;
-			}
+		for (const [code, count] of statusCodeEntries(report.statusCodes)) {
+			if (!statusCodes[code]) statusCodes[code] = { base: 0, target: 0 };
+			if (typeof count === "number") statusCodes[code][key] = count;
 		}
 	};
 	collect(base, "base");

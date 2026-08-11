@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Search, Clock } from "lucide-react";
+import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
 import { ApiError } from "@/services";
 import {
@@ -71,6 +71,8 @@ export default function HistoryList() {
 		setFilterType,
 		filterStatus,
 		setFilterStatus,
+		pinnedOnly,
+		setPinnedOnly,
 		sortBy,
 		setSortBy,
 	} = useHistoryStore();
@@ -100,7 +102,7 @@ export default function HistoryList() {
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
-	} = useRunsQuery(debouncedSearch);
+	} = useRunsQuery(debouncedSearch, pinnedOnly);
 	const deleteRunMutation = useDeleteRunMutation();
 	const setBaselineMutation = useSetRunBaselineMutation();
 	const showToast = useToastStore((s) => s.showToast);
@@ -114,7 +116,7 @@ export default function HistoryList() {
 	// current search.
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
-	const runs = filterRuns(allRuns, { filterType, filterStatus, sortBy });
+	const runs = filterRuns(allRuns, { filterType, filterStatus, pinnedOnly, sortBy });
 
 	/*
 	 * A collection run's row carries the collection's id, not its name - the
@@ -300,6 +302,26 @@ export default function HistoryList() {
 								Oldest
 							</Button>
 						</div>
+						{/*
+						 * The pin is the only filter that changes what is
+						 * *fetched* rather than what is shown (`baseline=true`),
+						 * so it sits apart from the two Selects: those narrow the
+						 * loaded pages, this one asks the engine a different
+						 * question. `aria-pressed` because it is a toggle, not a
+						 * navigation - the variant swap alone says nothing to a
+						 * screen reader.
+						 */}
+						<Button
+							variant={pinnedOnly ? "default" : "ghost"}
+							onClick={() => setPinnedOnly(!pinnedOnly)}
+							size="sm"
+							className="h-8 gap-1 ml-auto"
+							aria-pressed={pinnedOnly}
+							title="Show only runs pinned as a baseline"
+						>
+							<Pin className="w-3.5 h-3.5 shrink-0" />
+							Pinned
+						</Button>
 					</div>
 				</div>
 
@@ -337,11 +359,16 @@ export default function HistoryList() {
 							<EmptyState
 								className="h-full"
 								icon={Clock}
-								title="No test runs found"
+								title={pinnedOnly ? "No pinned runs found" : "No test runs found"}
 								description={
+									// Order matters: with a search or a Select
+									// narrowing the list, "pin a run" would be
+									// advice for a state the user is not in.
 									searchQuery || filterType !== "all" || filterStatus !== "all"
 										? "Try widening the search or clearing the filters."
-										: "Run your first load test to see its results here."
+										: pinnedOnly
+											? "Pin a run as its request's baseline to keep it here."
+											: "Run your first load test to see its results here."
 								}
 							/>
 						)}
