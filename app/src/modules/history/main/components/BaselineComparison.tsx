@@ -38,7 +38,19 @@ interface BaselineComparisonProps {
 	runId: string;
 }
 
-/** The metrics worth a strip: the p99 a run is judged on, and the two totals. */
+/**
+ * The metrics worth a strip: the p99 a run is judged on, and the two totals.
+ *
+ * Three, deliberately, and not the whole diff. `compareReports` also computes
+ * p50/p90/p95/avg/max and the status-code merge, and #472 listed "latency
+ * percentiles and status codes" among its criteria - so the curation is
+ * recorded here rather than left to read as an oversight (#503). This strip is
+ * a glance in a report header, answering "is this run worse than the one I
+ * pinned?" in one line; the run's own percentile charts and status-code table
+ * sit a few hundred pixels below it in the same view, and an agent that wants
+ * every delta has `compare_runs`. Six percentile columns here would repeat that
+ * page and bury the one number the header exists to show.
+ */
 const HEADLINE_METRICS = ["latency.p99", "summary.avgRps", "summary.errorRate"] as const;
 
 const METRIC_LABELS: Record<string, string> = {

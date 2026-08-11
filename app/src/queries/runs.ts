@@ -53,13 +53,22 @@ export function runsPollInterval(loadedPages: number): number | false {
  *
  * @param q Optional server-side substring search over the stored snapshot.
  *          Type/status/sort stay client-side (see history-store `filterRuns`).
+ * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so
+ *          a pin older than the loaded pages is reachable. Left unset rather
+ *          than passed as `false`, which the engine reads as "only unpinned".
  */
-export function useRunsQuery(q?: string) {
+export function useRunsQuery(q?: string, pinnedOnly = false) {
 	const search = q?.trim() || undefined;
+	const baseline = pinnedOnly ? true : undefined;
 	return useInfiniteQuery<RunListResponse, Error>({
-		queryKey: queryKeys.runs.list({ q: search }),
+		queryKey: queryKeys.runs.list({ q: search, baseline }),
 		queryFn: ({ pageParam = 0 }) =>
-			apiService.listRuns({ q: search, limit: RUNS_PAGE_LIMIT, offset: pageParam as number }),
+			apiService.listRuns({
+				q: search,
+				baseline,
+				limit: RUNS_PAGE_LIMIT,
+				offset: pageParam as number,
+			}),
 		initialPageParam: 0,
 		getNextPageParam: (lastPage) =>
 			lastPage.pagination.hasMore

@@ -661,7 +661,7 @@ collapsing goes through `toggleCollectionExpanded`.
 
 #### `modules/history/history-store.ts` - History Filter & Sort
 
-UI-only: Search, filter (type/status), and sort (newest/oldest) for the history tab.
+UI-only: Search, filter (type/status/pinned), and sort (newest/oldest) for the history tab.
 
 **State:**
 ```typescript
@@ -669,6 +669,7 @@ UI-only: Search, filter (type/status), and sort (newest/oldest) for the history 
   searchQuery: string
   filterType: "all" | "load" | "design"
   filterStatus: "all" | "pending" | "running" | "completed" | "stopped" | "failed"
+  pinnedOnly: boolean
   sortBy: "newest" | "oldest"
 }
 ```
@@ -678,12 +679,23 @@ sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
 debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
 runs, not just the pages loaded into the sidebar.
 
+`pinnedOnly` is server-side for the same reason - it drives
+`GET /runs?baseline=true`, so a pin older than the loaded pages is still
+findable - **and** applied again in `filterRuns`. That second pass is not
+redundant: unpinning patches the loaded pages in place rather than refetching
+them (see `useSetRunBaselineMutation` below), so the row just unpinned would
+otherwise sit in the pinned-only list until the next poll. The param decides
+what is fetched; the pass decides what is shown. `false` is never sent: the
+engine reads `baseline=false` as "only unpinned runs", so the off state omits
+the param entirely.
+
 **Key Methods:**
 ```typescript
 const {
   searchQuery, setSearchQuery,
   filterType, setFilterType,
   filterStatus, setFilterStatus,
+  pinnedOnly, setPinnedOnly,
   sortBy, setSortBy,
   resetFilters
 } = useHistoryStore();
@@ -1066,7 +1078,7 @@ requests: {
 runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
-  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q)
+  list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline)
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
   recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],

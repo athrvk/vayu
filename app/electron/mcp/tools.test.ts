@@ -2156,6 +2156,53 @@ describe("dispatchTool", () => {
 	});
 
 	/*
+	 * The reports this tool reads come straight off `GET /runs/:id/report` -
+	 * nothing transforms them on the way in, the way the renderer's query layer
+	 * does - so the status mix arrives in the engine's own serialization: an
+	 * array of `[code, count]` pairs, because `std::map<int, size_t>` cannot be
+	 * a JSON object. Read as a record it yielded index keys with tuple values,
+	 * every count was skipped, and the tool reported an empty mix as if the run
+	 * had recorded no responses at all.
+	 */
+	test("compare_runs reads the engine's raw [code, count] status mix", async () => {
+		const reports: Record<string, unknown> = {
+			run_a: {
+				latency: { p99: 40 },
+				summary: { avgRps: 100 },
+				statusCodes: [
+					[200, 5970],
+					[500, 30],
+				],
+			},
+			run_b: {
+				latency: { p99: 80 },
+				summary: { avgRps: 90 },
+				statusCodes: [
+					[200, 5292],
+					[500, 108],
+				],
+			},
+		};
+		const client = fakeClient({
+			getRunReport: vi.fn().mockImplementation((id: string) => Promise.resolve(reports[id])),
+		});
+
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).toMatchObject({
+			statusCodes: {
+				"200": { base: 5970, target: 5292 },
+				"500": { base: 30, target: 108 },
+			},
+		});
+	});
+
+	/*
 	 * Omitting the base is the "did my change regress?" shape: the agent knows
 	 * the run it just started and not which older run is the reference. It
 	 * resolves through the same endpoint the history view's strip uses, so the

@@ -90,6 +90,45 @@ const CASES: { name: string; base: Record<string, unknown>; target: Record<strin
 		},
 	},
 	{
+		// The shape the MCP path actually receives: `GET /runs/:id/report` is
+		// read raw there, and the engine's `std::map<int, size_t>` serializes as
+		// an array of pairs. The renderer's transformer folds it to a record
+		// first, so the two sides see different shapes for the same report -
+		// which is precisely why both have to read both.
+		name: "engine-raw status codes, as arrays of [code, count] pairs",
+		base: {
+			latency: { p50: 10, p90: 18, p95: 20, p99: 40, avg: 12, max: 100 },
+			summary: { avgRps: 100, throughput: 99, errorRate: 0.5, totalRequests: 6000 },
+			statusCodes: [
+				[200, 5970],
+				[500, 30],
+			],
+		},
+		target: {
+			latency: { p50: 15, p90: 27, p95: 30, p99: 80, avg: 18, max: 200 },
+			summary: { avgRps: 90, throughput: 88, errorRate: 2.0, totalRequests: 5400 },
+			statusCodes: [
+				[200, 5292],
+				[429, 8],
+				[500, 100],
+			],
+		},
+	},
+	{
+		// One side transformed, one side raw - what a comparison between a
+		// report the renderer cached and one the tool fetched looks like.
+		name: "a raw base against a transformed target",
+		base: { statusCodes: [[200, 10]] },
+		target: { statusCodes: { "200": 12 } },
+	},
+	{
+		// Pairs that are not pairs: an index key with a tuple value would be a
+		// status code the run never saw.
+		name: "malformed entries in the array form",
+		base: { statusCodes: [[200, 10], "500", [], [404], [301, "many"]] },
+		target: { statusCodes: [] },
+	},
+	{
 		name: "values that are not numbers at all",
 		base: {
 			latency: { p50: "10", p99: null, avg: Number.NaN },
@@ -105,6 +144,43 @@ describe("run comparison mirror", () => {
 		expect(mainCompare("run_base", "run_target", base, target)).toEqual(
 			rendererCompare("run_base", "run_target", base, target)
 		);
+	});
+
+	/*
+	 * Equality alone cannot catch this one: dropping the array form again would
+	 * leave *both* sides reporting an empty mix, and an empty mix equals an
+	 * empty mix. So the merged counts are pinned as values, on both sides.
+	 */
+	test("engine-raw pairs merge into real counts, not an empty mix", () => {
+		const base = {
+			statusCodes: [
+				[200, 5970],
+				[500, 30],
+			],
+		};
+		const target = {
+			statusCodes: [
+				[200, 5292],
+				[429, 8],
+				[500, 100],
+			],
+		};
+		const expected = {
+			"200": { base: 5970, target: 5292 },
+			"429": { base: 0, target: 8 },
+			"500": { base: 30, target: 100 },
+		};
+
+		expect(mainCompare("a", "b", base, target).statusCodes).toEqual(expected);
+		expect(rendererCompare("a", "b", base, target).statusCodes).toEqual(expected);
+	});
+
+	test("a malformed pair is dropped rather than keyed by its index", () => {
+		const report = { statusCodes: [[200, 10], "500", [], [404], [301, "many"]] };
+
+		const expected = { "200": { base: 10, target: 0 }, "301": { base: 0, target: 0 } };
+		expect(mainCompare("a", "b", report, {}).statusCodes).toEqual(expected);
+		expect(rendererCompare("a", "b", report, {}).statusCodes).toEqual(expected);
 	});
 
 	test("both sides label the same metrics with the same direction", () => {
