@@ -1281,9 +1281,19 @@ inbox on a free port that answers `200` with no body.
 
 An out-of-range value is a `400` naming the field rather than a fallback to the
 default: a listener quietly answering something other than what it was asked to
-is invisible on both sides of the wire. A bind that fails (port in use) is a
-`409` with code `inbox_bind_failed`; a non-loopback bind without confirmation is
-a `400` with code `inbox_non_loopback_bind`.
+is invisible on both sides of the wire. A bind that fails is a `409` with code
+`inbox_bind_failed`; a non-loopback bind without confirmation is a `400` with
+code `inbox_non_loopback_bind`.
+
+A `port` another engine listener is already running on - an inbox or a mock
+issuer - is refused with that same `409`, naming the holder ("`inbox inbox_2f1c`
+is already listening there"). The engine checks that itself rather than letting
+the bind report it: listeners are bound with `SO_REUSEPORT`, so on Linux a
+second bind on the same address and port *succeeds* and the kernel then splits
+arriving connections between the two listeners, each capturing an effectively
+random half. A port held by a process outside the engine is still reported by
+the bind, with the "in use or unavailable" wording; `port: 0` is never refused
+this way, since the kernel does not hand out a port it is already using.
 
 **Response:**
 ```json
@@ -1487,7 +1497,10 @@ consent screens and multi-tenant realms are deliberate non-goals.
 }
 ```
 
-`port: 0` (the default) binds an ephemeral port. `clients` empty accepts **any**
+`port: 0` (the default) binds an ephemeral port; an explicit `port` another
+engine listener already holds is a `500` with code `mock_issuer_bind_failed`
+naming that listener, for the [same `SO_REUSEPORT`
+reason](#webhook-inbox) the inbox refuses one. `clients` empty accepts **any**
 client id; with clients configured, an id must be one of them and one carrying a
 secret must present it (Basic header or body - both RFC 6749 §2.3.1 placements).
 A field present with the wrong type or an out-of-range value is a `400`

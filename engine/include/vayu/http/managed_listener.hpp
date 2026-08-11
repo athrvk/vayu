@@ -27,6 +27,13 @@ namespace vayu::http {
  * - **Bind before listening.** `bind_to_any_port` / `bind_to_port` report the
  *   failure a `listen()` on a taken port would only ever log, so the caller can
  *   answer its own error rather than leaving a thread spinning.
+ * - **Refuse a port another listener holds.** The bind cannot do it:
+ *   cpp-httplib sets `SO_REUSEPORT`, so on Linux a second bind on the same
+ *   `127.0.0.1:port` succeeds and the kernel then splits arriving connections
+ *   between the two accept loops - two inboxes, each capturing a random half of
+ *   the webhooks (issue #512). Every live listener therefore claims its
+ *   address:port here, and an explicitly requested port that is already claimed
+ *   is refused before the bind, naming the holder.
  * - **Return only once the accept loop is live.** `stop()` racing ahead of
  *   `listen()` is *missed* by cpp-httplib, and the `join()` that follows then
  *   hangs forever. `start()` therefore does not return until the server reports
@@ -63,20 +70,39 @@ class ManagedListener {
      */
     httplib::Server& server ();
 
-    /**
-     * Bind @p bind_address (@p port, or an ephemeral port when 0) and start
-     * accepting.
-     *
-     * @return the bound port, or 0 when the bind failed or this listener was
-     *         already started - nothing is running in either case, and the
-     *         caller owns the error it reports.
-     */
-    int start (const std::string& bind_address, int port = 0);
+    /// What `start()` did. Nothing is listening whenever `port` is 0, and the
+    /// caller owns the error it reports either way; `held_by` is what separates
+    /// the two reasons it can be 0 by the time a socket was tried.
+    struct StartOutcome {
+        /// The bound port, or 0 when nothing is listening.
+        int port = 0;
+        /// Names the listener already holding the requested address:port (e.g.
+        /// `"inbox inbox_2f1c"`) when that is why `port` is 0. Empty for every
+        /// other outcome, so a caller can tell a port this engine already holds
+        /// from a bind that failed for any other reason.
+        std::string held_by;
+    };
 
     /**
-     * Stop accepting, join the listener thread, release the server. Idempotent
-     * and safe on a listener that never started; returns only once no handler
-     * is still running, which can take as long as the slowest one.
+     * Bind @p bind_address (@p port, or an ephemeral port when 0) and start
+     * accepting, claiming the bound address:port for as long as this listener
+     * runs. @p owner_label names this listener in the refusal another manager
+     * gets when it asks for the same port.
+     *
+     * An explicitly requested port already claimed by a live listener is
+     * refused without touching a socket - see the class comment on
+     * `SO_REUSEPORT`. An ephemeral request is not checked: the kernel does not
+     * hand out a port it is already using.
+     */
+    StartOutcome start (const std::string& bind_address,
+    int port                       = 0,
+    const std::string& owner_label = {});
+
+    /**
+     * Stop accepting, join the listener thread, release the server and the port
+     * claim. Idempotent and safe on a listener that never started; returns only
+     * once no handler is still running, which can take as long as the slowest
+     * one - and once the port is claimable again.
      */
     void stop ();
 

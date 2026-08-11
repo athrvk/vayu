@@ -466,17 +466,20 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     svr.Delete (".*", capture);
     svr.Options (".*", capture);
 
-    const int bound = inbox->listener.start (request.bind, request.port);
-    if (bound <= 0) {
+    const auto started =
+    inbox->listener.start (request.bind, request.port, "inbox " + inbox->id);
+    if (started.port <= 0) {
+        const std::string where = request.bind + ":" +
+        (request.port > 0 ? std::to_string (request.port) : std::string ("(any)"));
         out.ok            = false;
         out.http_status   = 409;
         out.error_code    = "inbox_bind_failed";
-        out.error_message = "Could not bind " + request.bind + ":" +
-        (request.port > 0 ? std::to_string (request.port) : std::string ("(any)")) +
-        " - the address may be in use or unavailable";
+        out.error_message = started.held_by.empty () ?
+        "Could not bind " + where + " - the address may be in use or unavailable" :
+        "Could not bind " + where + " - " + started.held_by + " is already listening there";
         return out;
     }
-    inbox->port = bound;
+    inbox->port = started.port;
 
     {
         std::lock_guard<std::mutex> lock (mutex_);
