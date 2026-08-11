@@ -33,6 +33,8 @@ function entry(value: string, key = "liveReplayWindowMs"): ConfigEntry {
 		description: "",
 		category: "observability",
 		default: "300000",
+		requiresRestart: false,
+		advanced: false,
 		updatedAt: 0,
 	};
 }

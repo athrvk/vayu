@@ -1044,6 +1044,17 @@ struct ConfigEntry {
     std::optional<std::string> max_value; // Optional maximum (for numbers)
     std::optional<std::string> options; // JSON array of {value,label}, enum types only
     int64_t updated_at;                 // Last update timestamp
+    // Whether the running engine keeps the old value until it is restarted.
+    // Serialized as `requiresRestart`; the app and the MCP `update_config` tool
+    // both read it. It used to be spelled as a "(Requires Restart)" suffix in
+    // the label and substring-parsed by both, so a stale label lied to both at
+    // once - hence a typed field, and a test that no label carries the suffix.
+    bool requires_restart = false;
+    // Whether the setting is an internal that no everyday user story reaches
+    // (a lock pragma, a watchdog backoff). Serialized as `advanced`; the app
+    // renders these in a collapsed section at the bottom of their category
+    // rather than beside the settings people actually tune.
+    bool advanced = false;
 };
 
 /**

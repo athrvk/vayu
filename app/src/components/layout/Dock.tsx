@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { FolderOpen, Clock, Braces, Info, PanelRight, Settings } from "lucide-react";
+import { FolderOpen, Clock, Braces, Info, PanelRight, RefreshCw, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
+import { useEngineRestart } from "@/hooks/useEngineRestart";
 
 interface DrawerButton {
 	view: DrawerView;
@@ -188,6 +189,65 @@ function EngineStatus() {
 	);
 }
 
+/**
+ * A saved setting the running engine has not picked up yet.
+ *
+ * Every other setting in the app confirms itself: the value is written, the
+ * thing it governs changes. The restart-required ones cannot - the engine keeps
+ * serving the old value until it is relaunched - and until now nothing said so
+ * outside the Settings screen, which is exactly where the user is *not* once
+ * they have moved on. So the Dock carries it, beside the connection light that
+ * already answers "what is the engine doing".
+ *
+ * What it tracks, stated plainly: settings saved from this app since it
+ * connected that the engine marks `requiresRestart` (`engine-store`, written by
+ * `SettingsMain`). Not a comparison against the engine's running values - it
+ * does not report those, so any such claim would be inferred rather than known.
+ * The honest consequence is that this cannot survive a reload of the renderer,
+ * and it says "saved" rather than "in effect".
+ */
+function PendingRestart() {
+	const pendingRestart = useEngineStore((s) => s.pendingRestart);
+	// The subtree stops here on the ordinary path, so the machinery behind the
+	// action - the restart itself, and the cache invalidation that follows it -
+	// is only mounted while there is a restart to offer.
+	return pendingRestart ? <PendingRestartButton /> : null;
+}
+
+function PendingRestartButton() {
+	const { restart, isRestarting } = useEngineRestart();
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				{/*
+				 * A button, not a chip with a tooltip: the restart is the point,
+				 * and a status that can only be read is one more thing to carry
+				 * back to Settings. Warning tokens rather than a raw amber - the
+				 * `-text` variant is the pair that passes contrast at 12px, the
+				 * same rule the connection light follows above.
+				 */}
+				<button
+					onClick={() => void restart()}
+					disabled={isRestarting}
+					className="flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				>
+					<RefreshCw
+						className={cn("w-3 h-3", isRestarting && "animate-spin")}
+						aria-hidden="true"
+					/>
+					{isRestarting ? "Restarting…" : "Restart pending"}
+				</button>
+			</TooltipTrigger>
+			<TooltipContent side="top">
+				<p className="max-w-64 whitespace-normal break-words">
+					A saved setting needs an engine restart to take effect. Click to restart now.
+				</p>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
@@ -234,6 +294,8 @@ export function Dock() {
 				{/* Middle - ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
 					<EngineStatus />
+
+					<PendingRestart />
 
 					{/*
 					 * "Unsaved changes" is the only place in the app that says so.

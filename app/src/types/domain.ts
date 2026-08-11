@@ -1360,6 +1360,19 @@ export interface ConfigEntry {
 	default: string;
 	min?: string;
 	max?: string;
+	/**
+	 * Whether the running engine keeps the old value until it is restarted.
+	 * Typed metadata the engine always sends (`config_entry_json`), replacing
+	 * the "(Requires Restart)" label substring both this app and the MCP
+	 * `update_config` tool used to parse out of the prose.
+	 */
+	requiresRestart: boolean;
+	/**
+	 * Whether the entry is an internal with no everyday user story (a lock
+	 * pragma, a watchdog backoff). Rendered collapsed under "Advanced" at the
+	 * bottom of its category rather than beside the settings people tune.
+	 */
+	advanced: boolean;
 	updatedAt: number;
 	/**
 	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the

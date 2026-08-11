@@ -63,7 +63,12 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
             "' has malformed options JSON, omitting it: " + e.what ());
         }
     }
-    entry_json["updatedAt"] = entry.updated_at;
+    // Always present, both of them: a consumer that has to distinguish "false"
+    // from "this engine does not send it" is back to guessing, which is the
+    // habit the typed flag replaced.
+    entry_json["requiresRestart"] = entry.requires_restart;
+    entry_json["advanced"]        = entry.advanced;
+    entry_json["updatedAt"]       = entry.updated_at;
     return entry_json;
 }
 

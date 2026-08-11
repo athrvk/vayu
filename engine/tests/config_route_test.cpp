@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <set>
 #include <string>
 #include <utility>
 
@@ -235,6 +236,110 @@ TEST_F (ConfigRouteTest, SeededDefaultHttpVersionOptionsMatchAllHttpVersionsInOr
         EXPECT_EQ (options[i]["value"], vayu::to_string (versions[i]));
         EXPECT_EQ (options[i]["label"], vayu::http_version_label (versions[i]));
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// requiresRestart / advanced: typed metadata, not a label convention.
+// ---------------------------------------------------------------------------
+
+// The whole point of the field: a consumer asks the entry, not the prose. Both
+// values are asserted, because a serializer that always sent `true` would pass
+// a one-sided check.
+TEST_F (ConfigRouteTest, RestartRequiredSerializesAsATypedFlagBothWays) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json restarts = find_entry (body, "workers");
+    ASSERT_TRUE (restarts.contains ("requiresRestart"));
+    EXPECT_TRUE (restarts["requiresRestart"].get<bool> ());
+
+    // Read per run, so a change applies to the next run started.
+    json does_not = find_entry (body, "defaultTimeout");
+    ASSERT_TRUE (does_not.contains ("requiresRestart"));
+    EXPECT_FALSE (does_not["requiresRestart"].get<bool> ());
+}
+
+// The convention this replaced, guarded against creeping back: the flag is the
+// only statement, so no label may also spell it out. Scans the whole seeded
+// catalogue and asserts it scanned something - a guard that reads an empty
+// list passes for the wrong reason.
+TEST_F (ConfigRouteTest, NoSeededLabelOrDescriptionSpellsOutTheRestartRequirement) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    size_t restart_required_count = 0;
+    for (const auto& entry : entries) {
+        EXPECT_EQ (entry.label.find ("Requires Restart"), std::string::npos)
+        << "entry '" << entry.key << "' states the restart requirement in its "
+        << "label";
+        EXPECT_EQ (entry.description.find ("require engine restart"),
+        std::string::npos)
+        << "entry '" << entry.key << "' states the restart requirement in its "
+        << "description";
+        if (entry.requires_restart) {
+            ++restart_required_count;
+        }
+    }
+    // The statement has to live somewhere: dropping the suffix without setting
+    // the flag would satisfy the scan above and tell the user nothing.
+    EXPECT_GT (restart_required_count, 0u);
+}
+
+// Membership is the recorded decision (#520), so it is pinned by key rather
+// than by count - an entry added to or dropped from the group has to say so
+// here.
+TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
+    const std::set<std::string> expected = { "dbBusyTimeout",
+        "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs",
+        "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs" };
+
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";
+
+    std::set<std::string> actual;
+    for (const auto& entry : entries) {
+        if (entry.advanced) {
+            actual.insert (entry.key);
+        }
+    }
+    EXPECT_EQ (actual, expected);
+}
+
+TEST_F (ConfigRouteTest, AdvancedSerializesOnTheWire) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json internal = find_entry (body, "dbBusyTimeout");
+    ASSERT_TRUE (internal.contains ("advanced"));
+    EXPECT_TRUE (internal["advanced"].get<bool> ());
+
+    json everyday = find_entry (body, "workers");
+    ASSERT_TRUE (everyday.contains ("advanced"));
+    EXPECT_FALSE (everyday["advanced"].get<bool> ());
+}
+
+// A write must not flatten metadata it does not carry. POST /config sends only
+// values, so the update path copies the stored row - if it ever rebuilt the
+// entry instead, both flags would silently reset to false and every restart
+// chip in the app would vanish after one save.
+TEST_F (ConfigRouteTest, UpdatingAValueKeepsItsMetadataFlags) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"dbBusyTimeout":"20000"}})");
+    ASSERT_EQ (status, 200);
+
+    auto stored = db_->get_config_entry ("dbBusyTimeout");
+    ASSERT_TRUE (stored.has_value ());
+    EXPECT_EQ (stored->value, "20000");
+    EXPECT_TRUE (stored->requires_restart);
+    EXPECT_TRUE (stored->advanced);
+
+    json entry = find_entry (body, "dbBusyTimeout");
+    EXPECT_TRUE (entry["requiresRestart"].get<bool> ());
+    EXPECT_TRUE (entry["advanced"].get<bool> ());
 }
 
 } // namespace

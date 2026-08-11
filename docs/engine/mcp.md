@@ -202,9 +202,10 @@ Notes:
   regression from an improvement without knowing each metric's sense.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
-  `restartRequired` in its structured result (the engine marks these in each
-  entry's label). Such values are saved, but the running engine keeps the old
-  value until it is restarted, so the tool says so in its text output too.
+  `restartRequired` in its structured result (read from each entry's typed
+  `requiresRestart` field, not from its label). Such values are saved, but the
+  running engine keeps the old value until it is restarted, so the tool says so
+  in its text output too.
 - **The collection / request write verbs** are the CRUD an agent needs to work
   unattended: `create_collection` gives it a `collectionId` to file new requests
   under, and `update_request` / `delete_request` let it correct or remove a

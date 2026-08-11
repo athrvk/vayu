@@ -188,8 +188,18 @@ describe("engine config tools", () => {
 		const client = fakeClient({
 			getConfig: vi.fn().mockResolvedValue({
 				entries: [
-					{ key: "workers", value: "16", label: "Worker threads (Requires Restart)" },
-					{ key: "timeoutMs", value: "5000", label: "Request timeout" },
+					{
+						key: "workers",
+						value: "16",
+						label: "Worker Threads",
+						requiresRestart: true,
+					},
+					{
+						key: "timeoutMs",
+						value: "5000",
+						label: "Request timeout",
+						requiresRestart: false,
+					},
 				],
 			}),
 		});

@@ -41,6 +41,8 @@ const enumEntry: ConfigEntry = {
 	value: "auto",
 	default: "auto",
 	category: "general_engine",
+	requiresRestart: false,
+	advanced: false,
 	updatedAt: 0,
 	options: [
 		{ value: "auto", label: "Auto" },
