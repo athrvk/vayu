@@ -79,6 +79,7 @@ export const API_ENDPOINTS = {
 		requestId?: string;
 		collectionId?: string;
 		q?: string;
+		baseline?: boolean;
 	}) => {
 		const qs = new URLSearchParams();
 		if (params.limit !== undefined) qs.set("limit", String(params.limit));
@@ -88,10 +89,16 @@ export const API_ENDPOINTS = {
 		if (params.requestId) qs.set("requestId", params.requestId);
 		if (params.collectionId) qs.set("collectionId", params.collectionId);
 		if (params.q) qs.set("q", params.q);
+		// Tested for `undefined` rather than truthiness: `baseline: false` is a
+		// real question ("the runs that are not pinned"), and a falsy check
+		// would drop it and answer with every run instead.
+		if (params.baseline !== undefined) qs.set("baseline", String(params.baseline));
 		const s = qs.toString();
 		return s ? `/runs?${s}` : `/runs`;
 	},
 	RUN_BY_ID: (id: string) => `/runs/${id}`,
+	/** Pin or unpin a run as the baseline later runs are compared against. */
+	RUN_BASELINE: (id: string) => `/runs/${id}/baseline`,
 	RUN_REPORT: (id: string) => `/runs/${id}/report`,
 	RUN_STOP: (id: string) => `/runs/${id}/stop`,
 	// The response headers and body captured for a run's retained samples.

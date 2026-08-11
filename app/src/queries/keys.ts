@@ -66,6 +66,14 @@ export const queryKeys = {
 		lastCollectionRuns: () => [...queryKeys.runs.all, "lastCollectionRun"] as const,
 		lastCollectionRun: (collectionId: string) =>
 			[...queryKeys.runs.lastCollectionRuns(), collectionId] as const,
+		// The run pinned as baseline for one request, for the history view's
+		// vs-baseline strip. Its own family for the fourth time and the same
+		// reason as the three above: it caches a plain `RunListResponse`, and
+		// the delete-run patch walks everything under `lists()` as
+		// `InfiniteData`. `baselines()` is the prefix to invalidate when a pin
+		// moves, or when the run set changes without a known request.
+		baselines: () => [...queryKeys.runs.all, "baseline"] as const,
+		baseline: (requestId: string) => [...queryKeys.runs.baselines(), requestId] as const,
 		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,

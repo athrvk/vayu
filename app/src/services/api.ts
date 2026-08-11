@@ -338,9 +338,19 @@ export const apiService = {
 			requestId,
 			collectionId,
 			q,
+			baseline,
 		} = params;
 		return await httpClient.get<RunListResponse>(
-			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, collectionId, q })
+			API_ENDPOINTS.RUNS_LIST({
+				limit,
+				offset,
+				type,
+				status,
+				requestId,
+				collectionId,
+				q,
+				baseline,
+			})
 		);
 	},
 
@@ -398,6 +408,14 @@ export const apiService = {
 
 	async deleteRun(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.RUN_BY_ID(id));
+	},
+
+	/**
+	 * Pin or unpin a run as the baseline for its request. Answers the updated
+	 * list row, so a caller can patch its cached row instead of re-listing.
+	 */
+	async setRunBaseline(id: string, baseline: boolean): Promise<Run> {
+		return await httpClient.put<Run>(API_ENDPOINTS.RUN_BASELINE(id), { baseline });
 	},
 
 	/**

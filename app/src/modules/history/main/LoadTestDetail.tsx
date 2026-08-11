@@ -40,7 +40,13 @@ import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore } from "@/stores";
-import { OverviewTab, PerformanceTab, SamplesTab, ScenarioStepsTab } from "./components";
+import {
+	BaselineComparison,
+	OverviewTab,
+	PerformanceTab,
+	SamplesTab,
+	ScenarioStepsTab,
+} from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
 import type { LoadTestDetailProps, MonitorSeriesResponse, TimeSeriesResponse } from "../types";
 
@@ -275,6 +281,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						)}
 					</div>
 				)}
+
+				{/* How this run compares with the one pinned as its baseline.
+				    Absent when nothing is pinned, or when this run is the pin -
+				    see BaselineComparison. */}
+				<BaselineComparison report={report} runId={runId} />
 
 				{/* What kept the run authorized. Drawn only when the engine was able to
 				    refresh at all - a run without the section reports nothing here,

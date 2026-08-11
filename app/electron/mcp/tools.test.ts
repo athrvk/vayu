@@ -47,6 +47,10 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue([]),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
+		getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: "req_1", baseline: false }),
+		listBaselineRuns: vi
+			.fn()
+			.mockResolvedValue({ data: [{ id: "run_pinned", baseline: true }] }),
 		composeRequest: identityCompose(),
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
@@ -2054,6 +2058,93 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		expect(client.getRunReport).toHaveBeenCalledTimes(2);
 		expect(firstText(res)).toContain("run_a");
+		// An explicit base is used as given - no baseline lookup happens.
+		expect(client.listBaselineRuns).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * Omitting the base is the "did my change regress?" shape: the agent knows
+	 * the run it just started and not which older run is the reference. It
+	 * resolves through the same endpoint the history view's strip uses, so the
+	 * two cannot answer the question about different pairs of runs.
+	 */
+	test("compare_runs falls back to the target's pinned baseline", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBeFalsy();
+		expect(client.getRun).toHaveBeenCalledWith("run_b", undefined);
+		expect(client.listBaselineRuns).toHaveBeenCalledWith("req_1", undefined);
+		expect(client.getRunReport).toHaveBeenCalledWith("run_pinned", undefined);
+		expect(firstText(res)).toContain("run_pinned");
+	});
+
+	test("compare_runs says so when the request has no baseline pinned", async () => {
+		const client = fakeClient({ listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }) });
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/No run is pinned as the baseline/i);
+		// And nothing was compared against a run nobody chose.
+		expect(client.getRunReport).not.toHaveBeenCalled();
+	});
+
+	test("compare_runs says so when the target ran no saved request", async () => {
+		const client = fakeClient({
+			getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: null }),
+		});
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/did not run a saved request/i);
+		expect(client.listBaselineRuns).not.toHaveBeenCalled();
+	});
+
+	test("compare_runs refuses to compare the baseline with itself", async () => {
+		const client = fakeClient({
+			listBaselineRuns: vi
+				.fn()
+				.mockResolvedValue({ data: [{ id: "run_b", baseline: true }] }),
+		});
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/is itself the baseline/i);
+		expect(client.getRunReport).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The direction label is the half of a delta a number cannot carry, and an
+	 * agent reading `delta: -12` has no other way to know whether that is good.
+	 */
+	test("compare_runs labels which direction is an improvement", async () => {
+		const client = fakeClient({
+			getRunReport: vi.fn().mockResolvedValue({
+				latency: { p99: 40 },
+				summary: { avgRps: 100, totalRequests: 10 },
+				statusCodes: {},
+			}),
+		});
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+
+		const parsed = JSON.parse(firstText(res)) as {
+			latency: Array<{ metric: string; direction: string }>;
+			throughput: Array<{ metric: string; direction: string }>;
+			reliability: Array<{ metric: string; direction: string }>;
+		};
+		expect(parsed.latency.find((m) => m.metric === "latency.p99")?.direction).toBe(
+			"lower-is-better"
+		);
+		expect(parsed.throughput.find((m) => m.metric === "summary.avgRps")?.direction).toBe(
+			"higher-is-better"
+		);
+		expect(
+			parsed.reliability.find((m) => m.metric === "summary.totalRequests")?.direction
+		).toBe("neutral");
 	});
 });
 

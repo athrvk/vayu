@@ -887,6 +887,17 @@ struct Run {
     // default so sync_schema can ALTER TABLE ADD COLUMN it onto an existing
     // runs table (same pattern as requests.follow_redirects).
     std::string summary; // TEXT NOT NULL DEFAULT ''
+    // Pinned as a known-good run to compare later runs against. Set through
+    // `PUT /runs/:id/baseline`; the engine stays policy-free about *which*
+    // baseline applies to a run (a client picks that, by request), so several
+    // runs may carry the flag at once.
+    //
+    // Retention reads it: `prune_runs` never deletes a baseline and never
+    // counts one toward the retained-run cap, because a pin the cap can expire
+    // is not a pin. Defaulted (and stored with a `default_value`) so
+    // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
+    // the same pattern as `summary` above and `requests.follow_redirects`.
+    bool baseline = false; // INTEGER NOT NULL DEFAULT 0
 };
 
 /**

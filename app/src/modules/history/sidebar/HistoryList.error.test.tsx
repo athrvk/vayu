@@ -68,6 +68,7 @@ const queryState = {
 vi.mock("@/queries", () => ({
 	useRunsQuery: () => queryState.runs,
 	useDeleteRunMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useSetRunBaselineMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	flattenRunPages: (d: { pages?: Array<{ data: unknown[] }> } | undefined) =>
 		d?.pages?.flatMap((p) => p.data) ?? [],
 	runsTotal: (d: { pages?: Array<{ pagination: { total: number } }> } | undefined) =>

@@ -237,6 +237,29 @@ export class EngineClient {
 		return this.request("GET", "/runs?limit=100&offset=0", undefined, signal);
 	}
 
+	/**
+	 * One run's row (`GET /runs/:id`), including which saved request it ran and
+	 * whether it is pinned as a baseline. `compare_runs` reads the first to find
+	 * a target's baseline when the caller named none.
+	 */
+	getRun(runId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/runs/${encodeURIComponent(runId)}`, undefined, signal);
+	}
+
+	/**
+	 * The runs pinned as baselines for one saved request, newest first. One row
+	 * is all any caller needs - "the baseline" is the most recent pin - so the
+	 * page is bounded to it rather than to the 100 `listRuns` allows.
+	 */
+	listBaselineRuns(requestId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/runs?baseline=true&limit=1&offset=0&requestId=${encodeURIComponent(requestId)}`,
+			undefined,
+			signal
+		);
+	}
+
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
 	}

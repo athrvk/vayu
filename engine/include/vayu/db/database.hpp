@@ -40,6 +40,10 @@ struct RunFilter {
     std::optional<std::string> request_id;
     std::optional<std::string> q;
     std::optional<std::string> collection_id;
+    // `true` lists only pinned baselines, `false` only unpinned ones. Both are
+    // real questions - "which run is the baseline for this request" is the
+    // first, and it is what a client resolves before diffing against it.
+    std::optional<bool> baseline;
 };
 
 /**
@@ -189,12 +193,23 @@ class Database {
     void update_run_summary (const std::string& id, const std::string& summary);
 
     /**
+     * @brief Pin (or unpin) a run as a baseline, returning the stored row.
+     *
+     * `std::nullopt` means no run has that id - the route's 404. Several runs
+     * may be pinned at once: the engine records the pin and nothing more, and
+     * which baseline applies to a given run is the client's choice (per
+     * request, per endpoint), so no write here unpins anything else.
+     */
+    std::optional<Run> set_run_baseline (const std::string& id, bool baseline);
+
+    /**
      * @brief Prune old runs (and their cascaded metrics/results) by two limits.
      *
      * A run is a victim when it falls beyond @p max_runs most-recent runs
      * (ordered by start_time) OR its start_time is older than @p max_age_days.
      * Either limit is disabled by passing 0. Runs still `running`/`pending` are
-     * never pruned and never count toward @p max_runs. Deletion goes through the
+     * never pruned and never count toward @p max_runs, and neither is a run
+     * pinned as a baseline (`Run::baseline`). Deletion goes through the
      * `delete_run` cascade in start_time-batched transactions, releasing the DB
      * mutex between batches so a large backlog cannot stall other endpoints.
      */

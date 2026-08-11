@@ -40,6 +40,9 @@ nlohmann::json build_run_report_config (const nlohmann::json& config);
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id);
+// Defined in runs.cpp; returns {http_status, json_body}.
+std::pair<int, nlohmann::json>
+set_run_baseline_response (vayu::db::Database& db, const std::string& run_id, const std::string& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -1057,6 +1060,96 @@ TEST_F (RunsRouteTest, RunWithNoSummaryReportsFromSampledResults) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 1u);
     EXPECT_EQ (body["summary"]["failedRequests"].get<size_t> (), 1u);
+}
+
+// ============================================================================
+// PUT /runs/:id/baseline (set_run_baseline_response) and the list's filter
+// ============================================================================
+
+TEST_F (RunsRouteTest, BaselinePutPinsTheRunAndAnswersTheUpdatedRow) {
+    seed ({ .id = "run_a", .start_time = 100 });
+
+    auto [status, body] =
+    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":true})");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["id"], "run_a");
+    EXPECT_TRUE (body["baseline"].get<bool> ());
+    // The answer is a list row, so a client can patch its cache from it rather
+    // than re-listing - the compact summary travels with it.
+    EXPECT_TRUE (body.contains ("summary"));
+
+    EXPECT_TRUE (db_->get_run ("run_a")->baseline);
+
+    auto [unpin_status, unpin_body] =
+    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":false})");
+    ASSERT_EQ (unpin_status, 200);
+    EXPECT_FALSE (unpin_body["baseline"].get<bool> ());
+    EXPECT_FALSE (db_->get_run ("run_a")->baseline);
+}
+
+TEST_F (RunsRouteTest, BaselinePutOnAMissingRunIs404) {
+    auto [status, body] =
+    vayu::http::routes::set_run_baseline_response (*db_, "no_such_run", R"({"baseline":true})");
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body["error"]["message"], "Run not found");
+}
+
+// A body that does not carry a boolean is refused, never quietly accepted:
+// this endpoint has exactly one field, so ignoring it would answer 200 to a
+// request that changed nothing.
+TEST_F (RunsRouteTest, BaselinePutRejectsABodyWithoutABoolean) {
+    seed ({ .id = "run_a", .start_time = 100 });
+
+    for (const char* body : { R"({"baseline":"true"})", R"({"baseline":1})",
+         R"({"baseline":null})", R"({})", R"({"pinned":true})", "not json", "[]" }) {
+        auto [status, response] =
+        vayu::http::routes::set_run_baseline_response (*db_, "run_a", body);
+        EXPECT_EQ (status, 400) << "accepted: " << body;
+    }
+    EXPECT_FALSE (db_->get_run ("run_a")->baseline) << "a rejected body still wrote";
+}
+
+TEST_F (RunsRouteTest, ListRowsCarryTheBaselineFlag) {
+    seed ({ .id = "run_a", .start_time = 100 });
+    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":true})");
+
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_TRUE (body["data"][0]["baseline"].get<bool> ());
+}
+
+TEST_F (RunsRouteTest, ListFiltersToBaselinesAndBackAgain) {
+    seed ({ .id = "pinned", .start_time = 300 });
+    seed ({ .id = "plain", .start_time = 200 });
+    vayu::http::routes::set_run_baseline_response (*db_, "pinned", R"({"baseline":true})");
+
+    vayu::db::RunFilter only_baselines;
+    only_baselines.baseline = true;
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, only_baselines, 50, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "pinned");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 1);
+
+    vayu::db::RunFilter no_baselines;
+    no_baselines.baseline = false;
+    auto [plain_status, plain_body] =
+    vayu::http::routes::get_runs_response (*db_, no_baselines, 50, 0);
+    ASSERT_EQ (plain_status, 200);
+    ASSERT_EQ (plain_body["data"].size (), 1u);
+    EXPECT_EQ (plain_body["data"][0]["id"], "plain");
+}
+
+// The single-run payload answers it too, so a client that opened a run
+// directly can draw its pin without listing.
+TEST_F (RunsRouteTest, SingleRunPayloadCarriesTheBaselineFlag) {
+    seed ({ .id = "run_a", .start_time = 100 });
+    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":true})");
+
+    auto run = db_->get_run ("run_a");
+    ASSERT_TRUE (run.has_value ());
+    EXPECT_TRUE (vayu::json::serialize (*run)["baseline"].get<bool> ());
 }
 
 } // namespace

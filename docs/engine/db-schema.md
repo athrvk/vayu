@@ -217,6 +217,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
+| `baseline`        | INTEGER | `1` when the run is pinned as a baseline. NOT NULL DEFAULT `0`               |
 
 **`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
@@ -226,6 +227,16 @@ failed and leaves `end_time` as recorded, so an unseeded row would report a dura
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
 future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
 (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
+
+**`baseline`** is the pin set by
+[`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
+known-good run later runs of the same request are compared against. Several rows
+may carry it at once - the engine records the pin and leaves the choice of which
+baseline applies to a given run to the client. NOT NULL with a `default_value`,
+which is what lets `sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing
+`runs` table (the same pattern as `summary` and `requests.follow_redirects`);
+rows written before the column read as unpinned. **Retention reads it** - see
+below.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
@@ -343,7 +354,9 @@ every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs,
 the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
 (ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
 either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
-toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
+toward the cap, and neither are runs whose `baseline` is set: a pin that retention can expire is
+not a pin, and pins counting toward the cap would let a handful of them evict the recent history
+the cap exists to keep. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
 their `monitor_samples` + their `results`), batched inside transactions that release the DB mutex between batches so a large
 backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
