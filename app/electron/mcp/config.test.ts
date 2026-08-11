@@ -9,11 +9,14 @@ import { describe, it, expect } from "vitest";
 import {
 	buildSafetyConfigFromEnv,
 	DEFAULT_MCP_SAFETY_CONFIG,
+	MCP_CAP_CEILINGS,
 	normalizeHost,
 	resolveSafetyConfig,
 	sanitizeSafetyInput,
+	type McpCapKey,
 } from "./config.js";
 import { checkAllowlist, checkLoadCaps } from "./safety.js";
+import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 
 describe("normalizeHost", () => {
 	it("strips scheme, port, path, and query and lowercases", () => {
@@ -85,6 +88,49 @@ describe("sanitizeSafetyInput", () => {
 		).toBeUndefined();
 		expect(sanitizeSafetyInput({ maxIterations: 5000.7 }).maxIterations).toBe(5000);
 		expect(sanitizeSafetyInput({ maxIterations: 0 }).maxIterations).toBeUndefined();
+	});
+
+	/*
+	 * A cap above its ceiling used to be stored verbatim, so Settings could hold
+	 * a Max concurrency of 50,000 while the engine refuses anything over 10,000:
+	 * the panel showed a guardrail that no run could ever reach, and the run it
+	 * was meant to bound died on an engine 400 instead.
+	 */
+	it("holds each cap at its ceiling instead of storing a value no run can reach", () => {
+		const keys = Object.keys(MCP_CAP_CEILINGS) as McpCapKey[];
+		expect(keys.length).toBe(4);
+		for (const key of keys) {
+			const ceiling = MCP_CAP_CEILINGS[key];
+			expect(sanitizeSafetyInput({ [key]: ceiling + 1 })[key]).toBe(ceiling);
+			expect(sanitizeSafetyInput({ [key]: ceiling * 10 })[key]).toBe(ceiling);
+			// The ceiling itself and everything under it are the user's to set.
+			expect(sanitizeSafetyInput({ [key]: ceiling })[key]).toBe(ceiling);
+			expect(sanitizeSafetyInput({ [key]: 7 })[key]).toBe(7);
+		}
+	});
+
+	it("holds an over-ceiling cap read back from a hand-edited config file too", () => {
+		// `loadPersistedSafety` re-sanitizes what it reads, so a file edited
+		// while the app was closed cannot smuggle a cap past the ceiling.
+		const resolved = resolveSafetyConfig(sanitizeSafetyInput({ maxConcurrency: 99_999 }));
+		expect(resolved.maxConcurrency).toBe(MCP_CAP_CEILINGS.maxConcurrency);
+	});
+
+	/*
+	 * Second copy of the same four numbers: the renderer's ceiling bounds and
+	 * this sanitizer. `electron/` production code may not import `src/`, so the
+	 * copy stays - this is the half of the chain that keeps it honest, the
+	 * renderer-to-engine half living in
+	 * `src/constants/load-test.engine-parity.test.ts`. The load dialog and an
+	 * agent must not disagree about the largest run Vayu will start.
+	 */
+	it("mirrors the ceilings the load dialog itself will not exceed", () => {
+		expect(MCP_CAP_CEILINGS).toEqual({
+			maxRps: LOAD_TEST_CEILING_BOUNDS.rps.MAX,
+			maxConcurrency: LOAD_TEST_CEILING_BOUNDS.concurrency.MAX,
+			maxDurationSeconds: LOAD_TEST_CEILING_BOUNDS.durationSeconds.MAX,
+			maxIterations: LOAD_TEST_CEILING_BOUNDS.iterations.MAX,
+		});
 	});
 
 	it("keeps allowWrites only when it is a boolean", () => {
@@ -166,6 +212,18 @@ describe("buildSafetyConfigFromEnv", () => {
 		expect(config.maxIterations).toBe(250);
 		expect(checkLoadCaps({ mode: "iterations", iterations: 251 }, config).ok).toBe(false);
 		expect(checkLoadCaps({ mode: "iterations", iterations: 250 }, config).ok).toBe(true);
+	});
+
+	it("holds an over-ceiling cap the same way the Settings path does", () => {
+		const { config, ignored } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_CONCURRENCY: "50000",
+		});
+
+		expect(config.maxConcurrency).toBe(MCP_CAP_CEILINGS.maxConcurrency);
+		// Held, not thrown away: `ignored` is for values that fell back to a
+		// default, and this one is in force at the ceiling.
+		expect(ignored).toEqual([]);
+		expect(checkLoadCaps({ concurrency: 10_001 }, config).ok).toBe(false);
 	});
 
 	it("rejects a non-positive cap the same way the Settings path does", () => {

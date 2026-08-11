@@ -65,6 +65,7 @@ import type {
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { Callout } from "@/components/shared";
+import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
@@ -229,29 +230,47 @@ interface CapField {
 	key: "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
 	label: string;
 	description: string;
+	/**
+	 * The highest value this cap may be set to. The main process holds the cap
+	 * here on save (`sanitizeSafetyInput`), so the input advertises the same
+	 * number rather than letting a user type one that silently comes back lower.
+	 */
+	ceiling: number;
 }
 
+/**
+ * Each cap names the run fields it actually bounds, because a cap that reads as
+ * covering every run does not: a rate cap cannot touch a run that carries no
+ * rate. The mode names are the ones the load dialog shows (`LOAD_TEST_MODES`).
+ */
 const CAP_FIELDS: CapField[] = [
 	{
 		key: "maxRps",
 		label: "Max RPS",
-		description: "Ceiling on target requests/sec for a load run.",
+		description:
+			"Ceiling on the request rate an agent may ask for. Only a Constant RPS run carries a rate - the closed-loop modes are held by Max concurrency and Max iterations instead.",
+		ceiling: LOAD_TEST_CEILING_BOUNDS.rps.MAX,
 	},
 	{
 		key: "maxConcurrency",
 		label: "Max concurrency",
-		description: "Ceiling on in-flight requests for a load run.",
+		description:
+			"Ceiling on the connections a closed-loop run may hold: what Constant Concurrency holds, what a Ramp-Up starts from, and the top a Capacity Discovery search climbs to. A Constant RPS run is paced by its rate instead, so this cap does not bound its in-flight requests.",
+		ceiling: LOAD_TEST_CEILING_BOUNDS.concurrency.MAX,
 	},
 	{
 		key: "maxDurationSeconds",
 		label: "Max duration (seconds)",
-		description: "Ceiling on how long a load run may last.",
+		description:
+			"Ceiling on how long a load run may last. An iterations run stops on a count and never reads a duration, so Max iterations is what bounds that one.",
+		ceiling: LOAD_TEST_CEILING_BOUNDS.durationSeconds.MAX,
 	},
 	{
 		key: "maxIterations",
 		label: "Max iterations",
 		description:
 			"Ceiling on requests for an iterations run, which stops on a count rather than a duration.",
+		ceiling: LOAD_TEST_CEILING_BOUNDS.iterations.MAX,
 	},
 ];
 
@@ -566,8 +585,10 @@ export default function McpSettingsPanel() {
 						<div>
 							<Label className="text-sm">Enable MCP server</Label>
 							<p className="text-xs text-muted-foreground mt-0.5">
-								When off, the endpoint is unavailable and connected agents get a
-								clean “start Vayu” error. Persists across restarts.
+								On by default: while Vayu is running, a connected agent can reach
+								the endpoint below. When off, the endpoint stops accepting
+								connections and connected agents get a clean “start Vayu” error.
+								Your choice persists across restarts.
 							</p>
 						</div>
 						<Switch
@@ -656,7 +677,9 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						Choose which tools agents can use. A disabled tool is hidden from the
-						agent's tool list and rejected if called anyway.
+						agent's tool list and rejected if called anyway. The Write group has a
+						second switch of its own - Write access, below - and a write tool needs
+						both: leaving it on here does nothing while writes are off.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
@@ -741,11 +764,14 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
-						requests are allowed - a safe default. Add a host (no scheme or port), e.g.{" "}
-						<code className="font-mono">api.example.com</code>. The list is checked
-						before Vayu sends anything, so a script an agent writes cannot reach around
-						it: <code className="font-mono">pm.sendRequest</code> is refused entirely
-						for requests an agent starts, and works normally when you Send from Vayu.
+						requests are allowed - a safe default. Paste a URL or type a host; either is
+						reduced to the host, so{" "}
+						<code className="font-mono">https://api.example.com:8080/v1</code> and{" "}
+						<code className="font-mono">api.example.com</code> are the same entry. The
+						list is checked before Vayu sends anything, so a script an agent writes
+						cannot reach around it: <code className="font-mono">pm.sendRequest</code> is
+						refused entirely for requests an agent starts, and works normally when you
+						Send from Vayu.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-3">
@@ -846,7 +872,9 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						Hard ceilings on agent-started load runs. A request over any cap is rejected
-						before it reaches the engine.
+						before it reaches the engine, and each cap bounds only the runs that carry
+						the field it names. A cap above the most Vayu itself will run is lowered to
+						that maximum when you save it.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -865,6 +893,7 @@ export default function McpSettingsPanel() {
 									type="number"
 									aria-label={field.label}
 									min={1}
+									max={field.ceiling}
 									value={
 										capDrafts[field.key] ??
 										(config ? String(config[field.key]) : "")
@@ -896,15 +925,14 @@ export default function McpSettingsPanel() {
 						<CardTitle className="text-base">Write access</CardTitle>
 					</div>
 					<CardDescription>
-						When off (default), agents can read but not change saved data: every tool in
-						the <code className="font-mono">write</code> category is disabled -
-						creating, renaming and deleting collections and saved requests, plus{" "}
-						<code className="font-mono">update_environment</code> and{" "}
-						<code className="font-mono">update_engine_config</code>. A delete asks you
-						to confirm each time as well, stating how much a collection contains before
-						it goes. This does not affect <code className="font-mono">run_request</code>
-						, <code className="font-mono">run_collection_smoke</code>, or load runs,
-						which are governed by the allowlist and caps.
+						When off (default), agents can read and send requests but cannot change
+						saved data: every tool in the Write group above refuses - creating, renaming
+						and deleting collections and saved requests, and editing environments and
+						engine config. Turning it on grants no tool you switched off in Tools; the
+						two switches are separate, and a delete still asks you to confirm each time,
+						stating how much a collection contains before it goes. Sending requests and
+						load runs are unaffected either way - the allowlist and the caps govern
+						those.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
