@@ -14,6 +14,7 @@
 
 #include "vayu/http/oauth_authorize.hpp"
 
+#include "vayu/http/managed_listener.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/pkce.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -24,7 +25,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <thread>
 #include <variant>
 
 namespace vayu::http {
@@ -119,8 +119,10 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string error;
     std::string cache_key;
 
-    std::unique_ptr<httplib::Server> server; // loopback mode only
-    std::thread listen_thread;
+    /// Loopback mode only - an embedded-mode attempt never starts it, and
+    /// stopping an unstarted listener is a no-op. Declared last so it is
+    /// destroyed first: the callback handler reads every field above it.
+    ManagedListener listener;
 };
 
 OAuth2AuthorizeManager::OAuth2AuthorizeManager () = default;
@@ -134,13 +136,7 @@ OAuth2AuthorizeManager::~OAuth2AuthorizeManager () {
 }
 
 void OAuth2AuthorizeManager::teardown_locked (Attempt& attempt) {
-    if (attempt.server) {
-        attempt.server->stop ();
-    }
-    if (attempt.listen_thread.joinable ()) {
-        attempt.listen_thread.join ();
-    }
-    attempt.server.reset ();
+    attempt.listener.stop ();
 }
 
 void OAuth2AuthorizeManager::reap_timed_out_locked () {
@@ -202,10 +198,9 @@ const nlohmann::json& config, const std::string& mode) {
         attempt->redirect_uri = callback;
     } else {
         // Loopback: bind a one-shot listener on an ephemeral 127.0.0.1 port.
-        attempt->server = std::make_unique<httplib::Server> ();
-        Attempt* raw    = attempt.get ();
+        Attempt* raw = attempt.get ();
 
-        attempt->server->Get ("/callback",
+        attempt->listener.server ().Get ("/callback",
         [raw, &db] (const httplib::Request& req, httplib::Response& res) {
             const auto params = parse_query (req.target.find ('?') != std::string::npos
                     ? req.target.substr (req.target.find ('?') + 1)
@@ -245,7 +240,7 @@ const nlohmann::json& config, const std::string& mode) {
             res.set_content (body, "text/html");
         });
 
-        const int port = attempt->server->bind_to_any_port ("127.0.0.1");
+        const int port = attempt->listener.start ("127.0.0.1");
         if (port <= 0) {
             out.ok            = false;
             out.http_status   = 500;
@@ -255,14 +250,6 @@ const nlohmann::json& config, const std::string& mode) {
         }
         attempt->redirect_uri =
         "http://127.0.0.1:" + std::to_string (port) + "/callback";
-        httplib::Server* svr   = attempt->server.get ();
-        attempt->listen_thread = std::thread ([svr] { svr->listen_after_bind (); });
-
-        // Wait until the accept loop is live before returning; otherwise a
-        // stop() that races ahead of listen() is missed and join() hangs.
-        for (int i = 0; i < 200 && !svr->is_running (); ++i) {
-            std::this_thread::sleep_for (std::chrono::milliseconds (1));
-        }
     }
 
     out.attempt_id    = attempt_id;

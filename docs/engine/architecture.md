@@ -93,7 +93,11 @@ Each on-demand listener is owned by a manager that is a **member of `Server`, de
 `server_`** (`engine/include/vayu/http/server.hpp`). Members are destroyed in reverse order, so the
 route lambdas holding references to a manager are gone before its destructor stops and joins the
 listener threads - and the `Database` those threads write to, being external to `Server`, is still
-alive at that point.
+alive at that point. All three managers run that lifecycle - bind, wait for the accept loop, stop,
+join, release - through one shared `ManagedListener`
+(`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
+one of three copies; what stays per-manager is the route registration, the error each bind failure
+answers with, and the OAuth attempt TTL sweep.
 
 ### Event Loop (`curl_multi`)
 

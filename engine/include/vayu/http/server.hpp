@@ -45,22 +45,21 @@ class Server {
     vayu::core::RunManager& run_manager_;
     int port_;
     bool verbose_;
-    // Declared before server_ so it is destroyed *after* server_ (reverse member
-    // order): the httplib lambdas that reference it are gone before its dtor
-    // stops and joins any live loopback listeners, and db_ (external) is still
-    // alive at that point. Previously a function-local static outliving db_.
+    // Everything from here down to server_ is declared *before* it so it is
+    // destroyed *after* it (reverse member order): the httplib lambdas that
+    // reference these members are gone with server_, and db_ - external, so
+    // outliving all of this - is still alive when their destructors run.
+    //
+    // That matters most for the three listener-owning managers: each holds one
+    // ManagedListener per attempt / issuer / inbox, and each destructor stops
+    // and joins those listener threads while a handler may still be writing to
+    // db_. The one rule they all run on lives on the helper - see
+    // managed_listener.hpp. The cookie jar is here for the first half of the
+    // reason alone: an in-flight /execute holds a reference to it, and it is
+    // process-lifetime by design (see cookie_jar.hpp).
     OAuth2AuthorizeManager oauth_authorize_manager_;
-    // Same reverse-order reasoning as oauth_authorize_manager_ above: the
-    // route lambdas and any in-flight /execute hold a reference to it, so it
-    // must outlive server_. Process-lifetime by design - see cookie_jar.hpp.
     CookieJar cookie_jar_;
-    // Same reverse-order reasoning again: its dtor stops and joins every live
-    // mock-issuer listener, and the route lambdas that reach it must be gone by
-    // then - so it is declared before server_ and destroyed after it.
     MockIssuerManager mock_issuer_manager_;
-    // And once more, for the third listener family: each inbox is an independent
-    // listener whose handlers hold a reference to db_, and the route lambdas that
-    // start and stop them must be gone before this dtor joins their threads.
     InboxManager inbox_manager_;
     httplib::Server server_;
     std::thread server_thread_;

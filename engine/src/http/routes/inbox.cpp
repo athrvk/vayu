@@ -16,6 +16,7 @@
 #include "vayu/http/inbox.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -340,9 +341,6 @@ struct InboxManager::Inbox {
     std::string id;
     std::string bind;
     int port = 0;
-    std::unique_ptr<httplib::Server> server;
-    std::thread listen_thread;
-    std::atomic<bool> running{ false };
     /// Resolved once at start and const thereafter, so every capture in one
     /// inbox was truncated and retained by the same rules.
     InboxLimits limits;
@@ -354,13 +352,19 @@ struct InboxManager::Inbox {
     std::mutex response_mutex;
     InboxCannedResponse response;
 
+    /// Declared last so it is destroyed first: the capture handler reads the
+    /// limits and the canned response above it while the accept loop is alive.
+    /// Its listening state *is* the inbox's `running` - a stopped inbox keeps
+    /// its record, so there is nothing else for `running` to mean.
+    ManagedListener listener;
+
     InboxInfo info_locked () const {
         InboxInfo info;
         info.inbox_id = id;
         info.bind     = bind;
         info.port     = port;
         info.url      = "http://" + bind + ":" + std::to_string (port) + "/";
-        info.running  = running.load ();
+        info.running  = listener.is_listening ();
         info.loopback = is_loopback_bind (bind);
         info.response = response;
         return info;
@@ -378,17 +382,10 @@ InboxManager::~InboxManager () {
 }
 
 void InboxManager::teardown_locked (Inbox& inbox) {
-    if (inbox.server) {
-        inbox.server->stop ();
-    }
     // A capture in its configured delay is still holding a listener thread, so
-    // this join waits up to inbox::MAX_RESPONSE_DELAY_MS - which is why that
-    // bound exists.
-    if (inbox.listen_thread.joinable ()) {
-        inbox.listen_thread.join ();
-    }
-    inbox.server.reset ();
-    inbox.running.store (false);
+    // the join inside stop() waits up to inbox::MAX_RESPONSE_DELAY_MS - which is
+    // why that bound exists.
+    inbox.listener.stop ();
 }
 
 InboxManager::StartResult
@@ -400,10 +397,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     inbox->id       = vayu::utils::generate_id ("inbox_");
     inbox->bind     = request.bind;
     inbox->response = request.response;
-    inbox->server   = std::make_unique<httplib::Server> ();
     // Reject an oversized upload at the transport rather than buffering it:
     // the handler below only ever stores a prefix anyway.
-    inbox->server->set_payload_max_length (constants::inbox::MAX_PAYLOAD_BYTES);
+    inbox->listener.server ().set_payload_max_length (constants::inbox::MAX_PAYLOAD_BYTES);
 
     Inbox* raw                       = inbox.get ();
     httplib::Server::Handler capture = [raw, &db] (const httplib::Request& req,
@@ -462,16 +458,15 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
 
     // Every method cpp-httplib will route, on every path. CONNECT, TRACE and
     // PRI are the remainder and are not routable - a webhook is never one.
-    inbox->server->Get (".*", capture); // also serves HEAD
-    inbox->server->Post (".*", capture);
-    inbox->server->Put (".*", capture);
-    inbox->server->Patch (".*", capture);
-    inbox->server->Delete (".*", capture);
-    inbox->server->Options (".*", capture);
+    httplib::Server& svr = inbox->listener.server ();
+    svr.Get (".*", capture); // also serves HEAD
+    svr.Post (".*", capture);
+    svr.Put (".*", capture);
+    svr.Patch (".*", capture);
+    svr.Delete (".*", capture);
+    svr.Options (".*", capture);
 
-    const int bound = request.port > 0 ?
-    (inbox->server->bind_to_port (request.bind, request.port) ? request.port : -1) :
-    inbox->server->bind_to_any_port (request.bind);
+    const int bound = inbox->listener.start (request.bind, request.port);
     if (bound <= 0) {
         out.ok            = false;
         out.http_status   = 409;
@@ -482,15 +477,6 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         return out;
     }
     inbox->port = bound;
-
-    httplib::Server* svr = inbox->server.get ();
-    inbox->running.store (true);
-    inbox->listen_thread = std::thread ([svr] { svr->listen_after_bind (); });
-    // Return only once the accept loop is live: a stop() that races ahead of
-    // listen() is missed, and the join then hangs.
-    for (int i = 0; i < 200 && !svr->is_running (); ++i) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (1));
-    }
 
     {
         std::lock_guard<std::mutex> lock (mutex_);
