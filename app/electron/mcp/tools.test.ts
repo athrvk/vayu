@@ -1466,6 +1466,99 @@ describe("dispatchTool", () => {
 		expect(payload.thresholds).toEqual({ latencyP99Ms: 50, maxErrorRatePct: 0.1 });
 	});
 
+	test("start_load_run forwards the monitor block to /runs unchanged", async () => {
+		// The keys are the engine's own and `validate_run_config` is what judges
+		// them, so anything renamed or dropped on this path is a scrape the run
+		// silently never performs.
+		const client = fakeClient();
+		const monitor = {
+			url: "http://localhost:9100/metrics",
+			intervalMs: 2000,
+			format: "prometheus" as const,
+			series: ["process_cpu_seconds_total", "go_memstats_heap_inuse_bytes"],
+		};
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.monitor).toEqual(monitor);
+	});
+
+	test("start_load_run sends no monitor key when none was asked for", () => {
+		const parsed = parseArgs("start_load_run", { url: "https://api.example.com" });
+		expect(parsed.monitor).toBeUndefined();
+	});
+
+	test("start_load_run allows a loopback monitor beside a non-loopback target", async () => {
+		// The allowlist decision, in the shape that motivates it: the target is a
+		// public host on the list, the vitals endpoint is the machine's own
+		// exporter and is on no list at all.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor: { url: "http://127.0.0.1:9100/metrics", series: ["up"] },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+	});
+
+	test("start_load_run refuses a public monitor host that is not allowlisted", async () => {
+		// The other half of the same decision - and the run must not start, since
+		// a refusal that still generated load would be no guard at all.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				monitor: { url: "https://metrics.evil.test/m", series: ["up"] },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/monitor endpoint is a second host/i);
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+	});
+
+	test("start_load_run leaves the monitor block's ranges to the engine", () => {
+		// Deliberate: `monitor.series`' ceiling is the `monitorMaxSeries` setting,
+		// so a copy of it here would refuse blocks the engine accepts. The schema
+		// types the shape only - a wrong *type* is still caught.
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { url: "http://localhost:9100/m", intervalMs: 1, series: ["a"] },
+			})
+		).not.toThrow();
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { url: "http://localhost:9100/m", series: "cpu" },
+			})
+		).toThrow();
+		expect(() =>
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				monitor: { series: ["a"] },
+			})
+		).toThrow();
+	});
+
 	test("start_load_run sends no thresholds key when none were declared", () => {
 		// An empty object is a 400 from POST /runs, so "no budgets" has to be
 		// an absent key rather than an empty one.
