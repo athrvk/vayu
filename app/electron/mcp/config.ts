@@ -150,11 +150,58 @@ function isFiniteNumber(v: unknown): v is number {
 	return typeof v === "number" && Number.isFinite(v);
 }
 
+/** The four numeric caps, which share one range rule. */
+export type McpCapKey = "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
+
+const MCP_CAP_KEYS: readonly McpCapKey[] = [
+	"maxRps",
+	"maxConcurrency",
+	"maxDurationSeconds",
+	"maxIterations",
+];
+
+/**
+ * The highest value each cap may hold - the maxima of the renderer's
+ * `LOAD_TEST_CEILING_BOUNDS`, which are the engine's own guards where the engine
+ * has one (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds`
+ * at the per-transfer timeout guard) and the point past which a single desktop
+ * engine is the wrong tool where it does not.
+ *
+ * A cap above its ceiling is not a looser policy, it is an absent one: the value
+ * it would admit is refused by the engine or beyond anything Vayu will compose
+ * anyway, and the user is left believing a guardrail exists where none does. So
+ * the sanitizer holds each cap at its ceiling rather than storing it.
+ *
+ * Literals rather than an import because production code in `electron/` may not
+ * reach into `src/` - `tsconfig.node.json` withholds the `@/*` mapping on
+ * purpose - the same reason `MAX_IN_FLIGHT_BOUND` in `tools.ts` is a literal.
+ * The copies are kept honest from the test side: `config.test.ts` ties these to
+ * the renderer constant, and `load-test.engine-parity.test.ts` ties that to the
+ * engine header.
+ */
+export const MCP_CAP_CEILINGS = {
+	maxRps: 1_000_000,
+	maxConcurrency: 10_000,
+	maxDurationSeconds: 86_400,
+	maxIterations: 100_000_000,
+} as const satisfies Record<McpCapKey, number>;
+
+/**
+ * A cap as a whole number inside its ceiling, or undefined when the input is not
+ * a usable cap at all (non-numeric, zero, negative, NaN) - which the caller
+ * drops, leaving the default in force rather than a cap that cannot fire.
+ */
+function clampCap(key: McpCapKey, value: unknown): number | undefined {
+	if (!isFiniteNumber(value) || value <= 0) return undefined;
+	return Math.min(Math.floor(value), MCP_CAP_CEILINGS[key]);
+}
+
 /**
  * Sanitize a partial safety override arriving from the (untrusted) renderer
  * before it is applied or persisted: normalize + de-duplicate allowlist hosts,
- * clamp caps to positive integers, and drop anything malformed. Only recognized,
- * well-formed fields survive - every other input is ignored rather than trusted.
+ * hold caps to whole numbers between 1 and their ceiling, and drop anything
+ * malformed. Only recognized, well-formed fields survive - every other input is
+ * ignored rather than trusted.
  */
 export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<McpSafetyConfig> {
 	const out: Partial<McpSafetyConfig> = {};
@@ -166,17 +213,9 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 			.filter((h) => h.length > 0);
 		out.allowlist = Array.from(new Set(hosts));
 	}
-	if (isFiniteNumber(input.maxRps) && input.maxRps > 0) {
-		out.maxRps = Math.floor(input.maxRps);
-	}
-	if (isFiniteNumber(input.maxConcurrency) && input.maxConcurrency > 0) {
-		out.maxConcurrency = Math.floor(input.maxConcurrency);
-	}
-	if (isFiniteNumber(input.maxDurationSeconds) && input.maxDurationSeconds > 0) {
-		out.maxDurationSeconds = Math.floor(input.maxDurationSeconds);
-	}
-	if (isFiniteNumber(input.maxIterations) && input.maxIterations > 0) {
-		out.maxIterations = Math.floor(input.maxIterations);
+	for (const key of MCP_CAP_KEYS) {
+		const cap = clampCap(key, input[key]);
+		if (cap !== undefined) out[key] = cap;
 	}
 	if (typeof input.allowAll === "boolean") {
 		out.allowAll = input.allowAll;

@@ -613,7 +613,11 @@ configurable in **Settings → MCP** and persisted.
   destroy a subtree.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
-  `tools/call`.
+  `tools/call`. This and the write toggle are **independent**, and a write tool
+  needs both: switching the write category on here does nothing while
+  `allowWrites` is off, and turning `allowWrites` on re-enables no tool that is
+  in `disabledTools`. Settings states this on both cards, because a user who
+  flips one switch and sees no change has nothing else to go on.
 - **Server on/off** - the whole server can be disabled; while off the endpoint
   does not accept connections. Persists across restarts.
 - **Transport hardening** - loopback bind, Host-header (DNS-rebinding) validation,
@@ -628,21 +632,38 @@ process did not already have.
 
 `McpSafetyConfig` (defaults in parentheses):
 
-| Field                | Default | Meaning                                       |
-| -------------------- | ------- | --------------------------------------------- |
-| `allowlist`          | `[]`    | Permitted hostnames (empty = deny all).       |
-| `allowAll`           | `false` | Bypass the allowlist for any resolvable host. |
-| `maxRps`             | `1000`  | Cap on `targetRps`.                           |
-| `maxConcurrency`     | `200`   | Cap on `concurrency` and `startConcurrency`.  |
-| `maxDurationSeconds` | `300`   | Cap on load-run duration.                     |
-| `maxIterations`      | `10000` | Cap on `iterations` (iterations mode).        |
-| `allowWrites`        | `false` | Enable the data-mutating tools.               |
-| `disabledTools`      | `[]`    | Tool names to hide/reject.                    |
+| Field                | Default | Ceiling     | Meaning                                                    |
+| -------------------- | ------- | ----------- | ---------------------------------------------------------- |
+| `allowlist`          | `[]`    | -           | Permitted hostnames (empty = deny all).                    |
+| `allowAll`           | `false` | -           | Bypass the allowlist for any resolvable host.              |
+| `maxRps`             | `1000`  | `1000000`   | Cap on `targetRps`, which only `constant_rps` carries.     |
+| `maxConcurrency`     | `200`   | `10000`     | Cap on `concurrency` and `startConcurrency` (closed-loop). |
+| `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
+| `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
+| `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
+| `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
 The renderer never sets these directly: `main.ts` sanitizes every change
-(`sanitizeSafetyInput` - normalizes/de-dupes hosts, clamps caps to positive
-integers, validates `disabledTools` against the tool catalog) before applying it
-live and writing it to disk.
+(`sanitizeSafetyInput` - normalizes/de-dupes hosts, holds each cap to a whole
+number between 1 and its ceiling, trims and de-dupes `disabledTools`) before
+applying it live and writing it to disk. The same sanitizer runs over the
+persisted file on load and over the CLI's `VAYU_MCP_*` variables, so no path
+reaches the guards with a cap outside that range.
+
+The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
+`LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
+(`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
+per-transfer timeout guard). A cap set above its ceiling is held there rather
+than stored: the value it would admit is one the engine refuses or one no Vayu
+surface will compose, so storing it shows a guardrail that does not exist. The
+copy is tied to the renderer constant by `config.test.ts`, the way
+`MAX_IN_FLIGHT_BOUND` is - `electron/` may not import `src/`.
+
+`maxRps` and `maxConcurrency` bound **different runs**, which is why neither is a
+general "load cap": `targetRps` exists only in `constant_rps`, so `maxRps` is
+inert against a closed-loop run, and `maxConcurrency` bounds the concurrency a
+closed-loop run holds (or a ramp starts from, or a capacity search climbs to) -
+not the in-flight requests of a rate-paced run, which `maxInFlight` governs.
 
 ## Architecture
 

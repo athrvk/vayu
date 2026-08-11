@@ -23,7 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import McpSettingsPanel from "./McpSettingsPanel";
 import { useToastStore } from "@/stores";
@@ -166,7 +166,13 @@ describe("McpSettingsPanel endpoint", () => {
 
 		await renderPanel();
 
-		expect(screen.queryByText(/^https?:\/\//)).not.toBeInTheDocument();
+		// Scoped to the Connection card: that is where a URL is shown as fact and
+		// copied into an agent's config. Elsewhere on the panel a URL is sample
+		// copy (the allowlist card shows one being reduced to a host), which this
+		// guard is not about and used to fail on.
+		const connectionCard = screen.getByText("Connection").closest("[data-slot=card]");
+		expect(connectionCard).not.toBeNull();
+		expect(within(connectionCard as HTMLElement).queryByText(/^https?:\/\//)).toBeNull();
 		// The placeholder stands in wherever the URL would have been - the
 		// endpoint line and every connect snippet.
 		expect(screen.getAllByText(/unavailable - mcp status not loaded/i).length).toBeGreaterThan(
@@ -223,6 +229,106 @@ describe("McpSettingsPanel connect failures", () => {
 		});
 
 		expect(toastMessages().join(" ")).toMatch(/couldn't connect .*mcp server is off/i);
+	});
+});
+
+/**
+ * This is the one panel where wrong copy is a safety problem: a user lowering a
+ * cap against an agent is entitled to text that matches the mechanism. Max RPS
+ * read as covering "a load run" while `targetRps` exists only in Constant RPS,
+ * and Max concurrency claimed to cap "in-flight requests", which is not what it
+ * bounds. Both are asserted by what they must *not* say as well, since the
+ * defect was an over-broad sentence rather than a missing one.
+ */
+describe("McpSettingsPanel cap copy", () => {
+	/**
+	 * The description paragraph rendered beside a cap's input. Reached from the
+	 * input rather than by text, so an assertion cannot pass by matching some
+	 * other row's copy.
+	 */
+	function capDescription(label: string): string {
+		const row = screen.getByLabelText(label).closest("div");
+		const text = row?.querySelector("p")?.textContent ?? "";
+		expect(text.length).toBeGreaterThan(0);
+		return text;
+	}
+
+	it("scopes Max RPS to the mode that carries a rate", async () => {
+		await renderPanel();
+
+		const text = capDescription("Max RPS");
+		expect(text).toMatch(/only a constant rps run carries a rate/i);
+		expect(text).toMatch(/max concurrency/i);
+	});
+
+	it("says what Max concurrency bounds, and that in-flight is not it", async () => {
+		await renderPanel();
+
+		const text = capDescription("Max concurrency");
+		expect(text).toMatch(/closed-loop/i);
+		// The old text said this cap ceilings "in-flight requests for a load
+		// run". It may only appear now as the thing the cap does *not* bound.
+		expect(text).toMatch(/does not bound its in-flight requests/i);
+	});
+
+	it("advertises each cap's ceiling on the input the user types into", async () => {
+		await renderPanel();
+
+		// The main process holds each cap here on save, so an input that offered
+		// more would be an input whose value silently comes back lower.
+		expect(screen.getByLabelText("Max RPS")).toHaveAttribute("max", "1000000");
+		expect(screen.getByLabelText("Max concurrency")).toHaveAttribute("max", "10000");
+		expect(screen.getByLabelText("Max duration (seconds)")).toHaveAttribute("max", "86400");
+		expect(screen.getByLabelText("Max iterations")).toHaveAttribute("max", "100000000");
+	});
+
+	it("says a cap above that maximum is lowered rather than stored", async () => {
+		await renderPanel();
+
+		expect(
+			screen.getByText(/a cap above the most vayu itself will run is lowered/i)
+		).toBeInTheDocument();
+	});
+});
+
+/**
+ * Two switches govern the write tools - the Tools card's Write group
+ * (`disabledTools`) and the Write access toggle (`allowWrites`) - and a user who
+ * flips one and sees no effect from the other has only these two sentences to go
+ * on. Each card must name the other.
+ */
+describe("McpSettingsPanel copy that described only half its mechanism", () => {
+	it("says what the server switch gives when it is on, and that on is the default", async () => {
+		await renderPanel();
+
+		// It described only the OFF state, on a switch that ships on.
+		expect(screen.getByText(/on by default/i)).toBeInTheDocument();
+	});
+
+	it("states the allowlist rule the normalizer actually has", async () => {
+		await renderPanel();
+
+		// "no scheme or port" was a rule `normalizeHost` does not enforce - it
+		// accepts a full URL and reduces it - so a user pasting one had no way to
+		// know the entry they got was the right one.
+		expect(screen.getByText(/paste a url or type a host/i)).toBeInTheDocument();
+		expect(screen.queryByText(/no scheme or port/i)).not.toBeInTheDocument();
+	});
+});
+
+describe("McpSettingsPanel write-switch cross-references", () => {
+	it("tells the Tools card that Write access is a second switch", async () => {
+		await renderPanel();
+
+		expect(screen.getByText(/write access, below/i)).toBeInTheDocument();
+	});
+
+	it("tells the Write access card that a tool switched off in Tools stays off", async () => {
+		await renderPanel();
+
+		expect(
+			screen.getByText(/turning it on grants no tool you switched off in tools/i)
+		).toBeInTheDocument();
 	});
 });
 
