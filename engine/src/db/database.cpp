@@ -2017,6 +2017,19 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now });
 
+    upsert_config (ConfigEntry{ "phaseHistograms",
+    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    "boolean", "Per-Phase Latency Histograms",
+    "Record DNS, connect, TLS, first-byte and download times for every "
+    "load-test completion, so the report can give each phase real percentiles "
+    "instead of an average over the small sample it stores traces for. This is "
+    "what answers whether a slow p99 came from the server or from connection "
+    "setup. Costs five histogram writes per completion; turn it off only if a "
+    "run at your throughput ceiling measurably suffers.",
+    "observability",
+    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    std::nullopt, std::nullopt, std::nullopt, now });
+
     upsert_config (ConfigEntry{ "maxResponseBodyBytes",
     std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
     "integer", "Maximum Load-Test Response Body",

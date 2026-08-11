@@ -465,6 +465,14 @@ constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
 /// HdrHistogram max trackable latency in microseconds (1 hour)
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
+/// Whether a load run feeds the five per-phase histograms (config key
+/// `phaseHistograms`). On by default: the phase values are computed for every
+/// completion anyway, and without this bank they survive only for the ~1% of
+/// completions a trace is retained for - so "was it the server or the
+/// connection path" is answered off a biased sample. The escape hatch exists
+/// because the feed is five atomic histogram records on the completion path;
+/// see docs/engine/benchmarks.md for the measured cost.
+constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 } // namespace metrics_collector
 
 /**

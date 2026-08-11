@@ -509,3 +509,32 @@ TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
         expect_rejected (config, "sloMs");
     }
 }
+
+// --- 8. Per-phase histograms (issue #476) ---------------------------------
+
+// Read as a bool inside RunContext's constructor, which throws on a string -
+// after the run row exists. Rejected here so a rejected request leaves no
+// trace, like every other field in this function.
+//
+// Mutation check: delete the `phase_histograms` guard from validate_run_config
+// and the string case below is accepted.
+TEST (RunConfigValidation, ANonBooleanPhaseHistogramsIsRejected) {
+    for (const nlohmann::json bad :
+    { nlohmann::json ("true"), nlohmann::json (1), nlohmann::json (nlohmann::json::array ()) }) {
+        auto config                = valid_config ();
+        config["phase_histograms"] = bad;
+        expect_rejected (config, "phase_histograms");
+    }
+}
+
+TEST (RunConfigValidation, BothPhaseHistogramSettingsAreAccepted) {
+    for (const bool value : { true, false }) {
+        auto config                = valid_config ();
+        config["phase_histograms"] = value;
+        EXPECT_FALSE (validate_run_config (config).has_value ());
+    }
+    // Absent and null both mean "use the engine setting".
+    auto config                = valid_config ();
+    config["phase_histograms"] = nullptr;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}

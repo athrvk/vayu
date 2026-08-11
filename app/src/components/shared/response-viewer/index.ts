@@ -42,13 +42,25 @@ export type { ResponseActionsProps } from "./ResponseActions";
 // to mean finding all five, and two of them had already drifted. See
 // `timing-phases.ts` for what drifted and why colour lives there.
 export { PHASE_TIPS } from "./phase-tips";
-export { TIMING_PHASES, phaseColor, phasesFromTrace, phasesFromAverages } from "./timing-phases";
+export {
+	TIMING_PHASES,
+	phaseColor,
+	phasesFromTrace,
+	phasesFromAverages,
+	hasPhaseAverages,
+	phasesFromPercentiles,
+	tailRatio,
+} from "./timing-phases";
 export type {
 	TimingPhase,
 	TimingPhaseKey,
 	TimingPhaseSource,
 	TimingAverageSource,
+	TimingPhasePercentileKey,
+	TimingPhasePercentiles,
+	TimingPercentileSource,
 	ResolvedTimingPhase,
+	ResolvedPhasePercentiles,
 	MaybeResolvedTimingPhase,
 } from "./timing-phases";
 export { default as TimingPhaseTiles } from "./TimingPhaseTiles";

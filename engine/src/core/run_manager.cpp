@@ -358,7 +358,7 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
 RunContext::RunContext (const std::string& id,
 nlohmann::json cfg,
 size_t max_errors,
-CaptureDefaults capture_defaults)
+EngineDefaults engine_defaults)
 : run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
@@ -407,9 +407,14 @@ CaptureDefaults capture_defaults)
     mc_config.capture_response_bodies = config.value ("capture_response_bodies",
     constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES);
     mc_config.max_sample_body_bytes = static_cast<size_t> (config.value (
-    "max_sample_body_bytes", static_cast<int64_t> (capture_defaults.max_sample_body_bytes)));
+    "max_sample_body_bytes", static_cast<int64_t> (engine_defaults.max_sample_body_bytes)));
     mc_config.max_sample_bytes = static_cast<size_t> (
-    config.value ("max_sample_bytes", static_cast<int64_t> (capture_defaults.max_sample_bytes)));
+    config.value ("max_sample_bytes", static_cast<int64_t> (engine_defaults.max_sample_bytes)));
+    // Per-phase histograms. Engine-config default, per-run override like the
+    // caps above - a run that only wants the cheapest possible completion path
+    // can switch them off without changing the setting for every other run.
+    mc_config.phase_histograms =
+    config.value ("phase_histograms", engine_defaults.phase_histograms);
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
@@ -693,17 +698,19 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         // The config-backed defaults RunContext cannot read for itself - it
         // holds no Database - resolved here, the way `maxStoredErrors` always
         // has been. A run's own config still overrides each of them.
-        CaptureDefaults capture_defaults;
-        capture_defaults.max_sample_body_bytes =
+        EngineDefaults engine_defaults;
+        engine_defaults.max_sample_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBodyBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES)));
-        capture_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
+        engine_defaults.phase_histograms = db.get_config_bool ("phaseHistograms",
+        vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS);
+        engine_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))),
-        capture_defaults);
+        engine_defaults);
         register_run (run_id, context);
 
         // Sweep stale retained runs on each new registration so that headless /
@@ -998,6 +1005,7 @@ RunManager& manager) {
             inputs.status_codes    = context->metrics_collector->status_code_distribution ();
             inputs.latency         = percentiles;
             inputs.latency_avg_ms  = avg_latency;
+            inputs.phases          = context->metrics_collector->phase_percentiles ();
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests     = validation.run;
@@ -1106,6 +1114,7 @@ RunManager& manager) {
             inputs.status_codes     = mc.status_code_distribution ();
             inputs.latency          = mc.calculate_percentiles ();
             inputs.latency_avg_ms   = mc.average_latency ();
+            inputs.phases           = mc.phase_percentiles ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
             if (context->auth_refresh) {
@@ -1230,6 +1239,19 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         summary["thresholds"] = { { "checks", checks },
             { "passed", inputs.thresholds->passed },
             { "failed", inputs.thresholds->failed } };
+    }
+    // Per-phase latency distributions, keyed by wire name so a reader does not
+    // have to know the enum's order. Omitted when the run recorded none - a
+    // reader that finds no `phases` key is looking at a run whose phase data
+    // was never collected, not at a target with a free TLS handshake.
+    if (inputs.phases.has_value ()) {
+        nlohmann::json phases = nlohmann::json::object ();
+        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+            const auto& p        = (*inputs.phases)[i];
+            phases[TIMING_PHASE_KEYS[i]] = { { "p50", p.p50 }, { "p95", p.p95 },
+                { "p99", p.p99 }, { "max", p.max }, { "count", p.count } };
+        }
+        summary["phases"] = phases;
     }
     // What a capacity run's search found, level by level. Omitted for every
     // other mode - a fixed-target run measured a point, not a curve, and has

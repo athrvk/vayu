@@ -56,6 +56,16 @@ export type TimingPhaseAverageKey =
 	| "avgFirstByteMs"
 	| "avgDownloadMs";
 
+/**
+ * Key on a run report's `timingBreakdown.phases` (per-run percentiles).
+ *
+ * Not the same spelling as {@link TimingPhaseKey}: the engine writes the phase's
+ * wire name, and TTFB's is `firstByte`. Keeping both on the descriptor is what
+ * stops a renderer from reaching for `phases[phase.key]` and silently finding
+ * nothing for TTFB.
+ */
+export type TimingPhasePercentileKey = "dns" | "connect" | "tls" | "firstByte" | "download";
+
 export interface TimingPhase {
 	key: TimingPhaseKey;
 	/** What tiles, legend rows and waterfall rows print. */
@@ -73,6 +83,7 @@ export interface TimingPhase {
 	tip: string;
 	traceKey: TimingPhaseTraceKey;
 	averageKey: TimingPhaseAverageKey;
+	percentileKey: TimingPhasePercentileKey;
 }
 
 /** The phases in wire order. This ordering is the render order everywhere. */
@@ -85,6 +96,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 		tip: PHASE_TIPS.dns,
 		traceKey: "dnsMs",
 		averageKey: "avgDnsMs",
+		percentileKey: "dns",
 	},
 	{
 		key: "connect",
@@ -94,6 +106,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 		tip: PHASE_TIPS.connect,
 		traceKey: "connectMs",
 		averageKey: "avgConnectMs",
+		percentileKey: "connect",
 	},
 	{
 		key: "tls",
@@ -103,6 +116,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 		tip: PHASE_TIPS.tls,
 		traceKey: "tlsMs",
 		averageKey: "avgTlsMs",
+		percentileKey: "tls",
 	},
 	{
 		key: "ttfb",
@@ -112,6 +126,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 		tip: PHASE_TIPS.ttfb,
 		traceKey: "firstByteMs",
 		averageKey: "avgFirstByteMs",
+		percentileKey: "firstByte",
 	},
 	{
 		key: "download",
@@ -121,6 +136,7 @@ export const TIMING_PHASES: readonly TimingPhase[] = [
 		tip: PHASE_TIPS.download,
 		traceKey: "downloadMs",
 		averageKey: "avgDownloadMs",
+		percentileKey: "download",
 	},
 ];
 
@@ -171,4 +187,70 @@ export function phasesFromAverages(
 	source: TimingAverageSource | null | undefined
 ): MaybeResolvedTimingPhase[] {
 	return TIMING_PHASES.map((phase) => ({ ...phase, value: source?.[phase.averageKey] }));
+}
+
+/**
+ * Whether a `timingBreakdown` carries the averages half at all.
+ *
+ * `timingBreakdown` holds two independently-present halves - averages over the
+ * retained trace sample, and `phases` percentiles over every completion - so
+ * the object existing says nothing about the averages. Every renderer of the
+ * averages asks this instead of testing the object, which is what keeps a
+ * phases-only report from painting five zeroed bars and a "0 ms" total.
+ */
+export function hasPhaseAverages(source: TimingAverageSource | null | undefined): boolean {
+	return TIMING_PHASES.some((phase) => source?.[phase.averageKey] !== undefined);
+}
+
+/** One phase's whole-run distribution, as the engine writes it. */
+export interface TimingPhasePercentiles {
+	p50: number;
+	p95: number;
+	p99: number;
+	max: number;
+	/** Completions behind this distribution; identical across the five. */
+	count: number;
+}
+
+/** Any object carrying per-run percentiles: a report's `timingBreakdown.phases`. */
+export type TimingPercentileSource = Partial<
+	Record<TimingPhasePercentileKey, TimingPhasePercentiles | undefined>
+>;
+
+/** A phase paired with its whole-run distribution. */
+export interface ResolvedPhasePercentiles extends TimingPhase {
+	percentiles: TimingPhasePercentiles;
+}
+
+/**
+ * The phases a run reported percentiles for, in wire order.
+ *
+ * Filters like `phasesFromTrace` and unlike `phasesFromAverages`: this table is
+ * only rendered at all when the section exists, and a phase the engine did not
+ * write is one it did not measure. Returns an empty list for an absent section,
+ * which is the caller's signal to render nothing rather than an empty table.
+ */
+export function phasesFromPercentiles(
+	source: TimingPercentileSource | null | undefined
+): ResolvedPhasePercentiles[] {
+	return TIMING_PHASES.map((phase) => ({
+		...phase,
+		percentiles: source?.[phase.percentileKey],
+	})).filter((phase): phase is ResolvedPhasePercentiles => phase.percentiles !== undefined);
+}
+
+/**
+ * Ratio of a phase's p99 to its p50, or `null` when the tail cannot be read.
+ *
+ * A phase whose p99 towers over its p50 is the signal the percentile table
+ * exists to surface - the classic case is TLS, where a p50 of 0 (connections
+ * reused) beside a large p99 means the run was re-handshaking under load, which
+ * an average over both flattens into a number that looks merely mediocre.
+ *
+ * `null` for a p50 of 0: the ratio is unbounded there, and "infinitely worse
+ * than instant" is not a figure to print. Callers that care about that case
+ * read `p99` directly - a zero p50 with a real p99 is itself the finding.
+ */
+export function tailRatio(percentiles: TimingPhasePercentiles): number | null {
+	return percentiles.p50 > 0 ? percentiles.p99 / percentiles.p50 : null;
 }

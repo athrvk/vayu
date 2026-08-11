@@ -156,6 +156,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   concurrency - silently, since the run still reports percentiles, just computed from fewer
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
+- **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
+  fed by every successful completion and read once after the drain, behind the report's
+  `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
+  averages beside them are computed over the ~1% of completions a trace is stored for, and
+  escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
+  `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
+  check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.

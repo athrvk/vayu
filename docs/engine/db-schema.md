@@ -245,6 +245,13 @@ default, so `sync_schema()` can
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
                "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "phases": {
+    "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100 },
+    "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100 },
+    "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 100 },
+    "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 100 },
+    "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 100 }
+  },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
@@ -252,6 +259,17 @@ default, so `sync_schema()` can
   }
 }
 ```
+
+`phases` carries the whole-run distribution of each network phase, drained from the collector's
+five per-phase HdrHistograms - which every successful completion feeds, unlike the sampled
+`results` rows the report's `timingBreakdown` averages come from. Keyed by wire name (`firstByte`,
+not `ttfb`), and the only section here written in camelCase, because the report passes it through
+verbatim rather than translating it. **Omitted** when the run recorded no distribution - the
+`phaseHistograms` setting (or the run's own `phase_histograms`) off, or nothing successful
+completed - which keeps the report's `timingBreakdown.phases` absent rather than showing five
+zeroed rows; a zeroed TLS row would claim the handshake was free, which is a different statement
+from "this run did not measure it". A zero *inside* a present section is meaningful and kept: a
+run over reused connections genuinely has a TLS p50 of 0.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `thresholds` follows

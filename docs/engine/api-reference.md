@@ -457,6 +457,7 @@ on disk, one in memory:
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
+| `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
@@ -2114,6 +2115,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_sample_body_bytes` | `0`-`104857600` | A captured body is copied on the completion callback, so the cap bounds hot-path work. `0` keeps headers and metadata and no body. Defaults to the `maxSampleBodyBytes` setting. |
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
 | `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
+| `phase_histograms` | boolean | Per-run override for the `phaseHistograms` setting. `false` skips the bank entirely, and the run's report carries no `timingBreakdown.phases`. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
@@ -2150,6 +2152,12 @@ independent budgets:
 | Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
 | Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
 | Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
+
+None of these budgets bound the report's `timingBreakdown.phases`: the per-phase
+histograms are fed by every completion and hold counts rather than records, so
+the phase distribution is the whole population no matter how hard the stores
+above thin. That is what they are for - the `avg*` fields beside them *are*
+computed over the sampled subset.
 
 Two properties are worth relying on. An outlier **never consumes a sampling
 slot**: a run whose target degrades does not silently stop sampling ordinary
@@ -2864,7 +2872,14 @@ alone rather than erroring. **The response shape is the same either way.**
   },
   "timingBreakdown": {
     "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
-    "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7
+    "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7,
+    "phases": {
+      "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 6000 },
+      "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 6000 },
+      "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 6000 },
+      "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 6000 },
+      "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000 }
+    }
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
   "sampling": {
@@ -2888,6 +2903,22 @@ alone rather than erroring. **The response shape is the same either way.**
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**`timingBreakdown` holds two independently-present halves.** The `avg*` fields
+are means over the run's *retained trace sample* - the 1-in-`success_sample_rate`
+completions stored while `save_timing_breakdown` is on, plus any slow-request
+outliers - so they are absent for a run that stored no traces. `phases` comes
+from five HdrHistograms fed by **every** successful completion, so it is present
+for exactly such a run, and absent only when `phaseHistograms` was off, nothing
+succeeded, or the run predates the bank. Read each half by its own key: the
+object's presence proves neither, and the two are drawn from different
+populations, so a `phases.tls.p50` is not comparable to an `avgTlsMs`.
+
+`phases` is what answers "was the latency the server or the connection path".
+A `tls.p50` of 0 beside a large `tls.p99` is a run re-handshaking under load -
+most requests reused a connection, a minority did not - which the average over
+both flattens into a number that looks merely mediocre. `count` is the number of
+completions behind each distribution and is identical across the five.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 
