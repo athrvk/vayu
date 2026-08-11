@@ -24,7 +24,6 @@
 #include <httplib.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -312,6 +311,30 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     return out;
 }
 
+std::optional<InboxParseError> parse_live_resume_point (const std::string& header_value,
+const std::string& param_value,
+int64_t& out) {
+    out = 0;
+    // The header is the browser's own reconnect and therefore the more recent
+    // of the two; an empty one is absent, not a resume point of "".
+    const std::string& value = header_value.empty () ? param_value : header_value;
+    const char* source = header_value.empty () ? "lastEventId" : "Last-Event-ID";
+    if (value.empty ()) {
+        return std::nullopt;
+    }
+
+    int64_t parsed_id = 0;
+    const char* begin = value.data ();
+    const char* end   = begin + value.size ();
+    const auto parsed = std::from_chars (begin, end, parsed_id);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || parsed_id < 0) {
+        return InboxParseError{ 400, "invalid_last_event_id",
+            std::string (source) + " must be a non-negative capture id" };
+    }
+    out = parsed_id;
+    return std::nullopt;
+}
+
 nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {
     nlohmann::json out;
     out["id"]         = capture.id;
@@ -344,8 +367,15 @@ struct InboxManager::Inbox {
     /// Resolved once at start and const thereafter, so every capture in one
     /// inbox was truncated and retained by the same rules.
     InboxLimits limits;
-    /// One live SSE stream per inbox; see InboxManager::try_claim_live.
-    std::atomic<bool> live_claimed{ false };
+    /// One live SSE stream per inbox; see InboxManager::try_claim_live. Both
+    /// fields are guarded by InboxManager::mutex_ - every accessor locks it -
+    /// and `live_claim == 0` means unclaimed.
+    LiveClaim live_claim = 0;
+    /// When the holder last wrote to its socket successfully. A holder writes
+    /// at least a keep-alive every poll interval, so a long gap here is the
+    /// only evidence available that its socket is gone: cpp-httplib reports
+    /// that only through the next failing write.
+    std::chrono::steady_clock::time_point live_last_write{};
 
     /// Guards `response` only. The capture handler takes this and never the
     /// manager's lock, so a teardown holding the manager lock can always join.
@@ -383,8 +413,8 @@ InboxManager::~InboxManager () {
 
 void InboxManager::teardown_locked (Inbox& inbox) {
     // A capture in its configured delay is still holding a listener thread, so
-    // the join inside stop() waits up to inbox::MAX_RESPONSE_DELAY_MS - which is
-    // why that bound exists.
+    // the join inside stop() waits up to inbox::MAX_RESPONSE_DELAY_MS - which
+    // is why that bound exists.
     inbox.listener.stop ();
 }
 
@@ -552,20 +582,54 @@ const InboxCannedResponse& response) {
     return it->second->info_locked ();
 }
 
-bool InboxManager::try_claim_live (const std::string& inbox_id) {
+namespace {
+
+/// How long a claim may go without a successful write before it is takeable.
+/// Two poll intervals, floored so that the shortest permitted cadence does not
+/// make ordinary scheduler jitter look like a dead stream.
+std::chrono::milliseconds live_claim_stale_after (const InboxLimits& limits) {
+    const int window = std::max (constants::inbox::MIN_LIVE_CLAIM_STALE_MS,
+    limits.live_poll_interval_ms * constants::inbox::LIVE_CLAIM_STALE_INTERVALS);
+    return std::chrono::milliseconds (window);
+}
+
+} // namespace
+
+std::optional<LiveClaim> InboxManager::try_claim_live (const std::string& inbox_id) {
     std::lock_guard<std::mutex> lock (mutex_);
     auto it = inboxes_.find (inbox_id);
     if (it == inboxes_.end ()) {
-        return false;
+        return std::nullopt;
     }
-    bool expected = false;
-    return it->second->live_claimed.compare_exchange_strong (expected, true);
+    Inbox& inbox = *it->second;
+    if (inbox.live_claim != 0) {
+        const auto since = std::chrono::steady_clock::now () - inbox.live_last_write;
+        if (since < live_claim_stale_after (inbox.limits)) {
+            return std::nullopt;
+        }
+        // Held by a stream that is not writing. Take it over rather than refuse:
+        // the refusal is what strands a reconnecting client (issue #506).
+    }
+    inbox.live_claim      = next_live_claim_++;
+    inbox.live_last_write = std::chrono::steady_clock::now ();
+    return inbox.live_claim;
 }
 
-void InboxManager::release_live (const std::string& inbox_id) {
+bool InboxManager::note_live_write (const std::string& inbox_id, LiveClaim claim) {
     std::lock_guard<std::mutex> lock (mutex_);
-    if (auto it = inboxes_.find (inbox_id); it != inboxes_.end ()) {
-        it->second->live_claimed.store (false);
+    auto it = inboxes_.find (inbox_id);
+    if (it == inboxes_.end () || it->second->live_claim != claim) {
+        return false;
+    }
+    it->second->live_last_write = std::chrono::steady_clock::now ();
+    return true;
+}
+
+void InboxManager::release_live (const std::string& inbox_id, LiveClaim claim) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    if (auto it = inboxes_.find (inbox_id);
+        it != inboxes_.end () && it->second->live_claim == claim) {
+        it->second->live_claim = 0;
     }
 }
 
@@ -814,9 +878,10 @@ void register_inbox_routes (RouteContext& ctx) {
     /**
      * GET /inbox/:id/live
      * One SSE event per capture, `id:` carrying the capture id so a reconnect
-     * resumes with `Last-Event-ID`. One stream per inbox: each holds a
-     * cpp-httplib pool thread for its whole life, so a second is a 409 rather
-     * than a quietly parked thread.
+     * resumes from where it left off. One stream per inbox: each holds a
+     * cpp-httplib pool thread for its whole life, so a second live watcher is a
+     * 409 rather than a quietly parked thread - but a claim whose holder has
+     * stopped writing is taken over instead of refused (issue #506).
      */
     ctx.server.Get (R"(/inbox/([^/]+)/live)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -826,24 +891,25 @@ void register_inbox_routes (RouteContext& ctx) {
             return;
         }
         const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
-        if (!ctx.inbox_manager.try_claim_live (inbox_id)) {
+
+        int64_t last_id = 0;
+        if (auto error =
+            parse_live_resume_point (req.get_header_value ("Last-Event-ID"),
+            req.get_param_value ("lastEventId"), last_id)) {
+            send_error (res, error->http_status, error->message, error->code);
+            return;
+        }
+
+        const auto claim = ctx.inbox_manager.try_claim_live (inbox_id);
+        if (!claim) {
             send_error (res, 409,
             "This inbox is already being watched; close the other stream first",
             "inbox_live_in_use");
             return;
         }
 
-        int64_t last_id = 0;
-        if (req.has_header ("Last-Event-ID")) {
-            try {
-                last_id = std::stoll (req.get_header_value ("Last-Event-ID"));
-            } catch (...) {
-                last_id = 0;
-            }
-        }
-
         res.set_content_provider ("text/event-stream",
-        [&ctx, inbox_id, last_id, limits] (size_t, httplib::DataSink& sink) mutable {
+        [&ctx, inbox_id, last_id, limits, claim = *claim] (size_t, httplib::DataSink& sink) mutable {
             while (true) {
                 if (!sink.is_writable ()) {
                     break;
@@ -860,10 +926,17 @@ void register_inbox_routes (RouteContext& ctx) {
                     const std::string payload = "id: " + std::to_string (capture.id) +
                     "\ndata: " + inbox_capture_json (capture).dump () + "\n\n";
                     if (!sink.write (payload.data (), payload.size ())) {
-                        ctx.inbox_manager.release_live (inbox_id);
+                        ctx.inbox_manager.release_live (inbox_id, claim);
                         return false;
                     }
                     last_id = capture.id;
+                }
+                // A write that lands is the only evidence this socket is alive,
+                // and therefore what holds the claim. Losing it means a
+                // reconnect already took the slot over, so this stream ends
+                // without releasing what is no longer its own.
+                if (!fresh.empty () && !ctx.inbox_manager.note_live_write (inbox_id, claim)) {
+                    return false;
                 }
                 if (fresh.empty ()) {
                     // A stopped inbox captures nothing more, but the record and
@@ -875,14 +948,17 @@ void register_inbox_routes (RouteContext& ctx) {
                     }
                     const std::string keep_alive = ": keep-alive\n\n";
                     if (!sink.write (keep_alive.data (), keep_alive.size ())) {
-                        ctx.inbox_manager.release_live (inbox_id);
+                        ctx.inbox_manager.release_live (inbox_id, claim);
+                        return false;
+                    }
+                    if (!ctx.inbox_manager.note_live_write (inbox_id, claim)) {
                         return false;
                     }
                     std::this_thread::sleep_for (
                     std::chrono::milliseconds (limits.live_poll_interval_ms));
                 }
             }
-            ctx.inbox_manager.release_live (inbox_id);
+            ctx.inbox_manager.release_live (inbox_id, claim);
             return false;
         });
     });

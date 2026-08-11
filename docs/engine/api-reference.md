@@ -1367,9 +1367,26 @@ list above and an SSE `id:` equal to the capture's `id`. A reconnect that sends
 `Last-Event-ID` resumes after that capture, so nothing is missed across a drop.
 The stream ends when the inbox is stopped.
 
+**`?lastEventId=<id>` is the same resume point as a query parameter**, for a
+client that reconnects by hand: browser `EventSource` sets `Last-Event-ID` only
+on its *own* retry and exposes no way to set a header on a fresh connection. The
+header wins when both are given, being the more recent of the two. A value that
+is not a non-negative capture id is refused with `400` and code
+`invalid_last_event_id` rather than resumed from the start, which would replay
+every retained capture as though it had just arrived.
+
 **One stream per inbox.** A second concurrent watcher is refused with `409` and
 code `inbox_live_in_use`: each SSE handler occupies a cpp-httplib pool thread
 for its whole life, so N watchers on one inbox is N parked threads.
+
+**A claim whose holder stopped writing is taken over, not refused.** A stream
+learns its socket died only when its next write fails, up to one
+`inboxLivePollIntervalMs` later, so a client reconnecting inside that window used
+to meet a `409` it could not recover from. A holder that has not written
+successfully for two poll intervals (at least 100ms) is not writing, and its slot
+goes to the newcomer; the evicted stream ends on its next write. Every live
+stream writes at least a keep-alive each interval, so a genuinely live watcher is
+never evicted and a second concurrent one is still refused.
 
 ## Authentication
 

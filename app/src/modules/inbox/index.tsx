@@ -20,9 +20,9 @@
  */
 
 import { useState } from "react";
-import { Copy, Inbox as InboxIcon, Play, Square, Trash2 } from "lucide-react";
+import { Copy, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
-import { EmptyState, ErrorState } from "@/components/shared";
+import { Callout, EmptyState, ErrorState } from "@/components/shared";
 import {
 	useClearInboxCapturesMutation,
 	useInboxCapturesQuery,
@@ -93,7 +93,7 @@ export default function InboxView() {
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
 	const captures = capturesQuery.data?.data ?? [];
-	const watching = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
+	const live = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
 
 	const selectedCapture = captures.find((c) => c.id === selectedCaptureId) ?? captures[0] ?? null;
 
@@ -187,7 +187,7 @@ export default function InboxView() {
 					</Badge>
 				)}
 				<Badge variant="outline">
-					{inbox.running ? (watching ? "Live" : "Running") : "Stopped"}
+					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
 
 				<div className="ml-auto flex items-center gap-2">
@@ -227,6 +227,30 @@ export default function InboxView() {
 				pending={updateResponse.isPending}
 				onApply={applyResponse}
 			/>
+
+			{/*
+			 * The stream stopped, not the listener - the inbox is still
+			 * recording, this list has only stopped hearing about it. Saying so
+			 * is the whole point: the badge alone would read "Running" forever
+			 * and look like an inbox nothing is sending to (issue #506).
+			 */}
+			{live.stopped && (
+				<div className="px-3 pt-2">
+					<Callout
+						severity="warning"
+						title="Live updates stopped"
+						action={
+							<Button variant="outline" size="sm" onClick={live.resume}>
+								<RotateCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+								Resume
+							</Button>
+						}
+					>
+						the reconnects were refused. Captures are still being recorded and this list
+						will catch up on the ones it missed.
+					</Callout>
+				</div>
+			)}
 
 			<div className="flex min-h-0 flex-1">
 				<aside className="flex w-72 min-h-0 shrink-0 flex-col border-r border-border">

@@ -508,6 +508,15 @@ constexpr int LIVE_POLL_INTERVAL_MS = 250;
 constexpr int MIN_LIVE_POLL_INTERVAL_MS = 25;
 constexpr int MAX_LIVE_POLL_INTERVAL_MS = 5000;
 
+/// How many poll intervals a live stream may go without a successful write
+/// before its claim is considered dead and a reconnect may take it over. A
+/// healthy stream writes at least a keep-alive every interval, so two elapsed
+/// intervals means it is not writing - see InboxManager::try_claim_live.
+constexpr int LIVE_CLAIM_STALE_INTERVALS = 2;
+/// Floor under that window, so a 25ms cadence does not make ordinary scheduler
+/// jitter look like a dead holder.
+constexpr int MIN_LIVE_CLAIM_STALE_MS = 100;
+
 /// Transport limit on one inbound request. Past this the listener answers 413
 /// and records nothing - a payload this size is not a webhook. A rail rather
 /// than a setting: it bounds what an unauthenticated *remote* caller can make
