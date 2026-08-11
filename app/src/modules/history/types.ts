@@ -11,11 +11,19 @@
 
 import type { RunReport, LoadTestMetrics, MonitorSample } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
+import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 
 export interface TabProps {
 	report: RunReport;
 	runId?: string;
 	derived: DashboardDerived;
+	/**
+	 * Degradation windows detected in the run's per-tick series, derived once by
+	 * `LoadTestDetail`. Overview states them in words, Performance shades them on
+	 * the charts - one detection, two readings of it. Absent for a run whose
+	 * series never loaded or that had none.
+	 */
+	anomalies?: Anomaly[];
 }
 
 /**

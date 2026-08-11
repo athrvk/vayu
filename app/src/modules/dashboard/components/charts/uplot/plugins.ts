@@ -85,6 +85,85 @@ export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uP
 	};
 }
 
+/**
+ * A shaded x-axis window: the chart's way of saying "this interval was
+ * different". Where a {@link Marker} pins one value, an annotation covers the
+ * span a condition held for - the run's degradation windows, drawn on the same
+ * axis as the metric that degraded.
+ *
+ * Chart-layer vocabulary on purpose: it carries a span, a colour role and a
+ * label, and knows nothing about what made the window interesting. The semantic
+ * wrappers map their domain findings onto it.
+ */
+export interface Annotation {
+	/** Window start on the x axis (elapsed seconds). */
+	startSeconds: number;
+	/** Window end; equal to the start for an instant. */
+	endSeconds: number;
+	label: string;
+	role: ColorRole;
+}
+
+/** Below this width a band would read as a smudge, so it is drawn as a line. */
+const MIN_BAND_PX = 2;
+
+/** A label needs room, and a 6px band has none - drawing it anyway overlaps the neighbours. */
+const MIN_LABEL_PX = 28;
+
+/**
+ * Draw annotation bands each frame (survives zoom/pan), under the same `draw`
+ * hook the markers use so both layers sit over the series.
+ */
+export function annotationsPlugin(
+	getAnnotations: () => Annotation[],
+	theme: UplotTheme
+): uPlot.Plugin {
+	return {
+		hooks: {
+			draw: (u: uPlot) => {
+				const ctx = u.ctx;
+				const { left, top, width, height } = u.bbox;
+				ctx.save();
+				ctx.font = `${10 * dpr()}px "JetBrains Mono", monospace`;
+				ctx.textAlign = "left";
+				for (const a of getAnnotations()) {
+					const x1 = u.valToPos(a.startSeconds, "x", true);
+					const x2 = u.valToPos(a.endSeconds, "x", true);
+					// Wholly outside the visible range (the user zoomed past it).
+					if (x2 < left || x1 > left + width) continue;
+					const clipped1 = Math.max(x1, left);
+					const clipped2 = Math.min(x2, left + width);
+					const bandWidth = clipped2 - clipped1;
+					const color = theme.color(a.role);
+
+					if (bandWidth < MIN_BAND_PX) {
+						// An instant (first 5xx) or a window zoomed down to nothing: a
+						// dashed rule, matching how a marker pins a moment.
+						ctx.save();
+						ctx.strokeStyle = color;
+						ctx.lineWidth = 1.5 * dpr();
+						ctx.setLineDash([4 * dpr(), 4 * dpr()]);
+						ctx.beginPath();
+						ctx.moveTo(clipped1, top);
+						ctx.lineTo(clipped1, top + height);
+						ctx.stroke();
+						ctx.restore();
+					} else {
+						ctx.fillStyle = theme.color(a.role, 0.16);
+						ctx.fillRect(clipped1, top, bandWidth, height);
+					}
+
+					if (bandWidth >= MIN_LABEL_PX || bandWidth < MIN_BAND_PX) {
+						ctx.fillStyle = color;
+						ctx.fillText(a.label, clipped1 + 4 * dpr(), top + 11 * dpr());
+					}
+				}
+				ctx.restore();
+			},
+		},
+	};
+}
+
 export type ValueFormatter = (v: number | null | undefined) => string;
 
 /**
