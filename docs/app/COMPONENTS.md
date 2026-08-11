@@ -189,6 +189,7 @@ Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. When the engine is *down* the indicator becomes a focusable tooltip carrying `engineError` - the health poll's reason, which was previously recorded and rendered nowhere, so a refused connection, a timeout and a TLS failure all read as one word. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
+- **Middle - pending restart:** once a setting the engine marks `requiresRestart` has been saved, a "Restart pending" button appears beside the connection status and restarts the engine in place (`useEngineRestart`, shared with the Settings banner so the two cannot diverge). It tracks saves made since this renderer connected - not a comparison against the engine's running values, which it does not report - so it says *saved*, not *in effect*, and does not survive a renderer reload. A failed restart leaves the signal standing and reports the reason as a toast.
 - **Right - toggles:** Context bar toggle (⌘I). Pressed when the bar is open *and* the active tab is one it has content for, so the highlight always matches what is on screen.
 
 ## Request Builder (`modules/request-builder/`)
@@ -401,6 +402,8 @@ Same nav/content split as Variables: the category tree renders in the **Drawer**
 
 - **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
 - **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `LoadTestingPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `GeneralPanel` composes two cards of its own: `UpdatesCard.tsx` and `CookiesCard.tsx` (the engine's cookie jar - what it holds per environment, and the button that empties it). `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+
+The engine categories render from `GET /config` metadata alone - no per-key branching in the component. Two flags on each entry shape the screen: `requiresRestart` draws the "Restart Required" chip (and, once saved, the "Pending" chip plus the banner and the Dock's signal), and `advanced` moves the entry into a collapsed **Advanced** section at the bottom of its category. Both are read as fields; the `"(Requires Restart)"` label substring they replaced is gone, and `config_route_test.cpp` guards it from coming back. The collapsed state is deliberately not persisted, and resets when the category changes.
 
 Adding an app panel is three edits and no branching: a member on `ClientSettingsCategory` (`types/domain.ts`), one entry in `APP_SETTINGS_PANELS`, and the panel file. The sidebar tree and `SettingsMain` both read the registry.
 

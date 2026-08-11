@@ -807,13 +807,19 @@ const configUpdateSchema = z
 /**
  * Of the changed config keys, which require an engine restart to take effect.
  *
- * The label is the whole signal: the engine writes "… (Requires Restart)" into
- * each entry's `label` (`engine/src/db/database.cpp`) and emits no boolean
- * beside it. A `requiresRestart === true` branch used to run ahead of this
- * regex on a field nothing has ever written - a check that could not fire,
- * mirrored in `SettingsMain.tsx` and typed in `domain.ts`, which read as if the
- * engine had a second, more reliable channel. If one is ever added, this is the
- * one place that decides.
+ * The engine says so in a typed `requiresRestart` field on each entry
+ * (`engine/src/http/routes/config.cpp`), read here and in `SettingsMain.tsx`.
+ * It replaced a "… (Requires Restart)" substring in the entry's `label` that
+ * both consumers regex-matched out of the prose - so a label that fell out of
+ * step with the mechanism (the `workers` case, #197) misinformed an agent and
+ * the settings screen at once, and no rewording of the copy could be made
+ * without minding this parser.
+ *
+ * Strictly `=== true`: this decides whether the tool result tells an agent its
+ * change is live, and a payload that omits the field (an engine older than the
+ * app it is paired with) has not said that it does not need one.
+ *
+ * `update_config`'s `restartRequired` result shape is unchanged.
  */
 function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
 	const raw = Array.isArray(configResponse)
@@ -823,11 +829,7 @@ function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): s
 			: [];
 	const entries = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
 	const byKey = new Map(entries.map((e) => [String(e.key), e]));
-	return changedKeys.filter((key) => {
-		const e = byKey.get(key);
-		if (!e) return false;
-		return /requires restart/i.test(String(e.label ?? ""));
-	});
+	return changedKeys.filter((key) => byKey.get(key)?.requiresRestart === true);
 }
 
 /**

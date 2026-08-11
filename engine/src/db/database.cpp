@@ -333,7 +333,14 @@ inline auto make_storage (const std::string& path) {
     make_column ("min_value", &ConfigEntry::min_value),
     make_column ("max_value", &ConfigEntry::max_value),
     make_column ("options", &ConfigEntry::options),
-    make_column ("updated_at", &ConfigEntry::updated_at)),
+    make_column ("updated_at", &ConfigEntry::updated_at),
+    // NOT NULL with a default_value, so sync_schema can ALTER TABLE ADD COLUMN
+    // these onto an existing config_entries table - the rows are re-seeded with
+    // their metadata on every startup anyway, so the backfill value is only
+    // what the row holds between the ALTER and that upsert.
+    make_column ("requires_restart", &ConfigEntry::requires_restart,
+    default_value (false)),
+    make_column ("advanced", &ConfigEntry::advanced, default_value (false))),
 
     // Globals: App-wide variables (singleton row with id="globals")
     make_table ("globals", make_column ("id", &Globals::id, primary_key ()),
@@ -1626,6 +1633,26 @@ void Database::seed_default_config () {
     std::chrono::system_clock::now ().time_since_epoch ())
                .count ();
 
+    // Metadata markers, wrapped around the entry they apply to so the flag is
+    // read at the top of the seed rather than counted out as a trailing
+    // positional `true` after `now`.
+    //
+    // restart_required: the running engine keeps the old value until restarted.
+    // The app shows one chip from this and the Dock a pending signal; nothing
+    // states it in the label or the description any more.
+    //
+    // advanced: an internal with no everyday user story. Rendered collapsed
+    // under "Advanced" at the bottom of its category, not removed - a knob that
+    // is still live is still reachable.
+    auto restart_required = [] (ConfigEntry entry) {
+        entry.requires_restart = true;
+        return entry;
+    };
+    auto advanced = [] (ConfigEntry entry) {
+        entry.advanced = true;
+        return entry;
+    };
+
     // Helper lambda: Creates or updates a config entry
     // - New entries get default values
     // - Existing entries preserve user-modified values but get updated metadata
@@ -1648,23 +1675,21 @@ void Database::seed_default_config () {
     // Core settings defining the application's base capacity and threading model
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "workers",
-    std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads (Requires Restart)",
+    upsert_config (restart_required (ConfigEntry{ "workers",
+    std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
     "Number of background worker threads. Higher values improve throughput on "
     "multi-core systems but increase RAM usage. "
-    "Default equals CPU core count. Changes require engine restart to take "
-    "effect.",
+    "Default equals CPU core count.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
-    "1", "128", std::nullopt, now });
+    "1", "128", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "maxConnections",
+    upsert_config (restart_required (ConfigEntry{ "maxConnections",
     std::to_string (vayu::core::constants::server::MAX_CONNECTIONS), "integer",
-    "Maximum Connections (Requires Restart)",
+    "Maximum Connections",
     "Global limit for simultaneous internal connections. Increasing "
-    "beyond system limits (ulimit) may cause instability. "
-    "Changes require engine restart to take effect.",
+    "beyond system limits (ulimit) may cause instability.",
     "general_engine", std::to_string (vayu::core::constants::server::MAX_CONNECTIONS),
-    "100", "100000", std::nullopt, now });
+    "100", "100000", std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
@@ -1743,9 +1768,9 @@ void Database::seed_default_config () {
     // SQLite optimization settings for high-throughput load testing
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "dbCacheSize",
+    upsert_config (restart_required (ConfigEntry{ "dbCacheSize",
     std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
-    "integer", "Database Cache Size (Requires Restart)",
+    "integer", "Database Cache Size",
     "Memory used to cache test results and metrics during high-RPS load tests. "
     "Larger values reduce disk writes when storing thousands of results per "
     "second, "
@@ -1755,11 +1780,11 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "1048576",    // min: 1MB in bytes
     "1073741824", // max: 1GB in bytes
-    std::nullopt, now });
+    std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "dbTempStore",
+    upsert_config (restart_required (ConfigEntry{ "dbTempStore",
     std::to_string (vayu::core::constants::database::TEMP_STORE), "integer",
-    "Temporary Tables Storage (Requires Restart)",
+    "Temporary Tables Storage",
     "Where temporary data is stored when generating test reports and "
     "aggregating metrics. "
     "Options: 0 = Default (file), 1 = Always use file, 2 = Always use memory. "
@@ -1768,11 +1793,11 @@ void Database::seed_default_config () {
     "active tests. "
     "Recommended for high-frequency reporting. Default: Memory.",
     "database_performance", std::to_string (vayu::core::constants::database::TEMP_STORE),
-    "0", "2", std::nullopt, now });
+    "0", "2", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "dbMmapSize",
+    upsert_config (restart_required (ConfigEntry{ "dbMmapSize",
     std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
-    "integer", "Memory-Mapped I/O Size (Requires Restart)",
+    "integer", "Memory-Mapped I/O Size",
     "Amount of database file accessed directly from memory when reading "
     "test results and metrics. "
     "Example: 268435456 = 256MB. Speeds up dashboard updates and report "
@@ -1783,11 +1808,11 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
     "0",          // min: disabled
     "1073741824", // max: 1GB
-    std::nullopt, now });
+    std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "dbWalAutocheckpoint",
+    upsert_config (restart_required (ConfigEntry{ "dbWalAutocheckpoint",
     std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
-    "integer", "WAL Checkpoint Frequency (Requires Restart)",
+    "integer", "WAL Checkpoint Frequency",
     "How often SQLite saves accumulated test results to the main database file "
     "(in pages). "
     "During high-RPS tests, results accumulate in the WAL file. Lower values "
@@ -1797,11 +1822,11 @@ void Database::seed_default_config () {
     "grows larger). "
     "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages.",
     "database_performance", std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
-    "100", "10000", std::nullopt, now });
+    "100", "10000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "dbBusyTimeout",
+    upsert_config (restart_required (advanced (ConfigEntry{ "dbBusyTimeout",
     std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
-    "integer", "Database Lock Wait Time (Requires Restart)",
+    "integer", "Database Lock Wait Time",
     "How long SQLite waits (in milliseconds) when multiple threads try to "
     "write test results "
     "simultaneously. "
@@ -1814,11 +1839,11 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "1000",  // min: 1 second
     "60000", // max: 60 seconds
-    std::nullopt, now });
+    std::nullopt, now })));
 
-    upsert_config (ConfigEntry{ "dbSynchronous",
+    upsert_config (restart_required (ConfigEntry{ "dbSynchronous",
     std::to_string (vayu::core::constants::database::SYNCHRONOUS), "integer",
-    "Data Safety Mode (Requires Restart)",
+    "Data Safety Mode",
     "How aggressively SQLite ensures test results are written to disk. "
     "Options: 0 = Off (fastest; the database stays consistent after a crash, "
     "but the most recent results may be lost on power failure or OS crash - "
@@ -1829,7 +1854,7 @@ void Database::seed_default_config () {
     "This setting directly impacts how fast results can be saved during "
     "high-RPS tests. Default: Off.",
     "database_performance", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
-    "0", "2", std::nullopt, now });
+    "0", "2", std::nullopt, now }));
 
     // =========================================================================
     // NETWORK & CONNECTIVITY CONFIGURATION
@@ -1916,7 +1941,7 @@ void Database::seed_default_config () {
     "3600000", // 1 hour
     std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "oauth2RefreshRetryMs",
+    upsert_config (advanced (ConfigEntry{ "oauth2RefreshRetryMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer",
     "OAuth 2.0 Refresh Retry Delay",
     "First wait after a mid-run renewal is refused, doubled per consecutive "
@@ -1925,9 +1950,9 @@ void Database::seed_default_config () {
     "fatal - so this is about recovering from a token endpoint that blipped.",
     "network_performance",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS),
-    "250", "600000", std::nullopt, now });
+    "250", "600000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "oauth2RefreshRetryMaxMs",
+    upsert_config (advanced (ConfigEntry{ "oauth2RefreshRetryMaxMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS), "integer",
     "Maximum OAuth 2.0 Refresh Retry Delay",
     "Ceiling on that backoff, so a token endpoint that is down for an hour "
@@ -1935,9 +1960,9 @@ void Database::seed_default_config () {
     "seconds.",
     "network_performance",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
-    "1000", "3600000", std::nullopt, now });
+    "1000", "3600000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "oauth2RefreshPollIntervalMs",
+    upsert_config (advanced (ConfigEntry{ "oauth2RefreshPollIntervalMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
     "integer", "OAuth 2.0 Refresh Poll Interval",
     "How often the renewal watchdog wakes while it waits, to notice that the "
@@ -1949,7 +1974,7 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
     "10",   // 10ms - below this the wakeups outweigh what they save
     "5000", // 5s - past this a finished run visibly waits on the join
-    std::nullopt, now });
+    std::nullopt, now }));
 
     // Server-vitals monitor. Both are read per run - a change applies to the
     // next run started, no restart. The interval *bounds* (250-60000ms) are
@@ -2251,7 +2276,7 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::inbox::MIN_CAPTURES),
     std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "inboxLivePollIntervalMs",
+    upsert_config (advanced (ConfigEntry{ "inboxLivePollIntervalMs",
     std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer",
     "Inbox Live Poll Interval",
     "How often a watched inbox checks for newly arrived captures. This is the "
@@ -2260,7 +2285,7 @@ void Database::seed_default_config () {
     "on the capture path itself.",
     "observability", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
     std::to_string (vayu::core::constants::inbox::MIN_LIVE_POLL_INTERVAL_MS),
-    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now });
+    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now }));
 
     if (existing.empty ()) {
         vayu::utils::log_info ("Seeded default configuration values");

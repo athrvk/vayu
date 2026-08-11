@@ -715,6 +715,17 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `max_value`     | TEXT    | Optional maximum (numbers)                             |
 | `options`       | TEXT    | JSON array of `{value, label}`; `"enum"` entries only  |
 | `updated_at`    | INTEGER | Unix ms                                                |
+| `requires_restart` | INTEGER | Boolean; the running engine keeps the old value until restarted |
+| `advanced`      | INTEGER | Boolean; an internal, rendered collapsed under "Advanced" |
+
+**requires_restart / advanced** are NOT NULL with a `default_value` of false, so
+`sync_schema` adds them to an existing table with `ALTER TABLE ADD COLUMN`
+rather than a copy-and-recreate. They are metadata, not user data: every startup
+re-seeds each row's metadata (values are preserved), so the backfill only holds
+between the ALTER and that upsert. `requires_restart` replaced a
+`"(Requires Restart)"` suffix in `label` that the app and the MCP tool surface
+both parsed out of the prose - one stale label misinformed both at once, and a
+test now asserts no label carries the substring.
 
 **options** is nullable and populated only for `type: "enum"` entries. It is
 JSON-in-TEXT, the same convention as every other structured column in this

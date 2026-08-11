@@ -32,7 +32,7 @@ import { useEngineStore } from "@/stores";
 
 const restartEntry = {
 	key: "worker_threads",
-	label: "Worker threads (Requires Restart)",
+	label: "Worker threads",
 	description: "Threads the engine starts with",
 	type: "integer" as const,
 	value: "4",
@@ -40,14 +40,29 @@ const restartEntry = {
 	category: "general_engine",
 	min: "1",
 	max: "64",
+	// The engine's typed signal, not a parenthetical in the label. Saving an
+	// entry without it must raise nothing - covered below.
+	requiresRestart: true,
+	advanced: false,
 	updatedAt: 0,
 };
 
+/**
+ * The mutation-check twin: the old label parser would have called this
+ * restart-required, the typed flag does not. Rendered in its own case below.
+ */
+const labelSaysSoButTheFlagDoesNot = {
+	...restartEntry,
+	label: "Worker threads (Requires Restart)",
+	requiresRestart: false,
+};
+
+let configEntries: (typeof restartEntry)[] = [restartEntry];
 const mutateAsync = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({
-		data: { entries: [restartEntry] },
+		data: { entries: configEntries },
 		isLoading: false,
 		error: null,
 	}),
@@ -88,6 +103,7 @@ const banner = () => screen.queryByText("Engine restart required");
 beforeEach(() => {
 	cleanup();
 	vi.clearAllMocks();
+	configEntries = [restartEntry];
 	useEngineStore.setState({ pendingRestart: false, restartRequiredKeys: [] });
 });
 
@@ -108,11 +124,9 @@ describe("the restart-required banner", () => {
 		await waitFor(() => expect(banner()).not.toBeNull());
 		expect(mutateAsync).toHaveBeenCalledWith({ entries: { worker_threads: "8" } });
 		// Read out of the banner's own line, not the page: the field's label
-		// carries the same words and would match anywhere. The banner prints the
-		// label with the "(Requires Restart)" parenthetical stripped.
+		// carries the same words and would match anywhere.
 		const detail = screen.getByText(/will take effect after restarting the engine/);
 		expect(detail.textContent).toContain("Changes to Worker threads");
-		expect(detail.textContent).not.toContain("Requires Restart");
 		// The store is what holds it, and the component reads it from there.
 		expect(useEngineStore.getState().pendingRestart).toBe(true);
 		expect(useEngineStore.getState().restartRequiredKeys).toEqual(["worker_threads"]);
@@ -144,5 +158,32 @@ describe("the restart-required banner", () => {
 
 		expect(banner()).not.toBeNull();
 		expect(useEngineStore.getState().restartRequiredKeys).toEqual(["worker_threads"]);
+	});
+
+	it("is raised by the typed flag, not by the words in the label", async () => {
+		// The exact mutation this guards: put the substring parser back and this
+		// entry - whose label still reads "(Requires Restart)" while the engine
+		// says it does not - raises a banner that lies.
+		configEntries = [labelSaysSoButTheFlagDoesNot];
+		renderSettings();
+
+		fireEvent.change(screen.getByRole("spinbutton", { name: /Worker threads/i }), {
+			target: { value: "8" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /Save/i }));
+
+		await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
+		expect(banner()).toBeNull();
+		expect(useEngineStore.getState().pendingRestart).toBe(false);
+	});
+
+	it("shows the Restart Required chip on the entry from the flag alone", () => {
+		renderSettings();
+		expect(screen.getByText("Restart Required")).not.toBeNull();
+
+		cleanup();
+		configEntries = [labelSaysSoButTheFlagDoesNot];
+		renderSettings();
+		expect(screen.queryByText("Restart Required")).toBeNull();
 	});
 });

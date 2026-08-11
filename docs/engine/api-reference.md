@@ -415,6 +415,8 @@ min/max/options):
       "default": "8",
       "min": "1",
       "max": "256",
+      "requiresRestart": true,
+      "advanced": false,
       "updatedAt": 1234567890
     },
     {
@@ -430,6 +432,8 @@ min/max/options):
         { "value": "http1.1", "label": "HTTP/1.x" },
         { "value": "http2", "label": "HTTP/2" }
       ],
+      "requiresRestart": false,
+      "advanced": false,
       "updatedAt": 1234567890
     }
   ]
@@ -441,6 +445,21 @@ types). `options` is present only for `type: "enum"` entries - a JSON array of
 `{value, label}`, so the renderer can draw a picker without a second,
 hand-maintained value-to-label map. `value` and `default` are always strings;
 `type` is one of `integer`, `number`, `boolean`, `string`, or `enum`.
+
+`requiresRestart` and `advanced` are booleans, always present:
+
+- **`requiresRestart`** - the running engine keeps the old value until it is
+  restarted; anything else takes effect on the next run, inbox or request that
+  reads it. It is the only statement of that fact: labels and descriptions no
+  longer spell it out, and the app renders one chip from this field (a pending
+  signal in the Dock too, once such a setting has been saved). Consumers must
+  read the field rather than parse the label - the old `(Requires Restart)`
+  suffix drifted out of step with the mechanism and misinformed the settings
+  screen and the MCP `update_config` result at the same time.
+- **`advanced`** - an internal with no everyday user story (`dbBusyTimeout`, the
+  three `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`). Still
+  live and still settable; the app renders these collapsed under an "Advanced"
+  section at the bottom of their category.
 
 `defaultHttpVersion` is the only seeded `enum` entry today: the protocol a
 **newly created** request starts with (see [POST /requests](#post-requests)).

@@ -298,7 +298,7 @@ This matters because the seeded labels are wrong in places.
 
 | Key | Read site | When it applies |
 |---|---|---|
-| `workers` | `core/run_manager.cpp` | **Per run.** No restart, despite the "(Requires Restart)" label |
+| `workers` | `core/run_manager.cpp` | **Per run.** No restart, despite the entry's `requiresRestart: true` |
 | `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run |
 | `eventLoopMaxConcurrent` | `core/run_manager.cpp` | Per run, but **overridden** by the run's own `concurrency` |
 | `dnsCacheTimeout` | `core/run_manager.cpp` | Per run |
@@ -326,7 +326,7 @@ Tracked in [#197](https://github.com/athrvk/vayu/issues/197).
 ## Engine tuning notes
 
 Knobs that move RPS (set via `POST /config`; most are read **per run** - no
-restart needed despite the "Requires Restart" label on some):
+restart needed despite `requiresRestart: true` on some):
 
 - **run `concurrency`** - the dominant lever, and it is a property of the run,
   not the engine config. **64** on this target. Note the MCP safety cap
