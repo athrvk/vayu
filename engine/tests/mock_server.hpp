@@ -34,6 +34,28 @@ class SlowMockServer {
         svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("{}", "application/json");
         });
+        // A Prometheus-style exposition endpoint, for the server-vitals
+        // monitor. The counter climbs by one per scrape so a test can assert
+        // the loop actually ran; `cpu` is exported as a labelled family, which
+        // is what the parser's sum-per-name rule is about.
+        svr.Get ("/vitals", [this] (const httplib::Request&, httplib::Response& res) {
+            const int n = ++scrapes;
+            res.set_content ("# HELP vayu_test_cpu Test CPU seconds\n"
+                             "# TYPE vayu_test_cpu counter\n"
+                             "vayu_test_cpu{cpu=\"0\"} 1.5\n"
+                             "vayu_test_cpu{cpu=\"1\"} 2.5\n"
+                             "vayu_test_rss_bytes " + std::to_string (n * 1000) + "\n"
+                             "vayu_test_unused 7\n",
+            "text/plain");
+        });
+        // The same numbers as a flat JSON object, for `format: "json"`.
+        svr.Get ("/vitals.json", [this] (const httplib::Request&, httplib::Response& res) {
+            const int n = ++scrapes;
+            res.set_content ("{\"vayu_test_cpu\":4.0,\"vayu_test_rss_bytes\":" +
+            std::to_string (n * 1000) + ",\"vayu_test_unused\":7}",
+            "application/json");
+        });
+
         // An upstream that never answers on its own - what a stop must not wait
         // for. The handler only returns once the fixture is torn down (or after
         // a hard cap, so a leaked handler cannot wedge the test binary).
@@ -78,10 +100,24 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
     }
 
+    std::string vitals_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/vitals";
+    }
+
+    std::string vitals_json_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/vitals.json";
+    }
+
+    /// How many times either vitals endpoint has been scraped.
+    int scrape_count () const {
+        return scrapes.load ();
+    }
+
     httplib::Server svr;
     std::thread thread;
     int port = 0;
     std::atomic<bool> released{ false };
+    std::atomic<int> scrapes{ 0 };
 };
 
 } // namespace vayu::tests

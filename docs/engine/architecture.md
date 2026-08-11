@@ -729,13 +729,19 @@ row exists - and the executor is the only thing that differs.
 - **Main Thread**: HTTP server, request routing
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
+- **Monitor Thread**: One per load test that declared a `monitor` block - it
+  scrapes the target's metrics endpoint on its own interval. Separate from the
+  metrics thread because that one is a fixed-cadence sampler with no deadline
+  compensation: a blocking HTTP call inside it would delay every subsequent tick
+  by the scrape's latency, and a hanging endpoint would end live metrics for the
+  whole run.
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped → run workers
-signalled and joined (each joins its own metrics thread and stops its event
-loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
-scope exit. Nothing is detached.
+signalled and joined (each joins its own metrics and monitor threads and stops
+its event loop first) → `curl_global_cleanup` → `Database` / `RunManager`
+destroyed at scope exit. Nothing is detached.
 
 ## Performance Characteristics
 

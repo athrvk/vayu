@@ -263,6 +263,32 @@ constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 } // namespace server
 
 /**
+ * @brief The server-vitals monitor a run may scrape alongside its own metrics.
+ *
+ * The two a user reaches for are config-backed (`monitorIntervalMs`,
+ * `monitorMaxSeries`) and these are their seeds. The other three are rails
+ * rather than preferences: the interval bounds exist to stop a cadence that
+ * measures the scraper instead of the target, and the backoff threshold is how
+ * politely the loop gives up on a dead endpoint - the same reason
+ * `threshold_eval`'s budget ranges are constants.
+ */
+namespace monitor {
+/// Floor on `monitor.intervalMs`. Below this the scrape's own latency is a
+/// large share of the interval, so the series measures the scraper.
+constexpr int MIN_INTERVAL_MS = 250;
+/// Ceiling on it. A run shorter than one interval would record nothing.
+constexpr int MAX_INTERVAL_MS = 60000;
+/// Cadence for a block that names no `intervalMs` (config `monitorIntervalMs`).
+constexpr int DEFAULT_INTERVAL_MS = 1000;
+/// How many metrics one run may chart (config `monitorMaxSeries`). Each is a
+/// line on one overlay and a name matched against every exposition line.
+constexpr size_t MAX_SERIES = 8;
+/// Consecutive failed scrapes before the loop logs once and backs off. Below
+/// this a scrape failure is a gap in the series and nothing else.
+constexpr int FAILURES_BEFORE_BACKOFF = 5;
+} // namespace monitor
+
+/**
  * @brief Server-Sent Events (SSE) configuration
  */
 namespace sse {

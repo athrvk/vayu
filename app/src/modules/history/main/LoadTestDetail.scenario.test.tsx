@@ -35,6 +35,12 @@ vi.mock("@/queries/runs", () => ({
 		fetchNextPage: vi.fn(),
 		hasNextPage: false,
 	}),
+	useRunMonitorSeriesQuery: () => ({
+		data: undefined,
+		isFetchingNextPage: false,
+		fetchNextPage: vi.fn(),
+		hasNextPage: false,
+	}),
 }));
 
 function renderReport(ui: ReactElement) {
