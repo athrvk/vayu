@@ -144,6 +144,59 @@ events once connections are established, and the log grew only 5,256 bytes
 across 3.4 M requests. Gating the debug callback on log level remains worthwhile
 hygiene; it is not a performance lever.
 
+### Per-phase histograms cost under 2% (2026-08-11, engine 0.15.0)
+
+`phaseHistograms` (issue #476) adds **five `hdr_record_value_atomic` calls per
+successful completion** - the DNS/connect/TLS/first-byte/download bank behind
+the report's `timingBreakdown.phases`. It defaults **on**, and this is the
+measurement that decides that.
+
+**Different hardware from every other figure on this page.** Measured on a
+4-core Linux container, not the M3 Pro, with the mock server sharing those same
+4 cores - so the ceiling is **~18.9k req/s**, a third of the M3 Pro's. Read the
+A/B ratio, not the absolute numbers.
+
+Same daemon, same target, same run config; only the run's own
+`phase_histograms` override differs, so no restart separates the arms.
+`constant_concurrency` 64, 20 s per run, 4 s cooldown, 19 runs per arm - 14
+with ON first in each pair and 5 with the order reversed, because a fixed
+within-pair order would let any drift land entirely on one arm.
+
+| statistic | ON | OFF | delta |
+|---|---:|---:|---:|
+| median req/s | 18,578 | 18,869 | **-1.54%** |
+| mean req/s | 18,242 | 18,694 | -2.42% |
+| mean, lowest run per arm dropped | - | - | -1.78% |
+
+The raw mean is the only figure past 2%, and one run does all of that work: a
+single ON rep landed at 14,641 req/s, 21% under the next-lowest run in either
+arm. Per-arm spread is 12-25%, so a 1.5% difference is at the edge of what this
+box resolves at all - and the two orderings disagree in size (-1.83% ON-first,
+-0.97% OFF-first).
+
+**What the bank actually costs, measured without the shared-core confound.**
+Timing the five records directly against the same vendored HdrHistogram, with
+the value mix a real run produces (mostly zeros - a reused connection does no
+DNS and no handshake, so the writes concentrate on one bucket and contend
+maximally):
+
+| writer threads | latency histogram only | plus 5 phases | marginal |
+|---|---:|---:|---:|
+| 1 | 36 ns | 196 ns | **160 ns** / completion |
+| 2 | 76 ns | 357 ns | 281 ns / completion |
+| 4 | 91 ns | 440 ns | **349 ns** / completion |
+
+At the measured 18.9k req/s ceiling, 349 ns per completion is **6.5 ms of CPU
+per second - 0.65% of one core, 0.16% of this 4-core box.** That is an order of
+magnitude below the end-to-end spread, which is the strongest evidence that the
+1.5% seen there is this container's variance rather than the bank.
+
+**Verdict: default stays on.** Every outlier-robust statistic is under the 2%
+line the issue set, and the direct measurement accounts for a sixth of even
+that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
+off for anyone whose target proves otherwise; off leaves the bank unallocated,
+so the completion path pays one null check.
+
 ### The in-app proof run
 
 Started from the app's own Load Test panel (not the CLI, not MCP), 60 s,

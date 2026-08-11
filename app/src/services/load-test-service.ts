@@ -19,7 +19,7 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useDashboardStore, useClientSettingsStore } from "@/stores";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, MonitorSample } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // We throttle UI commits to keep render cost bounded, but BUFFER every tick the
 // engine sends so historicalMetrics keeps the full 10 Hz signal.
@@ -30,6 +30,10 @@ class LoadTestService {
 	private isConnected: boolean = false;
 	private lastMetricsPushTime = 0;
 	private pendingBuffer: LoadTestMetrics[] = [];
+	// Scrapes ride the same throttle as the ticks: they arrive on the same
+	// stream and are drawn on the same chart row, so committing them separately
+	// would render the overlay a frame out of step with the series under it.
+	private pendingMonitor: MonitorSample[] = [];
 	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/**
@@ -67,7 +71,9 @@ class LoadTestService {
 			runId,
 			this.handleMetrics.bind(this),
 			this.handleError.bind(this),
-			this.handleClose.bind(this)
+			this.handleClose.bind(this),
+			undefined,
+			this.handleMonitorSample.bind(this)
 		);
 	}
 
@@ -85,6 +91,7 @@ class LoadTestService {
 			this.throttleTimer = null;
 		}
 		this.pendingBuffer = [];
+		this.pendingMonitor = [];
 		this.lastMetricsPushTime = 0;
 		this.activeRunId = null;
 		this.isConnected = false;
@@ -127,13 +134,24 @@ class LoadTestService {
 		}
 	}
 
+	private handleMonitorSample(sample: MonitorSample): void {
+		this.pendingMonitor.push(sample);
+		// No timer of its own: the next metrics flush carries it. A run always
+		// ticks at least as often as the slowest scrape interval, so a sample
+		// waits one tick at most - and the final flush in handleClose drains
+		// whatever the last tick left behind.
+	}
+
 	private flushMetrics(): void {
-		if (this.pendingBuffer.length === 0) return;
+		if (this.pendingBuffer.length === 0 && this.pendingMonitor.length === 0) return;
 		this.lastMetricsPushTime = Date.now();
 		const batch = this.pendingBuffer;
+		const monitor = this.pendingMonitor;
 		this.pendingBuffer = [];
+		this.pendingMonitor = [];
 		const store = useDashboardStore.getState();
 		store.addMetricsBatch(batch);
+		store.addMonitorSamples(monitor);
 	}
 
 	private handleError(error: Error): void {

@@ -156,6 +156,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   concurrency - silently, since the run still reports percentiles, just computed from fewer
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
+- **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
+  fed by every successful completion and read once after the drain, behind the report's
+  `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
+  averages beside them are computed over the ~1% of completions a trace is stored for, and
+  escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
+  `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
+  check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
@@ -729,13 +736,19 @@ row exists - and the executor is the only thing that differs.
 - **Main Thread**: HTTP server, request routing
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
+- **Monitor Thread**: One per load test that declared a `monitor` block - it
+  scrapes the target's metrics endpoint on its own interval. Separate from the
+  metrics thread because that one is a fixed-cadence sampler with no deadline
+  compensation: a blocking HTTP call inside it would delay every subsequent tick
+  by the scrape's latency, and a hanging endpoint would end live metrics for the
+  whole run.
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped → run workers
-signalled and joined (each joins its own metrics thread and stops its event
-loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
-scope exit. Nothing is detached.
+signalled and joined (each joins its own metrics and monitor threads and stops
+its event loop first) → `curl_global_cleanup` → `Database` / `RunManager`
+destroyed at scope exit. Nothing is detached.
 
 ## Performance Characteristics
 

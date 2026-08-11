@@ -11,6 +11,9 @@ import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_CONTEXT_BAR_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
+	DEFAULT_GRAPHQL_VARIABLES_SIZE,
+	GRAPHQL_VARIABLES_MAX_SIZE,
+	GRAPHQL_VARIABLES_MIN_SIZE,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
 } from "@/constants/layout";
@@ -42,6 +45,20 @@ interface LayoutState {
 	// Request / response split ratio (0–1, fraction for the left/request pane)
 	requestSplitRatio: number;
 
+	/**
+	 * Whether the GraphQL body's Variables pane is collapsed to its header, and
+	 * the height (percent of the editor stack) to give it back when it reopens.
+	 *
+	 * Here rather than in `explorer-store` for the reason that store states about
+	 * itself: an expansion set describes a schema that may not exist next launch,
+	 * so it is deliberately in memory only. How tall a user wants their variables
+	 * pane is a layout preference like every other one in this file, and it has
+	 * to survive both a relaunch and the Radix unmount the Body tab does on every
+	 * glance at Headers.
+	 */
+	graphqlVariablesCollapsed: boolean;
+	graphqlVariablesSize: number;
+
 	// Actions
 	setDrawerOpen: (open: boolean) => void;
 	toggleDrawer: () => void;
@@ -56,6 +73,9 @@ interface LayoutState {
 	toggleContextBarSection: (id: string) => void;
 
 	setRequestSplitRatio: (ratio: number) => void;
+
+	setGraphqlVariablesCollapsed: (collapsed: boolean) => void;
+	setGraphqlVariablesSize: (size: number) => void;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -68,6 +88,8 @@ export const useLayoutStore = create<LayoutState>()(
 			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
 			contextBarCollapsedSections: [],
 			requestSplitRatio: 0.5,
+			graphqlVariablesCollapsed: false,
+			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
 			toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
@@ -95,6 +117,20 @@ export const useLayoutStore = create<LayoutState>()(
 
 			setRequestSplitRatio: (ratio) =>
 				set({ requestSplitRatio: Math.max(0.2, Math.min(0.8, ratio)) }),
+
+			setGraphqlVariablesCollapsed: (collapsed) =>
+				set({ graphqlVariablesCollapsed: collapsed }),
+			/*
+			 * Clamped to the pane's own bounds, so a size recorded while the pane
+			 * was mid-collapse cannot come back as a height the panel refuses.
+			 */
+			setGraphqlVariablesSize: (size) =>
+				set({
+					graphqlVariablesSize: Math.max(
+						GRAPHQL_VARIABLES_MIN_SIZE,
+						Math.min(GRAPHQL_VARIABLES_MAX_SIZE, size)
+					),
+				}),
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
@@ -126,6 +162,8 @@ export const useLayoutStore = create<LayoutState>()(
 				contextBarWidth: state.contextBarWidth,
 				contextBarCollapsedSections: state.contextBarCollapsedSections,
 				requestSplitRatio: state.requestSplitRatio,
+				graphqlVariablesCollapsed: state.graphqlVariablesCollapsed,
+				graphqlVariablesSize: state.graphqlVariablesSize,
 			}),
 		}
 	)

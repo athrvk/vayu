@@ -188,9 +188,13 @@ const ResultAnnotations& annotations) {
         // keeps its body, which is the case the old precedence-based version
         // could only express by moving the record.
         const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
+        // The phase breakdown goes in whatever the retention gate above
+        // decided: `trace_data` carries these same five numbers for the ~1% of
+        // completions something retains, and the histograms are how the other
+        // 99% reach the report.
         context->metrics_collector->record_success (response.status_code, latency,
         response.timing.queue_wait_ms, trace_data, trace_reason,
-        capture_body ? &response : nullptr);
+        capture_body ? &response : nullptr, &response.timing);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 

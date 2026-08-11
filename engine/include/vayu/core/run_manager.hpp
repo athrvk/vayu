@@ -25,6 +25,7 @@
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
@@ -37,6 +38,20 @@ class CookieJar;
 } // namespace vayu::http
 
 namespace vayu::core {
+
+/**
+ * @brief One wire-ready SSE frame: `event: <name>`, `id: <offset>`, `data:`.
+ *
+ * The single framing copy. `RunContext::append_event` builds through it under
+ * the ring's lock, and the extracted-for-testing `build_tick_payload` /
+ * `build_step_payload` delegate to it - so a run's `metrics`, `step` and
+ * `monitor` frames cannot drift into three shapes, and a consumer resuming from
+ * `Last-Event-ID` sees one id space across all of them.
+ */
+[[nodiscard]] inline std::string
+build_sse_frame (const std::string& event_name, const std::string& data, size_t offset) {
+    return "event: " + event_name + "\nid: " + std::to_string (offset) + "\ndata: " + data + "\n\n";
+}
 
 /**
  * @brief Ring capacity for a run's live tick topic: how many ticks fit in
@@ -84,10 +99,17 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
  * anything whose default lives in `config_entries` is resolved by the caller
  * and handed in, the way `maxStoredErrors` always has been. A run's own config
  * still overrides these; they are only what it falls back to.
+ *
+ * Named for that role rather than for capture, which is what the first two
+ * fields happen to be about - `phase_histograms` reaches RunContext by the
+ * same route for the same reason and is not a capture knob.
  */
-struct CaptureDefaults {
+struct EngineDefaults {
     size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
     size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+    /// Config key `phaseHistograms`. Whether the run feeds the five per-phase
+    /// histograms behind the report's `timingBreakdown.phases`.
+    bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 };
 
 struct RunContext {
@@ -99,6 +121,22 @@ struct RunContext {
     // itself and terminate. RunManager owns the handle instead - see
     // `run_workers_` - and joins it from a thread that is never the worker.
     std::thread metrics_thread;
+    /**
+     * The server-vitals scrape loop, spawned only for a run whose config
+     * carries a usable `monitor` block. Owned and joined exactly like
+     * `metrics_thread` - both exit on `is_running` and are joined by the worker
+     * before it writes the summary, which is what makes `monitor_totals`
+     * readable without a lock.
+     *
+     * It is a second thread rather than work on the metrics thread because that
+     * one is a fixed-cadence sampler with no deadline compensation: a blocking
+     * HTTP call inside it delays every subsequent tick by the scrape's latency,
+     * and a hanging endpoint would stop live metrics for the whole run.
+     */
+    std::thread monitor_thread;
+    /// Per-series totals for the report's `monitor` section; null when the run
+    /// configured no monitor. Written by `monitor_thread`, read after its join.
+    std::unique_ptr<MonitorTotals> monitor_totals;
     // Refreshes the run's OAuth 2.0 credential before it expires. Spawned only
     // when the run's auth can actually be refreshed (see
     // `http::plan_auth_refresh`), joined everywhere metrics_thread is - it
@@ -219,6 +257,36 @@ struct RunContext {
 
     void append_tick (std::string payload) {
         std::lock_guard<std::mutex> lock (tick_mtx);
+        append_locked (std::move (payload));
+    }
+
+    /**
+     * @brief Frame one SSE event and publish it, assigning its id under the
+     *        ring's own lock.
+     *
+     * The id must be the slot the frame lands in, and a run with a monitor has
+     * **two** producers on this ring - the metrics thread and the scrape loop.
+     * Reading `published_count` and appending as two steps would hand both the
+     * same id under interleaving, which breaks `Last-Event-ID` resume (a
+     * consumer that saw the duplicate skips whichever frame it did not read).
+     * Framing here makes that impossible rather than unlikely.
+     */
+    void append_event (const std::string& event_name, const std::string& data) {
+        std::lock_guard<std::mutex> lock (tick_mtx);
+        size_t offset = tick_base_offset + tick_buffer.size ();
+        append_locked (build_sse_frame (event_name, data, offset));
+    }
+    [[nodiscard]] TickBatch ticks_since (size_t from) const {
+        std::lock_guard<std::mutex> lock (tick_mtx);
+        size_t end = tick_base_offset + tick_buffer.size ();
+        if (from >= end) return { {}, from };
+        size_t start = from < tick_base_offset ? tick_base_offset : from;
+        auto begin_it =
+        tick_buffer.begin () + static_cast<std::ptrdiff_t> (start - tick_base_offset);
+        return { { begin_it, tick_buffer.end () }, end };
+    }
+    /// Push one already-framed payload and trim the ring. Caller holds `tick_mtx`.
+    void append_locked (std::string payload) {
         tick_buffer.push_back (std::move (payload));
         // A loop, not an `if`: the cap can drop between appends, and one
         // eviction per append would take the whole run to converge on it.
@@ -230,15 +298,7 @@ struct RunContext {
         published_count.store (tick_base_offset + tick_buffer.size (),
         std::memory_order_release);
     }
-    [[nodiscard]] TickBatch ticks_since (size_t from) const {
-        std::lock_guard<std::mutex> lock (tick_mtx);
-        size_t end = tick_base_offset + tick_buffer.size ();
-        if (from >= end) return { {}, from };
-        size_t start = from < tick_base_offset ? tick_base_offset : from;
-        auto begin_it =
-        tick_buffer.begin () + static_cast<std::ptrdiff_t> (start - tick_base_offset);
-        return { { begin_it, tick_buffer.end () }, end };
-    }
+
     [[nodiscard]] size_t tick_count () const {
         std::lock_guard<std::mutex> lock (tick_mtx);
         return tick_buffer.size ();
@@ -343,7 +403,7 @@ struct RunContext {
     RunContext (const std::string& id,
     nlohmann::json cfg,
     size_t max_errors                = constants::metrics_collector::DEFAULT_MAX_ERRORS,
-    CaptureDefaults capture_defaults = {});
+    EngineDefaults engine_defaults = {});
     ~RunContext ();
 
     /**
@@ -517,6 +577,12 @@ struct RunSummaryInputs {
     std::map<int, size_t> status_codes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Whole-run percentiles for each of the five network phases, indexed by
+    // TimingPhase. Absent when the run recorded none (the `phaseHistograms`
+    // toggle off, or nothing successful completed), which keeps the report's
+    // `timingBreakdown.phases` object out rather than showing five zeroed
+    // distributions - the same absent-not-zeros rule `capacity` follows.
+    std::optional<std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>> phases;
     // Transfers that asked for HTTP/2 and negotiated something older. The one
     // figure here that is about the report's own validity rather than about
     // performance - see MetricsCollector::record_http_version_downgrade.
@@ -539,6 +605,10 @@ struct RunSummaryInputs {
     // which leaves the report's scenario section out entirely rather than
     // showing it zeros - the section exists to say what a sequence did.
     std::optional<nlohmann::json> scenario;
+    // What the server-vitals scrape recorded, under the summary's `monitor`
+    // key. Absent for a run that configured no monitor - the report then omits
+    // the section entirely rather than showing a run that scraped nothing.
+    std::optional<nlohmann::json> monitor;
     // When and whether this run's OAuth 2.0 credential was refreshed while it
     // ran, under the summary's `auth` key. Absent for every run that could not
     // refresh at all (no oauth2 auth, a non-expiring or query-placed token, the
@@ -719,6 +789,26 @@ vayu::db::Database* db_ptr,
 bool verbose,
 RunManager& manager);
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr);
+
+/**
+ * @brief Scrape @p config's metrics endpoint for the life of the run.
+ *
+ * Runs on `RunContext::monitor_thread`. Each pass GETs the URL with a timeout
+ * well under the interval, stores what it read as a `monitor_samples` row and
+ * publishes it as a live `monitor` SSE frame, then sleeps out the rest of the
+ * interval in short slices so a finishing run is never held up by a long one.
+ *
+ * A failed scrape is a **gap**: it is counted, it never throws outward, and it
+ * never fails the run. After `FAILURES_BEFORE_BACKOFF` consecutive failures it
+ * logs once and keeps trying on a doubled interval, so an endpoint that went
+ * away for the whole run costs one log line rather than one per scrape.
+ *
+ * Declared here so a test can drive the loop against a mock endpoint without an
+ * HTTP server in front of it; the production caller is `RunManager::start_run`.
+ */
+void collect_monitor (std::shared_ptr<RunContext> context,
+vayu::db::Database* db_ptr,
+MonitorConfig config);
 
 /**
  * @brief Keep a run's OAuth 2.0 credential valid for as long as the run lasts.

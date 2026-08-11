@@ -54,6 +54,11 @@ describe("LoadTestService", () => {
 			"run_1",
 			expect.any(Function),
 			expect.any(Function),
+			expect.any(Function),
+			// No step handler - a load run emits none - but a monitor handler,
+			// because a run configured with a `monitor` block streams its
+			// scrapes on this same connection.
+			undefined,
 			expect.any(Function)
 		);
 	});

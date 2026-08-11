@@ -1006,3 +1006,77 @@ TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
     ASSERT_TRUE (summary.max_healthy.has_value ());
     EXPECT_EQ (summary.max_healthy->concurrency, 2u);
 }
+
+// ============================================================================
+// Per-phase histograms on the completion path (issue #476)
+// ============================================================================
+
+namespace {
+/// A completion whose TTFB is set independently of its total, so a test can
+/// make the sampled subset differ from the population on purpose.
+vayu::Result<vayu::Response> completion_with_ttfb (double latency_ms, double first_byte_ms) {
+    vayu::Response response;
+    vayu::Result<vayu::Response> result = completion (latency_ms);
+    response                            = result.value ();
+    response.timing.first_byte_ms       = first_byte_ms;
+    return vayu::Result<vayu::Response> (response);
+}
+} // namespace
+
+// The point of the bank: the phase distribution covers every completion, not
+// the ~1% a trace is retained for. The population here is deliberately
+// bimodal, and the 1-in-10 sampler selects exactly the minority - so a feed
+// gated on retention would report the *fast* value as the median.
+//
+// Mutation check: move the record_success phase argument inside the
+// `sampled || is_slow || exemplar` branch in handle_result and both assertions
+// below fail - the count drops to 50 and the p50 to 5ms.
+TEST_F (LoadStrategyTest, PhaseHistogramsEscapeTheRetentionSample) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100000 }, // nothing here is an outlier
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 10 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-phase-escape", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    // The sampler keeps completions 0, 10, 20, ... - the fast ones.
+    for (int i = 0; i < 500; ++i) {
+        vayu::core::handle_result (context, db,
+        completion_with_ttfb (10.0, i % 10 == 0 ? 5.0 : 200.0));
+    }
+
+    EXPECT_EQ (context->metrics_collector->success_results ().size (), 50u);
+
+    auto phases = context->metrics_collector->phase_percentiles ();
+    ASSERT_TRUE (phases.has_value ());
+    const auto& ttfb = (*phases)[static_cast<size_t> (vayu::core::TimingPhase::FirstByte)];
+    EXPECT_EQ (ttfb.count, 500u);
+    EXPECT_NEAR (ttfb.p50, 200.0, 1.0);
+    // The retained sample is 90% of the way off; that gap is the feature.
+    EXPECT_NEAR (ttfb.min, 5.0, 1.0);
+}
+
+// The per-run override reaches the collector, and off means no section at all.
+TEST_F (LoadStrategyTest, PhaseHistogramsCanBeDisabledPerRun) {
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "phase_histograms", false },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-phase-off", config);
+    vayu::db::Database db (TEST_DB_PATH);
+
+    for (int i = 0; i < 20; ++i) {
+        vayu::core::handle_result (context, db, completion (10.0));
+    }
+
+    EXPECT_EQ (context->metrics_collector->total_requests (), 20u);
+    EXPECT_FALSE (context->metrics_collector->phase_percentiles ().has_value ());
+
+    // On by default, so a run that says nothing still gets the distribution.
+    nlohmann::json bare = { { "mode", "constant_rps" } };
+    auto stock = std::make_shared<vayu::core::RunContext> ("test-phase-default", bare);
+    vayu::core::handle_result (stock, db, completion (10.0));
+    EXPECT_TRUE (stock->metrics_collector->phase_percentiles ().has_value ());
+}

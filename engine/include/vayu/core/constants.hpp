@@ -263,6 +263,32 @@ constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 } // namespace server
 
 /**
+ * @brief The server-vitals monitor a run may scrape alongside its own metrics.
+ *
+ * The two a user reaches for are config-backed (`monitorIntervalMs`,
+ * `monitorMaxSeries`) and these are their seeds. The other three are rails
+ * rather than preferences: the interval bounds exist to stop a cadence that
+ * measures the scraper instead of the target, and the backoff threshold is how
+ * politely the loop gives up on a dead endpoint - the same reason
+ * `threshold_eval`'s budget ranges are constants.
+ */
+namespace monitor {
+/// Floor on `monitor.intervalMs`. Below this the scrape's own latency is a
+/// large share of the interval, so the series measures the scraper.
+constexpr int MIN_INTERVAL_MS = 250;
+/// Ceiling on it. A run shorter than one interval would record nothing.
+constexpr int MAX_INTERVAL_MS = 60000;
+/// Cadence for a block that names no `intervalMs` (config `monitorIntervalMs`).
+constexpr int DEFAULT_INTERVAL_MS = 1000;
+/// How many metrics one run may chart (config `monitorMaxSeries`). Each is a
+/// line on one overlay and a name matched against every exposition line.
+constexpr size_t MAX_SERIES = 8;
+/// Consecutive failed scrapes before the loop logs once and backs off. Below
+/// this a scrape failure is a gap in the series and nothing else.
+constexpr int FAILURES_BEFORE_BACKOFF = 5;
+} // namespace monitor
+
+/**
  * @brief Server-Sent Events (SSE) configuration
  */
 namespace sse {
@@ -439,6 +465,14 @@ constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
 /// HdrHistogram max trackable latency in microseconds (1 hour)
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
+/// Whether a load run feeds the five per-phase histograms (config key
+/// `phaseHistograms`). On by default: the phase values are computed for every
+/// completion anyway, and without this bank they survive only for the ~1% of
+/// completions a trace is retained for - so "was it the server or the
+/// connection path" is answered off a biased sample. The escape hatch exists
+/// because the feed is five atomic histogram records on the completion path;
+/// see docs/engine/benchmarks.md for the measured cost.
+constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 } // namespace metrics_collector
 
 /**

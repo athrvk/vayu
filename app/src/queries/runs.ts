@@ -24,7 +24,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { Run, RunListResponse, StartScenarioRunRequest } from "@/types";
-import type { TimeSeriesResponse } from "@/modules/history/types";
+import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
 
@@ -214,6 +214,35 @@ export function useRunTimeSeriesQuery(runId: string | null) {
 			}),
 		enabled: !!runId,
 		// Historical data never changes
+		staleTime: Infinity,
+		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
+		initialPageParam: 0,
+		getNextPageParam: (lastPage) =>
+			lastPage.pagination.hasMore
+				? lastPage.pagination.offset + lastPage.pagination.limit
+				: undefined,
+	});
+}
+
+/**
+ * Fetch the server vitals scraped during a run (paginated, auto-fetches all
+ * pages), for the history view's overlay.
+ *
+ * Its own query beside {@link useRunTimeSeriesQuery} rather than a field on it:
+ * the two series come from different endpoints and different cadences, and a
+ * run that configured no monitor must not pay a second fetch it would only ever
+ * read as empty - which is what `enabled` expresses at the call site.
+ */
+export function useRunMonitorSeriesQuery(runId: string | null, enabled = true) {
+	return useInfiniteQuery<MonitorSeriesResponse, Error>({
+		queryKey: queryKeys.runs.monitorSeries(runId ?? ""),
+		queryFn: ({ pageParam = 0 }) =>
+			apiService.getRunMonitorSeries(runId!, {
+				limit: STATS_PAGE_LIMIT,
+				offset: pageParam as number,
+			}),
+		enabled: !!runId && enabled,
+		// A finished run's scrapes never change, like its time series.
 		staleTime: Infinity,
 		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
 		initialPageParam: 0,

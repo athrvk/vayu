@@ -372,6 +372,42 @@ JSClassDef expect_class = { .class_name = "Expectation",
     .exotic                             = nullptr };
 
 /**
+ * @brief Throw a failed assertion the way chai does - as an `AssertionError`.
+ *
+ * `pm.expect` is chai, and chai reports a broken assertion as an
+ * `AssertionError`. Vayu threw a `TypeError` instead, which is wrong in two
+ * ways a user can see (issue #487): the report and the console prefix every
+ * failure with `TypeError:`, which reads as an engine fault rather than the
+ * assertion doing its job, and a script that inspects what it caught -
+ * `catch (e) { if (e.name === "AssertionError") ... }` - takes the other branch
+ * than it does in Postman.
+ *
+ * QuickJS has no `AssertionError` class, so the error is a plain `Error` with
+ * the name replaced: `instanceof Error` still holds, `JS_NewError` gives it the
+ * same backtrace a native throw would, and `message` is defined with the
+ * native errors' attributes (writable, configurable, **not** enumerable) so
+ * `JSON.stringify(e)` answers what it always did. No `AssertionError` global is
+ * exposed - chai's lives on the `chai` module, which Vayu does not ship, and a
+ * bare global would be a name Postman scripts cannot rely on either.
+ *
+ * Only *assertion* failures come through here. A script-text mistake - a
+ * matcher called with no argument, a misspelled name under `pm.response.to` -
+ * stays a `TypeError`, in chai as much as here: nothing was asserted, the call
+ * itself was wrong.
+ */
+JSValue throw_assertion_failure (JSContext* ctx, const std::string& message) {
+    JSValue error = JS_NewError (ctx);
+    if (JS_IsException (error)) {
+        return JS_EXCEPTION;
+    }
+    JS_DefinePropertyValueStr (ctx, error, "name", JS_NewString (ctx, "AssertionError"),
+    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr (ctx, error, "message", JS_NewString (ctx, message.c_str ()),
+    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    return JS_Throw (ctx, error);
+}
+
+/**
  * @brief Report a failed assertion, prefixed with the expectation's message.
  *
  * chai's `expect(value, message)` puts the script's own words in front of
@@ -390,10 +426,9 @@ JSClassDef expect_class = { .class_name = "Expectation",
  */
 JSValue throw_expect_failure (JSContext* ctx, const ExpectState* state, const std::string& failure) {
     if (state != nullptr && !state->message.empty ()) {
-        const std::string prefixed = state->message + ": " + failure;
-        return JS_ThrowTypeError (ctx, "%s", prefixed.c_str ());
+        return throw_assertion_failure (ctx, state->message + ": " + failure);
     }
-    return JS_ThrowTypeError (ctx, "%s", failure.c_str ());
+    return throw_assertion_failure (ctx, failure);
 }
 
 // ----------------------------------------------------------------------------
@@ -2140,6 +2175,13 @@ void install_response_body_readers (JSContext* ctx, JSValue response, const std:
 // pm.response.to.have Assertions (Postman-compatible)
 // ============================================================================
 
+// These are chai assertions in Postman exactly as `pm.expect` is, so their
+// failures throw through `throw_assertion_failure` too - a report that named
+// one form `AssertionError` and the other `TypeError` would be a distinction
+// with nothing behind it. They carry no chai message argument (`status(200)`
+// takes a status code, not a message), so they call the helper directly rather
+// than through `throw_expect_failure`, which exists to apply that prefix.
+
 JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "status() requires an expected status code");
@@ -2158,7 +2200,7 @@ JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc
     if (data->response->status_code != expected_status) {
         std::string msg = "Expected status code " + std::to_string (expected_status) +
         " but got " + std::to_string (data->response->status_code);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_assertion_failure (ctx, msg);
     }
 
     return JS_UNDEFINED;
@@ -2194,7 +2236,7 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
 
     if (!found) {
         std::string msg = "Expected response to have header '" + header_name + "'";
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_assertion_failure (ctx, msg);
     }
 
     // If a second argument is provided, check the value
@@ -2203,7 +2245,7 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
         if (found_value != expected_value) {
             std::string msg = "Expected header '" + header_name + "' to be '" +
             expected_value + "' but got '" + found_value + "'";
-            return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+            return throw_assertion_failure (ctx, msg);
         }
     }
 
@@ -2224,7 +2266,7 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
 
     if (data->response->body.find (expected) == std::string::npos) {
         std::string msg = "Expected response body to contain '" + expected + "'";
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_assertion_failure (ctx, msg);
     }
 
     return JS_UNDEFINED;
@@ -2242,7 +2284,7 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
     if (JS_IsException (json)) {
         // Swallow the parse exception so we report a clean assertion failure.
         JS_FreeValue (ctx, JS_GetException (ctx));
-        return JS_ThrowTypeError (ctx, "Response body is not valid JSON");
+        return throw_assertion_failure (ctx, "Response body is not valid JSON");
     }
 
     // No-arg form asserts only that the body is valid JSON (Postman semantics).
@@ -2274,7 +2316,7 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
         if (JS_IsUndefined (current)) {
             JS_FreeValue (ctx, json);
             std::string msg = "Expected response body to have property '" + prop_path + "'";
-            return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+            return throw_assertion_failure (ctx, msg);
         }
 
         if (end == std::string::npos)
@@ -2340,7 +2382,7 @@ int magic) {
     if (code < matcher.lo || code > matcher.hi) {
         std::string msg = std::string ("Expected response to have ") +
         matcher.expectation + " but got " + std::to_string (code);
-        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+        return throw_assertion_failure (ctx, msg);
     }
 
     return JS_UNDEFINED;
@@ -2358,7 +2400,7 @@ JSValue js_response_be_json (JSContext* ctx, JSValueConst this_val, int argc, JS
     JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
     data->response->body.size (), "<response>");
     if (JS_IsException (json)) {
-        return JS_ThrowTypeError (ctx, "Expected response body to be valid JSON");
+        return throw_assertion_failure (ctx, "Expected response body to be valid JSON");
     }
     JS_FreeValue (ctx, json);
 
@@ -2375,7 +2417,7 @@ JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int arg
     }
 
     if (data->response->body.empty ()) {
-        return JS_ThrowTypeError (ctx, "Expected response to have a body");
+        return throw_assertion_failure (ctx, "Expected response to have a body");
     }
 
     return JS_UNDEFINED;
