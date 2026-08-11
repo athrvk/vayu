@@ -18,6 +18,7 @@
 #include "vayu/http/mock_issuer.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/managed_listener.hpp"
 #include "vayu/http/pkce.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -367,8 +368,9 @@ struct MockIssuerState {
     std::map<std::string, IssuedCode> codes;
     std::map<std::string, IssuedRefresh> refresh_tokens;
 
-    std::unique_ptr<httplib::Server> server;
-    std::thread listen_thread;
+    /// Declared last so it is destroyed first: `/token` and `/authorize` read
+    /// every field above it while the accept loop is alive.
+    ManagedListener listener;
 
     std::string token_url () const {
         return issuer_url + "/token";
@@ -620,13 +622,7 @@ MockIssuerManager::~MockIssuerManager () {
 }
 
 void MockIssuerManager::teardown (Issuer& issuer) {
-    if (issuer.server) {
-        issuer.server->stop ();
-    }
-    if (issuer.listen_thread.joinable ()) {
-        issuer.listen_thread.join ();
-    }
-    issuer.server.reset ();
+    issuer.listener.stop ();
 }
 
 MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
@@ -659,24 +655,20 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     // The signing key is base64url text rather than raw bytes so it can be
     // handed to a service under test as a shared secret verbatim.
     issuer->signing_key = pkce::random_token (32);
-    issuer->server      = std::make_unique<httplib::Server> ();
 
     Issuer* raw = issuer.get ();
-    raw->server->Post ("/token", [raw] (const httplib::Request& req, httplib::Response& res) {
+    raw->listener.server ().Post (
+    "/token", [raw] (const httplib::Request& req, httplib::Response& res) {
         handle_token (*raw, req, res);
     });
-    raw->server->Get (
+    raw->listener.server ().Get (
     "/authorize", [raw] (const httplib::Request& req, httplib::Response& res) {
         handle_authorize (*raw, req, res);
     });
 
     // 127.0.0.1 only, never configurable: the issuer mints bearer tokens and
     // the engine has no route auth, so a wider bind would hand them to the LAN.
-    const int port = issuer->settings.port == 0 ?
-    issuer->server->bind_to_any_port ("127.0.0.1") :
-    (issuer->server->bind_to_port ("127.0.0.1", issuer->settings.port) ?
-    issuer->settings.port :
-    0);
+    const int port = issuer->listener.start ("127.0.0.1", issuer->settings.port);
     if (port <= 0) {
         out.ok            = false;
         out.http_status   = 500;
@@ -688,14 +680,6 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     }
     issuer->port       = port;
     issuer->issuer_url = "http://127.0.0.1:" + std::to_string (port);
-
-    httplib::Server* svr  = issuer->server.get ();
-    issuer->listen_thread = std::thread ([svr] { svr->listen_after_bind (); });
-    // Same reason as the authorize listener: a stop() that races ahead of
-    // listen() is missed and the join below would hang.
-    for (int i = 0; i < 200 && !svr->is_running (); ++i) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (1));
-    }
 
     out.issuer_id     = issuer->id;
     out.issuer_url    = issuer->issuer_url;

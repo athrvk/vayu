@@ -382,6 +382,7 @@ if(VAYU_BUILD_ENGINE)
     add_executable(vayu-engine
         src/daemon.cpp
         src/http/server.cpp
+        src/http/managed_listener.cpp
         src/http/routes/health.cpp
         src/http/routes/config.cpp
         src/http/routes/collections.cpp
@@ -483,6 +484,7 @@ if(VAYU_BUILD_TESTS)
         tests/oauth_route_test.cpp
         tests/pkce_test.cpp
         tests/debug_redact_test.cpp
+        tests/managed_listener_test.cpp
         tests/oauth_authorize_test.cpp
         tests/mock_issuer_test.cpp
         tests/inbox_test.cpp
@@ -517,6 +519,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/cookies.cpp
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
+        src/http/managed_listener.cpp
     )
     
     # The cross-language conformance fixture lives in the source tree and is
