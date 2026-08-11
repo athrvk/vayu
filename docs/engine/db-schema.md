@@ -604,16 +604,18 @@ What a [webhook inbox](api-reference.md#webhook-inbox) listener captured. Struct
 | `path`           | TEXT       | Decoded path, no query                                            |
 | `query`          | TEXT       | Raw query string, without the `?`                                 |
 | `headers`        | TEXT       | JSON object; a repeated name is joined with `, `                  |
-| `body`           | TEXT       | Stored bytes, truncated to `constants::inbox::MAX_BODY_BYTES` (64 KiB) |
+| `body`           | TEXT       | Stored bytes, truncated to the `inboxMaxBodyBytes` setting (default 64 KiB) |
 | `body_bytes`     | INTEGER    | Size **as received**, which exceeds `length(body)` when truncated |
 | `body_truncated` | INTEGER    | 1 when `body` is a prefix                                         |
 | `remote_addr`    | TEXT       | Peer address the request arrived from                             |
 
-**Bounded as it is written.** `add_inbox_request` inserts and trims in one transaction, keeping
-the newest `constants::inbox::MAX_CAPTURES` (500) rows per inbox and deleting the oldest by `id` -
-insertion order, which for an append-only table is arrival order and, unlike `received_at`, cannot
-tie. A capture the caller was told had landed can therefore never be missing its insert, nor an
-untrimmed table its bound.
+**Bounded as it is written.** `add_inbox_request` inserts and trims in one transaction, keeping the
+newest `inboxMaxCaptures` rows per inbox (default 500, settable 1-10000) and deleting the oldest by
+`id` - insertion order, which for an append-only table is arrival order and, unlike `received_at`,
+cannot tie. A capture the caller was told had landed can therefore never be missing its insert, nor
+an untrimmed table its bound. The retention and body limits are resolved by `read_inbox_limits`
+once, when the inbox starts, so every row belonging to one inbox was truncated and retained by the
+same rule - see [api-reference.md](api-reference.md#webhook-inbox) for the settings.
 
 **Cleared at startup.** An inbox lives only as long as the engine process that opened it, so after
 a restart every row here belongs to an inbox nothing can list. `Database::init` calls

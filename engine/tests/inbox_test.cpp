@@ -174,6 +174,14 @@ class InboxListenerTest : public ::testing::Test {
         return httplib::Client ("127.0.0.1", info.port);
     }
 
+    /// Edit a seeded config row the way a user would through POST /config.
+    void set_config (const char* key, int64_t value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        entry->value = std::to_string (value);
+        db_->save_config_entry (*entry);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<InboxManager> manager_;
 };
@@ -310,6 +318,94 @@ TEST_F (InboxListenerTest, OneLiveStreamPerInbox) {
     manager_->release_live (started.info.inbox_id);
     EXPECT_TRUE (manager_->try_claim_live (started.info.inbox_id));
     EXPECT_FALSE (manager_->try_claim_live ("inbox_nope"));
+}
+
+// ---------------------------------------------------------------------------
+// The user-settable limits
+// ---------------------------------------------------------------------------
+
+TEST_F (InboxListenerTest, SeedsTheThreeLimitsFromTheConstants) {
+    const auto limits = vayu::http::read_inbox_limits (*db_);
+    EXPECT_EQ (limits.max_body_bytes, inbox_constants::MAX_BODY_BYTES);
+    EXPECT_EQ (limits.max_captures, inbox_constants::MAX_CAPTURES);
+    EXPECT_EQ (limits.live_poll_interval_ms, inbox_constants::LIVE_POLL_INTERVAL_MS);
+
+    // Each is a real config row, so the Settings panel renders it with no app
+    // change - a constant with no entry would be invisible there.
+    for (const char* key :
+    { "inboxMaxBodyBytes", "inboxMaxCaptures", "inboxLivePollIntervalMs" }) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        EXPECT_EQ (entry->category, "observability") << key;
+        EXPECT_TRUE (entry->min_value.has_value ()) << key;
+        EXPECT_TRUE (entry->max_value.has_value ()) << key;
+    }
+}
+
+// Mutation check for the reader: point the capture path back at the constant
+// and the value the user stored stops reaching the listener.
+TEST_F (InboxListenerTest, AConfiguredBodyLimitIsWhatTruncatesACapture) {
+    set_config ("inboxMaxBodyBytes", inbox_constants::MIN_BODY_BYTES);
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    const std::string body (static_cast<size_t> (inbox_constants::MIN_BODY_BYTES) + 40, 'x');
+    ASSERT_TRUE (client.Post ("/hook", body, "text/plain"));
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 1, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    EXPECT_EQ (static_cast<int64_t> (captures.front ().body.size ()),
+    inbox_constants::MIN_BODY_BYTES);
+    EXPECT_TRUE (captures.front ().body_truncated);
+    EXPECT_EQ (captures.front ().body_bytes, static_cast<int64_t> (body.size ()));
+}
+
+TEST_F (InboxListenerTest, AConfiguredRetentionIsWhatBoundsTheCaptureRing) {
+    set_config ("inboxMaxCaptures", 2);
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_TRUE (client.Post ("/hook", std::to_string (i), "text/plain"));
+    }
+
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 2u);
+    EXPECT_EQ (captures[0].body, "3"); // newest kept
+    EXPECT_EQ (captures[1].body, "2");
+}
+
+// A running inbox keeps the limits it started with, so one inbox's captures are
+// a set truncated by a single rule rather than by whatever the setting was at
+// each arrival.
+TEST_F (InboxListenerTest, ARunningInboxKeepsTheLimitsItStartedWith) {
+    auto started = start ();
+    ASSERT_TRUE (manager_->limits (started.info.inbox_id).has_value ());
+    EXPECT_EQ (manager_->limits (started.info.inbox_id)->max_captures,
+    inbox_constants::MAX_CAPTURES);
+
+    set_config ("inboxMaxCaptures", 3);
+    EXPECT_EQ (manager_->limits (started.info.inbox_id)->max_captures,
+    inbox_constants::MAX_CAPTURES);
+
+    auto restarted = start ();
+    EXPECT_EQ (manager_->limits (restarted.info.inbox_id)->max_captures, 3);
+    EXPECT_FALSE (manager_->limits ("inbox_nope").has_value ());
+}
+
+// POST /config rejects an out-of-range value against the seeded min/max, so a
+// hand-edited row is the only way one arrives - and a body limit of 0 would
+// turn every capture into an empty row that claims to be truncated.
+TEST_F (InboxListenerTest, AnOutOfRangeStoredValueFallsBackToItsSeed) {
+    set_config ("inboxMaxBodyBytes", 0);
+    set_config ("inboxMaxCaptures", -1);
+    set_config ("inboxLivePollIntervalMs", 10 * inbox_constants::MAX_LIVE_POLL_INTERVAL_MS);
+
+    const auto limits = vayu::http::read_inbox_limits (*db_);
+    EXPECT_EQ (limits.max_body_bytes, inbox_constants::MAX_BODY_BYTES);
+    EXPECT_EQ (limits.max_captures, inbox_constants::MAX_CAPTURES);
+    EXPECT_EQ (limits.live_poll_interval_ms, inbox_constants::LIVE_POLL_INTERVAL_MS);
 }
 
 // ---------------------------------------------------------------------------

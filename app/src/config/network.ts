@@ -60,8 +60,9 @@ export const RUNS_PAGE_LIMIT = 50;
 export const MCP_RUNS_PAGE_LIMIT = 100;
 
 /**
- * Page size for `GET /inbox/:id/requests`. The engine retains 500 captures per
- * inbox and caps a page at that, so this is the "what arrived recently" window
- * the surface opens with; the live stream appends past it.
+ * Page size for `GET /inbox/:id/requests`. This is the "what arrived recently"
+ * window the surface opens with; the live stream appends past it. Not a mirror
+ * of the engine's retention - that is the `inboxMaxCaptures` setting, which
+ * caps how large a page may be asked for, not how large one is worth fetching.
  */
 export const INBOX_CAPTURES_PAGE_LIMIT = 50;

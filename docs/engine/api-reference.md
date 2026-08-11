@@ -1228,11 +1228,22 @@ inbox reports `loopback: false` from then on so a client can badge it. See
 [architecture.md](architecture.md#listeners) for why only the inbox listener may
 bind wide and the management API never may.
 
-**Bounds.** A capture stores at most 64 KiB of body (`bodyTruncated` says the
-stored bytes are a prefix and `bodyBytes` is the size as received); a request
-larger than 8 MiB is refused at the transport with a `413` and recorded nowhere;
-each inbox retains its 500 most recent captures, oldest evicted first; the
-canned response's `delayMs` is capped at 30000.
+**Bounds.** Three are settings (`GET`/`POST /config`, category *Observability &
+Data*), read once when an inbox starts - so a change applies to the next inbox
+started, and a running listener keeps what it was started with:
+
+| Setting | Default | Range | What it bounds |
+|---------|---------|-------|----------------|
+| `inboxMaxBodyBytes` | 65536 | 256 - 8388608 | Stored body per capture. Past it the body is kept as a prefix with `bodyTruncated: true`; `bodyBytes` is always the size as received |
+| `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
+| `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
+
+Two are **not** settings, deliberately. A request over **8 MiB** is refused at
+the transport with a `413` and recorded nowhere: that bounds what an
+unauthenticated remote caller can make the engine buffer, which is not the local
+user's preference to spend. The canned response's **`delayMs` is capped at
+30000**: it holds a listener thread for its whole duration and a stop waits on
+that join, so it bounds how long a stop can be made to take.
 
 ### POST /inbox/start
 

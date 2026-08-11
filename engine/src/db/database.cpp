@@ -2112,6 +2112,45 @@ void Database::seed_default_config () {
     "observability", vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now });
 
+    // Webhook inbox. All three are read once when an inbox starts, so a change
+    // applies to the next inbox started - no restart. The running listener keeps
+    // what it was started with, which is what makes one inbox's captures a set
+    // truncated and retained by a single rule rather than by whatever the
+    // setting happened to be at each arrival.
+    upsert_config (ConfigEntry{ "inboxMaxBodyBytes",
+    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer",
+    "Inbox Capture Body Limit",
+    "How much of an inbound webhook body an inbox stores. A larger payload is "
+    "kept as a prefix and flagged as truncated, never silently cut - the "
+    "capture reports the size as received either way. Raise it for a provider "
+    "that posts large documents; the transport still refuses anything over 8MB "
+    "outright, which is not a webhook.",
+    "observability", std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES),
+    std::to_string (vayu::core::constants::inbox::MIN_BODY_BYTES),
+    std::to_string (vayu::core::constants::inbox::MAX_PAYLOAD_BYTES), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "inboxMaxCaptures",
+    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer",
+    "Inbox Captures Retained",
+    "How many requests one inbox keeps before the oldest are dropped. Also the "
+    "most a single page of the capture list may ask for. Raise it to keep a "
+    "long webhook session whole; every capture is a stored row, so this and "
+    "the body limit above together bound what an inbox costs on disk.",
+    "observability", std::to_string (vayu::core::constants::inbox::MAX_CAPTURES),
+    std::to_string (vayu::core::constants::inbox::MIN_CAPTURES),
+    std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "inboxLivePollIntervalMs",
+    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer",
+    "Inbox Live Poll Interval",
+    "How often a watched inbox checks for newly arrived captures. This is the "
+    "delay between a webhook landing and its row appearing. Lower costs a few "
+    "more wakeups per second on the one thread holding that stream and nothing "
+    "on the capture path itself.",
+    "observability", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
+    std::to_string (vayu::core::constants::inbox::MIN_LIVE_POLL_INTERVAL_MS),
+    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now });
+
     if (existing.empty ()) {
         vayu::utils::log_info ("Seeded default configuration values");
     } else {

@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 
 #include <map>
@@ -63,6 +64,34 @@ struct InboxParseError {
     std::string code;
     std::string message;
 };
+
+/**
+ * The user-settable bounds an inbox works within, resolved from the config
+ * table. Every field here is something a user reaches for - how much of a
+ * payload to keep, how many payloads, how quickly the list updates.
+ *
+ * Resolved as a struct rather than read per use, and taken by the decision
+ * points as a resolved value rather than a `Database`, so the capture path
+ * stays testable without a database - the same split
+ * `read_auth_refresh_tuning` draws for the mid-run renewal knobs.
+ */
+struct InboxLimits {
+    int64_t max_body_bytes = vayu::core::constants::inbox::MAX_BODY_BYTES;
+    int64_t max_captures   = vayu::core::constants::inbox::MAX_CAPTURES;
+    int live_poll_interval_ms = vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS;
+};
+
+/**
+ * Read `inboxMaxBodyBytes`, `inboxMaxCaptures` and `inboxLivePollIntervalMs`.
+ *
+ * A value outside its seeded range can only come from a hand-edited row -
+ * `POST /config` rejects one against the same bounds - and falls back to the
+ * seed rather than being trusted, as `read_auth_refresh_tuning` does. Resolved
+ * once when an inbox starts, so a change applies to inboxes started after it;
+ * the running listener keeps the bounds it was started with, which is what
+ * keeps one inbox's captures a single, consistently-truncated set.
+ */
+InboxLimits read_inbox_limits (vayu::db::Database& db);
 
 /** Is @p bind an address only this machine can reach? */
 bool is_loopback_bind (const std::string& bind);
@@ -141,6 +170,11 @@ class InboxManager {
 
     std::optional<InboxInfo> get (const std::string& inbox_id);
     std::vector<InboxInfo> list ();
+
+    /// The limits @p inbox_id was started with; nullopt when it does not exist.
+    /// Read by the routes so a page cap and a live cadence describe the inbox
+    /// they belong to rather than whatever the config says at that moment.
+    std::optional<InboxLimits> limits (const std::string& inbox_id);
 
     /// nullopt when no such inbox exists. Applies to a stopped inbox too - it
     /// is the configuration a restart would use, not the listener's state.

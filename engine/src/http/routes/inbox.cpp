@@ -82,6 +82,31 @@ std::string content_type_of (const std::map<std::string, std::string>& headers) 
 
 } // namespace
 
+InboxLimits read_inbox_limits (vayu::db::Database& db) {
+    const InboxLimits defaults;
+    // A value outside the seeded range can only reach here from a hand-edited
+    // row - POST /config rejects one against each key's min/max - and a body cap
+    // of 0 or a retention of 0 would quietly turn every capture into an empty
+    // row. Fall back rather than trust it, as read_auth_refresh_tuning does.
+    auto read = [&db] (const char* key, int64_t fallback, int64_t low, int64_t high) {
+        const auto value =
+        static_cast<int64_t> (db.get_config_int (key, static_cast<int> (fallback)));
+        return (value >= low && value <= high) ? value : fallback;
+    };
+
+    InboxLimits limits;
+    limits.max_body_bytes = read ("inboxMaxBodyBytes", defaults.max_body_bytes,
+    constants::inbox::MIN_BODY_BYTES,
+    static_cast<int64_t> (constants::inbox::MAX_PAYLOAD_BYTES));
+    limits.max_captures   = read ("inboxMaxCaptures", defaults.max_captures,
+      constants::inbox::MIN_CAPTURES, constants::inbox::CAPTURES_CEILING);
+    limits.live_poll_interval_ms =
+    static_cast<int> (read ("inboxLivePollIntervalMs",
+    defaults.live_poll_interval_ms, constants::inbox::MIN_LIVE_POLL_INTERVAL_MS,
+    constants::inbox::MAX_LIVE_POLL_INTERVAL_MS));
+    return limits;
+}
+
 bool is_loopback_bind (const std::string& bind) {
     if (bind == "localhost" || bind == "::1" || bind == "[::1]") {
         return true;
@@ -270,6 +295,9 @@ struct InboxManager::Inbox {
     std::unique_ptr<httplib::Server> server;
     std::thread listen_thread;
     std::atomic<bool> running{ false };
+    /// Resolved once at start and const thereafter, so every capture in one
+    /// inbox was truncated and retained by the same rules.
+    InboxLimits limits;
     /// One live SSE stream per inbox; see InboxManager::try_claim_live.
     std::atomic<bool> live_claimed{ false };
 
@@ -320,6 +348,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     StartResult out;
 
     auto inbox      = std::make_unique<Inbox> ();
+    inbox->limits   = read_inbox_limits (db);
     inbox->id       = vayu::utils::generate_id ("inbox_");
     inbox->bind     = request.bind;
     inbox->response = request.response;
@@ -339,14 +368,14 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         capture_row.query       = query_of (req.target);
         capture_row.headers     = headers_to_json (req.headers).dump ();
         capture_row.body_bytes  = static_cast<int64_t> (req.body.size ());
-        capture_row.body_truncated = capture_row.body_bytes > constants::inbox::MAX_BODY_BYTES;
+        capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body        = capture_row.body_truncated ?
-               req.body.substr (0, static_cast<size_t> (constants::inbox::MAX_BODY_BYTES)) :
+               req.body.substr (0, static_cast<size_t> (raw->limits.max_body_bytes)) :
                req.body;
         capture_row.remote_addr = req.remote_addr;
 
         try {
-            db.add_inbox_request (capture_row, constants::inbox::MAX_CAPTURES);
+            db.add_inbox_request (capture_row, raw->limits.max_captures);
         } catch (const std::exception& e) {
             // The sender is told the truth: nothing was recorded. Answering the
             // canned response here would make a dropped capture invisible on
@@ -464,6 +493,16 @@ std::vector<InboxInfo> InboxManager::list () {
     return out;
 }
 
+std::optional<InboxLimits> InboxManager::limits (const std::string& inbox_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto it = inboxes_.find (inbox_id);
+    if (it == inboxes_.end ()) {
+        return std::nullopt;
+    }
+    // Const since start(); no per-inbox lock needed to read it.
+    return it->second->limits;
+}
+
 std::optional<InboxInfo> InboxManager::update_response (const std::string& inbox_id,
 const InboxCannedResponse& response) {
     std::lock_guard<std::mutex> lock (mutex_);
@@ -561,8 +600,10 @@ int64_t offset) {
 namespace {
 
 /// limit: default DEFAULT_PAGE_LIMIT, invalid/<=0 -> default, capped at
-/// MAX_CAPTURES (nothing beyond it is retained). offset: <0 -> 0.
-std::pair<int64_t, int64_t> parse_capture_pagination (const httplib::Request& req) {
+/// @p retained - the inbox's configured retention, past which nothing exists to
+/// return. offset: <0 -> 0.
+std::pair<int64_t, int64_t>
+parse_capture_pagination (const httplib::Request& req, int64_t retained) {
     int64_t limit  = constants::inbox::DEFAULT_PAGE_LIMIT;
     int64_t offset = 0;
     if (req.has_param ("limit")) {
@@ -570,8 +611,8 @@ std::pair<int64_t, int64_t> parse_capture_pagination (const httplib::Request& re
             limit = std::stoll (req.get_param_value ("limit"));
             if (limit <= 0)
                 limit = constants::inbox::DEFAULT_PAGE_LIMIT;
-            if (limit > constants::inbox::MAX_CAPTURES)
-                limit = constants::inbox::MAX_CAPTURES;
+            if (limit > retained)
+                limit = retained;
         } catch (...) {
             limit = constants::inbox::DEFAULT_PAGE_LIMIT;
         }
@@ -696,7 +737,12 @@ void register_inbox_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/inbox/([^/]+)/requests)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string inbox_id = req.matches[1];
-        auto [limit, offset]       = parse_capture_pagination (req);
+        // The cap follows the inbox's own retention rather than the constant:
+        // with `inboxMaxCaptures` raised, a page of 50 would otherwise be the
+        // most the engine would ever hand back.
+        const auto limits    = ctx.inbox_manager.limits (inbox_id);
+        auto [limit, offset] = parse_capture_pagination (
+        req, limits ? limits->max_captures : constants::inbox::MAX_CAPTURES);
         try {
             auto [status, body] = inbox_captures_response (
             ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
@@ -742,6 +788,7 @@ void register_inbox_routes (RouteContext& ctx) {
             send_error (res, 404, "Inbox not found");
             return;
         }
+        const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
         if (!ctx.inbox_manager.try_claim_live (inbox_id)) {
             send_error (res, 409,
             "This inbox is already being watched; close the other stream first",
@@ -759,7 +806,7 @@ void register_inbox_routes (RouteContext& ctx) {
         }
 
         res.set_content_provider ("text/event-stream",
-        [&ctx, inbox_id, last_id] (size_t, httplib::DataSink& sink) mutable {
+        [&ctx, inbox_id, last_id, limits] (size_t, httplib::DataSink& sink) mutable {
             while (true) {
                 if (!sink.is_writable ()) {
                     break;
@@ -794,8 +841,8 @@ void register_inbox_routes (RouteContext& ctx) {
                         ctx.inbox_manager.release_live (inbox_id);
                         return false;
                     }
-                    std::this_thread::sleep_for (std::chrono::milliseconds (
-                    constants::inbox::LIVE_POLL_INTERVAL_MS));
+                    std::this_thread::sleep_for (
+                    std::chrono::milliseconds (limits.live_poll_interval_ms));
                 }
             }
             ctx.inbox_manager.release_live (inbox_id);
