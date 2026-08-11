@@ -9,13 +9,21 @@
  * History Component Types
  */
 
-import type { RunReport, LoadTestMetrics } from "@/types";
+import type { RunReport, LoadTestMetrics, MonitorSample } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
+import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 
 export interface TabProps {
 	report: RunReport;
 	runId?: string;
 	derived: DashboardDerived;
+	/**
+	 * Degradation windows detected in the run's per-tick series, derived once by
+	 * `LoadTestDetail`. Overview states them in words, Performance shades them on
+	 * the charts - one detection, two readings of it. Absent for a run whose
+	 * series never loaded or that had none.
+	 */
+	anomalies?: Anomaly[];
 }
 
 /**
@@ -25,6 +33,8 @@ export interface TabProps {
  */
 export interface PerformanceTabProps extends TabProps {
 	timeSeries: LoadTestMetrics[];
+	/** Server vitals scraped during the run; empty when it monitored nothing. */
+	monitorSamples: MonitorSample[];
 	isLoadingSeries?: boolean;
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
@@ -48,6 +58,21 @@ export type SampleResult = NonNullable<RunReport["results"]>[number];
  */
 export interface TimeSeriesResponse {
 	data: LoadTestMetrics[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
+}
+
+/**
+ * Server-vitals response from GET /runs/:runId/monitor - the same envelope the
+ * tick series uses, so one pagination reader covers both.
+ */
+export interface MonitorSeriesResponse {
+	data: MonitorSample[];
 	pagination: {
 		total: number;
 		limit: number;

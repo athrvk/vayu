@@ -256,6 +256,13 @@ default, so `sync_schema()` can
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
                "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "phases": {
+    "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100 },
+    "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100 },
+    "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 100 },
+    "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 100 },
+    "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 100 }
+  },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
@@ -263,6 +270,17 @@ default, so `sync_schema()` can
   }
 }
 ```
+
+`phases` carries the whole-run distribution of each network phase, drained from the collector's
+five per-phase HdrHistograms - which every successful completion feeds, unlike the sampled
+`results` rows the report's `timingBreakdown` averages come from. Keyed by wire name (`firstByte`,
+not `ttfb`), and the only section here written in camelCase, because the report passes it through
+verbatim rather than translating it. **Omitted** when the run recorded no distribution - the
+`phaseHistograms` setting (or the run's own `phase_histograms`) off, or nothing successful
+completed - which keeps the report's `timingBreakdown.phases` absent rather than showing five
+zeroed rows; a zeroed TLS row would claim the handshake was free, which is a different statement
+from "this run did not measure it". A zero *inside* a present section is meaningful and kept: a
+run over reused connections genuinely has a TLS p50 of 0.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `thresholds` follows
@@ -339,7 +357,7 @@ either knob is disabled by `0`. Runs still `running`/`pending` are never pruned 
 toward the cap, and neither are runs whose `baseline` is set: a pin that retention can expire is
 not a pin, and pins counting toward the cap would let a handful of them evict the recent history
 the cap exists to keep. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
-their `results`), batched inside transactions that release the DB mutex between batches so a large
+their `monitor_samples` + their `results`), batched inside transactions that release the DB mutex between batches so a large
 backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
 is wired into both at once. `prune_runs_configured()` reads the two
@@ -432,6 +450,44 @@ Two consequences of the row being the tick:
 Latency percentiles in a tick are the **windowed** (rolling) values sampled from the
 `hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
 [`runs.summary`](#runs), never here.
+
+---
+
+### `monitor_samples`
+
+The **server vitals** a run scraped from a target endpoint it was configured to
+watch (`monitor` on `POST /runs`): one row per successful scrape, written by the
+run's own scrape thread. Struct is `db::MonitorSample`. Auto-created by
+`sync_schema()`.
+
+| Column      | Type       | Notes                                          |
+|-------------|------------|------------------------------------------------|
+| `id`        | INTEGER PK | Autoincrement                                  |
+| `run_id`    | TEXT       | FK → `runs.id`                                 |
+| `timestamp` | INTEGER    | Unix ms - when the engine scraped              |
+| `payload`   | TEXT       | JSON: the sample object (below)                |
+
+`payload` **is** one `data[]` entry of `GET /runs/:runId/monitor`, and the
+`data:` of a live `monitor` SSE frame - one shape for both, built by
+`vayu::core::build_monitor_sample_payload`:
+
+```json
+{
+  "timestamp": 1730000001000,
+  "series": { "node_cpu_seconds_total": 3.75, "process_resident_memory_bytes": 1048576 }
+}
+```
+
+**Its own table rather than wider `metric_ticks` rows.** That payload's key set
+is the `GET /runs/:runId/metrics` contract, pinned by `stats_route_test.cpp`;
+and a scrape lands on the user's own cadence (250-60000ms), which does not line
+up row for row with the 1/s tick. A scrape that read nothing writes no row at
+all - a stored sample with no readings would draw a line through a hole in the
+data - so gaps are counted in the run summary's `monitor.failures` instead.
+
+Deleted with the run by the same cascade (`remove_run_cascade_locked`).
+
+---
 
 **The EAV `metrics` table this replaced is gone.** It stored one row per
 (`run_id`, `name`, `timestamp`) sample, ~20 rows per second of a run, and was kept read-only
@@ -657,6 +713,7 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | Index                        | Column                  | Query paths that rely on it                                                                                                                       |
 |------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `idx_metric_ticks_run_id`    | `metric_ticks.run_id`   | `get_metric_ticks_paginated` / `count_metric_ticks` (every `GET /runs/:id/metrics`), `get_metric_ticks_since` (the legacy SSE poll), and the `remove_all` in the run cascade |
+| `idx_monitor_samples_run_id` | `monitor_samples.run_id`| `get_monitor_samples_paginated` / `count_monitor_samples` (every `GET /runs/:id/monitor`) and the `remove_all` in the run cascade                  |
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
 | `idx_result_bodies_run_id`   | `result_bodies.run_id`  | `get_result_bodies_paginated` / `count_result_bodies` (every `GET /runs/:id/samples`) and the `remove_all` in the run cascade                     |
 | `idx_body_blobs_run_id`      | `body_blobs.run_id`     | The `remove_all` in the run cascade                                                                                                               |

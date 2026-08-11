@@ -243,6 +243,15 @@ class Database {
     std::vector<MetricTick> get_metric_ticks_since (const std::string& run_id, int64_t last_id);
     int64_t count_metric_ticks (const std::string& run_id);
 
+    // Monitor samples - one wide row per scrape of a run's configured
+    // server-vitals endpoint. Deliberately not part of `metric_ticks`: that
+    // payload's key set is the GET /runs/:id/metrics contract.
+    void add_monitor_sample (const MonitorSample& sample);
+    // Ordered (timestamp, id) so a page boundary never splits a sample.
+    std::vector<MonitorSample>
+    get_monitor_samples_paginated (const std::string& run_id, int64_t limit, int64_t offset);
+    int64_t count_monitor_samples (const std::string& run_id);
+
     // Results
     void add_result (const Result& result);
     /**

@@ -8,7 +8,11 @@
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
-import { phaseColor, phasesFromAverages } from "@/components/shared/response-viewer/timing-phases";
+import {
+	hasPhaseAverages,
+	phaseColor,
+	phasesFromAverages,
+} from "@/components/shared/response-viewer/timing-phases";
 
 /**
  * Timing waterfall - from report.timingBreakdown. Always renders 5 rows so the
@@ -30,9 +34,15 @@ import { phaseColor, phasesFromAverages } from "@/components/shared/response-vie
  *
  * Values format through `formatPhaseDuration` rather than `.toFixed(0)`, which
  * rendered any sub-millisecond average as a flat "0".
+ *
+ * `hasData` asks whether the *averages* are there, not whether
+ * `timingBreakdown` is. The object now also carries `phases` (percentiles over
+ * every completion, from the histogram bank), which is present for runs that
+ * stored no traces at all - testing the object would paint five empty bars and
+ * a confident "0 ms" total for exactly those runs.
  */
 export function TimingWaterfall({ report }: { report: RunReport | null }) {
-	const hasData = !!report?.timingBreakdown;
+	const hasData = hasPhaseAverages(report?.timingBreakdown);
 	const stages = phasesFromAverages(report?.timingBreakdown);
 
 	const total = stages.reduce((s, x) => s + (x.value ?? 0), 0);

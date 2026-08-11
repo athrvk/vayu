@@ -156,6 +156,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   concurrency - silently, since the run still reports percentiles, just computed from fewer
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
+- **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
+  fed by every successful completion and read once after the drain, behind the report's
+  `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
+  averages beside them are computed over the ~1% of completions a trace is stored for, and
+  escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
+  `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
+  check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
@@ -274,6 +281,21 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
+- **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
+  `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
+  and `/authorize`, so auth flows are exercisable offline with no real identity
+  provider. It mints HS256 JWTs with a random per-issuer key (libsodium again),
+  auto-approves `/authorize` with PKCE S256 verification, rotates refresh
+  tokens, and can be flipped between healthy and `slow` / `server_error` /
+  `invalid_client` while running. In-memory only and owned by the `Server`, on
+  the same reverse-member-order rule as the authorize manager.
+
+**Listener inventory.** The engine's own API is the only long-lived listener
+(`127.0.0.1:<port>`, `server.cpp`). Everything else is spawned, loopback-bound
+and short-lived: the interactive-auth callback (one per attempt, 5-minute TTL)
+and mock issuers (at most 8, until stopped). None of them may bind wider than
+`127.0.0.1` - the management API has no route auth and CORS `*`, and a mock
+issuer hands out bearer tokens, so a non-loopback bind would publish both.
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See
@@ -729,13 +751,19 @@ row exists - and the executor is the only thing that differs.
 - **Main Thread**: HTTP server, request routing
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
+- **Monitor Thread**: One per load test that declared a `monitor` block - it
+  scrapes the target's metrics endpoint on its own interval. Separate from the
+  metrics thread because that one is a fixed-cadence sampler with no deadline
+  compensation: a blocking HTTP call inside it would delay every subsequent tick
+  by the scrape's latency, and a hanging endpoint would end live metrics for the
+  whole run.
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped → run workers
-signalled and joined (each joins its own metrics thread and stops its event
-loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
-scope exit. Nothing is detached.
+signalled and joined (each joins its own metrics and monitor threads and stops
+its event loop first) → `curl_global_cleanup` → `Database` / `RunManager`
+destroyed at scope exit. Nothing is detached.
 
 ## Performance Characteristics
 

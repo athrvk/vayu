@@ -734,6 +734,41 @@ TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
     EXPECT_FALSE (body.contains ("sampling"));
 }
 
+// Server vitals survive the summary -> report round trip in the shape the
+// scrape wrote them, so the section a reader sees is the one the run recorded.
+TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
+    seed ({ .id = "run_monitor", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    vayu::core::MonitorTotals totals;
+    totals.add ({ { "node_cpu", 1.0 } });
+    totals.add ({ { "node_cpu", 3.0 } });
+    totals.record_failure ();
+    inputs.monitor = totals.to_summary ();
+    db_->update_run_summary (
+    "run_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_monitor");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("monitor"));
+    EXPECT_EQ (body["monitor"]["samples"].get<size_t> (), 2u);
+    EXPECT_EQ (body["monitor"]["failures"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (body["monitor"]["series"]["node_cpu"]["avg"].get<double> (), 2.0);
+}
+
+// The absence twin: a run that configured no monitor reports no section, rather
+// than a target that reported nothing.
+TEST_F (RunsRouteTest, ReportOmitsMonitorWhenNoneWasConfigured) {
+    seed ({ .id = "run_no_monitor", .start_time = 1000 });
+    auto inputs    = summary_inputs ();
+    inputs.monitor = std::nullopt;
+    db_->update_run_summary (
+    "run_no_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_monitor");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("monitor"));
+}
+
 // A run without script validation keeps the section out entirely, rather than
 // reporting a run of zero tests that all passed.
 TEST_F (RunsRouteTest, ReportOmitsTestValidationWhenNoScriptRan) {
@@ -928,6 +963,60 @@ TEST_F (RunsRouteTest, ReportOmitsCapacityForEveryOtherMode) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_not_capacity");
     ASSERT_EQ (status, 200);
     EXPECT_FALSE (body.contains ("capacity"));
+}
+
+// Per-phase percentiles round-trip from the histogram bank into the report,
+// under `timingBreakdown` beside the averages (issue #476).
+TEST_F (RunsRouteTest, ReportCarriesPerPhasePercentiles) {
+    seed ({ .id = "run_phases", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+
+    std::array<vayu::core::MetricsCollector::Percentiles, vayu::core::TIMING_PHASE_COUNT> phases{};
+    // Five distinct magnitudes, so a phase written into the wrong key fails here.
+    const double p50s[] = { 0.1, 0.3, 0.0, 2.9, 0.1 };
+    const double p99s[] = { 1.4, 8.2, 22.0, 6.1, 0.9 };
+    for (size_t i = 0; i < vayu::core::TIMING_PHASE_COUNT; ++i) {
+        phases[i].count = 4321;
+        phases[i].p50   = p50s[i];
+        phases[i].p95   = p50s[i] * 2.0;
+        phases[i].p99   = p99s[i];
+        phases[i].max   = p99s[i] * 3.0;
+    }
+    inputs.phases = phases;
+    db_->update_run_summary (
+    "run_phases", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_phases");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("timingBreakdown"));
+    const auto& breakdown = body["timingBreakdown"];
+    ASSERT_TRUE (breakdown.contains ("phases"));
+    const auto& reported = breakdown["phases"];
+
+    // Keyed by wire name - `firstByte`, not `ttfb`, and not an array index.
+    EXPECT_DOUBLE_EQ (reported["dns"]["p50"].get<double> (), 0.1);
+    EXPECT_DOUBLE_EQ (reported["connect"]["p99"].get<double> (), 8.2);
+    EXPECT_DOUBLE_EQ (reported["tls"]["p99"].get<double> (), 22.0);
+    EXPECT_DOUBLE_EQ (reported["firstByte"]["p50"].get<double> (), 2.9);
+    EXPECT_DOUBLE_EQ (reported["download"]["max"].get<double> (), 2.7);
+    EXPECT_EQ (reported["tls"]["count"].get<size_t> (), 4321u);
+}
+
+// The absence twin. A run that recorded no distribution reports no `phases`
+// key - five zeroed rows would claim every phase was instant. The averages
+// half is unaffected, which is what keeps the two independently present.
+TEST_F (RunsRouteTest, ReportOmitsPhasesWhenNoneWereRecorded) {
+    seed ({ .id = "run_no_phases", .start_time = 1000 });
+    auto inputs   = summary_inputs ();
+    inputs.phases = std::nullopt;
+    db_->update_run_summary (
+    "run_no_phases", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_phases");
+    ASSERT_EQ (status, 200);
+    if (body.contains ("timingBreakdown")) {
+        EXPECT_FALSE (body["timingBreakdown"].contains ("phases"));
+    }
 }
 
 // A summary that is not a JSON object is treated as absent. There is no second

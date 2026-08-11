@@ -25,6 +25,7 @@ import { TooltipProvider } from "@/components/ui";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import { SchemaExplorer } from "./SchemaExplorer";
+import type { SchemaEntry } from "@/lib/graphql/schema-cache";
 import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 
 const KEY = "test-schema-key";
@@ -40,23 +41,33 @@ class StubObserver {
 	disconnect() {}
 }
 
-function renderExplorer(overrides: Partial<Parameters<typeof SchemaExplorer>[0]> = {}) {
+/** The cache snapshot the pane reads, defaulted to a schema in hand. */
+function entryOf(overrides: Partial<SchemaEntry> = {}): SchemaEntry {
+	return { status: "ready", schema, error: null, fetchedAt: Date.now(), ...overrides };
+}
+
+function renderExplorer(
+	overrides: Omit<Partial<Parameters<typeof SchemaExplorer>[0]>, "entry"> & {
+		entry?: Partial<SchemaEntry>;
+	} = {}
+) {
 	const onInsert = vi.fn();
 	const onRefresh = vi.fn();
+	const onClose = vi.fn();
+	const { entry, ...rest } = overrides;
 	const view = render(
 		<TooltipProvider>
 			<SchemaExplorer
-				schema={schema}
-				status="ready"
-				fetchedAt={Date.now()}
+				entry={entryOf(entry)}
 				schemaKey={KEY}
 				onRefresh={onRefresh}
+				onClose={onClose}
 				onInsert={onInsert}
-				{...overrides}
+				{...rest}
 			/>
 		</TooltipProvider>
 	);
-	return { onInsert, onRefresh, view };
+	return { onInsert, onRefresh, onClose, view };
 }
 
 const rows = () => screen.getAllByRole("treeitem");
@@ -264,7 +275,7 @@ describe("the rendered row count is bounded", () => {
 			lru: [KEY],
 		});
 
-		renderExplorer({ schema: big });
+		renderExplorer({ entry: { schema: big } });
 
 		// 400 fields plus two branch rows, windowed to the first 200.
 		expect(rows()).toHaveLength(200);
@@ -351,14 +362,39 @@ describe("the keyboard", () => {
 
 describe("what it says when there is no schema", () => {
 	it("offers the refresh rather than an empty tree", () => {
-		renderExplorer({ schema: null, status: "error", fetchedAt: null });
+		renderExplorer({ entry: { schema: null, status: "error", fetchedAt: null } });
 		expect(screen.getByText(/No schema loaded/)).toBeTruthy();
 		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
 	});
 
 	it("browses a stale schema and states its age instead of blanking", () => {
-		renderExplorer({ status: "error", fetchedAt: Date.now() - 600_000 });
+		renderExplorer({ entry: { status: "error", fetchedAt: Date.now() - 600_000 } });
 		expect(screen.getByText(/Refresh failed/)).toBeTruthy();
 		expect(rows().length).toBeGreaterThan(0);
+	});
+});
+
+describe("the header is where every schema affordance lives", () => {
+	it("states the schema's status here, not a pane away", () => {
+		renderExplorer();
+		expect(screen.getByTitle(/Schema loaded/)).toBeTruthy();
+	});
+
+	it("names the failure and the fix when introspection was refused", () => {
+		renderExplorer({
+			entry: {
+				schema: null,
+				status: "error",
+				fetchedAt: null,
+				error: { kind: "auth", message: "401" },
+			},
+		});
+		expect(screen.getByTitle(/Credentials were rejected/).textContent).toContain("No schema");
+	});
+
+	it("closes the pane from its own header, since the Query header no longer can", () => {
+		const { onClose } = renderExplorer();
+		fireEvent.click(screen.getByLabelText("Hide schema"));
+		expect(onClose).toHaveBeenCalledTimes(1);
 	});
 });

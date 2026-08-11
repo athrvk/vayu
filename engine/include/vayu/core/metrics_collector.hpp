@@ -175,6 +175,36 @@ struct MetricsCollectorConfig {
 
     /// Ceiling on the per-status exemplar store, 0 = unlimited.
     size_t max_exemplar_results = constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS;
+
+    /// Whether the five per-phase histograms are allocated and fed. Off makes
+    /// the collector byte-for-byte what it was before them: no bank is
+    /// allocated, nothing is recorded, and `phase_percentiles()` answers
+    /// nullopt - which is what keeps the report's `phases` section absent
+    /// rather than showing five zeroed distributions.
+    bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
+};
+
+/**
+ * @brief The five network phases of a transfer, in wire order.
+ *
+ * Indexes the per-phase histogram bank and the array `phase_percentiles()`
+ * returns; `TIMING_PHASE_KEYS` gives the wire name of each, so the enum and
+ * the JSON cannot drift apart.
+ */
+enum class TimingPhase : size_t {
+    Dns       = 0,
+    Connect   = 1,
+    Tls       = 2,
+    FirstByte = 3,
+    Download  = 4
+};
+
+inline constexpr size_t TIMING_PHASE_COUNT = 5;
+
+/// Wire names, indexed by TimingPhase. The report's `timingBreakdown.phases`
+/// object is keyed by these.
+inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS = {
+    "dns", "connect", "tls", "firstByte", "download"
 };
 
 /**
@@ -268,13 +298,24 @@ class MetricsCollector {
      *                   the caller decides what deserves a body (see
      *                   handle_result), because the store a record lands in is
      *                   not what makes its body worth keeping.
+     * @param phases the completion's phase breakdown, fed to the per-phase
+     *                   histograms. Recorded **unconditionally** - it is
+     *                   deliberately not coupled to @p trace_reason, because
+     *                   escaping the ~1% retention sample is the entire point
+     *                   of the bank. Pass the live `response.timing` rather
+     *                   than five doubles: five adjacent parameters of the
+     *                   same type is a transposition waiting to happen, and
+     *                   the caller already holds the struct. nullptr, or a
+     *                   collector built with `phase_histograms` off, records
+     *                   nothing.
      */
     void record_success (int status_code,
     double latency_ms,
     double queue_wait_ms,
     const std::string& trace_data     = "",
     SuccessTraceReason trace_reason   = SuccessTraceReason::None,
-    const Response* capture_source    = nullptr);
+    const Response* capture_source    = nullptr,
+    const Timing* phases              = nullptr);
 
     /**
      * @brief Record a response sample for deferred script validation
@@ -531,6 +572,21 @@ class MetricsCollector {
     [[nodiscard]] Percentiles calculate_percentiles ();
 
     /**
+     * @brief Whole-run percentiles for each of the five network phases.
+     *
+     * Indexed by @ref TimingPhase. Read once, after the run has drained - the
+     * bank is written concurrently by every event-loop worker and only this
+     * post-run read is single-threaded, exactly like `calculate_percentiles`.
+     *
+     * `nullopt` says the run has no phase distribution to report at all:
+     * either `phase_histograms` was off, or nothing successful completed.
+     * Distinguishing that from "five phases that all measured 0ms" is why the
+     * whole return is optional rather than an array of empty Percentiles - a
+     * report showing a zeroed TLS row would claim the handshake was free.
+     */
+    [[nodiscard]] std::optional<std::array<Percentiles, TIMING_PHASE_COUNT>> phase_percentiles () const;
+
+    /**
      * @brief Sample the rolling (windowed) latency percentiles for the interval
      *        that has elapsed since the previous call, then reset the window.
      *
@@ -707,6 +763,17 @@ class MetricsCollector {
     // exclusion between writers, so the write itself must be the atomic variant.
     struct hdr_interval_recorder interval_recorder_{};
     bool interval_recorder_ready_{ false };
+
+    // One cumulative histogram per network phase, indexed by TimingPhase. Same
+    // range and precision as latency_histogram_, so a phase's p99 and the
+    // run's are read on the same scale rather than at two resolutions.
+    //
+    // All-null when `phase_histograms` is off - the null check in
+    // record_success is then the whole cost of the feature on the completion
+    // path, and phase_percentiles() answers nullopt. Written from every
+    // event-loop worker, so records go through hdr_record_value_atomic for the
+    // same reason latency_histogram_'s do; read once after the drain.
+    std::array<struct hdr_histogram*, TIMING_PHASE_COUNT> phase_histograms_{};
 
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;

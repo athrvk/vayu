@@ -23,6 +23,7 @@ import {
 	CapturedResponseNotice,
 	ResponseBody,
 	SampledExchange,
+	hasPhaseAverages,
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
@@ -144,8 +145,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 				</Card>
 			)}
 
-			{/* Timing Breakdown */}
-			{report.timingBreakdown && (
+			{/* Timing Breakdown. Gated on the averages themselves, not on the
+			    object: `timingBreakdown` also carries the per-phase percentiles,
+			    which exist for runs that stored no traces - and this card renders
+			    averages only, so it would print five dashes for them. */}
+			{hasPhaseAverages(report.timingBreakdown) && (
 				<Card>
 					<CardHeader>
 						<CardTitle className="text-lg">Timing Breakdown</CardTitle>

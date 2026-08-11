@@ -756,6 +756,10 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
 
 - **MCP-originated run tagging** - tag runs started via MCP so History shows
   provenance.
+- **`start_mock_issuer`** - a tool over the engine's local OAuth 2.0 mock issuer
+  ([API reference](./api-reference.md#local-mock-issuer)), so an agent asked to
+  "test this auth flow" can mint its own tokens. Deliberately out of scope of
+  the engine-side feature (#479); the routes are reachable today.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command (backlog M1).
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.

@@ -167,6 +167,9 @@ inline auto make_storage (const std::string& path) {
     // every run ever recorded, not just the current one.
     // get_metric_ticks_since is polled every 500ms by the legacy SSE loop.
     make_index ("idx_metric_ticks_run_id", &MetricTick::run_id),
+    // monitor_samples grows with the run too (one row per scrape interval), and
+    // both its reader and the run cascade filter on run_id.
+    make_index ("idx_monitor_samples_run_id", &MonitorSample::run_id),
     make_index ("idx_results_run_id", &Result::run_id),
     // GET /runs/:id/samples pages result_bodies by run, and the run cascade
     // deletes both new tables by run_id.
@@ -257,6 +260,16 @@ inline auto make_storage (const std::string& path) {
     make_column ("run_id", &MetricTick::run_id),
     make_column ("timestamp", &MetricTick::timestamp),
     make_column ("payload", &MetricTick::payload)), // JSON: the whole tick object
+
+    // Monitor samples: one row per scrape of the run's configured server-vitals
+    // endpoint. Its own table rather than a wider metric_ticks row - the tick
+    // payload's key set is the GET /runs/:id/metrics contract, and these arrive
+    // on the user's scrape cadence, not the tick cadence.
+    make_table ("monitor_samples",
+    make_column ("id", &MonitorSample::id, primary_key ().autoincrement ()),
+    make_column ("run_id", &MonitorSample::run_id),
+    make_column ("timestamp", &MonitorSample::timestamp),
+    make_column ("payload", &MonitorSample::payload)), // JSON: {timestamp, series}
 
     // Results: Individual request outcomes with timing breakdown
     make_table ("results", make_column ("id", &Result::id, primary_key ().autoincrement ()),
@@ -1005,6 +1018,7 @@ int64_t Database::count_runs (const RunFilter& filter) {
 // was added to both by editing only this function). Caller holds the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
+    impl_->storage.remove_all<MonitorSample> (where (c (&MonitorSample::run_id) == id));
     // Captured bodies before the results they hang off, so a delete interrupted
     // between the two leaves results without bodies rather than body rows
     // pointing at nothing. `maxRunsRetained` doubles as the expiry for anything
@@ -1201,6 +1215,31 @@ Database::get_metric_ticks_since (const std::string& run_id, int64_t last_id) {
 int64_t Database::count_metric_ticks (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.count<MetricTick> (where (c (&MetricTick::run_id) == run_id));
+}
+
+// ============================================================================
+// Monitor samples - external server vitals scraped alongside a run
+// ============================================================================
+
+void Database::add_monitor_sample (const MonitorSample& sample) {
+    retry_on_busy ("add monitor sample", 5, std::chrono::milliseconds (100),
+    [&] { impl_->storage.insert (sample); });
+}
+
+// Ordered (timestamp, id) for the same reason the tick reader is: a page
+// boundary falls between two whole samples, never inside one.
+std::vector<MonitorSample>
+Database::get_monitor_samples_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<MonitorSample> (
+    where (c (&MonitorSample::run_id) == run_id),
+    multi_order_by (order_by (&MonitorSample::timestamp), order_by (&MonitorSample::id)),
+    sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_monitor_samples (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<MonitorSample> (where (c (&MonitorSample::run_id) == run_id));
 }
 
 // ============================================================================
@@ -1809,6 +1848,33 @@ void Database::seed_default_config () {
     "5000", // 5s - past this a finished run visibly waits on the join
     std::nullopt, now });
 
+    // Server-vitals monitor. Both are read per run - a change applies to the
+    // next run started, no restart. The interval *bounds* (250-60000ms) are
+    // deliberately not settings: they exist to stop a cadence that measures the
+    // scraper rather than the target.
+    upsert_config (ConfigEntry{ "monitorIntervalMs",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer",
+    "Server Monitoring Scrape Interval",
+    "How often a load test scrapes the metrics endpoint it was pointed at, "
+    "when the run does not set its own interval. Each scrape is one request on "
+    "the run's monitor thread, so it never delays the run's own metrics - but a "
+    "cadence faster than the target's own collection interval only re-reads the "
+    "same numbers. Raise it for an endpoint that is expensive to render.",
+    "observability",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS),
+    std::to_string (vayu::core::constants::monitor::MIN_INTERVAL_MS),
+    std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "monitorMaxSeries",
+    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer",
+    "Server Monitoring Metric Limit",
+    "How many metric names one run may chart from its monitored endpoint. Each "
+    "is a line on a single overlay and a name matched against every line of the "
+    "exposition body, so the ceiling is about a readable chart rather than a "
+    "hard cost. The chart has four distinct colours and repeats them past that.",
+    "observability", std::to_string (vayu::core::constants::monitor::MAX_SERIES),
+    "1", "64", std::nullopt, now });
+
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
     // Configuration for the QuickJS sandbox execution, limits, and debugging
@@ -1983,6 +2049,19 @@ void Database::seed_default_config () {
     "0",          // 0 disables body capture while keeping headers and metadata
     "1073741824", // 1GB
     std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "phaseHistograms",
+    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    "boolean", "Per-Phase Latency Histograms",
+    "Record DNS, connect, TLS, first-byte and download times for every "
+    "load-test completion, so the report can give each phase real percentiles "
+    "instead of an average over the small sample it stores traces for. This is "
+    "what answers whether a slow p99 came from the server or from connection "
+    "setup. Costs five histogram writes per completion; turn it off only if a "
+    "run at your throughput ceiling measurably suffers.",
+    "observability",
+    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    std::nullopt, std::nullopt, std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxResponseBodyBytes",
     std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),

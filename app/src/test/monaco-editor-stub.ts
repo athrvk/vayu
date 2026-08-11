@@ -27,12 +27,22 @@ export const editorPositions = new Map<string, { lineNumber: number; column: num
 export const editorReveals = new Map<string, number[]>();
 /** How many times each mocked editor was focused, by language. */
 export const editorFocuses = new Map<string, number>();
+/** The range each mocked editor was last asked to select, by language. */
+export const editorSelections = new Map<string, EditorRange>();
+
+export interface EditorRange {
+	startLineNumber: number;
+	startColumn: number;
+	endLineNumber: number;
+	endColumn: number;
+}
 
 export function resetEditorStubs() {
 	editorValues.clear();
 	editorPositions.clear();
 	editorReveals.clear();
 	editorFocuses.clear();
+	editorSelections.clear();
 }
 
 export function offsetAt(text: string, position: { lineNumber: number; column: number }): number {
@@ -67,6 +77,7 @@ export function fakeEditor(language: string) {
 		getPosition: () => editorPositions.get(language) ?? { lineNumber: 1, column: 1 },
 		setPosition: (p: { lineNumber: number; column: number }) =>
 			editorPositions.set(language, p),
+		setSelection: (range: EditorRange) => editorSelections.set(language, range),
 		revealPositionInCenterIfOutsideViewport: () => {},
 		revealLineInCenter: (line: number) =>
 			editorReveals.set(language, [...(editorReveals.get(language) ?? []), line]),

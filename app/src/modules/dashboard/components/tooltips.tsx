@@ -96,6 +96,9 @@ export const TOOLTIPS = {
 	statusCodesOverTime:
 		"Per-interval count of responses by status class, stacked. A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Derived by diffing the cumulative status-code map between ticks.",
 
+	serverVitals:
+		"Metrics scraped from the target itself during the run, drawn on the run's own timeline so a climb in p99 can be read against the server's CPU, memory or connection count. Each reading holds until the next scrape; a break in a line is a scrape that failed. Configure the endpoint under Server monitoring when starting the run.",
+
 	// ---- Other existing cards ----
 	rampDeviation:
 		"Mean absolute gap between achieved (measured) and configured concurrency, as a percent of target. Counts both undershoot and overshoot, so a ramp that runs over target reads high.",
@@ -103,6 +106,8 @@ export const TOOLTIPS = {
 		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Sourced from the engine's HdrHistogram.",
 	avgRequestTiming:
 		"Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server.",
+	phasePercentiles:
+		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the engine's phaseHistograms setting.",
 } satisfies Record<string, ReactNode>;
 
 export type TooltipKey = keyof typeof TOOLTIPS;

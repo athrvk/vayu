@@ -21,17 +21,40 @@
 		"noFallthroughCasesInSwitch": true,
 		"forceConsistentCasingInFileNames": true,
 
-		/* Path aliases */
-		"baseUrl": ".",
+		/*
+		 * Ambient type packages, declared rather than inferred. TypeScript 7
+		 * defaults this to `[]`; 5.x defaults it to every package under
+		 * `node_modules/@types`. Leaving it unset therefore means two different
+		 * things to the two compilers - under 7 the source-scanning tests lose
+		 * `node:fs`, `node:path` and `__dirname` (176 errors across 48 files,
+		 * measured on 7.0.2), all of which this one line restores.
+		 *
+		 * Only `node` is listed because it is the only one used ambiently.
+		 * `@types/react`, `@types/react-dom` and `@types/js-yaml` arrive through
+		 * ordinary imports, which this option does not govern.
+		 */
+		"types": ["node"],
+
+		/*
+		 * Path aliases, with no `baseUrl` - TypeScript 7 removes that option, and
+		 * without it a target must be written relative (`./src/*`, not `src/*`)
+		 * or tsc rejects the config outright with TS5090. Relative targets
+		 * resolve against this file's directory, so each entry below points
+		 * where its `baseUrl`-rooted spelling used to.
+		 *
+		 * The bundler-side copies of this table are hand-written aliases in
+		 * `vite.config.ts` and `vitest.config.ts` - neither derives from this
+		 * file, so a new entry here has to be added there too.
+		 */
 		"paths": {
-			"@/*": ["src/*"],
-			"@/components/*": ["src/components/*"],
-			"@/modules/*": ["src/modules/*"],
-			"@/stores/*": ["src/stores/*"],
-			"@/hooks/*": ["src/hooks/*"],
-			"@/services/*": ["src/services/*"],
-			"@/types/*": ["src/types/*"],
-			"@/utils/*": ["src/utils/*"],
+			"@/*": ["./src/*"],
+			"@/components/*": ["./src/components/*"],
+			"@/modules/*": ["./src/modules/*"],
+			"@/stores/*": ["./src/stores/*"],
+			"@/hooks/*": ["./src/hooks/*"],
+			"@/services/*": ["./src/services/*"],
+			"@/types/*": ["./src/types/*"],
+			"@/utils/*": ["./src/utils/*"],
 			"@shared/*": ["../shared/*"]
 		}
 	},

@@ -115,6 +115,12 @@ export const API_ENDPOINTS = {
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
 		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 
+	// Server vitals scraped during the run (JSON, paginated, same envelope).
+	// Its own endpoint rather than extra keys on the tick objects: those keys
+	// are the /metrics contract, and scrapes land on the user's own cadence.
+	RUN_MONITOR: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
+		`/runs/${runId}/monitor?limit=${limit}&offset=${offset}`,
+
 	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
 	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
 	// (the import path no longer creates items one POST at a time).

@@ -197,11 +197,26 @@ struct ReportExtras {
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
     size_t response_bodies_captured = 0;
+    // What the run's server-vitals scrape recorded, verbatim from the summary
+    // (per-series min/max/avg plus the sample and gap counts). `has_monitor`
+    // false leaves the section out entirely - a run that configured no monitor
+    // did not measure a target reporting zeros.
+    bool has_monitor = false;
+    nlohmann::json monitor = nlohmann::json::object ();
     // How many of this run's transfers asked for HTTP/2 and negotiated
     // something older. Not a performance number - it is what tells the reader
     // whether the protocol the report is labelled with is the one the numbers
     // were measured over (issue #215).
     double http_version_downgraded = 0.0;
+    // Per-phase latency distributions, verbatim from the summary and already in
+    // the report's shape. Empty for a run that recorded none - the toggle off,
+    // nothing successful completed, or an engine older than the phase bank -
+    // which leaves `timingBreakdown.phases` out. The averages beside it are
+    // computed over the retained sample and stay whatever they were; these are
+    // the whole population, so a reader comparing the two is comparing a
+    // sample's mean against every completion's distribution, not two views of
+    // the same rows.
+    nlohmann::json phases = nlohmann::json::object ();
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -385,6 +400,11 @@ ReportExtras& extras) {
         }
     }
 
+    if (summary.contains ("monitor") && summary["monitor"].is_object ()) {
+        extras.has_monitor = true;
+        extras.monitor     = summary["monitor"];
+    }
+
     if (summary.contains ("tests") && summary["tests"].is_object ()) {
         extras.has_tests = true;
         read_number (summary["tests"], "sampled", extras.tests_sampled);
@@ -406,6 +426,15 @@ ReportExtras& extras) {
 
     if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
         read_capacity_section (summary["capacity"], extras);
+    }
+
+    // Per-phase distributions, passed through rather than re-keyed: the
+    // producer writes the report's own wire names (TIMING_PHASE_KEYS), so a
+    // translation table here would be a second place to keep them. An empty
+    // object is treated as absent - it names no phase a reader can act on.
+    if (summary.contains ("phases") && summary["phases"].is_object () &&
+    !summary["phases"].empty ()) {
+        extras.phases = summary["phases"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -875,12 +904,26 @@ const std::string& run_id) {
     }
     json_report["errors"] = errors_obj;
 
+    // Two independent halves under one key, and either can be present without
+    // the other. The averages come from the retained trace sample, so they are
+    // absent for a run that stored no traces; `phases` comes from the
+    // histograms every completion fed, so it is present for a run that stored
+    // none and absent for one recorded before the bank existed. Clients read
+    // each half by its own key rather than treating the object's presence as
+    // proof of either.
+    nlohmann::json timing_breakdown = nlohmann::json::object ();
     if (report.has_timing_data) {
-        json_report["timingBreakdown"] = { { "avgDnsMs", report.avg_dns_ms },
-            { "avgConnectMs", report.avg_connect_ms },
-            { "avgTlsMs", report.avg_tls_ms },
-            { "avgFirstByteMs", report.avg_first_byte_ms },
-            { "avgDownloadMs", report.avg_download_ms } };
+        timing_breakdown["avgDnsMs"]       = report.avg_dns_ms;
+        timing_breakdown["avgConnectMs"]   = report.avg_connect_ms;
+        timing_breakdown["avgTlsMs"]       = report.avg_tls_ms;
+        timing_breakdown["avgFirstByteMs"] = report.avg_first_byte_ms;
+        timing_breakdown["avgDownloadMs"]  = report.avg_download_ms;
+    }
+    if (!extras.phases.empty ()) {
+        timing_breakdown["phases"] = extras.phases;
+    }
+    if (!timing_breakdown.empty ()) {
+        json_report["timingBreakdown"] = timing_breakdown;
     }
 
     if (report.slow_threshold_ms > 0) {
@@ -927,6 +970,13 @@ const std::string& run_id) {
         if (!extras.step_breakdown.empty ()) {
             json_report["scenario"]["steps"] = extras.step_breakdown;
         }
+    }
+
+    // Server vitals beside the run's own numbers. Passed through as stored:
+    // the totals are written in the report's own shape, so there is one
+    // description of the section rather than a writer and a translator.
+    if (extras.has_monitor) {
+        json_report["monitor"] = extras.monitor;
     }
 
     if (extras.has_tests) {

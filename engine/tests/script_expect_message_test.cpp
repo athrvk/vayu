@@ -145,10 +145,13 @@ TEST_F (ExpectMessageTest, TheMessageSurvivesNegationAndChaining) {
 // separator, no empty prefix.
 TEST_F (ExpectMessageTest, TheOneArgumentFormIsUnchanged) {
     // Whole-string equality rather than a substring: what this pins is that
-    // nothing was added, which a `contains` cannot see.
+    // nothing was added, which a `contains` cannot see. The leading
+    // `AssertionError:` is chai's name for a failed assertion (#487), not a
+    // prefix this feature adds.
     EXPECT_EQ (failure_of (R"(pm.expect(false).to.be.true)"),
-    "TypeError: Expected value to be truthy");
-    EXPECT_EQ (failure_of (R"(pm.expect(1).to.equal(2))"), "TypeError: Expected 1 to equal 2");
+    "AssertionError: Expected value to be truthy");
+    EXPECT_EQ (failure_of (R"(pm.expect(1).to.equal(2))"),
+    "AssertionError: Expected 1 to equal 2");
 }
 
 // chai coerces the message instead of demanding a string, and a caller that
@@ -163,7 +166,8 @@ TEST_F (ExpectMessageTest, ANonStringMessageIsCoercedAndAnAbsentOneIsNotPrefixed
 
     for (const char* absent : { R"(pm.expect(false, undefined).to.be.true)",
          R"(pm.expect(false, null).to.be.true)", R"(pm.expect(false, "").to.be.true)" }) {
-        EXPECT_EQ (failure_of (absent), "TypeError: Expected value to be truthy") << absent;
+        EXPECT_EQ (failure_of (absent), "AssertionError: Expected value to be truthy")
+        << absent;
     }
 }
 

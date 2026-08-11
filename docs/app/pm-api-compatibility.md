@@ -271,6 +271,22 @@ Non-strings are coerced and `undefined` / `null` mean no message, both as in
 chai. Assertion failures carry it; a malformed call (`.to.be.above()` with no
 argument) reports its own misuse unprefixed.
 
+**A failed assertion is an `AssertionError`**, as in chai - both from
+`pm.expect` and from `pm.response.to`:
+
+```javascript
+pm.expect(1).to.equal(2);
+// AssertionError: Expected 1 to equal 2
+try { pm.response.to.have.status(200); } catch (e) { e.name === 'AssertionError'; }
+```
+
+QuickJS has no `AssertionError` class, so this is an `Error` carrying that
+`name`: `instanceof Error` holds, `e.stack` is the same one a native throw
+gets, and there is no `AssertionError` global to reference (chai's lives on the
+`chai` module, which Vayu does not ship). **A mistake in the script text stays a
+`TypeError`** - a matcher called with no argument, a name nothing implements -
+because nothing was asserted, the call itself was wrong.
+
 `have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
 reported unequal by `eql` rather than compared (their contents are not
 properties); `Date` compares by instant, `RegExp` by pattern; a cyclic value

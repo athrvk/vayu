@@ -263,6 +263,32 @@ constexpr int64_t OAUTH2_REFRESH_POLL_INTERVAL_MS = 100;
 } // namespace server
 
 /**
+ * @brief The server-vitals monitor a run may scrape alongside its own metrics.
+ *
+ * The two a user reaches for are config-backed (`monitorIntervalMs`,
+ * `monitorMaxSeries`) and these are their seeds. The other three are rails
+ * rather than preferences: the interval bounds exist to stop a cadence that
+ * measures the scraper instead of the target, and the backoff threshold is how
+ * politely the loop gives up on a dead endpoint - the same reason
+ * `threshold_eval`'s budget ranges are constants.
+ */
+namespace monitor {
+/// Floor on `monitor.intervalMs`. Below this the scrape's own latency is a
+/// large share of the interval, so the series measures the scraper.
+constexpr int MIN_INTERVAL_MS = 250;
+/// Ceiling on it. A run shorter than one interval would record nothing.
+constexpr int MAX_INTERVAL_MS = 60000;
+/// Cadence for a block that names no `intervalMs` (config `monitorIntervalMs`).
+constexpr int DEFAULT_INTERVAL_MS = 1000;
+/// How many metrics one run may chart (config `monitorMaxSeries`). Each is a
+/// line on one overlay and a name matched against every exposition line.
+constexpr size_t MAX_SERIES = 8;
+/// Consecutive failed scrapes before the loop logs once and backs off. Below
+/// this a scrape failure is a gap in the series and nothing else.
+constexpr int FAILURES_BEFORE_BACKOFF = 5;
+} // namespace monitor
+
+/**
  * @brief Server-Sent Events (SSE) configuration
  */
 namespace sse {
@@ -439,6 +465,14 @@ constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
 /// HdrHistogram max trackable latency in microseconds (1 hour)
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
+/// Whether a load run feeds the five per-phase histograms (config key
+/// `phaseHistograms`). On by default: the phase values are computed for every
+/// completion anyway, and without this bank they survive only for the ~1% of
+/// completions a trace is retained for - so "was it the server or the
+/// connection path" is answered off a biased sample. The escape hatch exists
+/// because the feed is five atomic histogram records on the completion path;
+/// see docs/engine/benchmarks.md for the measured cost.
+constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 } // namespace metrics_collector
 
 /**
@@ -458,6 +492,37 @@ constexpr size_t CAPACITY = 65536;
 /// Number of spins before sleeping in the worker loop
 constexpr int SPIN_COUNT = 2000;
 } // namespace queue
+
+/**
+ * @brief Local OAuth 2.0 mock issuer bounds
+ *
+ * Rails rather than preferences: every one of these bounds a resource the
+ * *caller* does not pay for - listener threads, and two maps a long-lived
+ * daemon would otherwise grow one entry per authorize call that never came
+ * back for its code. The issuer's actual behaviour (expiry, claims, failure
+ * mode, cadence of nothing) is per-issuer request payload, not config.
+ */
+namespace mock_issuer {
+/// Concurrently running issuers. Each owns a listener thread plus cpp-httplib's
+/// own accept loop, so this is a thread budget more than anything else.
+constexpr size_t MAX_ISSUERS = 8;
+/// Clients one issuer may be configured with.
+constexpr size_t MAX_CLIENTS = 32;
+/// Authorization codes held awaiting their exchange (oldest evicted first).
+constexpr size_t MAX_PENDING_CODES = 256;
+/// Live refresh tokens held per issuer (oldest evicted first). Rotation spends
+/// one and mints one, so this only binds when many are issued and never used.
+constexpr size_t MAX_REFRESH_TOKENS = 256;
+/// How long an authorization code stays exchangeable. RFC 6749 §4.1.2 asks for
+/// a short lifetime; this matches the interactive attempt TTL in
+/// oauth_authorize.cpp so the two halves of one flow expire together.
+constexpr int64_t CODE_TTL_MS = 5 * 60 * 1000;
+/// Ceiling on the `slow` failure mode's delay. Past a minute the caller is
+/// testing its own timeout, and the sleep holds a cpp-httplib pool thread.
+constexpr int64_t MAX_SLOW_MS = 60000;
+/// Ceiling on a minted token's lifetime (31 days).
+constexpr int64_t MAX_EXPIRES_IN_SECONDS = 31LL * 86400LL;
+} // namespace mock_issuer
 
 /**
  * @brief Database optimization configuration
