@@ -59,6 +59,16 @@ interface LayoutState {
 	graphqlVariablesCollapsed: boolean;
 	graphqlVariablesSize: number;
 
+	/**
+	 * Whether the ⌘K command palette is showing.
+	 *
+	 * Here rather than as local state in the palette because the two things that
+	 * open it are in different subtrees: the chord handler in `Shell`, and the
+	 * title bar's search bar. Deliberately absent from `partialize` - a dialog
+	 * that reopened itself on every launch is not a layout preference.
+	 */
+	paletteOpen: boolean;
+
 	// Actions
 	setDrawerOpen: (open: boolean) => void;
 	toggleDrawer: () => void;
@@ -76,6 +86,8 @@ interface LayoutState {
 
 	setGraphqlVariablesCollapsed: (collapsed: boolean) => void;
 	setGraphqlVariablesSize: (size: number) => void;
+
+	setPaletteOpen: (open: boolean) => void;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -90,6 +102,7 @@ export const useLayoutStore = create<LayoutState>()(
 			requestSplitRatio: 0.5,
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
+			paletteOpen: false,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
 			toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
@@ -131,6 +144,8 @@ export const useLayoutStore = create<LayoutState>()(
 						Math.min(GRAPHQL_VARIABLES_MAX_SIZE, size)
 					),
 				}),
+
+			setPaletteOpen: (open) => set({ paletteOpen: open }),
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,

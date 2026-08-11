@@ -48,6 +48,7 @@ export default function WelcomeScreen() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { openTab } = useTabsStore();
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
 	const {
 		data: collections = [],
@@ -160,6 +161,7 @@ export default function WelcomeScreen() {
 						collectionCount={collections.length}
 						onImport={openImport}
 						onNewRequest={handleNewRequest}
+						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
 						onInbox={() => openTab({ type: "inbox", entityId: null })}

@@ -34,7 +34,10 @@ function read(path: string): string {
 
 const tabsStore = read("../../stores/tabs-store.ts");
 const shell = read("./Shell.tsx");
-const tabStrip = read("./TabStrip.tsx");
+// The descriptor switch moved out of `TabStrip.tsx` when the command palette
+// needed the same labels - see tab-descriptors.ts. Reading the file it actually
+// lives in is what keeps this guard from passing vacuously on the wrong one.
+const tabDescriptors = read("./tab-descriptors.ts");
 
 /** The members of `export type TabType = "a" | "b" | ...`. */
 function tabTypes(source: string): string[] {
@@ -61,12 +64,20 @@ describe("TabType coverage", () => {
 		}
 	});
 
-	it("gives every type a branch in TabStrip's descriptor switch", () => {
+	it("gives every type a branch in the tab-descriptor switch", () => {
 		for (const type of types) {
-			expect(tabStrip, `TabStrip has no descriptor case for "${type}"`).toContain(
-				`case "${type}":`
-			);
+			expect(
+				tabDescriptors,
+				`tab-descriptors has no descriptor case for "${type}"`
+			).toContain(`case "${type}":`);
 		}
+	});
+
+	it("reads the descriptor module it scans", () => {
+		// Same vacuity guard as the union above: a renamed file would otherwise
+		// throw here rather than pass silently, but the length check states it.
+		expect(tabDescriptors.length).toBeGreaterThan(1000);
+		expect(tabDescriptors).toContain("export function useTabDescriptors");
 	});
 
 	it("gives every type an explicit answer in isTabDirty", () => {

@@ -145,6 +145,7 @@ describe("the variables icon", () => {
 				collectionCount={0}
 				onImport={() => {}}
 				onNewRequest={() => {}}
+				onSearch={() => {}}
 				onHistory={() => {}}
 				onVariables={() => {}}
 				onInbox={() => {}}

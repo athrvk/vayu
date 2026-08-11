@@ -26,11 +26,14 @@ import { Skeleton } from "@/components/ui";
 export function LauncherSkeleton() {
 	return (
 		<div className="flex flex-col gap-8" role="status" aria-label="Loading">
-			{/* Start - label + the 2x4 action tile grid */}
+			{/* Start - label + the action tile grid. Column counts and tile count
+			    both track Launcher's grid: a skeleton one tile short reflows the
+			    row the moment the real content arrives, which is the one thing a
+			    skeleton exists to prevent. */}
 			<section aria-hidden="true">
 				<Skeleton className="mb-2 h-3 w-10 rounded-md" />
-				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-					{Array.from({ length: 4 }, (_, i) => (
+				<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+					{Array.from({ length: 6 }, (_, i) => (
 						// Matches ActionTile: bordered card, icon over label.
 						<div
 							key={i}

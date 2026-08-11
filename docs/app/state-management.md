@@ -48,8 +48,9 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 **State:**
 ```typescript
 {
-  openTabs: Tab[]          // Each tab has unique id, type, and optional entityId
+  openTabs: Tab[]                        // Each tab has unique id, type, and optional entityId
   activeTabId: string | null
+  tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
 }
 ```
 
@@ -68,6 +69,14 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 - Response eviction: `closeTabsForEntities` clears each id's entry in
   `response-store`. Both callers reach it after a delete, and nothing else
   evicts from that map
+- Focus recency: `tabFocusedAt` stamps `openTab` and `focusTab`, and is read by
+  the command palette, which lists open tabs most-recently-used first. It cannot
+  come from `openTabs`, which is insertion order - the tab you were just in sits
+  wherever it was opened. Session-scoped on purpose (absent from `partialize`):
+  tabs *are* restored across launches, so a persisted copy would rank a restored
+  list by yesterday's attention, and an empty map falls back to strip order.
+  Entries for closed tabs are dropped on the next focus rather than in every
+  close path - nothing reads a stamp for a tab that is not open
 - Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
   a payload whose *stamped* version differs from the store's when no `migrate`
   is supplied, so the stub is where the next bump goes; it also refuses a
@@ -94,6 +103,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   contextBarWidth: number
   contextBarCollapsedSections: string[]  // Section ids the user collapsed
   requestSplitRatio: number              // 0–1; left/request pane fraction
+  paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```
 
@@ -118,6 +128,12 @@ migration collapses them onto a single `drawerWidth`, keeping whatever
 Collections (the default view) had. Re-introducing a per-view width re-introduces
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
+
+**`paletteOpen` is here, and is not persisted.** The palette lives in `Shell`
+while the things that open it - the welcome Launcher's Search tile, the title
+bar's search bar - are in other subtrees, so the flag has to be shared state
+rather than the dialog's own. It is deliberately absent from `partialize`: a
+dialog that reopened itself on every launch is not a layout preference.
 
 **Context-bar sections are collapsed by exception.** The store holds the ids the
 user closed (`contextBarCollapsedSections`); anything not listed is expanded. Two
