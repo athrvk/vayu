@@ -6,21 +6,25 @@
  */
 
 /**
- * @file compare.ts
- * @brief Pure server-side diff of two run reports (the `compare_runs` tool's
- *        core). Answers "did my change regress?" by comparing latency
- *        percentiles, error rate, throughput, and status-code mix, each
- *        labelled with which direction counts as an improvement. Defensive
- *        against missing fields so it works across run types.
+ * @file run-compare.ts
+ * @brief Pure diff of two run reports: "did my change regress?" as latency,
+ *        throughput, error-rate and status-code deltas, each labelled with
+ *        which direction counts as an improvement.
  *
- * **Mirrored by `app/src/lib/run-compare.ts`, which the history view's
- * vs-baseline strip uses.** Neither process can import the other's source:
- * this project emits with `rootDir: "electron"` and so cannot compile a file
- * from `src/` (TS6059), and the renderer cannot import one from here either,
- * because this is a referenced composite project (TS6305 - and excluding a
- * file from it to dodge that is TS6307). So the copy is deliberate, and
- * `compare.conformance.test.ts` runs both implementations over the same
- * fixtures and fails on any divergence. Change this file and change that one.
+ * **This file is mirrored, on purpose, by `electron/mcp/compare.ts`.** The two
+ * processes cannot share a source file: `tsconfig.node.json` emits the main
+ * process with `rootDir: "electron"`, so it cannot compile a file from `src/`
+ * (TS6059), and the renderer cannot import one from `electron/` either, since
+ * that is a referenced composite project (TS6305) - excluding a file from it to
+ * dodge that is TS6307. The mirror is therefore pinned the way this repo pins
+ * its other cross-boundary copies (`lib/dynamic-variables.ts`,
+ * `McpDataEntity`): a conformance test - `electron/mcp/compare.conformance.test.ts` -
+ * runs *both* implementations over the same fixtures and fails on any
+ * divergence, in either direction. Change this file and change that one.
+ *
+ * Defensive against missing fields throughout: it reads reports from any engine
+ * version and any run type, and a metric a report does not carry is `null`
+ * rather than a zero that would read as a real measurement.
  */
 
 type Report = Record<string, unknown>;
@@ -68,9 +72,9 @@ function delta(
 }
 
 /**
- * What a delta means, for a reader or a colour. Kept beside the diff so the
- * renderer and an agent reading `direction` cannot come to disagree about
- * which way is up.
+ * What a delta means, for a reader or a colour. Kept here rather than in the
+ * component so the renderer and an agent reading `direction` cannot come to
+ * disagree about which way is up.
  *
  * `unknown` is a metric one of the two runs did not record - which is not the
  * same claim as "it did not move", and must not be painted as one.

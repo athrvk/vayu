@@ -158,6 +158,9 @@ Json serialize (const vayu::db::Run& run) {
     json["environmentId"] = run.environment_id.has_value () ?
     Json (run.environment_id.value ()) :
     Json (nullptr);
+    // Emitted on the single-run payload as well as the list row, so a client
+    // that opened a run directly can draw its pin without re-listing.
+    json["baseline"] = run.baseline;
     return json;
 }
 

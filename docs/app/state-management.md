@@ -1054,6 +1054,8 @@ runs: {
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],
   lastCollectionRuns: () => ["runs", "lastCollectionRun"], // prefix: invalidate every collection's row
   lastCollectionRun: (collectionId) => ["runs", "lastCollectionRun", collectionId],
+  baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's pin
+  baseline: (requestId) => ["runs", "baseline", requestId],
   allRuns: () => ["runs", "allRuns"],
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -1066,8 +1068,18 @@ runs: {
 
 The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
 query is keyed on is `list()` / `detail(id)`. `runs.lastDesign`,
-`runs.recentDesign` and `runs.lastCollectionRun` sit under `runs.all` but
-deliberately **not** under `runs.lists()` - see below.
+`runs.recentDesign`, `runs.lastCollectionRun` and `runs.baseline` sit under
+`runs.all` but deliberately **not** under `runs.lists()` - see below.
+
+`runs.baseline(requestId)` caches the run pinned as that request's baseline
+(`GET /runs?baseline=true&requestId=&limit=1`), which the history report's
+vs-baseline strip reads. Pinning, unpinning and deleting a run all **invalidate
+the `baselines()` prefix** rather than patching it: the pin moves, and a run id
+gives no way back to the request whose baseline it was - a run of an unsaved
+request has no `requestId` at all. The pin *flag* on the loaded list rows is
+patched in place from the mutation's response, the same way a delete patches
+them, because the sidebar polls only its first page and a refetch would leave a
+pin invisible on any page the user had scrolled to.
 
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)

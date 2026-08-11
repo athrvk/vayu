@@ -638,6 +638,15 @@ export interface Run {
 	 * and never on `GET /runs/:id`, which attaches the whole {@link result}.
 	 */
 	resultSummary?: RunResultSummary;
+	/**
+	 * Whether this run is pinned as a baseline - the known-good run later runs
+	 * of the same request are measured against, and the one run the engine's
+	 * retention never expires. Toggled through `PUT /runs/:id/baseline`.
+	 *
+	 * Optional because a run row from an engine older than this field has none;
+	 * absent reads the same as `false` everywhere.
+	 */
+	baseline?: boolean;
 }
 
 /**
@@ -683,6 +692,12 @@ export interface RunListParams {
 	 */
 	collectionId?: string;
 	q?: string;
+	/**
+	 * `true` lists only pinned baselines, `false` only unpinned runs. Unset
+	 * lists both - so leave it unset rather than passing `false` to mean
+	 * "either".
+	 */
+	baseline?: boolean;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */

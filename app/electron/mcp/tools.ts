@@ -266,6 +266,55 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
 	);
 }
 
+/**
+ * The run pinned as baseline for whatever saved request @p targetRunId ran -
+ * `compare_runs`'s answer when the caller named no base.
+ *
+ * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&
+ * requestId=...` is ordered newest-first, so "the baseline" is its first row.
+ * That is the same question the history view's vs-baseline strip asks, so an
+ * agent and the UI compare a run against the same pin.
+ *
+ * Every way this can fail to find one throws a message naming the fix, because
+ * the alternative - silently comparing against some other run - is a wrong
+ * answer presented as a right one. A run that has no saved request behind it
+ * (an ad-hoc load run) has nothing to resolve *through*, which is a different
+ * problem from a request with no pin, and says so.
+ */
+async function resolveBaseline(
+	targetRunId: string,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<string> {
+	const run = (await ctx.client.getRun(targetRunId, signal)) as Record<string, unknown> | null;
+	const requestId = run && typeof run.requestId === "string" ? run.requestId : null;
+	if (!requestId) {
+		throw new ToolArgError(
+			`Run ${targetRunId} did not run a saved request, so it has no baseline to resolve. ` +
+				`Pass "baseRunId" explicitly.`
+		);
+	}
+
+	const page = (await ctx.client.listBaselineRuns(requestId, signal)) as {
+		data?: Array<Record<string, unknown>>;
+	} | null;
+	const baseline = page?.data?.[0];
+	const baseRunId = baseline && typeof baseline.id === "string" ? baseline.id : null;
+	if (!baseRunId) {
+		throw new ToolArgError(
+			`No run is pinned as the baseline for request ${requestId}. Pin one in Vayu's ` +
+				`history sidebar, or pass "baseRunId" explicitly.`
+		);
+	}
+	if (baseRunId === targetRunId) {
+		throw new ToolArgError(
+			`Run ${targetRunId} is itself the baseline for request ${requestId}; there is ` +
+				`nothing to compare it against. Pass "baseRunId" to compare it with another run.`
+		);
+	}
+	return baseRunId;
+}
+
 // --- Confirmation gate -------------------------------------------------------
 
 /**
@@ -699,6 +748,10 @@ const metricDeltaSchema = z.object({
 	target: z.number().nullable(),
 	delta: z.number().nullable(),
 	pctChange: z.number().nullable(),
+	// Which way is an improvement. Without it a reader has to know that falling
+	// latency is good and falling throughput is not; `neutral` marks the metric
+	// (total requests) where neither direction is a verdict.
+	direction: z.enum(["lower-is-better", "higher-is-better", "neutral"]),
 });
 
 const runComparisonSchema = z.object({
@@ -2002,7 +2055,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request.",
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,
@@ -2010,14 +2063,20 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			baseRunId: z.string().describe("Baseline run ID (e.g. main)."),
+			baseRunId: z
+				.string()
+				.optional()
+				.describe(
+					"Baseline run ID (e.g. main). Omit to use the run pinned as baseline for the target's saved request."
+				),
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},
 		outputSchema: runComparisonSchema,
 		handler: async (args, ctx, signal) => {
-			const baseRunId = requireStr(args, "baseRunId");
 			const targetRunId = requireStr(args, "targetRunId");
 			try {
+				const baseRunId =
+					str(args, "baseRunId") || (await resolveBaseline(targetRunId, ctx, signal));
 				const [base, target] = await Promise.all([
 					ctx.client.getRunReport(baseRunId, signal),
 					ctx.client.getRunReport(targetRunId, signal),
@@ -2030,6 +2089,10 @@ export const TOOLS: McpTool[] = [
 				);
 				return structuredResult(comparison as unknown as Record<string, unknown>);
 			} catch (err) {
+				// A baseline that could not be resolved is an argument problem the
+				// caller can fix, not an engine failure - it must not be reported
+				// as one.
+				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
 		},

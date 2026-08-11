@@ -460,7 +460,10 @@ on disk, one in memory:
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 
-In-progress (`running`/`pending`) runs are never pruned.
+In-progress (`running`/`pending`) runs are never pruned, and neither are runs
+pinned as baselines (see
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
+toward `maxRunsRetained`.
 
 ### POST /config
 
@@ -2489,6 +2492,12 @@ stays cheap as history grows.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
+- `baseline` - `true` lists only runs pinned as baselines, `false` only unpinned
+  ones (any other value is ignored, like an unrecognised `type`). Leaving it out
+  lists both, so omit it rather than passing `false` to mean "either". A
+  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, since
+  the list is already `start_time DESC` - the lookup both the history view's
+  vs-baseline strip and the MCP `compare_runs` tool make.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
@@ -2525,6 +2534,11 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
+**`baseline`** is on every row, `true` only for a run pinned through
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline). It is also on
+`GET /runs/:runId`, so a client that opened a run directly can draw the pin
+without listing.
+
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
@@ -2550,6 +2564,7 @@ a server.
       "status": "completed",
       "startTime": 1234567890,
       "endTime": 1234567891,
+      "baseline": true,
       "summary": {
         "url": "https://api.example.com/users",
         "method": "GET",
@@ -2570,6 +2585,7 @@ a server.
       "status": "completed",
       "startTime": 1234567892,
       "endTime": 1234567893,
+      "baseline": false,
       "summary": { "url": "https://api.example.com/users", "method": "GET", "httpVersion": "auto" },
       "resultSummary": { "statusCode": 200, "latencyMs": 34.2 }
     }
@@ -2607,7 +2623,8 @@ release; new callers should always pass pagination params and read the
 Get details for a specific run.
 
 **Response:** The run object shown in `GET /runs` (`id`, `requestId`,
-`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`).
+`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`,
+`baseline`).
 
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
@@ -2957,6 +2974,45 @@ a **404** in the shared error shape.
 ```json
 { "error": { "code": 404, "message": "Run not found" } }
 ```
+
+### PUT /runs/:runId/baseline
+
+Pin (or unpin) a run as a **baseline** - the known-good run later runs of the
+same request are compared against. `PUT` rather than `POST` per the
+[create vs update](#resource-writes-create-vs-update) split: the run already
+exists, and this updates it. There is no deprecated alias; the endpoint is new.
+
+Two things follow from a pin, and both are the point of it:
+
+- **Retention never expires it.** `prune_runs` skips a baseline under both the
+  count cap and the age cap, and a pinned run does not count toward
+  `maxRunsRetained` either - a pin the cap could expire is not a pin, and pins
+  crowding the cap would evict the recent history the cap exists to keep.
+- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
+
+Several runs may be pinned at once (one per request is the expected use). The
+engine records the pin and holds no opinion about which baseline applies to
+which run - that selection is the client's, so a pin never unpins anything else.
+
+**Request body** - `baseline` is required and must be a boolean:
+```json
+{ "baseline": true }
+```
+
+**Response `200`:** the updated run row, in the same shape
+[GET /runs](#get-runs) lists (including `summary`), so a client can patch its
+cached row instead of re-listing.
+
+**`400`** when the body is not JSON, has no `baseline`, or `baseline` is not a
+boolean - including `null`. Unlike the merge-patch resource updates, an
+unusable value here is refused rather than ignored: this body has exactly one
+field, so ignoring it would answer `200` to a request that changed nothing.
+
+```json
+{ "error": { "code": "bad_request", "message": "Invalid 'baseline': must be a boolean" } }
+```
+
+**`404`** when no run has that id.
 
 ### DELETE /runs/:runId
 

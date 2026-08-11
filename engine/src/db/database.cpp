@@ -247,7 +247,9 @@ inline auto make_storage (const std::string& path) {
     // existing, non-empty runs table - pre-existing rows backfill to `""`,
     // which the report route reads as "the engine died before this run
     // finished; report from the sampled results alone".
-    make_column ("summary", &Run::summary, default_value (""))),
+    make_column ("summary", &Run::summary, default_value ("")),
+    // Pinned-as-baseline flag; see Run::baseline for why retention reads it.
+    make_column ("baseline", &Run::baseline, default_value (false))),
 
     // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",
@@ -958,12 +960,14 @@ auto run_filter_where (const RunFilter& filter) {
     const bool no_req        = !filter.request_id.has_value ();
     const bool no_q          = !filter.q.has_value () || filter.q->empty ();
     const bool no_collection = !filter.collection_id.has_value ();
+    const bool no_baseline   = !filter.baseline.has_value ();
 
     const RunType type_val           = filter.type.value_or (RunType::Design);
     const RunStatus status_val       = filter.status.value_or (RunStatus::Pending);
     const std::string req_val        = filter.request_id.value_or ("");
     const std::string q_pat          = "%" + (filter.q ? *filter.q : std::string{}) + "%";
     const std::string collection_val = filter.collection_id.value_or ("");
+    const bool baseline_val          = filter.baseline.value_or (false);
 
     // The snapshot when it is JSON, an empty object when it is not - the guard
     // described above, so json_extract below is always handed valid JSON.
@@ -977,6 +981,7 @@ auto run_filter_where (const RunFilter& filter) {
     (c (&Run::status) == status_val || no_status) &&
     (c (&Run::request_id) == req_val || no_req) &&
     (like (&Run::config_snapshot, q_pat) || no_q) &&
+    (c (&Run::baseline) == baseline_val || no_baseline) &&
     (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) ==
      collection_val ||
     no_collection));
@@ -1036,6 +1041,26 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
     });
 }
 
+// Pin or unpin a run as a baseline. Retried like every other write here, and
+// the read-modify-write sits inside the retried callback so a retry re-reads
+// the row rather than replaying a stale copy over a summary or a status a
+// worker wrote in between. Returns the stored row, or nullopt when there is no
+// such run - which is what lets the route answer 404 instead of inventing one.
+std::optional<Run> Database::set_run_baseline (const std::string& id, bool baseline) {
+    std::optional<Run> updated;
+    retry_on_busy ("set run baseline", 5, std::chrono::milliseconds (100), [&] {
+        auto run = get_run (id);
+        if (!run) {
+            updated.reset ();
+            return;
+        }
+        run->baseline = baseline;
+        impl_->storage.update (*run);
+        updated = *run;
+    });
+    return updated;
+}
+
 // Retention: drop runs beyond the count cap and/or older than the age cap.
 void Database::prune_runs (int max_runs, int max_age_days) {
     // Both limits off - nothing to do (0 = unlimited for each).
@@ -1063,6 +1088,14 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         for (const auto& run : runs) {
             // In-flight runs are never pruned and do not count toward the cap.
             if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
+                continue;
+            }
+            // Neither is a pinned baseline: a run kept as the thing later runs
+            // are measured against is exactly the run retention must not
+            // expire. Skipped rather than merely spared, for the same reason
+            // an in-flight run is - counting it toward the cap would let a
+            // handful of pins evict the recent history the cap exists to keep.
+            if (run.baseline) {
                 continue;
             }
             const bool over_count = (max_runs > 0) && (kept >= max_runs);

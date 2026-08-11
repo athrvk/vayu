@@ -438,7 +438,8 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
     row["environmentId"] = run.environment_id.has_value () ?
     nlohmann::json (*run.environment_id) :
     nlohmann::json (nullptr);
-    row["summary"] = build_run_summary (run.config_snapshot);
+    row["baseline"] = run.baseline;
+    row["summary"]  = build_run_summary (run.config_snapshot);
     return row;
 }
 
@@ -602,6 +603,44 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
     }
     add_http_version (config_obj, config);
     return config_obj;
+}
+
+/**
+ * Testable core of PUT /runs/:id/baseline, returning {http_status, json_body}.
+ *
+ * PUT rather than POST because this updates an existing run (the repo's
+ * create-vs-update rule, issue #95), and a whole endpoint rather than a field
+ * on a general run update because a run has no general update: everything else
+ * on the row is written by the engine as the run executes.
+ *
+ * `baseline` is required and must be a real boolean. The merge-patch helper
+ * `apply_bool_field` ignores a non-boolean instead, which is right for an
+ * optional field among many and wrong here - this body has exactly one field,
+ * so ignoring it would answer 200 to a request that changed nothing.
+ *
+ * 200 carries the updated row in the same shape `GET /runs` lists, so a client
+ * can patch its cached row from the response instead of re-listing.
+ */
+std::pair<int, nlohmann::json>
+set_run_baseline_response (vayu::db::Database& db, const std::string& run_id, const std::string& body) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse (body);
+    } catch (const std::exception&) {
+        return { 400, error_body (400, "Invalid JSON body") };
+    }
+    if (!parsed.is_object () || !parsed.contains ("baseline")) {
+        return { 400, error_body (400, "Missing 'baseline': expected {\"baseline\": true|false}") };
+    }
+    if (!parsed["baseline"].is_boolean ()) {
+        return { 400, error_body (400, "Invalid 'baseline': must be a boolean") };
+    }
+
+    auto updated = db.set_run_baseline (run_id, parsed["baseline"].get<bool> ());
+    if (!updated) {
+        return { 404, error_body (404, "Run not found") };
+    }
+    return { 200, serialize_run_row (*updated) };
 }
 
 /**
@@ -983,6 +1022,8 @@ void register_run_routes (RouteContext& ctx) {
      *   or load run never matches; an id nothing ran is an empty page, not an
      *   error.
      * - q: case-insensitive substring over the stored config_snapshot text
+     * - baseline: "true" lists only pinned baselines, "false" only unpinned
+     *   ones; any other value is ignored, like an invalid type/status
      *
      * Back-compat (removed next minor): a request with *no* query params at all
      * returns the legacy bare array of full-configSnapshot rows unchanged, so
@@ -992,7 +1033,7 @@ void register_run_routes (RouteContext& ctx) {
         const bool wants_envelope = req.has_param ("limit") || req.has_param ("offset") ||
         req.has_param ("type") || req.has_param ("status") ||
         req.has_param ("requestId") || req.has_param ("collectionId") ||
-        req.has_param ("q");
+        req.has_param ("q") || req.has_param ("baseline");
 
         if (!wants_envelope) {
             // Legacy no-param path: today's bare array, byte-shape-identical.
@@ -1047,6 +1088,16 @@ void register_run_routes (RouteContext& ctx) {
             filter.collection_id = req.get_param_value ("collectionId");
         if (req.has_param ("q"))
             filter.q = req.get_param_value ("q");
+        // Only the two spellings that mean something are honoured; anything
+        // else leaves the filter unset, matching how an invalid `type` or
+        // `status` is ignored rather than answered with a 400.
+        if (req.has_param ("baseline")) {
+            const std::string value = req.get_param_value ("baseline");
+            if (value == "true")
+                filter.baseline = true;
+            else if (value == "false")
+                filter.baseline = false;
+        }
 
         vayu::utils::log_info ("GET /runs - Listing runs (limit=" +
         std::to_string (limit) + ", offset=" + std::to_string (offset) + ")");
@@ -1125,6 +1176,32 @@ void register_run_routes (RouteContext& ctx) {
     };
     ctx.server.Delete (R"(/runs/([^/]+))", delete_run);
     ctx.server.Delete (R"(/run/([^/]+))", deprecated_alias (delete_run));
+
+    /**
+     * PUT /runs/:runId/baseline  - body {"baseline": true|false}
+     * Pins or unpins a run as a baseline: the known-good run later runs are
+     * compared against, and the one run retention will not expire. Answers the
+     * updated list row; 404 when no such run, 400 on a body that does not carry
+     * a boolean `baseline`. No deprecated alias - the endpoint is new.
+     */
+    ctx.server.Put (R"(/runs/([^/]+)/baseline)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string run_id = req.matches[1];
+        vayu::utils::log_info ("PUT /runs/:id/baseline - Run: " + run_id);
+        try {
+            auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
+            res.status          = status;
+            res.set_content (body.dump (), "application/json");
+            if (status == 404) {
+                vayu::utils::log_warning (
+                "PUT /runs/:id/baseline - Run not found: " + run_id);
+            }
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "PUT /runs/:id/baseline - Error for run " + run_id + ": " + e.what ());
+            send_error (res, 500, e.what ());
+        }
+    });
 
     /**
      * POST /runs/:runId/stop  (alias: POST /run/:runId/stop, deprecated)

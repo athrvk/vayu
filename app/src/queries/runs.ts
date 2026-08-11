@@ -320,6 +320,87 @@ export function useLastCollectionRunQuery(collectionId: string | null | undefine
 	});
 }
 
+/**
+ * How the run being viewed says which request it was - the two ways a baseline
+ * can be looked up, in the order they are tried.
+ *
+ * A saved request has an id, and the engine filters on it exactly. A run of an
+ * unsaved request has none (its `requestId` is null), and the only identity it
+ * left behind is the url and method on its row summary - so those are matched
+ * instead, over a bounded page of pinned runs.
+ */
+export interface BaselineTarget {
+	requestId?: string | null;
+	url?: string | null;
+	method?: string | null;
+}
+
+/**
+ * How many pinned runs the url/method fallback looks at. `q` is a substring
+ * match over the stored snapshot text, so it over-matches by design (a url is
+ * a substring of longer urls, and of any body quoting it); the exact match
+ * happens here, over a page small enough that an unsaved request with a heavily
+ * pinned history costs one bounded request rather than a walk of the archive.
+ */
+const BASELINE_SCAN_LIMIT = 20;
+
+function baselineCacheKey(target: BaselineTarget): string | null {
+	if (target.requestId) return target.requestId;
+	if (target.url && target.method) return `${target.method} ${target.url}`;
+	return null;
+}
+
+/**
+ * The run pinned as baseline for the same request as @p target, or `null` when
+ * nothing is pinned.
+ *
+ * `GET /runs?baseline=true` is ordered newest-first, so "the baseline" is the
+ * first row - the engine allows several pins (one per request is the expected
+ * use) and deliberately holds no opinion about which applies where, so choosing
+ * is the client's job and this is the one place the renderer does it. The MCP
+ * `compare_runs` tool resolves it the same way, against the same endpoint.
+ *
+ * `null` and "still loading" are different answers and stay different: the
+ * caller renders nothing until this settles, rather than flashing a
+ * "no baseline" state at every run it opens.
+ */
+export function useBaselineRunQuery(target: BaselineTarget | null) {
+	const key = target ? baselineCacheKey(target) : null;
+
+	return useQuery<Run | null>({
+		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.baseline`.
+		queryKey: queryKeys.runs.baseline(key ?? ""),
+		queryFn: async () => {
+			if (target?.requestId) {
+				const page = await apiService.listRuns({
+					baseline: true,
+					requestId: target.requestId,
+					limit: 1,
+				});
+				return page.data[0] ?? null;
+			}
+			// The unsaved-request fallback. `q` narrows server-side; the row's
+			// own summary decides, so a url that merely *contains* this one is
+			// not mistaken for it.
+			const page = await apiService.listRuns({
+				baseline: true,
+				q: target!.url!,
+				limit: BASELINE_SCAN_LIMIT,
+			});
+			const method = target!.method!.toUpperCase();
+			return (
+				page.data.find(
+					(run) =>
+						run.summary?.url === target!.url &&
+						(run.summary?.method ?? "GET").toUpperCase() === method
+				) ?? null
+			);
+		},
+		enabled: !!key,
+		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+	});
+}
+
 // ============ Run Mutations ============
 
 /**
@@ -414,15 +495,68 @@ export function useDeleteRunMutation() {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.runs.lastCollectionRuns(),
 			});
+			// And the per-request baseline caches, for the third time and the
+			// same reason: the deleted run may have been the pin, and its id
+			// gives no way back to the request it was pinned for.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+		},
+	});
+}
+
+/**
+ * Pin or unpin a run as its request's baseline.
+ *
+ * The engine answers with the updated row, so the loaded list pages are patched
+ * from it rather than refetched - the same in-place patch `useDeleteRunMutation`
+ * does, and for the same reason: the sidebar polls only its first page, so a
+ * refetch would leave a pin invisible on any page the user had scrolled to.
+ *
+ * The baseline family is invalidated rather than patched: the pin *moves*, so
+ * the previous holder's cached answer is now wrong and there is no way back
+ * from a run id to the request whose baseline it was (a run of an unsaved
+ * request has no `requestId` at all).
+ */
+export function useSetRunBaselineMutation() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ runId, baseline }: { runId: string; baseline: boolean }) =>
+			apiService.setRunBaseline(runId, baseline),
+		onSuccess: (updated) => {
+			queryClient.setQueriesData<InfiniteData<RunListResponse>>(
+				{ queryKey: queryKeys.runs.lists() },
+				(old) => {
+					// A cache under this prefix that is not paged is left alone
+					// rather than thrown on - see useDeleteRunMutation.
+					if (!old || !Array.isArray(old.pages)) return old;
+					return {
+						...old,
+						pages: old.pages.map((page) => {
+							if (!page.data.some((r) => r.id === updated.id)) return page;
+							return {
+								...page,
+								data: page.data.map((r) =>
+									r.id === updated.id ? { ...r, baseline: updated.baseline } : r
+								),
+							};
+						}),
+					};
+				}
+			);
+			// The run detail carries the flag too (GET /runs/:id emits it).
+			queryClient.setQueryData<Run>(queryKeys.runs.detail(updated.id), (old) =>
+				old ? { ...old, baseline: updated.baseline } : old
+			);
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
 		},
 	});
 }
 
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
- * all-runs Settings query, and the per-request Recent sends and per-collection
- * Last run lists, which are their own families and would otherwise survive a
- * cleared history.
+ * all-runs Settings query, the per-request Recent sends and per-collection
+ * Last run lists, and the per-request baseline lookups, which are their own
+ * families and would otherwise survive a cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();
@@ -432,5 +566,6 @@ export function useInvalidateRuns() {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
 	};
 }

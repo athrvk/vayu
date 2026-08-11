@@ -815,6 +815,175 @@ TEST_F (DatabaseTest, PruneRunsNeverDeletesInFlightRuns) {
     EXPECT_EQ (ids.size (), 3u);
 }
 
+// A pin is a promise the retention cap must not break: the run later runs are
+// measured against has to outlive the window of recent runs. Skipped rather
+// than merely spared, so pins cannot crowd the cap either.
+TEST_F (DatabaseTest, PruneRunsNeverDeletesABaselineRun) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (db, "pinned", 1000);
+    seed_run_with_children (db, "old", 2000);
+    seed_run_with_children (db, "recent", 3000);
+    ASSERT_TRUE (db.set_run_baseline ("pinned", true).has_value ());
+
+
+    // Cap of one: without the exemption "pinned" is the oldest and the first
+    // to go. With it, the cap still keeps exactly one non-baseline run.
+    db.prune_runs (1, 0);
+
+    auto ids = run_ids (db);
+    EXPECT_TRUE (ids.count ("pinned")) << "retention expired a pinned baseline";
+    EXPECT_TRUE (ids.count ("recent"));
+    EXPECT_FALSE (ids.count ("old"));
+    // Its children survive with it - a baseline whose results were cascaded
+    // away is a row that can no longer be compared against.
+    EXPECT_EQ (db.count_metric_ticks ("pinned"), 1);
+    EXPECT_EQ (db.get_results ("pinned").size (), 1u);
+}
+
+// The age cap is the other way retention deletes, and reaches a pinned run
+// sooner than the count cap does - a baseline is *meant* to get old.
+TEST_F (DatabaseTest, PruneRunsByAgeSparesABaselineRun) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    const int64_t day             = 86'400'000LL;
+    const int64_t ninety_days_ago = now - 90 * day;
+    seed_run_with_children (db, "pinned_stale", ninety_days_ago);
+    seed_run_with_children (db, "stale", ninety_days_ago);
+    ASSERT_TRUE (db.set_run_baseline ("pinned_stale", true).has_value ());
+
+    db.prune_runs (0, 30);
+
+    auto ids = run_ids (db);
+    EXPECT_TRUE (ids.count ("pinned_stale"));
+    EXPECT_FALSE (ids.count ("stale"));
+}
+
+TEST_F (DatabaseTest, SetRunBaselineTogglesAndPersists) {
+    const int64_t recent = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                           .count ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_run_with_children (db, "run_1", recent);
+
+        auto stored = db.get_run ("run_1");
+        ASSERT_TRUE (stored.has_value ());
+        EXPECT_FALSE (stored->baseline) << "a run is not a baseline until pinned";
+
+        auto pinned = db.set_run_baseline ("run_1", true);
+        ASSERT_TRUE (pinned.has_value ());
+        EXPECT_TRUE (pinned->baseline);
+        // The whole row comes back, not just the flag - the route answers with it.
+        EXPECT_EQ (pinned->id, "run_1");
+    }
+
+    // Survives a reopen: the pin is a stored column, not process state.
+    Database db (TEST_DB_PATH);
+    db.init ();
+    auto reopened = db.get_run ("run_1");
+    ASSERT_TRUE (reopened.has_value ());
+    EXPECT_TRUE (reopened->baseline);
+
+    auto unpinned = db.set_run_baseline ("run_1", false);
+    ASSERT_TRUE (unpinned.has_value ());
+    EXPECT_FALSE (unpinned->baseline);
+    EXPECT_FALSE (db.get_run ("run_1")->baseline);
+}
+
+TEST_F (DatabaseTest, SetRunBaselineOnAMissingRunReportsNothingStored) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_FALSE (db.set_run_baseline ("no_such_run", true).has_value ());
+}
+
+// A database written before the column existed must open, and its rows must
+// read as unpinned rather than as an error - the `default_value` is what makes
+// sync_schema add the column instead of refusing the table.
+TEST_F (DatabaseTest, RunsStoredBeforeTheBaselineColumnReadAsUnpinned) {
+    const int64_t recent = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                           .count ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_run_with_children (db, "legacy", recent);
+    }
+
+    // Drop the column back off, the way a database written by an older build
+    // has it - the same simulation MigratesHttpVersionColumnOntoAPreExisting-
+    // RequestsTable uses.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE runs DROP COLUMN baseline",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+
+    // Guard the guard: a drop that silently did nothing would leave the
+    // assertions below passing without a pre-column database to prove them on.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        sqlite3_stmt* stmt = nullptr;
+        ASSERT_EQ (sqlite3_prepare_v2 (handle, "PRAGMA table_info(runs)", -1, &stmt, nullptr),
+        SQLITE_OK);
+        bool has_column = false;
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* col_name = sqlite3_column_text (stmt, 1);
+            if (col_name != nullptr &&
+            std::string (reinterpret_cast<const char*> (col_name)) == "baseline") {
+                has_column = true;
+            }
+        }
+        sqlite3_finalize (stmt);
+        sqlite3_close (handle);
+        ASSERT_FALSE (has_column) << "drop did not remove baseline";
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    auto legacy = db.get_run ("legacy");
+    ASSERT_TRUE (legacy.has_value ()) << "an older database no longer opens";
+    EXPECT_FALSE (legacy->baseline);
+}
+
+TEST_F (DatabaseTest, RunFilterSelectsBaselinesInBothDirections) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    seed_run_with_children (db, "pinned", 3000);
+    seed_run_with_children (db, "plain", 2000);
+    db.set_run_baseline ("pinned", true);
+
+    vayu::db::RunFilter only_baselines;
+    only_baselines.baseline = true;
+    auto pinned             = db.get_runs_paginated (only_baselines, 50, 0);
+    ASSERT_EQ (pinned.size (), 1u);
+    EXPECT_EQ (pinned[0].id, "pinned");
+    EXPECT_EQ (db.count_runs (only_baselines), 1);
+
+    vayu::db::RunFilter no_baselines;
+    no_baselines.baseline = false;
+    auto plain            = db.get_runs_paginated (no_baselines, 50, 0);
+    ASSERT_EQ (plain.size (), 1u);
+    EXPECT_EQ (plain[0].id, "plain");
+
+    // Unset stays a wildcard - the filter must not narrow a list nobody
+    // asked to narrow.
+    EXPECT_EQ (db.count_runs ({}), 2);
+}
+
 // ============================================================================
 // Startup reconciliation (reconcile_orphaned_runs)
 // ============================================================================
