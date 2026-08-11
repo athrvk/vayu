@@ -1301,6 +1301,81 @@ hands it back.
 Attempts time out after 5 minutes; on success the token is written to the cache
 and `cacheKey` is returned.
 
+### Local mock issuer
+
+A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -
+no real identity provider, so no 2FA prompts, provider rate limits or
+"suspicious login" mail in the dev loop. Each issuer is an independent
+`127.0.0.1` listener serving `/token` and `/authorize`; point any OAuth 2.0
+config's `accessTokenUrl` at the `tokenUrl` it returns.
+
+It is **not an IdP**. JWKS/RS256, OIDC discovery documents, token introspection,
+consent screens and multi-tenant realms are deliberate non-goals.
+
+| Method / Path | Purpose |
+|---------------|---------|
+| `POST /mock-issuer/start` | Start one → `{issuerId, issuerUrl, tokenUrl, authorizeUrl, signingKey}` |
+| `GET /mock-issuer` | List the running issuers |
+| `PUT /mock-issuer/:id` | Update `failureMode` / `slowMs` / `expiresInSeconds` live |
+| `POST /mock-issuer/:id/stop` | Stop one → `{stopped: true}` (`404` if unknown) |
+
+**Start body** (every field optional):
+
+```json
+{
+  "port": 0,
+  "expiresInSeconds": 3600,
+  "claims": { "sub": "alice", "roles": ["admin"] },
+  "clients": [{ "clientId": "cid", "clientSecret": "s3cret" }],
+  "failureMode": "none",
+  "slowMs": 2000,
+  "issueRefreshTokens": true
+}
+```
+
+`port: 0` (the default) binds an ephemeral port. `clients` empty accepts **any**
+client id; with clients configured, an id must be one of them and one carrying a
+secret must present it (Basic header or body - both RFC 6749 §2.3.1 placements).
+A field present with the wrong type or an out-of-range value is a `400`
+(`mock_issuer_invalid_config`) rather than a silent fallback to the default - a
+mock issuer running with an expiry other than the one asked for would defeat the
+purpose. At most 8 issuers run at once (`429 mock_issuer_limit_reached`).
+
+**The issuer's own endpoints:**
+
+- `POST /token` - `client_credentials`, `password`, `authorization_code` and
+  `refresh_token` grants, `application/x-www-form-urlencoded` as RFC 6749 §3.2
+  requires. Answers `{access_token, token_type: "Bearer", expires_in,
+  refresh_token?, scope?}`. Authorization codes are single-use and expire after
+  5 minutes; a refresh grant **rotates** its token (the presented one is spent).
+- `GET /authorize` - auto-approves and `302`s straight back to `redirect_uri`
+  with `code` and `state`, so the interactive flow completes with zero human
+  steps. PKCE is verified when a `code_challenge` is present;
+  `code_challenge_method` must then be `S256` (`plain` is refused rather than
+  quietly accepted). An unknown client or a missing `redirect_uri` answers in
+  place rather than redirecting (RFC 6749 §4.1.2.1).
+
+The access token is an **HS256 JWT** signed with the per-issuer `signingKey` the
+start call returned - hand that key to the service under test as its shared
+secret and it can verify the mock's tokens. The payload is the configured
+`claims` plus `iss`, `iat`, `exp` and `jti` (these four always win, since they
+describe the token being issued), with `sub`, `client_id` and `scope` filled in
+only when the claims did not set them.
+
+`failureMode` is what makes retry and error handling testable, and can be
+flipped on a **running** issuer with the `PUT`:
+
+| Mode | `/token` answers |
+|------|------------------|
+| `none` | Normally |
+| `slow` | Normally, after `slowMs` |
+| `server_error` | `500 {"error": "temporarily_unavailable"}` |
+| `invalid_client` | `401 {"error": "invalid_client"}` |
+
+Issuers bind `127.0.0.1` only - never configurable, because they mint bearer
+tokens and the engine has no route auth. State is in-memory: a restart forgets
+every issuer, and stopping one drops its codes and refresh tokens with it.
+
 ## Execution
 
 ### POST /compose

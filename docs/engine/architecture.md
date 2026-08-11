@@ -274,6 +274,21 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
+- **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
+  `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
+  and `/authorize`, so auth flows are exercisable offline with no real identity
+  provider. It mints HS256 JWTs with a random per-issuer key (libsodium again),
+  auto-approves `/authorize` with PKCE S256 verification, rotates refresh
+  tokens, and can be flipped between healthy and `slow` / `server_error` /
+  `invalid_client` while running. In-memory only and owned by the `Server`, on
+  the same reverse-member-order rule as the authorize manager.
+
+**Listener inventory.** The engine's own API is the only long-lived listener
+(`127.0.0.1:<port>`, `server.cpp`). Everything else is spawned, loopback-bound
+and short-lived: the interactive-auth callback (one per attempt, 5-minute TTL)
+and mock issuers (at most 8, until stopped). None of them may bind wider than
+`127.0.0.1` - the management API has no route auth and CORS `*`, and a mock
+issuer hands out bearer tokens, so a non-loopback bind would publish both.
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See

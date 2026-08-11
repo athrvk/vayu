@@ -460,6 +460,37 @@ constexpr int SPIN_COUNT = 2000;
 } // namespace queue
 
 /**
+ * @brief Local OAuth 2.0 mock issuer bounds
+ *
+ * Rails rather than preferences: every one of these bounds a resource the
+ * *caller* does not pay for - listener threads, and two maps a long-lived
+ * daemon would otherwise grow one entry per authorize call that never came
+ * back for its code. The issuer's actual behaviour (expiry, claims, failure
+ * mode, cadence of nothing) is per-issuer request payload, not config.
+ */
+namespace mock_issuer {
+/// Concurrently running issuers. Each owns a listener thread plus cpp-httplib's
+/// own accept loop, so this is a thread budget more than anything else.
+constexpr size_t MAX_ISSUERS = 8;
+/// Clients one issuer may be configured with.
+constexpr size_t MAX_CLIENTS = 32;
+/// Authorization codes held awaiting their exchange (oldest evicted first).
+constexpr size_t MAX_PENDING_CODES = 256;
+/// Live refresh tokens held per issuer (oldest evicted first). Rotation spends
+/// one and mints one, so this only binds when many are issued and never used.
+constexpr size_t MAX_REFRESH_TOKENS = 256;
+/// How long an authorization code stays exchangeable. RFC 6749 §4.1.2 asks for
+/// a short lifetime; this matches the interactive attempt TTL in
+/// oauth_authorize.cpp so the two halves of one flow expire together.
+constexpr int64_t CODE_TTL_MS = 5 * 60 * 1000;
+/// Ceiling on the `slow` failure mode's delay. Past a minute the caller is
+/// testing its own timeout, and the sleep holds a cpp-httplib pool thread.
+constexpr int64_t MAX_SLOW_MS = 60000;
+/// Ceiling on a minted token's lifetime (31 days).
+constexpr int64_t MAX_EXPIRES_IN_SECONDS = 31LL * 86400LL;
+} // namespace mock_issuer
+
+/**
  * @brief Database optimization configuration
  */
 namespace database {
