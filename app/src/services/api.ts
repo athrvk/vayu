@@ -71,7 +71,7 @@ import type {
 	StartInboxRequest,
 	ClearInboxCapturesResponse,
 } from "@/types";
-import type { TimeSeriesResponse } from "@/modules/history/types";
+import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import {
@@ -460,6 +460,16 @@ export const apiService = {
 		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
 		return await httpClient.get<TimeSeriesResponse>(
 			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset)
+		);
+	},
+
+	async getRunMonitorSeries(
+		id: string,
+		options: { limit?: number; offset?: number } = {}
+	): Promise<MonitorSeriesResponse> {
+		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
+		return await httpClient.get<MonitorSeriesResponse>(
+			API_ENDPOINTS.RUN_MONITOR(id, limit, offset)
 		);
 	},
 

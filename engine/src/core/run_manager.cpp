@@ -15,6 +15,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_runner.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -357,7 +358,7 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
 RunContext::RunContext (const std::string& id,
 nlohmann::json cfg,
 size_t max_errors,
-CaptureDefaults capture_defaults)
+EngineDefaults engine_defaults)
 : run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
@@ -406,9 +407,14 @@ CaptureDefaults capture_defaults)
     mc_config.capture_response_bodies = config.value ("capture_response_bodies",
     constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES);
     mc_config.max_sample_body_bytes = static_cast<size_t> (config.value (
-    "max_sample_body_bytes", static_cast<int64_t> (capture_defaults.max_sample_body_bytes)));
+    "max_sample_body_bytes", static_cast<int64_t> (engine_defaults.max_sample_body_bytes)));
     mc_config.max_sample_bytes = static_cast<size_t> (
-    config.value ("max_sample_bytes", static_cast<int64_t> (capture_defaults.max_sample_bytes)));
+    config.value ("max_sample_bytes", static_cast<int64_t> (engine_defaults.max_sample_bytes)));
+    // Per-phase histograms. Engine-config default, per-run override like the
+    // caps above - a run that only wants the cheapest possible completion path
+    // can switch them off without changing the setting for every other run.
+    mc_config.phase_histograms =
+    config.value ("phase_histograms", engine_defaults.phase_histograms);
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
@@ -447,6 +453,11 @@ RunContext::~RunContext () {
 void RunContext::join_aux_threads () {
     if (metrics_thread.joinable ()) {
         metrics_thread.join ();
+    }
+    // Same reasoning for the scrape loop: a joinable thread left on a
+    // destroyed context is std::terminate, not a leak.
+    if (monitor_thread.joinable ()) {
+        monitor_thread.join ();
     }
     if (auth_refresh_thread.joinable ()) {
         auth_refresh_thread.join ();
@@ -687,17 +698,19 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         // The config-backed defaults RunContext cannot read for itself - it
         // holds no Database - resolved here, the way `maxStoredErrors` always
         // has been. A run's own config still overrides each of them.
-        CaptureDefaults capture_defaults;
-        capture_defaults.max_sample_body_bytes =
+        EngineDefaults engine_defaults;
+        engine_defaults.max_sample_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBodyBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES)));
-        capture_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
+        engine_defaults.phase_histograms = db.get_config_bool ("phaseHistograms",
+        vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS);
+        engine_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))),
-        capture_defaults);
+        engine_defaults);
         register_run (run_id, context);
 
         // Sweep stale retained runs on each new registration so that headless /
@@ -739,6 +752,19 @@ std::shared_ptr<const ScenarioExecution> scenario) {
         // joined by the worker thread below.
         context->metrics_thread =
         std::thread ([context, &db] () { collect_metrics (context, &db); });
+        // Server vitals, when this run asked for them. Read from the config the
+        // route already validated; `monitor_config_from` returning nothing here
+        // means the run declared no monitor (or a snapshot this engine cannot
+        // read), and the run proceeds exactly as it did before the block
+        // existed. The totals live on the context so the summary can read them
+        // once this thread has been joined.
+        if (auto monitor = monitor_config_from (context->config, read_monitor_limits (db))) {
+            context->monitor_totals = std::make_unique<MonitorTotals> ();
+            context->monitor_thread = std::thread (
+            [context, &db, cfg = std::move (*monitor)] () mutable {
+                collect_monitor (context, &db, std::move (cfg));
+            });
+        }
         return std::thread ([context, &db, verbose, this] () {
             execute_load_test (context, &db, verbose, *this);
         });
@@ -913,11 +939,13 @@ RunManager& manager) {
         // (not after cleanup/metrics thread join)
         db.update_run_end_time (context->run_id);
 
-        // Stop background metrics collection and wait for thread to finish
+        // Stop background collection and wait for the threads to finish
         context->is_running = false;
 
         // Properly join the auxiliary threads to ensure the tick thread is
-        // done writing to the DB and the refresh watchdog has let go of it.
+        // done writing to the DB, the refresh watchdog has let go of it, and
+        // the scrape loop's `monitor_totals` is final before the summary below
+        // reads it.
         context->join_aux_threads ();
 
         // Calculate cleanup overhead (time from test end to after cleanup)
@@ -977,6 +1005,7 @@ RunManager& manager) {
             inputs.status_codes    = context->metrics_collector->status_code_distribution ();
             inputs.latency         = percentiles;
             inputs.latency_avg_ms  = avg_latency;
+            inputs.phases          = context->metrics_collector->phase_percentiles ();
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests     = validation.run;
@@ -984,6 +1013,11 @@ RunManager& manager) {
             // so it is already final here; absent for every other mode.
             inputs.capacity  = context->capacity;
             inputs.retention = read_retention (*context->metrics_collector);
+            // Safe to read unlocked: the scrape thread is its only writer and
+            // was joined above, which is the happens-before edge.
+            if (context->monitor_totals) {
+                inputs.monitor = context->monitor_totals->to_summary ();
+            }
             // Read only now, after the drain above: a completion callback can
             // still be advancing a VU while the strategy's own frame has
             // already returned, so the tallies are only final here.
@@ -1080,6 +1114,7 @@ RunManager& manager) {
             inputs.status_codes     = mc.status_code_distribution ();
             inputs.latency          = mc.calculate_percentiles ();
             inputs.latency_avg_ms   = mc.average_latency ();
+            inputs.phases           = mc.phase_percentiles ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
             if (context->auth_refresh) {
@@ -1113,8 +1148,7 @@ RunManager& manager) {
 }
 
 std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
-    return "event: metrics\nid: " + std::to_string (offset) + "\ndata: " +
-    stats.dump () + "\n\n";
+    return build_sse_frame ("metrics", stats.dump (), offset);
 }
 
 nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
@@ -1206,6 +1240,19 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
             { "passed", inputs.thresholds->passed },
             { "failed", inputs.thresholds->failed } };
     }
+    // Per-phase latency distributions, keyed by wire name so a reader does not
+    // have to know the enum's order. Omitted when the run recorded none - a
+    // reader that finds no `phases` key is looking at a run whose phase data
+    // was never collected, not at a target with a free TLS handshake.
+    if (inputs.phases.has_value ()) {
+        nlohmann::json phases = nlohmann::json::object ();
+        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+            const auto& p        = (*inputs.phases)[i];
+            phases[TIMING_PHASE_KEYS[i]] = { { "p50", p.p50 }, { "p95", p.p95 },
+                { "p99", p.p99 }, { "max", p.max }, { "count", p.count } };
+        }
+        summary["phases"] = phases;
+    }
     // What a capacity run's search found, level by level. Omitted for every
     // other mode - a fixed-target run measured a point, not a curve, and has
     // no knee to report.
@@ -1217,6 +1264,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // executors. Omitted for a single-request load run, which has no sequence.
     if (inputs.scenario.has_value ()) {
         summary["scenario"] = *inputs.scenario;
+    }
+    // What the server-vitals scrape recorded. Omitted for a run that configured
+    // no monitor, so the report's section is absent rather than showing a run
+    // that scraped nothing as one whose target reported zeros.
+    if (inputs.monitor.has_value ()) {
+        summary["monitor"] = *inputs.monitor;
     }
     // Whether this run's OAuth 2.0 credential was kept current, and at what
     // cost. Omitted for every run that could not refresh at all, so an absent
@@ -1312,8 +1365,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         context->publish_live_tick ({ 0, win_p50, win_p95, win_p99, live_current_rps,
         backpressure, window.count });
 
-        size_t offset = context->published_count.load ();
-        context->append_tick (build_tick_payload (stats, offset));
+        // Framed by the ring, which assigns the id under its own lock: a run
+        // with a monitor has a second producer appending to it, and reading the
+        // offset here would race that thread for the same id.
+        context->append_event ("metrics", stats.dump ());
     };
 
     // Guard the entire body so that any exception (std::bad_alloc, json error,
@@ -1473,6 +1528,105 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Unconditional: always signal consumers so they terminate cleanly,
     // even if the producer threw.
     context->closed.store (true, std::memory_order_release);
+}
+
+void collect_monitor (std::shared_ptr<RunContext> context,
+vayu::db::Database* db_ptr,
+MonitorConfig config) {
+    auto& db = *db_ptr;
+
+    // A scrape must not outlive its own cadence: the sample a late answer
+    // carries is no longer about the moment it was asked for, and the loop
+    // would spend the whole run behind itself. Three quarters of the interval
+    // leaves room to store the row and come back round.
+    const int timeout_ms = std::max (100, config.interval_ms * 3 / 4);
+
+    // No cookie jar: this is the engine talking on its own behalf, like the
+    // OAuth token call and the update check (see ClientConfig::cookie_jar).
+    vayu::http::Client client{ vayu::http::ClientConfig{} };
+
+    int consecutive_failures = 0;
+    bool backoff_logged      = false;
+    int interval_ms          = config.interval_ms;
+
+    // Guarded whole, for the same reason collect_metrics is: an exception out
+    // of a thread function calls std::terminate, and a scrape failure must
+    // never take the run with it.
+    try {
+        while (context->is_running) {
+            const auto scrape_started = std::chrono::steady_clock::now ();
+
+            vayu::Request request;
+            request.method     = vayu::HttpMethod::GET;
+            request.url        = config.url;
+            request.timeout_ms = timeout_ms;
+
+            std::map<std::string, double> values;
+            auto sent = client.send (request);
+            if (sent.is_ok () && !sent.value ().has_error () && sent.value ().is_success ()) {
+                values = parse_monitor_body (config.format, sent.value ().body, config.series);
+            }
+
+            // A scrape that read nothing is a gap, whether the transport failed
+            // or the body carried none of the requested names: both mean this
+            // moment went unmeasured, and a stored sample with no readings
+            // would draw a line through a hole in the data.
+            if (values.empty ()) {
+                ++consecutive_failures;
+                if (context->monitor_totals) {
+                    context->monitor_totals->record_failure ();
+                }
+                if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
+                    if (!backoff_logged) {
+                        vayu::utils::log_warning ("Monitor scrape for run " + context->run_id +
+                        " has failed " + std::to_string (consecutive_failures) +
+                        " times in a row (" + config.url +
+                        "); backing off, the series will show gaps");
+                        backoff_logged = true;
+                    }
+                    // Doubled once, not per failure: the point is to stop
+                    // hammering an endpoint that is gone, not to drift so far
+                    // out that a recovered one is noticed minutes later.
+                    interval_ms =
+                    std::min (config.interval_ms * 2, constants::monitor::MAX_INTERVAL_MS);
+                }
+            } else {
+                consecutive_failures = 0;
+                backoff_logged       = false;
+                interval_ms          = config.interval_ms;
+
+                const int64_t sample_wall_ms = now_ms ();
+                auto payload = build_monitor_sample_payload (sample_wall_ms, values);
+                if (context->monitor_totals) {
+                    context->monitor_totals->add (values);
+                }
+                try {
+                    db.add_monitor_sample (
+                    { 0, context->run_id, sample_wall_ms, payload.dump () });
+                } catch (const std::exception& e) {
+                    // The live frame below still goes out: a row this run could
+                    // not store is worth less than a series that stops drawing.
+                    vayu::utils::log_warning ("Failed to store monitor sample for run " +
+                    context->run_id + ": " + e.what ());
+                }
+                context->append_event ("monitor", payload.dump ());
+            }
+
+            // Sleep out the remainder of the interval in short slices. A run
+            // that finishes joins this thread, so a single sleep_for would hold
+            // the whole run open for up to a minute at the maximum interval.
+            const auto deadline =
+            scrape_started + std::chrono::milliseconds (interval_ms);
+            while (context->is_running && std::chrono::steady_clock::now () < deadline) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (
+                std::min (50, interval_ms)));
+            }
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("collect_monitor: " + std::string (e.what ()));
+    } catch (...) {
+        vayu::utils::log_error ("collect_monitor: unknown exception");
+    }
 }
 
 } // namespace vayu::core

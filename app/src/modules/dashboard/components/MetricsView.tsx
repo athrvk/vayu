@@ -39,6 +39,7 @@ import {
 	buildStatusOverTime,
 	latestThroughputMbps,
 } from "../utils/metricsTransforms";
+import { detectAnomalies } from "../utils/detectAnomalies";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -48,10 +49,13 @@ import {
 	StatusCodesOverTimeChart,
 	ResponseTimeVsConcurrencyChart,
 	HdrPercentileChart,
+	ServerVitalsChart,
 	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
+import { PhasePercentiles } from "./charts/PhasePercentiles";
+import { hasPhaseAverages } from "@/components/shared/response-viewer/timing-phases";
 
 function MetricsView({
 	metrics,
@@ -88,11 +92,23 @@ function MetricsView({
 		[loadMode, chartWindow, rampConfig]
 	);
 
+	/*
+	 * Degradation windows, derived here beside the other series transforms rather
+	 * than inside `derived` below: that bundle deliberately depends on the latest
+	 * tick and not on the whole history array, so folding a history-wide scan into
+	 * it would rebuild it at 10 Hz and defeat the React.memo on HeroRow /
+	 * ModeStatsRow. The charts are the consumers, and they take it directly.
+	 */
+	const anomalies = useMemo(() => detectAnomalies(chartWindow), [chartWindow]);
+
 	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
+	// Empty for a run that configured no monitor - the row below reads that
+	// rather than the config, so it is right for a replayed run too.
+	const monitorSamples = useDashboardStore((s) => s.monitorSamples);
 
 	// Only the latest tick's elapsed_seconds is consumed below - depending on the
 	// whole historicalMetrics array would rebuild `derived` every tick (10 Hz) and
@@ -239,6 +255,7 @@ function MetricsView({
 						rampOverlay={rampOverlay}
 						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
+						anomalies={anomalies}
 					/>
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
@@ -303,6 +320,7 @@ function MetricsView({
 						history={chartWindow}
 						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
+						anomalies={anomalies}
 					/>
 				</div>
 			)}
@@ -378,6 +396,7 @@ function MetricsView({
 								isCompleted={isCompleted}
 								syncKey={CHART_SYNC.live}
 								breakpoint={breakpoint}
+								anomalies={anomalies}
 							/>
 						</div>
 					)}
@@ -425,6 +444,29 @@ function MetricsView({
 				</div>
 			)}
 
+			{/* Server vitals - only for a run that scraped an endpoint, so a run
+			    without a monitor block keeps the dashboard it always had. */}
+			{monitorSamples.length > 0 && chartWindow.length > 1 && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-xs font-semibold text-foreground">
+							Server vitals
+							<InfoChip tip={TOOLTIPS.serverVitals} />
+						</h3>
+						<span className="text-[10px] font-mono text-muted-foreground">
+							scraped from the target
+						</span>
+					</div>
+					<ServerVitalsChart
+						history={chartWindow}
+						samples={monitorSamples}
+						isCompleted={isCompleted}
+						syncKey={CHART_SYNC.live}
+						anomalies={anomalies}
+					/>
+				</div>
+			)}
+
 			{/* Row 3 - HDR plot + Timing waterfall */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
 				{/* HDR */}
@@ -467,10 +509,27 @@ function MetricsView({
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
 						<span className="text-[10px] font-mono text-muted-foreground">
-							{finalReport?.timingBreakdown ? "from timing samples" : "-"}
+							{hasPhaseAverages(finalReport?.timingBreakdown)
+								? "from timing samples"
+								: "-"}
 						</span>
 					</div>
 					<TimingWaterfall report={finalReport} />
+					{/* Percentiles under the averages, separated by a rule and its
+					    own heading: they are the same five phases measured over a
+					    different population (every completion, not the trace
+					    sample), so running them together as more rows would invite
+					    a column-to-column comparison that is not valid. Renders
+					    nothing when the run recorded no distributions. */}
+					{finalReport?.timingBreakdown?.phases && (
+						<div className="mt-3.5 pt-3.5 border-t border-border">
+							<h3 className="text-xs font-semibold text-foreground mb-3">
+								Phase percentiles
+								<InfoChip tip={TOOLTIPS.phasePercentiles} />
+							</h3>
+							<PhasePercentiles report={finalReport} />
+						</div>
+					)}
 				</div>
 			</div>
 

@@ -436,13 +436,18 @@ collection run's per-step progress.
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
   browser's built-in `EventSource` retry. At run end the app converges on the stored report
   (`GET /runs/:id/report`) rather than reconnecting to the stream.
-- **Event Handling**: `metrics` events, `step` events, `complete` event, `error` handling
+- **Event Handling**: `metrics` events, `step` events, `monitor` events, `complete` event,
+  `error` handling
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row
   rather than merely say nothing.
+- **Monitor Parsing**: `parseMonitorEvent()` narrows a `monitor` frame the same way and returns
+  `null` for one it cannot read. A sample defaulted to `timestamp: 0` would join onto the very
+  start of the run's timeline and draw a reading at a moment it was never taken; individual
+  non-numeric entries are dropped, because the rest of the scrape is still real data.
 
 ### Usage
 
@@ -452,7 +457,8 @@ sseClient.connect(
   onMessage: (metrics: LoadTestMetrics) => void,
   onError: (error: Error) => void,
   onClose: () => void,
-  onStep?: (step: ScenarioStepEvent) => void   // scenario runs only
+  onStep?: (step: ScenarioStepEvent) => void,     // scenario runs only
+  onMonitor?: (sample: MonitorSample) => void     // runs with a `monitor` block only
 );
 
 sseClient.disconnect();
@@ -466,6 +472,9 @@ sseClient.isConnected(): boolean
 - **`step`**: One step execution of a scenario run - `{iteration, stepIndex, name, outcome,
   statusCode, latencyMs}`. Listened for only when `onStep` is passed, since a load run never
   emits one.
+- **`monitor`**: One scrape of the run's monitored endpoint - `{timestamp, series}`. Listened
+  for only when `onMonitor` is passed. Interleaved with `metrics` ticks on one id space, so
+  `Last-Event-ID` resume replays both in the order they happened.
 - **`complete`**: The run reached a terminal status
 - **`error`**: Connection error (triggers reconnection)
 - **`open`**: Connection established
@@ -533,6 +542,11 @@ export const API_ENDPOINTS = {
   // Time-series metrics (JSON, paginated) - used to hydrate history
   STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
     `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
+
+  // Server vitals scraped during the run (JSON, paginated, same envelope).
+  // Fetched by the history view only when the report says the run recorded some.
+  RUN_MONITOR: (runId: string, limit = 5000, offset = 0) =>
+    `/runs/${runId}/monitor?limit=${limit}&offset=${offset}`,
 };
 ```
 

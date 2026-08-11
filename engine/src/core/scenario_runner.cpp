@@ -259,7 +259,7 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.data_row_index) {
         data["dataRowIndex"] = *record.data_row_index;
     }
-    return "event: step\nid: " + std::to_string (offset) + "\ndata: " + data.dump () + "\n\n";
+    return build_sse_frame ("step", data.dump (), offset);
 }
 
 nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inputs) {

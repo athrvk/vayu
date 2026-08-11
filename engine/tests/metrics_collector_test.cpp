@@ -991,3 +991,140 @@ TEST (MetricsCollectorRetention, ResponseSamplesStayBoundedUnderConcurrentWriter
     EXPECT_EQ (collector.response_samples ().size () + collector.response_samples_dropped (),
     8u * 2000u);
 }
+
+// ============================================================================
+// Per-Phase Histograms (issue #476)
+// ============================================================================
+
+namespace {
+
+/// A completion's phase breakdown, spelled out so a test reads as the five
+/// numbers it is asserting on rather than as five positional doubles.
+vayu::Timing phase_timing (double dns, double connect, double tls, double first_byte, double download) {
+    vayu::Timing timing;
+    timing.dns_ms        = dns;
+    timing.connect_ms    = connect;
+    timing.tls_ms        = tls;
+    timing.first_byte_ms = first_byte;
+    timing.download_ms   = download;
+    return timing;
+}
+
+constexpr size_t kDns       = static_cast<size_t> (TimingPhase::Dns);
+constexpr size_t kConnect   = static_cast<size_t> (TimingPhase::Connect);
+constexpr size_t kTls       = static_cast<size_t> (TimingPhase::Tls);
+constexpr size_t kFirstByte = static_cast<size_t> (TimingPhase::FirstByte);
+constexpr size_t kDownload  = static_cast<size_t> (TimingPhase::Download);
+
+} // namespace
+
+// Each phase's values must land in its own histogram. Driving five distinct
+// magnitudes is what makes a transposition (connect written into the tls slot,
+// say) fail here rather than in a report nobody re-derives.
+TEST_F (MetricsCollectorTest, PhaseValuesLandInTheirOwnHistogram) {
+    for (int i = 0; i < 100; ++i) {
+        const auto timing = phase_timing (1.0, 10.0, 100.0, 200.0, 4.0);
+        collector->record_success (200, 315.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+    }
+
+    auto phases = collector->phase_percentiles ();
+    ASSERT_TRUE (phases.has_value ());
+
+    constexpr double tolerance = 1.0;
+    EXPECT_NEAR ((*phases)[kDns].p50, 1.0, tolerance);
+    EXPECT_NEAR ((*phases)[kConnect].p50, 10.0, tolerance);
+    EXPECT_NEAR ((*phases)[kTls].p50, 100.0, tolerance);
+    EXPECT_NEAR ((*phases)[kFirstByte].p50, 200.0, tolerance);
+    EXPECT_NEAR ((*phases)[kDownload].p50, 4.0, tolerance);
+
+    // Fed together, so every phase holds the whole run.
+    for (const auto& phase : *phases) {
+        EXPECT_EQ (phase.count, 100u);
+    }
+}
+
+// The distribution, not just the middle: a tail that only 1% of completions
+// paid is exactly what the averages this replaces could not show.
+TEST_F (MetricsCollectorTest, PhasePercentilesSeparateTailFromBody) {
+    // 95 reused connections (no handshake) and 5 that re-handshaked for 50ms.
+    // The split is 95/5 rather than 99/1 so the outliers sit *inside* p99: with
+    // a single outlier in 100 the p99 is legitimately 0 and only `max` sees it,
+    // which would make this test assert the histogram's rank arithmetic rather
+    // than the behaviour it is here for.
+    for (int i = 0; i < 95; ++i) {
+        const auto timing = phase_timing (0.0, 0.0, 0.0, 5.0, 1.0);
+        collector->record_success (200, 6.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+    }
+    for (int i = 0; i < 5; ++i) {
+        const auto slow = phase_timing (0.0, 3.0, 50.0, 5.0, 1.0);
+        collector->record_success (200, 59.0, 0.0, "", SuccessTraceReason::None, nullptr, &slow);
+    }
+
+    auto phases = collector->phase_percentiles ();
+    ASSERT_TRUE (phases.has_value ());
+
+    // A zero p50 is the truthful reading of "most requests did no handshake" -
+    // it must not be mistaken for a dropped record, which is why zeros are
+    // recorded rather than skipped.
+    EXPECT_DOUBLE_EQ ((*phases)[kTls].p50, 0.0);
+    EXPECT_DOUBLE_EQ ((*phases)[kTls].p95, 0.0);
+    EXPECT_EQ ((*phases)[kTls].count, 100u);
+    EXPECT_NEAR ((*phases)[kTls].max, 50.0, 1.0);
+    // The mean this replaces would have read 2.5ms - a number that looks like a
+    // uniformly slightly-slow handshake rather than 5% of requests paying 50ms.
+    EXPECT_NEAR ((*phases)[kTls].p99, 50.0, 1.0);
+}
+
+// The escape hatch has to actually cost nothing: off means no bank, and a
+// report with no `phases` section rather than one full of zeros.
+TEST_F (MetricsCollectorTest, PhaseHistogramsOffRecordsNothing) {
+    MetricsCollectorConfig config;
+    config.phase_histograms = false;
+    MetricsCollector off ("phases_off", config);
+
+    const auto timing = phase_timing (1.0, 10.0, 100.0, 200.0, 4.0);
+    off.record_success (200, 315.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+
+    EXPECT_EQ (off.total_requests (), 1u);
+    EXPECT_FALSE (off.phase_percentiles ().has_value ());
+}
+
+// Absent, not zeros: a run where nothing succeeded reports no distribution, so
+// a reader cannot mistake it for a target whose every phase was instant.
+TEST_F (MetricsCollectorTest, PhasePercentilesAbsentWithoutCompletions) {
+    EXPECT_FALSE (collector->phase_percentiles ().has_value ());
+
+    // A success recorded without a breakdown (the record_success overloads that
+    // predate the bank, and every non-load caller) leaves it absent too.
+    collector->record_success (200, 10.0, 0.0);
+    EXPECT_FALSE (collector->phase_percentiles ().has_value ());
+}
+
+// Written from every event-loop worker, so the records must be the atomic
+// variant - the plain one is a read-modify-write on counts[] and loses
+// increments. A lost increment shows up here as a count below the total.
+TEST_F (MetricsCollectorTest, PhaseHistogramsSafeUnderConcurrentWriters) {
+    constexpr int kThreads   = 4;
+    constexpr int kPerThread = 5000;
+
+    std::vector<std::thread> writers;
+    writers.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        writers.emplace_back ([this] () {
+            for (int i = 0; i < kPerThread; ++i) {
+                const auto timing = phase_timing (1.0, 2.0, 3.0, 4.0, 5.0);
+                collector->record_success (200, 15.0, 0.0, "",
+                SuccessTraceReason::None, nullptr, &timing);
+            }
+        });
+    }
+    for (auto& writer : writers) {
+        writer.join ();
+    }
+
+    auto phases = collector->phase_percentiles ();
+    ASSERT_TRUE (phases.has_value ());
+    for (const auto& phase : *phases) {
+        EXPECT_EQ (phase.count, static_cast<size_t> (kThreads * kPerThread));
+    }
+}

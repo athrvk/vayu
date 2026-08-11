@@ -16,14 +16,17 @@
 
 import { useMemo } from "react";
 import type uPlot from "uplot";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, MonitorSample } from "@/types";
 import {
 	buildLatencyChartData,
 	buildPercentileChartData,
 	type RampOverlay,
 } from "../../../utils/metricsTransforms";
 import type { Breakpoint } from "../../../utils/computeBreakpoint";
-import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
+import type { Anomaly, AnomalyKind } from "../../../utils/detectAnomalies";
+import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
+import type { ColorRole } from "./uplotTheme";
+import { UPlotChart, type UPlotSeriesSpec, type Marker, type Annotation } from "./UPlotChart";
 import {
 	bucketColumns,
 	rebucket,
@@ -32,7 +35,17 @@ import {
 	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
-import { axisMs, axisRate, axisPct, fmtMs, fmtRate, fmtCount, fmtPct } from "./formatters";
+import {
+	axisMs,
+	axisRate,
+	axisPct,
+	axisVitals,
+	fmtMs,
+	fmtRate,
+	fmtCount,
+	fmtPct,
+	fmtVitals,
+} from "./formatters";
 import { useClientSettingsStore } from "@/stores";
 
 interface BaseProps {
@@ -41,6 +54,12 @@ interface BaseProps {
 	syncKey?: string;
 	height?: number;
 	breakpoint?: Breakpoint | null;
+	/**
+	 * Detected degradation windows, shaded on the time axis. Derived once by the
+	 * view that owns the series (live dashboard / history detail) and passed down,
+	 * so every chart in a synced stack shades the same windows.
+	 */
+	anomalies?: Anomaly[] | null;
 }
 
 /** Vertical breakpoint marker (p99 crossed SLO), shared by the time-series charts. */
@@ -56,6 +75,29 @@ function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
 	];
 }
 
+/**
+ * Anomaly colour by what went wrong - errors read as errors, slowness as a
+ * warning. The breakpoint marker is `warning` too and they can coincide, which
+ * is correct: both are saying the run degraded there, one against the SLO and
+ * one against the run's own baseline.
+ */
+const ANOMALY_ROLE: Record<AnomalyKind, ColorRole> = {
+	latency_spike: "warning",
+	error_burst: "destructive",
+	throughput_drop: "warning",
+	first_5xx: "destructive",
+};
+
+/** Anomaly windows as chart-layer bands, shared by the time-series charts. */
+function anomalyAnnotations(anomalies?: Anomaly[] | null): Annotation[] {
+	return (anomalies ?? []).map((a) => ({
+		startSeconds: a.startSeconds,
+		endSeconds: a.endSeconds,
+		label: a.label,
+		role: ANOMALY_ROLE[a.kind],
+	}));
+}
+
 /** Response-time percentiles over time - the canonical "latency vs time" chart. */
 export function LatencyPercentilesChart({
 	history,
@@ -63,8 +105,10 @@ export function LatencyPercentilesChart({
 	syncKey,
 	height,
 	breakpoint,
+	anomalies,
 }: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);
 		const { times, cols } = rebucket(
@@ -92,13 +136,21 @@ export function LatencyPercentilesChart({
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={breakpointMarker(breakpoint)}
+			annotations={annotations}
 		/>
 	);
 }
 
 /** Latency breakdown: perceived latency vs wire time, with the queue-wait gap band. */
-export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }: BaseProps) {
+export function LatencyBreakdownChart({
+	history,
+	isCompleted,
+	syncKey,
+	height,
+	anomalies,
+}: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
 	const { data, series } = useMemo(() => {
 		const d = buildLatencyChartData(history);
 		const { times, cols } = rebucket(
@@ -132,6 +184,7 @@ export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }:
 			yFormat={axisMs}
 			isLive={!isCompleted}
 			syncKey={syncKey}
+			annotations={annotations}
 		/>
 	);
 }
@@ -149,8 +202,10 @@ export function RequestRateChart({
 	targetRps,
 	rampOverlay,
 	breakpoint,
+	anomalies,
 }: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
 	const { data, series, hasRamp } = useMemo(() => {
 		const { times, cols } = bucketColumns(
 			history,
@@ -217,14 +272,23 @@ export function RequestRateChart({
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={markers}
+			annotations={annotations}
 			key={hasRamp ? "ramp" : "plain"}
 		/>
 	);
 }
 
 /** Active connections (in-flight) over time. */
-export function ConnectionsChart({ history, isCompleted, syncKey, height, breakpoint }: BaseProps) {
+export function ConnectionsChart({
+	history,
+	isCompleted,
+	syncKey,
+	height,
+	breakpoint,
+	anomalies,
+}: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
 	const data = useMemo<uPlot.AlignedData>(() => {
 		const { times, cols } = bucketColumns(history, [pickConcurrency], bucketSeconds);
 		return [times, cols[0]];
@@ -243,13 +307,22 @@ export function ConnectionsChart({ history, isCompleted, syncKey, height, breakp
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={breakpointMarker(breakpoint)}
+			annotations={annotations}
 		/>
 	);
 }
 
 /** Error rate (%) over time. */
-export function ErrorRateChart({ history, isCompleted, syncKey, height, breakpoint }: BaseProps) {
+export function ErrorRateChart({
+	history,
+	isCompleted,
+	syncKey,
+	height,
+	breakpoint,
+	anomalies,
+}: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
 	const data = useMemo<uPlot.AlignedData>(() => {
 		const { times, cols } = bucketColumns(history, [pickErrorRate], bucketSeconds);
 		return [times, cols[0]];
@@ -268,6 +341,75 @@ export function ErrorRateChart({ history, isCompleted, syncKey, height, breakpoi
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={breakpointMarker(breakpoint)}
+			annotations={annotations}
+		/>
+	);
+}
+
+/**
+ * The categorical hues legible as a line on both grounds, in the order the
+ * vitals overlay assigns them. A run names its own metrics, so a series gets a
+ * colour by position - there is no semantic mapping to make. A run may name up
+ * to eight metrics, so past four the cycle repeats; the tooltip names every
+ * series, which is what keeps a repeated hue readable.
+ */
+const VITALS_ROLES: UPlotSeriesSpec["role"][] = [
+	"categorical",
+	"categorical-2",
+	"categorical-3",
+	"categorical-4",
+];
+
+/**
+ * Server vitals scraped from the target during the run, on the run's own
+ * timeline.
+ *
+ * Not bucketed like the charts above: those average a metric the engine emits
+ * every tick, while these are point readings on the user's scrape cadence -
+ * averaging two of them into a bucket would report a number the target never
+ * exported. The resampling onto the tick x axis (and the gaps where a scrape
+ * failed) is `joinMonitorToTimeline`'s, so this component only paints.
+ *
+ * Renders nothing when the run scraped nothing, which is what keeps the row out
+ * of a dashboard for a run that configured no monitor.
+ */
+export function ServerVitalsChart({
+	history,
+	samples,
+	isCompleted,
+	syncKey,
+	height,
+	anomalies,
+}: BaseProps & { samples: MonitorSample[] }) {
+	// The most useful place a degradation window can be shaded: this row is where
+	// "the p99 spike at t=41" gets answered with what the server was doing then.
+	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const { data, series } = useMemo(() => {
+		const joined = joinMonitorToTimeline(history, samples);
+		const aligned: uPlot.AlignedData = [
+			joined.times,
+			...joined.columns.map((col) => col as (number | null)[]),
+		] as uPlot.AlignedData;
+		const spec: UPlotSeriesSpec[] = joined.names.map((name, i) => ({
+			label: name,
+			role: VITALS_ROLES[i % VITALS_ROLES.length],
+			width: 1.8,
+			format: fmtVitals,
+		}));
+		return { data: aligned, series: spec };
+	}, [history, samples]);
+
+	if (series.length === 0 || data[0].length < 2) return null;
+	return (
+		<UPlotChart
+			data={data}
+			series={series}
+			xTime
+			height={height}
+			yFormat={axisVitals}
+			isLive={!isCompleted}
+			syncKey={syncKey}
+			annotations={annotations}
 		/>
 	);
 }

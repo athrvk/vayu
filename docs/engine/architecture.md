@@ -61,22 +61,28 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 
 ### Listeners
 
-The management API is one listener; two more are opened on demand, and the rule that
-separates them is where each may bind.
+This is the engine's whole listener inventory. The management API is the only long-lived one;
+three more are opened on demand, and the rule that separates them is where each may bind.
 
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
 | Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
-| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt |
+| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
+| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response |
 
-**The management API may never bind beyond loopback, and the inbox may.** That is not an
-inconsistency: the management API has no route authentication and answers `Access-Control-Allow-Origin: *`
-(`server.cpp`), so anything that can reach it can read every stored request, every credential the
-database holds, and start runs against arbitrary targets. An inbox listener serves *none* of that -
-it accepts a request, stores it, and replies with what the user configured - so exposing it to a LAN
-exposes capture-and-echo and nothing more. A webhook source on another host is a real case; a
-management API on another host is not one worth the blast radius.
+**The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
+are different reasons:
+
+- The **management API** has no route authentication and answers `Access-Control-Allow-Origin: *`
+  (`server.cpp`), so anything that can reach it can read every stored request, every credential the
+  database holds, and start runs against arbitrary targets.
+- A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization
+  code; publishing either would publish a credential.
+- An **inbox** serves none of that - it accepts a request, stores it, and replies with what the user
+  configured - so exposing it to a LAN exposes capture-and-echo and nothing more. A webhook source
+  on another host is a real case; a management API on another host is not one worth the blast
+  radius.
 
 Even so, wide is never the default: `bind` outside 127.0.0.0/8 and `::1` is refused unless the
 caller sends `"confirmNonLoopback": true`, and the inbox then reports `loopback: false` on every
@@ -186,6 +192,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   concurrency - silently, since the run still reports percentiles, just computed from fewer
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
+- **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
+  fed by every successful completion and read once after the drain, behind the report's
+  `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
+  averages beside them are computed over the ~1% of completions a trace is stored for, and
+  escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
+  `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
+  check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
@@ -304,6 +317,21 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
+- **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
+  `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
+  and `/authorize`, so auth flows are exercisable offline with no real identity
+  provider. It mints HS256 JWTs with a random per-issuer key (libsodium again),
+  auto-approves `/authorize` with PKCE S256 verification, rotates refresh
+  tokens, and can be flipped between healthy and `slow` / `server_error` /
+  `invalid_client` while running. In-memory only and owned by the `Server`, on
+  the same reverse-member-order rule as the authorize manager.
+
+**Listener inventory.** Both auth listeners are spawned, loopback-bound and
+short-lived - the interactive-auth callback (one per attempt, 5-minute TTL) and
+mock issuers (at most 8, until stopped) - and neither may ever bind wider than
+`127.0.0.1`, because one carries an authorization code and the other hands out
+bearer tokens. The full inventory, including the one listener that *may* bind
+wider and why, is [above](#listeners).
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See
@@ -759,13 +787,19 @@ row exists - and the executor is the only thing that differs.
 - **Main Thread**: HTTP server, request routing
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
+- **Monitor Thread**: One per load test that declared a `monitor` block - it
+  scrapes the target's metrics endpoint on its own interval. Separate from the
+  metrics thread because that one is a fixed-cadence sampler with no deadline
+  compensation: a blocking HTTP call inside it would delay every subsequent tick
+  by the scrape's latency, and a hanging endpoint would end live metrics for the
+  whole run.
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped → run workers
-signalled and joined (each joins its own metrics thread and stops its event
-loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
-scope exit. Nothing is detached.
+signalled and joined (each joins its own metrics and monitor threads and stops
+its event loop first) → `curl_global_cleanup` → `Database` / `RunManager`
+destroyed at scope exit. Nothing is detached.
 
 ## Performance Characteristics
 

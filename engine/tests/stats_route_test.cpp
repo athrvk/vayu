@@ -36,6 +36,8 @@ namespace vayu::http::routes {
 // Defined in metrics.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id, int64_t limit, int64_t offset);
+std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
+const std::string& run_id, int64_t limit, int64_t offset);
 } // namespace vayu::http::routes
 
 namespace {
@@ -273,6 +275,47 @@ TEST_F (StatsRouteTest, UnreadableTickPayloadIsSkippedNotFatal) {
     // The row still counts for pagination - the page really did consume it.
     EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
     EXPECT_EQ (body["pagination"]["returned"].get<int64_t> (), 2);
+}
+
+// ============================================================================
+// The server-vitals series (monitor_samples)
+// ============================================================================
+
+// Same envelope as the tick series, from its own table - so a client that can
+// page one can page the other.
+TEST_F (StatsRouteTest, MonitorSeriesReturnsStoredSamplesInTheSharedEnvelope) {
+    const std::string id = seed_run ();
+    db_->add_monitor_sample ({ 0, id, 1000,
+    vayu::core::build_monitor_sample_payload (1000, { { "cpu", 0.5 } }).dump () });
+    db_->add_monitor_sample ({ 0, id, 2000,
+    vayu::core::build_monitor_sample_payload (2000, { { "cpu", 0.75 } }).dump () });
+
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_EQ (body["data"][0]["timestamp"].get<int64_t> (), 1000);
+    EXPECT_DOUBLE_EQ (body["data"][1]["series"]["cpu"].get<double> (), 0.75);
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
+    EXPECT_FALSE (body["pagination"]["hasMore"].get<bool> ());
+}
+
+// A run that configured no monitor is an empty series, not a 404: the run
+// exists and simply scraped nothing.
+TEST_F (StatsRouteTest, MonitorSeriesIsEmptyForARunWithoutAMonitor) {
+    const std::string id = seed_run ();
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0);
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["data"].size (), 0u);
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 0);
+}
+
+TEST_F (StatsRouteTest, MonitorSeriesMissingRunIs404) {
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, "run_nope", 5000, 0);
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body["error"]["message"], "Run not found");
 }
 
 } // namespace

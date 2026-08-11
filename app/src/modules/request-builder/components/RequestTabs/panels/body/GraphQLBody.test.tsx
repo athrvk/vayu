@@ -129,10 +129,17 @@ describe("the schema badge", () => {
 		expect(badge.getAttribute("title")).toMatch(/1m ago/);
 	});
 
-	it("shows nothing at all before an endpoint has been introspected", () => {
+	it("claims nothing before an endpoint has been introspected, but still opens", () => {
 		renderBody();
-		expect(screen.queryByText("Schema")).toBeNull();
+
+		// The badge itself renders nothing for `idle` - no status has been
+		// established, and inventing one would be worse than silence. The chip
+		// around it keeps a plain label, because the way into the explorer must
+		// not depend on the schema having loaded first.
 		expect(screen.queryByText("No schema")).toBeNull();
+		expect(screen.queryByText("Schema stale")).toBeNull();
+		expect(screen.getByText("Schema").getAttribute("title")).toMatch(/not been loaded yet/i);
+		expect(screen.getByLabelText("Browse schema")).toBeTruthy();
 	});
 });
 

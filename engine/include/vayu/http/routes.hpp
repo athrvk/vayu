@@ -31,9 +31,12 @@ namespace vayu::http {
 // oauth_authorize.hpp. Forward-declared here so RouteContext can carry a
 // reference without every route TU pulling in the loopback listener machinery.
 class OAuth2AuthorizeManager;
+// Owns the local OAuth 2.0 mock issuers; defined in mock_issuer.hpp. Forward-
+// declared for the same reason as the manager above.
+class MockIssuerManager;
 // Owns the webhook inbox listeners; defined in inbox.hpp. Forward-declared for
-// the same reason as the manager above - a route TU that never touches an inbox
-// does not pull in the listener machinery.
+// the same reason as the two managers above - a route TU that never touches an
+// inbox does not pull in the listener machinery.
 class InboxManager;
 } // namespace vayu::http
 
@@ -491,6 +494,9 @@ struct RouteContext {
     /// `/execute` (which sends through it) and by `/cookies` (which shows and
     /// clears it). Not reachable from the load path - see cookie_jar.hpp.
     vayu::http::CookieJar& cookie_jar;
+    /// The local OAuth 2.0 mock issuers (issue #479). Owned by Server; see
+    /// server.hpp for why it is declared before server_.
+    vayu::http::MockIssuerManager& mock_issuer_manager;
     /// The webhook inboxes (issue #480). Owned by Server; read by `/inbox`.
     vayu::http::InboxManager& inbox_manager;
 };
@@ -511,6 +517,7 @@ void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);
 void register_oauth_routes (RouteContext& ctx);
 void register_cookie_routes (RouteContext& ctx);
+void register_mock_issuer_routes (RouteContext& ctx);
 void register_inbox_routes (RouteContext& ctx);
 
 /**

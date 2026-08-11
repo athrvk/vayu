@@ -91,3 +91,45 @@ describe("dashboard-store live retention window", () => {
 		expect(state.breakpoint.p99Ms).toBe(250);
 	});
 });
+
+describe("dashboard-store monitor samples", () => {
+	beforeEach(() => {
+		useDashboardStore.getState().startRun("r");
+	});
+
+	it("starts empty, so a run without a monitor draws no vitals row", () => {
+		expect(useDashboardStore.getState().monitorSamples).toEqual([]);
+	});
+
+	it("appends scrapes in arrival order", () => {
+		const s = useDashboardStore.getState();
+		s.addMonitorSamples([{ timestamp: 1000, series: { cpu: 1 } }]);
+		s.addMonitorSamples([{ timestamp: 2000, series: { cpu: 2 } }]);
+
+		expect(useDashboardStore.getState().monitorSamples.map((m) => m.timestamp)).toEqual([
+			1000, 2000,
+		]);
+	});
+
+	it("bounds the buffer by the retained-tick ceiling", () => {
+		// A scrape can be configured faster than the tick cadence, so this array
+		// needs its own cap - an overnight soak at 250ms would otherwise grow
+		// without limit beside a series that is trimmed.
+		const s = useDashboardStore.getState();
+		s.setMaxRetainedTicks(5);
+		s.addMonitorSamples(
+			Array.from({ length: 12 }, (_, i) => ({ timestamp: i, series: { cpu: i } }))
+		);
+
+		const kept = useDashboardStore.getState().monitorSamples;
+		expect(kept).toHaveLength(5);
+		expect(kept[0].timestamp).toBe(7);
+	});
+
+	it("clears the samples when a new run starts", () => {
+		const s = useDashboardStore.getState();
+		s.addMonitorSamples([{ timestamp: 1000, series: { cpu: 1 } }]);
+		useDashboardStore.getState().startRun("r2");
+		expect(useDashboardStore.getState().monitorSamples).toEqual([]);
+	});
+});

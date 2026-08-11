@@ -111,10 +111,34 @@ export interface InsertRefusal {
 	reason: string;
 }
 
-export type InsertResult = DocumentInsertion | InsertRefusal;
+/**
+ * The leaf is already in the selection set the insertion would have written it
+ * into, so there is nothing to write.
+ *
+ * A *value* rather than a silent return, for the same reason a refusal is one:
+ * the caller has to say what happened. Duplicate fields are valid GraphQL - they
+ * merge - so this is not the "never produce an invalid document" contract, it is
+ * the second click on a row adding a line the user cannot tell from the first.
+ * The offsets are the existing field's name, so the caller can show it instead.
+ */
+export interface InsertAlreadyPresent {
+	alreadyPresent: true;
+	/** Offset of the existing field's name in the document. */
+	start: number;
+	/** Offset one past the end of that name. */
+	end: number;
+	/** What is already there, for the live-region announcement. */
+	label: string;
+}
+
+export type InsertResult = DocumentInsertion | InsertRefusal | InsertAlreadyPresent;
 
 export function isRefusal(result: InsertResult): result is InsertRefusal {
 	return "refused" in result;
+}
+
+export function isAlreadyPresent(result: InsertResult): result is InsertAlreadyPresent {
+	return "alreadyPresent" in result;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -443,6 +467,37 @@ function declareVariables(
 	return { start: keywordEnd, end: keywordEnd, text: ` (${defs})` };
 }
 
+/**
+ * The selection `set` already holds for a bare leaf field, or null.
+ *
+ * Narrow on purpose, and the narrowing is the design. A field with required
+ * arguments can honestly appear twice with different values; an object-typed
+ * field re-inserted brings a selection set of its own, which is a different
+ * line. Only a scalar or enum taking no required argument produces a duplicate
+ * the user cannot tell apart from what is already there. An *aliased* selection
+ * is a different key in the response, so it does not count as the field being
+ * present either.
+ */
+function presentLeaf(
+	schema: GraphQLSchema,
+	enclosing: EnclosingSet,
+	step: FieldStep
+): FieldNode | null {
+	const owner = schema.getType(enclosing.typeName);
+	if (!isObjectType(owner) && !isInterfaceType(owner)) return null;
+	const field: GraphQLField<unknown, unknown> | undefined = owner.getFields()[step.fieldName];
+	if (!field) return null;
+	if (field.args.some((a) => isNonNullType(a.type) && a.defaultValue === undefined)) return null;
+	if (leafSelection(getNamedType(field.type)) !== null) return null;
+
+	return (
+		enclosing.selectionSet.selections.find(
+			(s): s is FieldNode =>
+				s.kind === Kind.FIELD && !s.alias && s.name.value === step.fieldName
+		) ?? null
+	);
+}
+
 /** Variable names already declared by an operation, without the `$`. */
 function declaredNames(operation: OperationDefinitionNode): string[] {
 	return (operation.variableDefinitions ?? []).map((d) => d.variable.name.value);
@@ -486,6 +541,24 @@ export function insertField(
 			}
 		}
 		if (stepIndex === -1) continue;
+
+		/*
+		 * The suffix is a single leaf and that leaf is already selected here:
+		 * inserting it again would add a line the user cannot tell from the one
+		 * they already have. Report where it is instead of writing it twice.
+		 */
+		const suffix = fullPath.slice(stepIndex);
+		if (suffix.length === 1) {
+			const present = presentLeaf(schema, enclosing, suffix[0]);
+			if (present) {
+				return {
+					alreadyPresent: true,
+					start: present.name.loc!.start,
+					end: present.name.loc!.end,
+					label: present.name.value,
+				};
+			}
+		}
 
 		const namer = new VariableNamer(declaredNames(enclosing.operation));
 		const body = renderSteps(schema, fullPath.slice(stepIndex), namer);

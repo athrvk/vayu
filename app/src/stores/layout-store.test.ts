@@ -7,7 +7,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useLayoutStore } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
+import {
+	PANEL_MIN_WIDTH,
+	PANEL_MAX_WIDTH,
+	DEFAULT_DRAWER_WIDTH,
+	DEFAULT_GRAPHQL_VARIABLES_SIZE,
+	GRAPHQL_VARIABLES_MAX_SIZE,
+	GRAPHQL_VARIABLES_MIN_SIZE,
+} from "@/constants/layout";
 
 /**
  * The drawer used to store a width per view (history 320, the rest 260), so
@@ -127,5 +134,50 @@ describe("layout-store context-bar sections", () => {
 		// the in-memory state looks right either way.
 		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
 		expect(stored.state.contextBarCollapsedSections).toEqual(["code"]);
+	});
+});
+
+/**
+ * The GraphQL Variables pane's height, which is a preference and not a schema
+ * fact - so it lives here rather than in the in-memory `explorer-store`.
+ */
+describe("layout-store graphql variables pane", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({
+			graphqlVariablesCollapsed: false,
+			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
+		});
+	});
+
+	it("opens at the size the pane shipped with", () => {
+		expect(useLayoutStore.getState().graphqlVariablesCollapsed).toBe(false);
+		expect(useLayoutStore.getState().graphqlVariablesSize).toBe(DEFAULT_GRAPHQL_VARIABLES_SIZE);
+	});
+
+	it("clamps a recorded size to the bounds the panel will accept", () => {
+		const { setGraphqlVariablesSize } = useLayoutStore.getState();
+
+		// A size read off a panel mid-collapse is below the floor; stored raw it
+		// comes back as a height the panel refuses and the pane opens to
+		// whatever the library decides instead.
+		setGraphqlVariablesSize(2);
+		expect(useLayoutStore.getState().graphqlVariablesSize).toBe(GRAPHQL_VARIABLES_MIN_SIZE);
+
+		setGraphqlVariablesSize(99);
+		expect(useLayoutStore.getState().graphqlVariablesSize).toBe(GRAPHQL_VARIABLES_MAX_SIZE);
+
+		setGraphqlVariablesSize(48);
+		expect(useLayoutStore.getState().graphqlVariablesSize).toBe(48);
+	});
+
+	it("survives a restart, both halves", () => {
+		useLayoutStore.getState().setGraphqlVariablesCollapsed(true);
+		useLayoutStore.getState().setGraphqlVariablesSize(52);
+
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		// Mutation check: drop either key from `partialize` and the collapse the
+		// user chose lasts exactly until the next launch.
+		expect(stored.state.graphqlVariablesCollapsed).toBe(true);
+		expect(stored.state.graphqlVariablesSize).toBe(52);
 	});
 });

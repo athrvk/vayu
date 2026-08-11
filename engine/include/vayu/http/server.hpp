@@ -16,6 +16,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/inbox.hpp"
+#include "vayu/http/mock_issuer.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/routes.hpp"
 
@@ -53,9 +54,13 @@ class Server {
     // route lambdas and any in-flight /execute hold a reference to it, so it
     // must outlive server_. Process-lifetime by design - see cookie_jar.hpp.
     CookieJar cookie_jar_;
-    // Same reverse-order reasoning again: each inbox is an independent listener
-    // whose handlers hold a reference to db_, and the route lambdas that start
-    // and stop them must be gone before this dtor joins their threads.
+    // Same reverse-order reasoning again: its dtor stops and joins every live
+    // mock-issuer listener, and the route lambdas that reach it must be gone by
+    // then - so it is declared before server_ and destroyed after it.
+    MockIssuerManager mock_issuer_manager_;
+    // And once more, for the third listener family: each inbox is an independent
+    // listener whose handlers hold a reference to db_, and the route lambdas that
+    // start and stop them must be gone before this dtor joins their threads.
     InboxManager inbox_manager_;
     httplib::Server server_;
     std::thread server_thread_;
