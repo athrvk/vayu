@@ -60,3 +60,28 @@ export const TAB_OVERFLOW_WIDTH = 56;
 
 /** Width of the trailing "new tab" button, also reserved up front. */
 export const TAB_NEW_BUTTON_WIDTH = 30;
+
+/* ── GraphQL body: the Variables pane ────────────────────────────────────── */
+
+/**
+ * How much of the editor stack the Variables pane takes when it is open, and
+ * the bounds a remembered size is clamped to.
+ *
+ * A percentage rather than pixels because the pane splits a stack whose own
+ * height is whatever the response viewer left it. The default is the size the
+ * pane shipped with; the floor is the panel's `minSize`, below which the panel
+ * collapses instead of shrinking.
+ */
+export const DEFAULT_GRAPHQL_VARIABLES_SIZE = 35;
+export const GRAPHQL_VARIABLES_MIN_SIZE = 15;
+export const GRAPHQL_VARIABLES_MAX_SIZE = 75;
+
+/**
+ * Height of a GraphQL editor pane's header row (px).
+ *
+ * The Variables pane collapses to exactly its header, so this is both the
+ * header's own height and the panel's `collapsedSize` - one constant, because
+ * the two disagreeing is a collapsed pane that clips its own badges or leaves a
+ * strip of dead editor under them.
+ */
+export const GRAPHQL_PANE_HEADER_HEIGHT = 28;

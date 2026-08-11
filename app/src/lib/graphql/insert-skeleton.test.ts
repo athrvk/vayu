@@ -12,9 +12,11 @@ import {
 	insertField,
 	insertFragment,
 	insertionForNode,
+	isAlreadyPresent,
 	isRefusal,
 	mergeVariables,
 	type DocumentInsertion,
+	type InsertAlreadyPresent,
 	type InsertResult,
 } from "./insert-skeleton";
 import {
@@ -27,9 +29,10 @@ import {
 
 const schema: GraphQLSchema = fixtureSchema();
 
-/** Unwrap an insertion, failing loudly when it was refused. */
+/** Unwrap an insertion, failing loudly when it was refused or already there. */
 function inserted(result: InsertResult): DocumentInsertion {
 	if (isRefusal(result)) throw new Error(`refused: ${result.reason}`);
+	if (isAlreadyPresent(result)) throw new Error(`already present: ${result.label}`);
 	return result;
 }
 
@@ -173,6 +176,78 @@ describe("insertField - into the document the cursor is in", () => {
 		expect(result.text).toContain("$id2: ID!");
 		expect(Object.keys(result.variables)).toEqual(["id2"]);
 		expectValid(result.text);
+	});
+});
+
+describe("insertField - a leaf the set already selects", () => {
+	const doc = `query Existing {\n  user(id: "1") {\n    id\n    handle\n  }\n}\n`;
+	const inUserSet = doc.indexOf("handle");
+	const handleRow = {
+		parentTypeName: "User",
+		fieldName: "handle",
+		rootPath: [
+			{ parentTypeName: "Query", fieldName: "user" },
+			{ parentTypeName: "User", fieldName: "handle" },
+		],
+	};
+
+	it("reports where it already is rather than writing it twice", () => {
+		const result = insertField(schema, doc, inUserSet, handleRow);
+
+		// Mutation check: drop the `presentLeaf` branch in `insertField` and this
+		// is a `DocumentInsertion` whose text carries `handle` on two lines.
+		expect(isAlreadyPresent(result)).toBe(true);
+		const present = result as InsertAlreadyPresent;
+		expect(present.label).toBe("handle");
+		expect(doc.slice(present.start, present.end)).toBe("handle");
+	});
+
+	it("still inserts a leaf the set does not have", () => {
+		const result = inserted(
+			insertField(schema, doc, inUserSet, {
+				parentTypeName: "User",
+				fieldName: "name",
+				rootPath: [
+					{ parentTypeName: "Query", fieldName: "user" },
+					{ parentTypeName: "User", fieldName: "name" },
+				],
+			})
+		);
+		expect(result.text).toContain("name");
+		expectValid(result.text);
+	});
+
+	it("leaves an aliased selection out of it - that is a different response key", () => {
+		const aliased = `query Existing {\n  user(id: "1") {\n    id\n    shown: handle\n  }\n}\n`;
+		const result = insertField(schema, aliased, aliased.indexOf("shown"), handleRow);
+
+		expect(isAlreadyPresent(result)).toBe(false);
+		expect(inserted(result).text.match(/handle/g)).toHaveLength(2);
+	});
+
+	it("says nothing about a leaf that takes an argument, which can honestly repeat", () => {
+		// `deletePost(id: ID!): Boolean` is a leaf, but a second call with another
+		// id is a different call - not the duplicate line this branch exists for.
+		const mutation = `mutation Existing($id: ID!) {\n  deletePost(id: $id)\n}\n`;
+		const result = insertField(schema, mutation, mutation.indexOf("deletePost"), {
+			parentTypeName: "Mutation",
+			fieldName: "deletePost",
+			rootPath: [{ parentTypeName: "Mutation", fieldName: "deletePost" }],
+		});
+
+		expect(isAlreadyPresent(result)).toBe(false);
+		expect(inserted(result).text.match(/deletePost/g)).toHaveLength(2);
+	});
+
+	it("says nothing about an object field, whose second copy brings its own selection", () => {
+		const outer = doc.indexOf("user(");
+		const result = insertField(schema, doc, outer, {
+			parentTypeName: "Query",
+			fieldName: "user",
+			rootPath: [{ parentTypeName: "Query", fieldName: "user" }],
+		});
+
+		expect(isAlreadyPresent(result)).toBe(false);
 	});
 });
 

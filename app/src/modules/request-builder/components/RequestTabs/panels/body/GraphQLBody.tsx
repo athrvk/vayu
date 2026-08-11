@@ -16,16 +16,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	CheckCircle2,
-	AlertCircle,
-	Braces,
-	Loader2,
-	PanelRightClose,
-	PanelRightOpen,
-	RefreshCw,
-} from "lucide-react";
+import { AlertCircle, Braces, ChevronDown, ChevronRight, PanelRightOpen } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { editor } from "monaco-editor";
 import {
 	CodeEditor,
@@ -33,9 +26,6 @@ import {
 	ResizablePanelGroup,
 	ResizablePanel,
 	ResizableHandle,
-	Tooltip,
-	TooltipTrigger,
-	TooltipContent,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -46,7 +36,6 @@ import {
 	schemaCacheKey,
 	useSchemaCache,
 	type SchemaEntry,
-	type SchemaFailure,
 	type SchemaTarget,
 } from "@/lib/graphql/schema-cache";
 import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
@@ -54,14 +43,22 @@ import { attachVariablesDiagnostics } from "@/lib/graphql/variables-diagnostics"
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import {
 	insertionForNode,
+	isAlreadyPresent,
 	isRefusal,
 	mergeVariables,
 	type DocumentInsertion,
 } from "@/lib/graphql/insert-skeleton";
 import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
+import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
+import { schemaStatusTitle } from "@/lib/graphql/schema-status";
+import { useLayoutStore } from "@/stores";
+import {
+	GRAPHQL_PANE_HEADER_HEIGHT,
+	GRAPHQL_VARIABLES_MAX_SIZE,
+	GRAPHQL_VARIABLES_MIN_SIZE,
+} from "@/constants/layout";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/utils/helpers";
 import { TIMING } from "@/config/timing";
 import {
 	classifyVariables,
@@ -105,77 +102,6 @@ export interface GraphQLBodyProps {
 }
 
 /**
- * What the badge says about a failure, per kind.
- *
- * The store keeps the classified failure and the engine's own words; this is
- * the sentence that names the fix. One static "introspection failed" used to
- * cover all of them, so an expired token and an endpoint with introspection
- * switched off - opposite actions - read identically (#383).
- *
- * Exhaustive by type: a new failure kind in `introspect.ts` is a type error
- * here rather than a silent fall back to the generic sentence.
- */
-const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
-	auth: "Credentials were rejected. Check the request's auth, then refresh.",
-	unsupported: "This endpoint does not allow introspection, so only syntax is checked.",
-	http: "The endpoint answered with an error status.",
-	network: "The endpoint could not be reached.",
-	parse: "The answer was not an introspection result.",
-	"too-large": "The schema is too large to load.",
-	unknown: "Introspection failed.",
-};
-
-function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
-	const status = entry?.status ?? "idle";
-	if (status === "idle") return null;
-
-	const age = entry?.fetchedAt ? `Schema loaded ${formatRelativeTime(entry.fetchedAt)}.` : null;
-
-	if (status === "loading") {
-		return (
-			<BadgeText className="text-muted-foreground" title={age ?? "Loading the schema."}>
-				<Loader2 className="w-3 h-3 animate-spin" />
-				Schema
-			</BadgeText>
-		);
-	}
-
-	if (status === "ready") {
-		return (
-			<BadgeText className="text-success-text" title={age ?? "Schema loaded."}>
-				<CheckCircle2 className="w-3 h-3" />
-				Schema
-			</BadgeText>
-		);
-	}
-
-	const failure = entry?.error;
-	const hint = FAILURE_HINT[failure?.kind ?? "unknown"];
-	const detail = failure?.message ? `${hint} ${failure.message}` : hint;
-
-	/*
-	 * A refresh that failed over a schema that loaded earlier is not "no schema":
-	 * the editors still complete against the last good one, so the badge says
-	 * how old it is and what went wrong, rather than claiming there is nothing.
-	 */
-	if (entry?.schema) {
-		return (
-			<BadgeText className="text-warning-text" title={age ? `${detail} ${age}` : detail}>
-				<AlertCircle className="w-3 h-3" />
-				Schema stale
-			</BadgeText>
-		);
-	}
-
-	return (
-		<BadgeText className="text-destructive-text" title={`${detail} Syntax checking only.`}>
-			<AlertCircle className="w-3 h-3" />
-			No schema
-		</BadgeText>
-	);
-}
-
-/**
  * What the Variables pane's text will do when the request is sent.
  *
  * Nothing at all for `empty` and `json`, which is the common case and needs no
@@ -211,22 +137,6 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 	);
 }
 
-function BadgeText({
-	className,
-	title,
-	children,
-}: {
-	className: string;
-	title: string;
-	children: React.ReactNode;
-}) {
-	return (
-		<span className={cn("flex items-center gap-1 text-[10px]", className)} title={title}>
-			{children}
-		</span>
-	);
-}
-
 /** Where an insertion landed, in words a screen reader can use. */
 const PLACEMENT_PHRASE: Record<DocumentInsertion["placement"], string> = {
 	cursor: "at the cursor",
@@ -235,19 +145,108 @@ const PLACEMENT_PHRASE: Record<DocumentInsertion["placement"], string> = {
 	fragment: "as a new fragment",
 };
 
+const PANE_HEADER_CLASS =
+	"flex w-full items-center justify-between gap-2 px-3 border-b border-border bg-panel shrink-0";
+
+/**
+ * A pane's header bar, fixed at `GRAPHQL_PANE_HEADER_HEIGHT`.
+ *
+ * The height is a constant rather than padding-plus-content because the
+ * Variables pane collapses to exactly this bar, and the panel's `collapsedSize`
+ * has to be the same number. Padding that happened to add up would drift the
+ * first time a control inside changed size.
+ */
 function PaneHeader({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="flex items-center justify-between px-3 py-1 border-b border-border bg-panel shrink-0">
+		<div className={PANE_HEADER_CLASS} style={{ height: GRAPHQL_PANE_HEADER_HEIGHT }}>
 			{children}
 		</div>
 	);
 }
 
-function PaneTitle({ children }: { children: string }) {
+/**
+ * The same bar, as the control that collapses its pane.
+ *
+ * The whole bar is the button rather than a chevron inside it: a header with a
+ * narrow activator and a wide box is the composite-row hit-area trap
+ * `drawer-row-hit-area` was written against. The badges ride inside it as
+ * spans, which is what keeps them readable while the pane is collapsed - the
+ * moment "2 variables need a value" most needs to be on screen.
+ */
+function CollapsiblePaneHeader({
+	collapsed,
+	onToggle,
+	children,
+}: {
+	collapsed: boolean;
+	onToggle: () => void;
+	children: React.ReactNode;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onToggle}
+			aria-expanded={!collapsed}
+			className={cn(PANE_HEADER_CLASS, "text-left hover:bg-accent transition-colors")}
+			style={{ height: GRAPHQL_PANE_HEADER_HEIGHT }}
+		>
+			{children}
+		</button>
+	);
+}
+
+function PaneTitle({ children, collapsed }: { children: string; collapsed?: boolean }) {
 	// `EYEBROW_CLASS` rather than the `Eyebrow` component: this sits in a
 	// `flex items-center justify-between` bar beside a control, where the
 	// primitive's `<p>` would be the wrong element for an inline label.
-	return <span className={EYEBROW_CLASS}>{children}</span>;
+	if (collapsed === undefined) return <span className={EYEBROW_CLASS}>{children}</span>;
+	return (
+		<span className={cn(EYEBROW_CLASS, "flex items-center gap-1")}>
+			{collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+			{children}
+		</span>
+	);
+}
+
+/**
+ * The Query header's one schema control, shown only while the explorer is
+ * closed.
+ *
+ * It is the status badge and the open-the-explorer affordance in a single
+ * target, because they are one subject: the badge says whether there is a
+ * schema, and the pane it opens is where every other thing about the schema now
+ * lives. The header used to carry three separate controls for that subject, one
+ * of which (Refresh) was also visible inside the explorer at the same time.
+ *
+ * A schema nothing has been said about yet still needs the way in, so the chip
+ * falls back to a plain label rather than the badge's `null`.
+ */
+function SchemaChip({ entry, onOpen }: { entry: SchemaEntry | null; onOpen: () => void }) {
+	const idle = (entry?.status ?? "idle") === "idle";
+	/*
+	 * The badge carries the status sentence in its own `title`, so the chip
+	 * wears no second tooltip: a Radix tooltip over an element that already has
+	 * a native one is the same fact told twice, which is what this control was
+	 * built to stop. `aria-label` names the action the text cannot.
+	 */
+	return (
+		<button
+			type="button"
+			onClick={onOpen}
+			aria-label="Browse schema"
+			aria-expanded={false}
+			className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+		>
+			{idle ? (
+				<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
+					Schema
+				</BadgeText>
+			) : (
+				<SchemaStatusBadge entry={entry} />
+			)}
+			<PanelRightOpen className="w-3 h-3" />
+		</button>
+	);
 }
 
 export function GraphQLBody({
@@ -263,7 +262,6 @@ export function GraphQLBody({
 	// so it is a stable snapshot, and status/schema/error/freshness cannot be
 	// read a render apart from each other.
 	const entry = useSchemaCache((s) => s.getActiveEntry());
-	const schemaStatus = entry?.status ?? "idle";
 	const activeSchema = entry?.schema ?? null;
 
 	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
@@ -460,6 +458,69 @@ export function GraphQLBody({
 		void useSchemaCache.getState().refreshSchema(schemaTarget);
 	};
 
+	/*
+	 * The Variables pane's collapse, driven from the store rather than from the
+	 * panel.
+	 *
+	 * The store is the truth and the panel follows it, not the other way round,
+	 * because the panel's own memory dies with the mount - and this component is
+	 * unmounted every time Radix glances at the Headers tab, which is the whole
+	 * reason the body drafts and the explorer store exist. A drag that collapses
+	 * the pane reports back through `onResize`, so the two agree whichever end
+	 * the user reached for.
+	 */
+	const variablesPanel = useRef<PanelImperativeHandle | null>(null);
+	const variablesCollapsed = useLayoutStore((s) => s.graphqlVariablesCollapsed);
+	const variablesSize = useLayoutStore((s) => s.graphqlVariablesSize);
+	const setVariablesCollapsed = useLayoutStore((s) => s.setGraphqlVariablesCollapsed);
+	const setVariablesSize = useLayoutStore((s) => s.setGraphqlVariablesSize);
+
+	useEffect(() => {
+		const panel = variablesPanel.current;
+		if (!panel) return;
+		if (variablesCollapsed) {
+			if (!panel.isCollapsed()) panel.collapse();
+			return;
+		}
+		/*
+		 * `resize` to the remembered size rather than `expand`: the panel's
+		 * "most recent size" is only whatever this mount has seen, so after a tab
+		 * glance `expand` would open to the minimum instead of the height the
+		 * user left it at.
+		 */
+		if (panel.isCollapsed()) panel.resize(`${useLayoutStore.getState().graphqlVariablesSize}%`);
+	}, [variablesCollapsed]);
+
+	/*
+	 * Debounced for the same reason the request/response split is: a drag fires
+	 * this on every frame, and the store writes through to localStorage.
+	 */
+	const sizeSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => () => clearTimeout(sizeSaveTimeout.current ?? undefined), []);
+	const handleVariablesResize = (
+		size: { asPercentage: number },
+		_id: string | number | undefined,
+		previous: { asPercentage: number } | undefined
+	) => {
+		/*
+		 * The mount call - the one with no previous size - is the panel telling
+		 * us what we just told it. Reading collapse state back from it would let
+		 * a layout that has not settled overwrite the preference that produced
+		 * it, and there is nothing to learn from it either way.
+		 */
+		if (!previous) return;
+		const panel = variablesPanel.current;
+		const collapsed = panel?.isCollapsed() ?? false;
+		if (collapsed !== useLayoutStore.getState().graphqlVariablesCollapsed) {
+			setVariablesCollapsed(collapsed);
+		}
+		// A collapsed panel's size is the header bar, which is not a height to
+		// come back to.
+		if (collapsed) return;
+		if (sizeSaveTimeout.current) clearTimeout(sizeSaveTimeout.current);
+		sizeSaveTimeout.current = setTimeout(() => setVariablesSize(size.asPercentage), 200);
+	};
+
 	useEffect(() => {
 		const offset = pendingCursor.current;
 		if (offset === null) return;
@@ -530,11 +591,41 @@ export function GraphQLBody({
 			announce(result.reason);
 			return;
 		}
+		/*
+		 * The leaf is already in the set the click would have added it to. Show
+		 * the user the line they already have instead of writing a second one -
+		 * selected, not merely scrolled to, so the editor's own selection paints
+		 * it rather than a highlight hand-rolled beside the one Monaco owns.
+		 */
+		if (isAlreadyPresent(result)) {
+			const instance = queryEditorRef.current;
+			if (instance && model) {
+				const from = model.getPositionAt(result.start);
+				const to = model.getPositionAt(result.end);
+				instance.setSelection({
+					startLineNumber: from.lineNumber,
+					startColumn: from.column,
+					endLineNumber: to.lineNumber,
+					endColumn: to.column,
+				});
+				instance.revealLineInCenter(from.lineNumber);
+				instance.focus();
+			}
+			announce(`${result.label} is already selected.`);
+			return;
+		}
 
 		const merged = mergeVariables(variables, result.variables);
 		setVariables(merged.text);
 		onVariablesDraftChange(merged.text);
 		setPendingVariables(merged.pending);
+		/*
+		 * An insertion that could not write its variables has just made the pane
+		 * the thing to look at, so a collapsed pane opens itself. This is the one
+		 * moment the badge is not enough on its own: it names variables the user
+		 * now has to type values into, and typing needs the editor.
+		 */
+		if (merged.pending.length > 0) setVariablesCollapsed(false);
 
 		const next = serializeGraphQLBody({
 			...parts,
@@ -577,60 +668,15 @@ export function GraphQLBody({
 								</SelectContent>
 							</Select>
 						)}
-						<SchemaStatusBadge entry={entry} />
-						{schemaTarget.url && (
-							/*
-							 * Bespoke tiny affordance (12px, no button chrome), so it wraps
-							 * Tooltip by hand rather than using TooltipIconButton, whose
-							 * icon-size Button would dwarf it here. Same result: a real
-							 * tooltip plus a name, replacing the old title.
-							 */
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<button
-										type="button"
-										onClick={refresh}
-										disabled={schemaStatus === "loading"}
-										aria-label="Refresh schema"
-										className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-									>
-										<RefreshCw
-											className={cn(
-												"w-3 h-3",
-												schemaStatus === "loading" && "animate-spin"
-											)}
-										/>
-									</button>
-								</TooltipTrigger>
-								<TooltipContent side="top">Refresh schema</TooltipContent>
-							</Tooltip>
-						)}
 						{/*
-						 * The explorer toggle sits beside the schema badge because it
-						 * is the same subject: the badge says whether there is a
-						 * schema, this opens it. Same 12px affordance as Refresh.
+						 * One control about the schema, and only while the pane
+						 * that owns the subject is closed. With the explorer open
+						 * this header is the operation picker and nothing else -
+						 * status, freshness and Refresh are all a pane away, where
+						 * they cannot be visible twice at once.
 						 */}
-						{schemaTarget.url && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<button
-										type="button"
-										onClick={() => setExplorerOpen(!explorerOpen)}
-										aria-label={explorerOpen ? "Hide schema" : "Browse schema"}
-										aria-pressed={explorerOpen}
-										className="text-muted-foreground hover:text-foreground transition-colors"
-									>
-										{explorerOpen ? (
-											<PanelRightClose className="w-3 h-3" />
-										) : (
-											<PanelRightOpen className="w-3 h-3" />
-										)}
-									</button>
-								</TooltipTrigger>
-								<TooltipContent side="top">
-									{explorerOpen ? "Hide schema" : "Browse schema"}
-								</TooltipContent>
-							</Tooltip>
+						{schemaTarget.url && !showExplorer && (
+							<SchemaChip entry={entry} onOpen={() => setExplorerOpen(true)} />
 						)}
 					</div>
 				</PaneHeader>
@@ -660,14 +706,38 @@ export function GraphQLBody({
 			 */}
 			<ResizableHandle className="h-px w-full cursor-row-resize bg-rule hover:bg-primary transition-colors" />
 
-			<ResizablePanel defaultSize="35%" minSize="15%" className="flex flex-col">
-				<PaneHeader>
-					<PaneTitle>Variables</PaneTitle>
+			{/*
+			 * Collapsible, because a `{ "code": "IN" }` document is two lines and
+			 * the pane reserved a third of the stack for it. Collapsed it is its
+			 * own header, and the query editor takes the height back.
+			 *
+			 * `collapsedSize` in pixels rather than a percentage: the bar it
+			 * collapses to is a fixed 28px whatever the stack's own height is,
+			 * and a percentage would clip it in a short pane and leave dead
+			 * editor under it in a tall one.
+			 */}
+			<ResizablePanel
+				panelRef={variablesPanel}
+				collapsible
+				collapsedSize={`${GRAPHQL_PANE_HEADER_HEIGHT}px`}
+				defaultSize={
+					variablesCollapsed ? `${GRAPHQL_PANE_HEADER_HEIGHT}px` : `${variablesSize}%`
+				}
+				minSize={`${GRAPHQL_VARIABLES_MIN_SIZE}%`}
+				maxSize={`${GRAPHQL_VARIABLES_MAX_SIZE}%`}
+				onResize={handleVariablesResize}
+				className="flex flex-col"
+			>
+				<CollapsiblePaneHeader
+					collapsed={variablesCollapsed}
+					onToggle={() => setVariablesCollapsed(!variablesCollapsed)}
+				>
+					<PaneTitle collapsed={variablesCollapsed}>Variables</PaneTitle>
 					<div className="flex items-center gap-2">
 						<PendingVariablesBadge names={pendingVariables} />
 						<VariablesFormBadge form={classifyVariables(variables)} />
 					</div>
-				</PaneHeader>
+				</CollapsiblePaneHeader>
 				<div className="min-h-0 flex-1">
 					<CodeEditor
 						height="100%"
@@ -710,11 +780,10 @@ export function GraphQLBody({
 					className="flex flex-col min-w-0"
 				>
 					<SchemaExplorer
-						schema={activeSchema}
-						status={schemaStatus}
-						fetchedAt={entry?.fetchedAt ?? null}
+						entry={entry}
 						schemaKey={targetKey}
 						onRefresh={refresh}
+						onClose={() => setExplorerOpen(false)}
 						onInsert={handleExplorerInsert}
 					/>
 				</ResizablePanel>
