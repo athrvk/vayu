@@ -573,6 +573,77 @@ export interface ClearCookiesResponse {
 	cleared: number;
 }
 
+// Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
+// none of these shapes is stored client-side - the surface reads them back.
+
+/** What an inbox answers every caller with. */
+export interface InboxCannedResponse {
+	status: number;
+	body: string;
+	headers: Record<string, string>;
+	delayMs: number;
+}
+
+export interface Inbox {
+	inboxId: string;
+	/** `http://<bind>:<port>/` - what a webhook source is pointed at. */
+	url: string;
+	bind: string;
+	port: number;
+	/** False once stopped; the record and its captures stay readable. */
+	running: boolean;
+	/** False when the inbox is reachable beyond this machine - badge it. */
+	loopback: boolean;
+	response: InboxCannedResponse;
+}
+
+/** One request an inbox recorded. */
+export interface InboxCapture {
+	id: number;
+	inboxId: string;
+	receivedAt: number;
+	method: string;
+	path: string;
+	/** Raw query string, without the `?`. */
+	query: string;
+	headers: Record<string, string>;
+	/** At most the engine's per-capture cap; see `bodyTruncated`. */
+	body: string;
+	/** Size as received, which is larger than `body.length` when truncated. */
+	bodyBytes: number;
+	bodyTruncated: boolean;
+	remoteAddr: string;
+}
+
+export interface StartInboxRequest {
+	port?: number;
+	bind?: string;
+	/** Required by the engine for any bind that is not loopback. */
+	confirmNonLoopback?: boolean;
+	response?: Partial<InboxCannedResponse>;
+}
+
+export interface ListInboxesResponse {
+	data: Inbox[];
+}
+
+/** The `{data, pagination}` envelope `GET /inbox/:id/requests` returns. */
+export interface InboxCapturesResponse {
+	data: InboxCapture[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
+}
+
+export interface ClearInboxCapturesResponse {
+	inboxId: string;
+	cleared: number;
+}
+
 // Health & Config API
 export type GetHealthResponse = EngineHealth;
 

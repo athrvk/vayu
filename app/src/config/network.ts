@@ -58,3 +58,10 @@ export const RUNS_PAGE_LIMIT = 50;
  * so an agent gets recent runs without downloading unbounded history.
  */
 export const MCP_RUNS_PAGE_LIMIT = 100;
+
+/**
+ * Page size for `GET /inbox/:id/requests`. The engine retains 500 captures per
+ * inbox and caps a page at that, so this is the "what arrived recently" window
+ * the surface opens with; the live stream appends past it.
+ */
+export const INBOX_CAPTURES_PAGE_LIMIT = 50;

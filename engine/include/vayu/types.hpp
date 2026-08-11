@@ -976,6 +976,33 @@ struct PendingResultBody {
 };
 
 /**
+ * @brief One request captured by a webhook inbox listener (issue #480).
+ *
+ * The inbox itself is process-lifetime state on `InboxManager` - the rows are
+ * here because a capture list is paged and must not grow a running daemon's
+ * heap without bound. `Database::clear_inbox_requests_all` runs at `init()` for
+ * exactly that reason: no inbox survives a restart, so neither may its rows.
+ *
+ * `body` holds at most `constants::inbox::MAX_BODY_BYTES`; `body_truncated`
+ * says the stored bytes are a prefix, and `body_bytes` is the size as received.
+ * Both are stored rather than derived because a truncated capture that looked
+ * complete is the failure mode this table exists to avoid.
+ */
+struct InboxRequest {
+    int id = 0; // PK, autoincrement - also the SSE event id
+    std::string inbox_id;
+    int64_t received_at = 0; // Unix ms
+    std::string method;
+    std::string path;
+    std::string query;   // raw query string, without the '?'
+    std::string headers; // JSON object
+    std::string body;    // stored bytes, already truncated to the cap
+    int64_t body_bytes  = 0;
+    bool body_truncated = false;
+    std::string remote_addr;
+};
+
+/**
  * @brief Configuration entry with metadata for UI display
  */
 struct ConfigEntry {

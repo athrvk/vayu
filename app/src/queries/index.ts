@@ -69,6 +69,16 @@ export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 // Cookie jar
 export { useCookiesQuery, useClearCookiesMutation } from "./cookies";
 
+// Webhook inbox
+export {
+	useInboxesQuery,
+	useInboxCapturesQuery,
+	useStartInboxMutation,
+	useStopInboxMutation,
+	useUpdateInboxResponseMutation,
+	useClearInboxCapturesMutation,
+} from "./inbox";
+
 // Health & Config
 export { useHealthQuery } from "./health";
 export { useConfigQuery, useUpdateConfigMutation } from "./config";

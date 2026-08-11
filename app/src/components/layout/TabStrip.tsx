@@ -40,7 +40,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 // `Zap` stays: here it is the load-test mark, which is what the bolt means
 // throughout the app. `Braces` is the variables mark (see `Dock.tsx`).
-import { X, Plus, Folder, Zap, Braces, Clock, Settings, ChevronDown } from "lucide-react";
+import { X, Plus, Folder, Zap, Braces, Clock, Settings, ChevronDown, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { useQueries } from "@tanstack/react-query";
@@ -126,6 +126,9 @@ function iconForTab(tab: Tab, runType?: string): typeof Folder | undefined {
 			return Braces;
 		case "settings":
 			return Settings;
+		case "inbox":
+			// The same glyph the Launcher tile that opens it carries.
+			return Inbox;
 		default:
 			return undefined;
 	}
@@ -170,6 +173,8 @@ function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				return { label: "Settings", title: "Settings", icon };
 			case "variables":
 				return { label: "Variables", title: "Variables", icon };
+			case "inbox":
+				return { label: "Inbox", title: "Webhook Inbox", icon };
 			case "dashboard":
 				return { label: "Load Test", title: "Load Test", icon };
 			case "collection": {

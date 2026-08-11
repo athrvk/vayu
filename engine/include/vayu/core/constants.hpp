@@ -442,6 +442,32 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 } // namespace metrics_collector
 
 /**
+ * @brief Webhook inbox configuration (issue #480)
+ *
+ * Rails rather than preferences: every one of these bounds what a *remote*
+ * caller can make the engine hold or wait for, so none is user-settable. The
+ * canned response a user actually tunes (status, headers, body, delay) is
+ * per-inbox request state, not a constant.
+ */
+namespace inbox {
+/// Stored bytes per capture. A larger body is truncated with the flag set.
+constexpr int64_t MAX_BODY_BYTES = 64 * 1024;
+/// Transport limit on one inbound request. Past this the listener answers 413
+/// and records nothing - a payload this size is not a webhook.
+constexpr size_t MAX_PAYLOAD_BYTES = 8UL * 1024 * 1024;
+/// Captures retained per inbox; the oldest are deleted as new ones arrive.
+constexpr int64_t MAX_CAPTURES = 500;
+/// Upper bound on the canned response's artificial delay. It occupies a
+/// listener thread for its whole duration, so it is bounded well below any
+/// client timeout.
+constexpr int MAX_RESPONSE_DELAY_MS = 30000;
+/// Poll cadence of `GET /inbox/:id/live` against the capture table.
+constexpr int LIVE_POLL_INTERVAL_MS = 250;
+/// Page size of `GET /inbox/:id/requests` when the caller names none.
+constexpr int64_t DEFAULT_PAGE_LIMIT = 50;
+} // namespace inbox
+
+/**
  * @brief Script validation configuration
  */
 namespace script_validation {

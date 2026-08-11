@@ -138,6 +138,24 @@ apiService.clearCookies(scope?: { environmentId: string | null }): Promise<Clear
 
 The engine keeps one cookie jar per environment for design-mode requests
 (issue #301); `CookiesCard` in Settings → General shows and clears them.
+
+#### Webhook inbox
+
+```typescript
+apiService.listInboxes(): Promise<Inbox[]>
+apiService.startInbox(request?: StartInboxRequest): Promise<Inbox>
+apiService.stopInbox(inboxId): Promise<Inbox>
+apiService.updateInboxResponse(inboxId, response: Partial<InboxCannedResponse>): Promise<Inbox>
+apiService.listInboxCaptures(inboxId, limit?, offset?): Promise<InboxCapturesResponse>
+apiService.clearInboxCaptures(inboxId): Promise<ClearInboxCapturesResponse>
+```
+
+An inbox records the requests sent to it and answers a canned response
+(issue #480); `modules/inbox/` is the surface. `updateInboxResponse` is a
+merge-patch - an omitted field keeps what the inbox is serving - and the live
+capture stream (`INBOX_LIVE`) is a plain `EventSource` rather than `SSEClient`,
+which maps load-test metrics specifically. Captures arriving on that stream are
+merged into the `listInboxCaptures` cache, so there is one list.
 `clearCookies` distinguishes three cases the way the engine does, and they are
 not interchangeable: **omitted** clears every jar, `{ environmentId: null }`
 clears only the jar used when no environment is selected, and an id clears that
@@ -497,6 +515,18 @@ export const API_ENDPOINTS = {
   RUN_SAMPLES: (id: string, limit: number, offset: number) =>
     `/runs/${id}/samples?limit=${limit}&offset=${offset}`,
   
+  // Webhook inbox - engine-hosted listener that records what is sent to it.
+  // START is a verb path: an inbox lives for the engine process, so the
+  // POST-creates/PUT-updates split does not apply to it.
+  INBOX: "/inbox",
+  INBOX_START: "/inbox/start",
+  INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,
+  INBOX_BY_ID: (inboxId: string) => `/inbox/${inboxId}`,
+  INBOX_CAPTURES: (inboxId: string, limit: number, offset: number) =>
+    `/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,
+  INBOX_CAPTURES_CLEAR: (inboxId: string) => `/inbox/${inboxId}/requests`,
+  INBOX_LIVE: (inboxId: string) => `/inbox/${inboxId}/live`,
+
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 

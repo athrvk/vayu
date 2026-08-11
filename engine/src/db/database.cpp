@@ -176,6 +176,10 @@ inline auto make_storage (const std::string& path) {
     make_index ("idx_requests_collection_id", &Request::collection_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
     make_index ("idx_collections_parent_id", &Collection::parent_id),
+    // Every inbox read filters by inbox_id (the capture list, the live poll,
+    // the retention trim and the clear), and a long-lived listener appends to
+    // this table without bound between trims.
+    make_index ("idx_inbox_requests_inbox_id", &InboxRequest::inbox_id),
     // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
     make_index ("idx_runs_start_time", &Run::start_time),
     // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
@@ -285,6 +289,22 @@ inline auto make_storage (const std::string& path) {
     make_column ("truncated", &ResultBody::truncated),
     make_column ("is_binary", &ResultBody::is_binary),
     make_column ("content_type", &ResultBody::content_type)),
+
+    // Inbox requests: what a webhook inbox listener captured (issue #480).
+    // Not owned by a run, so nothing in the run cascade touches it - the rows
+    // are bounded per inbox as they are written and cleared wholesale at
+    // startup, since no inbox survives the process that opened it.
+    make_table ("inbox_requests",
+    make_column ("id", &InboxRequest::id, primary_key ().autoincrement ()),
+    make_column ("inbox_id", &InboxRequest::inbox_id),
+    make_column ("received_at", &InboxRequest::received_at),
+    make_column ("method", &InboxRequest::method),
+    make_column ("path", &InboxRequest::path), make_column ("query", &InboxRequest::query),
+    make_column ("headers", &InboxRequest::headers), // JSON object
+    make_column ("body", &InboxRequest::body),
+    make_column ("body_bytes", &InboxRequest::body_bytes),
+    make_column ("body_truncated", &InboxRequest::body_truncated),
+    make_column ("remote_addr", &InboxRequest::remote_addr)),
 
     // ─────────────── CONFIGURATION TABLES ───────────────
 
@@ -569,6 +589,19 @@ void Database::init () {
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "Startup run reconciliation failed: " + std::string (e.what ()));
+    }
+
+    // No webhook inbox survives the process that opened it, so any capture row
+    // still here belongs to an inbox nothing can list. Best-effort, like the
+    // two passes around it.
+    try {
+        if (const int64_t dropped = clear_inbox_requests_all (); dropped > 0) {
+            vayu::utils::log_info ("Cleared " + std::to_string (dropped) +
+            " inbox capture(s) left by a previous process");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup inbox capture cleanup failed: " + std::string (e.what ()));
     }
 
     // Trim accumulated run history on startup (design-mode clicks and load runs
@@ -1168,6 +1201,77 @@ Database::get_metric_ticks_since (const std::string& run_id, int64_t last_id) {
 int64_t Database::count_metric_ticks (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.count<MetricTick> (where (c (&MetricTick::run_id) == run_id));
+}
+
+// ============================================================================
+// Inbox captures - what a webhook inbox listener recorded (issue #480)
+// ============================================================================
+
+int Database::add_inbox_request (const InboxRequest& capture, int64_t max_captures) {
+    int assigned_id = 0;
+    retry_on_busy ("append inbox capture", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            assigned_id = static_cast<int> (impl_->storage.insert (capture));
+
+            if (max_captures > 0) {
+                const int64_t stored = impl_->storage.count<InboxRequest> (
+                where (c (&InboxRequest::inbox_id) == capture.inbox_id));
+                if (stored > max_captures) {
+                    // Delete by id rather than "everything older than the Nth
+                    // received_at": two captures can share a millisecond, and a
+                    // timestamp cutoff would then evict both or neither.
+                    auto victims = impl_->storage.select (&InboxRequest::id,
+                    where (c (&InboxRequest::inbox_id) == capture.inbox_id),
+                    order_by (&InboxRequest::id),
+                    sqlite_orm::limit (stored - max_captures));
+                    for (const int victim : victims) {
+                        impl_->storage.remove<InboxRequest> (victim);
+                    }
+                }
+            }
+            return true; // Commit
+        });
+    });
+    return assigned_id;
+}
+
+std::vector<InboxRequest> Database::get_inbox_requests_paginated (const std::string& inbox_id,
+int64_t limit,
+int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id),
+    order_by (&InboxRequest::id).desc (), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_inbox_requests (const std::string& inbox_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+}
+
+std::vector<InboxRequest>
+Database::get_inbox_requests_since (const std::string& inbox_id, int64_t last_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id && c (&InboxRequest::id) > last_id),
+    order_by (&InboxRequest::id));
+}
+
+int64_t Database::clear_inbox_requests (const std::string& inbox_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const int64_t removed =
+    impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    impl_->storage.remove_all<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    return removed;
+}
+
+int64_t Database::clear_inbox_requests_all () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const int64_t removed = impl_->storage.count<InboxRequest> ();
+    if (removed > 0) {
+        impl_->storage.remove_all<InboxRequest> ();
+    }
+    return removed;
 }
 
 // ============================================================================

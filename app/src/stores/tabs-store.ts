@@ -18,7 +18,8 @@ export type TabType =
 	| "dashboard"
 	| "run"
 	| "variables"
-	| "settings";
+	| "settings"
+	| "inbox";
 
 export interface Tab {
 	id: string; // unique tab instance ID (nanoid or crypto.randomUUID)
@@ -29,7 +30,7 @@ export interface Tab {
 const MAX_OPEN_TABS = 12;
 
 // Singletons: only one tab of this type can exist at a time
-const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings"];
+const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox"];
 
 // These tab types are exempt from LRU auto-close
 const LRU_EXEMPT_TYPES: TabType[] = ["dashboard"];
@@ -106,6 +107,17 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 					return true;
 				}
 			}
+			return false;
+		case "inbox":
+			/*
+			 * Never dirty, stated rather than left to the default.
+			 *
+			 * An inbox holds no draft: its listener and its canned response are
+			 * engine state, written through as they are changed. The explicit
+			 * case is here because a *missing* one reads as clean too, and the
+			 * two are indistinguishable to the next reader - which is how a
+			 * dirty Settings tab became LRU-evictable.
+			 */
 			return false;
 		// welcome, dashboard and run register no save context at all.
 		default:

@@ -278,6 +278,44 @@ class Database {
     /// The stored bytes of a blob, or `""` when the id is 0 or unknown.
     std::string get_body_blob_content (int blob_id);
 
+    // Webhook inbox captures (issue #480). The inbox itself is process-lifetime
+    // state on InboxManager; only what it captured is stored, and only so a
+    // long-running listener's capture list is paged off disk rather than held
+    // on the heap.
+
+    /**
+     * @brief Append one capture and trim the inbox back to @p max_captures.
+     *
+     * Insert and trim are one transaction: a capture list that briefly held
+     * 501 rows would be harmless, but a trim that ran without its insert (or
+     * the reverse) would drop a capture the caller was told had landed. The
+     * oldest rows go first, by `id` - the insertion order, which for an
+     * append-only table is also the arrival order, and unlike `received_at`
+     * cannot tie.
+     *
+     * @return the id assigned to the stored capture.
+     */
+    int add_inbox_request (const InboxRequest& capture, int64_t max_captures);
+
+    /// Newest first - the order the capture list reads in.
+    std::vector<InboxRequest>
+    get_inbox_requests_paginated (const std::string& inbox_id, int64_t limit, int64_t offset);
+    int64_t count_inbox_requests (const std::string& inbox_id);
+    /// Captures with `id` greater than @p last_id, oldest first (the live poll).
+    std::vector<InboxRequest>
+    get_inbox_requests_since (const std::string& inbox_id, int64_t last_id);
+    /// @return how many rows were removed.
+    int64_t clear_inbox_requests (const std::string& inbox_id);
+    /**
+     * @brief Drop every capture, for every inbox. Called from `init()`.
+     *
+     * An inbox is process-lifetime, so after a restart no row here has an inbox
+     * that could list it - they would be unreachable bytes growing with every
+     * session. Same reasoning as `reconcile_orphaned_runs`: the previous
+     * process's leftovers are reconciled before anything can read them.
+     */
+    int64_t clear_inbox_requests_all ();
+
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);

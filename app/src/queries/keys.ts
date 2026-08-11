@@ -77,6 +77,16 @@ export const queryKeys = {
 		samples: (id: string) => [...queryKeys.runs.all, "samples", id] as const,
 	},
 
+	// Webhook inboxes (issue #480). Engine-process state, not stored records -
+	// `list` is every inbox this engine has started, `captures` is one inbox's
+	// recorded requests, kept apart because the live stream invalidates only
+	// the second.
+	inbox: {
+		all: ["inbox"] as const,
+		list: () => [...queryKeys.inbox.all, "list"] as const,
+		captures: (inboxId: string) => [...queryKeys.inbox.all, "captures", inboxId] as const,
+	},
+
 	// Warm-cache pass over every collection's requests (see
 	// usePrefetchCollectionsAndRequests). Keyed here rather than inline so it
 	// can be invalidated when the set of collections changes - it succeeds once
