@@ -510,31 +510,39 @@ TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
     }
 }
 
-// --- 8. Per-phase histograms (issue #476) ---------------------------------
+// --- 8. The boolean run-config settings (issues #476, #504) ---------------
 
-// Read as a bool inside RunContext's constructor, which throws on a string -
-// after the run row exists. Rejected here so a rejected request leaves no
-// trace, like every other field in this function.
+// Each is read as a bool inside RunContext's constructor, which throws on a
+// string - after the run row exists. Rejected here so a rejected request leaves
+// no trace, like every other field in this function.
 //
-// Mutation check: delete the `phase_histograms` guard from validate_run_config
-// and the string case below is accepted.
-TEST (RunConfigValidation, ANonBooleanPhaseHistogramsIsRejected) {
-    for (const nlohmann::json bad :
-    { nlohmann::json ("true"), nlohmann::json (1), nlohmann::json (nlohmann::json::array ()) }) {
-        auto config                = valid_config ();
-        config["phase_histograms"] = bad;
-        expect_rejected (config, "phase_histograms");
+// Mutation check: delete any one key from the guard's list in
+// validate_run_config and that key's string case below is accepted.
+TEST (RunConfigValidation, ANonBooleanBooleanSettingIsRejected) {
+    for (const char* key :
+    { "phase_histograms", "save_timing_breakdown", "capture_response_bodies" }) {
+        for (const nlohmann::json bad : { nlohmann::json ("true"),
+             nlohmann::json (1), nlohmann::json (nlohmann::json::array ()) }) {
+            auto config = valid_config ();
+            config[key] = bad;
+            expect_rejected (config, key);
+        }
     }
 }
 
-TEST (RunConfigValidation, BothPhaseHistogramSettingsAreAccepted) {
-    for (const bool value : { true, false }) {
-        auto config                = valid_config ();
-        config["phase_histograms"] = value;
-        EXPECT_FALSE (validate_run_config (config).has_value ());
+TEST (RunConfigValidation, BothValuesOfEveryBooleanSettingAreAccepted) {
+    for (const char* key :
+    { "phase_histograms", "save_timing_breakdown", "capture_response_bodies" }) {
+        for (const bool value : { true, false }) {
+            auto config = valid_config ();
+            config[key] = value;
+            EXPECT_FALSE (validate_run_config (config).has_value ())
+            << key << " = " << value << " was refused";
+        }
+        // Absent and null both mean "use the engine setting".
+        auto config = valid_config ();
+        config[key] = nullptr;
+        EXPECT_FALSE (validate_run_config (config).has_value ())
+        << "a null " << key << " was refused";
     }
-    // Absent and null both mean "use the engine setting".
-    auto config                = valid_config ();
-    config["phase_histograms"] = nullptr;
-    EXPECT_FALSE (validate_run_config (config).has_value ());
 }

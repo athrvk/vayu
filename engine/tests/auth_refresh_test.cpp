@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
-#include <atomic>
 #include <chrono>
 #include <memory>
 #include <set>
@@ -29,6 +28,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/mock_issuer.hpp"
 #include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
@@ -47,30 +47,19 @@ int64_t now_ms () {
 }
 
 /**
- * A mock identity provider and target in one process.
+ * The target of the run: `/api` records every distinct `Authorization` value it
+ * is sent, in the order they first appeared. That ordering is the assertion -
+ * the run must move from the first token to the second while it is still going,
+ * not merely end up on the second.
  *
- * `/token` mints a new access token per call with a short, configurable
- * lifetime; `/api` records every distinct `Authorization` value it is sent, in
- * the order they first appeared. That ordering is the assertion: the run must
- * move from AT1 to AT2 while it is still going, not merely end up on AT2.
+ * The identity provider it used to carry alongside is now `MockIssuerManager`
+ * (#479), the engine's own mock issuer, so there is one mock IdP in the tree
+ * rather than a copy here that never receives its fixes.
  */
-class MockIdpAndTarget {
+class MockTarget {
     public:
-    explicit MockIdpAndTarget (int64_t expires_in_s)
-    : expires_in_s_ (expires_in_s) {
+    MockTarget () {
         svr_.new_task_queue = [] { return new httplib::ThreadPool (16); };
-
-        svr_.Post ("/token", [this] (const httplib::Request&, httplib::Response& res) {
-            if (token_endpoint_fails_.load ()) {
-                res.status = 400;
-                res.set_content (R"({"error":"invalid_grant"})", "application/json");
-                return;
-            }
-            const int minted = ++minted_;
-            res.set_content ("{\"access_token\":\"AT" + std::to_string (minted) +
-            "\",\"token_type\":\"Bearer\",\"expires_in\":" + std::to_string (expires_in_s_) + "}",
-            "application/json");
-        });
 
         svr_.Get ("/api", [this] (const httplib::Request& req, httplib::Response& res) {
             const std::string auth = req.get_header_value ("Authorization");
@@ -88,18 +77,15 @@ class MockIdpAndTarget {
         svr_.wait_until_ready ();
     }
 
-    ~MockIdpAndTarget () {
+    ~MockTarget () {
         svr_.stop ();
         if (thread_.joinable ())
             thread_.join ();
     }
 
-    MockIdpAndTarget (const MockIdpAndTarget&)            = delete;
-    MockIdpAndTarget& operator= (const MockIdpAndTarget&) = delete;
+    MockTarget (const MockTarget&)            = delete;
+    MockTarget& operator= (const MockTarget&) = delete;
 
-    std::string token_url () const {
-        return "http://127.0.0.1:" + std::to_string (port_) + "/token";
-    }
     std::string api_url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/api";
     }
@@ -110,17 +96,10 @@ class MockIdpAndTarget {
         return seen_;
     }
 
-    void fail_token_endpoint (bool fail) {
-        token_endpoint_fails_.store (fail);
-    }
-
     private:
     httplib::Server svr_;
     std::thread thread_;
     int port_ = 0;
-    int64_t expires_in_s_;
-    std::atomic<int> minted_{ 0 };
-    std::atomic<bool> token_endpoint_fails_{ false };
     mutable std::mutex mutex_;
     std::vector<std::string> seen_;
 };
@@ -566,17 +545,23 @@ class MidRunRefreshTest : public ::testing::Test {
 // report says when it changed. Mutation check - drop the sync_auth_header call
 // from the submission path and `credentials_seen` stays at one entry.
 TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
-    MockIdpAndTarget idp (/*expires_in_s=*/3);
-    const json oauth2 = oauth2_config (idp.token_url ());
+    MockTarget target;
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const json oauth2 = oauth2_config (issuer.token_url);
 
     const json summary =
-    execute ("run-auth-refresh", run_config (idp.api_url (), oauth2));
+    execute ("run-auth-refresh", run_config (target.api_url (), oauth2));
 
-    const auto seen = idp.credentials_seen ();
+    const auto seen = target.credentials_seen ();
     ASSERT_GE (seen.size (), 2u)
     << "the run sent one credential for its whole life: " << seen.size ();
-    EXPECT_EQ (seen[0], "Bearer AT1");
-    EXPECT_EQ (seen[1], "Bearer AT2");
+    // Each mint carries its own `jti`, so a second distinct value is a second
+    // token rather than the same one re-sent.
+    EXPECT_EQ (seen[0].rfind ("Bearer ", 0), 0u) << seen[0];
+    EXPECT_EQ (seen[1].rfind ("Bearer ", 0), 0u) << seen[1];
+    EXPECT_NE (seen[0], seen[1]) << "the run re-sent its first token";
 
     ASSERT_TRUE (summary.contains ("auth")) << summary.dump ();
     const auto& auth = summary["auth"];
@@ -590,13 +575,16 @@ TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
 // A token endpoint that stops answering must not fail the run: the target's own
 // status codes plus this section are the honest report.
 TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
-    MockIdpAndTarget idp (/*expires_in_s=*/3);
-    const json oauth2 = oauth2_config (idp.token_url ());
+    MockTarget target;
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const json oauth2 = oauth2_config (issuer.token_url);
 
     create_run_row ("run-auth-refresh-fails");
     vayu::core::RunManager manager;
-    ASSERT_TRUE (manager.start_run (
-    "run-auth-refresh-fails", run_config (idp.api_url (), oauth2), *db, false));
+    ASSERT_TRUE (manager.start_run ("run-auth-refresh-fails",
+    run_config (target.api_url (), oauth2), *db, false));
 
     // Only once the run is on the wire has it resolved its first token - auth
     // is resolved on the worker, after start_run has returned. Breaking the
@@ -610,7 +598,9 @@ TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
     }
     ASSERT_GT (context->requests_sent.load (), 0u)
     << "the run never started sending";
-    idp.fail_token_endpoint (true);
+    const auto broken =
+    issuers.update (issuer.issuer_id, json{ { "failureMode", "server_error" } });
+    ASSERT_TRUE (broken.found && broken.ok) << broken.error;
     await_completion ("run-auth-refresh-fails");
     manager.shutdown (std::chrono::milliseconds (15000));
 
@@ -628,14 +618,27 @@ TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
 
 // A run that cannot refresh spawns no watchdog and reports no section - the
 // absent section is what says "this run was never watching".
+//
+// The inert shape driven here is the user's explicit opt-out, and the token
+// still expires mid-run: the opt-out has to hold even when a refresh would
+// otherwise have been due. The other inert shapes - an unknown expiry, a
+// query-placed token, an uncached one - are pinned directly on
+// plan_auth_refresh by InertForEveryUnrefreshableShape, which is where the
+// expiry-less one now lives: the engine's mock issuer always states an expiry,
+// so no run against it can be missing one.
 TEST_F (MidRunRefreshTest, ANonRefreshableRunReportsNoAuthSection) {
-    MockIdpAndTarget idp (/*expires_in_s=*/0); // no expiry information
-    const json oauth2 = oauth2_config (idp.token_url ());
+    MockTarget target;
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    json oauth2                = oauth2_config (issuer.token_url);
+    oauth2["autoRefreshToken"] = false;
 
-    const json summary = execute ("run-auth-inert", run_config (idp.api_url (), oauth2));
+    const json summary =
+    execute ("run-auth-inert", run_config (target.api_url (), oauth2));
 
     EXPECT_FALSE (summary.contains ("auth")) << summary.dump ();
-    const auto seen = idp.credentials_seen ();
+    const auto seen = target.credentials_seen ();
     ASSERT_EQ (seen.size (), 1u);
-    EXPECT_EQ (seen[0], "Bearer AT1");
+    EXPECT_EQ (seen[0].rfind ("Bearer ", 0), 0u) << seen[0];
 }

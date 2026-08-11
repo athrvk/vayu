@@ -1274,7 +1274,7 @@ inbox on a free port that answers `200` with no body.
 | Field | Meaning |
 |-------|---------|
 | `port` | `0` (default) picks a free port |
-| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback` |
+| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback`. Loopback is decided by parsing the *address*, so a hostname that merely starts `127.` (or `localhost.example.com`) is not loopback and needs the confirmation |
 | `response.status` | 100-599 |
 | `response.headers` | String values only; a `Content-Type` here is used verbatim |
 | `response.delayMs` | 0-30000, applied before every reply |
@@ -2220,6 +2220,7 @@ row exists:
 | Input | Rejected because |
 |-------|------------------|
 | `mode: "constant_rps"` with a `scenario` | An open-loop arrival rate over a multi-step sequence is an arrival-rate executor, which Vayu does not implement. Refused rather than silently run closed-loop. |
+| `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
 
@@ -2342,6 +2343,8 @@ default, and whose message names the offending field and why the bound exists:
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
 | `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
 | `phase_histograms` | boolean | Per-run override for the `phaseHistograms` setting. `false` skips the bank entirely, and the run's report carries no `timingBreakdown.phases`. |
+| `save_timing_breakdown` | boolean | Read as a bool inside the run-context constructor, which threw on a string *after* the row was written - the same stranded-`pending` failure `duration` had. |
+| `capture_response_bodies` | boolean | Same read, same constructor, same failure. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
