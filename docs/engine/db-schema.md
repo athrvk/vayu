@@ -217,6 +217,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
+| `baseline`        | INTEGER | `1` when the run is pinned as a baseline. NOT NULL DEFAULT `0`               |
 
 **`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
@@ -226,6 +227,16 @@ failed and leaves `end_time` as recorded, so an unseeded row would report a dura
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
 future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
 (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
+
+**`baseline`** is the pin set by
+[`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
+known-good run later runs of the same request are compared against. Several rows
+may carry it at once - the engine records the pin and leaves the choice of which
+baseline applies to a given run to the client. NOT NULL with a `default_value`,
+which is what lets `sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing
+`runs` table (the same pattern as `summary` and `requests.follow_redirects`);
+rows written before the column read as unpinned. **Retention reads it** - see
+below.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
@@ -343,7 +354,9 @@ every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs,
 the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
 (ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
 either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
-toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
+toward the cap, and neither are runs whose `baseline` is set: a pin that retention can expire is
+not a pin, and pins counting toward the cap would let a handful of them evict the recent history
+the cap exists to keep. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
 their `monitor_samples` + their `results`), batched inside transactions that release the DB mutex between batches so a large
 backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
@@ -646,6 +659,44 @@ rows in them.
 
 ---
 
+### `inbox_requests`
+
+What a [webhook inbox](api-reference.md#webhook-inbox) listener captured. Struct is
+`db::InboxRequest`.
+
+| Column           | Type       | Notes                                                            |
+|------------------|------------|------------------------------------------------------------------|
+| `id`             | INTEGER PK | Autoincrement; also the SSE event id on `GET /inbox/:id/live`     |
+| `inbox_id`       | TEXT       | The inbox that recorded it - **not** an FK; inboxes are in memory |
+| `received_at`    | INTEGER    | Unix ms                                                          |
+| `method`         | TEXT       | Any verb cpp-httplib routes (GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS) |
+| `path`           | TEXT       | Decoded path, no query                                            |
+| `query`          | TEXT       | Raw query string, without the `?`                                 |
+| `headers`        | TEXT       | JSON object; a repeated name is joined with `, `                  |
+| `body`           | TEXT       | Stored bytes, truncated to the `inboxMaxBodyBytes` setting (default 64 KiB) |
+| `body_bytes`     | INTEGER    | Size **as received**, which exceeds `length(body)` when truncated |
+| `body_truncated` | INTEGER    | 1 when `body` is a prefix                                         |
+| `remote_addr`    | TEXT       | Peer address the request arrived from                             |
+
+**Bounded as it is written.** `add_inbox_request` inserts and trims in one transaction, keeping the
+newest `inboxMaxCaptures` rows per inbox (default 500, settable 1-10000) and deleting the oldest by
+`id` - insertion order, which for an append-only table is arrival order and, unlike `received_at`,
+cannot tie. A capture the caller was told had landed can therefore never be missing its insert, nor
+an untrimmed table its bound. The retention and body limits are resolved by `read_inbox_limits`
+once, when the inbox starts, so every row belonging to one inbox was truncated and retained by the
+same rule - see [api-reference.md](api-reference.md#webhook-inbox) for the settings.
+
+**Cleared at startup.** An inbox lives only as long as the engine process that opened it, so after
+a restart every row here belongs to an inbox nothing can list. `Database::init` calls
+`clear_inbox_requests_all` for the same reason it reconciles orphaned runs: the previous process's
+leftovers are dealt with before anything can read them. Rows are stored at all - rather than kept
+on the heap - so a long-lived listener's capture list is paged off disk instead of growing a
+running daemon's memory.
+
+New in 0.16.0. `sync_schema()` creates new tables outright, so there is no migration.
+
+---
+
 ### `config_entries`
 
 Engine configuration registry - each tunable setting with UI metadata. Read by `GET /config`,
@@ -707,6 +758,7 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
 | `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
+| `idx_inbox_requests_inbox_id`| `inbox_requests.inbox_id`| Every inbox read - the capture page, the live poll, the per-insert retention trim and `DELETE /inbox/:id/requests`                |
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 
 `metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per

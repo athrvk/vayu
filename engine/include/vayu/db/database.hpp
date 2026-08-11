@@ -40,6 +40,10 @@ struct RunFilter {
     std::optional<std::string> request_id;
     std::optional<std::string> q;
     std::optional<std::string> collection_id;
+    // `true` lists only pinned baselines, `false` only unpinned ones. Both are
+    // real questions - "which run is the baseline for this request" is the
+    // first, and it is what a client resolves before diffing against it.
+    std::optional<bool> baseline;
 };
 
 /**
@@ -189,12 +193,23 @@ class Database {
     void update_run_summary (const std::string& id, const std::string& summary);
 
     /**
+     * @brief Pin (or unpin) a run as a baseline, returning the stored row.
+     *
+     * `std::nullopt` means no run has that id - the route's 404. Several runs
+     * may be pinned at once: the engine records the pin and nothing more, and
+     * which baseline applies to a given run is the client's choice (per
+     * request, per endpoint), so no write here unpins anything else.
+     */
+    std::optional<Run> set_run_baseline (const std::string& id, bool baseline);
+
+    /**
      * @brief Prune old runs (and their cascaded metrics/results) by two limits.
      *
      * A run is a victim when it falls beyond @p max_runs most-recent runs
      * (ordered by start_time) OR its start_time is older than @p max_age_days.
      * Either limit is disabled by passing 0. Runs still `running`/`pending` are
-     * never pruned and never count toward @p max_runs. Deletion goes through the
+     * never pruned and never count toward @p max_runs, and neither is a run
+     * pinned as a baseline (`Run::baseline`). Deletion goes through the
      * `delete_run` cascade in start_time-batched transactions, releasing the DB
      * mutex between batches so a large backlog cannot stall other endpoints.
      */
@@ -286,6 +301,44 @@ class Database {
     int64_t count_result_bodies (const std::string& run_id);
     /// The stored bytes of a blob, or `""` when the id is 0 or unknown.
     std::string get_body_blob_content (int blob_id);
+
+    // Webhook inbox captures (issue #480). The inbox itself is process-lifetime
+    // state on InboxManager; only what it captured is stored, and only so a
+    // long-running listener's capture list is paged off disk rather than held
+    // on the heap.
+
+    /**
+     * @brief Append one capture and trim the inbox back to @p max_captures.
+     *
+     * Insert and trim are one transaction: a capture list that briefly held
+     * 501 rows would be harmless, but a trim that ran without its insert (or
+     * the reverse) would drop a capture the caller was told had landed. The
+     * oldest rows go first, by `id` - the insertion order, which for an
+     * append-only table is also the arrival order, and unlike `received_at`
+     * cannot tie.
+     *
+     * @return the id assigned to the stored capture.
+     */
+    int add_inbox_request (const InboxRequest& capture, int64_t max_captures);
+
+    /// Newest first - the order the capture list reads in.
+    std::vector<InboxRequest>
+    get_inbox_requests_paginated (const std::string& inbox_id, int64_t limit, int64_t offset);
+    int64_t count_inbox_requests (const std::string& inbox_id);
+    /// Captures with `id` greater than @p last_id, oldest first (the live poll).
+    std::vector<InboxRequest>
+    get_inbox_requests_since (const std::string& inbox_id, int64_t last_id);
+    /// @return how many rows were removed.
+    int64_t clear_inbox_requests (const std::string& inbox_id);
+    /**
+     * @brief Drop every capture, for every inbox. Called from `init()`.
+     *
+     * An inbox is process-lifetime, so after a restart no row here has an inbox
+     * that could list it - they would be unreachable bytes growing with every
+     * session. Same reasoning as `reconcile_orphaned_runs`: the previous
+     * process's leftovers are reconciled before anything can read them.
+     */
+    int64_t clear_inbox_requests_all ();
 
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);

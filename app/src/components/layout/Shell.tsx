@@ -18,6 +18,7 @@ import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
+import InboxView from "@/modules/inbox";
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
 	if (!tab) return <WelcomeScreen />;
@@ -36,6 +37,8 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 			return <VariablesMain />;
 		case "settings":
 			return <SettingsMain />;
+		case "inbox":
+			return <InboxView />;
 		default:
 			return null;
 	}

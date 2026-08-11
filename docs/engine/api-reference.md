@@ -463,7 +463,10 @@ on disk, one in memory:
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 
-In-progress (`running`/`pending`) runs are never pruned.
+In-progress (`running`/`pending`) runs are never pruned, and neither are runs
+pinned as baselines (see
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
+toward `maxRunsRetained`.
 
 ### POST /config
 
@@ -1209,6 +1212,154 @@ a mistake.
 
 `cleared` counts the cookies dropped; clearing a scope that holds nothing is a
 `200` with `0`, not an error.
+
+## Webhook Inbox
+
+An **inbox** is a second HTTP listener the engine opens on request. It accepts
+any method on any path, records what arrived, and answers a canned response -
+nothing else. That is what makes testing the *receiving* side of a webhook a
+local operation: point the sender at the inbox URL instead of a cloud tunnel,
+and the payload never leaves the machine.
+
+**Lifetime is the engine process.** An inbox is not a stored resource: there is
+no create/update split ([POST creates, PUT updates](#resource-writes-create-vs-update)
+applies to collections, requests and environments), ids are not restorable
+across restarts, and `POST /inbox/start` is a verb path for that reason. Stopping
+an inbox frees its listener but keeps the record - and therefore its captures -
+readable until the engine exits.
+
+**Binding is a trust decision.** The default is `127.0.0.1`. Any other address
+is refused unless the caller also sends `"confirmNonLoopback": true`, and the
+inbox reports `loopback: false` from then on so a client can badge it. See
+[architecture.md](architecture.md#listeners) for why only the inbox listener may
+bind wide and the management API never may.
+
+**Bounds.** Three are settings (`GET`/`POST /config`, category *Observability &
+Data*), read once when an inbox starts - so a change applies to the next inbox
+started, and a running listener keeps what it was started with:
+
+| Setting | Default | Range | What it bounds |
+|---------|---------|-------|----------------|
+| `inboxMaxBodyBytes` | 65536 | 256 - 8388608 | Stored body per capture. Past it the body is kept as a prefix with `bodyTruncated: true`; `bodyBytes` is always the size as received |
+| `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
+| `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
+
+Two are **not** settings, deliberately. A request over **8 MiB** is refused at
+the transport with a `413` and recorded nowhere: that bounds what an
+unauthenticated remote caller can make the engine buffer, which is not the local
+user's preference to spend. The canned response's **`delayMs` is capped at
+30000**: it holds a listener thread for its whole duration and a stop waits on
+that join, so it bounds how long a stop can be made to take.
+
+### POST /inbox/start
+
+Start a listener. Every field is optional - an empty body starts a loopback
+inbox on a free port that answers `200` with no body.
+
+**Request:**
+```json
+{
+  "port": 0,
+  "bind": "127.0.0.1",
+  "confirmNonLoopback": false,
+  "response": {
+    "status": 200,
+    "body": "",
+    "headers": {},
+    "delayMs": 0
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `port` | `0` (default) picks a free port |
+| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback` |
+| `response.status` | 100-599 |
+| `response.headers` | String values only; a `Content-Type` here is used verbatim |
+| `response.delayMs` | 0-30000, applied before every reply |
+
+An out-of-range value is a `400` naming the field rather than a fallback to the
+default: a listener quietly answering something other than what it was asked to
+is invisible on both sides of the wire. A bind that fails (port in use) is a
+`409` with code `inbox_bind_failed`; a non-loopback bind without confirmation is
+a `400` with code `inbox_non_loopback_bind`.
+
+**Response:**
+```json
+{
+  "inboxId": "inbox_2f1c...",
+  "url": "http://127.0.0.1:41235/",
+  "bind": "127.0.0.1",
+  "port": 41235,
+  "running": true,
+  "loopback": true,
+  "response": { "status": 200, "body": "", "headers": {}, "delayMs": 0 }
+}
+```
+
+### GET /inbox
+
+Every inbox this process has started, running or stopped: `{"data": [ ... ]}`,
+each entry the object above.
+
+### PUT /inbox/:inboxId
+
+Update the canned response, live - the next caller receives the new one, with no
+restart and no captures lost. Merge-patch: an absent field keeps what the inbox
+is serving. The body may be the response object itself or `{"response": {...}}`,
+so a client can send back what `start` handed it. `404` for an unknown id.
+
+### POST /inbox/:inboxId/stop
+
+Stop the listener. Returns the inbox with `running: false`. Captures survive;
+`404` for an unknown id.
+
+### GET /inbox/:inboxId/requests
+
+The captures, **newest first**, in the standard `{data, pagination}` envelope.
+
+**Query parameters:** `limit` (default 50, capped at 500), `offset` (default 0).
+
+```json
+{
+  "data": [
+    {
+      "id": 12,
+      "inboxId": "inbox_2f1c...",
+      "receivedAt": 1767225600000,
+      "method": "POST",
+      "path": "/hooks/order",
+      "query": "attempt=2",
+      "headers": { "Content-Type": "application/json" },
+      "body": "{\"id\":7}",
+      "bodyBytes": 8,
+      "bodyTruncated": false,
+      "remoteAddr": "127.0.0.1"
+    }
+  ],
+  "pagination": { "total": 1, "limit": 50, "offset": 0, "hasMore": false, "returned": 1 }
+}
+```
+
+`id` is the capture's storage id and also its SSE event id (see below).
+`headers` joins a repeated name with `, `. `query` is the raw query string
+without the `?`.
+
+### DELETE /inbox/:inboxId/requests
+
+Clear the captures, keeping the listener: `{"inboxId": "...", "cleared": 12}`.
+
+### GET /inbox/:inboxId/live
+
+Server-Sent Events, one event per capture, each carrying the same object as the
+list above and an SSE `id:` equal to the capture's `id`. A reconnect that sends
+`Last-Event-ID` resumes after that capture, so nothing is missed across a drop.
+The stream ends when the inbox is stopped.
+
+**One stream per inbox.** A second concurrent watcher is refused with `409` and
+code `inbox_live_in_use`: each SSE handler occupies a cpp-httplib pool thread
+for its whole life, so N watchers on one inbox is N parked threads.
 
 ## Authentication
 
@@ -2679,6 +2830,12 @@ stays cheap as history grows.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
+- `baseline` - `true` lists only runs pinned as baselines, `false` only unpinned
+  ones (any other value is ignored, like an unrecognised `type`). Leaving it out
+  lists both, so omit it rather than passing `false` to mean "either". A
+  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, since
+  the list is already `start_time DESC` - the lookup both the history view's
+  vs-baseline strip and the MCP `compare_runs` tool make.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
@@ -2715,6 +2872,11 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
+**`baseline`** is on every row, `true` only for a run pinned through
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline). It is also on
+`GET /runs/:runId`, so a client that opened a run directly can draw the pin
+without listing.
+
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
@@ -2740,6 +2902,7 @@ a server.
       "status": "completed",
       "startTime": 1234567890,
       "endTime": 1234567891,
+      "baseline": true,
       "summary": {
         "url": "https://api.example.com/users",
         "method": "GET",
@@ -2760,6 +2923,7 @@ a server.
       "status": "completed",
       "startTime": 1234567892,
       "endTime": 1234567893,
+      "baseline": false,
       "summary": { "url": "https://api.example.com/users", "method": "GET", "httpVersion": "auto" },
       "resultSummary": { "statusCode": 200, "latencyMs": 34.2 }
     }
@@ -2797,7 +2961,8 @@ release; new callers should always pass pagination params and read the
 Get details for a specific run.
 
 **Response:** The run object shown in `GET /runs` (`id`, `requestId`,
-`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`).
+`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`,
+`baseline`).
 
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
@@ -3186,6 +3351,45 @@ a **404** in the shared error shape.
 ```json
 { "error": { "code": 404, "message": "Run not found" } }
 ```
+
+### PUT /runs/:runId/baseline
+
+Pin (or unpin) a run as a **baseline** - the known-good run later runs of the
+same request are compared against. `PUT` rather than `POST` per the
+[create vs update](#resource-writes-create-vs-update) split: the run already
+exists, and this updates it. There is no deprecated alias; the endpoint is new.
+
+Two things follow from a pin, and both are the point of it:
+
+- **Retention never expires it.** `prune_runs` skips a baseline under both the
+  count cap and the age cap, and a pinned run does not count toward
+  `maxRunsRetained` either - a pin the cap could expire is not a pin, and pins
+  crowding the cap would evict the recent history the cap exists to keep.
+- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
+
+Several runs may be pinned at once (one per request is the expected use). The
+engine records the pin and holds no opinion about which baseline applies to
+which run - that selection is the client's, so a pin never unpins anything else.
+
+**Request body** - `baseline` is required and must be a boolean:
+```json
+{ "baseline": true }
+```
+
+**Response `200`:** the updated run row, in the same shape
+[GET /runs](#get-runs) lists (including `summary`), so a client can patch its
+cached row instead of re-listing.
+
+**`400`** when the body is not JSON, has no `baseline`, or `baseline` is not a
+boolean - including `null`. Unlike the merge-patch resource updates, an
+unusable value here is refused rather than ignored: this body has exactly one
+field, so ignoring it would answer `200` to a request that changed nothing.
+
+```json
+{ "error": { "code": "bad_request", "message": "Invalid 'baseline': must be a boolean" } }
+```
+
+**`404`** when no run has that id.
 
 ### DELETE /runs/:runId
 

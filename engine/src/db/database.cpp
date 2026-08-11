@@ -179,6 +179,10 @@ inline auto make_storage (const std::string& path) {
     make_index ("idx_requests_collection_id", &Request::collection_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
     make_index ("idx_collections_parent_id", &Collection::parent_id),
+    // Every inbox read filters by inbox_id (the capture list, the live poll,
+    // the retention trim and the clear), and a long-lived listener appends to
+    // this table without bound between trims.
+    make_index ("idx_inbox_requests_inbox_id", &InboxRequest::inbox_id),
     // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
     make_index ("idx_runs_start_time", &Run::start_time),
     // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
@@ -250,7 +254,9 @@ inline auto make_storage (const std::string& path) {
     // existing, non-empty runs table - pre-existing rows backfill to `""`,
     // which the report route reads as "the engine died before this run
     // finished; report from the sampled results alone".
-    make_column ("summary", &Run::summary, default_value (""))),
+    make_column ("summary", &Run::summary, default_value ("")),
+    // Pinned-as-baseline flag; see Run::baseline for why retention reads it.
+    make_column ("baseline", &Run::baseline, default_value (false))),
 
     // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",
@@ -298,6 +304,22 @@ inline auto make_storage (const std::string& path) {
     make_column ("truncated", &ResultBody::truncated),
     make_column ("is_binary", &ResultBody::is_binary),
     make_column ("content_type", &ResultBody::content_type)),
+
+    // Inbox requests: what a webhook inbox listener captured (issue #480).
+    // Not owned by a run, so nothing in the run cascade touches it - the rows
+    // are bounded per inbox as they are written and cleared wholesale at
+    // startup, since no inbox survives the process that opened it.
+    make_table ("inbox_requests",
+    make_column ("id", &InboxRequest::id, primary_key ().autoincrement ()),
+    make_column ("inbox_id", &InboxRequest::inbox_id),
+    make_column ("received_at", &InboxRequest::received_at),
+    make_column ("method", &InboxRequest::method),
+    make_column ("path", &InboxRequest::path), make_column ("query", &InboxRequest::query),
+    make_column ("headers", &InboxRequest::headers), // JSON object
+    make_column ("body", &InboxRequest::body),
+    make_column ("body_bytes", &InboxRequest::body_bytes),
+    make_column ("body_truncated", &InboxRequest::body_truncated),
+    make_column ("remote_addr", &InboxRequest::remote_addr)),
 
     // ─────────────── CONFIGURATION TABLES ───────────────
 
@@ -582,6 +604,19 @@ void Database::init () {
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "Startup run reconciliation failed: " + std::string (e.what ()));
+    }
+
+    // No webhook inbox survives the process that opened it, so any capture row
+    // still here belongs to an inbox nothing can list. Best-effort, like the
+    // two passes around it.
+    try {
+        if (const int64_t dropped = clear_inbox_requests_all (); dropped > 0) {
+            vayu::utils::log_info ("Cleared " + std::to_string (dropped) +
+            " inbox capture(s) left by a previous process");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup inbox capture cleanup failed: " + std::string (e.what ()));
     }
 
     // Trim accumulated run history on startup (design-mode clicks and load runs
@@ -971,12 +1006,14 @@ auto run_filter_where (const RunFilter& filter) {
     const bool no_req        = !filter.request_id.has_value ();
     const bool no_q          = !filter.q.has_value () || filter.q->empty ();
     const bool no_collection = !filter.collection_id.has_value ();
+    const bool no_baseline   = !filter.baseline.has_value ();
 
     const RunType type_val           = filter.type.value_or (RunType::Design);
     const RunStatus status_val       = filter.status.value_or (RunStatus::Pending);
     const std::string req_val        = filter.request_id.value_or ("");
     const std::string q_pat          = "%" + (filter.q ? *filter.q : std::string{}) + "%";
     const std::string collection_val = filter.collection_id.value_or ("");
+    const bool baseline_val          = filter.baseline.value_or (false);
 
     // The snapshot when it is JSON, an empty object when it is not - the guard
     // described above, so json_extract below is always handed valid JSON.
@@ -990,6 +1027,7 @@ auto run_filter_where (const RunFilter& filter) {
     (c (&Run::status) == status_val || no_status) &&
     (c (&Run::request_id) == req_val || no_req) &&
     (like (&Run::config_snapshot, q_pat) || no_q) &&
+    (c (&Run::baseline) == baseline_val || no_baseline) &&
     (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) ==
      collection_val ||
     no_collection));
@@ -1050,6 +1088,26 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
     });
 }
 
+// Pin or unpin a run as a baseline. Retried like every other write here, and
+// the read-modify-write sits inside the retried callback so a retry re-reads
+// the row rather than replaying a stale copy over a summary or a status a
+// worker wrote in between. Returns the stored row, or nullopt when there is no
+// such run - which is what lets the route answer 404 instead of inventing one.
+std::optional<Run> Database::set_run_baseline (const std::string& id, bool baseline) {
+    std::optional<Run> updated;
+    retry_on_busy ("set run baseline", 5, std::chrono::milliseconds (100), [&] {
+        auto run = get_run (id);
+        if (!run) {
+            updated.reset ();
+            return;
+        }
+        run->baseline = baseline;
+        impl_->storage.update (*run);
+        updated = *run;
+    });
+    return updated;
+}
+
 // Retention: drop runs beyond the count cap and/or older than the age cap.
 void Database::prune_runs (int max_runs, int max_age_days) {
     // Both limits off - nothing to do (0 = unlimited for each).
@@ -1077,6 +1135,14 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         for (const auto& run : runs) {
             // In-flight runs are never pruned and do not count toward the cap.
             if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
+                continue;
+            }
+            // Neither is a pinned baseline: a run kept as the thing later runs
+            // are measured against is exactly the run retention must not
+            // expire. Skipped rather than merely spared, for the same reason
+            // an in-flight run is - counting it toward the cap would let a
+            // handful of pins evict the recent history the cap exists to keep.
+            if (run.baseline) {
                 continue;
             }
             const bool over_count = (max_runs > 0) && (kept >= max_runs);
@@ -1208,6 +1274,76 @@ int64_t Database::count_monitor_samples (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.count<MonitorSample> (where (c (&MonitorSample::run_id) == run_id));
 }
+
+// ============================================================================
+// Inbox captures - what a webhook inbox listener recorded (issue #480)
+// ============================================================================
+
+int Database::add_inbox_request (const InboxRequest& capture, int64_t max_captures) {
+    int assigned_id = 0;
+    retry_on_busy ("append inbox capture", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            assigned_id = static_cast<int> (impl_->storage.insert (capture));
+
+            if (max_captures > 0) {
+                const int64_t stored = impl_->storage.count<InboxRequest> (
+                where (c (&InboxRequest::inbox_id) == capture.inbox_id));
+                if (stored > max_captures) {
+                    // Delete by id rather than "everything older than the Nth
+                    // received_at": two captures can share a millisecond, and a
+                    // timestamp cutoff would then evict both or neither.
+                    auto victims = impl_->storage.select (&InboxRequest::id,
+                    where (c (&InboxRequest::inbox_id) == capture.inbox_id),
+                    order_by (&InboxRequest::id),
+                    sqlite_orm::limit (stored - max_captures));
+                    for (const int victim : victims) {
+                        impl_->storage.remove<InboxRequest> (victim);
+                    }
+                }
+            }
+            return true; // Commit
+        });
+    });
+    return assigned_id;
+}
+
+std::vector<InboxRequest> Database::get_inbox_requests_paginated (const std::string& inbox_id,
+int64_t limit,
+int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id),
+    order_by (&InboxRequest::id).desc (), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_inbox_requests (const std::string& inbox_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+}
+
+std::vector<InboxRequest>
+Database::get_inbox_requests_since (const std::string& inbox_id, int64_t last_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id && c (&InboxRequest::id) > last_id),
+    order_by (&InboxRequest::id));
+}
+
+int64_t Database::clear_inbox_requests (const std::string& inbox_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const int64_t removed =
+    impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    impl_->storage.remove_all<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    return removed;
+}
+
+int64_t Database::clear_inbox_requests_all () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const int64_t removed = impl_->storage.count<InboxRequest> ();
+    if (removed > 0) {
+        impl_->storage.remove_all<InboxRequest> ();
+    }
+    return removed;}
 
 // ============================================================================
 // Results - Individual request outcomes with timing breakdown
@@ -2086,6 +2222,45 @@ void Database::seed_default_config () {
     "SSE Send Last Event ID", "Resumes data streams from the last received event. Disable if using incompatible proxies.",
     "observability", vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now });
+
+    // Webhook inbox. All three are read once when an inbox starts, so a change
+    // applies to the next inbox started - no restart. The running listener keeps
+    // what it was started with, which is what makes one inbox's captures a set
+    // truncated and retained by a single rule rather than by whatever the
+    // setting happened to be at each arrival.
+    upsert_config (ConfigEntry{ "inboxMaxBodyBytes",
+    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer",
+    "Inbox Capture Body Limit",
+    "How much of an inbound webhook body an inbox stores. A larger payload is "
+    "kept as a prefix and flagged as truncated, never silently cut - the "
+    "capture reports the size as received either way. Raise it for a provider "
+    "that posts large documents; the transport still refuses anything over 8MB "
+    "outright, which is not a webhook.",
+    "observability", std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES),
+    std::to_string (vayu::core::constants::inbox::MIN_BODY_BYTES),
+    std::to_string (vayu::core::constants::inbox::MAX_PAYLOAD_BYTES), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "inboxMaxCaptures",
+    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer",
+    "Inbox Captures Retained",
+    "How many requests one inbox keeps before the oldest are dropped. Also the "
+    "most a single page of the capture list may ask for. Raise it to keep a "
+    "long webhook session whole; every capture is a stored row, so this and "
+    "the body limit above together bound what an inbox costs on disk.",
+    "observability", std::to_string (vayu::core::constants::inbox::MAX_CAPTURES),
+    std::to_string (vayu::core::constants::inbox::MIN_CAPTURES),
+    std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "inboxLivePollIntervalMs",
+    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer",
+    "Inbox Live Poll Interval",
+    "How often a watched inbox checks for newly arrived captures. This is the "
+    "delay between a webhook landing and its row appearing. Lower costs a few "
+    "more wakeups per second on the one thread holding that stream and nothing "
+    "on the capture path itself.",
+    "observability", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
+    std::to_string (vayu::core::constants::inbox::MIN_LIVE_POLL_INTERVAL_MS),
+    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now });
 
     if (existing.empty ()) {
         vayu::utils::log_info ("Seeded default configuration values");

@@ -27,6 +27,7 @@ describe("API_ENDPOINTS canonical routes", () => {
 		expect(API_ENDPOINTS.RUN_BY_ID("r1")).toBe("/runs/r1");
 		expect(API_ENDPOINTS.RUN_REPORT("r1")).toBe("/runs/r1/report");
 		expect(API_ENDPOINTS.RUN_STOP("r1")).toBe("/runs/r1/stop");
+		expect(API_ENDPOINTS.RUN_BASELINE("r1")).toBe("/runs/r1/baseline");
 	});
 
 	it("builds the paginated /runs list URL with only the given params", () => {
@@ -44,6 +45,14 @@ describe("API_ENDPOINTS canonical routes", () => {
 		expect(API_ENDPOINTS.RUNS_LIST({ collectionId: "col_1", limit: 1 })).toBe(
 			"/runs?limit=1&collectionId=col_1"
 		);
+		// The vs-baseline strip's lookup - one request's pin, one row. Both
+		// spellings are sent: `baseline=false` asks a different question from
+		// an omitted `baseline`, so a falsy check here would silently widen it
+		// to every run.
+		expect(API_ENDPOINTS.RUNS_LIST({ baseline: true, requestId: "req_1", limit: 1 })).toBe(
+			"/runs?limit=1&requestId=req_1&baseline=true"
+		);
+		expect(API_ENDPOINTS.RUNS_LIST({ baseline: false })).toBe("/runs?baseline=false");
 		// No params -> bare /runs, which the engine treats as the legacy array.
 		expect(API_ENDPOINTS.RUNS_LIST({})).toBe("/runs");
 	});

@@ -148,7 +148,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
-| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
 | `run_request`          | execute  | `POST /compose` + `POST /execute`            | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `create_collection`    | write    | `POST /collections`                          | write toggle               |
@@ -188,6 +188,18 @@ Notes:
   decision described under [Safety](#safety-model) rather than the target's
   check by extension. The scrape needs no cap of its own: the monitor thread is
   joined when the run ends, so whatever bounds the run bounds it.
+- **`compare_runs`** takes `baseRunId` optionally. Omitted, it resolves the run
+  pinned as the **baseline** for whatever saved request the target ran -
+  `GET /runs/:id` for the `requestId`, then
+  `GET /runs?baseline=true&requestId=<id>&limit=1` - which is the same lookup
+  the app's history view makes, so an agent and the UI never compare a run
+  against different references. Nothing to resolve through (an ad-hoc run with
+  no saved request), no pin for that request, or a target that *is* the pin:
+  each is a refusal naming the fix, never a silent comparison against some
+  other run. Every metric in the result carries a `direction` -
+  `lower-is-better`, `higher-is-better` or `neutral` (total requests, which
+  moves with how long a run was told to run) - so a reader can tell a
+  regression from an improvement without knowing each metric's sense.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (the engine marks these in each
@@ -641,7 +653,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
-| `compare.ts`       | Pure two-report diff for `compare_runs`.                                    |
+| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence. |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`, the one dispatch path `server.ts` and the tests share. |
 | `resources.ts`     | Static + templated resource definitions.                                    |

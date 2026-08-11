@@ -15,6 +15,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/inbox.hpp"
 #include "vayu/http/mock_issuer.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/routes.hpp"
@@ -57,6 +58,10 @@ class Server {
     // mock-issuer listener, and the route lambdas that reach it must be gone by
     // then - so it is declared before server_ and destroyed after it.
     MockIssuerManager mock_issuer_manager_;
+    // And once more, for the third listener family: each inbox is an independent
+    // listener whose handlers hold a reference to db_, and the route lambdas that
+    // start and stop them must be gone before this dtor joins their threads.
+    InboxManager inbox_manager_;
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{ false };

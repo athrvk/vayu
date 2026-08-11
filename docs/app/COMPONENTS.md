@@ -32,7 +32,8 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
-    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   ├── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   └── <InboxView />                // type="inbox"       modules/inbox/
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; sections from context-bar/registry.ts; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
@@ -325,6 +326,8 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
 
+A **load run's** row also carries the baseline pin: a Pin action beside Delete (`useSetRunBaselineMutation` → `PUT /runs/:id/baseline`) and, once pinned, a "Baseline" chip that stays visible rather than appearing on hover - the pin is state, not an affordance. Only load runs offer it: a baseline exists to be diffed, and only a load run has percentiles, throughput and an error rate to diff. Pinning also exempts the run from the engine's retention, so the promise is worth making only where it buys something. No confirmation dialog, unlike Delete - both directions are one click from being undone.
+
 A **collection run's** row is a different shape, because it has no url and no method: a folder icon and the collection's name, over a chip line of step count, iterations (omitted when 1, the default) and sub-folders. The badge slot beside Delete is deliberately **empty** for one. That slot marks the types whose identity line would otherwise look alike - load and design both print a bare URL, so load carries the ⚡ - and a collection run's identity is already unmistakable, so a badge there would be the third glyph in one card saying the same thing, after the folder icon and the step count. Guarded by a test asserting no two icons in the card are the same glyph.
 
 A **collection run** row has no url and no method - its work is a sequence - so it renders `summary.scenario` (`GET /runs`) instead: the collection's name, the plan's step count, and iterations when there was more than one pass. The name is not on the wire; `HistoryList` resolves it from the loaded tree with one shared `useCollectionsQuery` and passes it down, so the row stays presentational over already-shaped data and the page does not become one query per row. A collection deleted since its run falls back to the id it does have. The type filter carries all three run types - `filterRuns` compares its value to `run.type` directly, so a type the dropdown cannot name is one the list can only show under "All".
@@ -334,6 +337,8 @@ A **collection run** row has no url and no method - its work is a sequence - so 
 `HistoryDetail` fetches the **run** (`useRunQuery`) and asks for the report only when the run is a load run. `GET /runs/:id/report` is a load-test aggregate: against a design run its percentiles all come from one sample and `metadata.configuration` is absent, so it cannot say what a design run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a design run it also carries the stored exchange. The header shows the run's identity, type and status but **not** its URL - the builder below renders its own URL bar, and two stacked read as a bug. A **scenario** run is not gated on its report either, for a different reason: while the sequence is still executing the live `step` stream is the content, so waiting for a report that does not yet describe a finished run would hold the tab on a skeleton for the length of the run. `ScenarioRunView` asks for the report itself.
 
 `DesignRunView.tsx` renders `RequestBuilderProvider` + `RequestBuilderLayout` with starting values from `design-run-seed.ts` (`seedFromRun`), the stored exchange as `initialResponse`, and the run's recorded collection script parts as `inheritedPreScripts` / `inheritedPostScripts`. It **holds the pane until `useRequestQuery` settles**, and tells a genuine deletion from a transport failure before seeding: `seedFromRun` reads a falsy live request as "deleted", so a query in flight, a deletion and an unreachable engine all look alike unless kept apart. The provider re-seeds only on a change of `initialRequest.id` - null for every detached copy - so an early or wrong seed would stick. Loading holds the pane; a genuine deletion (the `RequestNotFoundError` sentinel from `useRequestQuery`, matched via `isRequestNotFound` not a message string) seeds the orphan copy that replays the recorded wire headers; any other settled error is a transport failure and renders `ErrorState` with a retry rather than guessing a copy. The run's recorded auth **mode** (`seed.recordedAuthMode`, all that survives storage) is shown read-only beside the copy, so a user can see when the request's current auth differs from what the run sent. A run recorded before script parts existed passes its one glued string as `legacyPreScript` / `legacyPostScript`; `LegacyScriptNotice` shows it whole with a note that its parts cannot be separated, and the replay sends it as a single request-origin part. **The copy is detached** by two independent gates - `id: null` and no `onSave` - so editing it cannot rewrite the saved request. Sending again replays the recorded collection parts unchanged plus the edited request part, under the same `requestId`. `SaveRunToRequestDialog.tsx` + `save-run-to-request.ts` write chosen values back behind a confirm; they never write auth (only the mode survives storage) and never write scripts for a run stored before script parts existed.
+
+`LoadTestDetail.tsx`'s header carries `components/BaselineComparison.tsx`, the **vs-baseline strip**: the open run's p99, throughput and error rate against the run pinned for the same request, each delta coloured by `MetricDelta.direction` rather than by its sign (latency up is a regression, throughput up is not). It resolves the pin itself (`useBaselineRunQuery`: by `requestId`, or by url+method for a run of an unsaved request) and fetches the run row from the shared cache the pane above already filled, so it stays self-contained instead of threading a prop through every call site. It renders **nothing** when no run is pinned, when the open run *is* the pin, or before the baseline's report has loaded - a strip of zeros would claim "nothing changed" about runs that were never compared. The diff comes from `lib/run-compare.ts`, mirrored by the MCP tool's `electron/mcp/compare.ts` and pinned to it by `compare.conformance.test.ts`.
 
 `ScenarioRunView.tsx` is the collection-run tab: the sequence, step by step, plus a four-number summary. It is deliberately **not** `LoadTestDetail` - a scenario run's `results[]` are step executions of *different* requests, so the load report's percentiles and status distribution would describe a sequence as though it were one request repeated.
 
@@ -399,6 +404,36 @@ Adding an app panel is three edits and no branching: a member on `ClientSettings
 
 `LoadTestingPanel.tsx` is the ceilings the load-test dialog offers - the app's own policy, clamped to the engine's crash guards on the way into `client-settings-store`. The engine's bounds themselves are deliberately **not** settings; see `docs/app/api-integration.md` (Dialog ceilings are a user setting).
 
+## Webhook Inbox (`modules/inbox/`)
+
+The receiving half of the app (issue #480): an engine-hosted listener that records the requests
+sent to it, so building a webhook consumer needs no cloud tunnel. Engine contract:
+`docs/engine/api-reference.md` (Webhook Inbox).
+
+- `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop, the URL with a copy control, the
+  running/live badge, the capture list and the detail pane.
+- `CannedResponseControls.tsx` - reply status and delay. Its own component so the two fields can be
+  drafts (typing `50` on the way to `500` must not push a 50 at the next caller) and so re-seeding
+  them from the engine is a remount - `InboxView` keys it on the served values - rather than a
+  `setState` inside an effect.
+- `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
+  A capture is an exchange with no response, which that viewer already handles; a request you
+  received should read like one you sent.
+- `useInboxLive.ts` - the SSE stream. New captures are merged into the same query cache
+  `useInboxCapturesQuery` fills, not kept in a second list beside it - two lists would need
+  reconciling on every clear, and whichever the detail pane read would decide which was true.
+- `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
+
+**One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
+tab, and the engine permits a single live stream per inbox (each holds a pool thread), so a surface
+watching several at once would spend threads on lists nobody reads. The tab is a singleton and is
+never dirty - both stated explicitly in `tabs-store`, since a *missing* answer reads the same as
+"clean" and is what once made a dirty Settings tab LRU-evictable
+(`components/layout/tab-type-coverage.test.ts` guards all three switches).
+
+**Entry point:** the `Inbox` tile on the welcome Launcher. It has no Drawer view to switch to -
+an inbox is not a stored record - so there is nothing for a Dock button to act on.
+
 ## Welcome (`modules/welcome/`)
 
 Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
@@ -408,7 +443,8 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is five tiles: New
+  request, Import, History, Variables, Inbox.
 
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
