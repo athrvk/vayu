@@ -172,6 +172,44 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
 }
 
 // ---------------------------------------------------------------------------
+// Where a live stream resumes from
+// ---------------------------------------------------------------------------
+
+TEST (InboxLiveResumePoint, AbsentMeansFromTheStartAndTheHeaderWinsOverTheParam) {
+    int64_t last_id = -1;
+    ASSERT_FALSE (vayu::http::parse_live_resume_point ("", "", last_id).has_value ());
+    EXPECT_EQ (last_id, 0);
+
+    // The query parameter is the app's own reconnect - EventSource cannot set a
+    // header on a fresh connection - and is read exactly like the header.
+    ASSERT_FALSE (vayu::http::parse_live_resume_point ("", "42", last_id).has_value ());
+    EXPECT_EQ (last_id, 42);
+
+    // The browser's reconnect header is the more recent of the two.
+    ASSERT_FALSE (vayu::http::parse_live_resume_point ("77", "42", last_id).has_value ());
+    EXPECT_EQ (last_id, 77);
+}
+
+TEST (InboxLiveResumePoint, RejectsAValueThatIsNotACaptureId) {
+    int64_t last_id = 0;
+    for (const char* bad : { "abc", "12x", "", "-1", " 7", "1.5" }) {
+        const std::string value = bad;
+        // Empty is absence, not a bad value - it is in this list to pin that.
+        const auto error = vayu::http::parse_live_resume_point ("", value, last_id);
+        if (value.empty ()) {
+            EXPECT_FALSE (error.has_value ());
+            continue;
+        }
+        ASSERT_TRUE (error.has_value ()) << bad;
+        EXPECT_EQ (error->http_status, 400) << bad;
+        EXPECT_EQ (error->code, "invalid_last_event_id") << bad;
+        // Silently resuming from 0 would replay every retained capture as
+        // though it had just arrived, which is what the loud failure prevents.
+        EXPECT_EQ (last_id, 0) << bad;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // A live listener
 // ---------------------------------------------------------------------------
 
@@ -374,13 +412,64 @@ TEST_F (InboxListenerTest, TearsDownCleanlyWithAListenerStillRunning) {
 }
 
 TEST_F (InboxListenerTest, OneLiveStreamPerInbox) {
-    auto started = start ();
-    EXPECT_TRUE (manager_->try_claim_live (started.info.inbox_id));
-    EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id))
+    auto started     = start ();
+    const auto claim = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (claim.has_value ());
+    EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ())
     << "a second watcher would park a second pool thread on the same inbox";
-    manager_->release_live (started.info.inbox_id);
-    EXPECT_TRUE (manager_->try_claim_live (started.info.inbox_id));
-    EXPECT_FALSE (manager_->try_claim_live ("inbox_nope"));
+    manager_->release_live (started.info.inbox_id, *claim);
+    const auto second = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (second.has_value ());
+    EXPECT_NE (*second, *claim)
+    << "a reused token would let a stale holder act on it";
+    EXPECT_FALSE (manager_->try_claim_live ("inbox_nope").has_value ());
+}
+
+// A stream that keeps writing is live, whatever the wall clock says - the whole
+// point of the takeover window is that it never evicts one of these.
+TEST_F (InboxListenerTest, AWritingStreamKeepsItsClaimPastTheStaleWindow) {
+    // The default cadence, so the window under test (two intervals, 500ms) is
+    // an order of magnitude above the loop's own sleep - a scheduling hiccup
+    // must not read as a dead holder here or the test is flaky by design.
+    auto started     = start ();
+    const auto claim = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (claim.has_value ());
+
+    const auto deadline = std::chrono::steady_clock::now () +
+    std::chrono::milliseconds (inbox_constants::LIVE_POLL_INTERVAL_MS * 4);
+    while (std::chrono::steady_clock::now () < deadline) {
+        ASSERT_TRUE (manager_->note_live_write (started.info.inbox_id, *claim));
+        EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ())
+        << "a stream that is still writing was evicted";
+        std::this_thread::sleep_for (std::chrono::milliseconds (50));
+    }
+    EXPECT_TRUE (manager_->note_live_write (started.info.inbox_id, *claim));
+}
+
+// The #506 race: the browser reconnects before the previous stream's poll loop
+// has noticed its socket died, and the refusal is what strands it for good.
+TEST_F (InboxListenerTest, AReconnectTakesOverAClaimThatStoppedWriting) {
+    set_config ("inboxLivePollIntervalMs", inbox_constants::MIN_LIVE_POLL_INTERVAL_MS);
+    auto started    = start ();
+    const auto dead = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (dead.has_value ());
+
+    // Immediately after the last write the holder is presumed alive.
+    EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ());
+
+    std::this_thread::sleep_for (
+    std::chrono::milliseconds (inbox_constants::MIN_LIVE_CLAIM_STALE_MS + 50));
+    const auto reconnect = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (reconnect.has_value ())
+    << "a reconnect met a 409 it cannot recover from";
+
+    // The evicted holder learns it lost the slot the next time it writes, and
+    // can neither keep the new claim's clock alive nor release it.
+    EXPECT_FALSE (manager_->note_live_write (started.info.inbox_id, *dead));
+    manager_->release_live (started.info.inbox_id, *dead);
+    EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ())
+    << "the evicted holder released a slot that was no longer its own";
+    EXPECT_TRUE (manager_->note_live_write (started.info.inbox_id, *reconnect));
 }
 
 // ---------------------------------------------------------------------------

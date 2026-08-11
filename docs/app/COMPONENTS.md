@@ -424,6 +424,12 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
 - `useInboxLive.ts` - the SSE stream. New captures are merged into the same query cache
   `useInboxCapturesQuery` fills, not kept in a second list beside it - two lists would need
   reconciling on every clear, and whichever the detail pane read would decide which was true.
+  The reconnect is the hook's own, not the browser's: `EventSource` treats a non-200 as fatal,
+  and a reconnect landing inside the engine's dead-socket window meets a `409`, so a single
+  drop used to end the stream for the life of the tab. It retries with a jittered backoff,
+  resumes from the last capture id it saw (`?lastEventId=`, since no API sets a header on a
+  fresh connection), and once the retries are spent reports `stopped` so the surface can say
+  so and offer a Resume rather than leave the badge reading `Running`.
 - `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
 
 **One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
