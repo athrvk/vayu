@@ -26,9 +26,12 @@
 		/* Renderer sources reached from a test are DOM code; `electron/` is not. */
 		"lib": ["ES2020", "DOM", "DOM.Iterable"],
 		"types": ["node", "vitest/globals"],
-		"baseUrl": ".",
+		/*
+		 * No `baseUrl`, so targets are written relative to this file (`app/`) -
+		 * see the longer note in tsconfig.json.
+		 */
 		"paths": {
-			"@/*": ["src/*"],
+			"@/*": ["./src/*"],
 			"@shared/*": ["../shared/*"]
 		}
 	},

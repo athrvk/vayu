@@ -174,7 +174,19 @@ Configuration is in `electron-builder.json`:
 - Target: ES2020
 - Module: ESNext
 - JSX: React
-- Path aliases: `@/*` → `src/*`
+- Path aliases: `@/*` → `./src/*`
+- `types: ["node"]`
+
+The last two are written the way they are because TypeScript 7 removes `baseUrl`
+and changes the default of `types` from "every package under `node_modules/@types`"
+to `[]`. Both are spelled out here so the config means the same thing to 5.x and
+7.x: alias targets are relative (a non-relative target without `baseUrl` is the
+hard error TS5090), and the one ambient type package the source-scanning tests
+rely on is named. Adding an `@types/*` package that provides globals means adding
+it to that list.
+
+The alias table is duplicated by hand in `vite.config.ts` and `vitest.config.ts`;
+neither reads this file, so a new alias has to be added in all three.
 
 ### Electron main process (`tsconfig.node.json`)
 
@@ -187,7 +199,7 @@ Configuration is in `electron-builder.json`:
 ### Electron tests (`tsconfig.electron-test.json`)
 
 - `noEmit` - it exists to type-check what `tsconfig.node.json` excludes
-- Adds the `@/*` → `src/*` alias, which the main-process config deliberately
+- Adds the `@/*` → `./src/*` alias, which the main-process config deliberately
   lacks: only a test may cross into `app/src/` (`resolve.test.ts` compares the
   renderer's dynamic-variable table against the main-process copy)
 - Run by `pnpm type-check`; without it nothing checked these files, and a
