@@ -476,6 +476,55 @@ constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 } // namespace metrics_collector
 
 /**
+ * @brief Webhook inbox configuration (issue #480)
+ *
+ * Rails rather than preferences: every one of these bounds what a *remote*
+ * caller can make the engine hold or wait for, so none is user-settable. The
+ * canned response a user actually tunes (status, headers, body, delay) is
+ * per-inbox request state, not a constant.
+ */
+namespace inbox {
+/// Stored bytes per capture, seeding the `inboxMaxBodyBytes` setting. A larger
+/// body is truncated with the flag set.
+constexpr int64_t MAX_BODY_BYTES = 64 * 1024;
+/// Bounds on that setting. The floor keeps a capture from being all flag and no
+/// payload; the ceiling is the transport limit below, past which nothing is
+/// read at all.
+constexpr int64_t MIN_BODY_BYTES = 256;
+
+/// Captures retained per inbox, seeding the `inboxMaxCaptures` setting; the
+/// oldest are deleted as new ones arrive.
+constexpr int64_t MAX_CAPTURES = 500;
+/// Bounds on that setting. The ceiling is what one `GET /inbox/:id/requests`
+/// page may ask for, so it also bounds how much a single read materialises.
+constexpr int64_t MIN_CAPTURES     = 1;
+constexpr int64_t CAPTURES_CEILING = 10000;
+
+/// Poll cadence of `GET /inbox/:id/live` against the capture table, seeding the
+/// `inboxLivePollIntervalMs` setting.
+constexpr int LIVE_POLL_INTERVAL_MS = 250;
+/// Bounds on that setting: below the floor the wakeups outweigh the latency
+/// they save, above the ceiling a webhook visibly lags its arrival.
+constexpr int MIN_LIVE_POLL_INTERVAL_MS = 25;
+constexpr int MAX_LIVE_POLL_INTERVAL_MS = 5000;
+
+/// Transport limit on one inbound request. Past this the listener answers 413
+/// and records nothing - a payload this size is not a webhook. A rail rather
+/// than a setting: it bounds what an unauthenticated *remote* caller can make
+/// the engine buffer, which is not the local user's preference to spend.
+constexpr size_t MAX_PAYLOAD_BYTES = 8UL * 1024 * 1024;
+/// Upper bound on the canned response's artificial delay. It occupies a
+/// listener thread for its whole duration - and the teardown join waits for it
+/// - so it is bounded well below any client timeout. A rail for the same
+/// reason: it is how long a stop can be made to take, not a preference.
+constexpr int MAX_RESPONSE_DELAY_MS = 30000;
+/// Page size of `GET /inbox/:id/requests` when the caller names none. Not a
+/// setting: the app always sends an explicit `limit`, so an engine-side default
+/// would have no reader on the path the app takes.
+constexpr int64_t DEFAULT_PAGE_LIMIT = 50;
+} // namespace inbox
+
+/**
  * @brief Script validation configuration
  */
 namespace script_validation {

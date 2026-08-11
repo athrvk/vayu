@@ -1213,6 +1213,154 @@ a mistake.
 `cleared` counts the cookies dropped; clearing a scope that holds nothing is a
 `200` with `0`, not an error.
 
+## Webhook Inbox
+
+An **inbox** is a second HTTP listener the engine opens on request. It accepts
+any method on any path, records what arrived, and answers a canned response -
+nothing else. That is what makes testing the *receiving* side of a webhook a
+local operation: point the sender at the inbox URL instead of a cloud tunnel,
+and the payload never leaves the machine.
+
+**Lifetime is the engine process.** An inbox is not a stored resource: there is
+no create/update split ([POST creates, PUT updates](#resource-writes-create-vs-update)
+applies to collections, requests and environments), ids are not restorable
+across restarts, and `POST /inbox/start` is a verb path for that reason. Stopping
+an inbox frees its listener but keeps the record - and therefore its captures -
+readable until the engine exits.
+
+**Binding is a trust decision.** The default is `127.0.0.1`. Any other address
+is refused unless the caller also sends `"confirmNonLoopback": true`, and the
+inbox reports `loopback: false` from then on so a client can badge it. See
+[architecture.md](architecture.md#listeners) for why only the inbox listener may
+bind wide and the management API never may.
+
+**Bounds.** Three are settings (`GET`/`POST /config`, category *Observability &
+Data*), read once when an inbox starts - so a change applies to the next inbox
+started, and a running listener keeps what it was started with:
+
+| Setting | Default | Range | What it bounds |
+|---------|---------|-------|----------------|
+| `inboxMaxBodyBytes` | 65536 | 256 - 8388608 | Stored body per capture. Past it the body is kept as a prefix with `bodyTruncated: true`; `bodyBytes` is always the size as received |
+| `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
+| `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
+
+Two are **not** settings, deliberately. A request over **8 MiB** is refused at
+the transport with a `413` and recorded nowhere: that bounds what an
+unauthenticated remote caller can make the engine buffer, which is not the local
+user's preference to spend. The canned response's **`delayMs` is capped at
+30000**: it holds a listener thread for its whole duration and a stop waits on
+that join, so it bounds how long a stop can be made to take.
+
+### POST /inbox/start
+
+Start a listener. Every field is optional - an empty body starts a loopback
+inbox on a free port that answers `200` with no body.
+
+**Request:**
+```json
+{
+  "port": 0,
+  "bind": "127.0.0.1",
+  "confirmNonLoopback": false,
+  "response": {
+    "status": 200,
+    "body": "",
+    "headers": {},
+    "delayMs": 0
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `port` | `0` (default) picks a free port |
+| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback` |
+| `response.status` | 100-599 |
+| `response.headers` | String values only; a `Content-Type` here is used verbatim |
+| `response.delayMs` | 0-30000, applied before every reply |
+
+An out-of-range value is a `400` naming the field rather than a fallback to the
+default: a listener quietly answering something other than what it was asked to
+is invisible on both sides of the wire. A bind that fails (port in use) is a
+`409` with code `inbox_bind_failed`; a non-loopback bind without confirmation is
+a `400` with code `inbox_non_loopback_bind`.
+
+**Response:**
+```json
+{
+  "inboxId": "inbox_2f1c...",
+  "url": "http://127.0.0.1:41235/",
+  "bind": "127.0.0.1",
+  "port": 41235,
+  "running": true,
+  "loopback": true,
+  "response": { "status": 200, "body": "", "headers": {}, "delayMs": 0 }
+}
+```
+
+### GET /inbox
+
+Every inbox this process has started, running or stopped: `{"data": [ ... ]}`,
+each entry the object above.
+
+### PUT /inbox/:inboxId
+
+Update the canned response, live - the next caller receives the new one, with no
+restart and no captures lost. Merge-patch: an absent field keeps what the inbox
+is serving. The body may be the response object itself or `{"response": {...}}`,
+so a client can send back what `start` handed it. `404` for an unknown id.
+
+### POST /inbox/:inboxId/stop
+
+Stop the listener. Returns the inbox with `running: false`. Captures survive;
+`404` for an unknown id.
+
+### GET /inbox/:inboxId/requests
+
+The captures, **newest first**, in the standard `{data, pagination}` envelope.
+
+**Query parameters:** `limit` (default 50, capped at 500), `offset` (default 0).
+
+```json
+{
+  "data": [
+    {
+      "id": 12,
+      "inboxId": "inbox_2f1c...",
+      "receivedAt": 1767225600000,
+      "method": "POST",
+      "path": "/hooks/order",
+      "query": "attempt=2",
+      "headers": { "Content-Type": "application/json" },
+      "body": "{\"id\":7}",
+      "bodyBytes": 8,
+      "bodyTruncated": false,
+      "remoteAddr": "127.0.0.1"
+    }
+  ],
+  "pagination": { "total": 1, "limit": 50, "offset": 0, "hasMore": false, "returned": 1 }
+}
+```
+
+`id` is the capture's storage id and also its SSE event id (see below).
+`headers` joins a repeated name with `, `. `query` is the raw query string
+without the `?`.
+
+### DELETE /inbox/:inboxId/requests
+
+Clear the captures, keeping the listener: `{"inboxId": "...", "cleared": 12}`.
+
+### GET /inbox/:inboxId/live
+
+Server-Sent Events, one event per capture, each carrying the same object as the
+list above and an SSE `id:` equal to the capture's `id`. A reconnect that sends
+`Last-Event-ID` resumes after that capture, so nothing is missed across a drop.
+The stream ends when the inbox is stopped.
+
+**One stream per inbox.** A second concurrent watcher is refused with `409` and
+code `inbox_live_in_use`: each SSE handler occupies a cpp-httplib pool thread
+for its whole life, so N watchers on one inbox is N parked threads.
+
 ## Authentication
 
 The engine **resolves auth server-side**. Every request's `auth` object (on

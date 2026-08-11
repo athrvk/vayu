@@ -32,7 +32,8 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
-    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   ├── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
+    │   └── <InboxView />                // type="inbox"       modules/inbox/
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; sections from context-bar/registry.ts; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
@@ -402,6 +403,36 @@ Adding an app panel is three edits and no branching: a member on `ClientSettings
 
 `LoadTestingPanel.tsx` is the ceilings the load-test dialog offers - the app's own policy, clamped to the engine's crash guards on the way into `client-settings-store`. The engine's bounds themselves are deliberately **not** settings; see `docs/app/api-integration.md` (Dialog ceilings are a user setting).
 
+## Webhook Inbox (`modules/inbox/`)
+
+The receiving half of the app (issue #480): an engine-hosted listener that records the requests
+sent to it, so building a webhook consumer needs no cloud tunnel. Engine contract:
+`docs/engine/api-reference.md` (Webhook Inbox).
+
+- `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop, the URL with a copy control, the
+  running/live badge, the capture list and the detail pane.
+- `CannedResponseControls.tsx` - reply status and delay. Its own component so the two fields can be
+  drafts (typing `50` on the way to `500` must not push a 50 at the next caller) and so re-seeding
+  them from the engine is a remount - `InboxView` keys it on the served values - rather than a
+  `setState` inside an effect.
+- `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
+  A capture is an exchange with no response, which that viewer already handles; a request you
+  received should read like one you sent.
+- `useInboxLive.ts` - the SSE stream. New captures are merged into the same query cache
+  `useInboxCapturesQuery` fills, not kept in a second list beside it - two lists would need
+  reconciling on every clear, and whichever the detail pane read would decide which was true.
+- `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
+
+**One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
+tab, and the engine permits a single live stream per inbox (each holds a pool thread), so a surface
+watching several at once would spend threads on lists nobody reads. The tab is a singleton and is
+never dirty - both stated explicitly in `tabs-store`, since a *missing* answer reads the same as
+"clean" and is what once made a dirty Settings tab LRU-evictable
+(`components/layout/tab-type-coverage.test.ts` guards all three switches).
+
+**Entry point:** the `Inbox` tile on the welcome Launcher. It has no Drawer view to switch to -
+an inbox is not a stored record - so there is nothing for a Dock button to act on.
+
 ## Welcome (`modules/welcome/`)
 
 Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
@@ -411,7 +442,8 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is five tiles: New
+  request, Import, History, Variables, Inbox.
 
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 

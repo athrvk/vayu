@@ -127,6 +127,20 @@ export const API_ENDPOINTS = {
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_APPLY: `/import/apply`,
 
+	// Webhook inbox (issue #480). The engine hosts the listener; these drive its
+	// lifecycle and read what it captured. START is a verb path rather than a
+	// POST to `/inbox` because an inbox is not a stored resource - it exists for
+	// as long as the engine process does, so the create/update split #95 draws
+	// for collections and requests does not apply.
+	INBOX: `/inbox`,
+	INBOX_START: `/inbox/start`,
+	INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,
+	INBOX_BY_ID: (inboxId: string) => `/inbox/${inboxId}`,
+	INBOX_CAPTURES: (inboxId: string, limit: number, offset: number) =>
+		`/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,
+	INBOX_CAPTURES_CLEAR: (inboxId: string) => `/inbox/${inboxId}/requests`,
+	INBOX_LIVE: (inboxId: string) => `/inbox/${inboxId}/live`,
+
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,
 	OAUTH2_AUTHORIZE_START: `/oauth2/authorize/start`,

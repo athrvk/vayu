@@ -16,7 +16,7 @@
 // `Braces` is the app-wide mark for variables - see the note in
 // `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
 // records rather than `{{name}}` substitutions.
-import { Download, Plus, Braces, History } from "lucide-react";
+import { Download, Plus, Braces, History, Inbox } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
@@ -30,6 +30,7 @@ interface LauncherProps {
 	onNewRequest: () => void;
 	onHistory: () => void;
 	onVariables: () => void;
+	onInbox: () => void;
 }
 
 function plural(n: number, word: string) {
@@ -43,16 +44,24 @@ export function Launcher({
 	onNewRequest,
 	onHistory,
 	onVariables,
+	onInbox,
 }: LauncherProps) {
 	return (
 		<div className="flex flex-col gap-8">
 			<section>
 				<Eyebrow className="mb-2">Start</Eyebrow>
-				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+				{/* Five columns since the webhook inbox joined the row: the tiles
+				    are equal-weight starting points, and a 4-column grid holding
+				    five would strand one on a line of its own. */}
+				<div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
 					<ActionTile icon={History} label="History" onClick={onHistory} />
 					<ActionTile icon={Braces} label="Variables" onClick={onVariables} />
+					{/* The receiving half of the app. It has no drawer view to
+					    switch to - an inbox is engine state, not a stored record
+					    - so this tile is how it is reached. */}
+					<ActionTile icon={Inbox} label="Inbox" onClick={onInbox} />
 				</div>
 			</section>
 

@@ -34,6 +34,10 @@ class OAuth2AuthorizeManager;
 // Owns the local OAuth 2.0 mock issuers; defined in mock_issuer.hpp. Forward-
 // declared for the same reason as the manager above.
 class MockIssuerManager;
+// Owns the webhook inbox listeners; defined in inbox.hpp. Forward-declared for
+// the same reason as the two managers above - a route TU that never touches an
+// inbox does not pull in the listener machinery.
+class InboxManager;
 } // namespace vayu::http
 
 namespace vayu::http::routes {
@@ -493,6 +497,8 @@ struct RouteContext {
     /// The local OAuth 2.0 mock issuers (issue #479). Owned by Server; see
     /// server.hpp for why it is declared before server_.
     vayu::http::MockIssuerManager& mock_issuer_manager;
+    /// The webhook inboxes (issue #480). Owned by Server; read by `/inbox`.
+    vayu::http::InboxManager& inbox_manager;
 };
 
 // Route registration functions (implemented in separate files)
@@ -512,6 +518,7 @@ void register_import_routes (RouteContext& ctx);
 void register_oauth_routes (RouteContext& ctx);
 void register_cookie_routes (RouteContext& ctx);
 void register_mock_issuer_routes (RouteContext& ctx);
+void register_inbox_routes (RouteContext& ctx);
 
 /**
  * @brief Generate the TypeScript declarations for the `pm.*` script surface.
