@@ -33,6 +33,8 @@ import { NumberSettingRow } from "./SettingControls";
 
 interface CeilingField {
 	key: LoadTestCeilingKey;
+	/** The row's `data-setting-anchor` - see `app-settings.ts`. */
+	anchor: string;
 	label: string;
 	unit?: string;
 	description: string;
@@ -46,12 +48,14 @@ interface CeilingField {
 const FIELDS: readonly CeilingField[] = [
 	{
 		key: "concurrency",
+		anchor: "load-max-connections",
 		label: "Max connections",
 		description:
 			"Upper bound on the Connections field, and on where a ramp may start or finish. The engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
 	},
 	{
 		key: "rps",
+		anchor: "load-max-rate",
 		label: "Max target rate",
 		unit: "req/s",
 		description:
@@ -59,6 +63,7 @@ const FIELDS: readonly CeilingField[] = [
 	},
 	{
 		key: "durationSeconds",
+		anchor: "load-max-duration",
 		label: "Max duration",
 		unit: "sec",
 		description:
@@ -66,6 +71,7 @@ const FIELDS: readonly CeilingField[] = [
 	},
 	{
 		key: "iterations",
+		anchor: "load-max-requests",
 		label: "Max requests",
 		description: "Upper bound on the Requests field for Fixed Iterations runs.",
 	},
@@ -114,6 +120,7 @@ export default function LoadTestingPanel() {
 					return (
 						<NumberSettingRow
 							key={field.key}
+							anchor={field.anchor}
 							label={field.label}
 							description={field.description}
 							value={String(ceilings[field.key])}

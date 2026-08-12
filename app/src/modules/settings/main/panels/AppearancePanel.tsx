@@ -89,7 +89,7 @@ export default function AppearancePanel() {
 	return (
 		<>
 			{/* Theme Mode Selection */}
-			<Card>
+			<Card data-setting-anchor="theme-mode">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SunMoon className="w-5 h-5 text-muted-foreground" />
@@ -138,7 +138,7 @@ export default function AppearancePanel() {
 			</Card>
 
 			{/* Color Scheme Selection */}
-			<Card>
+			<Card data-setting-anchor="color-scheme">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SwatchBook className="w-5 h-5 text-muted-foreground" />
@@ -206,7 +206,7 @@ export default function AppearancePanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div>
+					<div data-setting-anchor="ui-font">
 						<Eyebrow className="mb-2">Font</Eyebrow>
 						<FontPicker
 							options={UI_FONTS}
@@ -220,7 +220,7 @@ export default function AppearancePanel() {
 						/>
 					</div>
 
-					<div>
+					<div data-setting-anchor="ui-scale">
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Maximize2 className="w-3.5 h-3.5" />
 							Scale
@@ -257,7 +257,7 @@ export default function AppearancePanel() {
 						</p>
 					</div>
 
-					<div>
+					<div data-setting-anchor="roundedness">
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Squircle className="w-3.5 h-3.5" />
 							Roundedness
@@ -282,7 +282,10 @@ export default function AppearancePanel() {
 						/>
 					</div>
 
-					<div className="border-t border-border pt-4">
+					<div
+						className="border-t border-border pt-4"
+						data-setting-anchor="reduced-motion"
+					>
 						<ToggleRow
 							label="Reduced motion"
 							description="Minimize animations and transitions across the app"

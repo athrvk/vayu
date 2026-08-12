@@ -540,7 +540,7 @@ export default function McpSettingsPanel() {
 			)}
 
 			{/* Connection status + onboarding */}
-			<Card>
+			<Card data-setting-anchor="mcp-connection">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Plug className="w-5 h-5 text-muted-foreground" />
@@ -662,7 +662,7 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Tools */}
-			<Card>
+			<Card data-setting-anchor="mcp-tools">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Wrench className="w-5 h-5 text-muted-foreground" />
@@ -740,7 +740,7 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Allowlist */}
-			<Card>
+			<Card data-setting-anchor="mcp-allowlist">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Globe className="w-5 h-5 text-muted-foreground" />
@@ -840,7 +840,7 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Load caps */}
-			<Card>
+			<Card data-setting-anchor="mcp-caps">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Gauge className="w-5 h-5 text-muted-foreground" />
@@ -879,7 +879,7 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Write access */}
-			<Card>
+			<Card data-setting-anchor="mcp-writes">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="w-5 h-5 text-muted-foreground" />

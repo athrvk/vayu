@@ -81,12 +81,18 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+// Selector-aware: `useRevealedSetting` subscribes with one, the view reads the
+// whole state. A mock that ignored the selector would hand the hook the state
+// object where it expects a key.
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({
-		selectedCategory: "database_performance",
-		highlightedKey,
-		clearHighlight,
-	}),
+	useSettingsStore: (selector?: (s: unknown) => unknown) => {
+		const state = {
+			selectedCategory: "database_performance",
+			highlightedKey,
+			clearHighlight,
+		};
+		return selector ? selector(state) : state;
+	},
 }));
 
 const showToast = vi.fn();

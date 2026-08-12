@@ -127,11 +127,61 @@ describe("settings search", () => {
 	it("selects an app panel with nothing to highlight - the panel is the result", () => {
 		renderTree();
 		fireEvent.change(search(), { target: { value: "appearance" } });
-		fireEvent.click(screen.getByText("Appearance"));
+		// First result: the panel itself outranks the settings it holds, which
+		// match on their category label. Its own label is the one being clicked -
+		// the same word appears below as those settings' subtitles.
+		fireEvent.click(screen.getAllByText("Appearance")[0]);
 
 		const state = useSettingsStore.getState();
 		expect(state.selectedCategory).toBe("appearance");
 		expect(state.highlightedKey).toBeNull();
+	});
+
+	/*
+	 * The bug this file did not catch the first time: the index held the seven
+	 * *panel* titles and the engine entries, so the words printed on the
+	 * Appearance panel - Theme Mode, Color Scheme, the font pickers - matched
+	 * nothing at all. These run against the real catalogue, not a fixture,
+	 * because a fixture would have passed then too.
+	 */
+	describe("the settings inside the panels", () => {
+		it.each([
+			["theme", "Theme Mode", "appearance", "theme-mode"],
+			["color", "Color Scheme", "appearance", "color-scheme"],
+			["font", "Interface font", "appearance", "ui-font"],
+			["dark mode", "Theme Mode", "appearance", "theme-mode"],
+			["auto-save", "Auto-save", "general", "auto-save"],
+			["notification", "Notification position", "notifications", "toast-position"],
+		])("finds %s", (query, label) => {
+			renderTree();
+			fireEvent.change(search(), { target: { value: query } });
+
+			expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+		});
+
+		it("selects the panel and names the block to reveal", () => {
+			renderTree();
+			fireEvent.change(search(), { target: { value: "theme" } });
+			fireEvent.click(screen.getAllByText("Theme Mode")[0]);
+
+			const state = useSettingsStore.getState();
+			expect(state.selectedCategory).toBe("appearance");
+			// The anchor the Appearance panel renders on the Theme Mode card. A
+			// result that only selected the panel would drop the user at the top
+			// of a screen and leave them to scan it.
+			expect(state.highlightedKey).toBe("theme-mode");
+		});
+
+		it("ranks the setting above the panel that contains it", () => {
+			// "Appearance" the panel also matches "appearance"; the setting a user
+			// typed the name of is the more specific answer.
+			renderTree();
+			fireEvent.change(search(), { target: { value: "roundedness" } });
+
+			const results = screen.getAllByRole("button");
+			const first = results.find((b) => b.textContent?.includes("Roundedness"));
+			expect(first).toBeDefined();
+		});
 	});
 
 	it("says so when nothing matches, and the clear button restores the sections", () => {

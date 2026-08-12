@@ -15,6 +15,7 @@
  */
 
 import type { ReactNode } from "react";
+import { useRevealedSetting } from "../../useRevealedSetting";
 
 interface ClientSettingsPanelProps {
 	title: string;
@@ -35,6 +36,9 @@ export default function ClientSettingsPanel({
 	saveNote,
 	children,
 }: ClientSettingsPanelProps) {
+	// A search result can name a setting inside the panel, not just the panel.
+	useRevealedSetting();
+
 	return (
 		<div className="flex-1 flex flex-col overflow-hidden">
 			{/* Header */}
