@@ -1385,6 +1385,20 @@ export interface ConfigEntry {
 	 * that shows these - there is none, by design.
 	 */
 	keywords: string[];
+	/**
+	 * What a numeric entry's value measures - `"ms"`, `"sec"`, `"days"` or
+	 * `"bytes"` today. Absent means the number is a count (workers, retained
+	 * runs), which has no unit; the engine omits the key rather than sending
+	 * null, the same as `min` / `max` / `options`.
+	 *
+	 * Rendered as the suffix inside the input, which is where a unit is stated
+	 * once - so a description must not spell it out as well (the engine guards
+	 * its seeds for that). `"bytes"` additionally selects the human-readable
+	 * byte formatting for the value, the range hint and the default line; any
+	 * other unit is shown verbatim, so a unit this app has never heard of still
+	 * reaches the screen instead of vanishing.
+	 */
+	unit?: string;
 	updatedAt: number;
 	/**
 	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the

@@ -53,7 +53,7 @@ import { DefaultValueLine, NumberSettingRow } from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { getEngineCategory } from "../engine-categories";
 import { useRevealedSetting } from "../useRevealedSetting";
-import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
+import { isByteUnit, formatBytes, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 
 /** Stated beside the Save bar, so the engine view's save model is on screen too. */
@@ -496,7 +496,7 @@ export default function SettingsMain() {
 
 	// Get formatted size for display (suffix/helper text)
 	const getFormattedSize = (entry: ConfigEntry): string | null => {
-		if (!isSizeConfig(entry.key)) return null;
+		if (!isByteUnit(entry.unit)) return null;
 		const value = getCurrentValue(entry);
 		const bytes = parseInt(value, 10);
 		if (isNaN(bytes)) return null;
@@ -588,7 +588,7 @@ export default function SettingsMain() {
 		const needsRestart = isRestartRequired(entry);
 		const isPendingRestart = restartRequiredKeys.includes(entry.key);
 		const isNumeric = entry.type === "integer" || entry.type === "number";
-		const defaultDisplay = isSizeConfig(entry.key)
+		const defaultDisplay = isByteUnit(entry.unit)
 			? formatBytes(parseInt(entry.default, 10) || 0)
 			: undefined;
 
@@ -704,13 +704,21 @@ export default function SettingsMain() {
 							integer={entry.type === "integer"}
 							min={entry.min}
 							max={entry.max}
+							/*
+							 * The entry says what it measures, so every numeric
+							 * setting can reach the suffix - not only the three
+							 * keys a hardcoded list here used to name. A byte
+							 * count reads as the formatted value itself ("100.0
+							 * MB" beside the raw number in the field); every
+							 * other unit is its own symbol.
+							 */
 							unit={
-								isSizeConfig(entry.key)
+								isByteUnit(entry.unit)
 									? (getFormattedSize(entry) ?? undefined)
-									: undefined
+									: entry.unit
 							}
 							rangeHint={
-								isSizeConfig(entry.key)
+								isByteUnit(entry.unit)
 									? formatSizeRange(entry.min, entry.max) || undefined
 									: undefined
 							}

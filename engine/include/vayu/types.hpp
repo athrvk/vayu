@@ -1062,6 +1062,21 @@ struct ConfigEntry {
     // so the wire shape is always an array and no client has to tell an absent
     // field from an empty one. Never rendered: these are match terms only.
     std::string keywords = "[]";
+    // What a numeric entry's value measures: "ms", "sec", "days" or "bytes".
+    // Serialized as `unit` and omitted when absent, the same way `min_value` /
+    // `max_value` / `options` are - a setting that measures nothing (a count of
+    // workers, of retained runs) declares none, and "items" would be noise.
+    //
+    // The app renders it as the suffix inside the input, which is where a unit
+    // is stated once; `bytes` additionally selects the human-readable byte
+    // formatting for the value, the range hint and the default line. It used to
+    // guess that last part from a hardcoded list of three keys, so an entry
+    // added here was invisible to it until someone edited a TypeScript array.
+    //
+    // Declared after `updated_at` on purpose: the seeds aggregate-initialize
+    // positionally up to that member, so every field added since is a trailing
+    // defaulted one set through a wrapper in `seed_default_config`.
+    std::optional<std::string> unit;
 };
 
 /**

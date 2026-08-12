@@ -440,6 +440,110 @@ TEST_F (ConfigRouteTest, SeededKeywordsNeverRepeatWordsTheEntryAlreadyCarries) {
     EXPECT_GT (with_keywords, 0u);
 }
 
+// ---------------------------------------------------------------------------
+// unit: what a numeric entry measures, so the app can put it on the input.
+// ---------------------------------------------------------------------------
+
+// Omitted, not null, when the entry measures nothing - the same shape as
+// `min`/`max`/`options`, so this payload has one rule for optional scalars
+// rather than one per field. Pinned here because "absent" is the only thing a
+// client can read as "this number is a count".
+TEST_F (ConfigRouteTest, UnitSerializesForAMeasuredEntryAndIsAbsentForACount) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json milliseconds = find_entry (body, "defaultTimeout");
+    ASSERT_TRUE (milliseconds.contains ("unit"));
+    EXPECT_EQ (milliseconds["unit"].get<std::string> (), "ms");
+
+    json bytes = find_entry (body, "dbCacheSize");
+    ASSERT_TRUE (bytes.contains ("unit"));
+    EXPECT_EQ (bytes["unit"].get<std::string> (), "bytes");
+
+    // Worker threads are a count. Not "" and not null - the key is gone.
+    json count = find_entry (body, "workers");
+    EXPECT_FALSE (count.contains ("unit"))
+    << "a count declared a unit; 'items' is noise, and an absent key is how a "
+       "client tells the two apart";
+}
+
+// The catalogue guard. A key that names its unit and does not declare one is
+// the defect this field exists to end: the app cannot infer it, so the unit
+// would be nowhere on screen. Only the keys whose *name* settles the question
+// are checked - dbCacheSize and scriptTimeout measure something too, and are
+// covered by review rather than by a rule that would have to guess.
+TEST_F (ConfigRouteTest, SeededUnitsCoverEveryKeyWhoseNameNamesOne) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    size_t checked = 0;
+    for (const auto& entry : entries) {
+        const char* expected = nullptr;
+        if (entry.key.ends_with ("Ms")) {
+            expected = "ms";
+        } else if (entry.key.ends_with ("Bytes")) {
+            expected = "bytes";
+        } else if (entry.key.ends_with ("Days")) {
+            expected = "days";
+        }
+        if (expected == nullptr) {
+            continue;
+        }
+        ++checked;
+        ASSERT_TRUE (entry.unit.has_value ())
+        << "entry '" << entry.key << "' names its unit in its key and declares "
+        << "none, so the input renders a bare number";
+        EXPECT_EQ (*entry.unit, expected) << "entry '" << entry.key << "'";
+    }
+    EXPECT_GT (checked, 10u) << "the key-suffix scan matched nothing";
+
+    // The converse: a unit on a value that is not a number would render a
+    // suffix on a switch or a select, which have no input to carry it.
+    for (const auto& entry : entries) {
+        if (entry.type != "integer" && entry.type != "number") {
+            EXPECT_FALSE (entry.unit.has_value ())
+            << "non-numeric entry '" << entry.key << "' declares a unit";
+        }
+    }
+}
+
+// Convention 3 of the settings voice: units live once, as the input's suffix.
+// An entry that declares one and still spells it out in prose states it twice
+// - and that prose is what this field replaced, so it is checked rather than
+// left to the next writer to remember. Only the clause form is rejected: "60 to
+// 300 seconds suits a stable endpoint" is a number with its unit spelled, which
+// convention 4 asks for.
+TEST_F (ConfigRouteTest, SeededDescriptionsDoNotRestateTheUnitTheInputCarries) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    auto lowered = [] (std::string text) {
+        for (auto& c : text) {
+            c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+        }
+        return text;
+    };
+
+    size_t with_unit = 0;
+    for (const auto& entry : entries) {
+        if (!entry.unit.has_value ()) {
+            continue;
+        }
+        ++with_unit;
+        const std::string description = lowered (entry.description);
+        for (const char* clause : { "in milliseconds", "in seconds", "in bytes",
+                 "in days", "in minutes", "in hours" }) {
+            EXPECT_EQ (description.find (clause), std::string::npos)
+            << "entry '" << entry.key << "' says '" << clause
+            << "', which its input's suffix already says";
+        }
+    }
+    EXPECT_GT (with_unit, 0u) << "no entry declares a unit - nothing was checked";
+}
+
 // A write must not flatten metadata it does not carry. POST /config sends only
 // values, so the update path copies the stored row - if it ever rebuilt the
 // entry instead, both flags would silently reset to false and every restart
@@ -454,10 +558,13 @@ TEST_F (ConfigRouteTest, UpdatingAValueKeepsItsMetadataFlags) {
     EXPECT_EQ (stored->value, "20000");
     EXPECT_TRUE (stored->requires_restart);
     EXPECT_TRUE (stored->advanced);
+    ASSERT_TRUE (stored->unit.has_value ());
+    EXPECT_EQ (*stored->unit, "ms");
 
     json entry = find_entry (body, "dbBusyTimeout");
     EXPECT_TRUE (entry["requiresRestart"].get<bool> ());
     EXPECT_TRUE (entry["advanced"].get<bool> ());
+    EXPECT_EQ (entry["unit"].get<std::string> (), "ms");
 }
 
 } // namespace
