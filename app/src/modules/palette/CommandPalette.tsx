@@ -13,12 +13,17 @@
  * and a settings section meant ⌘, plus its sidebar - so Vayu was navigated with
  * a mouse or not at all.
  *
- * Two things it deliberately is not:
+ * Three things it deliberately is not:
  *
  * - **Not its own search implementation.** Results come from source hooks
  *   (`sources/`), each returning the same `PaletteItem` shape and performing
  *   its action through the very call the sidebar makes. Adding settings,
  *   environments or runs later is a source, not a change here.
+ * - **Not its own list of actions.** The Commands and Settings groups are
+ *   `lib/commands`, the registry the native menu points at too. What this file
+ *   does own is the *host* for the dialogs those commands open - see
+ *   `useCommandSurfaces` for why the picker and the run dialog are mounted here
+ *   rather than left to surfaces that are not always on screen.
  * - **Not a second copy of the tab strip's naming.** Tab rows are labelled by
  *   `tab-descriptors`, the hook the strip itself uses.
  *
@@ -33,13 +38,19 @@ import { CommandDialog, CommandInput } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
+import { useCommandContext } from "@/hooks/useCommandContext";
+import RunCollectionDialog from "@/modules/collections/RunCollectionDialog";
+import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { PaletteResults } from "./PaletteResults";
+import { useCommandSurfaces } from "./useCommandSurfaces";
 import type { PaletteItem } from "./types";
 
 export function CommandPalette() {
 	const paletteOpen = useLayoutStore((s) => s.paletteOpen);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	const [query, setQuery] = useState("");
+	const { surfaces, pickerProps, runTarget, dismissRunDialog } = useCommandSurfaces();
+	const commandContext = useCommandContext(surfaces);
 	/** Where focus was when the palette opened, to give it back on close. */
 	const focusBefore = useRef<HTMLElement | null>(null);
 
@@ -118,24 +129,38 @@ export function CommandPalette() {
 	};
 
 	return (
-		<CommandDialog
-			open={paletteOpen}
-			onOpenChange={setPaletteOpen}
-			title="Command palette"
-			description="Search open tabs, requests, collections and views."
-			className="max-w-xl"
-		>
-			<CommandInput
-				value={query}
-				onValueChange={setQuery}
-				placeholder={`Search tabs, requests, collections… (${formatChord(PALETTE_CHORD)})`}
-			/>
-			{/*
-			 * Mounted only while open, so a shut palette holds no query observers
-			 * on collections, requests and run history - the same rule the
-			 * context bar applies to a collapsed section.
-			 */}
-			{paletteOpen && <PaletteResults query={query} onPick={pick} />}
-		</CommandDialog>
+		<>
+			<CommandDialog
+				open={paletteOpen}
+				onOpenChange={setPaletteOpen}
+				title="Command palette"
+				description="Search open tabs, requests, collections, views and commands."
+				className="max-w-xl"
+			>
+				<CommandInput
+					value={query}
+					onValueChange={setQuery}
+					placeholder={`Search tabs, requests, commands… (${formatChord(PALETTE_CHORD)})`}
+				/>
+				{/*
+				 * Mounted only while open, so a shut palette holds no query observers
+				 * on collections, requests and run history - the same rule the
+				 * context bar applies to a collapsed section.
+				 */}
+				{paletteOpen && (
+					<PaletteResults query={query} onPick={pick} commandContext={commandContext} />
+				)}
+			</CommandDialog>
+			{/* Outside the palette on purpose: a command closes the palette as it
+			    runs, so a dialog rendered inside it would be unmounted by the very
+			    pick that opened it. */}
+			<CollectionPicker {...pickerProps} />
+			{runTarget && (
+				<RunCollectionDialog
+					collection={runTarget}
+					onOpenChange={(open) => !open && dismissRunDialog()}
+				/>
+			)}
+		</>
 	);
 }

@@ -481,7 +481,7 @@ Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+
 
 It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
 
-- `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
+- `WelcomeScreen.tsx` - container: queries, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user. The new-request flow itself is `hooks/useNewRequest.ts`, shared with the palette's `new-request` command - two entry points must not disagree about where a request lands. This screen renders that hook's `pickerProps` and nothing more.
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
 - `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
@@ -496,14 +496,21 @@ Design rationale: `app/src/modules/welcome/README.md`
 
 ## Command Palette (`modules/palette/`)
 
-The ⌘K/Ctrl+K overlay: reach any open tab, saved request, collection or app view by name.
-Mounted once by `Shell`, alongside `ImportModal`.
+The ⌘K/Ctrl+K overlay: reach any open tab, saved request, collection or app view by name, and
+run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
 
-- **`CommandPalette.tsx`** - the dialog, the chord, focus restoration, and the open flag
-  (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted).
+- **`CommandPalette.tsx`** - the dialog, the chord, focus restoration, the open flag
+  (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted), and the host
+  for the dialogs its commands open (see `useCommandSurfaces.ts` below).
 - **`sources/`** - one hook per family, each returning `PaletteItem[]`: `useTabItems` (open
   tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
-  tabs). Adding settings, environments or runs later is a new source and nothing else.
+  tabs). `commandItems.ts` is the fourth and is a plain function, not a hook: it owns no data,
+  it maps the [command registry](#command-registry-libcommands) onto the same shape. Adding
+  environments or runs later is a new source and nothing else.
+- **`useCommandSurfaces.ts`** - the collection picker, the run dialog and the theme hook, which
+  three commands need and no store can hold. Their original hosts are not always on screen (the
+  welcome screen's picker only on the welcome tab, the tree's run dialog only while the drawer
+  is open), so the palette mounts its own - the same components, driven by the same calls.
 - **`types.ts`** - the `PaletteItem` shape, the fixed group order, and `rankForEmptyQuery`.
 - **`PaletteResults.tsx`** - grouping and rendering. **Mounted only while the palette is open**,
   the same cost rule the context bar applies to a collapsed section: a shut palette holds no
@@ -527,10 +534,44 @@ Three things about it are load-bearing:
 Ranking: cmdk's own match score once anything is typed; on the empty query, `rankForEmptyQuery`
 puts the most recent first - focus time for tabs (`tabFocusedAt` in `tabs-store`, session-scoped),
 last-run time for requests (from the run history already in cache). Groups render in a fixed
-order (Tabs, Requests, Collections, Views) so the list does not reshuffle as you type.
+order (Tabs, Requests, Collections, Views, Commands, Settings) so the list does not reshuffle as
+you type. Settings is its own group rather than more Commands: twelve sections would bury the
+handful of things the palette can actually *do*.
 
 **Entry points:** the chord, and the `Search` tile on the welcome Launcher. The title bar's
 search bar (#529) is the third and becomes the primary one - it flips the same store flag.
+
+## Command Registry (`lib/commands/`)
+
+Every user-facing *action* the app offers by name, declared once. **A new action is declared
+here, and its surfaces point at it** - a menu item, a tile or a palette row is a way of reaching
+a command, never a second definition of one. Before this, "open settings" existed separately in
+the native-menu bridge, the Dock, the settings sidebar and a keydown case, and nothing kept them
+in step or could enumerate them.
+
+- **`types.ts`** - `Command` (`id`, `title`, `keywords`, `group`, `icon`, `available?`,
+  `perform`) and `CommandContext`. A `title` may be a function of the context, which is how a
+  contextual command names its target: `Run "payments"`, not `Run collection`.
+- **`registry.ts`** - the roster. Actions (new request, import, run collection, close tab,
+  toggle theme, open settings) plus one command per settings section, **generated** from
+  `app-panels.ts` and `engine-categories.ts` so a section added there appears here without an
+  edit and cannot be named differently.
+- **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
+  render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
+
+Two rules make it work without a dependency-injection tangle:
+
+- **Stores are not in the context.** They are module singletons, so a `perform` calls
+  `useTabsStore.getState().openTab(...)` directly. The context carries only what `getState()`
+  cannot answer: the active tab and its label, the collection that tab shows, and the surfaces.
+- **A command that needs a surface the caller cannot offer declares itself unavailable** rather
+  than throwing when picked. `CommandSurfaces` is optional on the context; the menu bridge omits
+  it, so "New request" is simply not among the commands it can run.
+
+Consumers: `modules/palette/sources/commandItems.ts` (the Commands and Settings groups) and
+`hooks/useMenuActions.ts` (Preferences… → `open-settings`). `lib/commands/registry.test.ts` walks
+the roster and asserts every entry says something and that the settings roster still covers both
+catalogues.
 
 ## Toaster (`components/shared/Toaster.tsx`)
 

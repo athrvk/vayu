@@ -6,26 +6,29 @@
  */
 
 import { useEffect } from "react";
-import { useTabsStore, useAppearanceStore } from "@/stores";
+import { useAppearanceStore } from "@/stores";
+import { baseCommandContext, commandById } from "@/lib/commands";
 
 /**
  * Bridges native menu items (Preferences… / Settings, View → zoom) to in-app
  * state. No-op outside Electron.
+ *
+ * Preferences… points at the `open-settings` command rather than repeating its
+ * two lines, so the menu and the palette cannot drift into opening settings
+ * differently - the whole reason `lib/commands` exists.
  *
  * Zoom lives here rather than in `useAppearance` because this hook is mounted
  * exactly once, in `App`: `useAppearance` runs in the Appearance panel too, and
  * a second subscription would move the scale two steps per keypress.
  */
 export function useMenuActions(): void {
-	const openTab = useTabsStore((s) => s.openTab);
-
 	useEffect(() => {
 		// Optional-chain the call too: an older preload build may not expose
 		// onOpenSettings yet, and `?.` on electronAPI alone wouldn't guard that.
 		return window.electronAPI?.onOpenSettings?.(() =>
-			openTab({ type: "settings", entityId: null })
+			commandById("open-settings").perform(baseCommandContext())
 		);
-	}, [openTab]);
+	}, []);
 
 	useEffect(() => {
 		// The menu no longer zooms Chromium itself - it nudges the persisted

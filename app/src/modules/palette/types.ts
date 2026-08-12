@@ -20,7 +20,14 @@ import type { LucideIcon } from "lucide-react";
  * Which group a result renders under. The order here is the order on screen:
  * groups are fixed so the list does not reshuffle as you type.
  */
-export const PALETTE_GROUPS = ["tab", "request", "collection", "view"] as const;
+export const PALETTE_GROUPS = [
+	"tab",
+	"request",
+	"collection",
+	"view",
+	"command",
+	"settings",
+] as const;
 
 export type PaletteKind = (typeof PALETTE_GROUPS)[number];
 
@@ -30,6 +37,10 @@ export const PALETTE_GROUP_LABELS: Record<PaletteKind, string> = {
 	request: "Requests",
 	collection: "Collections",
 	view: "Views",
+	command: "Commands",
+	// Its own group rather than more Commands: twelve sections would bury the
+	// five things the palette can actually *do*.
+	settings: "Settings",
 };
 
 export interface PaletteItem {
