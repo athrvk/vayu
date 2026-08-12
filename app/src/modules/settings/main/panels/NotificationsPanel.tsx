@@ -89,7 +89,7 @@ export default function NotificationsPanel() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-5">
-				<div>
+				<div data-setting-anchor="toast-position">
 					<Eyebrow className="mb-2">Position</Eyebrow>
 					<OptionButtons
 						options={TOAST_POSITIONS.map((p) => ({ value: p.value, label: p.label }))}
@@ -120,7 +120,7 @@ export default function NotificationsPanel() {
 					</div>
 				</div>
 
-				<div>
+				<div data-setting-anchor="toast-duration">
 					<Eyebrow className="mb-2">Duration</Eyebrow>
 					<OptionButtons
 						options={TOAST_DURATION_SCALES.map((d) => ({
@@ -141,7 +141,7 @@ export default function NotificationsPanel() {
 					</p>
 				</div>
 
-				<div>
+				<div data-setting-anchor="toast-stack">
 					<Eyebrow className="mb-2">Stack size</Eyebrow>
 					<OptionButtons
 						options={TOAST_STACK_OPTIONS.map((o) => ({
@@ -159,7 +159,7 @@ export default function NotificationsPanel() {
 					</p>
 				</div>
 
-				<div>
+				<div data-setting-anchor="toast-severity">
 					<Eyebrow className="mb-2">Show</Eyebrow>
 					<OptionButtons
 						options={TOAST_SEVERITY_FLOORS.map((f) => ({

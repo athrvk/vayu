@@ -89,7 +89,7 @@ export function CookiesCard() {
 	};
 
 	return (
-		<Card>
+		<Card data-setting-anchor="cookies">
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<Cookie className="w-5 h-5 text-muted-foreground" />

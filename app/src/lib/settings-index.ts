@@ -8,21 +8,34 @@
 /**
  * Settings search index
  *
- * One searchable corpus over both halves of Settings: the client panels
- * (declared in the app-panels registry) and the engine entries the `/config`
- * API sends. Pure data in, pure data out - no React, no stores - so the
- * sidebar's search and the command palette's settings source (#527) share one
- * index rather than each growing its own matcher.
+ * One searchable corpus over all of Settings: the client panels (the app-panels
+ * registry), the individual settings inside them (the app-settings catalogue)
+ * and the engine entries the `/config` API sends. Pure data in, pure data out -
+ * no React, no stores - so the sidebar's search and the command palette's
+ * settings source (#527) share one index rather than each growing its own
+ * matcher.
  *
- * Entries are matched on label, description and id. The id matters: an engine
- * setting is called `dbCacheSize` in every doc, log line and MCP tool call, so
- * typing that must find it even though the visible label reads "Cache Size".
+ * **A panel is not its settings.** The first version of this index held panel
+ * titles and engine entries only, so "theme", "color" and "font" - words
+ * printed on the Appearance panel three times over - matched nothing, because
+ * the panel is called "Appearance" and describes itself as "the look and feel
+ * of the application". Indexing what a screen is *called* is not indexing what
+ * it *contains*.
+ *
+ * Entries are matched on label, id, description and keywords. The id matters:
+ * an engine setting is called `dbCacheSize` in every doc, log line and MCP tool
+ * call, so typing that must find it even though the visible label reads
+ * "Cache Size".
  */
 
 import type { SettingsCategory } from "@/types";
 
-/** Where a result lives: a whole client panel, or one engine entry inside one. */
-export type SettingsIndexKind = "panel" | "engine";
+/**
+ * What a result is: a whole client panel, one setting inside one, or one engine
+ * entry. The kind decides what a consumer does with it - a `panel` has no
+ * `anchor` to reveal, the other two do.
+ */
+export type SettingsIndexKind = "panel" | "app-setting" | "engine";
 
 export interface SettingsIndexEntry {
 	/** The panel id, or the engine entry key. Unique across the index. */
@@ -34,6 +47,14 @@ export interface SettingsIndexEntry {
 	category: SettingsCategory;
 	/** Human name of that category, for the result's subtitle. */
 	categoryLabel: string;
+	/**
+	 * What the settings view scrolls to and outlines: the engine entry's key, or
+	 * the app setting's `data-setting-anchor`. Absent on a `panel` result, which
+	 * is the whole screen.
+	 */
+	anchor?: string;
+	/** Extra match terms that appear in neither the label nor the description. */
+	keywords: readonly string[];
 }
 
 /** The app-panel fields the index needs (a structural subset of `AppSettingsPanel`). */
@@ -41,6 +62,15 @@ export interface SettingsPanelSource {
 	id: SettingsCategory;
 	label: string;
 	description: string;
+}
+
+/** The app-setting fields the index needs (a subset of `AppSettingDescriptor`). */
+export interface SettingsAppSettingSource {
+	anchor: string;
+	panel: SettingsCategory;
+	label: string;
+	description: string;
+	keywords?: readonly string[];
 }
 
 /** The engine-entry fields the index needs (a structural subset of `ConfigEntry`). */
@@ -59,6 +89,8 @@ export interface SettingsEngineCategorySource {
 
 interface BuildSettingsIndexInput {
 	panels: readonly SettingsPanelSource[];
+	/** The settings inside those panels. Omitted only by tests that do not need them. */
+	appSettings?: readonly SettingsAppSettingSource[];
 	engineEntries: readonly SettingsEngineEntrySource[];
 	engineCategories: readonly SettingsEngineCategorySource[];
 }
@@ -72,10 +104,12 @@ interface BuildSettingsIndexInput {
  */
 export function buildSettingsIndex({
 	panels,
+	appSettings = [],
 	engineEntries,
 	engineCategories,
 }: BuildSettingsIndexInput): SettingsIndexEntry[] {
 	const categoryLabels = new Map(engineCategories.map((c) => [c.id as string, c.label]));
+	const panelLabels = new Map(panels.map((p) => [p.id as string, p.label]));
 
 	const index: SettingsIndexEntry[] = panels.map((panel) => ({
 		id: panel.id,
@@ -84,7 +118,25 @@ export function buildSettingsIndex({
 		description: panel.description,
 		category: panel.id,
 		categoryLabel: panel.label,
+		keywords: [],
 	}));
+
+	for (const setting of appSettings) {
+		const panelLabel = panelLabels.get(setting.panel);
+		// Same rule as an engine entry in an unknown category: with no row in the
+		// sidebar to navigate to, a result for it would lead nowhere.
+		if (panelLabel === undefined) continue;
+		index.push({
+			id: setting.anchor,
+			kind: "app-setting",
+			label: setting.label,
+			description: setting.description,
+			category: setting.panel,
+			categoryLabel: panelLabel,
+			anchor: setting.anchor,
+			keywords: setting.keywords ?? [],
+		});
+	}
 
 	for (const entry of engineEntries) {
 		const categoryLabel = categoryLabels.get(entry.category);
@@ -96,6 +148,8 @@ export function buildSettingsIndex({
 			description: entry.description,
 			category: entry.category as SettingsCategory,
 			categoryLabel,
+			anchor: entry.key,
+			keywords: [],
 		});
 	}
 
@@ -114,8 +168,9 @@ function matchRank(entry: SettingsIndexEntry, query: string): number | null {
 	if (id.startsWith(query)) return 1;
 	if (label.includes(query)) return 2;
 	if (id.includes(query)) return 3;
-	if (entry.description.toLowerCase().includes(query)) return 4;
-	if (entry.categoryLabel.toLowerCase().includes(query)) return 5;
+	if (entry.keywords.some((keyword) => keyword.toLowerCase().includes(query))) return 4;
+	if (entry.description.toLowerCase().includes(query)) return 5;
+	if (entry.categoryLabel.toLowerCase().includes(query)) return 6;
 	return null;
 }
 

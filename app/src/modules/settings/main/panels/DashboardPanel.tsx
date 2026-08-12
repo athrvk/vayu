@@ -61,7 +61,7 @@ export default function DashboardPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div>
+					<div data-setting-anchor="chart-window">
 						<Eyebrow className="mb-2">Chart window</Eyebrow>
 						<OptionButtons
 							options={LIVE_WINDOW_OPTIONS.map((o) => ({
@@ -77,7 +77,7 @@ export default function DashboardPanel() {
 						</p>
 					</div>
 
-					<div>
+					<div data-setting-anchor="chart-granularity">
 						<Eyebrow className="mb-2">Chart granularity</Eyebrow>
 						<OptionButtons
 							options={CHART_GRANULARITY_OPTIONS}
@@ -91,7 +91,7 @@ export default function DashboardPanel() {
 						</p>
 					</div>
 
-					<div>
+					<div data-setting-anchor="live-refresh">
 						<Eyebrow className="mb-2">Live refresh rate</Eyebrow>
 						<OptionButtons
 							options={LIVE_REFRESH_OPTIONS}
@@ -119,6 +119,7 @@ export default function DashboardPanel() {
 				</CardHeader>
 				<CardContent>
 					<NumberSettingRow
+						anchor="slo-threshold"
 						label="SLO threshold"
 						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts, and prefills the p99 budget and the Capacity Discovery target when you open the load-test dialog."
 						value={String(sloThresholdMs)}

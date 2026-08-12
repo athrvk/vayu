@@ -124,7 +124,7 @@ export default function GeneralPanel() {
 			<UpdatesCard />
 
 			{/* Auto-save */}
-			<Card>
+			<Card data-setting-anchor="auto-save">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Save className="w-5 h-5 text-muted-foreground" />
@@ -161,7 +161,7 @@ export default function GeneralPanel() {
 			</Card>
 
 			{/* Data management */}
-			<Card>
+			<Card data-setting-anchor="data-management">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Database className="w-5 h-5 text-muted-foreground" />
@@ -202,7 +202,7 @@ export default function GeneralPanel() {
 			<CookiesCard />
 
 			{/* Storage paths */}
-			<Card>
+			<Card data-setting-anchor="storage-paths">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<FolderOpen className="w-5 h-5 text-muted-foreground" />
@@ -242,7 +242,7 @@ export default function GeneralPanel() {
 			</Card>
 
 			{/* Reset */}
-			<Card>
+			<Card data-setting-anchor="reset-app-settings">
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<RotateCcw className="w-5 h-5 text-muted-foreground" />

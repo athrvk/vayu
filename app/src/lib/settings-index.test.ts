@@ -17,7 +17,13 @@ import { buildSettingsIndex, searchSettings } from "./settings-index";
 
 const panels = [
 	{ id: "general" as const, label: "General", description: "Storage locations and app info" },
-	{ id: "appearance" as const, label: "Appearance", description: "Theme, accent and font" },
+	// The panel's real copy, deliberately: it never says "theme", "color" or
+	// "font", which is exactly why indexing panels alone found nothing.
+	{
+		id: "appearance" as const,
+		label: "Appearance",
+		description: "Customize the look and feel of the application",
+	},
 ];
 
 const engineCategories = [
@@ -46,16 +52,54 @@ const engineEntries = [
 	},
 ];
 
-const index = buildSettingsIndex({ panels, engineEntries, engineCategories });
+const appSettings = [
+	{
+		anchor: "theme-mode",
+		panel: "appearance" as const,
+		label: "Theme Mode",
+		description: "The app's light or dark palette.",
+		keywords: ["dark mode"],
+	},
+	{
+		anchor: "orphan-setting",
+		panel: "not-a-panel" as never,
+		label: "Orphan",
+		description: "Belongs to a panel that is not registered.",
+	},
+];
+
+const index = buildSettingsIndex({ panels, appSettings, engineEntries, engineCategories });
 
 describe("buildSettingsIndex", () => {
-	it("holds both catalogues, panels first and in declaration order", () => {
+	it("holds all three catalogues, panels first and in declaration order", () => {
 		expect(index.map((e) => e.id)).toEqual([
 			"general",
 			"appearance",
+			"theme-mode",
 			"dbCacheSize",
 			"defaultTimeout",
 		]);
+	});
+
+	it("indexes the settings inside a panel, not only the panel", () => {
+		/*
+		 * The defect this catalogue exists for: with panels alone, "theme"
+		 * matched nothing, because the panel that holds Theme Mode is called
+		 * "Appearance" and describes itself as the look and feel of the app.
+		 */
+		const panelsOnly = buildSettingsIndex({ panels, engineEntries, engineCategories });
+		expect(searchSettings(panelsOnly, "theme")).toEqual([]);
+		expect(searchSettings(index, "theme").map((e) => e.id)).toEqual(["theme-mode"]);
+	});
+
+	it("carries the anchor a consumer reveals, and none on a whole panel", () => {
+		expect(index.find((e) => e.id === "theme-mode")?.anchor).toBe("theme-mode");
+		expect(index.find((e) => e.id === "dbCacheSize")?.anchor).toBe("dbCacheSize");
+		expect(index.find((e) => e.id === "appearance")?.anchor).toBeUndefined();
+	});
+
+	it("drops an app setting whose panel is not registered", () => {
+		expect(index.find((e) => e.id === "orphan-setting")).toBeUndefined();
 	});
 
 	it("drops an entry whose category has no row to navigate to", () => {
@@ -117,8 +161,56 @@ describe("searchSettings", () => {
 		expect(hits.map((h) => h.id)).toEqual(["dbCacheSize", "appearance"]);
 	});
 
+	it("matches keywords, for the words a user types that the copy never uses", () => {
+		// "dark mode" is what the setting is called everywhere except in Vayu,
+		// where the label reads "Theme Mode" and the options are System/Light/Dark.
+		expect(searchSettings(index, "dark mode").map((e) => e.id)).toEqual(["theme-mode"]);
+	});
+
+	it("ranks a label match above a keyword match above a description mention", () => {
+		// Declared in the losing order, so passing cannot be an accident of
+		// declaration order surviving an unsorted list.
+		const ranked = buildSettingsIndex({
+			panels: [{ id: "appearance" as const, label: "Appearance", description: "" }],
+			appSettings: [
+				{
+					anchor: "by-description",
+					panel: "appearance" as const,
+					label: "Something else",
+					description: "Mentions zebra in passing.",
+				},
+				{
+					anchor: "by-keyword",
+					panel: "appearance" as const,
+					label: "Another thing",
+					description: "No mention here.",
+					keywords: ["zebra"],
+				},
+				{
+					anchor: "by-label",
+					panel: "appearance" as const,
+					label: "Zebra",
+					description: "No mention here either.",
+				},
+			],
+			engineEntries: [],
+			engineCategories,
+		});
+
+		expect(searchSettings(ranked, "zebra").map((e) => e.id)).toEqual([
+			"by-label",
+			"by-keyword",
+			"by-description",
+		]);
+	});
+
 	it("matches case-insensitively and returns nothing for a miss", () => {
-		expect(searchSettings(index, "APPEARANCE").map((h) => h.id)).toEqual(["appearance"]);
+		// The panel first, then the settings it holds - they match on the
+		// category label, which ranks last.
+		expect(searchSettings(index, "APPEARANCE").map((h) => h.id)).toEqual([
+			"appearance",
+			"theme-mode",
+		]);
 		expect(searchSettings(index, "zzzz")).toEqual([]);
 	});
 });

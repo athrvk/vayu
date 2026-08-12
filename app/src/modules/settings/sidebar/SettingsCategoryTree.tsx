@@ -33,6 +33,7 @@ import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, Input, Skeleton } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
+import { APP_SETTINGS } from "@/modules/settings/main/app-settings";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { buildSettingsIndex, searchSettings } from "@/lib/settings-index";
 
@@ -80,6 +81,7 @@ export default function SettingsCategoryTree() {
 		() =>
 			buildSettingsIndex({
 				panels: APP_SETTINGS_PANELS,
+				appSettings: APP_SETTINGS,
 				engineEntries: configResponse?.entries ?? [],
 				engineCategories: ENGINE_SETTINGS_CATEGORIES,
 			}),
@@ -160,10 +162,7 @@ export default function SettingsCategoryTree() {
 									<button
 										key={`${result.kind}:${result.id}`}
 										onClick={() =>
-											selectCategory(
-												result.category,
-												result.kind === "engine" ? result.id : undefined
-											)
+											selectCategory(result.category, result.anchor)
 										}
 										className="w-full flex flex-col items-start gap-0.5 px-4 py-1.5 text-left transition-colors text-foreground hover:bg-accent"
 									>
@@ -171,9 +170,16 @@ export default function SettingsCategoryTree() {
 											{result.label}
 										</span>
 										<span className="w-full truncate text-xs text-muted-foreground">
+											{/* The engine key is part of the subtitle
+											    because that is what docs, logs and MCP
+											    calls name the setting. An app setting
+											    has no such name, so its subtitle is the
+											    panel that holds it. */}
 											{result.kind === "engine"
 												? `${result.categoryLabel} · ${result.id}`
-												: "App settings"}
+												: result.kind === "app-setting"
+													? result.categoryLabel
+													: "App settings"}
 										</span>
 									</button>
 								))}

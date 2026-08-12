@@ -65,7 +65,7 @@ export default function EditorPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div>
+					<div data-setting-anchor="code-font">
 						<Eyebrow className="mb-2">Code font</Eyebrow>
 						<FontPicker
 							options={MONO_FONTS}
@@ -79,7 +79,7 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div>
+					<div data-setting-anchor="editor-font-size">
 						<Eyebrow className="mb-2">Font size</Eyebrow>
 						<OptionButtons
 							options={EDITOR_FONT_SIZES.map((v) => ({ value: v, label: `${v}px` }))}
@@ -88,7 +88,7 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div>
+					<div data-setting-anchor="tab-width">
 						<Eyebrow className="mb-2">Tab width</Eyebrow>
 						<OptionButtons
 							options={EDITOR_TAB_SIZES.map((v) => ({
@@ -101,7 +101,7 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div className="space-y-3 pt-1">
+					<div className="space-y-3 pt-1" data-setting-anchor="editor-behaviour">
 						<ToggleRow
 							label="Word wrap"
 							description="Wrap long lines instead of scrolling horizontally"

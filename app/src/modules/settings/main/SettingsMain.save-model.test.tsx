@@ -45,12 +45,12 @@ vi.mock("@/queries/runs", () => ({
 vi.mock("./panels/UpdatesCard", () => ({ UpdatesCard: () => null }));
 vi.mock("./panels/CookiesCard", () => ({ CookiesCard: () => null }));
 
+const clearHighlight = vi.fn();
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({
-		selectedCategory,
-		highlightedKey: null,
-		clearHighlight: vi.fn(),
-	}),
+	useSettingsStore: (selector?: (s: unknown) => unknown) => {
+		const state = { selectedCategory, highlightedKey: null, clearHighlight };
+		return selector ? selector(state) : state;
+	},
 }));
 
 const showToast = vi.fn();

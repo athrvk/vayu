@@ -12,8 +12,6 @@
  * Shows a form with all configurable entries for that category.
  */
 
-/* global setTimeout, clearTimeout */
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useEngineStore, useToastStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
@@ -54,14 +52,12 @@ import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import { DefaultValueLine, NumberSettingRow } from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { getEngineCategory } from "../engine-categories";
+import { useRevealedSetting } from "../useRevealedSetting";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 
 /** Stated beside the Save bar, so the engine view's save model is on screen too. */
 const ENGINE_SAVE_NOTE = "Changes are staged here and written when you save.";
-
-/** How long a searched-for setting stays outlined after the view scrolls to it. */
-const HIGHLIGHT_MS = 2500;
 
 /**
  * Check if a config entry requires a restart when changed
@@ -139,7 +135,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 }
 
 export default function SettingsMain() {
-	const { selectedCategory, highlightedKey, clearHighlight } = useSettingsStore();
+	const { selectedCategory, highlightedKey } = useSettingsStore();
 	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
 		useEngineStore();
 	const showToast = useToastStore((s) => s.showToast);
@@ -348,24 +344,17 @@ export default function SettingsMain() {
 	}, [selectedCategory]);
 
 	/*
-	 * Reveal the entry a sidebar search result picked.
-	 *
-	 * An entry inside the collapsed Advanced group has to be uncollapsed to be
-	 * revealed at all, which is derived rather than pushed into state: a
+	 * The scrolling and the outline belong to `useRevealedSetting`, which works
+	 * off the `data-setting-anchor` below - the same mechanism the app panels
+	 * use. What is left here is the one thing an attribute cannot do: an entry
+	 * inside the collapsed Advanced group has to be uncollapsed before it exists
+	 * to be revealed. Derived rather than pushed into state, since a
 	 * `setAdvancedOpen` here would fight the category switch that closes it.
 	 */
-	const highlightedRef = useRef<HTMLDivElement | null>(null);
+	useRevealedSetting();
 	const highlightedIsAdvanced =
 		highlightedKey !== null && advancedEntries.some((entry) => entry.key === highlightedKey);
 	const showAdvanced = advancedOpen || highlightedIsAdvanced;
-
-	useEffect(() => {
-		if (!highlightedKey) return;
-		// jsdom has no layout and does not implement this, hence the optional call.
-		highlightedRef.current?.scrollIntoView?.({ block: "center" });
-		const timer = setTimeout(clearHighlight, HIGHLIGHT_MS);
-		return () => clearTimeout(timer);
-	}, [highlightedKey, clearHighlight]);
 
 	// Keep handleSave ref updated
 	useEffect(() => {
@@ -598,7 +587,6 @@ export default function SettingsMain() {
 		const hasError = edited?.error;
 		const needsRestart = isRestartRequired(entry);
 		const isPendingRestart = restartRequiredKeys.includes(entry.key);
-		const isHighlighted = highlightedKey === entry.key;
 		const isNumeric = entry.type === "integer" || entry.type === "number";
 		const defaultDisplay = isSizeConfig(entry.key)
 			? formatBytes(parseInt(entry.default, 10) || 0)
@@ -607,13 +595,12 @@ export default function SettingsMain() {
 		return (
 			<Card
 				key={entry.key}
-				ref={isHighlighted ? highlightedRef : undefined}
+				data-setting-anchor={entry.key}
 				className={cn(
 					"transition-colors",
 					isModified && !hasError && "border-primary/50",
 					hasError && "border-destructive/50",
-					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10",
-					isHighlighted && "ring-2 ring-primary"
+					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
 				)}
 			>
 				<CardHeader className="pb-3">

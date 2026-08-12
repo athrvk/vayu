@@ -206,6 +206,11 @@ export type NumberCommitStrategy = "change" | "blur";
 interface NumberSettingRowProps {
 	label: string;
 	/**
+	 * `data-setting-anchor` for this row - the id a search result reveals. Only
+	 * rows declared in the app-settings catalogue need one.
+	 */
+	anchor?: string;
+	/**
 	 * Keeps the label as the input's accessible name without printing it - for
 	 * the engine cards, where the CardTitle above already says it and a visible
 	 * second copy would read it out twice.
@@ -260,6 +265,7 @@ function derivedRangeHint(min?: string, max?: string): string | null {
  */
 export function NumberSettingRow({
 	label,
+	anchor,
 	labelHidden = false,
 	description,
 	value,
@@ -327,7 +333,7 @@ export function NumberSettingRow({
 		// `data-setting-row` names the row's box: the input, its hint, its error
 		// and its Default line are siblings, and without a named container a
 		// consumer (or a test) is left guessing at `closest("div")`.
-		<div className="space-y-1.5" data-setting-row={label}>
+		<div className="space-y-1.5" data-setting-row={label} data-setting-anchor={anchor}>
 			<Label
 				htmlFor={inputId}
 				className={cn("text-sm font-medium", labelHidden && "sr-only")}
