@@ -105,7 +105,10 @@ export default function AppearancePanel() {
 						<SunMoon className="w-5 h-5 text-muted-foreground" />
 						<CardTitle className="text-base">Theme Mode</CardTitle>
 					</div>
-					<CardDescription>Choose between light, dark, or system theme.</CardDescription>
+					<CardDescription>
+						Sets the app&apos;s light or dark palette. System follows your operating
+						system and switches automatically.
+					</CardDescription>
 				</CardHeader>
 				<CardContent>
 					{isLoading ? (

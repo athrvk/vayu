@@ -79,9 +79,10 @@ export default function DashboardPanel() {
 						<CardTitle className="text-base">Capacity SLO threshold</CardTitle>
 					</div>
 					<CardDescription>
-						The p99 latency at which a run is considered saturated. Drives the
+						The p99 latency at which a run is considered saturated. It marks the
 						breakpoint stat, the Saturation card, and the SLO line on the latency
-						charts.
+						charts, and prefills the p99 budget and the Capacity Discovery target when
+						you open the load-test dialog.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

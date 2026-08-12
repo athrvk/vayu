@@ -86,3 +86,58 @@ describe("Reset app settings", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 });
+
+/**
+ * The copy has to name everything `resetAll` clears.
+ *
+ * It used to say "appearance, editor and dashboard preferences", but the reset
+ * removes `STORAGE_KEYS.CLIENT_SETTINGS` wholesale - so notification
+ * preferences, the auto-save setting and the load-test ceilings went with it,
+ * unannounced. Undersold scope on an irreversible action is the defect; a
+ * partial reset would be its own surprise, so the text is what moved.
+ *
+ * Each term below is checked against both the card and the confirm dialog,
+ * because a user can read either one before committing.
+ */
+describe("Reset app settings copy", () => {
+	const CLEARED = [
+		"appearance",
+		"editor",
+		"dashboard",
+		"notifications",
+		"auto-save",
+		"load-test limits",
+	];
+
+	const text = (el: Element | null) => el?.textContent?.toLowerCase() ?? "";
+
+	it("the card names every category the reset clears", () => {
+		render(<GeneralPanel />);
+		const card = screen.getByText(/^Reset app settings$/).closest("div[data-slot='card']");
+		const copy = text(card);
+		expect(copy.length).toBeGreaterThan(0);
+		for (const term of CLEARED) expect(copy).toContain(term);
+	});
+
+	it("the confirm dialog names them too, and says the app reloads", () => {
+		render(<GeneralPanel />);
+		openReset();
+		const copy = text(screen.getByRole("dialog"));
+		expect(copy.length).toBeGreaterThan(0);
+		for (const term of CLEARED) expect(copy).toContain(term);
+		// `resetAll` ends in window.location.reload(); losing the tab you are on
+		// is worth stating before the click, not after.
+		expect(copy).toContain("reloads");
+	});
+
+	it("still promises what the reset does not touch", () => {
+		render(<GeneralPanel />);
+		openReset();
+		const copy = text(screen.getByRole("dialog"));
+		// SETTINGS_STORAGE_KEYS holds no workspace or engine-side key, so these
+		// three survive - the reassurance is load-bearing, not filler.
+		for (const kept of ["collections", "requests", "run history"]) {
+			expect(copy).toContain(kept);
+		}
+	});
+});

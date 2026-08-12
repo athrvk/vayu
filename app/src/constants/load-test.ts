@@ -29,6 +29,19 @@
  * already being done when `maxInFlight` drifted.
  */
 
+/**
+ * Starting values, deliberately fixed - the Settings panel offers ceilings, not
+ * defaults, and that asymmetry is the policy (recorded for #521).
+ *
+ * A ceiling is a standing rule about what this machine may be asked to do, so it
+ * belongs in Settings. A starting value is only ever seen once per request: the
+ * load dialog memoes each request's draft and reopens on it
+ * (`restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS")` and its siblings in
+ * `LoadTestConfigDialog`), so a user-set default would apply to a request's
+ * first run and never again. The
+ * one number that genuinely spans runs - the p99 SLO - is already a setting
+ * (`sloThresholdMs`) and seeds the dialog from there.
+ */
 export const LOAD_TEST_DEFAULTS = {
 	MODE: "constant_rps",
 	DURATION_S: 60,

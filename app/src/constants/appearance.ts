@@ -12,8 +12,9 @@
  * persisted to localStorage and applied to the document. This file is the
  * single source of truth: types, the settings controls, and the runtime guards
  * all derive from the arrays (font, radius) and the scale range below. Font
- * stacks reference faces already loaded by index.html (Space Grotesk, JetBrains
- * Mono) or system fonts, so switching never triggers a network fetch.
+ * stacks reference faces already loaded by index.html (Space Grotesk, Inter and
+ * the four mono faces) or system fonts, so switching never triggers a network
+ * fetch.
  */
 
 export interface FontOption {
@@ -52,7 +53,17 @@ export const UI_FONTS = [
 
 /** UI font preference, applied by overriding the `--font-sans` custom property. */
 export type UiFont = (typeof UI_FONTS)[number]["value"];
-export const DEFAULT_UI_FONT: UiFont = "inter";
+
+/**
+ * The default UI face, and it must stay the one `index.css` already assigns to
+ * `--font-sans`: the pre-paint script in index.html deliberately carries no
+ * entry for it, so a fresh install paints the stylesheet's face and the store's
+ * mount-time `applyFont` re-asserts the same stack. When this constant named a
+ * different face than the stylesheet, a fresh install painted Space Grotesk and
+ * then swapped to Inter once React mounted. `appearance.default-font.test.ts`
+ * holds the three - constant, stylesheet, pre-paint map - together.
+ */
+export const DEFAULT_UI_FONT: UiFont = "grotesk";
 
 /** A preset UI font, or "custom" - a user-typed family (see {@link customSansStack}). */
 export type UiFontChoice = UiFont | "custom";
@@ -226,5 +237,5 @@ export function customMonoStack(family: string): string {
 
 /** Custom UI (sans) stack, falling back to the default sans faces. */
 export function customSansStack(family: string): string {
-	return customFontStack(family, "Inter, system-ui, sans-serif");
+	return customFontStack(family, '"Space Grotesk", system-ui, sans-serif');
 }
