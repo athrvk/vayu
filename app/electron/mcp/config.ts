@@ -259,10 +259,31 @@ export interface IgnoredSafetyEnvVar {
 	fallback: McpSafetyConfig[keyof McpSafetyConfig];
 }
 
-/** A safety config built from the environment, plus what was thrown away. */
+/**
+ * An environment variable whose cap the sanitizer held at its ceiling. Its own
+ * shape rather than a reuse of `IgnoredSafetyEnvVar`: nothing fell back here, so
+ * that type's `fallback` would have to name a default that never applied.
+ */
+export interface ClampedSafetyEnvVar {
+	/** The `VAYU_MCP_*` variable name. */
+	variable: string;
+	/** Its raw value, as it appeared in the environment. */
+	value: string;
+	/** The cap actually in force - the key's ceiling. */
+	applied: number;
+}
+
+/**
+ * A safety config built from the environment, plus every way it differs from
+ * what was asked for: `ignored` for variables that fell back to their default,
+ * `clamped` for caps that are in force at a lower value than requested. The two
+ * are separate channels because they are separate outcomes - a reader that
+ * merged them could not tell an operator which of the two happened.
+ */
 export interface EnvSafetyConfig {
 	config: McpSafetyConfig;
 	ignored: IgnoredSafetyEnvVar[];
+	clamped: ClampedSafetyEnvVar[];
 }
 
 function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
@@ -297,7 +318,10 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
  *
  * Anything the sanitizer rejects is reported in `ignored` so the CLI can tell a
  * headless operator which default applied, rather than leaving them to discover
- * it from an uncapped run.
+ * it from an uncapped run. A cap held at its ceiling is reported in `clamped`
+ * for the same reason one step further along: the run is bounded at a value the
+ * operator did not type, and without a line saying so the first evidence is a
+ * refused run.
  */
 export function buildSafetyConfigFromEnv(env: NodeJS.ProcessEnv): EnvSafetyConfig {
 	const raw = readSafetyFromEnv(env);
@@ -312,5 +336,38 @@ export function buildSafetyConfigFromEnv(env: NodeJS.ProcessEnv): EnvSafetyConfi
 			fallback: DEFAULT_MCP_SAFETY_CONFIG[key],
 		});
 	}
-	return { config: resolveSafetyConfig(sanitized), ignored };
+	const clamped: ClampedSafetyEnvVar[] = [];
+	for (const key of MCP_CAP_KEYS) {
+		const requested = raw[key];
+		const applied = sanitized[key];
+		if (applied === undefined || !isFiniteNumber(requested)) continue;
+		// Against the *floored* request, not the raw one: flooring `1000.7` to
+		// `1000` is not a ceiling being applied, and reporting it as one would
+		// name a maximum the value never came near. Derived from the sanitizer's
+		// own output rather than re-compared against `MCP_CAP_CEILINGS`, so the
+		// ceilings keep exactly one definition.
+		if (applied >= Math.floor(requested)) continue;
+		const variable = SAFETY_ENV_VARS[key];
+		clamped.push({ variable, value: env[variable] ?? "", applied });
+	}
+	return { config: resolveSafetyConfig(sanitized), ignored, clamped };
+}
+
+/**
+ * The stderr lines the stdio CLI prints for an environment that did not survive
+ * sanitization intact - one per ignored variable, then one per clamped cap.
+ * Separate from `cli.ts` because that module runs a server on import and so
+ * cannot be exercised by a test; this is the part worth pinning.
+ */
+export function formatSafetyEnvNotices({ ignored, clamped }: EnvSafetyConfig): string[] {
+	return [
+		...ignored.map(
+			({ variable, value, fallback }) =>
+				`[vayu-mcp] ignoring malformed ${variable}=${JSON.stringify(value)} (using default ${JSON.stringify(fallback)})`
+		),
+		...clamped.map(
+			({ variable, value, applied }) =>
+				`[vayu-mcp] ${variable}=${JSON.stringify(value)} is above the maximum of ${applied}; running with ${applied}`
+		),
+	];
 }

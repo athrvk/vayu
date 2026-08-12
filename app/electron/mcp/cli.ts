@@ -18,7 +18,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer } from "./server.js";
 import { EngineClient } from "./engine-client.js";
-import { buildSafetyConfigFromEnv } from "./config.js";
+import { buildSafetyConfigFromEnv, formatSafetyEnvNotices } from "./config.js";
 import type { ToolContext } from "./tools.js";
 
 async function main(): Promise<void> {
@@ -26,11 +26,10 @@ async function main(): Promise<void> {
 	const version = process.env.VAYU_VERSION ?? "0.0.0";
 
 	const client = new EngineClient({ baseUrl: engineBaseUrl });
-	const { config, ignored } = buildSafetyConfigFromEnv(process.env);
-	for (const { variable, value, fallback } of ignored) {
-		console.error(
-			`[vayu-mcp] ignoring malformed ${variable}=${JSON.stringify(value)} (using default ${JSON.stringify(fallback)})`
-		);
+	const envSafety = buildSafetyConfigFromEnv(process.env);
+	const { config } = envSafety;
+	for (const notice of formatSafetyEnvNotices(envSafety)) {
+		console.error(notice);
 	}
 	const contextProvider = (): ToolContext => ({ client, config });
 
