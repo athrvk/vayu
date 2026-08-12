@@ -765,6 +765,13 @@ exactly the rules Settings is held to:
   `[vayu-mcp] ignoring malformed VAYU_MCP_MAX_RPS="1,000" (using default 1000)`.
   Non-positive values (`0`, `-5`) are treated the same way; fractional values are
   floored.
+- **A cap above its ceiling is named too, through its own channel.** It did not
+  fall back - it is in force, held at the ceiling - so the CLI says which value
+  actually applies rather than which default did:
+  `[vayu-mcp] VAYU_MCP_MAX_CONCURRENCY="50000" is above the maximum of 10000; running with 10000`.
+  Without it the operator believes the policy is 50000 and learns otherwise from
+  a refused run. Flooring alone is not reported: `999.7` becomes `999` and names
+  no maximum, because it came near none.
 - **Allowlist entries are reduced to a bare hostname**, so
   `https://api.example.com` and `api.example.com:8080` both match the
   `api.example.com` the guard compares against. Entries are de-duplicated.

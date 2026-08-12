@@ -5,10 +5,12 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
 	buildSafetyConfigFromEnv,
 	DEFAULT_MCP_SAFETY_CONFIG,
+	formatSafetyEnvNotices,
 	MCP_CAP_CEILINGS,
 	normalizeHost,
 	resolveSafetyConfig,
@@ -215,15 +217,71 @@ describe("buildSafetyConfigFromEnv", () => {
 	});
 
 	it("holds an over-ceiling cap the same way the Settings path does", () => {
-		const { config, ignored } = buildSafetyConfigFromEnv({
+		const { config, ignored, clamped } = buildSafetyConfigFromEnv({
 			VAYU_MCP_MAX_CONCURRENCY: "50000",
 		});
 
 		expect(config.maxConcurrency).toBe(MCP_CAP_CEILINGS.maxConcurrency);
 		// Held, not thrown away: `ignored` is for values that fell back to a
-		// default, and this one is in force at the ceiling.
+		// default, and this one is in force at the ceiling - so it is reported
+		// through the other channel, with the value that actually applies.
 		expect(ignored).toEqual([]);
+		expect(clamped).toEqual([
+			{
+				variable: "VAYU_MCP_MAX_CONCURRENCY",
+				value: "50000",
+				applied: MCP_CAP_CEILINGS.maxConcurrency,
+			},
+		]);
 		expect(checkLoadCaps({ concurrency: 10_001 }, config).ok).toBe(false);
+	});
+
+	it("reports a clamped cap for every cap variable, never for an in-range one", () => {
+		const { clamped } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_RPS: "2000000",
+			VAYU_MCP_MAX_CONCURRENCY: "50000",
+			VAYU_MCP_MAX_DURATION_SECONDS: "300",
+			VAYU_MCP_MAX_ITERATIONS: "999000000",
+		});
+
+		expect(clamped.map((c) => c.variable)).toEqual([
+			"VAYU_MCP_MAX_RPS",
+			"VAYU_MCP_MAX_CONCURRENCY",
+			"VAYU_MCP_MAX_ITERATIONS",
+		]);
+		expect(clamped.map((c) => c.applied)).toEqual([
+			MCP_CAP_CEILINGS.maxRps,
+			MCP_CAP_CEILINGS.maxConcurrency,
+			MCP_CAP_CEILINGS.maxIterations,
+		]);
+	});
+
+	it("keeps the clamped and ignored channels from blurring", () => {
+		const { ignored, clamped } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_RPS: "1,000",
+			VAYU_MCP_MAX_CONCURRENCY: "50000",
+		});
+
+		// A malformed variable fell back and is only `ignored`; a clamped one is
+		// in force and is only `clamped`. An operator reading one channel must
+		// not be told the other thing happened.
+		expect(ignored.map((i) => i.variable)).toEqual(["VAYU_MCP_MAX_RPS"]);
+		expect(clamped.map((c) => c.variable)).toEqual(["VAYU_MCP_MAX_CONCURRENCY"]);
+	});
+
+	it("does not call a floored fractional cap clamped", () => {
+		const { config, clamped } = buildSafetyConfigFromEnv({
+			// Floored to 999, which is not a ceiling being applied - saying "above
+			// the maximum of 1000000" here would name a limit it never came near.
+			VAYU_MCP_MAX_RPS: "999.7",
+			// Fractional too, but over the ceiling once floored, so this one is
+			// reported and the ceiling is what applies.
+			VAYU_MCP_MAX_ITERATIONS: "100000001.5",
+		});
+
+		expect(config.maxRps).toBe(999);
+		expect(config.maxIterations).toBe(MCP_CAP_CEILINGS.maxIterations);
+		expect(clamped.map((c) => c.variable)).toEqual(["VAYU_MCP_MAX_ITERATIONS"]);
 	});
 
 	it("rejects a non-positive cap the same way the Settings path does", () => {
@@ -258,7 +316,7 @@ describe("buildSafetyConfigFromEnv", () => {
 	});
 
 	it("reports nothing when every variable is well-formed", () => {
-		const { config, ignored } = buildSafetyConfigFromEnv({
+		const { config, ignored, clamped } = buildSafetyConfigFromEnv({
 			VAYU_MCP_ALLOWLIST: "api.example.com",
 			VAYU_MCP_MAX_RPS: "50",
 			VAYU_MCP_MAX_CONCURRENCY: "10",
@@ -270,6 +328,7 @@ describe("buildSafetyConfigFromEnv", () => {
 		});
 
 		expect(ignored).toEqual([]);
+		expect(clamped).toEqual([]);
 		// Exhaustive on purpose: a field added to McpSafetyConfig without an env
 		// var lands here as an unexpected key. That is how the missing
 		// VAYU_MCP_MAX_ITERATIONS was caught.
@@ -286,10 +345,11 @@ describe("buildSafetyConfigFromEnv", () => {
 	});
 
 	it("returns the safe defaults for an empty environment", () => {
-		const { config, ignored } = buildSafetyConfigFromEnv({});
+		const { config, ignored, clamped } = buildSafetyConfigFromEnv({});
 
 		expect(config).toEqual(DEFAULT_MCP_SAFETY_CONFIG);
 		expect(ignored).toEqual([]);
+		expect(clamped).toEqual([]);
 	});
 
 	it('leaves the opt-in booleans off for any value other than "true"', () => {
@@ -300,5 +360,51 @@ describe("buildSafetyConfigFromEnv", () => {
 
 		expect(config.allowAll).toBe(false);
 		expect(config.allowWrites).toBe(false);
+	});
+});
+
+/*
+ * What the stdio operator actually sees. A channel nothing prints is the
+ * "written but never read" defect, so these assert the lines, and the last one
+ * asserts `cli.ts` is what emits them.
+ */
+describe("formatSafetyEnvNotices", () => {
+	it("names a clamped cap, its raw value, and the value in force", () => {
+		const notices = formatSafetyEnvNotices(
+			buildSafetyConfigFromEnv({ VAYU_MCP_MAX_CONCURRENCY: "50000" })
+		);
+
+		expect(notices).toEqual([
+			'[vayu-mcp] VAYU_MCP_MAX_CONCURRENCY="50000" is above the maximum of 10000; running with 10000',
+		]);
+	});
+
+	it("prints both channels, ignored first, and keeps their wording distinct", () => {
+		const notices = formatSafetyEnvNotices(
+			buildSafetyConfigFromEnv({
+				VAYU_MCP_MAX_RPS: "1,000",
+				VAYU_MCP_MAX_CONCURRENCY: "50000",
+			})
+		);
+
+		expect(notices).toEqual([
+			'[vayu-mcp] ignoring malformed VAYU_MCP_MAX_RPS="1,000" (using default 1000)',
+			'[vayu-mcp] VAYU_MCP_MAX_CONCURRENCY="50000" is above the maximum of 10000; running with 10000',
+		]);
+	});
+
+	it("says nothing when the environment survived intact", () => {
+		expect(
+			formatSafetyEnvNotices(buildSafetyConfigFromEnv({ VAYU_MCP_MAX_RPS: "50" }))
+		).toEqual([]);
+	});
+
+	it("is what the CLI prints, so neither channel can go unread", () => {
+		const source = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
+
+		// Guard the guard: an empty read would pass every assertion below.
+		expect(source.length).toBeGreaterThan(0);
+		expect(source).toContain("formatSafetyEnvNotices");
+		expect(source).toContain("console.error(notice)");
 	});
 });
