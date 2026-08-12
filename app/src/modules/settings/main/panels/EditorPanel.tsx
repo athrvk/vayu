@@ -110,6 +110,7 @@ export default function EditorPanel() {
 						/>
 						<ToggleRow
 							label="Line numbers"
+							description="Number every line in the editor gutter"
 							checked={editor.lineNumbers}
 							onChange={(lineNumbers) => setEditor({ lineNumbers })}
 						/>

@@ -142,6 +142,7 @@ export default function GeneralPanel() {
 				<CardContent className="space-y-4">
 					<ToggleRow
 						label="Auto-save edits"
+						description="Off leaves an edited request marked unsaved until you save it"
 						checked={autoSave.enabled}
 						onChange={(enabled) => setAutoSave({ enabled })}
 					/>
@@ -248,8 +249,9 @@ export default function GeneralPanel() {
 						<CardTitle className="text-base">Reset app settings</CardTitle>
 					</div>
 					<CardDescription>
-						Restore appearance, editor, and dashboard preferences to their defaults.
-						Collections, requests, and run history are not affected.
+						Restore every app preference to its default: appearance, editor, dashboard,
+						notifications, auto-save, and the load-test limits. Collections, requests,
+						and run history are not affected.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -269,7 +271,7 @@ export default function GeneralPanel() {
 				open={confirmReset}
 				onOpenChange={setConfirmReset}
 				title="Reset app settings?"
-				description="Appearance, editor and dashboard preferences go back to their defaults and the app reloads. Collections, requests and run history are not affected."
+				description="Every app preference goes back to its default - appearance, editor, dashboard, notifications, auto-save and the load-test limits - and the app reloads. Collections, requests and run history are not affected."
 				onConfirm={resetSettings}
 				confirmLabel="Reset"
 				confirmVariant="default"

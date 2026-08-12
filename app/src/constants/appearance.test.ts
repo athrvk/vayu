@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from "vitest";
 import {
+	DEFAULT_MONO_FONT,
+	DEFAULT_UI_FONT,
 	DEFAULT_UI_SCALE,
 	UI_SCALE_MAX,
 	UI_SCALE_MIN,
@@ -14,7 +16,9 @@ import {
 	customFontStack,
 	customMonoStack,
 	customSansStack,
+	fontStack,
 	formatScale,
+	monoFontStack,
 	nudgeScale,
 	parseScale,
 } from "./appearance";
@@ -40,7 +44,16 @@ describe("customFontStack", () => {
 	it("mono/sans wrappers apply their respective fallbacks", () => {
 		expect(customMonoStack("Iosevka")).toContain('"Iosevka",');
 		expect(customMonoStack("Iosevka")).toContain("monospace");
-		expect(customSansStack("Georgia")).toBe('"Georgia", Inter, system-ui, sans-serif');
+		expect(customSansStack("Georgia")).toBe(
+			'"Georgia", "Space Grotesk", system-ui, sans-serif'
+		);
+	});
+
+	// A custom family that fails to load must land on the same face a user who
+	// never opened the picker sees, not on a second, parallel default.
+	it("falls back to the default preset's own stack", () => {
+		expect(customSansStack("Georgia").endsWith(fontStack(DEFAULT_UI_FONT))).toBe(true);
+		expect(customMonoStack("Iosevka").endsWith(monoFontStack(DEFAULT_MONO_FONT))).toBe(true);
 	});
 });
 
