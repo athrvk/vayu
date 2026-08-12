@@ -68,6 +68,7 @@ vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: () => ({ selectedCategory, restartRequiredKeys: [] }),
 }));
 
+const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useEngineStore: () => ({
 		isEngineConnected: true,
@@ -76,6 +77,9 @@ vi.mock("@/stores", () => ({
 		addRestartRequiredKey: vi.fn(),
 		clearRestartRequired: vi.fn(),
 	}),
+	// The panel toasts the edits a category-switch flush had to drop.
+	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
+		selector({ showToast }),
 }));
 
 const setStatus = vi.fn();
@@ -106,6 +110,7 @@ describe("SettingsMain - leaving a category", () => {
 	beforeEach(() => {
 		mutateAsync.mockClear();
 		setStatus.mockClear();
+		showToast.mockClear();
 		selectedCategory = "network_performance";
 	});
 
@@ -148,6 +153,36 @@ describe("SettingsMain - leaving a category", () => {
 		});
 
 		expect(mutateAsync).not.toHaveBeenCalled();
+	});
+
+	it("says an invalid edit was dropped rather than dropping it silently", async () => {
+		/*
+		 * The discard itself is right - a flush has no screen left to show an
+		 * inline error on - but it happened with nothing on screen to say so, so
+		 * a typed value simply vanished. The count is part of the message: with
+		 * several staged edits, "1 invalid change" tells you the rest were kept.
+		 */
+		const { unmount } = render(<Panel />);
+
+		fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "9999" } });
+
+		await act(async () => {
+			unmount();
+		});
+
+		expect(showToast).toHaveBeenCalledWith("1 invalid change was discarded.", "warning");
+	});
+
+	it("stays quiet when everything staged was valid", async () => {
+		const { unmount } = render(<Panel />);
+
+		fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+		await act(async () => {
+			unmount();
+		});
+
+		expect(showToast).not.toHaveBeenCalled();
 	});
 
 	it("leaves the save status alone while it has nothing pending", async () => {

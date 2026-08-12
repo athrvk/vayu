@@ -18,8 +18,16 @@
  */
 
 import { useState } from "react";
-import { Bell, Clock, Layers, VolumeX, Play } from "lucide-react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { Bell, Play } from "lucide-react";
+import {
+	Button,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	Eyebrow,
+} from "@/components/ui";
 import { useClientSettingsStore, useToastStore } from "@/stores";
 import {
 	TOAST_POSITIONS,
@@ -67,26 +75,33 @@ export default function NotificationsPanel() {
 	};
 
 	return (
-		<>
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Bell className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Position</CardTitle>
-					</div>
-					<CardDescription>
-						Where notifications appear. Every position clears the title bar and the
-						status strip, and swiping to dismiss follows the edge the stack sits on.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-3">
+		/* One card, four rows: the card is the topic ("Notifications") and each
+		   preference is a row inside it. It was four cards, one per setting. */
+		<Card>
+			<CardHeader className="pb-3">
+				<div className="flex items-center gap-2">
+					<Bell className="w-5 h-5 text-muted-foreground" />
+					<CardTitle className="text-base">Notifications</CardTitle>
+				</div>
+				<CardDescription>
+					Where toasts appear, how long they stay, how many stack at once, and what is
+					worth interrupting you for.
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="space-y-5">
+				<div>
+					<Eyebrow className="mb-2">Position</Eyebrow>
 					<OptionButtons
 						options={TOAST_POSITIONS.map((p) => ({ value: p.value, label: p.label }))}
 						value={notifications.position}
 						onChange={(position: ToastPosition) => setNotifications({ position })}
 						columns="grid-cols-3"
 					/>
-					<div className="flex items-center gap-2">
+					<p className="text-xs text-muted-foreground mt-2">
+						Every position clears the title bar and the status strip, and swiping to
+						dismiss follows the edge the stack sits on.
+					</p>
+					<div className="flex items-center gap-2 mt-3">
 						<Button
 							variant="outline"
 							size="sm"
@@ -103,22 +118,10 @@ export default function NotificationsPanel() {
 								: "Fires a sample notification with the settings below."}
 						</p>
 					</div>
-				</CardContent>
-			</Card>
+				</div>
 
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Clock className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Duration</CardTitle>
-					</div>
-					<CardDescription>
-						Scales how long notifications stay. Severity still sets the ratio - a
-						failure outlasts a confirmation at every setting - and the timer pauses
-						while you hover, focus or leave the window.
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
+				<div>
+					<Eyebrow className="mb-2">Duration</Eyebrow>
 					<OptionButtons
 						options={TOAST_DURATION_SCALES.map((d) => ({
 							value: d.value,
@@ -131,22 +134,15 @@ export default function NotificationsPanel() {
 						}
 						columns="grid-cols-4"
 					/>
-				</CardContent>
-			</Card>
+					<p className="text-xs text-muted-foreground mt-2">
+						Scales how long notifications stay. Severity still sets the ratio - a
+						failure outlasts a confirmation at every setting - and the timer pauses
+						while you hover, focus or leave the window.
+					</p>
+				</div>
 
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Layers className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Stack size</CardTitle>
-					</div>
-					<CardDescription>
-						How many notifications may stack before the oldest is dropped. {MAX_TOASTS}{" "}
-						is what fits without the top of the stack running off screen; above that,
-						the oldest can become unreachable.
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
+				<div>
+					<Eyebrow className="mb-2">Stack size</Eyebrow>
 					<OptionButtons
 						options={TOAST_STACK_OPTIONS.map((o) => ({
 							value: o.value,
@@ -156,21 +152,15 @@ export default function NotificationsPanel() {
 						onChange={(maxVisible: number) => setNotifications({ maxVisible })}
 						columns="grid-cols-3"
 					/>
-				</CardContent>
-			</Card>
+					<p className="text-xs text-muted-foreground mt-2">
+						How many notifications may stack before the oldest is dropped. {MAX_TOASTS}{" "}
+						is what fits without the top of the stack running off screen; above that,
+						the oldest can become unreachable.
+					</p>
+				</div>
 
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<VolumeX className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Show</CardTitle>
-					</div>
-					<CardDescription>
-						The least severe notification worth interrupting you for. Anything below the
-						line is dropped rather than queued.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-3">
+				<div>
+					<Eyebrow className="mb-2">Show</Eyebrow>
 					<OptionButtons
 						options={TOAST_SEVERITY_FLOORS.map((f) => ({
 							value: f.value,
@@ -183,18 +173,22 @@ export default function NotificationsPanel() {
 						}
 						columns="grid-cols-4"
 					/>
+					<p className="text-xs text-muted-foreground mt-2">
+						The least severe notification worth interrupting you for. Anything below the
+						line is dropped rather than queued.
+					</p>
 					{/*
 					 * Only the option that hides failures carries a warning, and it is
 					 * rendered rather than described in the option's own text so it is
 					 * visible after the choice is made, not only while browsing.
 					 */}
 					{severity?.warn && (
-						<p className="rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error-text">
+						<p className="mt-3 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error-text">
 							{severity.warn}
 						</p>
 					)}
-				</CardContent>
-			</Card>
-		</>
+				</div>
+			</CardContent>
+		</Card>
 	);
 }

@@ -247,7 +247,9 @@ describe("McpSettingsPanel cap copy", () => {
 	 * other row's copy.
 	 */
 	function capDescription(label: string): string {
-		const row = screen.getByLabelText(label).closest("div");
+		// `data-setting-row` is the shared NumberSettingRow's own container, so
+		// this reaches the description of *this* cap and no other.
+		const row = screen.getByLabelText(label).closest("[data-setting-row]");
 		const text = row?.querySelector("p")?.textContent ?? "";
 		expect(text.length).toBeGreaterThan(0);
 		return text;
@@ -278,7 +280,10 @@ describe("McpSettingsPanel cap copy", () => {
 		// more would be an input whose value silently comes back lower.
 		expect(screen.getByLabelText("Max RPS")).toHaveAttribute("max", "1000000");
 		expect(screen.getByLabelText("Max concurrency")).toHaveAttribute("max", "10000");
-		expect(screen.getByLabelText("Max duration (seconds)")).toHaveAttribute("max", "86400");
+		// The unit moved out of the label and into the input's suffix, so the
+		// label is now "Max duration" - one place per unit, per the settings
+		// voice conventions.
+		expect(screen.getByLabelText("Max duration")).toHaveAttribute("max", "86400");
 		expect(screen.getByLabelText("Max iterations")).toHaveAttribute("max", "100000000");
 	});
 

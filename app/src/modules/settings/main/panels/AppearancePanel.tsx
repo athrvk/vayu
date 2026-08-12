@@ -14,17 +14,7 @@
  * {@link ClientSettingsPanel} by the app-settings registry.
  */
 
-import {
-	Monitor,
-	Sun,
-	Moon,
-	SunMoon,
-	CheckCircle2,
-	SwatchBook,
-	Type,
-	Maximize2,
-	Squircle,
-} from "lucide-react";
+import { Monitor, Sun, Moon, SunMoon, SwatchBook, Type, Maximize2, Squircle } from "lucide-react";
 import {
 	Button,
 	Card,
@@ -54,7 +44,7 @@ import {
 } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 import { modKey } from "@/lib/platform";
-import { ToggleRow } from "./SettingControls";
+import { OptionButtons, ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
 // Vayu-flavored preview: an HTTP method, path, status, and latency - mixed case
@@ -118,23 +108,15 @@ export default function AppearancePanel() {
 							<Skeleton className="h-24 flex-1" />
 						</div>
 					) : (
-						<div className="grid grid-cols-3 gap-3">
-							{themeOptions.map((option) => {
+						<OptionButtons
+							options={themeOptions.map((option) => {
 								const Icon = option.icon;
-								const isSelected = themeSource === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setTheme(option.value)}
-										className={cn(
-											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<div
+								return {
+									value: option.value,
+									label: option.label,
+									description: option.description,
+									preview: (isSelected) => (
+										<span
 											className={cn(
 												"w-10 h-10 rounded-full flex items-center justify-center",
 												isSelected
@@ -143,27 +125,14 @@ export default function AppearancePanel() {
 											)}
 										>
 											<Icon className="w-5 h-5" />
-										</div>
-										<div className="text-center">
-											<p
-												className={cn(
-													"text-sm font-medium",
-													isSelected && "text-primary"
-												)}
-											>
-												{option.label}
-											</p>
-											<p className="text-xs text-muted-foreground mt-0.5">
-												{option.description}
-											</p>
-										</div>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
+										</span>
+									),
+								};
 							})}
-						</div>
+							value={themeSource}
+							onChange={setTheme}
+							columns="grid-cols-3"
+						/>
 					)}
 				</CardContent>
 			</Card>
@@ -191,59 +160,36 @@ export default function AppearancePanel() {
 							<Skeleton className="h-28" />
 						</div>
 					) : (
-						<div className="grid grid-cols-3 gap-3">
-							{COLOR_SCHEMES.map((option) => {
+						<OptionButtons
+							options={COLOR_SCHEMES.map((option) => {
 								const Icon = option.icon;
-								const isSelected = colorScheme === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setColorScheme(option.value)}
-										className={cn(
-											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<div className="flex items-center gap-2">
-											{/* Swatch derives from the scheme's own accent
-											    token so it can never drift from reality.
-											    data-color-scheme (+ dark) scopes --primary
-											    to this scheme regardless of the active one. */}
-											<div
-												data-color-scheme={option.value}
-												className={cn(
-													"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
-													isDark && "dark",
-													isSelected &&
-														"ring-2 ring-offset-2 ring-primary ring-offset-background"
-												)}
-											>
-												<Icon className="w-4 h-4 text-primary-foreground" />
-											</div>
-										</div>
-										<div className="text-center">
-											<p
-												className={cn(
-													"text-sm font-medium",
-													isSelected && "text-primary"
-												)}
-											>
-												{option.label}
-											</p>
-											<p className="text-xs text-muted-foreground mt-0.5">
-												{option.description}
-											</p>
-										</div>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
+								return {
+									value: option.value,
+									label: option.label,
+									description: option.description,
+									/* Swatch derives from the scheme's own accent token
+									   so it can never drift from reality.
+									   data-color-scheme (+ dark) scopes --primary to
+									   this scheme regardless of the active one. */
+									preview: (isSelected) => (
+										<span
+											data-color-scheme={option.value}
+											className={cn(
+												"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
+												isDark && "dark",
+												isSelected &&
+													"ring-2 ring-offset-2 ring-primary ring-offset-background"
+											)}
+										>
+											<Icon className="w-4 h-4 text-primary-foreground" />
+										</span>
+									),
+								};
 							})}
-						</div>
+							value={colorScheme}
+							onChange={setColorScheme}
+							columns="grid-cols-3"
+						/>
 					)}
 				</CardContent>
 			</Card>
@@ -316,37 +262,24 @@ export default function AppearancePanel() {
 							<Squircle className="w-3.5 h-3.5" />
 							Roundedness
 						</Eyebrow>
-						<div className="grid grid-cols-3 gap-3">
-							{UI_RADII.map((option) => {
-								const isSelected = radius === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setRadius(option.value)}
-										className={cn(
-											"relative flex flex-col items-start gap-1.5 p-3 rounded-lg border-2 text-left transition-colors",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<span
-											className="h-6 w-9 border-2 border-muted-foreground/40 bg-muted"
-											style={{ borderRadius: option.radius }}
-											aria-hidden
-										/>
-										<span className="text-sm font-medium">{option.label}</span>
-										<span className="text-xs text-muted-foreground">
-											{option.description}
-										</span>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
-							})}
-						</div>
+						<OptionButtons
+							options={UI_RADII.map((option) => ({
+								value: option.value,
+								label: option.label,
+								description: option.description,
+								preview: () => (
+									<span
+										className="h-6 w-9 border-2 border-muted-foreground/40 bg-muted"
+										style={{ borderRadius: option.radius }}
+										aria-hidden
+									/>
+								),
+							}))}
+							value={radius}
+							onChange={setRadius}
+							columns="grid-cols-3"
+							align="start"
+						/>
 					</div>
 
 					<div className="border-t border-border pt-4">

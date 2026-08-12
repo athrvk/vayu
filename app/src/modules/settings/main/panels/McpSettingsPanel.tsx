@@ -66,6 +66,7 @@ import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { Callout } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { NumberSettingRow, ToggleRow } from "./SettingControls";
 
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
@@ -229,6 +230,8 @@ function CopyButton({
 interface CapField {
 	key: "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
 	label: string;
+	/** Rendered as the input's suffix - units live there once, not in the label. */
+	unit?: string;
 	description: string;
 	/**
 	 * The highest value this cap may be set to. The main process holds the cap
@@ -247,6 +250,7 @@ const CAP_FIELDS: CapField[] = [
 	{
 		key: "maxRps",
 		label: "Max RPS",
+		unit: "req/s",
 		description:
 			"Ceiling on the request rate an agent may ask for. Only a Constant RPS run carries a rate - the closed-loop modes are held by Max concurrency and Max iterations instead.",
 		ceiling: LOAD_TEST_CEILING_BOUNDS.rps.MAX,
@@ -260,7 +264,8 @@ const CAP_FIELDS: CapField[] = [
 	},
 	{
 		key: "maxDurationSeconds",
-		label: "Max duration (seconds)",
+		label: "Max duration",
+		unit: "sec",
 		description:
 			"Ceiling on how long a load run may last. An iterations run stops on a count and never reads a duration, so Max iterations is what bounds that one.",
 		ceiling: LOAD_TEST_CEILING_BOUNDS.durationSeconds.MAX,
@@ -283,7 +288,6 @@ export default function McpSettingsPanel() {
 	const [config, setConfig] = useState<McpSafetyConfig | null>(null);
 	const [tools, setTools] = useState<McpToolInfo[]>([]);
 	const [newHost, setNewHost] = useState("");
-	const [capDrafts, setCapDrafts] = useState<Partial<Record<CapField["key"], string>>>({});
 	// Nothing to wait for outside Electron, where there is no IPC to call.
 	const [isLoading, setIsLoading] = useState(hasElectron);
 	const [connecting, setConnecting] = useState<McpConnectClient | null>(null);
@@ -468,20 +472,18 @@ export default function McpSettingsPanel() {
 		[config, persist]
 	);
 
+	/*
+	 * The draft lives in the row primitive now, so this only decides whether the
+	 * committed number is worth an IPC round trip: zero and negatives are held
+	 * back rather than sent for the main process to clamp, and an unchanged
+	 * value is not re-persisted.
+	 */
 	const commitCap = useCallback(
-		(key: CapField["key"]) => {
-			setCapDrafts((prev) => {
-				const raw = prev[key];
-				const next = { ...prev };
-				delete next[key];
-				if (raw !== undefined && config) {
-					const n = parseInt(raw, 10);
-					if (!Number.isNaN(n) && n > 0 && n !== config[key]) {
-						void persist({ [key]: n });
-					}
-				}
-				return next;
-			});
+		(key: CapField["key"], raw: string) => {
+			if (!config) return;
+			const n = parseInt(raw, 10);
+			if (Number.isNaN(n) || n <= 0 || n === config[key]) return;
+			void persist({ [key]: n });
 		},
 		[config, persist]
 	);
@@ -581,23 +583,14 @@ export default function McpSettingsPanel() {
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{/* Server on/off */}
-					<div className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/30 px-3 py-2.5">
-						<div>
-							<Label className="text-sm">Enable MCP server</Label>
-							<p className="text-xs text-muted-foreground mt-0.5">
-								On by default: while Vayu is running, a connected agent can reach
-								the endpoint below. When off, the endpoint stops accepting
-								connections and connected agents get a clean “start Vayu” error.
-								Your choice persists across restarts.
-							</p>
-						</div>
-						<Switch
-							checked={enabled}
-							onCheckedChange={(checked) => void toggleEnabled(checked)}
-							disabled={isLoading || !hasElectron || !status}
-							aria-label="Enable MCP server"
-						/>
-					</div>
+					<ToggleRow
+						className="rounded-md border border-border bg-muted/30 px-3 py-2.5"
+						label="Enable MCP server"
+						description="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, the endpoint stops accepting connections and connected agents get a clean “start Vayu” error. Your choice persists across restarts."
+						checked={enabled}
+						onChange={(checked) => void toggleEnabled(checked)}
+						disabled={isLoading || !hasElectron || !status}
+					/>
 
 					{/* Enabled but not listening - usually a port conflict. Offer a retry. */}
 					{!isLoading && enabled && !running && (
@@ -695,8 +688,9 @@ export default function McpSettingsPanel() {
 							const allOn = enabledCount === catTools.length;
 							return (
 								<div key={cat.id}>
-									<div className="flex items-center justify-between gap-4 mb-2">
-										<div>
+									<ToggleRow
+										className="mb-2"
+										label={
 											<div className="flex items-center gap-2">
 												<span className="text-sm font-semibold">
 													{cat.label}
@@ -705,46 +699,36 @@ export default function McpSettingsPanel() {
 													{enabledCount}/{catTools.length} on
 												</span>
 											</div>
-											<p className="text-xs text-muted-foreground mt-0.5">
-												{cat.description}
-											</p>
-										</div>
-										<Switch
-											checked={allOn}
-											onCheckedChange={(checked) =>
-												setToolsEnabled(names, checked)
-											}
-											disabled={!config}
-											title="Toggle all in this group"
-										/>
-									</div>
+										}
+										ariaLabel={`Enable all ${cat.label} tools`}
+										description={cat.description}
+										checked={allOn}
+										onChange={(checked) => setToolsEnabled(names, checked)}
+										disabled={!config}
+										title="Toggle all in this group"
+									/>
 									<div className="space-y-1 border-l border-border pl-3">
 										{catTools.map((tool) => {
 											const on = !(config?.disabledTools ?? []).includes(
 												tool.name
 											);
 											return (
-												<div
+												<ToggleRow
 													key={tool.name}
-													className="flex items-center justify-between gap-4 py-1"
-												>
-													<div className="min-w-0">
+													className="py-1"
+													label={
 														<code className="text-xs font-mono">
 															{tool.name}
 														</code>
-														<p className="text-xs text-muted-foreground mt-0.5">
-															{tool.description}
-														</p>
-													</div>
-													<Switch
-														checked={on}
-														onCheckedChange={(checked) =>
-															setToolsEnabled([tool.name], checked)
-														}
-														disabled={!config}
-														aria-label={`Enable tool ${tool.name}`}
-													/>
-												</div>
+													}
+													ariaLabel={`Enable tool ${tool.name}`}
+													description={tool.description}
+													checked={on}
+													onChange={(checked) =>
+														setToolsEnabled([tool.name], checked)
+													}
+													disabled={!config}
+												/>
 											);
 										})}
 									</div>
@@ -776,21 +760,13 @@ export default function McpSettingsPanel() {
 				</CardHeader>
 				<CardContent className="space-y-3">
 					{/* Allow all hosts */}
-					<div className="flex items-center justify-between gap-4">
-						<div>
-							<Label className="text-sm">Allow all hosts</Label>
-							<p className="text-xs text-muted-foreground mt-0.5">
-								Bypass the allowlist and let agents target any host. Reduces safety
-								- leave off unless you trust the agent.
-							</p>
-						</div>
-						<Switch
-							checked={config?.allowAll ?? false}
-							onCheckedChange={(checked) => void persist({ allowAll: checked })}
-							disabled={!config}
-							aria-label="Allow all hosts"
-						/>
-					</div>
+					<ToggleRow
+						label="Allow all hosts"
+						description="Bypass the allowlist and let agents target any host. Reduces safety - leave off unless you trust the agent."
+						checked={config?.allowAll ?? false}
+						onChange={(checked) => void persist({ allowAll: checked })}
+						disabled={!config}
+					/>
 
 					{config?.allowAll && (
 						<Callout severity="warning" title="All hosts are allowed">
@@ -878,42 +854,27 @@ export default function McpSettingsPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
-					{CAP_FIELDS.map((field) => (
-						<div key={field.key} className="flex items-center justify-between gap-4">
-							<div>
-								<Label className="text-sm">{field.label}</Label>
-								<p className="text-xs text-muted-foreground mt-0.5">
-									{field.description}
-								</p>
-							</div>
-							{isLoading ? (
-								<Skeleton className="h-9 w-28 shrink-0" />
-							) : (
-								<Input
-									type="number"
-									aria-label={field.label}
-									min={1}
-									max={field.ceiling}
-									value={
-										capDrafts[field.key] ??
-										(config ? String(config[field.key]) : "")
-									}
-									onChange={(e) =>
-										setCapDrafts((prev) => ({
-											...prev,
-											[field.key]: e.target.value,
-										}))
-									}
-									onBlur={() => commitCap(field.key)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") e.currentTarget.blur();
-									}}
-									className="w-28 shrink-0"
-									disabled={!config}
-								/>
-							)}
-						</div>
-					))}
+					{CAP_FIELDS.map((field) =>
+						isLoading ? (
+							<Skeleton key={field.key} className="h-16 w-full" />
+						) : (
+							<NumberSettingRow
+								key={field.key}
+								label={field.label}
+								description={field.description}
+								value={config ? String(config[field.key]) : ""}
+								// Blur, not every keystroke: each commit crosses IPC,
+								// is re-sanitized by the main process and is applied to
+								// the live server.
+								commit="blur"
+								onCommit={(next) => commitCap(field.key, next)}
+								unit={field.unit}
+								min="1"
+								max={String(field.ceiling)}
+								disabled={!config}
+							/>
+						)
+					)}
 				</CardContent>
 			</Card>
 

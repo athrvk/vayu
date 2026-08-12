@@ -1,0 +1,145 @@
+/**
+ * @vitest-environment jsdom
+ */
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * ~45 engine entries and 7 app panels were findable only by guessing which
+ * category owned them - there was no search anywhere in Settings. These
+ * assertions are about what the search *does*: an entry has no row of its own
+ * in the normal tree, so finding one has to select its category and say which
+ * entry was meant.
+ */
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import SettingsCategoryTree from "./SettingsCategoryTree";
+import { useTabsStore } from "@/stores";
+import { useSettingsStore } from "@/modules/settings/settings-store";
+import type { ConfigEntry } from "@/types";
+
+const base = {
+	type: "integer" as const,
+	value: "1",
+	default: "1",
+	requiresRestart: false,
+	advanced: false,
+	updatedAt: 0,
+};
+
+const entries: ConfigEntry[] = [
+	{
+		...base,
+		key: "dbCacheSize",
+		label: "Cache Size",
+		description: "Memory SQLite keeps for pages it has already read.",
+		category: "database_performance",
+	},
+	{
+		...base,
+		key: "defaultTimeout",
+		label: "Default Timeout",
+		description: "How long a request waits before it is abandoned.",
+		category: "network_performance",
+	},
+];
+
+const configQuery = {
+	data: { entries } as unknown,
+	isLoading: false,
+	error: null as Error | null,
+	refetch: vi.fn(),
+};
+
+vi.mock("@/queries", () => ({
+	useConfigQuery: () => configQuery,
+}));
+
+function renderTree() {
+	const qc = new QueryClient();
+	return render(
+		<QueryClientProvider client={qc}>
+			<SettingsCategoryTree />
+		</QueryClientProvider>
+	);
+}
+
+const search = () => screen.getByLabelText("Search settings");
+
+beforeEach(() => {
+	cleanup();
+	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	useSettingsStore.setState({ selectedCategory: null, highlightedKey: null });
+});
+
+describe("settings search", () => {
+	it("shows both catalogue sections until something is typed", () => {
+		renderTree();
+
+		expect(screen.getByText("App Settings")).toBeInTheDocument();
+		expect(screen.getByText("Engine Settings")).toBeInTheDocument();
+		// Mutation check: an empty query must mean "not searching", not "no
+		// matches" - the sections are what the drawer shows by default.
+		expect(screen.queryByText(/result/)).not.toBeInTheDocument();
+	});
+
+	it("finds an engine entry by its label and replaces the sections with results", () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "cache" } });
+
+		expect(screen.getByText("Cache Size")).toBeInTheDocument();
+		expect(screen.getByText("1 result")).toBeInTheDocument();
+		expect(screen.queryByText("App Settings")).not.toBeInTheDocument();
+		// The subtitle names the owning category and the engine key, so two
+		// similarly-named settings are told apart before the click.
+		expect(screen.getByText(/Database Performance · dbCacheSize/)).toBeInTheDocument();
+	});
+
+	it("finds a setting by its key, and by words only its description carries", () => {
+		renderTree();
+
+		fireEvent.change(search(), { target: { value: "defaultTimeout" } });
+		expect(screen.getByText("Default Timeout")).toBeInTheDocument();
+
+		fireEvent.change(search(), { target: { value: "abandoned" } });
+		expect(screen.getByText("Default Timeout")).toBeInTheDocument();
+	});
+
+	it("selects the owning category and names the entry to reveal", () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "cache" } });
+		fireEvent.click(screen.getByText("Cache Size"));
+
+		const state = useSettingsStore.getState();
+		expect(state.selectedCategory).toBe("database_performance");
+		// Without the key the view would open on the right category and leave
+		// the user to find the row among 45 of them.
+		expect(state.highlightedKey).toBe("dbCacheSize");
+		expect(useTabsStore.getState().openTabs[0].type).toBe("settings");
+	});
+
+	it("selects an app panel with nothing to highlight - the panel is the result", () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "appearance" } });
+		fireEvent.click(screen.getByText("Appearance"));
+
+		const state = useSettingsStore.getState();
+		expect(state.selectedCategory).toBe("appearance");
+		expect(state.highlightedKey).toBeNull();
+	});
+
+	it("says so when nothing matches, and the clear button restores the sections", () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "zzzz" } });
+		expect(screen.getByText(/No settings match/)).toBeInTheDocument();
+
+		fireEvent.click(screen.getByLabelText("Clear search"));
+		expect(screen.getByText("App Settings")).toBeInTheDocument();
+	});
+});

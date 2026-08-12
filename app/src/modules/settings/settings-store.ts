@@ -19,13 +19,24 @@ interface SettingsState {
 	// Selected category in sidebar
 	selectedCategory: SettingsCategory | null;
 
+	/**
+	 * The engine entry a search result asked for, read by `SettingsMain` to
+	 * scroll that card into view and outline it. Cleared as soon as it has been
+	 * shown - it is a one-shot instruction, not a selection that persists.
+	 */
+	highlightedKey: string | null;
+
 	// Actions
-	setSelectedCategory: (category: SettingsCategory | null) => void;
+	setSelectedCategory: (category: SettingsCategory | null, highlightedKey?: string) => void;
+	clearHighlight: () => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
 	// Default to a real category so the settings tab opens with content
 	selectedCategory: "appearance",
+	highlightedKey: null,
 
-	setSelectedCategory: (category) => set({ selectedCategory: category }),
+	setSelectedCategory: (category, highlightedKey) =>
+		set({ selectedCategory: category, highlightedKey: highlightedKey ?? null }),
+	clearHighlight: () => set({ highlightedKey: null }),
 }));

@@ -12,12 +12,14 @@
  * Shows a form with all configurable entries for that category.
  */
 
+/* global setTimeout, clearTimeout */
+
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useEngineStore } from "@/stores";
+import { useEngineStore, useToastStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
-import type { ConfigEntry, EngineSettingsCategory } from "@/types";
+import type { ConfigEntry } from "@/types";
 import {
 	Settings,
 	Save,
@@ -49,9 +51,17 @@ import {
 import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
-import { getAppPanel, isClientCategory } from "./app-panels";
+import { DefaultValueLine, NumberSettingRow } from "./panels/SettingControls";
+import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
+import { getEngineCategory } from "../engine-categories";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
+
+/** Stated beside the Save bar, so the engine view's save model is on screen too. */
+const ENGINE_SAVE_NOTE = "Changes are staged here and written when you save.";
+
+/** How long a searched-for setting stays outlined after the view scrolls to it. */
+const HIGHLIGHT_MS = 2500;
 
 /**
  * Check if a config entry requires a restart when changed
@@ -64,33 +74,6 @@ import { useEngineRestart } from "@/hooks/useEngineRestart";
  * the single statement.
  */
 const isRestartRequired = (entry: ConfigEntry): boolean => entry.requiresRestart;
-
-// Client (app) categories render their own header via ClientSettingsPanel; only
-// the engine categories are titled here (this map drives the engine config view).
-const CATEGORY_TITLES: Record<EngineSettingsCategory, { title: string; description: string }> = {
-	general_engine: {
-		title: "General & Engine",
-		description: "Core settings defining the application's base capacity and threading model",
-	},
-	database_performance: {
-		title: "Database Performance",
-		description:
-			"SQLite optimization settings for high-throughput load testing and result storage",
-	},
-	network_performance: {
-		title: "Network & Connectivity",
-		description: "Low-level networking tuning for throughput, DNS, and connection persistence",
-	},
-	scripting_sandbox: {
-		title: "Scripting Environment",
-		description: "Configuration for the QuickJS sandbox execution, limits, and debugging",
-	},
-	observability: {
-		title: "Observability & Data",
-		description:
-			"Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits",
-	},
-};
 
 interface EditedValue {
 	value: string;
@@ -156,9 +139,10 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 }
 
 export default function SettingsMain() {
-	const { selectedCategory } = useSettingsStore();
+	const { selectedCategory, highlightedKey, clearHighlight } = useSettingsStore();
 	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
 		useEngineStore();
+	const showToast = useToastStore((s) => s.showToast);
 	const {
 		startSaving,
 		completeSaveThenIdle,
@@ -192,22 +176,30 @@ export default function SettingsMain() {
 	// had just published.
 	const markedPendingRef = useRef(false);
 
-	// Filter entries by selected category (calculate before early returns)
+	/*
+	 * Filter entries by selected category (calculate before early returns).
+	 *
+	 * Sorted by label, not by key: the key is an internal name, so key order put
+	 * `dbBusyTimeout` next to `dbCacheSize` but `maxScenarioSteps` nowhere near
+	 * `maxStepsPerIteration`. Seed insertion order was the other candidate and
+	 * cannot be trusted - the engine writes a changed setting with
+	 * `INSERT OR REPLACE` (`Database::set_config`), which assigns the row a new
+	 * rowid, so saving one value would reshuffle the screen.
+	 */
 	const categoryEntries =
 		selectedCategory && configResponse?.entries
 			? configResponse.entries
 					.filter((entry) => entry.category === selectedCategory)
-					.sort((a, b) => a.key.localeCompare(b.key))
+					.sort((a, b) => a.label.localeCompare(b.label))
 			: [];
 	// The engine marks its internals - a lock pragma, a watchdog's backoff -
 	// with `advanced`. They stay reachable, but below the settings people
 	// actually tune rather than interleaved with them by key order.
 	const primaryEntries = categoryEntries.filter((entry) => !entry.advanced);
 	const advancedEntries = categoryEntries.filter((entry) => entry.advanced);
-	const categoryConfig =
-		selectedCategory && !isClientCategory(selectedCategory)
-			? CATEGORY_TITLES[selectedCategory]
-			: null;
+	const categoryConfig = isClientCategory(selectedCategory)
+		? undefined
+		: getEngineCategory(selectedCategory);
 
 	// Check if there are unsaved changes (calculate before early returns)
 	const hasChanges = Object.keys(editedValues).length > 0;
@@ -242,15 +234,21 @@ export default function SettingsMain() {
 	 * the time the write lands. Invalid entries are dropped here rather than
 	 * refused: `handleSave` still refuses the whole batch (the Save button is
 	 * disabled while any value is invalid and the inline error says why), but a
-	 * flush has no screen left to show that error on, so it saves what it can.
+	 * flush has no screen left to show that error on, so it saves what it can -
+	 * and says so, because a value that was typed and then vanished with no
+	 * explanation is the silent discard this replaces.
 	 */
 	const saveEntries = useCallback(
 		async (entries: Record<string, EditedValue>) => {
 			const updates: Record<string, string> = {};
 			const restartKeys: string[] = [];
+			let discarded = 0;
 
 			for (const [key, edited] of Object.entries(entries)) {
-				if (!edited.isValid) continue;
+				if (!edited.isValid) {
+					discarded++;
+					continue;
+				}
 				updates[key] = edited.value;
 
 				// Check if this config requires restart
@@ -258,6 +256,12 @@ export default function SettingsMain() {
 				if (entry && isRestartRequired(entry)) {
 					restartKeys.push(key);
 				}
+			}
+			if (discarded > 0) {
+				showToast(
+					`${discarded} invalid change${discarded === 1 ? " was" : "s were"} discarded.`,
+					"warning"
+				);
 			}
 			if (Object.keys(updates).length === 0) return;
 
@@ -298,6 +302,7 @@ export default function SettingsMain() {
 			completeSaveThenIdle,
 			failSave,
 			addRestartRequiredKey,
+			showToast,
 		]
 	);
 
@@ -341,6 +346,26 @@ export default function SettingsMain() {
 			if (Object.keys(pending).length > 0) void saveEntriesRef.current?.(pending);
 		};
 	}, [selectedCategory]);
+
+	/*
+	 * Reveal the entry a sidebar search result picked.
+	 *
+	 * An entry inside the collapsed Advanced group has to be uncollapsed to be
+	 * revealed at all, which is derived rather than pushed into state: a
+	 * `setAdvancedOpen` here would fight the category switch that closes it.
+	 */
+	const highlightedRef = useRef<HTMLDivElement | null>(null);
+	const highlightedIsAdvanced =
+		highlightedKey !== null && advancedEntries.some((entry) => entry.key === highlightedKey);
+	const showAdvanced = advancedOpen || highlightedIsAdvanced;
+
+	useEffect(() => {
+		if (!highlightedKey) return;
+		// jsdom has no layout and does not implement this, hence the optional call.
+		highlightedRef.current?.scrollIntoView?.({ block: "center" });
+		const timer = setTimeout(clearHighlight, HIGHLIGHT_MS);
+		return () => clearTimeout(timer);
+	}, [highlightedKey, clearHighlight]);
 
 	// Keep handleSave ref updated
 	useEffect(() => {
@@ -404,7 +429,11 @@ export default function SettingsMain() {
 	if (appPanel) {
 		const Panel = appPanel.Component;
 		return (
-			<ClientSettingsPanel title={appPanel.label} description={appPanel.description}>
+			<ClientSettingsPanel
+				title={appPanel.label}
+				description={appPanel.description}
+				saveNote={appPanel.saveNote ?? DEFAULT_SAVE_NOTE}
+			>
 				<Panel />
 			</ClientSettingsPanel>
 		);
@@ -509,13 +538,27 @@ export default function SettingsMain() {
 		}));
 	};
 
-	// Reset a single value
-	const handleReset = (entry: ConfigEntry) => {
+	/**
+	 * Drop a staged edit, putting the field back to the saved value.
+	 *
+	 * Called Revert on screen. It used to be called Reset, next to a "Default:"
+	 * line it had nothing to do with - so the one control that looked like the
+	 * way back to the default was the one control that was not.
+	 */
+	const handleRevert = (entry: ConfigEntry) => {
 		setEditedValues((prev) => {
 			const next = { ...prev };
 			delete next[entry.key];
 			return next;
 		});
+	};
+
+	/** Stage the shipped default for one entry (written on the next save). */
+	const handleResetToDefault = (entry: ConfigEntry) => {
+		setEditedValues((prev) => ({
+			...prev,
+			[entry.key]: { value: entry.default, isValid: true },
+		}));
 	};
 
 	// Reset to defaults
@@ -553,21 +596,24 @@ export default function SettingsMain() {
 		const edited = editedValues[entry.key];
 		const isModified = edited !== undefined;
 		const hasError = edited?.error;
-		// Per entry, so `aria-describedby` never points at another
-		// setting's message - and only rendered when there is one,
-		// so the reference is never dangling.
-		const errorId = `setting-${entry.key}-error`;
 		const needsRestart = isRestartRequired(entry);
 		const isPendingRestart = restartRequiredKeys.includes(entry.key);
+		const isHighlighted = highlightedKey === entry.key;
+		const isNumeric = entry.type === "integer" || entry.type === "number";
+		const defaultDisplay = isSizeConfig(entry.key)
+			? formatBytes(parseInt(entry.default, 10) || 0)
+			: undefined;
 
 		return (
 			<Card
 				key={entry.key}
+				ref={isHighlighted ? highlightedRef : undefined}
 				className={cn(
 					"transition-colors",
 					isModified && !hasError && "border-primary/50",
 					hasError && "border-destructive/50",
-					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
+					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10",
+					isHighlighted && "ring-2 ring-primary"
 				)}
 			>
 				<CardHeader className="pb-3">
@@ -607,15 +653,16 @@ export default function SettingsMain() {
 							<Button
 								variant="ghost"
 								size="sm"
-								onClick={() => handleReset(entry)}
-								className="text-xs h-7 px-2"
+								onClick={() => handleRevert(entry)}
+								className="text-xs h-7 px-2 shrink-0"
+								title="Discard this staged change"
 							>
-								Reset
+								Revert
 							</Button>
 						)}
 					</div>
 				</CardHeader>
-				<CardContent>
+				<CardContent className="space-y-2">
 					{entry.type === "boolean" ? (
 						<div className="flex items-center gap-3">
 							<Switch
@@ -656,82 +703,55 @@ export default function SettingsMain() {
 								</SelectContent>
 							</Select>
 						) : null
+					) : isNumeric ? (
+						/*
+						 * `labelHidden`: the CardTitle above is the setting's name,
+						 * so a visible second copy would say it twice - but the
+						 * input still needs it as its accessible name.
+						 */
+						<NumberSettingRow
+							label={entry.label}
+							labelHidden
+							value={currentValue}
+							onDraftChange={(next) => handleValueChange(entry, next)}
+							integer={entry.type === "integer"}
+							min={entry.min}
+							max={entry.max}
+							unit={
+								isSizeConfig(entry.key)
+									? (getFormattedSize(entry) ?? undefined)
+									: undefined
+							}
+							rangeHint={
+								isSizeConfig(entry.key)
+									? formatSizeRange(entry.min, entry.max) || undefined
+									: undefined
+							}
+							error={hasError}
+							defaultValue={entry.default}
+							defaultDisplay={defaultDisplay}
+							onResetToDefault={() => handleResetToDefault(entry)}
+						/>
 					) : (
-						<div className="space-y-2">
-							<div className="flex items-center gap-2">
-								<div className="relative">
-									<Input
-										type={
-											entry.type === "integer" || entry.type === "number"
-												? "number"
-												: "text"
-										}
-										value={currentValue}
-										onChange={(e) => handleValueChange(entry, e.target.value)}
-										className={cn(
-											"max-w-xs",
-											hasError && "border-destructive",
-											isSizeConfig(entry.key) && "pr-16"
-										)}
-										placeholder={
-											isSizeConfig(entry.key) ? "Enter bytes" : undefined
-										}
-										// Same as the Switch above: the name is in
-										// the CardTitle, which nothing links to this
-										// input.
-										aria-label={entry.label}
-										/*
-										 * Out-of-range values were signalled by a
-										 * red border and a line of text sitting
-										 * loose beside the field - colour alone,
-										 * and a message the field did not point
-										 * at. `aria-invalid` states it, and
-										 * `aria-describedby` reads the reason out
-										 * with the field instead of leaving it to
-										 * be found.
-										 *
-										 * `|| undefined` so valid fields carry no
-										 * attribute at all, rather than a
-										 * misleading aria-invalid="false" on every
-										 * setting on the screen.
-										 */
-										aria-invalid={hasError ? true : undefined}
-										aria-describedby={hasError ? errorId : undefined}
-										min={entry.min}
-										max={entry.max}
-									/>
-									{isSizeConfig(entry.key) && getFormattedSize(entry) && (
-										<span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-											{getFormattedSize(entry)}
-										</span>
-									)}
-								</div>
-								{(entry.min || entry.max) && (
-									<span className="text-xs text-muted-foreground whitespace-nowrap">
-										{isSizeConfig(entry.key)
-											? formatSizeRange(entry.min, entry.max) || ""
-											: entry.min && entry.max
-												? `${entry.min} - ${entry.max}`
-												: entry.min
-													? `Min: ${entry.min}`
-													: `Max: ${entry.max}`}
-									</span>
-								)}
-							</div>
-							{hasError && (
-								<p id={errorId} className="text-xs text-destructive-text">
-									{edited.error}
-								</p>
-							)}
-							{currentValue !== entry.default && (
-								<p className="text-xs text-muted-foreground">
-									Default:{" "}
-									{isSizeConfig(entry.key)
-										? formatBytes(parseInt(entry.default, 10) || 0)
-										: entry.default}
-								</p>
-							)}
-						</div>
+						<Input
+							type="text"
+							value={currentValue}
+							onChange={(e) => handleValueChange(entry, e.target.value)}
+							className="max-w-xs"
+							// Same as the Switch above: the name is in the
+							// CardTitle, which nothing links to this input.
+							aria-label={entry.label}
+						/>
+					)}
+					{/* Numeric rows carry their own Default line (the primitive
+					    renders it); the other three types get it here so every
+					    engine setting has the same way back. */}
+					{!isNumeric && (
+						<DefaultValueLine
+							defaultValue={entry.default}
+							value={currentValue}
+							onReset={() => handleResetToDefault(entry)}
+						/>
 					)}
 				</CardContent>
 			</Card>
@@ -752,10 +772,13 @@ export default function SettingsMain() {
 			<div className="border-b border-border px-6 py-4 shrink-0">
 				<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 					<div>
-						<h1 className="text-xl font-semibold">{categoryConfig?.title}</h1>
+						<h1 className="text-xl font-semibold">{categoryConfig?.label}</h1>
 						<p className="text-sm text-muted-foreground mt-1">
 							{categoryConfig?.description}
 						</p>
+						{/* The engine half of the save-model story the app panels
+						    tell in their own header. */}
+						<p className="text-xs text-muted-foreground mt-1.5">{ENGINE_SAVE_NOTE}</p>
 					</div>
 					<div className="flex items-center gap-2">
 						<Button
@@ -795,13 +818,13 @@ export default function SettingsMain() {
 							<button
 								type="button"
 								onClick={() => setAdvancedOpen((open) => !open)}
-								aria-expanded={advancedOpen}
+								aria-expanded={showAdvanced}
 								className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 							>
 								<ChevronRight
 									className={cn(
 										"w-4 h-4 transition-transform",
-										advancedOpen && "rotate-90"
+										showAdvanced && "rotate-90"
 									)}
 									aria-hidden="true"
 								/>
@@ -810,7 +833,7 @@ export default function SettingsMain() {
 									({advancedEntries.length})
 								</span>
 							</button>
-							{advancedOpen && (
+							{showAdvanced && (
 								<div className="grid gap-4 mt-4">
 									{advancedEntries.map(renderEntryCard)}
 								</div>
