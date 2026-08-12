@@ -44,12 +44,22 @@ import {
 } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 import { modKey } from "@/lib/platform";
+import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
 // Vayu-flavored preview: an HTTP method, path, status, and latency - mixed case
 // and digits so the face's letterforms still read clearly.
 const UI_FONT_SAMPLE = "GET /users · 200 OK · 45ms";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const THEME_MODE = appSetting("theme-mode");
+const COLOR_SCHEME = appSetting("color-scheme");
+const UI_FONT = appSetting("ui-font");
+const UI_SCALE = appSetting("ui-scale");
+const ROUNDEDNESS = appSetting("roundedness");
+const REDUCED_MOTION = appSetting("reduced-motion");
 
 export default function AppearancePanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
@@ -89,11 +99,11 @@ export default function AppearancePanel() {
 	return (
 		<>
 			{/* Theme Mode Selection */}
-			<Card data-setting-anchor="theme-mode">
+			<Card data-setting-anchor={THEME_MODE.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SunMoon className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Theme Mode</CardTitle>
+						<CardTitle className="text-base">{THEME_MODE.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Sets the app&apos;s light or dark palette. System follows your operating
@@ -138,11 +148,11 @@ export default function AppearancePanel() {
 			</Card>
 
 			{/* Color Scheme Selection */}
-			<Card data-setting-anchor="color-scheme">
+			<Card data-setting-anchor={COLOR_SCHEME.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SwatchBook className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Color Scheme</CardTitle>
+						<CardTitle className="text-base">{COLOR_SCHEME.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Choose your preferred accent color. This affects buttons, highlights, and
@@ -206,8 +216,8 @@ export default function AppearancePanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div data-setting-anchor="ui-font">
-						<Eyebrow className="mb-2">Font</Eyebrow>
+					<div data-setting-anchor={UI_FONT.anchor}>
+						<Eyebrow className="mb-2">{UI_FONT.label}</Eyebrow>
 						<FontPicker
 							options={UI_FONTS}
 							value={font}
@@ -220,10 +230,10 @@ export default function AppearancePanel() {
 						/>
 					</div>
 
-					<div data-setting-anchor="ui-scale">
+					<div data-setting-anchor={UI_SCALE.anchor}>
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Maximize2 className="w-3.5 h-3.5" />
-							Scale
+							{UI_SCALE.label}
 						</Eyebrow>
 						<div className="flex items-center gap-3">
 							<input
@@ -257,10 +267,10 @@ export default function AppearancePanel() {
 						</p>
 					</div>
 
-					<div data-setting-anchor="roundedness">
+					<div data-setting-anchor={ROUNDEDNESS.anchor}>
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Squircle className="w-3.5 h-3.5" />
-							Roundedness
+							{ROUNDEDNESS.label}
 						</Eyebrow>
 						<OptionButtons
 							options={UI_RADII.map((option) => ({
@@ -284,10 +294,10 @@ export default function AppearancePanel() {
 
 					<div
 						className="border-t border-border pt-4"
-						data-setting-anchor="reduced-motion"
+						data-setting-anchor={REDUCED_MOTION.anchor}
 					>
 						<ToggleRow
-							label="Reduced motion"
+							label={REDUCED_MOTION.label}
 							description="Minimize animations and transitions across the app"
 							checked={reducedMotion}
 							onChange={setReducedMotion}

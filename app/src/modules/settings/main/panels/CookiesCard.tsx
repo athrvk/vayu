@@ -36,6 +36,11 @@ import {
 import { useCookiesQuery, useClearCookiesMutation, useEnvironmentsQuery } from "@/queries";
 import { useToastStore } from "@/stores";
 import type { CookieScope } from "@/types";
+import { appSetting } from "../app-settings";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const COOKIES = appSetting("cookies");
 
 /** What a scope is called once its id is resolved against the environments. */
 function scopeLabel(
@@ -89,11 +94,11 @@ export function CookiesCard() {
 	};
 
 	return (
-		<Card data-setting-anchor="cookies">
+		<Card data-setting-anchor={COOKIES.anchor}>
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<Cookie className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">Cookies</CardTitle>
+					<CardTitle className="text-base">{COOKIES.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Cookies the engine stores while you send requests, so a session survives to the

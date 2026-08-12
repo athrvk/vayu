@@ -33,9 +33,17 @@ import { useToastStore, useTabsStore } from "@/stores";
 import { useAllRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
+import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { UpdatesCard } from "./UpdatesCard";
 import { CookiesCard } from "./CookiesCard";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const AUTO_SAVE = appSetting("auto-save");
+const DATA_MANAGEMENT = appSetting("data-management");
+const STORAGE_PATHS = appSetting("storage-paths");
+const RESET = appSetting("reset-app-settings");
 
 interface AppPaths {
 	appDir: string;
@@ -124,11 +132,11 @@ export default function GeneralPanel() {
 			<UpdatesCard />
 
 			{/* Auto-save */}
-			<Card data-setting-anchor="auto-save">
+			<Card data-setting-anchor={AUTO_SAVE.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Save className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Auto-save</CardTitle>
+						<CardTitle className="text-base">{AUTO_SAVE.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Automatically save edits to requests after you stop typing. Manual save{" "}
@@ -161,11 +169,11 @@ export default function GeneralPanel() {
 			</Card>
 
 			{/* Data management */}
-			<Card data-setting-anchor="data-management">
+			<Card data-setting-anchor={DATA_MANAGEMENT.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Database className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Data management</CardTitle>
+						<CardTitle className="text-base">{DATA_MANAGEMENT.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Stored load-test runs and their metrics live in the engine database.
@@ -202,11 +210,11 @@ export default function GeneralPanel() {
 			<CookiesCard />
 
 			{/* Storage paths */}
-			<Card data-setting-anchor="storage-paths">
+			<Card data-setting-anchor={STORAGE_PATHS.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<FolderOpen className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Storage Paths</CardTitle>
+						<CardTitle className="text-base">{STORAGE_PATHS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						File system locations used by the application.
@@ -242,11 +250,11 @@ export default function GeneralPanel() {
 			</Card>
 
 			{/* Reset */}
-			<Card data-setting-anchor="reset-app-settings">
+			<Card data-setting-anchor={RESET.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<RotateCcw className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Reset app settings</CardTitle>
+						<CardTitle className="text-base">{RESET.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Restore every app preference to its default: appearance, editor, dashboard,

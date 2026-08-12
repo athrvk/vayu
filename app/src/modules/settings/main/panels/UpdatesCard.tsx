@@ -30,6 +30,11 @@ import { useState } from "react";
 import { ArrowUpCircle, Check, Copy, ExternalLink, Loader2, Power, RefreshCw } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import type { UpdateCheckResult } from "@/types/electron";
+import { appSetting } from "../app-settings";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const UPDATES = appSetting("updates");
 
 const APP_VERSION = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.0.0";
 
@@ -153,11 +158,11 @@ export function UpdatesCard() {
 	};
 
 	return (
-		<Card data-setting-anchor="updates">
+		<Card data-setting-anchor={UPDATES.anchor}>
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<ArrowUpCircle className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">Updates</CardTitle>
+					<CardTitle className="text-base">{UPDATES.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Vayu checks for new releases on its own; this asks right now.

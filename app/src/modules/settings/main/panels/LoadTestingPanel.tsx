@@ -29,13 +29,17 @@ import {
 	LOAD_TEST_CEILING_BOUNDS,
 	type LoadTestCeilingKey,
 } from "@/constants/load-test";
+import { appSetting, type AppSettingDescriptor } from "../app-settings";
 import { NumberSettingRow } from "./SettingControls";
 
 interface CeilingField {
 	key: LoadTestCeilingKey;
-	/** The row's `data-setting-anchor` - see `app-settings.ts`. */
-	anchor: string;
-	label: string;
+	/**
+	 * The catalogue entry that names this row: it carries both the label the
+	 * row prints and the `data-setting-anchor` a search result reveals, so the
+	 * two cannot be filled in separately - see `app-settings.ts`.
+	 */
+	setting: AppSettingDescriptor;
 	unit?: string;
 	description: string;
 }
@@ -48,31 +52,27 @@ interface CeilingField {
 const FIELDS: readonly CeilingField[] = [
 	{
 		key: "concurrency",
-		anchor: "load-max-connections",
-		label: "Max connections",
+		setting: appSetting("load-max-connections"),
 		description:
 			"Upper bound on the Connections field, and on where a ramp may start or finish. The engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
 	},
 	{
 		key: "rps",
-		anchor: "load-max-rate",
-		label: "Max target rate",
+		setting: appSetting("load-max-rate"),
 		unit: "req/s",
 		description:
 			"Upper bound on the Target rate field for Constant RPS runs. What a single desktop engine can actually reach depends on the target and your network long before this does.",
 	},
 	{
 		key: "durationSeconds",
-		anchor: "load-max-duration",
-		label: "Max duration",
+		setting: appSetting("load-max-duration"),
 		unit: "sec",
 		description:
 			"Upper bound on both Duration and Ramp duration. The default of one hour is a session; the ceiling of one day is the engine's own per-transfer limit.",
 	},
 	{
 		key: "iterations",
-		anchor: "load-max-requests",
-		label: "Max requests",
+		setting: appSetting("load-max-requests"),
 		description: "Upper bound on the Requests field for Fixed Iterations runs.",
 	},
 ];
@@ -120,8 +120,8 @@ export default function LoadTestingPanel() {
 					return (
 						<NumberSettingRow
 							key={field.key}
-							anchor={field.anchor}
-							label={field.label}
+							anchor={field.setting.anchor}
+							label={field.setting.label}
 							description={field.description}
 							value={String(ceilings[field.key])}
 							// Applies live: the next load dialog reads the store, so

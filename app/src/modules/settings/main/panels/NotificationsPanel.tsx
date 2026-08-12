@@ -40,7 +40,15 @@ import {
 	type ToastDurationScale,
 	type ToastSeverityFloor,
 } from "@/constants/toast";
+import { appSetting } from "../app-settings";
 import { OptionButtons } from "./SettingControls";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const POSITION = appSetting("toast-position");
+const DURATION = appSetting("toast-duration");
+const STACK_SIZE = appSetting("toast-stack");
+const SEVERITY = appSetting("toast-severity");
 
 /** Cycled so a repeated Preview shows the stack behaving, not one toast re-firing. */
 const PREVIEW_SEQUENCE = [
@@ -89,8 +97,8 @@ export default function NotificationsPanel() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-5">
-				<div data-setting-anchor="toast-position">
-					<Eyebrow className="mb-2">Position</Eyebrow>
+				<div data-setting-anchor={POSITION.anchor}>
+					<Eyebrow className="mb-2">{POSITION.label}</Eyebrow>
 					<OptionButtons
 						options={TOAST_POSITIONS.map((p) => ({ value: p.value, label: p.label }))}
 						value={notifications.position}
@@ -120,8 +128,8 @@ export default function NotificationsPanel() {
 					</div>
 				</div>
 
-				<div data-setting-anchor="toast-duration">
-					<Eyebrow className="mb-2">Duration</Eyebrow>
+				<div data-setting-anchor={DURATION.anchor}>
+					<Eyebrow className="mb-2">{DURATION.label}</Eyebrow>
 					<OptionButtons
 						options={TOAST_DURATION_SCALES.map((d) => ({
 							value: d.value,
@@ -141,8 +149,8 @@ export default function NotificationsPanel() {
 					</p>
 				</div>
 
-				<div data-setting-anchor="toast-stack">
-					<Eyebrow className="mb-2">Stack size</Eyebrow>
+				<div data-setting-anchor={STACK_SIZE.anchor}>
+					<Eyebrow className="mb-2">{STACK_SIZE.label}</Eyebrow>
 					<OptionButtons
 						options={TOAST_STACK_OPTIONS.map((o) => ({
 							value: o.value,
@@ -159,8 +167,8 @@ export default function NotificationsPanel() {
 					</p>
 				</div>
 
-				<div data-setting-anchor="toast-severity">
-					<Eyebrow className="mb-2">Show</Eyebrow>
+				<div data-setting-anchor={SEVERITY.anchor}>
+					<Eyebrow className="mb-2">{SEVERITY.label}</Eyebrow>
 					<OptionButtons
 						options={TOAST_SEVERITY_FLOORS.map((f) => ({
 							value: f.value,

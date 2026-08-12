@@ -34,7 +34,15 @@ import {
 	SLO_THRESHOLD_MIN_MS,
 	SLO_THRESHOLD_MAX_MS,
 } from "@/constants/client-settings";
+import { appSetting } from "../app-settings";
 import { NumberSettingRow, OptionButtons } from "./SettingControls";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const CHART_WINDOW = appSetting("chart-window");
+const CHART_GRANULARITY = appSetting("chart-granularity");
+const LIVE_REFRESH = appSetting("live-refresh");
+const SLO_THRESHOLD = appSetting("slo-threshold");
 
 export default function DashboardPanel() {
 	const { window: liveWindow, setWindow: setLiveWindow } = useLiveChartSettings();
@@ -61,8 +69,8 @@ export default function DashboardPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div data-setting-anchor="chart-window">
-						<Eyebrow className="mb-2">Chart window</Eyebrow>
+					<div data-setting-anchor={CHART_WINDOW.anchor}>
+						<Eyebrow className="mb-2">{CHART_WINDOW.label}</Eyebrow>
 						<OptionButtons
 							options={LIVE_WINDOW_OPTIONS.map((o) => ({
 								value: o.value,
@@ -77,8 +85,8 @@ export default function DashboardPanel() {
 						</p>
 					</div>
 
-					<div data-setting-anchor="chart-granularity">
-						<Eyebrow className="mb-2">Chart granularity</Eyebrow>
+					<div data-setting-anchor={CHART_GRANULARITY.anchor}>
+						<Eyebrow className="mb-2">{CHART_GRANULARITY.label}</Eyebrow>
 						<OptionButtons
 							options={CHART_GRANULARITY_OPTIONS}
 							value={chartBucketSeconds}
@@ -91,8 +99,8 @@ export default function DashboardPanel() {
 						</p>
 					</div>
 
-					<div data-setting-anchor="live-refresh">
-						<Eyebrow className="mb-2">Live refresh rate</Eyebrow>
+					<div data-setting-anchor={LIVE_REFRESH.anchor}>
+						<Eyebrow className="mb-2">{LIVE_REFRESH.label}</Eyebrow>
 						<OptionButtons
 							options={LIVE_REFRESH_OPTIONS}
 							value={liveRefreshMs}
@@ -119,8 +127,8 @@ export default function DashboardPanel() {
 				</CardHeader>
 				<CardContent>
 					<NumberSettingRow
-						anchor="slo-threshold"
-						label="SLO threshold"
+						anchor={SLO_THRESHOLD.anchor}
+						label={SLO_THRESHOLD.label}
 						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts, and prefills the p99 budget and the Capacity Discovery target when you open the load-test dialog."
 						value={String(sloThresholdMs)}
 						commit="change"

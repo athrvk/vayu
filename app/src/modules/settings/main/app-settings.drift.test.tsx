@@ -9,16 +9,21 @@
  */
 
 /**
- * The app-settings catalogue is a second copy of what the panels render, which
- * is exactly the arrangement that drifts: rename a card, move a row into
- * another panel, delete a setting, and search keeps offering a result that
- * lands on nothing - the failure the catalogue exists to fix, wearing a
- * different hat.
+ * The app-settings catalogue and the panels have to agree on two things, and
+ * both used to be able to drift:
  *
- * So the catalogue is not trusted, it is checked: every panel is rendered and
- * every anchor it declares has to be on screen, in that panel. Rendered rather
- * than source-scanned, because an anchor can arrive through a prop (the
- * NumberSettingRow rows do) and no scan of a panel file would see it.
+ * - **Where a result lands.** `anchor` is the `data-setting-anchor` the panel
+ *   puts on the block; rename a card, move a row into another panel, delete a
+ *   setting, and search keeps offering a result that lands on nothing.
+ * - **What it is called.** The catalogue used to hand-write a second copy of the
+ *   heading, so rewording a card on screen left search offering the old name.
+ *   The panels now render `appSetting("<anchor>").label`, and this file checks
+ *   that they really do - a heading typed back into a panel as a literal is the
+ *   regression, and it is the one a reviewer reads straight past.
+ *
+ * Rendered rather than source-scanned, because both the anchor and the label
+ * arrive through props (the `NumberSettingRow` and `ToggleRow` rows do) and no
+ * scan of a panel file would see them.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -50,6 +55,28 @@ function renderPanel(Component: React.ComponentType) {
 			<Component />
 		</QueryClientProvider>
 	);
+}
+
+/**
+ * What the block calls itself on screen.
+ *
+ * A settings block heading is one of four shapes and the block cannot say which
+ * it is, so they are tried in the order a reader's eye takes them: a row that
+ * *is* the setting names itself (`data-setting-row`, written from the same prop
+ * the row prints), then a card's title, then a sub-block's eyebrow, then a row
+ * nested inside the block. Order matters - a card holds rows, so the card's own
+ * title has to win over the first row inside it.
+ *
+ * Compared exactly rather than by substring: "Theme Modes" contains "Theme
+ * Mode", and a guard that accepts that is not a guard.
+ */
+function blockHeading(block: Element): string | null {
+	const own = block.getAttribute("data-setting-row");
+	if (own !== null) return own;
+	const titled = block.querySelector('[data-slot="card-title"], [data-slot="eyebrow"]');
+	if (titled) return titled.textContent?.trim() ?? "";
+	const row = block.querySelector("[data-setting-row]");
+	return row === null ? null : (row.getAttribute("data-setting-row") ?? "");
 }
 
 describe("the app settings catalogue", () => {
@@ -92,6 +119,37 @@ describe("the app settings catalogue", () => {
 					`${panel.label} declares "${setting.anchor}" (${setting.label}) but renders no such data-setting-anchor`
 				).toBe(true);
 			}
+		}
+	);
+
+	it.each(APP_SETTINGS_PANELS.map((p) => [p.id, p] as const))(
+		"prints the catalogue's label as the heading of every block in %s",
+		(id, panel) => {
+			const declared = APP_SETTINGS.filter((s) => s.panel === id);
+			const { container } = renderPanel(panel.Component);
+
+			let checked = 0;
+			for (const setting of declared) {
+				const block = container.querySelector(`[data-setting-anchor="${setting.anchor}"]`);
+				// The anchor test above owns the missing-block failure; skipping
+				// here keeps one defect from failing two tests with two stories.
+				if (block === null) continue;
+
+				const heading = blockHeading(block);
+				expect(
+					heading,
+					`${panel.label}: the block for "${setting.anchor}" prints no heading a search result could be checked against - it needs a CardTitle, an Eyebrow or a named row`
+				).not.toBeNull();
+				expect(
+					heading,
+					`${panel.label}: search offers "${setting.label}" for "${setting.anchor}" but the block is headed "${heading}" - the panel should render appSetting("${setting.anchor}").label`
+				).toBe(setting.label);
+				checked += 1;
+			}
+
+			// Guards the guard: a resolver that quietly found nothing would pass
+			// every assertion above by never running one.
+			expect(checked).toBe(declared.length);
 		}
 	);
 });

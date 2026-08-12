@@ -66,7 +66,16 @@ import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { Callout } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { appSetting } from "../app-settings";
 import { NumberSettingRow, ToggleRow } from "./SettingControls";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const CONNECTION = appSetting("mcp-connection");
+const TOOLS = appSetting("mcp-tools");
+const ALLOWLIST = appSetting("mcp-allowlist");
+const CAPS = appSetting("mcp-caps");
+const WRITES = appSetting("mcp-writes");
 
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
@@ -540,11 +549,11 @@ export default function McpSettingsPanel() {
 			)}
 
 			{/* Connection status + onboarding */}
-			<Card data-setting-anchor="mcp-connection">
+			<Card data-setting-anchor={CONNECTION.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Plug className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Connection</CardTitle>
+						<CardTitle className="text-base">{CONNECTION.label}</CardTitle>
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
 						) : !status ? (
@@ -662,11 +671,11 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Tools */}
-			<Card data-setting-anchor="mcp-tools">
+			<Card data-setting-anchor={TOOLS.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Wrench className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Tools</CardTitle>
+						<CardTitle className="text-base">{TOOLS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Choose which tools agents can use. A disabled tool is hidden from the
@@ -740,11 +749,11 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Allowlist */}
-			<Card data-setting-anchor="mcp-allowlist">
+			<Card data-setting-anchor={ALLOWLIST.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Globe className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Target allowlist</CardTitle>
+						<CardTitle className="text-base">{ALLOWLIST.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
@@ -840,11 +849,11 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Load caps */}
-			<Card data-setting-anchor="mcp-caps">
+			<Card data-setting-anchor={CAPS.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Gauge className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Load caps</CardTitle>
+						<CardTitle className="text-base">{CAPS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Hard ceilings on agent-started load runs. A request over any cap is rejected
@@ -879,11 +888,11 @@ export default function McpSettingsPanel() {
 			</Card>
 
 			{/* Write access */}
-			<Card data-setting-anchor="mcp-writes">
+			<Card data-setting-anchor={WRITES.anchor}>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Write access</CardTitle>
+						<CardTitle className="text-base">{WRITES.label}</CardTitle>
 					</div>
 					<CardDescription>
 						When off (default), agents can read and send requests but cannot change

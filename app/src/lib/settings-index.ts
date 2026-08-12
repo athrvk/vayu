@@ -42,6 +42,11 @@ export interface SettingsIndexEntry {
 	id: string;
 	kind: SettingsIndexKind;
 	label: string;
+	/**
+	 * One sentence about the entry. Display copy on the panel and engine halves
+	 * (both render it on screen); on an `app-setting` it is the catalogue's
+	 * written summary, because a panel's own copy is markup rather than a string.
+	 */
 	description: string;
 	/** The category to select in order to reveal this result. */
 	category: SettingsCategory;
@@ -69,7 +74,13 @@ export interface SettingsAppSettingSource {
 	anchor: string;
 	panel: SettingsCategory;
 	label: string;
-	description: string;
+	/**
+	 * The app half has no description string to lend: a panel's copy is markup
+	 * (`<Kbd>` chips, live counts, conditional notices), so the catalogue writes
+	 * a one-sentence summary of the block instead. It is a summary, not a
+	 * caption - see `app-settings.ts`.
+	 */
+	searchText: string;
 	keywords?: readonly string[];
 }
 
@@ -136,7 +147,7 @@ export function buildSettingsIndex({
 			id: setting.anchor,
 			kind: "app-setting",
 			label: setting.label,
-			description: setting.description,
+			description: setting.searchText,
 			category: setting.panel,
 			categoryLabel: panelLabel,
 			anchor: setting.anchor,

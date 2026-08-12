@@ -162,13 +162,23 @@ describe("settings search", () => {
 	 * because a fixture would have passed then too.
 	 */
 	describe("the settings inside the panels", () => {
+		/*
+		 * A result is titled exactly as the block is headed on screen - "Font",
+		 * not "Interface font" - because the panel and the catalogue share one
+		 * string now. The words that qualification used to carry are still
+		 * searchable, through the keywords and the search text: "interface" and
+		 * "severity" below are there to prove it, since neither is printed
+		 * anywhere on the block they find.
+		 */
 		it.each([
 			["theme", "Theme Mode", "appearance", "theme-mode"],
 			["color", "Color Scheme", "appearance", "color-scheme"],
-			["font", "Interface font", "appearance", "ui-font"],
+			["font", "Font", "appearance", "ui-font"],
+			["interface", "Font", "appearance", "ui-font"],
 			["dark mode", "Theme Mode", "appearance", "theme-mode"],
 			["auto-save", "Auto-save", "general", "auto-save"],
-			["notification", "Notification position", "notifications", "toast-position"],
+			["notification", "Position", "notifications", "toast-position"],
+			["severity", "Show", "notifications", "toast-severity"],
 		])("finds %s", (query, label) => {
 			renderTree();
 			fireEvent.change(search(), { target: { value: query } });
