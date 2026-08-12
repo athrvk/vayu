@@ -437,6 +437,22 @@ min/max/options):
       "advanced": false,
       "keywords": ["h2", "alpn"],
       "updatedAt": 1234567890
+    },
+    {
+      "key": "dbCacheSize",
+      "value": "67108864",
+      "type": "integer",
+      "label": "Database Cache Size",
+      "description": "Memory SQLite keeps per connection for recently used database pages...",
+      "category": "database_performance",
+      "default": "67108864",
+      "min": "1048576",
+      "max": "1073741824",
+      "unit": "bytes",
+      "requiresRestart": true,
+      "advanced": false,
+      "keywords": ["ram"],
+      "updatedAt": 1234567890
     }
   ]
 }
@@ -473,6 +489,23 @@ seeded keyword never repeats a word the entry already carries - search reaches
 the other three fields first and ranks them higher, so a duplicate would only
 push the entry above better matches. A test over the seeded catalogue enforces
 both halves of that.
+
+`unit` says what a numeric entry's value **measures** - `ms`, `sec`, `days` or
+`bytes` today - and is **omitted** when the entry measures nothing, the same
+shape as `min` / `max` / `options` above rather than a null. Absent means the
+number is a count (worker threads, retained runs, stored steps); a suffix
+reading "items" would be noise, so counts declare none. Non-numeric entries
+never declare one.
+
+The app renders it as the suffix inside the input, which is where a unit is
+stated **once** - so a seeded description never spells the same unit out as an
+"in milliseconds" clause, and a label never carries a `(ms)` suffix; a test
+over the catalogue enforces both. `bytes` additionally selects human-readable
+formatting for the value, the range hint and the default line (`104857600`
+reads as `100.0 MB`), which the app used to select from a hardcoded list of
+three keys - so a byte-valued entry added engine-side was formatted as a raw
+number until someone edited a TypeScript array. A client that meets a unit it
+does not know should show it verbatim rather than drop it.
 
 Two entries are seeded as `enum` today. `defaultHttpVersion` is the protocol a
 **newly created** request starts with (see [POST /requests](#post-requests)).

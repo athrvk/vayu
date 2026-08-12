@@ -41,6 +41,14 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     if (entry.max_value) {
         entry_json["max"] = *entry.max_value;
     }
+    // What the value measures ("ms", "sec", "days", "bytes"), omitted rather
+    // than sent as null when the entry measures nothing - the same shape as
+    // `min`/`max`/`options` above, so a client has one rule for optional
+    // scalars on this payload rather than one per field. Absent means "this
+    // number is a count", which is the only other thing it can be.
+    if (entry.unit) {
+        entry_json["unit"] = *entry.unit;
+    }
     if (entry.options) {
         // Stored as a JSON-array string (JSON-in-TEXT, same convention as
         // every other structured column); parse it back to a real array so

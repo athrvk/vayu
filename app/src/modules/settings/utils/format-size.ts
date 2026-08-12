@@ -68,15 +68,17 @@ export function parseSizeToBytes(sizeStr: string): number | null {
 }
 
 /**
- * Check if a config key is size-related
+ * Whether an entry's value is a byte count, and so reads as `1.0 MB` rather
+ * than as `1048576`.
  *
- * Engine keys only, and only ones the engine still seeds - `maxJsonFieldSize`
- * and `dbMmapSize` were retired in #519 and dropped from here with them, since
- * an entry naming a key that no longer arrives can never match.
+ * The entry declares it (`ConfigEntry.unit`, seeded engine-side). This used to
+ * be a hardcoded list of three keys here, which is the app re-deriving a fact
+ * the engine owns: an engine entry measured in bytes was formatted as a bare
+ * number until someone remembered to edit this array, and two keys had already
+ * been left in it after #519 retired them.
  */
-export function isSizeConfig(key: string): boolean {
-	const sizeKeys = ["scriptMemoryLimit", "scriptStackSize", "dbCacheSize"];
-	return sizeKeys.includes(key);
+export function isByteUnit(unit?: string): boolean {
+	return unit === "bytes";
 }
 
 /**

@@ -718,6 +718,7 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `requires_restart` | INTEGER | Boolean; the running engine keeps the old value until restarted |
 | `advanced`      | INTEGER | Boolean; an internal, rendered collapsed under "Advanced" |
 | `keywords`      | TEXT    | JSON array of extra search terms; `"[]"` when the entry declares none |
+| `unit`          | TEXT    | What a numeric value measures (`ms`, `sec`, `days`, `bytes`); NULL for a count |
 
 **requires_restart / advanced / keywords** are NOT NULL with a `default_value`
 (false, false and `"[]"`), so
@@ -737,6 +738,18 @@ seeded keyword may not repeat a word those three fields already carry - the
 search matches them first and ranks them above keywords, so a duplicate only
 lifts the entry over better matches. `config_route_test.cpp` scans the seeded
 catalogue for both rules.
+
+**unit** is nullable, like `min_value` / `max_value`: an entry that measures
+nothing declares none, and NULL is that - a nullable column is ALTER-friendly
+without a `default_value`. It is what lets the app put the unit on the input
+where a unit belongs, and `"bytes"` additionally selects the human-readable
+size formatting. The app used to decide that last part from a hardcoded list of
+three keys, which is the "one branch defines, another re-derives" shape: an
+entry seeded here was invisible to it until someone edited a TypeScript array,
+and two of the three keys had already been retired out from under it.
+`config_route_test.cpp` guards that every key ending `Ms` / `Bytes` / `Days`
+declares the matching unit, that no non-numeric entry declares one, and that no
+description restates a unit the input already carries.
 
 **options** is nullable and populated only for `type: "enum"` entries. It is
 JSON-in-TEXT, the same convention as every other structured column in this
