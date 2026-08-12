@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <set>
 #include <string>
 #include <utility>
@@ -286,6 +287,49 @@ TEST_F (ConfigRouteTest, NoSeededLabelOrDescriptionSpellsOutTheRestartRequiremen
     // The statement has to live somewhere: dropping the suffix without setting
     // the flag would satisfy the scan above and tell the user nothing.
     EXPECT_GT (restart_required_count, 0u);
+}
+
+// The settings voice conventions (#518), guarded where they are mechanically
+// checkable. Convention 4: labels abbreviate Max/Min, matching the app side.
+// Convention 3: a unit lives once, on the input - so a label never ends in a
+// parenthesised one. Both scans assert they scanned a seeded catalogue, since
+// a guard that reads an empty list passes for the wrong reason.
+TEST_F (ConfigRouteTest, NoSeededLabelSpellsOutMaxMinOrCarriesAUnit) {
+    // A parenthesised label tail is only a breach when it names a unit -
+    // "(Per Worker)" is a scope qualifier and stays. Kept as the units this
+    // catalogue actually measures in, so a new one is added deliberately.
+    const std::set<std::string> units = { "ms", "s", "sec", "secs", "second",
+        "seconds", "m", "min", "mins", "minute", "minutes", "h", "hr", "hour",
+        "hours", "day", "days", "b", "kb", "mb", "gb", "byte", "bytes", "rps",
+        "req/s", "%" };
+
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    for (const auto& entry : entries) {
+        EXPECT_NE (entry.label.rfind ("Maximum ", 0), 0u)
+        << "entry '" << entry.key << "' spells out Maximum in its label; the "
+        << "app side abbreviates it";
+        EXPECT_NE (entry.label.rfind ("Minimum ", 0), 0u)
+        << "entry '" << entry.key << "' spells out Minimum in its label; the "
+        << "app side abbreviates it";
+
+        if (entry.label.size () > 2 && entry.label.back () == ')') {
+            const auto open = entry.label.rfind ('(');
+            if (open != std::string::npos) {
+                std::string tail = entry.label.substr (
+                open + 1, entry.label.size () - open - 2);
+                for (auto& c : tail) {
+                    c = static_cast<char> (std::tolower (
+                    static_cast<unsigned char> (c)));
+                }
+                EXPECT_EQ (units.count (tail), 0u)
+                << "entry '" << entry.key << "' carries its unit in the label; "
+                << "the unit belongs on the input, once";
+            }
+        }
+    }
 }
 
 // Membership is the recorded decision (#520), so it is pinned by key rather
