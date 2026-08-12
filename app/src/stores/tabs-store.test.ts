@@ -11,7 +11,7 @@ import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
 
 beforeEach(() => {
-	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useSaveStore.setState({ contexts: new Map() });
 });
 
@@ -326,5 +326,71 @@ describe("closeTabsForEntities evicts stored responses", () => {
 		storeResponse("r1");
 		useTabsStore.getState().closeTabsForEntities([]);
 		expect(useResponseStore.getState().getResponse("r1")).not.toBeNull();
+	});
+});
+
+/**
+ * `openTabs` is insertion order, so the tab you were just in sits wherever it
+ * was opened. The command palette lists open tabs most-recently-used first,
+ * which needs a second signal - this one.
+ */
+describe("tabFocusedAt", () => {
+	const ids = () => useTabsStore.getState().openTabs.map((t) => t.id);
+	const byRecency = () => {
+		const { openTabs, tabFocusedAt } = useTabsStore.getState();
+		return [...openTabs]
+			.sort((a, b) => (tabFocusedAt[b.id] ?? 0) - (tabFocusedAt[a.id] ?? 0))
+			.map((t) => t.id);
+	};
+
+	it("ranks a re-focused tab ahead of one opened after it", async () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "settings", entityId: null });
+		store.openTab({ type: "variables", entityId: null });
+		store.openTab({ type: "inbox", entityId: null });
+		const [settings, variables, inbox] = ids();
+
+		// Date.now() has millisecond resolution and three opens can share one.
+		await new Promise((r) => setTimeout(r, 2));
+		useTabsStore.getState().focusTab(settings);
+
+		expect(byRecency()[0]).toBe(settings);
+		expect(byRecency()).toContain(variables);
+		expect(byRecency()).toContain(inbox);
+	});
+
+	it("stamps a singleton that was already open, since that is a focus too", async () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "settings", entityId: null });
+		store.openTab({ type: "inbox", entityId: null });
+		const [settings] = ids();
+
+		await new Promise((r) => setTimeout(r, 2));
+		// Deduped to a focus of the existing tab, not a second Settings tab.
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+
+		expect(useTabsStore.getState().openTabs).toHaveLength(2);
+		expect(byRecency()[0]).toBe(settings);
+	});
+
+	it("forgets a tab once it is closed and something else is focused", () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "settings", entityId: null });
+		store.openTab({ type: "inbox", entityId: null });
+		const [settings, inbox] = ids();
+
+		useTabsStore.getState().closeTab(inbox);
+		useTabsStore.getState().focusTab(settings);
+
+		expect(Object.keys(useTabsStore.getState().tabFocusedAt)).toEqual([settings]);
+	});
+
+	it("ignores a focus of a tab that is not open", () => {
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+		const before = useTabsStore.getState().tabFocusedAt;
+
+		useTabsStore.getState().focusTab("nope");
+
+		expect(useTabsStore.getState().tabFocusedAt).toBe(before);
 	});
 });

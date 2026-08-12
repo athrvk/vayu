@@ -19,6 +19,7 @@ import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 import InboxView from "@/modules/inbox";
+import { CommandPalette } from "@/modules/palette";
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
 	if (!tab) return <WelcomeScreen />;
@@ -176,6 +177,11 @@ export default function Shell() {
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
+			{/* Mounted once, like the import modal: it is summoned from a chord
+			    rather than from anything on screen, and its own ⌘K listener is
+			    what opens it. It owns that chord rather than the keydown map
+			    below - see the capture-phase note in CommandPalette. */}
+			<CommandPalette />
 			{/* Every tab uses the same shell: one left Drawer (its view switches
 			    with the tab - collections/history/variables/settings), the main
 			    content, and the request-only ContextBar. No tab type takes over

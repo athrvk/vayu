@@ -38,6 +38,22 @@ const LRU_EXEMPT_TYPES: TabType[] = ["dashboard"];
 interface TabsState {
 	openTabs: Tab[];
 	activeTabId: string | null;
+	/**
+	 * When each open tab was last focused, in epoch ms.
+	 *
+	 * Read by the command palette, which lists open tabs most-recently-used
+	 * first - the order a switcher has to have, and one `openTabs` cannot give:
+	 * that array is insertion order, so the tab you were just in sits wherever
+	 * it was opened.
+	 *
+	 * Session-scoped by design (absent from `partialize`). Tabs *are* restored
+	 * across launches, so a persisted copy would rank a restored list by
+	 * yesterday's attention; an empty map falls back to strip order, which is
+	 * what the user sees on screen anyway. Entries for closed tabs are dropped
+	 * on the next focus rather than in every close path - nothing reads a
+	 * stamp for a tab that is no longer open.
+	 */
+	tabFocusedAt: Record<string, number>;
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	closeTab: (tabId: string) => void;
@@ -148,6 +164,27 @@ function migrateTabs(persisted: unknown): PersistedTabs {
 	};
 }
 
+/**
+ * Stamp `focusedId` as focused now, keeping only the tabs that still exist.
+ *
+ * Pruning here rather than in each close path is what keeps the close paths
+ * unchanged: a stamp for a closed tab is unreachable (the palette only ranks
+ * open tabs) and is dropped the next time anything is focused.
+ */
+function stampFocus(
+	previous: Record<string, number>,
+	tabs: Tab[],
+	focusedId: string
+): Record<string, number> {
+	const live: Record<string, number> = {};
+	for (const tab of tabs) {
+		const at = previous[tab.id];
+		if (at !== undefined) live[tab.id] = at;
+	}
+	live[focusedId] = Date.now();
+	return live;
+}
+
 function makeId() {
 	return typeof crypto !== "undefined" && crypto.randomUUID
 		? crypto.randomUUID()
@@ -159,9 +196,10 @@ export const useTabsStore = create<TabsState>()(
 		(set, get) => ({
 			openTabs: [],
 			activeTabId: null,
+			tabFocusedAt: {},
 
 			openTab: (tabDef) => {
-				const { openTabs, activeTabId } = get();
+				const { openTabs, activeTabId, tabFocusedAt } = get();
 
 				// Dedupe: singletons and entity-keyed tabs
 				const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
@@ -171,7 +209,10 @@ export const useTabsStore = create<TabsState>()(
 						: t.type === tabDef.type && t.entityId === tabDef.entityId
 				);
 				if (existing) {
-					set({ activeTabId: existing.id });
+					set({
+						activeTabId: existing.id,
+						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, existing.id),
+					});
 					return;
 				}
 
@@ -196,7 +237,11 @@ export const useTabsStore = create<TabsState>()(
 					}
 				}
 
-				set({ openTabs: tabs, activeTabId: newTab.id });
+				set({
+					openTabs: tabs,
+					activeTabId: newTab.id,
+					tabFocusedAt: stampFocus(tabFocusedAt, tabs, newTab.id),
+				});
 			},
 
 			closeTab: (tabId) => {
@@ -261,8 +306,12 @@ export const useTabsStore = create<TabsState>()(
 			},
 
 			focusTab: (tabId) => {
-				if (get().openTabs.find((t) => t.id === tabId)) {
-					set({ activeTabId: tabId });
+				const { openTabs, tabFocusedAt } = get();
+				if (openTabs.find((t) => t.id === tabId)) {
+					set({
+						activeTabId: tabId,
+						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, tabId),
+					});
 				}
 			},
 		}),

@@ -20,6 +20,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 ├── <UpdateBanner />
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
+    ├── <CommandPalette />               // modules/palette/ - ⌘K overlay; open-state in layout-store
     ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; single left nav; switches views
     │   ├── <CollectionTree />           //   collections view (default)
     │   ├── <HistoryList />              //   history view
@@ -61,6 +62,8 @@ The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/i
 
 Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open tabs, active tab, add/close/focus methods).
 
+Labels and icons come from `tab-descriptors.ts`, a sibling module rather than this file, because the command palette lists the same tabs and must name them identically - a tab that reads "GET /v1/orders" in the strip and "Request" in the palette is two answers to one question.
+
 - **One tab per open entity**, deduplicated per type and `entityId`. Tabs show: icon (method badge for requests, folder for collections, lightning for dashboard, etc.), label (request method + URL path / collection name / screen name).
 - **Max 12 tabs** with LRU eviction when exceeding; dashboard tabs are exempt from eviction. Dirty tabs (unsaved) are skipped during eviction (autosave is the safety net).
 - **Middle-click closes** a tab (browser-like).
@@ -73,12 +76,12 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 - **One uniform layout for every tab** - `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
-- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab).
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four.
-- **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
+- **`<ImportModal />`** and **`<CommandPalette />`** mounted once each as global overlays; visibility in a store rather than in the Shell.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
@@ -454,12 +457,53 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is five tiles: New
-  request, Import, History, Variables, Inbox.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
+  request, Search, Import, History, Variables, Inbox. Search opens the command palette - the
+  chord alone is undiscoverable, and this grid is where the app teaches its own surfaces.
+- `LauncherSkeleton.tsx` - one skeleton tile per real tile. It has drifted a tile behind the
+  Launcher before; `WelcomeScreen.test.tsx` now asserts both grids against one constant.
 
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
 Design rationale: `app/src/modules/welcome/README.md`
+
+## Command Palette (`modules/palette/`)
+
+The ⌘K/Ctrl+K overlay: reach any open tab, saved request, collection or app view by name.
+Mounted once by `Shell`, alongside `ImportModal`.
+
+- **`CommandPalette.tsx`** - the dialog, the chord, focus restoration, and the open flag
+  (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted).
+- **`sources/`** - one hook per family, each returning `PaletteItem[]`: `useTabItems` (open
+  tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
+  tabs). Adding settings, environments or runs later is a new source and nothing else.
+- **`types.ts`** - the `PaletteItem` shape, the fixed group order, and `rankForEmptyQuery`.
+- **`PaletteResults.tsx`** - grouping and rendering. **Mounted only while the palette is open**,
+  the same cost rule the context bar applies to a collapsed section: a shut palette holds no
+  query observers on collections, requests or run history.
+
+Three things about it are load-bearing:
+
+- **The chord is on the capture phase**, unlike every other shortcut in the app (which lives in
+  `Shell`'s bubble-phase keydown map). Monaco treats ⌘K as the start of a chord and stops it
+  propagating, so a bubble listener never sees the key while the caret is in an editor.
+  `PALETTE_CHORD` lives in `constants/shortcuts.ts` so the handler and every label that
+  advertises the chord read one definition.
+- **Focus goes back where it came from**, and that is the palette's own code: Radix's
+  `FocusScope` restores to a dialog's *trigger*, and a palette summoned by a chord has none, so
+  focus would land on `<body>`. The previous element is captured from a store subscription
+  rather than an effect - child effects run first, so by the time an effect here fires the
+  dialog has already taken focus.
+- **Tab rows are named by `components/layout/tab-descriptors.ts`**, the same hook `TabStrip`
+  uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette.
+
+Ranking: cmdk's own match score once anything is typed; on the empty query, `rankForEmptyQuery`
+puts the most recent first - focus time for tabs (`tabFocusedAt` in `tabs-store`, session-scoped),
+last-run time for requests (from the run history already in cache). Groups render in a fixed
+order (Tabs, Requests, Collections, Views) so the list does not reshuffle as you type.
+
+**Entry points:** the chord, and the `Search` tile on the welcome Launcher. The title bar's
+search bar (#529) is the third and becomes the primary one - it flips the same store flag.
 
 ## Toaster (`components/shared/Toaster.tsx`)
 

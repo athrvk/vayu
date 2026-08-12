@@ -83,6 +83,21 @@ Some modules have components displayed in both the sidebar and main content area
     import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
     ```
 
+### Overlay Modules
+
+#### `palette/`
+
+- **Location:** neither sidebar nor main - a dialog mounted once by `Shell`, like `ImportModal`.
+- **Components:** `CommandPalette.tsx` (dialog, ⌘K chord, focus restoration), `PaletteResults.tsx`
+  (grouping and rendering, mounted only while open), `sources/` (one hook per result family).
+- **Extending it:** add a `sources/use*Items.ts` returning `PaletteItem[]` and list it in
+  `PaletteResults`. Nothing else changes - the dialog knows nothing about where a result came
+  from. Perform the action through the same call the sidebar makes rather than a new one.
+- **Usage:**
+    ```tsx
+    import { CommandPalette } from "@/modules/palette";
+    ```
+
 ## Import Guidelines
 
 1. **For modules with sidebar/main split:** Use explicit paths (`/sidebar` or `/main`) for clarity

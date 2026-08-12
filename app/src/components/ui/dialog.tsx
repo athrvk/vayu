@@ -37,11 +37,18 @@ function DialogOverlay({
 	);
 }
 
-function DialogContent({
-	className,
-	children,
-	...props
-}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+interface DialogContentProps extends React.ComponentProps<typeof DialogPrimitive.Content> {
+	/**
+	 * Draw the corner close button. On by default, and off for exactly one
+	 * shape: a command palette, whose top-right corner is occupied by its own
+	 * search field and which closes on Escape or a click outside like the
+	 * overlay it is. A dialog with a form or a decision keeps it - the button is
+	 * the discoverable way out.
+	 */
+	showClose?: boolean;
+}
+
+function DialogContent({ className, children, showClose = true, ...props }: DialogContentProps) {
 	return (
 		<DialogPortal>
 			<DialogOverlay />
@@ -58,10 +65,12 @@ function DialogContent({
 				{...props}
 			>
 				{children}
-				<DialogPrimitive.Close className="absolute right-4 top-4 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-					<X className="h-4 w-4" />
-					<span className="sr-only">Close</span>
-				</DialogPrimitive.Close>
+				{showClose && (
+					<DialogPrimitive.Close className="absolute right-4 top-4 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+						<X className="h-4 w-4" />
+						<span className="sr-only">Close</span>
+					</DialogPrimitive.Close>
+				)}
 			</DialogPrimitive.Content>
 		</DialogPortal>
 	);

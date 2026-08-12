@@ -6,7 +6,7 @@
  */
 
 /**
- * The request builder's send shortcuts, in one place.
+ * App-wide keyboard shortcuts, in one place.
  *
  * Each is defined once as a `Chord` and read by both the handler that fires it
  * and the label that advertises it, so a button cannot claim a key combination
@@ -26,18 +26,38 @@ export const SEND_CHORD: Chord = { mod: true, key: "↵" };
 export const LOAD_TEST_CHORD: Chord = { mod: true, shift: true, key: "↵" };
 
 /**
+ * Open the command palette.
+ *
+ * ⌘K/Ctrl+K is the cross-app convention for "search everything" (VS Code,
+ * Slack, Linear, GitHub), which is the whole reason it is worth taking: the
+ * chord is the one users already try.
+ *
+ * Declared here rather than inline in `Shell` because a second surface reads
+ * it - the palette's own hint, and the title-bar search bar that will show the
+ * chord it triggers. That is exactly the pairing this file exists to keep
+ * honest.
+ */
+export const PALETTE_CHORD: Chord = { mod: true, key: "K" };
+
+/**
  * Does this event match a chord?
  *
  * `shift` is compared strictly rather than ignored: without that,
  * Ctrl+Shift+Enter satisfies Send's `mod + Enter` too and both fire, which is
  * the one thing a modifier-distinguished pair must not do.
+ *
+ * The key itself is compared case-insensitively, because a letter chord is
+ * declared in the case it is *displayed* in ("K", so the hint reads ⌘K) while
+ * `KeyboardEvent.key` reports the character the keyboard produced - "k"
+ * unmodified, "K" under Caps Lock. Case is never what distinguishes two chords
+ * here; `shift` is, and it is still compared exactly.
  */
 export function matchesChord(
 	e: Pick<KeyboardEvent, "key" | "shiftKey" | "altKey" | "metaKey" | "ctrlKey">,
 	chord: Chord
 ): boolean {
 	const key = chord.key === "↵" ? "Enter" : chord.key;
-	if (e.key !== key) return false;
+	if (e.key.toLowerCase() !== key.toLowerCase()) return false;
 	if (!!chord.mod !== (e.metaKey || e.ctrlKey)) return false;
 	if (!!chord.shift !== e.shiftKey) return false;
 	if (!!chord.alt !== e.altKey) return false;

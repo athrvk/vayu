@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
-import { useTabsStore, useSessionStore } from "@/stores";
+import { useTabsStore, useSessionStore, useLayoutStore } from "@/stores";
 import type { Run } from "@/types";
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +25,13 @@ vi.mock("@/queries", () => ({
 	useCreateCollectionMutation: () => ({ mutateAsync: mocks.createCollection }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),
 }));
+
+/**
+ * How many tiles the populated Launcher shows. Asserted from both sides - the
+ * real grid and the skeleton's - because the skeleton silently drifted a tile
+ * behind the Launcher once already, which is the one thing it exists to avoid.
+ */
+const LAUNCHER_TILES = 6;
 
 function run(over: Partial<Run> = {}): Run {
 	return {
@@ -54,6 +61,7 @@ describe("WelcomeScreen", () => {
 		mocks.createCollection = vi.fn().mockResolvedValue({ id: "new-col" });
 		useTabsStore.setState({ openTabs: [], activeTabId: null });
 		useSessionStore.setState({ lastCollectionId: null });
+		useLayoutStore.setState({ paletteOpen: false });
 	});
 
 	describe("empty workspace", () => {
@@ -84,6 +92,24 @@ describe("WelcomeScreen", () => {
 			expect(screen.getByRole("button", { name: /New request/i })).toBeInTheDocument();
 			expect(screen.getByRole("button", { name: /^History$/i })).toBeInTheDocument();
 			expect(screen.getByText(/Recent runs/i)).toBeInTheDocument();
+		});
+
+		/*
+		 * The palette's visible half. ⌘K is undiscoverable on its own - nobody
+		 * presses it in an app they have not been told has a palette - so the
+		 * tile is what teaches the feature exists, and it has to open the same
+		 * palette the chord does rather than a second search of its own.
+		 */
+		it("opens the command palette from the Search tile", () => {
+			renderScreen();
+			expect(useLayoutStore.getState().paletteOpen).toBe(false);
+			fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+			expect(useLayoutStore.getState().paletteOpen).toBe(true);
+		});
+
+		it("shows one tile per action, and the skeleton matches", () => {
+			const { container } = renderScreen();
+			expect(container.querySelectorAll(".grid > button")).toHaveLength(LAUNCHER_TILES);
 		});
 
 		it("has no Load test action - a load test needs an existing request", () => {
@@ -200,9 +226,9 @@ describe("WelcomeScreen", () => {
 		mocks.runs = { data: [], isLoading: true };
 		const { container } = renderScreen();
 		expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
-		// Holds the Launcher shape: four action tiles so the real content lands
-		// in place rather than pushing a blank page around.
-		expect(container.querySelectorAll(".grid > div")).toHaveLength(4);
+		// Holds the Launcher shape: one skeleton tile per real action tile, so
+		// the content lands in place rather than pushing a blank page around.
+		expect(container.querySelectorAll(".grid > div")).toHaveLength(LAUNCHER_TILES);
 	});
 
 	it("drops the skeleton once the queries settle", () => {

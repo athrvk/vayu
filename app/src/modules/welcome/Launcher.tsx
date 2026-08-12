@@ -16,7 +16,7 @@
 // `Braces` is the app-wide mark for variables - see the note in
 // `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
 // records rather than `{{name}}` substitutions.
-import { Download, Plus, Braces, History, Inbox } from "lucide-react";
+import { Download, Plus, Braces, History, Inbox, Search } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
@@ -28,6 +28,7 @@ interface LauncherProps {
 	collectionCount: number;
 	onImport: () => void;
 	onNewRequest: () => void;
+	onSearch: () => void;
 	onHistory: () => void;
 	onVariables: () => void;
 	onInbox: () => void;
@@ -42,6 +43,7 @@ export function Launcher({
 	collectionCount,
 	onImport,
 	onNewRequest,
+	onSearch,
 	onHistory,
 	onVariables,
 	onInbox,
@@ -50,11 +52,18 @@ export function Launcher({
 		<div className="flex flex-col gap-8">
 			<section>
 				<Eyebrow className="mb-2">Start</Eyebrow>
-				{/* Five columns since the webhook inbox joined the row: the tiles
-				    are equal-weight starting points, and a 4-column grid holding
-				    five would strand one on a line of its own. */}
-				<div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+				{/* Six columns since Search joined the row: the tiles are
+				    equal-weight starting points, and a grid narrower than the
+				    count would strand one on a line of its own. */}
+				<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
+					{/*
+					 * The command palette's visible half. The chord alone is
+					 * undiscoverable - nobody presses ⌘K in an app they have not
+					 * been told has a palette - and this grid is where the app
+					 * teaches its own surfaces.
+					 */}
+					<ActionTile icon={Search} label="Search" onClick={onSearch} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
 					<ActionTile icon={History} label="History" onClick={onHistory} />
 					<ActionTile icon={Braces} label="Variables" onClick={onVariables} />
