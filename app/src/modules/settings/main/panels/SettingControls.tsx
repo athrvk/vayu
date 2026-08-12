@@ -109,6 +109,12 @@ interface ToggleRowProps {
 	label: ReactNode;
 	/** Required when `label` is not a plain string, so the switch keeps a name. */
 	ariaLabel?: string;
+	/**
+	 * `data-setting-anchor` for this row - the id a search result reveals, as on
+	 * {@link NumberSettingRow}. Only rows declared in the app-settings catalogue
+	 * need one.
+	 */
+	anchor?: string;
 	description?: ReactNode;
 	checked: boolean;
 	onChange: (checked: boolean) => void;
@@ -121,6 +127,7 @@ interface ToggleRowProps {
 export function ToggleRow({
 	label,
 	ariaLabel,
+	anchor,
 	description,
 	checked,
 	onChange,
@@ -130,7 +137,14 @@ export function ToggleRow({
 }: ToggleRowProps) {
 	const name = ariaLabel ?? (typeof label === "string" ? label : undefined);
 	return (
-		<div className={cn("flex items-center justify-between gap-4", className)}>
+		// `data-setting-row` names the row's box from the same string the switch
+		// is named by, as on {@link NumberSettingRow} - one writer, so a consumer
+		// or a test never has to read it back out of the markup.
+		<div
+			className={cn("flex items-center justify-between gap-4", className)}
+			data-setting-row={name}
+			data-setting-anchor={anchor}
+		>
 			<div className="min-w-0">
 				{typeof label === "string" ? (
 					<Label className="text-sm font-medium">{label}</Label>

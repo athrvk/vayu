@@ -33,5 +33,13 @@ export const EYEBROW_CLASS =
 	"text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
 
 export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
-	return <p className={cn(EYEBROW_CLASS, className)}>{children}</p>;
+	// `data-slot`, as the Card primitives carry: it is the only stable way to ask
+	// "what does this block call itself" without matching on the class string.
+	// `app-settings.drift.test.tsx` reads it to compare a settings block's
+	// heading against the name search offers for it.
+	return (
+		<p data-slot="eyebrow" className={cn(EYEBROW_CLASS, className)}>
+			{children}
+		</p>
+	);
 }

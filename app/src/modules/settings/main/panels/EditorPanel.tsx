@@ -27,12 +27,22 @@ import { useClientSettingsStore } from "@/stores";
 import { EDITOR_FONT_SIZES, EDITOR_TAB_SIZES } from "@/constants/client-settings";
 import { MONO_FONTS, customMonoStack, type MonoFontChoice } from "@/constants/appearance";
 import { CodeEditor } from "@/components/ui/code-editor";
+import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
 // Glyph-rich one-liner shown under each code-font choice. Lowercase g/a, the
 // zero, i/l/1, and the => ligature are where monospace faces differ most.
 const MONO_SAMPLE = "fn(0) => {a_g}";
+
+// Headings come from the catalogue so search cannot offer a name this panel
+// does not print - see `app-settings.ts`.
+const CODE_FONT = appSetting("code-font");
+const FONT_SIZE = appSetting("editor-font-size");
+const TAB_WIDTH = appSetting("tab-width");
+const WORD_WRAP = appSetting("word-wrap");
+const LINE_NUMBERS = appSetting("line-numbers");
+const MINIMAP = appSetting("minimap");
 
 const SAMPLE = [
 	"function greet(name) {",
@@ -65,8 +75,8 @@ export default function EditorPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
-					<div data-setting-anchor="code-font">
-						<Eyebrow className="mb-2">Code font</Eyebrow>
+					<div data-setting-anchor={CODE_FONT.anchor}>
+						<Eyebrow className="mb-2">{CODE_FONT.label}</Eyebrow>
 						<FontPicker
 							options={MONO_FONTS}
 							value={monoFont}
@@ -79,8 +89,8 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div data-setting-anchor="editor-font-size">
-						<Eyebrow className="mb-2">Font size</Eyebrow>
+					<div data-setting-anchor={FONT_SIZE.anchor}>
+						<Eyebrow className="mb-2">{FONT_SIZE.label}</Eyebrow>
 						<OptionButtons
 							options={EDITOR_FONT_SIZES.map((v) => ({ value: v, label: `${v}px` }))}
 							value={editor.fontSize}
@@ -88,8 +98,8 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div data-setting-anchor="tab-width">
-						<Eyebrow className="mb-2">Tab width</Eyebrow>
+					<div data-setting-anchor={TAB_WIDTH.anchor}>
+						<Eyebrow className="mb-2">{TAB_WIDTH.label}</Eyebrow>
 						<OptionButtons
 							options={EDITOR_TAB_SIZES.map((v) => ({
 								value: v,
@@ -101,21 +111,26 @@ export default function EditorPanel() {
 						/>
 					</div>
 
-					<div className="space-y-3 pt-1" data-setting-anchor="editor-behaviour">
+					{/* Three switches, three anchors: a search result for Minimap
+					    reveals the minimap row, not the group it sits in. */}
+					<div className="space-y-3 pt-1">
 						<ToggleRow
-							label="Word wrap"
+							anchor={WORD_WRAP.anchor}
+							label={WORD_WRAP.label}
 							description="Wrap long lines instead of scrolling horizontally"
 							checked={editor.wordWrap}
 							onChange={(wordWrap) => setEditor({ wordWrap })}
 						/>
 						<ToggleRow
-							label="Line numbers"
+							anchor={LINE_NUMBERS.anchor}
+							label={LINE_NUMBERS.label}
 							description="Number every line in the editor gutter"
 							checked={editor.lineNumbers}
 							onChange={(lineNumbers) => setEditor({ lineNumbers })}
 						/>
 						<ToggleRow
-							label="Minimap"
+							anchor={MINIMAP.anchor}
+							label={MINIMAP.label}
 							description="Show the code overview on the right edge"
 							checked={editor.minimap}
 							onChange={(minimap) => setEditor({ minimap })}
