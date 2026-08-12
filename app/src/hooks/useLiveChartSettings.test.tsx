@@ -29,7 +29,7 @@ function entry(value: string, key = "liveReplayWindowMs"): ConfigEntry {
 		key,
 		value,
 		type: "integer",
-		label: "Live Chart Window (ms)",
+		label: "Live Chart Window",
 		description: "",
 		category: "observability",
 		default: "300000",
