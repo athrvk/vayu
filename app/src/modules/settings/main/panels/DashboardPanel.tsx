@@ -8,14 +8,14 @@
 /**
  * DashboardPanel
  *
- * Behavioral preferences for live test dashboards and charts: the live chart
- * retention window, the capacity SLO threshold (drives breakpoint/saturation),
- * chart time granularity, and the live refresh rate. Client-side only
- * (localStorage-backed); consumed by the charts, the dashboard store, and the
- * live metrics service.
+ * Behavioral preferences for live test dashboards and charts, in two topics:
+ * the live charts (retention window, time granularity, refresh rate) and
+ * capacity (the SLO threshold that drives breakpoint/saturation). Client-side
+ * only (localStorage-backed); consumed by the charts, the dashboard store, and
+ * the live metrics service.
  */
 
-import { History, Gauge, LineChart, Rewind } from "lucide-react";
+import { History, Gauge } from "lucide-react";
 import {
 	Card,
 	CardContent,
@@ -23,18 +23,18 @@ import {
 	CardHeader,
 	CardTitle,
 	Eyebrow,
-	Input,
 } from "@/components/ui";
 import { useLiveChartSettings } from "@/hooks/useLiveChartSettings";
 import { useClientSettingsStore } from "@/stores";
 import { LIVE_WINDOW_OPTIONS } from "@/constants/live-window";
 import {
 	CHART_GRANULARITY_OPTIONS,
+	DEFAULT_SLO_THRESHOLD_MS,
 	LIVE_REFRESH_OPTIONS,
 	SLO_THRESHOLD_MIN_MS,
 	SLO_THRESHOLD_MAX_MS,
 } from "@/constants/client-settings";
-import { OptionButtons } from "./SettingControls";
+import { NumberSettingRow, OptionButtons } from "./SettingControls";
 
 export default function DashboardPanel() {
 	const { window: liveWindow, setWindow: setLiveWindow } = useLiveChartSettings();
@@ -47,28 +47,63 @@ export default function DashboardPanel() {
 
 	return (
 		<>
+			{/* One card per topic, settings as rows inside it. This was four cards,
+			    one per setting, which made a card mean nothing. */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<History className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Live Dashboard</CardTitle>
+						<CardTitle className="text-base">Live charts</CardTitle>
 					</div>
 					<CardDescription>
-						How much recent history the live charts keep. Older data rolls off;
-						completed runs in History always show the full run.
+						How the charts behave while a run is in flight. Completed runs in History
+						always show the full run at full detail.
 					</CardDescription>
 				</CardHeader>
-				<CardContent>
-					<Eyebrow className="mb-2">Chart window</Eyebrow>
-					<OptionButtons
-						options={LIVE_WINDOW_OPTIONS.map((o) => ({
-							value: o.value,
-							label: o.label,
-						}))}
-						value={liveWindow}
-						onChange={setLiveWindow}
-						columns="grid-cols-5"
-					/>
+				<CardContent className="space-y-5">
+					<div>
+						<Eyebrow className="mb-2">Chart window</Eyebrow>
+						<OptionButtons
+							options={LIVE_WINDOW_OPTIONS.map((o) => ({
+								value: o.value,
+								label: o.label,
+							}))}
+							value={liveWindow}
+							onChange={setLiveWindow}
+							columns="grid-cols-5"
+						/>
+						<p className="text-xs text-muted-foreground mt-2">
+							How much recent history the live charts keep. Older data rolls off.
+						</p>
+					</div>
+
+					<div>
+						<Eyebrow className="mb-2">Chart granularity</Eyebrow>
+						<OptionButtons
+							options={CHART_GRANULARITY_OPTIONS}
+							value={chartBucketSeconds}
+							onChange={setChartBucketSeconds}
+							columns="grid-cols-3"
+						/>
+						<p className="text-xs text-muted-foreground mt-2">
+							Time-bucket width for the charts. Finer shows more detail; coarser
+							smooths noisy runs.
+						</p>
+					</div>
+
+					<div>
+						<Eyebrow className="mb-2">Live refresh rate</Eyebrow>
+						<OptionButtons
+							options={LIVE_REFRESH_OPTIONS}
+							value={liveRefreshMs}
+							onChange={setLiveRefreshMs}
+							columns="grid-cols-3"
+						/>
+						<p className="text-xs text-muted-foreground mt-2">
+							How often live metrics are committed to the charts during a run. Faster
+							is smoother; slower is lighter on the CPU.
+						</p>
+					</div>
 				</CardContent>
 			</Card>
 
@@ -76,81 +111,25 @@ export default function DashboardPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Gauge className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Capacity SLO threshold</CardTitle>
+						<CardTitle className="text-base">Capacity</CardTitle>
 					</div>
 					<CardDescription>
-						The p99 latency at which a run is considered saturated. It marks the
-						breakpoint stat, the Saturation card, and the SLO line on the latency
-						charts, and prefills the p99 budget and the Capacity Discovery target when
-						you open the load-test dialog.
+						What Vayu treats as the edge of a target&apos;s capacity.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="flex items-center gap-2">
-						<div className="relative">
-							<Input
-								type="number"
-								// Named from the CardTitle above, which nothing links to
-								// this input.
-								aria-label="Capacity SLO threshold in milliseconds"
-								className="max-w-[10rem] pr-9"
-								value={sloThresholdMs}
-								min={SLO_THRESHOLD_MIN_MS}
-								max={SLO_THRESHOLD_MAX_MS}
-								onChange={(e) => {
-									const n = parseInt(e.target.value, 10);
-									if (!Number.isNaN(n)) setSloThresholdMs(n);
-								}}
-							/>
-							<span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-								ms
-							</span>
-						</div>
-						<span className="text-xs text-muted-foreground">
-							{SLO_THRESHOLD_MIN_MS}–{SLO_THRESHOLD_MAX_MS} ms
-						</span>
-					</div>
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<LineChart className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Chart granularity</CardTitle>
-					</div>
-					<CardDescription>
-						Time-bucket width for the charts. Finer shows more detail; coarser smooths
-						noisy runs.
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<OptionButtons
-						options={CHART_GRANULARITY_OPTIONS}
-						value={chartBucketSeconds}
-						onChange={setChartBucketSeconds}
-						columns="grid-cols-3"
-					/>
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Rewind className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Live refresh rate</CardTitle>
-					</div>
-					<CardDescription>
-						How often live metrics are committed to the charts during a run. Faster is
-						smoother; slower is lighter on the CPU.
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<OptionButtons
-						options={LIVE_REFRESH_OPTIONS}
-						value={liveRefreshMs}
-						onChange={setLiveRefreshMs}
-						columns="grid-cols-3"
+					<NumberSettingRow
+						label="SLO threshold"
+						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts, and prefills the p99 budget and the Capacity Discovery target when you open the load-test dialog."
+						value={String(sloThresholdMs)}
+						commit="change"
+						onCommit={(next) => setSloThresholdMs(parseInt(next, 10))}
+						unit="ms"
+						min={String(SLO_THRESHOLD_MIN_MS)}
+						max={String(SLO_THRESHOLD_MAX_MS)}
+						rangeHint={`${SLO_THRESHOLD_MIN_MS} - ${SLO_THRESHOLD_MAX_MS} ms`}
+						defaultValue={String(DEFAULT_SLO_THRESHOLD_MS)}
+						onResetToDefault={() => setSloThresholdMs(DEFAULT_SLO_THRESHOLD_MS)}
 					/>
 				</CardContent>
 			</Card>

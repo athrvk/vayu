@@ -22,22 +22,14 @@
  */
 
 import { Gauge, RotateCcw } from "lucide-react";
-import {
-	Button,
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-	Input,
-	Label,
-} from "@/components/ui";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import {
 	DEFAULT_LOAD_TEST_CEILINGS,
 	LOAD_TEST_CEILING_BOUNDS,
 	type LoadTestCeilingKey,
 } from "@/constants/load-test";
+import { NumberSettingRow } from "./SettingControls";
 
 interface CeilingField {
 	key: LoadTestCeilingKey;
@@ -109,7 +101,9 @@ export default function LoadTestingPanel() {
 							onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
 						>
 							<RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-							Reset
+							{/* "all", because each row now carries its own Reset
+							    beside its Default line. */}
+							Reset all
 						</Button>
 					)}
 				</div>
@@ -117,54 +111,26 @@ export default function LoadTestingPanel() {
 			<CardContent className="space-y-5">
 				{FIELDS.map((field) => {
 					const bounds = LOAD_TEST_CEILING_BOUNDS[field.key];
-					const id = `load-ceiling-${field.key}`;
 					return (
-						<div key={field.key} className="space-y-1.5">
-							<Label htmlFor={id} className="text-sm font-medium">
-								{field.label}
-							</Label>
-							<div className="flex items-center gap-2">
-								<div className="relative">
-									<Input
-										id={id}
-										type="number"
-										inputMode="numeric"
-										className={
-											field.unit ? "max-w-[10rem] pr-12" : "max-w-[10rem]"
-										}
-										value={ceilings[field.key]}
-										min={bounds.MIN}
-										max={bounds.MAX}
-										onChange={(e) => {
-											const n = parseInt(e.target.value, 10);
-											// An emptied field parses to NaN. The store
-											// clamps it to the floor rather than storing a
-											// NaN that would make every dialog range
-											// nonsense.
-											setCeilings({ [field.key]: n });
-										}}
-									/>
-									{field.unit && (
-										<span
-											className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground"
-											aria-hidden="true"
-										>
-											{field.unit}
-										</span>
-									)}
-								</div>
-								<span className="text-xs text-muted-foreground whitespace-nowrap">
-									{bounds.MIN.toLocaleString()} - {bounds.MAX.toLocaleString()}
-								</span>
-							</div>
-							<p className="text-xs text-muted-foreground">{field.description}</p>
-							{ceilings[field.key] !== DEFAULT_LOAD_TEST_CEILINGS[field.key] && (
-								<p className="text-xs text-muted-foreground">
-									Default:{" "}
-									{DEFAULT_LOAD_TEST_CEILINGS[field.key].toLocaleString()}
-								</p>
-							)}
-						</div>
+						<NumberSettingRow
+							key={field.key}
+							label={field.label}
+							description={field.description}
+							value={String(ceilings[field.key])}
+							// Applies live: the next load dialog reads the store, so
+							// there is nothing to save and nothing to wait for.
+							commit="change"
+							onCommit={(next) => setCeilings({ [field.key]: parseInt(next, 10) })}
+							unit={field.unit}
+							min={String(bounds.MIN)}
+							max={String(bounds.MAX)}
+							rangeHint={`${bounds.MIN.toLocaleString()} - ${bounds.MAX.toLocaleString()}`}
+							defaultValue={String(DEFAULT_LOAD_TEST_CEILINGS[field.key])}
+							defaultDisplay={DEFAULT_LOAD_TEST_CEILINGS[field.key].toLocaleString()}
+							onResetToDefault={() =>
+								setCeilings({ [field.key]: DEFAULT_LOAD_TEST_CEILINGS[field.key] })
+							}
+						/>
 					);
 				})}
 			</CardContent>

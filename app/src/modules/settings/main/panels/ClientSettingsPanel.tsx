@@ -19,12 +19,20 @@ import type { ReactNode } from "react";
 interface ClientSettingsPanelProps {
 	title: string;
 	description: string;
+	/**
+	 * One line saying when edits are persisted. Every app panel states it -
+	 * seven of them from one string - because the app autosaves, the engine view
+	 * has a Save bar and MCP commits on blur, and until now nothing on screen
+	 * told you which of the three you were in.
+	 */
+	saveNote: string;
 	children: ReactNode;
 }
 
 export default function ClientSettingsPanel({
 	title,
 	description,
+	saveNote,
 	children,
 }: ClientSettingsPanelProps) {
 	return (
@@ -34,6 +42,7 @@ export default function ClientSettingsPanel({
 				<div className="max-w-3xl mx-auto w-full">
 					<h1 className="text-xl font-semibold">{title}</h1>
 					<p className="text-sm text-muted-foreground mt-1">{description}</p>
+					<p className="text-xs text-muted-foreground mt-1.5">{saveNote}</p>
 				</div>
 			</div>
 

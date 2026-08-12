@@ -48,12 +48,22 @@ describe("LoadTestingPanel", () => {
 		expect(ceilings().concurrency).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
 
-	it("clamps an emptied field to the floor rather than storing a NaN", () => {
-		// `parseInt("")` is NaN, and a NaN ceiling makes every range in the load
-		// dialog nonsense - the field would show `max=""` and stop bounding.
+	it("keeps an emptied field out of the store instead of clamping it to the floor", () => {
+		/*
+		 * `parseInt("")` is NaN, and a NaN ceiling makes every range in the load
+		 * dialog nonsense. This used to be handled by letting the store clamp the
+		 * NaN to the floor - so clearing the field to retype it yanked the
+		 * ceiling to 1 mid-edit. The shared NumberSettingRow holds an
+		 * unparseable draft instead: the field shows what was typed and the
+		 * stored ceiling does not move until it is a number again.
+		 */
 		render(<LoadTestingPanel />);
 		fireEvent.change(connectionsField(), { target: { value: "" } });
-		expect(ceilings().concurrency).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MIN);
+		expect(connectionsField().value).toBe("");
+		expect(ceilings().concurrency).toBe(DEFAULT_LOAD_TEST_CEILINGS.concurrency);
+
+		fireEvent.change(connectionsField(), { target: { value: "5000" } });
+		expect(ceilings().concurrency).toBe(5000);
 	});
 
 	it("never lets a ceiling drop below one - the engine rejects a zero", () => {
@@ -64,14 +74,31 @@ describe("LoadTestingPanel", () => {
 
 	it("offers a reset only once something is off the default, and it restores every field", () => {
 		const { rerender } = render(<LoadTestingPanel />);
-		expect(screen.queryByRole("button", { name: /reset/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Reset all" })).not.toBeInTheDocument();
+		// Nor the per-row resets, which appear beside a row's Default line.
+		expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
 
 		fireEvent.change(connectionsField(), { target: { value: "5000" } });
 		fireEvent.change(screen.getByLabelText(/max duration/i), { target: { value: "120" } });
 		rerender(<LoadTestingPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+		expect(screen.getAllByRole("button", { name: "Reset" })).toHaveLength(2);
+		fireEvent.click(screen.getByRole("button", { name: "Reset all" }));
 		expect(ceilings()).toEqual(DEFAULT_LOAD_TEST_CEILINGS);
+	});
+
+	it("resets one ceiling from its own row, leaving the others alone", () => {
+		const { rerender } = render(<LoadTestingPanel />);
+		fireEvent.change(connectionsField(), { target: { value: "5000" } });
+		fireEvent.change(screen.getByLabelText(/max duration/i), { target: { value: "120" } });
+		rerender(<LoadTestingPanel />);
+
+		const connectionsRow = connectionsField().closest("[data-setting-row]");
+		const rowReset = connectionsRow?.querySelector("button");
+		fireEvent.click(rowReset as HTMLButtonElement);
+
+		expect(ceilings().concurrency).toBe(DEFAULT_LOAD_TEST_CEILINGS.concurrency);
+		expect(ceilings().durationSeconds).toBe(120);
 	});
 
 	it("names every ceiling it renders, so each input is reachable by its label", () => {

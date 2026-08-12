@@ -34,9 +34,26 @@ export interface AppSettingsPanel {
 	description: string;
 	icon: LucideIcon;
 	Component: ComponentType;
+	/**
+	 * How this panel saves, stated in its header. Three save models coexist in
+	 * Settings - these panels autosave, the engine view has an explicit Save
+	 * bar, and MCP commits number fields on blur - and nothing on screen used to
+	 * say which one you were looking at. Omit for the autosave default.
+	 */
+	saveNote?: string;
 }
 
+/** What a panel's header says when it does not override {@link AppSettingsPanel.saveNote}. */
+export const DEFAULT_SAVE_NOTE = "Changes are saved automatically.";
+
 export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
+	{
+		id: "general",
+		label: "General",
+		description: "Storage locations and application info",
+		icon: Info,
+		Component: GeneralPanel,
+	},
 	{
 		id: "appearance",
 		label: "Appearance",
@@ -78,13 +95,8 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 		icon: Plug,
 		Component: McpSettingsPanel,
-	},
-	{
-		id: "general",
-		label: "General",
-		description: "Storage locations and application info",
-		icon: Info,
-		Component: GeneralPanel,
+		saveNote:
+			"Switches and hosts are saved as you change them; the caps save when you leave the field. Every change is applied to the running server.",
 	},
 ];
 

@@ -73,6 +73,7 @@ vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: () => ({ selectedCategory: "general_engine", restartRequiredKeys: [] }),
 }));
 
+const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useEngineStore: () => ({
 		isEngineConnected: true,
@@ -81,6 +82,9 @@ vi.mock("@/stores", () => ({
 		addRestartRequiredKey: vi.fn(),
 		clearRestartRequired: vi.fn(),
 	}),
+	// The panel toasts the edits a category-switch flush had to drop.
+	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
+		selector({ showToast }),
 }));
 
 vi.mock("@/stores/save-store", () => ({
