@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <set>
 #include <string>
@@ -364,6 +365,79 @@ TEST_F (ConfigRouteTest, AdvancedSerializesOnTheWire) {
     json everyday = find_entry (body, "workers");
     ASSERT_TRUE (everyday.contains ("advanced"));
     EXPECT_FALSE (everyday["advanced"].get<bool> ());
+}
+
+// ---------------------------------------------------------------------------
+// keywords: the search terms the copy never says.
+// ---------------------------------------------------------------------------
+
+// Always an array, on every entry. A client that had to tell "declares none"
+// from "this engine does not send the field" would branch on absent-vs-empty,
+// which is exactly the guessing the typed flags above replaced.
+TEST_F (ConfigRouteTest, KeywordsSerializeAsAnArrayWithAndWithoutTerms) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json seeded = find_entry (body, "dbCacheSize");
+    ASSERT_TRUE (seeded.contains ("keywords"));
+    ASSERT_TRUE (seeded["keywords"].is_array ());
+    EXPECT_NE (std::find (seeded["keywords"].begin (), seeded["keywords"].end (),
+               json ("ram")),
+    seeded["keywords"].end ())
+    << "dbCacheSize lost the term a user arrives with for it";
+
+    // An entry whose label and description already carry every word worth
+    // typing declares none - and still sends the key.
+    json none = find_entry (body, "maxScenarioSteps");
+    ASSERT_TRUE (none.contains ("keywords"));
+    ASSERT_TRUE (none["keywords"].is_array ());
+    EXPECT_TRUE (none["keywords"].empty ());
+}
+
+// The rule that keeps the channel worth having: a keyword repeating a word the
+// entry already carries lifts it over entries that match better, so ranking
+// degrades into noise. Mechanically checkable, so it is checked rather than
+// left to review - the corpus is the same three fields the matcher reads
+// before it reaches keywords (key, label, description).
+TEST_F (ConfigRouteTest, SeededKeywordsNeverRepeatWordsTheEntryAlreadyCarries) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    auto lowered = [] (std::string text) {
+        for (auto& c : text) {
+            c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+        }
+        return text;
+    };
+
+    size_t with_keywords = 0;
+    for (const auto& entry : entries) {
+        json terms = json::parse (entry.keywords);
+        ASSERT_TRUE (terms.is_array ())
+        << "entry '" << entry.key << "' stores keywords that are not an array";
+        if (!terms.empty ()) {
+            ++with_keywords;
+        }
+
+        const std::string haystack =
+        lowered (entry.key + " " + entry.label + " " + entry.description);
+        for (const auto& term : terms) {
+            ASSERT_TRUE (term.is_string ())
+            << "entry '" << entry.key << "' has a non-string keyword";
+            const std::string needle = lowered (term.get<std::string> ());
+            EXPECT_FALSE (needle.empty ())
+            << "entry '" << entry.key << "' has an empty keyword";
+            EXPECT_EQ (haystack.find (needle), std::string::npos)
+            << "entry '" << entry.key << "' repeats '" << needle
+            << "', which its key, label or description already carries - the "
+            << "matcher finds it there and ranks it higher";
+        }
+    }
+    // The channel has to be used somewhere: a catalogue that declared none
+    // would satisfy every assertion above and leave search where it was.
+    EXPECT_GT (with_keywords, 0u);
 }
 
 // A write must not flatten metadata it does not carry. POST /config sends only

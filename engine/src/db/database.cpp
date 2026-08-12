@@ -341,7 +341,12 @@ inline auto make_storage (const std::string& path) {
     // what the row holds between the ALTER and that upsert.
     make_column ("requires_restart", &ConfigEntry::requires_restart,
     default_value (false)),
-    make_column ("advanced", &ConfigEntry::advanced, default_value (false))),
+    make_column ("advanced", &ConfigEntry::advanced, default_value (false)),
+    // JSON array of search terms, "[]" when the entry declares none - the
+    // same ALTER-friendly shape, and a column that is never null so the
+    // serializer has no absent case to invent an array for.
+    make_column ("keywords", &ConfigEntry::keywords,
+    default_value (std::string ("[]")))),
 
     // Globals: App-wide variables (singleton row with id="globals")
     make_table ("globals", make_column ("id", &Globals::id, primary_key ()),
@@ -1715,6 +1720,24 @@ void Database::seed_default_config () {
         entry.advanced = true;
         return entry;
     };
+    // keywords: the words a user arrives with that this entry's key, label and
+    // description never say - "ram" for a cache size, "deadline" for a timeout.
+    // Not a place to repeat what the entry already carries: search already
+    // matches all three fields, and a keyword that duplicates one only lifts
+    // the entry above better matches. A guard test enforces that.
+    auto keywords = [] (std::initializer_list<const char*> terms) {
+        // Serialized here rather than inside the returned wrapper: an
+        // initializer_list's backing array dies with the full-expression that
+        // built it, so a wrapper that held on to it would be reading freed
+        // storage the moment one is stored instead of called immediately.
+        std::string json =
+        nlohmann::json (std::vector<std::string> (terms.begin (), terms.end ()))
+        .dump ();
+        return [json = std::move (json)] (ConfigEntry entry) {
+            entry.keywords = json;
+            return entry;
+        };
+    };
 
     // Helper lambda: Creates or updates a config entry
     // - New entries get default values
@@ -1738,15 +1761,17 @@ void Database::seed_default_config () {
     // Core settings defining the application's base capacity and threading model
     // =========================================================================
 
-    upsert_config (restart_required (ConfigEntry{ "workers",
+    upsert_config (restart_required (keywords ({ "cores", "parallelism" }) (
+    ConfigEntry{ "workers",
     std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
     "Number of background worker threads. Higher values improve throughput on "
     "multi-core systems but increase RAM usage. "
     "Default equals CPU core count.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
-    "1", "128", std::nullopt, now }));
+    "1", "128", std::nullopt, now })));
 
-    upsert_config (ConfigEntry{ "defaultTimeout",
+    upsert_config (keywords ({ "deadline", "give up", "hang" }) (
+    ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
     "How long, in milliseconds, an HTTP request may run before it is abandoned, "
     "when the request does not set a timeout of its own. Raise it for slow "
@@ -1754,15 +1779,15 @@ void Database::seed_default_config () {
     "general_engine", std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
     "1000",   // min: 1 second
     "300000", // max: 5 minutes
-    std::nullopt, now });
+    std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "defaultHttpVersion",
+    upsert_config (keywords ({ "h2", "alpn" }) (ConfigEntry{ "defaultHttpVersion",
     vayu::to_string (vayu::DEFAULT_HTTP_VERSION), "enum", "Default HTTP Version",
     "Protocol a newly created request starts with. Auto lets the server and "
     "client negotiate (HTTP/2 where available, falling back to HTTP/1.1). "
     "Changing this does not alter requests that already exist.",
     "general_engine", vayu::to_string (vayu::DEFAULT_HTTP_VERSION),
-    std::nullopt, std::nullopt, http_version_options_json (), now });
+    std::nullopt, std::nullopt, http_version_options_json (), now }));
 
     upsert_config (ConfigEntry{ "maxScenarioSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer",
@@ -1807,20 +1832,21 @@ void Database::seed_default_config () {
     "general_engine", std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
     "0", "1000000", std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Max Steps Per Iteration",
+    upsert_config (keywords ({ "infinite loop" }) (
+    ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Max Steps Per Iteration",
     "How many requests one iteration of a collection run may send before it is "
     "stopped. It exists because a script can redirect the sequence with "
     "pm.execution.setNextRequest, and two steps pointing at each other would "
     "otherwise run forever. 0 derives the limit from the collection - ten "
     "times its request count, never fewer than 100.",
-    "general_engine", "0", "0", "1000000", std::nullopt, now });
+    "general_engine", "0", "0", "1000000", std::nullopt, now }));
 
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION
     // SQLite optimization settings for high-throughput load testing
     // =========================================================================
 
-    upsert_config (restart_required (ConfigEntry{ "dbCacheSize",
+    upsert_config (restart_required (keywords ({ "ram" }) (ConfigEntry{ "dbCacheSize",
     std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "integer", "Database Cache Size",
     "Memory SQLite keeps per connection for recently used database pages. A "
@@ -1830,9 +1856,10 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "1048576",    // min: 1MB in bytes
     "1073741824", // max: 1GB in bytes
-    std::nullopt, now }));
+    std::nullopt, now })));
 
-    upsert_config (restart_required (advanced (ConfigEntry{ "dbBusyTimeout",
+    upsert_config (restart_required (advanced (keywords ({ "contention" }) (
+    ConfigEntry{ "dbBusyTimeout",
     std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "integer", "Database Lock Wait Time",
     "How long a thread waits for the database when another one is writing to "
@@ -1842,9 +1869,10 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "1000",  // min: 1 second
     "60000", // max: 60 seconds
-    std::nullopt, now })));
+    std::nullopt, now }))));
 
-    upsert_config (restart_required (ConfigEntry{ "dbSynchronous",
+    upsert_config (restart_required (keywords ({ "fsync", "pragma" }) (
+    ConfigEntry{ "dbSynchronous",
     std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum",
     "Data Safety Mode",
     "How hard SQLite works to get results onto disk before reporting them "
@@ -1854,23 +1882,24 @@ void Database::seed_default_config () {
     "Full buy durability back at the cost of write throughput during a "
     "high-RPS run.",
     "database_performance", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
-    std::nullopt, std::nullopt, db_synchronous_options_json (), now }));
+    std::nullopt, std::nullopt, db_synchronous_options_json (), now })));
 
     // =========================================================================
     // NETWORK & CONNECTIVITY CONFIGURATION
     // Low-level networking tuning for throughput, DNS, and connection persistence
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "eventLoopMaxConcurrent",
+    upsert_config (keywords ({ "concurrency", "parallel" }) (
+    ConfigEntry{ "eventLoopMaxConcurrent",
     std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
     "integer", "Max Concurrent Requests (Per Worker)",
     "How many requests one worker keeps in flight at once. Higher values use "
     "more file descriptors and push the target harder. Read when a load test "
     "starts, so a change applies to the next run.",
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
-    "1", "10000", std::nullopt, now });
+    "1", "10000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "eventLoopMaxPerHost",
+    upsert_config (keywords ({ "socket", "pool" }) (ConfigEntry{ "eventLoopMaxPerHost",
     std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer",
     "Max Connections Per Host (Per Worker)",
     "Concurrency limit for a specific target API host. Critical for respecting "
@@ -1878,9 +1907,9 @@ void Database::seed_default_config () {
     "Lower values are gentler on the target; higher values maximize "
     "throughput.",
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST),
-    "1", "1000", std::nullopt, now });
+    "1", "1000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "dnsCacheTimeout",
+    upsert_config (keywords ({ "ttl" }) (ConfigEntry{ "dnsCacheTimeout",
     std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
     "integer", "DNS Cache Timeout",
     "How long, in seconds, a resolved hostname is reused before it is looked up "
@@ -1890,7 +1919,7 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
     "0",    // Disable cache
     "3600", // 1 hour
-    std::nullopt, now });
+    std::nullopt, now }));
 
     // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
     // before it expires, so a run longer than its token does not turn into a
@@ -1964,7 +1993,7 @@ void Database::seed_default_config () {
     // the next run started, no restart. The interval *bounds* (250-60000ms) are
     // deliberately not settings: they exist to stop a cadence that measures the
     // scraper rather than the target.
-    upsert_config (ConfigEntry{ "monitorIntervalMs",
+    upsert_config (keywords ({ "prometheus" }) (ConfigEntry{ "monitorIntervalMs",
     std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer",
     "Server Monitoring Scrape Interval",
     "How often, in milliseconds, a load test scrapes the metrics endpoint it "
@@ -1976,9 +2005,9 @@ void Database::seed_default_config () {
     "observability",
     std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS),
     std::to_string (vayu::core::constants::monitor::MIN_INTERVAL_MS),
-    std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now });
+    std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "monitorMaxSeries",
+    upsert_config (keywords ({ "prometheus" }) (ConfigEntry{ "monitorMaxSeries",
     std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer",
     "Server Monitoring Metric Limit",
     "How many metric names one run may chart from its monitored endpoint. Each "
@@ -1986,9 +2015,9 @@ void Database::seed_default_config () {
     "exposition body, so the ceiling is about a readable chart rather than a "
     "hard cost. The chart has four distinct colours and repeats them past that.",
     "observability", std::to_string (vayu::core::constants::monitor::MAX_SERIES),
-    "1", "64", std::nullopt, now });
+    "1", "64", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "monitorScrapeTimeoutMs",
+    upsert_config (keywords ({ "prometheus" }) (ConfigEntry{ "monitorScrapeTimeoutMs",
     std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS),
     "integer", "Server Monitoring Scrape Timeout",
     "How long, in milliseconds, one scrape of the metrics endpoint may take "
@@ -2001,54 +2030,55 @@ void Database::seed_default_config () {
     "loop behind itself.",
     "observability", std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS),
     "0", std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS),
-    std::nullopt, now });
+    std::nullopt, now }));
 
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
     // Configuration for the QuickJS sandbox execution, limits, and debugging
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "scriptTimeout",
+    upsert_config (keywords ({ "runaway" }) (ConfigEntry{ "scriptTimeout",
     std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script Execution Timeout",
     "How long, in milliseconds, a pre- or post-request script may run. A script "
     "that exceeds this is aborted and reported as an error, so an infinite loop "
     "cannot hang the engine. 0 disables the limit, which is not recommended.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS),
-    "0", "60000", std::nullopt, now });
+    "0", "60000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "scriptEnableConsole",
+    upsert_config (keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
     vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
     "boolean", "Enable Script Console",
     "Makes console.log() available inside scripts, with its output shown in the "
     "response viewer. Turn it off during a load test, where the writes cost "
     "throughput for output nobody reads.",
     "scripting_sandbox", vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
-    std::nullopt, std::nullopt, std::nullopt, now });
+    std::nullopt, std::nullopt, std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "scriptMemoryLimit",
+    upsert_config (keywords ({ "ram", "oom" }) (ConfigEntry{ "scriptMemoryLimit",
     std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script Memory Limit",
     "Largest heap one script execution may allocate before it is aborted. Raise "
     "it only for a script that processes very large data structures.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT),
     "1048576",   // 1MB
     "268435456", // 256MB
-    std::nullopt, now });
+    std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "scriptStackSize",
+    upsert_config (keywords ({ "recursion" }) (ConfigEntry{ "scriptStackSize",
     std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script Stack Size",
     "Depth of the call stack one script execution may use. Raise it only for a "
     "script that recurses deeply enough to overflow.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::STACK_SIZE),
     "65536",   // 64KB
     "1048576", // 1MB
-    std::nullopt, now });
+    std::nullopt, now }));
 
     // =========================================================================
     // OBSERVABILITY & DATA CONFIGURATION
     // Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits
     // =========================================================================
 
-    upsert_config (ConfigEntry{ "liveTickIntervalMs",
+    upsert_config (keywords ({ "refresh rate", "sse" }) (
+    ConfigEntry{ "liveTickIntervalMs",
     std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
     "integer", "Live Metrics Tick Interval",
     "How often, in milliseconds, the engine emits a live-metrics tick into the "
@@ -2057,9 +2087,9 @@ void Database::seed_default_config () {
     "ticks defeat live smoothness. The historical 1 Hz database sampling is "
     "unaffected.",
     "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "10", "1000", std::nullopt, now });
+    "10", "1000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "liveReplayWindowMs",
+    upsert_config (keywords ({ "time range" }) (ConfigEntry{ "liveReplayWindowMs",
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
     "integer", "Live Chart Window",
     "How much recent live-metrics history to keep: the span the dashboard's live "
@@ -2073,7 +2103,7 @@ void Database::seed_default_config () {
     "window does.",
     "observability",
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
-    "0", "3600000", std::nullopt, now });
+    "0", "3600000", std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "liveMaxRetainedTicks",
     std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
@@ -2151,7 +2181,7 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "phaseHistograms",
+    upsert_config (keywords ({ "ttfb", "timings" }) (ConfigEntry{ "phaseHistograms",
     vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
     "boolean", "Per-Phase Latency Histograms",
     "Records DNS, connect, TLS, first-byte and download times for every "
@@ -2162,7 +2192,7 @@ void Database::seed_default_config () {
     "a run at your throughput ceiling measurably suffers.",
     "observability",
     vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
-    std::nullopt, std::nullopt, std::nullopt, now });
+    std::nullopt, std::nullopt, std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "maxResponseBodyBytes",
     std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
@@ -2177,7 +2207,7 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "maxRunsRetained",
+    upsert_config (keywords ({ "cleanup" }) (ConfigEntry{ "maxRunsRetained",
     std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
     "Max Runs Retained",
     "Keep at most this many most-recent runs; older runs, with their metrics "
@@ -2186,9 +2216,9 @@ void Database::seed_default_config () {
     "file on disk and slows down loading the run history. In-progress runs are "
     "never pruned.",
     "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
-    "0", "100000", std::nullopt, now });
+    "0", "100000", std::nullopt, now }));
 
-    upsert_config (ConfigEntry{ "runRetentionDays",
+    upsert_config (keywords ({ "cleanup" }) (ConfigEntry{ "runRetentionDays",
     std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
     "Run Retention",
     "Delete runs older than this many days, with their metrics and results, at "
@@ -2196,7 +2226,7 @@ void Database::seed_default_config () {
     "forever - retains more history at the cost of a larger database file on "
     "disk. In-progress runs are never pruned.",
     "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
-    "0", "3650", std::nullopt, now });
+    "0", "3650", std::nullopt, now }));
 
     // Webhook inbox. All three are read once when an inbox starts, so a change
     // applies to the next inbox started - no restart. The running listener keeps

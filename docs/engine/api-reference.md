@@ -417,6 +417,7 @@ min/max/options):
       "max": "128",
       "requiresRestart": true,
       "advanced": false,
+      "keywords": ["cores", "parallelism"],
       "updatedAt": 1234567890
     },
     {
@@ -434,6 +435,7 @@ min/max/options):
       ],
       "requiresRestart": false,
       "advanced": false,
+      "keywords": ["h2", "alpn"],
       "updatedAt": 1234567890
     }
   ]
@@ -460,6 +462,17 @@ hand-maintained value-to-label map. `value` and `default` are always strings;
   three `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`). Still
   live and still settable; the app renders these collapsed under an "Advanced"
   section at the bottom of their category.
+
+`keywords` is an array of strings, **always present** and empty for the entries
+that declare none - a client never has to tell "declares none" from "this
+engine does not send the field". They are extra terms the app's settings search
+matches on: what a user types that this entry's key, label and description
+never say ("ram" for `dbCacheSize`, "deadline" for `defaultTimeout`, "fsync"
+for `dbSynchronous`). They are match terms only and are never displayed, and a
+seeded keyword never repeats a word the entry already carries - search reaches
+the other three fields first and ranks them higher, so a duplicate would only
+push the entry above better matches. A test over the seeded catalogue enforces
+both halves of that.
 
 Two entries are seeded as `enum` today. `defaultHttpVersion` is the protocol a
 **newly created** request starts with (see [POST /requests](#post-requests)).

@@ -37,6 +37,9 @@ const engineEntries = [
 		label: "Cache Size",
 		description: "Memory SQLite keeps for pages it has already read.",
 		category: "database_performance",
+		// The engine's own keyword for this entry: "ram" is what a user types
+		// and what neither the label nor the description says.
+		keywords: ["ram"],
 	},
 	{
 		key: "defaultTimeout",
@@ -167,6 +170,20 @@ describe("searchSettings", () => {
 		expect(searchSettings(index, "dark mode").map((e) => e.id)).toEqual(["theme-mode"]);
 	});
 
+	it("matches an engine entry's keywords, not only an app setting's", () => {
+		// The engine half carried `keywords: []` unconditionally until the
+		// entry itself could declare them: "ram" appears in neither "Cache
+		// Size" nor "Memory SQLite keeps for pages it has already read", so
+		// before that this query found nothing at all.
+		expect(searchSettings(index, "ram").map((e) => e.id)).toEqual(["dbCacheSize"]);
+	});
+
+	it("gives an engine entry that declares none an empty list, never undefined", () => {
+		// The rank check reads `entry.keywords.some(...)` unguarded, so a
+		// missing list would throw on the first query rather than not match.
+		expect(index.find((e) => e.id === "defaultTimeout")?.keywords).toEqual([]);
+	});
+
 	it("ranks a label match above a keyword match above a description mention", () => {
 		// Declared in the losing order, so passing cannot be an accident of
 		// declaration order surviving an unsorted list.
@@ -201,6 +218,43 @@ describe("searchSettings", () => {
 			"by-label",
 			"by-keyword",
 			"by-description",
+		]);
+	});
+
+	it("ranks an engine entry's key above its keywords, and those above a description", () => {
+		// The four-way version of the ranking above, on the half that has a key
+		// worth typing: `dbCacheSize` is what every doc, log line and MCP call
+		// names the setting, so a keyword must never outrank it.
+		const ranked = buildSettingsIndex({
+			panels: [],
+			engineEntries: [
+				{
+					key: "byDescription",
+					label: "Something else",
+					description: "Mentions zebra in passing.",
+					category: "database_performance",
+				},
+				{
+					key: "byKeyword",
+					label: "Another thing",
+					description: "No mention here.",
+					category: "database_performance",
+					keywords: ["zebra"],
+				},
+				{
+					key: "zebraKey",
+					label: "Another one still",
+					description: "No mention here either.",
+					category: "database_performance",
+				},
+			],
+			engineCategories,
+		});
+
+		expect(searchSettings(ranked, "zebra").map((e) => e.id)).toEqual([
+			"zebraKey",
+			"byKeyword",
+			"byDescription",
 		]);
 	});
 
