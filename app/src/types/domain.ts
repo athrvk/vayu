@@ -1373,6 +1373,18 @@ export interface ConfigEntry {
 	 * bottom of its category rather than beside the settings people tune.
 	 */
 	advanced: boolean;
+	/**
+	 * Extra terms the settings search matches on - what a user types that this
+	 * entry's key, label and description never say ("ram" for `dbCacheSize`,
+	 * "deadline" for `defaultTimeout`). Always sent, empty for the entries that
+	 * declare none, so "no keywords" never has to be told from "not sent".
+	 *
+	 * **Never rendered**, which is the one deliberate exception to this repo's
+	 * "written but never read" rule: the reader is `buildSettingsIndex`
+	 * (`lib/settings-index.ts`), not a component. Do not go looking for the UI
+	 * that shows these - there is none, by design.
+	 */
+	keywords: string[];
 	updatedAt: number;
 	/**
 	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the

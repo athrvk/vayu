@@ -43,6 +43,7 @@ const enumEntry: ConfigEntry = {
 	category: "general_engine",
 	requiresRestart: false,
 	advanced: false,
+	keywords: [],
 	updatedAt: 0,
 	options: [
 		{ value: "auto", label: "Auto" },
@@ -216,8 +217,12 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 
 		// And the seed call site actually feeds that JSON into the
 		// "defaultHttpVersion" entry's options column, not some other field.
+		// The entry may be wrapped in the seed's metadata markers
+		// (`restart_required`, `advanced`, `keywords ({...})`), so the prefix is
+		// allowed to carry them - but not to cross a `;`, which would let the
+		// match start at an earlier entry and assert about the wrong statement.
 		const seedMatch = databaseSource.match(
-			/upsert_config \(ConfigEntry\{ "defaultHttpVersion",[\s\S]*?\}\);/
+			/upsert_config \([^;]*ConfigEntry\{ "defaultHttpVersion",[\s\S]*?\}\)+;/
 		);
 		expect(seedMatch, "defaultHttpVersion upsert_config call not found").not.toBeNull();
 		expect(seedMatch?.[0]).toContain("http_version_options_json ()");

@@ -717,8 +717,10 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `updated_at`    | INTEGER | Unix ms                                                |
 | `requires_restart` | INTEGER | Boolean; the running engine keeps the old value until restarted |
 | `advanced`      | INTEGER | Boolean; an internal, rendered collapsed under "Advanced" |
+| `keywords`      | TEXT    | JSON array of extra search terms; `"[]"` when the entry declares none |
 
-**requires_restart / advanced** are NOT NULL with a `default_value` of false, so
+**requires_restart / advanced / keywords** are NOT NULL with a `default_value`
+(false, false and `"[]"`), so
 `sync_schema` adds them to an existing table with `ALTER TABLE ADD COLUMN`
 rather than a copy-and-recreate. They are metadata, not user data: every startup
 re-seeds each row's metadata (values are preserved), so the backfill only holds
@@ -726,6 +728,15 @@ between the ALTER and that upsert. `requires_restart` replaced a
 `"(Requires Restart)"` suffix in `label` that the app and the MCP tool surface
 both parsed out of the prose - one stale label misinformed both at once, and a
 test now asserts no label carries the substring.
+
+**keywords** is JSON-in-TEXT like `options`, but never null: an entry with no
+terms stores `"[]"`, so `GET /config` always sends an array and no client
+branches on absent-vs-empty. It holds what a user types that the entry's key,
+label and description never say ("ram" for `dbCacheSize`), which is why a
+seeded keyword may not repeat a word those three fields already carry - the
+search matches them first and ranks them above keywords, so a duplicate only
+lifts the entry over better matches. `config_route_test.cpp` scans the seeded
+catalogue for both rules.
 
 **options** is nullable and populated only for `type: "enum"` entries. It is
 JSON-in-TEXT, the same convention as every other structured column in this

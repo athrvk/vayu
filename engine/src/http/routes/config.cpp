@@ -68,7 +68,26 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     // habit the typed flag replaced.
     entry_json["requiresRestart"] = entry.requires_restart;
     entry_json["advanced"]        = entry.advanced;
-    entry_json["updatedAt"]       = entry.updated_at;
+    // Search terms, and always an array - empty for the entries that declare
+    // none. Unlike `options`, which is omitted when it cannot be parsed, this
+    // key is never dropped: a client that had to tell "no keywords" from "this
+    // engine does not send them" would be back to guessing, and an empty list
+    // is the honest answer to both a malformed row and an entry with none.
+    nlohmann::json keywords = nlohmann::json::array ();
+    try {
+        auto parsed = nlohmann::json::parse (entry.keywords);
+        if (parsed.is_array ()) {
+            keywords = std::move (parsed);
+        } else {
+            vayu::utils::log_warning ("config entry '" + entry.key +
+            "' has non-array keywords JSON, sending an empty list");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("config entry '" + entry.key +
+        "' has malformed keywords JSON, sending an empty list: " + e.what ());
+    }
+    entry_json["keywords"]  = std::move (keywords);
+    entry_json["updatedAt"] = entry.updated_at;
     return entry_json;
 }
 

@@ -30,6 +30,7 @@ const base = {
 	default: "1",
 	requiresRestart: false,
 	advanced: false,
+	keywords: [],
 	updatedAt: 0,
 };
 
@@ -40,6 +41,8 @@ const entries: ConfigEntry[] = [
 		label: "Cache Size",
 		description: "Memory SQLite keeps for pages it has already read.",
 		category: "database_performance",
+		// The keyword this entry is really seeded with (`database.cpp`).
+		keywords: ["ram"],
 	},
 	{
 		...base,
@@ -109,6 +112,20 @@ describe("settings search", () => {
 
 		fireEvent.change(search(), { target: { value: "abandoned" } });
 		expect(screen.getByText("Default Timeout")).toBeInTheDocument();
+	});
+
+	it("finds an engine entry by a keyword the entry carries and the copy does not", () => {
+		renderTree();
+
+		// End to end over a real seeded keyword: "ram" is nowhere in the label
+		// or the description, so this query is answered by the engine's own
+		// `keywords` field travelling through `/config` into the index.
+		fireEvent.change(search(), { target: { value: "ram" } });
+		expect(screen.getByText("Cache Size")).toBeInTheDocument();
+		// Presence, not a result count: "ram" is a substring of "histogram" and
+		// "parameter", so the real app catalogue answers this query too. What
+		// this pins is that the engine entry is among them at all.
+		expect(screen.getByText(/Database Performance · dbCacheSize/)).toBeInTheDocument();
 	});
 
 	it("selects the owning category and names the entry to reveal", () => {

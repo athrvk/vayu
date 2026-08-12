@@ -35,6 +35,7 @@ function entry(value: string, key = "liveReplayWindowMs"): ConfigEntry {
 		default: "300000",
 		requiresRestart: false,
 		advanced: false,
+		keywords: [],
 		updatedAt: 0,
 	};
 }

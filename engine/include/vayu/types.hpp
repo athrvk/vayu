@@ -1055,6 +1055,13 @@ struct ConfigEntry {
     // renders these in a collapsed section at the bottom of their category
     // rather than beside the settings people actually tune.
     bool advanced = false;
+    // Extra terms the settings search matches on: what a user types that the
+    // label and the description never say ("ram" for dbCacheSize, "deadline"
+    // for defaultTimeout). JSON array of strings, the same JSON-in-TEXT
+    // convention as `options`, but never null - an entry with none holds "[]"
+    // so the wire shape is always an array and no client has to tell an absent
+    // field from an empty one. Never rendered: these are match terms only.
+    std::string keywords = "[]";
 };
 
 /**

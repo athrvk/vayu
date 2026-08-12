@@ -44,6 +44,7 @@ const restartEntry = {
 	// entry without it must raise nothing - covered below.
 	requiresRestart: true,
 	advanced: false,
+	keywords: [],
 	updatedAt: 0,
 };
 

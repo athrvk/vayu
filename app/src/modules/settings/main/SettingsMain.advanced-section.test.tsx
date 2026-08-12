@@ -37,6 +37,7 @@ const base = {
 	min: "1",
 	max: "100000",
 	requiresRestart: false,
+	keywords: [],
 	updatedAt: 0,
 };
 

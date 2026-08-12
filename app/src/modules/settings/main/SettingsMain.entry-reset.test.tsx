@@ -31,6 +31,7 @@ const base = {
 	category: "database_performance",
 	requiresRestart: false,
 	advanced: false,
+	keywords: [],
 	updatedAt: 0,
 };
 

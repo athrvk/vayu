@@ -79,6 +79,12 @@ export interface SettingsEngineEntrySource {
 	label: string;
 	description: string;
 	category: string;
+	/**
+	 * Optional here, always sent by the engine (`config_entry_json`): a caller
+	 * assembling an entry by hand - a test, a fixture - should not have to
+	 * declare an empty list to say "none".
+	 */
+	keywords?: readonly string[];
 }
 
 /** The engine-category fields the index needs (a subset of the category registry). */
@@ -149,7 +155,7 @@ export function buildSettingsIndex({
 			category: entry.category as SettingsCategory,
 			categoryLabel,
 			anchor: entry.key,
-			keywords: [],
+			keywords: entry.keywords ?? [],
 		});
 	}
 
