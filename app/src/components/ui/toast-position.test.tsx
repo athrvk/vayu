@@ -40,6 +40,7 @@ const src = join(here, "..", "..");
 const css = readFileSync(join(src, "index.css"), "utf8");
 const dock = readFileSync(join(src, "components", "layout", "Dock.tsx"), "utf8");
 const titleBar = readFileSync(join(src, "components", "layout", "TitleBar.tsx"), "utf8");
+const tabStrip = readFileSync(join(src, "components", "layout", "TabStrip.tsx"), "utf8");
 const electronConstants = readFileSync(join(src, "..", "electron", "constants.ts"), "utf8");
 
 describe("toast stack position", () => {
@@ -50,6 +51,7 @@ describe("toast stack position", () => {
 		expect(css.length).toBeGreaterThan(1000);
 		expect(dock.length).toBeGreaterThan(1000);
 		expect(titleBar.length).toBeGreaterThan(1000);
+		expect(tabStrip.length).toBeGreaterThan(1000);
 		expect(electronConstants.length).toBeGreaterThan(500);
 	});
 
@@ -78,10 +80,18 @@ describe("toast stack position", () => {
 		// The whole point of making position configurable is that there is no
 		// longer a single corner to check. A new entry reaching for `bottom-4`
 		// reintroduces exactly the bug this file was opened for.
+		//
+		// The top edge is two bands, not one: the title row, and the tab strip
+		// beside the drawer's header band under it. Clearing only the first put
+		// the stack back on the chrome - the same defect, 32px lower.
 		expect(TOAST_POSITIONS.length).toBeGreaterThan(1);
 		for (const p of TOAST_POSITIONS) {
-			const edge = p.value.startsWith("bottom") ? "--dock-height" : "--titlebar-height";
-			expect(p.className, `${p.value} must offset by ${edge}`).toContain(`var(${edge})`);
+			const edges = p.value.startsWith("bottom")
+				? ["--dock-height"]
+				: ["--titlebar-height", "--tabstrip-height"];
+			for (const edge of edges) {
+				expect(p.className, `${p.value} must offset by ${edge}`).toContain(`var(${edge})`);
+			}
 			expect(p.className, `${p.value} uses a bare offset`).not.toMatch(/\b(bottom|top)-\d/);
 		}
 	});
@@ -117,8 +127,14 @@ describe("toast stack position", () => {
 
 	it("keeps the title bar's own height on the same token", () => {
 		// Same drift risk as the Dock: a bare h-[38px] here and a top-anchored
-		// stack would keep offsetting by a value the strip no longer has.
+		// stack would keep offsetting by a value the row no longer has.
 		expect(titleBar).toContain("h-[var(--titlebar-height)]");
+	});
+
+	it("keeps the tab strip's own height on the token the toasts subtract", () => {
+		// The second band the top offset clears. A bare h-8 in the strip and the
+		// stack drifts onto it the moment either number moves.
+		expect(tabStrip).toContain("h-[var(--tabstrip-height)]");
 	});
 
 	it("keeps the Dock's own height on the same token", () => {

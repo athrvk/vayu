@@ -1148,8 +1148,15 @@ their content.
 The four views had drifted into two different panel designs - Collections and
 History used a 16px padded container with a heading, Variables and Settings were
 flush with no heading at all. Switching views moved the content's vertical start
-*and* made the title appear or vanish. All four now match exactly: heading at
-11px from the panel top, body at 40px.
+*and* made the title appear or vanish. All four now match exactly: one 32px
+header band, body below it.
+
+- **The header is the drawer's half of the second chrome row.** It takes its
+  height from `--tabstrip-height` and carries the same bottom rule as the tab
+  strip on the other side of the resize handle, so the two read as one band
+  across the window rather than as two adjacent headers. That is the only reason
+  the height is a token and not an `h-8`: `TabStrip.tsx` and `DrawerPanel.tsx`
+  cannot see each other, and `titlebar-height.test.ts` holds them together.
 
 - **The frame owns header padding; the body is flush.** Rows run edge to edge -
   the sidebar convention, and it recovers the ~32px of row width the old inset
@@ -1579,7 +1586,10 @@ away. `never` resolves to a 24h sentinel rather than `Infinity`, because the
 primitive arms a real `setTimeout` and a non-finite delay there is coerced to 1.
 
 **Every position clears the chrome on its own edge**, via `--dock-height` at the
-bottom and `--titlebar-height` at the top - never a round number. The stack is
+bottom and `--titlebar-height` **plus** `--tabstrip-height` at the top - never a
+round number. The top edge is two bands since the shell split the title row from
+the tab strip, and clearing only the first put the stack back on the chrome
+32px lower. The stack is
 `position: fixed`, so it anchors to the window rather than the layout, and a
 plain `bottom-4` once put it on top of the Dock. `toast-position.test.tsx`
 checks all six.

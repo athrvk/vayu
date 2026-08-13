@@ -88,8 +88,22 @@ describe("tab strip width", () => {
 		 * measures is the width it already chose - a loop that collapses the strip
 		 * to a single tab no matter how wide the window is. There is no way to
 		 * observe that in jsdom, so the class itself is the assertion.
+		 *
+		 * `w-full`, not `flex-1`: the strip is a column item now (tab row over
+		 * main+context), where `flex-1` would grow it vertically and leave the
+		 * width to its content - the same loop, reintroduced by a class that
+		 * looks like the one that fixed it.
 		 */
-		expect(screen.getByRole("tablist").className).toMatch(/\bflex-1\b/);
+		expect(screen.getByRole("tablist").className).toMatch(/\bw-full\b/);
+	});
+
+	it("takes its height from the band token the drawer header shares", () => {
+		stubStripWidth(1200);
+		renderStrip();
+		// A bare h-8 here would drift from the drawer's header the moment either
+		// side changed, and the two are one band across the window: the strip's
+		// left edge is the drawer's right edge.
+		expect(screen.getByRole("tablist").className).toContain("h-[var(--tabstrip-height)]");
 	});
 
 	it("shows every tab when there is room", () => {
@@ -118,45 +132,34 @@ describe("tab strip width", () => {
 	});
 });
 
-describe("title bar drag region", () => {
+describe("drag regions", () => {
 	/*
-	 * The empty space to the right of the last tab has to move the window. It
-	 * stopped doing so when the strip gained `flex-1`: the root carried
-	 * `app-region: no-drag`, which was harmless while the element sized to its
-	 * content - the slack belonged to the draggable parent - and swallowed the
-	 * whole bar once it spanned the full width.
+	 * The strip used to live in the title bar, where the row was a drag region
+	 * and every interactive child had to opt out of it - a tab that did not was
+	 * simply unclickable, because a drag area ignores pointer events.
 	 *
-	 * So the container must NOT opt out, and every interactive child must.
+	 * It does not live there any more. Nothing in the content area drags the
+	 * window, so an `app-region` marker down here guards against a rule that no
+	 * longer reaches this subtree, and reads as though it still does. The
+	 * title-row half of the invariant - the header drags, its controls do not -
+	 * moved with the geometry to `TitleBar.search-bar.test.tsx`.
 	 */
 	const appRegion = (el: HTMLElement) =>
 		(el.style as CSSStyleDeclaration & { WebkitAppRegion?: string }).WebkitAppRegion;
 
-	it("leaves the strip itself draggable", () => {
-		stubStripWidth(2000);
-		renderStrip();
-		expect(appRegion(screen.getByRole("tablist"))).toBeFalsy();
-	});
-
-	it("opts every tab out, so tabs stay clickable", () => {
-		stubStripWidth(2000);
-		renderStrip();
-		for (const tab of screen.getAllByRole("tab")) {
-			expect(appRegion(tab)).toBe("no-drag");
-		}
-	});
-
-	it("opts the new-tab button out", () => {
-		stubStripWidth(2000);
-		renderStrip();
-		expect(appRegion(screen.getByLabelText("New tab"))).toBe("no-drag");
-	});
-
-	it("opts the overflow control out", () => {
+	it("declares no drag region on the strip or anything in it", () => {
 		stubStripWidth(320);
 		renderStrip();
 		const shown = screen.getAllByRole("tab").length;
-		expect(appRegion(screen.getByLabelText(`${TABS.length - shown} more tabs`))).toBe(
-			"no-drag"
-		);
+		// Non-empty by construction: the strip is stubbed narrow so it renders
+		// tabs *and* the overflow control, and a scan of nothing passes anything.
+		const marked = [
+			screen.getByRole("tablist"),
+			...screen.getAllByRole("tab"),
+			screen.getByLabelText("New tab"),
+			screen.getByLabelText(`${TABS.length - shown} more tabs`),
+		];
+		expect(marked.length).toBeGreaterThan(3);
+		for (const el of marked) expect(appRegion(el)).toBeFalsy();
 	});
 });

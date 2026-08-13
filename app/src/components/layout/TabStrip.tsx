@@ -8,8 +8,11 @@
 /**
  * TabStrip Component
  *
- * The horizontal row of open tabs rendered in the title bar. Reads from
- * tabs-store; one TabItem per open tab plus a "+" button that opens a
+ * The horizontal row of open tabs, rendered over the content area - main plus
+ * the context bar - with the drawer to its left. It sits there rather than
+ * across the window because that is the region tabs actually switch: the drawer
+ * is a global navigator and keeps its own header band beside this row. Reads
+ * from tabs-store; one TabItem per open tab plus a "+" button that opens a
  * welcome tab. No unsaved-dot - autosave is the safety net.
  *
  * **A tab is as wide as its own name, and the strip overflows rather than
@@ -80,8 +83,7 @@ function TabItem({
 			tabIndex={rovingTabIndex}
 			data-tab-id={tab.id}
 			title={descriptor.title}
-			// Opts out of the title bar's drag region so the tab is clickable.
-			style={{ width, minWidth: width, WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			style={{ width, minWidth: width }}
 			onClick={() => focusTab(tab.id)}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
@@ -230,26 +232,25 @@ export function TabStrip() {
 			role="tablist"
 			onKeyDown={onKeyDown}
 			/*
-			 * `flex-1` is load-bearing, not cosmetic. The strip is a flex item, so
-			 * without it it sizes to its own content - and since it measures its own
-			 * clientWidth to decide how many tabs fit, that is a feedback loop:
+			 * `w-full` is load-bearing, not cosmetic - it is the `flex-1` this
+			 * carried while the strip was a row item in the title bar, restated for
+			 * a column. Sized to its own content, the strip measures its own
+			 * clientWidth to decide how many tabs fit, which is a feedback loop:
 			 * measure the tabs, trim to fit "the space", the content shrinks, trim
 			 * again. It settled on a single tab with everything else in the overflow
 			 * menu regardless of how wide the window was. It has to be told to fill
 			 * the parent so the measurement is of available space, not of itself.
-			 */
-			className="panel-clip flex h-full min-w-0 flex-1 items-stretch overflow-hidden"
-			/*
-			 * No `app-region` here on purpose - the root inherits `drag` from the
-			 * wrapper in TitleBar, and each interactive child opts out individually
-			 * below.
 			 *
-			 * It used to be `no-drag` on this element, which was harmless only while
-			 * the strip sized to its content: the slack to the right of the last tab
-			 * belonged to the parent and stayed draggable. `flex-1` (needed so the
-			 * strip measures available space rather than its own tabs) made this
-			 * element span that slack, so the whole area stopped moving the window.
+			 * The strip owns its height, from the token the drawer's header band
+			 * reads too - the two are one band across the window, and a step in it
+			 * is what a second literal would produce.
+			 *
+			 * No `app-region` anywhere in this file any more. It used to live in the
+			 * title bar, where the row was a drag region and every interactive child
+			 * had to opt out; down here nothing drags the window, so the opt-outs
+			 * were guarding against a rule that no longer applies to this subtree.
 			 */
+			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel"
 		>
 			{visible.map((i) => (
 				<TabItem
@@ -271,7 +272,6 @@ export function TabStrip() {
 					<DropdownMenuTrigger asChild>
 						<button
 							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-							style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 							aria-label={`${overflowed.length} more tabs`}
 						>
 							+{overflowed.length}
@@ -311,12 +311,7 @@ export function TabStrip() {
 			<button
 				onClick={() => openTab({ type: "welcome", entityId: null })}
 				aria-label="New tab"
-				style={
-					{
-						width: TAB_NEW_BUTTON_WIDTH,
-						WebkitAppRegion: "no-drag",
-					} as React.CSSProperties
-				}
+				style={{ width: TAB_NEW_BUTTON_WIDTH }}
 				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			>
 				<Plus className="w-3.5 h-3.5" />

@@ -27,6 +27,14 @@
  * pre-paint window background before any stylesheet exists, so it has to name
  * them; they had drifted to `#f2f0eb`, a warm cream from a palette two
  * revisions old, against a `--panel` of `#fafafa`.
+ *
+ * The second chrome row - `--tabstrip-height`, shared by the tab strip and the
+ * drawer's header band - is held here too, for the third variant of the same
+ * problem: those two files cannot import each other either, and they meet at
+ * the drawer's resize handle where a disagreement is a visible step. It has no
+ * Electron mirror, and that absence is asserted rather than left to be noticed:
+ * nothing the main process draws is that tall, so a constant there would be one
+ * more value written and never read.
  */
 
 import { describe, it, expect } from "vitest";
@@ -119,6 +127,38 @@ describe("title bar height", () => {
 		// x clears the window's rounded top corner (~10-12px). At 12 the close
 		// button sat inside the curve, which no amount of vertical centring fixes.
 		expect(num("TRAFFIC_LIGHT_X")).toBeGreaterThanOrEqual(20);
+	});
+
+	it("declares the tab-strip band once, theme- and platform-independently", () => {
+		// The second chrome row: the tab strip over the content area and the
+		// drawer's header band beside it. One declaration, because the two halves
+		// meet at the drawer's resize handle and a second value is a visible step
+		// in the rule that runs across the window.
+		const declarations = [...css.matchAll(/--tabstrip-height:\s*(\d+px)\s*;/g)].map(
+			(m) => m[1]
+		);
+		expect(declarations).toEqual(["32px"]);
+		// Unlike --titlebar-height, deliberately *not* mirrored in
+		// electron/constants.ts: the frame, the Windows caption overlay and the
+		// traffic lights all size to the title row alone, so a constant there
+		// would have no reader - the defect this repo has found nine times.
+		expect(constants).not.toContain("TABSTRIP_HEIGHT");
+	});
+
+	it("keeps both halves of the band on that one token", () => {
+		const tabStrip = readFileSync(join(here, "components", "layout", "TabStrip.tsx"), "utf8");
+		const drawerPanel = readFileSync(
+			join(here, "components", "shared", "DrawerPanel.tsx"),
+			"utf8"
+		);
+		// Non-empty first: a scan of nothing satisfies every assertion made of it.
+		expect(tabStrip.length).toBeGreaterThan(1000);
+		expect(drawerPanel.length).toBeGreaterThan(500);
+		// The frame's header was `h-10` while the strip was in the title bar and
+		// the two never met. They meet now.
+		expect(tabStrip).toContain("h-[var(--tabstrip-height)]");
+		expect(drawerPanel).toContain("h-[var(--tabstrip-height)]");
+		expect(drawerPanel).not.toMatch(/className="flex h-10\b/);
 	});
 
 	it("reserves the same inset in both files", () => {

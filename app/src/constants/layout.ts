@@ -29,7 +29,7 @@ export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
  */
 export const INDENT_STEP = 12;
 
-/* ── Document tab strip (TitleBar) ───────────────────────────────────────── */
+/* ── Document tab strip (over the content column) ────────────────────────── */
 
 /**
  * A document tab sizes to its own name, between these bounds, and the strip

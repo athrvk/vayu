@@ -87,15 +87,20 @@ export const WINDOW_MIN_HEIGHT = 768;
  * **32px is the Windows standard**, and also the floor: `titleBarOverlay.height`
  * is what the OS draws its caption buttons at, and those are 46x32. Anything
  * smaller squeezes controls the platform requires to stay fully visible. The
- * 48px variant exists for a searchbox or a person-picture, neither of which
- * this bar has - tabs do not call for extra height.
+ * 48px variant exists for a searchbox or a person-picture; the row does hold a
+ * search bar now, but a 24px trigger inside a 32px row clears both by 4px, so
+ * the extra 16px would buy padding and nothing else.
  *
  * **macOS matches it.** 28px is the macOS standard for a title bar holding a
- * *title*; this one holds tabs, and the traffic lights are a fixed 12px object
- * that needs air as well. Safari and Chrome both use a taller bar for the same
- * reason. 32 gives the lights 10px above and below and keeps one number across
- * the three platforms - the map stays per-platform because the mechanism is
- * right even when the values agree.
+ * *title*; this one holds a search bar, and the traffic lights are a fixed 12px
+ * object that needs air as well. Safari and Chrome both use a taller bar for the
+ * same reason. 32 gives the lights 10px above and below and keeps one number
+ * across the three platforms - the map stays per-platform because the mechanism
+ * is right even when the values agree.
+ *
+ * The tab strip is no longer in this row - it sits in a second row over the
+ * content area, sized by `--tabstrip-height` in `src/index.css`. That token has
+ * no mirror here on purpose: nothing the main process draws is that tall.
  *
  * Linux follows Windows: Vayu draws its own decorations there, so there is no
  * system metric to match, and one fewer value to reason about is worth more
@@ -132,11 +137,12 @@ export const TRAFFIC_LIGHT_FRAME_HEIGHT = 14;
  */
 export const TRAFFIC_LIGHT_X = 20;
 /**
- * Width the renderer reserves for the cluster, so the first tab does not land
- * under it. A 20px lead plus three buttons on a 20px pitch ends at 84px; 104
- * leaves a 20px gutter. At 80 that gutter was 16px and the lights read as
- * crammed against the tab strip. Mirrored by `--traffic-light-inset` in
- * index.css and held to it by `titlebar-height.test.ts`.
+ * Width the renderer reserves for the cluster, so the title row's leading
+ * content does not land under it. A 20px lead plus three buttons on a 20px pitch
+ * ends at 84px; 104 leaves a 20px gutter. At 80 that gutter was 16px and the
+ * lights read as crammed against what followed. Mirrored by
+ * `--traffic-light-inset` in index.css and held to it by
+ * `titlebar-height.test.ts`.
  */
 export const TRAFFIC_LIGHT_INSET = 104;
 

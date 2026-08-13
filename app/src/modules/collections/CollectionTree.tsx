@@ -147,6 +147,10 @@ export default function CollectionTree() {
 	return (
 		<DrawerPanel
 			title="Collections"
+			// h-7, not h-8: the header is the drawer's half of the 32px chrome
+			// band now (it was a 40px header while the tab strip was up in the
+			// title bar), and a 32px control in it fills the band edge to edge -
+			// the hover fill lands on the rule underneath.
 			actions={
 				<>
 					{/* No TooltipProvider - a bare nested one would reset this
@@ -158,7 +162,7 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.openNewCollectionForm}
 								disabled={panel.isCreatingCollection}
-								className="h-8 w-8"
+								className="h-7 w-7"
 								aria-label="Add collection"
 							>
 								{panel.isCreatingCollection ? (
@@ -177,7 +181,7 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.createRequestFromToolbar}
 								disabled={panel.isCreatingRequest}
-								className="h-8 w-8"
+								className="h-7 w-7"
 								aria-label="Add request"
 							>
 								{panel.isCreatingRequest ? (
@@ -199,7 +203,7 @@ export default function CollectionTree() {
 								variant="ghost"
 								size="icon"
 								onClick={openImport}
-								className="h-8 w-8"
+								className="h-7 w-7"
 								aria-label="Import collection"
 							>
 								<Download className="w-4 h-4" />

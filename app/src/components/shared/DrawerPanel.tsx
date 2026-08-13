@@ -19,6 +19,13 @@
  * The frame owns the header padding; the body is deliberately flush so rows can
  * run edge to edge - the sidebar convention, and it buys back the ~32px of row
  * width the old inset cost. Rows supply their own internal padding.
+ *
+ * **The header is the drawer's half of the second chrome row.** It sizes to
+ * `--tabstrip-height` and carries the same bottom rule as the tab strip on the
+ * other side of the resize handle, so the two read as one band across the
+ * window rather than as two headers that happen to be adjacent. That is the
+ * only reason the height is a token here and not an `h-8`: the strip has to
+ * agree with it, and the two files cannot see each other.
  */
 
 import { cn } from "@/lib/utils";
@@ -35,9 +42,9 @@ interface DrawerPanelProps {
 export function DrawerPanel({ title, actions, children, className }: DrawerPanelProps) {
 	return (
 		<div className={cn("flex h-full w-full flex-col", className)}>
-			{/* Header is the only padded region; h-10 keeps the body starting at the
-			    same offset in every view. */}
-			<div className="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
+			{/* Header is the only padded region; one height for every view keeps the
+			    body starting at the same offset whichever view is showing. */}
+			<div className="flex h-[var(--tabstrip-height)] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
 				<h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
 				{actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
 			</div>
