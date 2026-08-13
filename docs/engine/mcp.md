@@ -134,8 +134,10 @@ validated by the SDK). A few declare an `outputSchema` and return validated
 `structuredContent` alongside the text rendering.
 
 The four categories partition tools by what they can do - and thus which gate
-applies: **read** (inspection, always safe), **execute** (sends real traffic to
-a target - allowlist), **write** (mutates saved data or engine config - write
+applies: **read** (inspection, always safe), **execute** (has an effect outside
+this process without touching saved data - allowlist when it sends real traffic
+to a target, none when the effect is a loopback service the engine hosts, as for
+the mock issuer), **write** (mutates saved data or engine config - write
 toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 
 | Tool                   | Category | Maps to                                      | Gate                       |
@@ -161,6 +163,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity` |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
+| `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
+| `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
+| `stop_mock_issuer`     | execute  | `POST /mock-issuer/:id/stop`                 | - (unknown id is a `404`, surfaced as a tool error) |
 
 Notes:
 
@@ -248,6 +253,27 @@ Notes:
   could not be read), because a matrix whose `total` silently excludes nested
   folders reads as a whole-collection pass. Requests run serially, so a large
   collection takes as long as its requests do added together.
+- **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
+  own tokens: `start_mock_issuer` stands up a
+  [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
+  `issuerId`, `tokenUrl`, `authorizeUrl` and `signingKey`, so the agent can
+  point a request's `oauth2` auth at the token URL, `run_request` it, and assert
+  on what the target received - offline, with no real provider's 2FA prompts or
+  rate limits in the loop. `expiresInSeconds` plus `issueRefreshTokens` is how
+  the 401-then-refresh path is exercised, and `failureMode` is how retry
+  handling is. **No allowlist entry is needed and none is checked**: the engine
+  binds every issuer to `127.0.0.1` and takes no host for it, so an issuer is
+  unreachable off the machine; the per-tool switch is what turns these off. The
+  start body is forwarded verbatim under the engine's own key names, and the
+  engine's limits (31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent
+  issuers) stay engine-side rather than being restated in the tool schema, for
+  the same reason `monitor`'s ranges are - a second copy would refuse values the
+  engine accepts the moment either side moves. The schema owns the *shape*: a
+  claims object, an integer port, a `failureMode` from the closed set. Stopping
+  an issuer frees its port; tokens it already minted stay valid until they
+  expire, since nothing verifies them against a live issuer. These tools emit no
+  `mcp:data-changed` event because no renderer surface reads issuers yet -
+  #502's Services drawer is what adds one.
 - **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
   is threaded into the engine `fetch` for every tool call, resource read,
   template list and prompt, so a client cancelling an in-flight call actually
@@ -611,6 +637,16 @@ configurable in **Settings → MCP** and persisted.
   the toggle **and** confirmation: the toggle is a single session-wide switch a
   user flips once to let an agent save a request, which is not consent to
   destroy a subtree.
+- **Loopback services carry no gate of their own** - `start_mock_issuer` and
+  `stop_mock_issuer` are `execute` tools that neither the allowlist nor the
+  write toggle governs. The allowlist exists to stop an agent generating traffic
+  against third parties it was never pointed at, and a mock issuer is bound to
+  `127.0.0.1` by the engine with no host to configure; the write toggle gates
+  saved data, which an ephemeral listener is not. Nor would a gate here withhold
+  anything: an agent with `localhost` allowlisted can already reach
+  `POST /mock-issuer/start` through `run_request`, for the same reason the
+  endpoint needs no auth token. The bounds that do apply are the engine's own -
+  at most 8 issuers at once - and the per-tool switch below.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
   `tools/call`. This and the write toggle are **independent**, and a write tool
@@ -809,10 +845,6 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
 
 - **MCP-originated run tagging** - tag runs started via MCP so History shows
   provenance.
-- **`start_mock_issuer`** - a tool over the engine's local OAuth 2.0 mock issuer
-  ([API reference](./api-reference.md#local-mock-issuer)), so an agent asked to
-  "test this auth flow" can mint its own tokens. Deliberately out of scope of
-  the engine-side feature (#479); the routes are reachable today.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command (backlog M1).
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.

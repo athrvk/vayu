@@ -141,7 +141,8 @@ const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string
 	{
 		id: "execute",
 		label: "Execute",
-		description: "Send real requests to a target (single request or a collection smoke test).",
+		description:
+			"Send real requests to a target (single request or a collection smoke test), and run the local mock OAuth issuer.",
 	},
 	{
 		id: "write",
