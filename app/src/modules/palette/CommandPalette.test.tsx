@@ -31,7 +31,8 @@ import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-libra
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CommandPalette } from "./CommandPalette";
-import { useLayoutStore, useTabsStore } from "@/stores";
+import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
+import { useSettingsStore } from "@/modules/settings/settings-store";
 
 const COLLECTIONS = [
 	{ id: "c1", name: "Payments", parentId: undefined },
@@ -66,6 +67,11 @@ vi.mock("@/queries", () => ({
 	useRunsQuery: () => ({ data: { pages: runPages } }),
 	flattenRunPages: (data?: { pages: { data: unknown[] }[] }) =>
 		data ? data.pages.flatMap((p) => p.data) : [],
+	// Reached through the command surfaces the palette now hosts: the shared
+	// new-request flow and the run dialog.
+	useCreateRequestMutation: () => ({ mutateAsync: vi.fn() }),
+	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
+	useStartScenarioRunMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveString: (s: string) => s }),
@@ -126,6 +132,8 @@ beforeEach(() => {
 	runPages = [{ data: [] }];
 	useLayoutStore.setState({ paletteOpen: false, drawerOpen: false, drawerView: "collections" });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
+	useImportModalStore.setState({ isOpen: false });
+	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
 });
 afterEach(cleanup);
 
@@ -278,7 +286,79 @@ describe("the empty query", () => {
 		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
 			(el) => el.textContent
 		);
-		expect(headings).toEqual(["Tabs", "Requests", "Collections", "Views"]);
+		expect(headings).toEqual([
+			"Tabs",
+			"Requests",
+			"Collections",
+			"Views",
+			"Commands",
+			"Settings",
+		]);
+	});
+});
+
+/**
+ * The registry's half of the palette. The point of these is that the palette
+ * *offers* the roster and runs it - the commands themselves are held to their
+ * behaviour in `lib/commands/registry.test.ts`, and duplicating that here would
+ * be two tests for one rule.
+ */
+describe("commands", () => {
+	it("finds a command by name and performs it on Enter", () => {
+		renderPalette();
+		open();
+
+		typeQuery("import");
+		pressEnter();
+
+		expect(useImportModalStore.getState().isOpen).toBe(true);
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+	});
+
+	it("finds a settings section by name and reveals it", () => {
+		renderPalette();
+		open();
+
+		typeQuery("notificat");
+		pressEnter();
+
+		expect(useSettingsStore.getState().selectedCategory).toBe("notifications");
+		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ type: "settings" });
+	});
+
+	it("offers the collection command only while a collection tab is active", () => {
+		renderPalette();
+		open();
+		expect(screen.queryByText(/^Run "/)).not.toBeInTheDocument();
+		cleanup();
+
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		// Named after its target, so Enter holds no surprise.
+		expect(screen.getByText('Run "Payments"')).toBeInTheDocument();
+	});
+
+	it("keeps the run dialog on screen after the pick closes the palette", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+
+		typeQuery('Run "Pay');
+		pressEnter();
+
+		// The dialog is hosted beside the palette, not inside it - inside, the
+		// pick that opened it would unmount it in the same commit.
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+		expect(screen.getByRole("dialog", { name: /Run Payments/ })).toBeInTheDocument();
 	});
 });
 

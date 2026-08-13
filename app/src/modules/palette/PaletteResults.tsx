@@ -23,30 +23,39 @@ import {
 	CommandSeparator,
 } from "@/components/ui";
 import { getMethodColor } from "@/utils";
+import type { CommandContext } from "@/lib/commands";
 import { PALETTE_GROUPS, PALETTE_GROUP_LABELS, rankForEmptyQuery, type PaletteItem } from "./types";
 import { useTabItems } from "./sources/useTabItems";
 import { useEntityItems } from "./sources/useEntityItems";
 import { useViewItems } from "./sources/useViewItems";
+import { commandItems } from "./sources/commandItems";
 
 interface PaletteResultsProps {
 	/** The live query, so ranking can tell "nothing typed" from "no match". */
 	query: string;
 	/** Run the item and close - the palette never stays open after a pick. */
 	onPick: (item: PaletteItem) => void;
+	/**
+	 * What the commands can see. Built by the palette rather than here, because
+	 * the dialogs it carries have to outlive the list: picking "Run" closes the
+	 * palette, and this component with it.
+	 */
+	commandContext: CommandContext;
 }
 
-export function PaletteResults({ query, onPick }: PaletteResultsProps) {
+export function PaletteResults({ query, onPick, commandContext }: PaletteResultsProps) {
 	const tabs = useTabItems();
 	const entities = useEntityItems();
 	const views = useViewItems();
+	const commands = commandItems(commandContext);
 
 	const grouped = useMemo(() => {
-		const all = [...tabs, ...entities, ...views];
+		const all = [...tabs, ...entities, ...views, ...commands];
 		return PALETTE_GROUPS.map((kind) => ({
 			kind,
 			items: rankForEmptyQuery(all.filter((item) => item.kind === kind)),
 		})).filter((group) => group.items.length > 0);
-	}, [tabs, entities, views]);
+	}, [tabs, entities, views, commands]);
 
 	/*
 	 * cmdk hides a group whose items all filter out, so the count has to come

@@ -17,39 +17,23 @@
  * to show. See app/src/modules/welcome/README.md for what belongs on this screen.
  */
 
-import { useState } from "react";
-import {
-	useTabsStore,
-	useImportModalStore,
-	useToastStore,
-	useLayoutStore,
-	useSessionStore,
-} from "@/stores";
-import {
-	useCollectionsQuery,
-	useRunsQuery,
-	flattenRunPages,
-	useCreateRequestMutation,
-	useCreateCollectionMutation,
-} from "@/queries";
+import { useTabsStore, useImportModalStore, useLayoutStore } from "@/stores";
+import { useCollectionsQuery, useRunsQuery, flattenRunPages } from "@/queries";
 import { ErrorState } from "@/components/shared";
-import { DEFAULT_REQUEST_NAME } from "@/constants/request";
-import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
-import { resolveNewRequestTarget } from "./targetCollection";
+import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "./components/CollectionPicker";
 import { FirstRunWelcome } from "./FirstRunWelcome";
 import { Launcher } from "./Launcher";
 import { LauncherSkeleton } from "./LauncherSkeleton";
 
-const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
-
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
-	const showToast = useToastStore((s) => s.showToast);
 	const { openTab } = useTabsStore();
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
-	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
+	// The flow itself lives in `useNewRequest`, shared with the command palette's
+	// "New request" - this screen renders its picker, nothing more.
+	const { newRequest, pickerProps } = useNewRequest();
 	const {
 		data: collections = [],
 		isLoading: collectionsLoading,
@@ -66,53 +50,6 @@ export default function WelcomeScreen() {
 	} = useRunsQuery();
 	// Flatten the loaded pages; the Launcher only shows the most recent handful.
 	const runs = flattenRunPages(runsData);
-	const createRequestMutation = useCreateRequestMutation();
-	const createCollectionMutation = useCreateCollectionMutation();
-
-	const [pickerOpen, setPickerOpen] = useState(false);
-
-	const createRequestIn = async (collectionId: string) => {
-		try {
-			const newRequest = await createRequestMutation.mutateAsync({
-				collectionId,
-				name: DEFAULT_REQUEST_NAME,
-				method: "GET",
-				url: "",
-			});
-			openTab({ type: "request", entityId: newRequest.id });
-		} catch (error) {
-			// Without this the click looks dead - the old code only logged.
-			console.error("Failed to create new request:", error);
-			showToast(CREATE_FAILED, "error");
-		}
-	};
-
-	const handleNewRequest = async () => {
-		const target = resolveNewRequestTarget(lastCollectionId, collections);
-		if (target.kind === "pick") {
-			setPickerOpen(true);
-			return;
-		}
-		if (target.kind === "collection") {
-			void createRequestIn(target.collectionId);
-			return;
-		}
-		// No collections yet - requests must belong to one, so make it first.
-		try {
-			const newCollection = await createCollectionMutation.mutateAsync({
-				name: DEFAULT_COLLECTION_NAME,
-			});
-			await createRequestIn(newCollection.id);
-		} catch (error) {
-			console.error("Failed to create collection:", error);
-			showToast(CREATE_FAILED, "error");
-		}
-	};
-
-	const handlePick = (collectionId: string) => {
-		setPickerOpen(false);
-		void createRequestIn(collectionId);
-	};
 
 	// Both queries start as [] while loading, which would read as an empty
 	// workspace and flash the first-run screen at returning users - hence the
@@ -153,14 +90,14 @@ export default function WelcomeScreen() {
 							onRetry={retry}
 						/>
 					) : (
-						<FirstRunWelcome onImport={openImport} onNewRequest={handleNewRequest} />
+						<FirstRunWelcome onImport={openImport} onNewRequest={newRequest} />
 					)
 				) : (
 					<Launcher
 						runs={runs}
 						collectionCount={collections.length}
 						onImport={openImport}
-						onNewRequest={handleNewRequest}
+						onNewRequest={newRequest}
 						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
@@ -168,12 +105,7 @@ export default function WelcomeScreen() {
 					/>
 				)}
 			</div>
-			<CollectionPicker
-				open={pickerOpen}
-				onOpenChange={setPickerOpen}
-				collections={collections}
-				onSelect={handlePick}
-			/>
+			<CollectionPicker {...pickerProps} />
 		</div>
 	);
 }
