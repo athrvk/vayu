@@ -5,7 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { SkippedItem } from "./types";
+import type { ExampleDraft, SkippedItem } from "./types";
+import { asRecord, asStr, prop } from "@/lib/json-node";
 
 export type RefResolver = (ref: string) => unknown;
 
@@ -72,5 +73,93 @@ export class SkipTally {
 
 	items(): SkippedItem[] {
 		return [...this.counts].map(([kind, count]) => ({ kind, count }));
+	}
+}
+
+/**
+ * Turn one entry of an operation's `responses` into an example draft (issue
+ * #481), or `undefined` when it cannot be stored as one.
+ *
+ * Shared because the two parsers disagree only about where the payload lives -
+ * v3 nests it under `content[mediaType]`, v2 puts `schema` and `examples`
+ * directly on the response - while everything around it (which status codes are
+ * representable, how the example is named, how the body is serialized) is the
+ * same decision twice. @p payload is the per-version half: it returns the body
+ * text and the media type, or `undefined` when the response documents no body.
+ *
+ * A key that is not a numeric status (`default`, `2XX`) has no status line to
+ * be served under, so it is skipped and tallied rather than guessed at - the
+ * caller passes the tally, and the preview names the loss.
+ */
+export function responseExample(
+	code: string,
+	response: unknown,
+	tally: SkipTally,
+	payload: (
+		response: Record<string, unknown>
+	) => { body: string; contentType: string } | undefined
+): ExampleDraft | undefined {
+	const node = asRecord(response);
+	if (!node) {
+		tally.add("malformed_spec");
+		return undefined;
+	}
+	const status = Number(code);
+	if (!/^\d{3}$/.test(code) || status < 100 || status > 599) {
+		tally.add("example_no_status");
+		return undefined;
+	}
+
+	const found = payload(node);
+	const description = asStr(node.description);
+	return {
+		// "200 - A user" when the spec describes the response, "200" when it does
+		// not. The status leads because that is what the reader scans a list of
+		// examples for.
+		name: description ? `${code} - ${description}` : code,
+		status,
+		headers: found ? [{ key: "Content-Type", value: found.contentType, enabled: true }] : [],
+		body: found?.body ?? "",
+		contentType: found?.contentType ?? "",
+	};
+}
+
+/** The JSON media type of an OpenAPI 3 `content` map, by the same rule request bodies use. */
+export function findJsonMediaType(content: Record<string, unknown>): string | undefined {
+	if (content["application/json"]) return "application/json";
+	return Object.keys(content).find(
+		(k) => k.startsWith("application/json") || k.endsWith("+json")
+	);
+}
+
+/**
+ * The first entry of an OpenAPI 3 `examples` map, unwrapped from its Example
+ * Object. `{"examples": {"user": {"value": {...}}}}` documents `{...}`, not the
+ * wrapper - importing the wrapper would store a body no server would send.
+ */
+export function firstNamedExample(examples: unknown): unknown {
+	const map = asRecord(examples);
+	if (!map) return undefined;
+	const first = Object.values(map)[0];
+	const entry = asRecord(first);
+	if (!entry) return undefined;
+	// `externalValue` names a URL rather than carrying a payload; there is
+	// nothing to store without fetching it, which an import must not do.
+	return "value" in entry ? entry.value : undefined;
+}
+
+/** Serialize a sampled/declared example payload the way a JSON response body reads. */
+export function exampleBodyText(value: unknown): string {
+	return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+/** A `$ref`-following read of `prop(node, key)`, single-hop like the rest of these. */
+export function deref(value: unknown, resolveRef: RefResolver): unknown {
+	const ref = asStr(prop(value, "$ref"));
+	if (!ref) return value;
+	try {
+		return resolveRef(ref);
+	} catch {
+		return undefined;
 	}
 }

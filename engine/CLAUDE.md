@@ -42,8 +42,9 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
-| POST | `/collections`, `/requests`, `/environments` | **Create only** - 409 on an existing id |
-| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id` | **Update only** (merge-patch) - 404 on a missing id |
+| GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
+| POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
+| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
 
 The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id[/report|/stop]`,
 `DELETE /run/:id`, `GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still
@@ -78,6 +79,15 @@ Three things worth knowing before you design around them:
   paths - `apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
   bulk import gets it too.
+- **Saved examples are nested under their request** (`/requests/:id/examples`,
+  issue #481) because one owns them: the owner is checked before the example on
+  every path, so an example reached through the wrong request is a `404` rather
+  than a cross-request write, and both `delete_request` and the collection
+  cascade take the examples with them. Ordering is a contract, not a display
+  choice - the list comes back by `order` (then `created_at`, then `id`) and a
+  mock server will answer with the first one. `POST /import/apply` writes them
+  nested on the request item, through the same `apply_request_example_fields`
+  applier the single-item route uses, so the two paths cannot drift.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request

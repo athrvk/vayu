@@ -126,6 +126,26 @@ export function unattachedFileParts(collections: CollectionDraft[]): number {
 	return count;
 }
 
+/**
+ * Saved example responses across a whole draft tree (issue #481), for
+ * `ImportMeta.exampleCount`.
+ *
+ * Read off the drafts rather than tallied as the parser walks, exactly like
+ * `unattachedFileParts` above: a counter incremented at the mapping site can
+ * drift from what the drafts actually carry, and this number is what the
+ * preview promises the user is about to be imported.
+ */
+export function countExamples(collections: CollectionDraft[]): number {
+	let count = 0;
+	for (const collection of collections) {
+		for (const request of collection.requests) {
+			count += request.examples?.length ?? 0;
+		}
+		count += countExamples(collection.children);
+	}
+	return count;
+}
+
 /** Read a Postman auth detail array/object into a flat {key:value} map (handles v2.1 + v2.0). */
 function authDetail(node: unknown): Record<string, string> {
 	if (Array.isArray(node)) {

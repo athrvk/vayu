@@ -8,6 +8,7 @@
 import type { FormFieldEntry, HttpMethod, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
+	ExampleDraft,
 	ImportOptions,
 	ImportParser,
 	ImportResult,
@@ -17,6 +18,7 @@ import type {
 import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
 import {
 	asString,
+	countExamples,
 	importedFilePart,
 	joinExec,
 	mapKeyValues,
@@ -232,6 +234,45 @@ function pmRedirects(item: unknown): Pick<RequestDraft, "followRedirects" | "max
 	};
 }
 
+/**
+ * Postman's saved responses (`item.response[]`) → example drafts (issue #481).
+ *
+ * These were read by nothing until the engine had a table to hold them: the
+ * parser walked `item.request` and stepped straight over the recorded
+ * responses, so importing a collection whose whole value was its documented
+ * responses silently produced a collection with none.
+ *
+ * `code` is the status, `header[]` the response headers (kept in source order,
+ * duplicates included - `Set-Cookie` repeats), `body` the recorded text. A
+ * saved response with no `code` documents a 200, which is what Postman shows
+ * for one; an entry that is not an object is skipped rather than allowed to
+ * abort the file, the same treatment `pmFolder` gives a malformed item.
+ */
+function pmExamples(item: JsonRecord, ctx: Ctx): ExampleDraft[] {
+	const out: ExampleDraft[] = [];
+	for (const entry of asArray(item.response)) {
+		const saved = asRecord(entry);
+		if (!saved) {
+			ctx.skippedMalformed += 1;
+			continue;
+		}
+		const headers = mapKeyValues(saved.header);
+		const code = saved.code;
+		out.push({
+			name: saved.name == null ? "Example" : asString(saved.name),
+			status: typeof code === "number" && Number.isFinite(code) ? code : 200,
+			headers,
+			body: asStr(saved.body) ?? "",
+			// Only from the recorded header. Postman also writes
+			// `_postman_previewlanguage`, but that is an editor mode ("json",
+			// "html") rather than a media type - storing it here would put a
+			// value in `contentType` that is not one.
+			contentType: headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "",
+		});
+	}
+	return out;
+}
+
 function pmRequest(item: JsonRecord, ctx: Ctx): RequestDraft {
 	const rq = asRecord(item.request) ?? {};
 	const { url, params } = pmUrl(rq.url);
@@ -242,6 +283,7 @@ function pmRequest(item: JsonRecord, ctx: Ctx): RequestDraft {
 	const pre = events.find((e) => e.listen === "prerequest");
 	const post = events.find((e) => e.listen === "test");
 	const body = pmBody(rq.body, ctx);
+	const examples = pmExamples(item, ctx);
 	return {
 		name: item.name == null ? "Untitled" : asString(item.name),
 		description: asStr(rq.description) ?? asStr(prop(rq.description, "content")) ?? "",
@@ -254,6 +296,7 @@ function pmRequest(item: JsonRecord, ctx: Ctx): RequestDraft {
 		preRequestScript: ctx.opts.importScripts ? joinExec(pre) : "",
 		postRequestScript: ctx.opts.importScripts ? joinExec(post) : "",
 		...pmRedirects(item),
+		...(examples.length > 0 ? { examples } : {}),
 	};
 }
 
@@ -323,6 +366,7 @@ function parsePostman(parsed: unknown, opts: ImportOptions, formatName: string):
 			folderCount: ctx.folderCount,
 			environmentCount: 0,
 			globalCount: 0,
+			exampleCount: countExamples([root]),
 			skipped,
 			nonExecutableAuth: ctx.nonExecutableAuth,
 			unattachedFileParts: unattachedFileParts([root]),

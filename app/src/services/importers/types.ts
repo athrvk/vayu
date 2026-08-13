@@ -30,7 +30,14 @@ export interface SkippedItem {
 		| "file_body"
 		| "malformed_item"
 		| "unsupported_method"
-		| "malformed_spec";
+		| "malformed_spec"
+		/**
+		 * An OpenAPI response whose key is not a numeric status - `default`, or a
+		 * `2XX` wildcard. It documents a real response, but a saved example is
+		 * served under one status line and there is no honest value to pick, so it
+		 * is dropped and counted rather than guessed at (issue #481).
+		 */
+		| "example_no_status";
 	count: number;
 }
 
@@ -42,6 +49,13 @@ export interface ImportMeta {
 	environmentCount: number;
 	/** Variables destined for Vayu's globals scope. Only a Postman globals export produces any. */
 	globalCount: number;
+	/**
+	 * Saved example responses found across every request (issue #481). Required
+	 * rather than optional so each parser states its answer - a format with no
+	 * examples reports 0, which is different from a parser that forgot to look.
+	 * Shown in the import preview beside the request and folder counts.
+	 */
+	exampleCount: number;
 	// TODO: populated by parsers so the Preview can warn the user about lossy imports.
 	// Vayu is HTTP-only and has no OAuth execution path; WebSocket/gRPC are dropped and
 	// oauth2/digest/aws/ntlm auth is stored-but-not-executed. Surface both rather than
@@ -58,6 +72,29 @@ export interface ImportMeta {
 	 * them get it from `unattachedFileParts`, which reads the drafts.
 	 */
 	unattachedFileParts: number;
+}
+
+/**
+ * A saved example response found next to a request in the source file (issue
+ * #481) - Postman's `item.response[]`, an OpenAPI operation's `responses`.
+ *
+ * Until the engine had somewhere to keep these, every parser dropped them
+ * without even counting the loss. They carry no id: the engine assigns one when
+ * the import is applied, and nothing in the payload references an example.
+ */
+export interface ExampleDraft {
+	name: string;
+	/** The status the example documents. Sources that state none import as 200. */
+	status: number;
+	/** Response headers, in source order and with duplicates intact (`Set-Cookie`). */
+	headers: KeyValueEntry[];
+	body: string;
+	/**
+	 * Denormalized from `headers` when the source states a content type, so a
+	 * viewer can pick a renderer without re-scanning the header list. `""` when
+	 * the source says nothing - not a guess.
+	 */
+	contentType: string;
 }
 
 export interface RequestDraft {
@@ -82,6 +119,13 @@ export interface RequestDraft {
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Saved example responses, in the order the source listed them - which the
+	 * engine stores as their `order`, because "the first example" is what a mock
+	 * server will answer with. Optional: a parser that has no concept of
+	 * examples must not look like one that found none.
+	 */
+	examples?: ExampleDraft[];
 }
 
 export interface CollectionDraft {

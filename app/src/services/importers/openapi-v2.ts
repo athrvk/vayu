@@ -8,6 +8,7 @@
 import type { FormFieldEntry, HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
+	ExampleDraft,
 	ImportOptions,
 	ImportParser,
 	ImportResult,
@@ -17,8 +18,14 @@ import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node
 import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
-import { resolvePathItem, SkipTally } from "./openapi-shared";
-import { importedFilePart, unattachedFileParts } from "./shared";
+import {
+	deref,
+	exampleBodyText,
+	resolvePathItem,
+	responseExample,
+	SkipTally,
+} from "./openapi-shared";
+import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -139,6 +146,7 @@ export class OpenApiV2Parser implements ImportParser {
 				folderCount: tagCollections.size,
 				environmentCount: 0,
 				globalCount: 0,
+				exampleCount: countExamples([root]),
 				skipped: tally.items(),
 				nonExecutableAuth: 0,
 				unattachedFileParts: unattachedFileParts([root]),
@@ -231,6 +239,7 @@ function buildSwaggerOp(
 		body = { mode, fields: formFields };
 	}
 
+	const examples = buildSwaggerExamples(op, spec, resolveRef, tally);
 	return {
 		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
 		description: asStr(op.description) ?? "",
@@ -242,5 +251,58 @@ function buildSwaggerOp(
 		auth: { mode: "inherit" },
 		preRequestScript: "",
 		postRequestScript: "",
+		...(examples.length > 0 ? { examples } : {}),
 	};
+}
+
+/**
+ * A Swagger 2.0 operation's `responses` → saved example responses (issue #481).
+ *
+ * The 2.0 shape puts the payload on the response itself rather than under a
+ * media-type map: `examples` is keyed by MIME type and holds the value
+ * directly, and `schema` describes it. Precedence is the documented example
+ * first, then a sample generated from the schema - the same order the v3 parser
+ * uses, and the same order this file already uses for a request body.
+ *
+ * The media type comes from the operation's `produces` (falling back to the
+ * spec-level one), because a 2.0 response does not name its own.
+ */
+function buildSwaggerExamples(
+	op: JsonRecord,
+	spec: JsonRecord,
+	resolveRef: (r: string) => unknown,
+	tally: SkipTally
+): ExampleDraft[] {
+	const map = asRecord(op.responses);
+	if (!map) return [];
+	const produces = (Array.isArray(op.produces) ? op.produces : asArray(spec.produces)).map(
+		(p) => asStr(p) ?? ""
+	);
+	const jsonProduced =
+		produces.find(
+			(p) => mediaType(p) === "application/json" || mediaType(p).endsWith("+json")
+		) ?? (produces.length === 0 ? "application/json" : undefined);
+
+	const out: ExampleDraft[] = [];
+	for (const [code, rawResponse] of Object.entries(map)) {
+		const draft = responseExample(code, deref(rawResponse, resolveRef), tally, (response) => {
+			// `examples` is keyed by MIME type and carries the value itself - no
+			// Example Object wrapper, unlike v3.
+			const declared = asRecord(response.examples);
+			const contentType = jsonProduced ?? produces[0] ?? "application/json";
+			const documented = declared
+				? (declared[contentType] ?? declared["application/json"])
+				: undefined;
+			if (documented !== undefined) {
+				return { body: exampleBodyText(documented), contentType };
+			}
+			if (!response.schema) return undefined;
+			return {
+				body: exampleBodyText(sampleSchema(response.schema, resolveRef)),
+				contentType,
+			};
+		});
+		if (draft) out.push(draft);
+	}
+	return out;
 }

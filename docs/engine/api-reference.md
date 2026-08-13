@@ -831,13 +831,108 @@ malformed `params` / `headers` entry, or an `httpVersion` that is not
 
 ### DELETE /requests/:id
 
-Delete a request.
+Delete a request. Cascades to the request's
+[saved examples](#request-examples) - they are owned by it, and every read of
+them is by request id, so a row left behind would be unreachable.
 
 **Response:**
 ```json
 {
   "message": "Request deleted successfully",
   "id": "req_1234567890"
+}
+```
+
+## Request examples
+
+Saved example responses for a request: what an importer found next to it
+(Postman's `item.response[]`, an OpenAPI operation's `responses`), and the
+responses a mock server will serve. Nested under the request because an example
+is owned by exactly one - the owner is checked before the example on every path,
+so an example reached through the wrong request is a `404`, not a cross-request
+write.
+
+**Ordering is part of the contract**, not a display preference: the list is
+returned by `order`, then `createdAt`, then `id`, and a mock server answers with
+the first example of the matched request. A create that states no `order`
+appends after the request's current examples; a bulk import numbers them by
+payload position, because every row it writes shares one `createdAt` and would
+otherwise come back shuffled by the id tiebreak.
+
+**Caps.** A `body` over **1 MiB** is a `400` rather than a truncation - an
+example served as if it were whole when it is not is worse than a refused write
+- and a request holds at most **100** examples.
+
+### GET /requests/:id/examples
+
+**Response:** an array of example objects, oldest first:
+```json
+[
+  {
+    "id": "exa_1234567890",
+    "requestId": "req_1234567890",
+    "name": "200 - A user",
+    "status": 200,
+    "headers": [{"key": "Content-Type", "value": "application/json", "enabled": true}],
+    "body": "{\"id\":1}",
+    "contentType": "application/json",
+    "order": 0,
+    "createdAt": 1730000000000,
+    "updatedAt": 1730000000000
+  }
+]
+```
+
+An empty array and a missing request are different answers: `404` (message
+`Request not found`) means the request does not exist, `[]` means it has no
+examples yet.
+
+### POST /requests/:id/examples
+
+Create one example. **Create only**, and the engine owns the id - see
+[Resource writes](#resource-writes-create-vs-update).
+
+**Request:**
+```json
+{
+  "name": "200 - A user",   // Required, no default (null is a 400)
+  "status": 200,             // Optional, must be 100-599. Default 200
+  "headers": [],             // Optional, array of {key, value, enabled}
+  "body": "",                // Optional. Default ""
+  "contentType": "",         // Optional. Default ""
+  "order": 0                 // Optional, appended after the request's examples if omitted
+}
+```
+
+`headers` is an array of `KeyValueEntry`, the same shape a request's headers
+use - not a JSON object. A stored example is re-served rather than only
+displayed, so repeated names (`Set-Cookie`) and the author's ordering both have
+to survive.
+
+**Response:** the created example object.
+
+**Errors:** `404` if the request does not exist. `400` if the body carries an
+`id`, if `name` is missing or `null`, on a `status` outside `100`-`599` (rejected
+rather than clamped - a stored `700` would be re-served as a status line nobody
+can send), on a malformed `headers` entry, or on a `body` over the cap. `409`
+when the request already holds the maximum number of examples.
+
+### PUT /requests/:id/examples/:exampleId
+
+Update one example. **Update only** - a `404` when the example does not exist,
+and the same `404` when it exists under a different request. Merge-patch body:
+absent keeps, `null` resets to the field's default (`name` has none, so `null`
+is a `400`).
+
+**Response:** the updated example object.
+
+### DELETE /requests/:id/examples/:exampleId
+
+**Response:**
+```json
+{
+  "message": "Example deleted successfully",
+  "id": "exa_1234567890"
 }
 ```
 
@@ -991,7 +1086,11 @@ accepted a client-supplied `id` - which they no longer do (see
     { "tempId": "r1", "collectionTempId": "c2", "name": "List users",
       "method": "GET", "url": "https://api.example.com/users",
       "params": [], "headers": [], "body": {"mode":"none"}, "bodyType": "none",
-      "auth": {"mode":"inherit"}, "order": 0 }
+      "auth": {"mode":"inherit"}, "order": 0,
+      "examples": [
+        { "name": "200 - A user", "status": 200, "headers": [], "body": "{}",
+          "contentType": "application/json" }
+      ] }
   ],
   "environments": [
     { "tempId": "e1", "name": "Prod", "variables": {} }
@@ -1023,14 +1122,24 @@ accepted a client-supplied `id` - which they no longer do (see
   and deliberately omits `order` on its **root** collections, so an import into a
   non-empty workspace lands after the roots already there instead of colliding
   with their `0, 1, 2...`.
-- Up to **10,000 items** per call (collections + requests + environments).
+- A request may carry **`examples`**, an array of
+  [saved example responses](#request-examples). They are nested rather than a
+  fourth section because nothing references them: they need no `tempId`, get
+  engine-generated ids, and so **do not appear in `idMap`**. Each entry takes the
+  fields `POST /requests/:id/examples` accepts, through the same field applier,
+  and an entry that fails validation is a per-item `400` naming the *request's*
+  `tempId`. An entry with no `order` takes its payload position, so the stored
+  order is the order the source file listed the responses in.
+- Up to **10,000 items** per call (collections + requests + environments +
+  nested examples - they are rows this call allocates and writes, so they count).
 
 **Response:** `200`
 ```json
 { "idMap": { "c1": "col_<uuid>", "c2": "col_<uuid>", "r1": "req_<uuid>", "e1": "env_<uuid>" } }
 ```
 
-Every `tempId` sent appears in `idMap`.
+Every `tempId` sent appears in `idMap`. Nested examples do not - they carry no
+`tempId` to map.
 
 **Atomicity:** validation runs over the whole payload before anything is written,
 and the write itself is a single SQLite transaction. A `400` therefore means

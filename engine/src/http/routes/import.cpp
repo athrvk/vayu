@@ -12,6 +12,7 @@
  *        (`/import/apply`) that persists a parsed import in one call.
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/utils/id.hpp"
@@ -337,12 +338,80 @@ std::vector<vayu::db::Collection>& out) {
     return std::nullopt;
 }
 
+/**
+ * The examples nested on one request item (issue #481).
+ *
+ * Examples carry no tempId and are not a top-level section: nothing references
+ * them, they exist only under the request they answer, and giving them ids in
+ * the shared namespace would put entries in the response's `idMap` that no
+ * client asked for. So they ride on their owner, and get engine-generated ids
+ * like every other row here.
+ *
+ * The rows go through `apply_request_example_fields` - the same applier
+ * `POST /requests/:id/examples` uses - so an imported example and a created one
+ * cannot disagree about a default, a required field or the body cap.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+build_example_rows (const nlohmann::json& item,
+const std::string& request_id,
+const std::string& temp,
+int64_t now,
+std::vector<vayu::db::RequestExample>& out) {
+    if (!item.contains ("examples") || item["examples"].is_null ()) {
+        return std::nullopt;
+    }
+    if (!item["examples"].is_array ()) {
+        return item_error ("Invalid 'examples': must be an array", temp);
+    }
+    const auto& examples = item["examples"];
+    if (examples.size () > vayu::core::constants::request_example::MAX_PER_REQUEST) {
+        return item_error ("Too many examples: " + std::to_string (examples.size ()) +
+        " exceeds the limit of " +
+        std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) +
+        " per request",
+        temp);
+    }
+
+    for (size_t i = 0; i < examples.size (); ++i) {
+        const auto& example = examples[i];
+        if (!example.is_object ()) {
+            return item_error ("Invalid example: must be an object", temp);
+        }
+        if (example.contains ("id")) {
+            return item_error (
+            "Invalid example: 'id' is not accepted - the engine assigns ids", temp);
+        }
+
+        vayu::db::RequestExample x;
+        x.id         = vayu::utils::generate_id ("exa_");
+        x.request_id = request_id;
+        x.created_at = now;
+        x.updated_at = now;
+
+        if (auto err = apply_item_fields (
+            [&] { return apply_request_example_fields (x, example, /*is_create=*/true); },
+            "example", temp)) {
+            return err;
+        }
+        // Payload order, unless the payload states its own. The create route's
+        // append-scan cannot help here: none of these rows are stored yet, so
+        // every one of them would compute the same slot - the same reason
+        // build_collection_rows hands out consecutive `order`s itself.
+        if (!example.contains ("order") || example["order"].is_null ()) {
+            x.order = static_cast<int> (i);
+        }
+        out.push_back (std::move (x));
+    }
+    return std::nullopt;
+}
+
 /** Pass 3b - request rows, owner resolved from `collectionTempId`. */
 std::optional<std::pair<int, nlohmann::json>> build_request_rows (vayu::db::Database& db,
 const nlohmann::json& requests,
 const TempIds& temps,
 int64_t now,
-std::vector<vayu::db::Request>& out) {
+std::vector<vayu::db::Request>& out,
+std::vector<vayu::db::RequestExample>& examples_out) {
     out.reserve (requests.size ());
     for (size_t i = 0; i < requests.size (); ++i) {
         const auto& item        = requests[i];
@@ -367,6 +436,9 @@ std::vector<vayu::db::Request>& out) {
 
         if (auto err = apply_item_fields (
             [&] { return apply_request_fields (db, r, fields, /*is_create=*/true); }, "request", temp)) {
+            return err;
+        }
+        if (auto err = build_example_rows (item, r.id, temp, now, examples_out)) {
             return err;
         }
         out.push_back (std::move (r));
@@ -443,7 +515,18 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return *err;
     }
 
-    const size_t total = collections->size () + requests->size () + environments->size ();
+    // Examples count toward the cap even though they are nested rather than a
+    // section of their own: they are rows this call allocates and writes, and
+    // 10000 requests each carrying their per-request maximum is exactly the
+    // unbounded payload the cap exists to refuse.
+    size_t nested_examples = 0;
+    for (const auto& item : *requests) {
+        if (item.is_object () && item.contains ("examples") && item["examples"].is_array ()) {
+            nested_examples += item["examples"].size ();
+        }
+    }
+    const size_t total =
+    collections->size () + requests->size () + environments->size () + nested_examples;
     if (total > MAX_IMPORT_ITEMS) {
         return body_error ("Import too large: " + std::to_string (total) +
         " items exceeds the limit of " + std::to_string (MAX_IMPORT_ITEMS) + " per call");
@@ -464,17 +547,18 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     std::vector<vayu::db::Collection> collection_rows;
     std::vector<vayu::db::Request> request_rows;
     std::vector<vayu::db::Environment> environment_rows;
+    std::vector<vayu::db::RequestExample> example_rows;
     if (auto err = build_collection_rows (db, *collections, temps, now, collection_rows)) {
         return *err;
     }
-    if (auto err = build_request_rows (db, *requests, temps, now, request_rows)) {
+    if (auto err = build_request_rows (db, *requests, temps, now, request_rows, example_rows)) {
         return *err;
     }
     if (auto err = build_environment_rows (*environments, temps, now, environment_rows)) {
         return *err;
     }
 
-    db.import_apply (collection_rows, request_rows, environment_rows);
+    db.import_apply (collection_rows, request_rows, environment_rows, example_rows);
     return { 200, nlohmann::json{ { "idMap", temps.real } } };
 }
 
@@ -496,8 +580,11 @@ void register_import_routes (RouteContext& ctx) {
      * engine-side and returned in an `idMap` keyed by the client's temp ids.
      * Body params: collections / requests / environments (arrays; absent or null
      * means none). Each item carries a `tempId`; a collection may carry
-     * `parentTempId`, a request must carry `collectionTempId`. All other fields
-     * are the ones the matching POST /<resource> accepts, minus `id`.
+     * `parentTempId`, a request must carry `collectionTempId`, and a request
+     * may carry `examples` (an array of saved example responses, written with
+     * engine-generated ids and absent from the `idMap` - nothing references
+     * them). All other fields are the ones the matching POST /<resource>
+     * accepts, minus `id`.
      * Returns: 200 `{"idMap": {...}}`, or 400 with `error.item` naming the
      * item that failed - in which case nothing at all was written.
      */

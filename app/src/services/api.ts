@@ -20,6 +20,7 @@ import {
 import type {
 	Collection,
 	Request,
+	RequestExample,
 	Environment,
 	GlobalVariables,
 	VariableValue,
@@ -194,6 +195,18 @@ export const apiService = {
 
 	async deleteRequest(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.REQUEST_BY_ID(id));
+	},
+
+	/**
+	 * A request's saved example responses, in stored order (issue #481).
+	 *
+	 * No transformer: unlike a request row, an example carries no timestamp the
+	 * app renders and no column that predates a schema change, so there is
+	 * nothing to reconcile - the wire shape is the domain shape, minus the
+	 * `order` and timestamps `RequestExample` deliberately does not claim.
+	 */
+	async listRequestExamples(requestId: string): Promise<RequestExample[]> {
+		return await httpClient.get<RequestExample[]>(API_ENDPOINTS.REQUEST_EXAMPLES(requestId));
 	},
 
 	/**

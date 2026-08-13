@@ -399,6 +399,9 @@ export class InsomniaV4Parser implements ImportParser {
 				folderCount,
 				environmentCount: environments.length,
 				globalCount: 0,
+				// Insomnia v4 exports carry no saved responses - the format has no
+				// concept of one, so this is 0 by absence rather than by drop.
+				exampleCount: 0,
 				skipped,
 				nonExecutableAuth: ctx.nonExec,
 				unattachedFileParts: unattachedFileParts(collections),

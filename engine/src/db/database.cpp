@@ -178,6 +178,9 @@ inline auto make_storage (const std::string& path) {
     make_index ("idx_body_blobs_run_id", &BodyBlob::run_id),
     // Sidebar load (get_requests_in_collection) and cascade delete.
     make_index ("idx_requests_collection_id", &Request::collection_id),
+    // Every example read is per-request (the list route, the request cascade,
+    // and the collection cascade one request at a time).
+    make_index ("idx_request_examples_request_id", &RequestExample::request_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
     make_index ("idx_collections_parent_id", &Collection::parent_id),
     // Every inbox read filters by inbox_id (the capture list, the live poll,
@@ -230,6 +233,21 @@ inline auto make_storage (const std::string& path) {
     make_column ("http_version", &Request::http_version, default_value ("auto")),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
+
+    // Request examples: saved example responses for a request (issue #481).
+    // Created by import today, and the response source a mock server serves
+    // from. sync_schema() creates the table outright, so no migration.
+    make_table ("request_examples",
+    make_column ("id", &RequestExample::id, primary_key ()),
+    make_column ("request_id", &RequestExample::request_id),
+    make_column ("name", &RequestExample::name),
+    make_column ("status", &RequestExample::status),
+    make_column ("headers", &RequestExample::headers), // JSON array of KeyValueEntry
+    make_column ("body", &RequestExample::body),
+    make_column ("content_type", &RequestExample::content_type),
+    make_column ("order", &RequestExample::order),
+    make_column ("created_at", &RequestExample::created_at),
+    make_column ("updated_at", &RequestExample::updated_at)),
 
     // Environments: Named variable sets (dev, staging, prod)
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
@@ -733,6 +751,14 @@ void Database::delete_collection (const std::string& id) {
     //    pattern as add_results_batch).
     impl_->storage.transaction ([&] {
         for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
+            // Examples first, and by request id rather than by collection: they
+            // hang off the request, so deleting the requests before them would
+            // leave rows no read can reach and no later delete can find.
+            for (const auto& r :
+            impl_->storage.get_all<Request> (where (c (&Request::collection_id) == *it))) {
+                impl_->storage.remove_all<RequestExample> (
+                where (c (&RequestExample::request_id) == r.id));
+            }
             impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
             impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
         }
@@ -767,10 +793,60 @@ std::vector<Request> Database::get_requests_in_collection (const std::string& co
     order_by (&Request::id)));
 }
 
+// Cascade: a request owns its examples, so both go in one transaction. Deleting
+// only the request would leave rows that no route can list (every read is by
+// request id) and that the collection cascade can no longer find either.
 void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting request: id=" + id);
-    impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+    vayu::utils::log_debug ("Deleting request (cascade): id=" + id);
+    impl_->storage.transaction ([&] {
+        impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::request_id) == id));
+        impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+        return true; // Commit
+    });
+}
+
+// ============================================================================
+// Request examples - saved example responses owned by a request (issue #481)
+// ============================================================================
+
+void Database::save_request_example (const RequestExample& e) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Saving request example: id=" + e.id + ", request_id=" + e.request_id);
+    impl_->storage.replace (e);
+}
+
+std::optional<RequestExample> Database::get_request_example (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
+    if (rows.empty ())
+        return std::nullopt;
+    return rows.front ();
+}
+
+std::vector<RequestExample> Database::get_request_examples (const std::string& request_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // The same three-key tie rule the other list reads use (see
+    // get_collections), and here it is a contract rather than a display
+    // preference: a mock server serves the *first* matching example. `order`
+    // has to lead, because a bulk import writes every example of one request in
+    // the same millisecond - on `created_at` alone they all tie and the id
+    // tiebreak returns the author's list shuffled.
+    return impl_->storage.get_all<RequestExample> (
+    where (c (&RequestExample::request_id) == request_id),
+    multi_order_by (order_by (&RequestExample::order),
+    order_by (&RequestExample::created_at), order_by (&RequestExample::id)));
+}
+
+int64_t Database::count_request_examples (const std::string& request_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<RequestExample> (where (c (&RequestExample::request_id) == request_id));
+}
+
+void Database::delete_request_example (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Deleting request example: id=" + id);
+    impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 
 // ============================================================================
@@ -782,14 +858,17 @@ void Database::delete_request (const std::string& id) {
 // runs, and the lambda only touches the same storage handle.
 void Database::import_apply (const std::vector<Collection>& collections,
 const std::vector<Request>& requests,
-const std::vector<Environment>& environments) {
-    if (collections.empty () && requests.empty () && environments.empty ()) {
+const std::vector<Environment>& environments,
+const std::vector<RequestExample>& examples) {
+    if (collections.empty () && requests.empty () && environments.empty () &&
+    examples.empty ()) {
         return;
     }
 
     vayu::utils::log_debug ("Applying import: " + std::to_string (collections.size ()) +
     " collections, " + std::to_string (requests.size ()) + " requests, " +
-    std::to_string (environments.size ()) + " environments");
+    std::to_string (environments.size ()) + " environments, " +
+    std::to_string (examples.size ()) + " examples");
 
     retry_on_busy ("apply import", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
@@ -798,6 +877,11 @@ const std::vector<Environment>& environments) {
             }
             for (const auto& r : requests) {
                 impl_->storage.replace (r);
+            }
+            // After the requests they belong to, so the rows land in owner
+            // order like everything else here.
+            for (const auto& x : examples) {
+                impl_->storage.replace (x);
             }
             for (const auto& e : environments) {
                 // Same at-most-one-active rule as save_environment, applied per

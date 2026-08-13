@@ -82,6 +82,8 @@ export class PostmanEnvironmentParser implements ImportParser {
 				folderCount: 0,
 				environmentCount: environments.length,
 				globalCount: Object.keys(globals).length,
+				// An environment/globals export has no requests, so no examples.
+				exampleCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
 				unattachedFileParts: 0, // an environment export carries no requests

@@ -695,6 +695,21 @@ export interface ImportApplyCollection {
 	postRequestScript?: string;
 }
 
+/**
+ * A saved example response nested on an import's request item (issue #481).
+ *
+ * No `tempId`: an example is referenced by nothing, so the engine assigns its
+ * id and it never appears in the response's `idMap`. Array order is the stored
+ * order - the engine numbers them by payload index.
+ */
+export interface ImportApplyExample {
+	name: string;
+	status?: number;
+	headers?: KeyValueEntry[];
+	body?: string;
+	contentType?: string;
+}
+
 export interface ImportApplyRequestItem {
 	tempId: string;
 	collectionTempId: string;
@@ -713,6 +728,8 @@ export interface ImportApplyRequestItem {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	order?: number;
+	/** Omitted unless the source file carried saved responses for this request. */
+	examples?: ImportApplyExample[];
 }
 
 export interface ImportApplyEnvironment {

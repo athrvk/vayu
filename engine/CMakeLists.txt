@@ -387,6 +387,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/config.cpp
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
+        src/http/routes/examples.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/globals.cpp
@@ -444,6 +445,7 @@ if(VAYU_BUILD_TESTS)
         tests/import_apply_route_test.cpp
         tests/config_route_test.cpp
         tests/requests_route_test.cpp
+        tests/examples_route_test.cpp
         tests/runs_route_test.cpp
         tests/collections_route_test.cpp
         tests/resource_write_route_test.cpp
@@ -505,6 +507,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
+        src/http/routes/examples.cpp
         src/http/routes/reorder.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp

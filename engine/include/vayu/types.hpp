@@ -845,6 +845,42 @@ struct Request {
     int64_t updated_at;
 };
 
+/**
+ * @brief A saved example response for a request (issue #481).
+ *
+ * What an importer finds in `item.response[]` (Postman) or under an operation's
+ * `responses` (OpenAPI) and used to drop on the floor, because nothing here
+ * could hold it. Owned by its request: `request_id` is the only owner, and both
+ * `delete_request` and the `delete_collection` cascade remove the examples with
+ * it, so an orphaned row is not a state the store can reach.
+ *
+ * `headers` is a JSON array of KeyValueEntry, the same shape `Request::headers`
+ * uses - not the JSON object `result_bodies` / `inbox_requests` store. A stored
+ * example is edited and re-served rather than merely displayed, so repeated
+ * names (`Set-Cookie`) and the author's order both have to survive, which an
+ * object cannot do.
+ */
+struct RequestExample {
+    std::string id;
+    std::string request_id;
+    std::string name;
+    int status = 200;         // HTTP status the example represents
+    std::string headers;      // JSON array of KeyValueEntry
+    std::string body;         // Response body, verbatim
+    std::string content_type; // Denormalized from `headers` by the client that wrote it
+    /**
+     * Position among the request's examples, exactly like `Request::order`
+     * within a collection - and load-bearing for the same reason it is there.
+     * A bulk import writes every example of a request in one millisecond, so
+     * `created_at` ties for all of them and the id tiebreak would hand back a
+     * lottery; "the first example" is a contract (it is what a mock server
+     * answers with), not a display preference.
+     */
+    int order = 0;
+    int64_t created_at;
+    int64_t updated_at;
+};
+
 struct Environment {
     std::string id;
     std::string name;

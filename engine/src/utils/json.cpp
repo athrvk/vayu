@@ -320,6 +320,34 @@ Json serialize (const vayu::db::Request& r) {
     return json;
 }
 
+Json serialize (const vayu::db::RequestExample& x) {
+    Json json;
+    json["id"]        = x.id;
+    json["requestId"] = x.request_id;
+    json["name"]      = x.name;
+    json["status"]    = x.status;
+
+    // Headers - stored as JSON array of KeyValueEntry, same as a request's.
+    // An unparseable blob degrades to `[]` exactly as the request serializer
+    // does: one bad row must not fail the list read it sits in.
+    if (x.headers.empty ()) {
+        json["headers"] = Json::array ();
+    } else {
+        try {
+            json["headers"] = Json::parse (x.headers);
+        } catch (const std::exception&) {
+            json["headers"] = Json::array ();
+        }
+    }
+
+    json["body"]        = x.body;
+    json["contentType"] = x.content_type;
+    json["order"]       = x.order;
+    json["createdAt"]   = x.created_at;
+    json["updatedAt"]   = x.updated_at;
+    return json;
+}
+
 Json serialize (const vayu::db::Environment& e) {
     Json json;
     json["id"]          = e.id;

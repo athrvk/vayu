@@ -61,6 +61,7 @@ function fixture(): ImportResult {
 			folderCount: 2,
 			environmentCount: 1,
 			globalCount: 0,
+			exampleCount: 0,
 			skipped: [],
 			nonExecutableAuth: 0,
 			unattachedFileParts: 0,

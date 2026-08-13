@@ -576,6 +576,25 @@ constexpr int64_t MAX_EXPIRES_IN_SECONDS = 31LL * 86400LL;
 } // namespace mock_issuer
 
 /**
+ * @brief Saved example-response bounds (issue #481)
+ *
+ * A rail, not a preference: an example is stored verbatim in a TEXT column that
+ * `GET /requests/:id/examples` returns in full, so the cap bounds what one
+ * import - or one caller - can make every later read of that request pay for.
+ * Generous enough for the recorded JSON payloads examples exist to hold, and
+ * well under the point at which a list response stops being displayable.
+ */
+namespace request_example {
+/// Body bytes per stored example. A larger body is a 400, never a silent
+/// truncation: an example whose body is not what the caller sent would be
+/// served as if it were (phase 2), and a half-body is worse than a refusal.
+constexpr size_t MAX_BODY_BYTES = 1024 * 1024;
+/// Examples one request may hold. Bounds the list read and the per-request
+/// slice of a bulk import.
+constexpr size_t MAX_PER_REQUEST = 100;
+} // namespace request_example
+
+/**
  * @brief Database optimization configuration
  */
 namespace database {
