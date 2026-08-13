@@ -21,10 +21,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { queryKeys } from "@/queries";
-import type { InboxCapture, InboxCapturesResponse } from "@/types";
+import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 
 /** Narrow one SSE payload to a capture, or reject it. */
 export function parseCaptureEvent(raw: unknown): InboxCapture | null {
@@ -104,6 +104,31 @@ export function inboxLiveRetryDelayMs(attempt: number, random: () => number = Ma
 		INBOX_LIVE_RETRY_MAX_MS
 	);
 	return Math.round(step + random() * step * 0.5);
+}
+
+/**
+ * Ask the engine, now, whether @p inboxId still has a listener (issue #554).
+ *
+ * A stream ends the same way whether the connection dropped or somebody stopped
+ * the inbox - from the drawer, an MCP tool or a bare curl - and only the engine
+ * knows which. The list is polled at `SERVICES_POLL_INTERVAL_MS`, so left to the
+ * poll a deliberate stop spends up to ten seconds looking like a live inbox
+ * whose stream is flapping. Reading it here answers both halves: the surface
+ * reflects the stop within the close, and the reconnect budget is kept for the
+ * drops it was added for.
+ *
+ * Only a definite answer counts. A refetch that failed leaves the last good
+ * list in the cache, which still says `running` - so a stream lost to a blip
+ * retries, as it must.
+ */
+async function listenerIsGone(client: QueryClient, inboxId: string): Promise<boolean> {
+	// `refetchType: "all"`, not the default "active": whether some other surface
+	// happens to be observing the list is not what should decide whether this
+	// answer is fresh.
+	await client.invalidateQueries({ queryKey: queryKeys.inbox.list(), refetchType: "all" });
+	const inboxes = client.getQueryData<Inbox[]>(queryKeys.inbox.list());
+	if (inboxes === undefined) return false;
+	return inboxes.find((i) => i.inboxId === inboxId)?.running !== true;
 }
 
 /** One subscription's stream state, stamped with the subscription it belongs to. */
@@ -227,7 +252,15 @@ export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiv
 				source = null;
 				if (cancelled || exhausted) return;
 				attempts += 1;
-				retryTimer = setTimeout(connect, inboxLiveRetryDelayMs(attempts));
+				const attempt = attempts;
+				void (async () => {
+					// The reconnect waits on this answer rather than racing it: a
+					// retry fired first is a request to re-attach to a listener the
+					// user has just stopped.
+					if (await listenerIsGone(queryClient, inboxId)) return;
+					if (cancelled) return;
+					retryTimer = setTimeout(connect, inboxLiveRetryDelayMs(attempt));
+				})();
 			};
 		};
 

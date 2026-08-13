@@ -148,6 +148,32 @@ describe("an inbox row", () => {
 		expect(useTabsStore.getState().openTabs.map((t) => t.type)).toContain("inbox");
 	});
 
+	/*
+	 * The row's label names one inbox, so the tab has to receive that one. It
+	 * used to open the tab with no address at all, which the tab resolved to the
+	 * first inbox in the engine's list - clicking the second row showed the
+	 * first (issue #554).
+	 */
+	it("hands the tab the inbox the row names, not just the tab type", async () => {
+		listInboxes.mockResolvedValue([
+			inbox(),
+			inbox({ inboxId: "inbox_b", port: 41235, url: "http://127.0.0.1:41235/" }),
+		]);
+		renderPanel();
+
+		fireEvent.click(await screen.findByRole("button", { name: /open inbox on port 41235/i }));
+		expect(useTabsStore.getState().openTabs).toContainEqual(
+			expect.objectContaining({ type: "inbox", entityId: "inbox_b" })
+		);
+
+		// And the second row retargets the one open tab rather than opening a
+		// second inbox tab.
+		fireEvent.click(screen.getByRole("button", { name: /open inbox on port 41234/i }));
+		const inboxTabs = useTabsStore.getState().openTabs.filter((t) => t.type === "inbox");
+		expect(inboxTabs).toHaveLength(1);
+		expect(inboxTabs[0].entityId).toBe("inbox_a");
+	});
+
 	it("copies the URL a webhook source is pointed at", async () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();

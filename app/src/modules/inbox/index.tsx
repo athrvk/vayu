@@ -17,11 +17,25 @@
  * restoring into a tab, and the engine allows a single live stream per inbox
  * (each holds a pool thread), so a surface that watched several at once would
  * be spending threads on lists nobody is reading.
+ *
+ * One tab still has to be able to name *which* inbox it shows (issue #554).
+ * That address is the tab's own `entityId`, written by whoever opens the tab -
+ * a drawer row, or the switcher in this header - and never mirrored into local
+ * state: two records of one selection is how the drawer came to open a tab
+ * showing a different inbox than the row it was clicked on.
  */
 
 import { useState } from "react";
 import { Copy, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
+import {
+	Badge,
+	Button,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui";
 import { Callout, EmptyState, ErrorState } from "@/components/shared";
 import {
 	useClearInboxCapturesMutation,
@@ -31,7 +45,7 @@ import {
 	useStopInboxMutation,
 	useUpdateInboxResponseMutation,
 } from "@/queries";
-import { useToastStore } from "@/stores";
+import { useTabsStore, useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -75,26 +89,43 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
+	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
-	const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
-	const [selectedCaptureId, setSelectedCaptureId] = useState<number | null>(null);
+	// Which capture, and of which inbox: ids are per-inbox, so a bare number
+	// carried across a switch can select a row in the inbox switched *to*.
+	const [selection, setSelection] = useState<{ inboxId: string; captureId: number } | null>(null);
 
 	const startInbox = useStartInboxMutation();
 	const stopInbox = useStopInboxMutation();
 	const updateResponse = useUpdateInboxResponseMutation();
 	const clearCaptures = useClearInboxCapturesMutation();
 
-	// Derived, not synced into state: the engine is the list of inboxes, and a
-	// selection it no longer has falls back to the first one it does. An effect
-	// writing the fallback back into `selectedInboxId` would say the same thing
-	// one render later, and be wrong for that render.
+	// The tab is the address (see the file comment): this reads it, and `show`
+	// below is the only writer, so the drawer and the switcher change the same
+	// thing.
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const addressedInboxId = activeTab?.type === "inbox" ? activeTab.entityId : null;
+	const show = (inboxId: string) => openTab({ type: "inbox", entityId: inboxId });
+
+	// The engine lists inboxes in map order, which is not stable across polls -
+	// so both the switcher's entries and the fallback below order by port. An
+	// inbox record carries no creation stamp; whether it should is #555's
+	// decision, and port is the stable key the record has today.
+	const ordered = [...inboxes].sort((a, b) => a.port - b.port);
+
+	// Derived, not synced into state: the engine is the list of inboxes, and an
+	// address it no longer has falls back to the first one it does. An effect
+	// writing that fallback back into the tab would say the same thing one
+	// render later, and be wrong for that render.
 	const inbox: Inbox | null =
-		inboxes.find((i) => i.inboxId === selectedInboxId) ?? inboxes[0] ?? null;
+		inboxes.find((i) => i.inboxId === addressedInboxId) ?? ordered[0] ?? null;
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
 	const captures = capturesQuery.data?.data ?? [];
 	const live = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
 
+	const selectedCaptureId =
+		selection !== null && selection.inboxId === inbox?.inboxId ? selection.captureId : null;
 	const selectedCapture = captures.find((c) => c.id === selectedCaptureId) ?? captures[0] ?? null;
 
 	if (isError) {
@@ -111,7 +142,7 @@ export default function InboxView() {
 		startInbox.mutate(
 			{},
 			{
-				onSuccess: (started) => setSelectedInboxId(started.inboxId),
+				onSuccess: (started) => show(started.inboxId),
 				onError: (mutationError) =>
 					showToast(
 						mutationError instanceof Error
@@ -189,6 +220,26 @@ export default function InboxView() {
 				<Badge variant="outline">
 					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
+
+				{/* The tab's multi-inbox story, which it never had: with several
+				    listeners running, this is the only way to reach one of them
+				    without going back through the drawer. Absent for a single
+				    inbox, where a switcher with one entry is just a control that
+				    does nothing. */}
+				{inboxes.length > 1 && (
+					<Select value={inbox.inboxId} onValueChange={show}>
+						<SelectTrigger className="h-7 w-auto gap-1 text-xs" aria-label="Inbox">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{ordered.map((option) => (
+								<SelectItem key={option.inboxId} value={option.inboxId}>
+									{`Port ${option.port}${option.running ? "" : " (stopped)"}`}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				)}
 
 				<div className="ml-auto flex items-center gap-2">
 					<Button
@@ -270,7 +321,12 @@ export default function InboxView() {
 									key={capture.id}
 									capture={capture}
 									selected={selectedCapture?.id === capture.id}
-									onSelect={() => setSelectedCaptureId(capture.id)}
+									onSelect={() =>
+										setSelection({
+											inboxId: inbox.inboxId,
+											captureId: capture.id,
+										})
+									}
 								/>
 							))
 						)}

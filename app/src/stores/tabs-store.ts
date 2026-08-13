@@ -29,7 +29,16 @@ export interface Tab {
 
 const MAX_OPEN_TABS = 12;
 
-// Singletons: only one tab of this type can exist at a time
+/**
+ * Singletons: only one tab of this type can exist at a time.
+ *
+ * One tab, not one address. Opening a singleton that is already open with a
+ * *different* `entityId` retargets the open tab rather than focusing whatever
+ * it was showing - the inbox tab is one surface pointed at one inbox, and the
+ * drawer row that names inbox B has to be able to show B in it (issue #554).
+ * The others are always opened with a null `entityId`, for which retargeting is
+ * a no-op.
+ */
 const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox"];
 
 // These tab types are exempt from LRU auto-close
@@ -209,9 +218,18 @@ export const useTabsStore = create<TabsState>()(
 						: t.type === tabDef.type && t.entityId === tabDef.entityId
 				);
 				if (existing) {
+					// Only a singleton can reach this branch with a different
+					// entityId - the entity-keyed lookup above matched on it.
+					const tabs =
+						existing.entityId === tabDef.entityId
+							? openTabs
+							: openTabs.map((t) =>
+									t.id === existing.id ? { ...t, entityId: tabDef.entityId } : t
+								);
 					set({
+						openTabs: tabs,
 						activeTabId: existing.id,
-						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, existing.id),
+						tabFocusedAt: stampFocus(tabFocusedAt, tabs, existing.id),
 					});
 					return;
 				}
