@@ -9,7 +9,7 @@
  * The app's own surfaces - drawer views and the tabs that are one of a kind.
  *
  * Two mechanisms behind one group, because the user is not asked to know the
- * difference: Collections/History/Variables/Settings switch the drawer
+ * difference: Collections/History/Variables/Services/Settings switch the drawer
  * (`activateDrawerView`, the same call the Dock's buttons make), while
  * Variables/Settings/Inbox are singleton *tabs*. Variables and Settings are
  * both - the drawer holds the tree, the tab holds the editor - so their entry
@@ -22,7 +22,7 @@
  * here set the view explicitly instead.
  */
 
-import { Braces, Clock, Folder, Inbox, Settings } from "lucide-react";
+import { Braces, Clock, Folder, Inbox, Radio, Settings } from "lucide-react";
 import { useLayoutStore, useTabsStore, type DrawerView, type TabType } from "@/stores";
 import type { PaletteItem } from "../types";
 
@@ -56,14 +56,21 @@ const VIEWS: ViewEntry[] = [
 		tabType: "variables",
 	},
 	{
+		title: "Services",
+		keywords: ["inbox", "webhook", "oauth", "issuer", "mock", "listener"],
+		icon: Radio,
+		drawerView: "services",
+	},
+	{
 		title: "Settings",
 		keywords: ["preferences", "options", "config"],
 		icon: Settings,
 		drawerView: "settings",
 		tabType: "settings",
 	},
-	// No drawer view of its own: an inbox is engine state, not a stored record,
-	// so the tab is the whole surface (see the Launcher tile's note).
+	// Kept beside Services, which lists inboxes and is where one is started:
+	// this entry is the *tab*, the detail surface with the capture list, and
+	// searching "inbox" should reach both.
 	{ title: "Inbox", keywords: ["webhook", "receive", "callback"], icon: Inbox, tabType: "inbox" },
 ];
 

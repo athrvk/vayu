@@ -83,6 +83,14 @@ export {
 	useClearInboxCapturesMutation,
 } from "./inbox";
 
+// OAuth 2.0 mock issuer
+export {
+	useMockIssuersQuery,
+	useStartMockIssuerMutation,
+	useUpdateMockIssuerMutation,
+	useStopMockIssuerMutation,
+} from "./mock-issuer";
+
 // Health & Config
 export { useHealthQuery } from "./health";
 export { useConfigQuery, useUpdateConfigMutation } from "./config";

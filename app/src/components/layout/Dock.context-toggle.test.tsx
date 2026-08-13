@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Dock } from "./Dock";
 import { TooltipProvider } from "@/components/ui";
 import { useLayoutStore, useTabsStore, type TabType } from "@/stores";
@@ -29,11 +30,21 @@ import { useLayoutStore, useTabsStore, type TabType } from "@/stores";
 // Injected by vite's `define` in the real build; the Dock renders it.
 vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
 
+/*
+ * The Dock reads the two local-service lists for its running-services indicator
+ * (issue #502), so it needs a client - as it has in the app, where every
+ * renderer sits under the root provider. Nothing is mocked: the queries fail
+ * against no engine, the count is 0, and the indicator renders nothing, which
+ * is the state these cases want.
+ */
 function renderDock() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
-		<TooltipProvider>
-			<Dock />
-		</TooltipProvider>
+		<QueryClientProvider client={client}>
+			<TooltipProvider>
+				<Dock />
+			</TooltipProvider>
+		</QueryClientProvider>
 	);
 }
 
