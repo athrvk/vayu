@@ -74,6 +74,12 @@ export const queryKeys = {
 		// moves, or when the run set changes without a known request.
 		baselines: () => [...queryKeys.runs.all, "baseline"] as const,
 		baseline: (requestId: string) => [...queryKeys.runs.baselines(), requestId] as const,
+		// One small page of runs matching a palette query. Its own family for the
+		// fifth time and the same reason as the four above: it caches a plain
+		// `RunListResponse`, and the delete-run patch walks everything under
+		// `lists()` as `InfiniteData`.
+		searches: () => [...queryKeys.runs.all, "search"] as const,
+		search: (q: string) => [...queryKeys.runs.searches(), q] as const,
 		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,

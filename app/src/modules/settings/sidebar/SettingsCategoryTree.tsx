@@ -14,15 +14,19 @@
  *
  * Plus the search that spans both: ~45 engine entries and 7 app panels used to
  * be findable only by guessing which category owned them. Typing filters the
- * shared settings index (`lib/settings-index.ts`) over labels, descriptions and
- * engine keys; picking a result selects the owning category and asks the main
- * view to reveal that entry.
+ * shared settings index (`useSettingsIndex`, over `lib/settings-index.ts`) by
+ * labels, descriptions and engine keys; picking a result selects the owning
+ * category and asks the main view to reveal that entry.
+ *
+ * The box's text lives in `settings-store` rather than here, so the command
+ * palette's "Search settings for …" row can hand its query over and land the
+ * user on an already-filtered sidebar.
  *
  * Category rows share a single selected treatment (the app's `--primary`
  * accent); there is no per-category color.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
 import { DrawerPanel, ErrorState } from "@/components/shared";
@@ -33,9 +37,9 @@ import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, Input, Skeleton } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
-import { APP_SETTINGS } from "@/modules/settings/main/app-settings";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
-import { buildSettingsIndex, searchSettings } from "@/lib/settings-index";
+import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
+import { searchSettings } from "@/lib/settings-index";
 
 interface CategoryMeta {
 	label: string;
@@ -64,10 +68,10 @@ function SectionHeading({ children, icon: Icon }: { children: string; icon?: Luc
 }
 
 export default function SettingsCategoryTree() {
-	const { selectedCategory, setSelectedCategory } = useSettingsStore();
+	const { selectedCategory, setSelectedCategory, searchQuery: query } = useSettingsStore();
+	const setQuery = useSettingsStore((s) => s.setSearchQuery);
 	const { openTab } = useTabsStore();
-	const { data: configResponse, isLoading, error, refetch } = useConfigQuery();
-	const [query, setQuery] = useState("");
+	const { isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now
 	// lives in the Drawer (not inside the settings tab), so it must open/focus
@@ -77,16 +81,9 @@ export default function SettingsCategoryTree() {
 		openTab({ type: "settings", entityId: null });
 	};
 
-	const index = useMemo(
-		() =>
-			buildSettingsIndex({
-				panels: APP_SETTINGS_PANELS,
-				appSettings: APP_SETTINGS,
-				engineEntries: configResponse?.entries ?? [],
-				engineCategories: ENGINE_SETTINGS_CATEGORIES,
-			}),
-		[configResponse]
-	);
+	// The same corpus the palette's settings source searches - see
+	// `useSettingsIndex`.
+	const index = useSettingsIndex();
 
 	const trimmedQuery = query.trim();
 	const results = useMemo(

@@ -17,8 +17,8 @@
  *
  * - **Not its own search implementation.** Results come from source hooks
  *   (`sources/`), each returning the same `PaletteItem` shape and performing
- *   its action through the very call the sidebar makes. Adding settings,
- *   environments or runs later is a source, not a change here.
+ *   its action through the very call the sidebar makes. Settings entries,
+ *   variables and runs joined as three more sources and changed nothing here.
  * - **Not its own list of actions.** The Commands and Settings groups are
  *   `lib/commands`, the registry the native menu points at too. What this file
  *   does own is the *host* for the dialogs those commands open - see
@@ -134,13 +134,13 @@ export function CommandPalette() {
 				open={paletteOpen}
 				onOpenChange={setPaletteOpen}
 				title="Command palette"
-				description="Search open tabs, requests, collections, views and commands."
+				description="Search open tabs, requests, collections, views, commands, settings, variables and past runs."
 				className="max-w-xl"
 			>
 				<CommandInput
 					value={query}
 					onValueChange={setQuery}
-					placeholder={`Search tabs, requests, commands… (${formatChord(PALETTE_CHORD)})`}
+					placeholder={`Search tabs, requests, settings, runs… (${formatChord(PALETTE_CHORD)})`}
 				/>
 				{/*
 				 * Mounted only while open, so a shut palette holds no query observers

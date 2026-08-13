@@ -26,17 +26,30 @@ interface SettingsState {
 	 */
 	highlightedKey: string | null;
 
+	/**
+	 * What the settings sidebar's search box holds.
+	 *
+	 * Store state rather than the tree's own `useState` because the palette's
+	 * "Search settings for …" escape row hands its query over: the palette
+	 * finds, the sidebar browses, and the browse surface has to open already
+	 * filtered. A user still only ever types into the tree's own box.
+	 */
+	searchQuery: string;
+
 	// Actions
 	setSelectedCategory: (category: SettingsCategory | null, highlightedKey?: string) => void;
 	clearHighlight: () => void;
+	setSearchQuery: (query: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
 	// Default to a real category so the settings tab opens with content
 	selectedCategory: "appearance",
 	highlightedKey: null,
+	searchQuery: "",
 
 	setSelectedCategory: (category, highlightedKey) =>
 		set({ selectedCategory: category, highlightedKey: highlightedKey ?? null }),
 	clearHighlight: () => set({ highlightedKey: null }),
+	setSearchQuery: (query) => set({ searchQuery: query }),
 }));
