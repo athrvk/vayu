@@ -81,6 +81,23 @@ export const TIMING = {
 	/** Engine health poll interval while the app is open. */
 	HEALTH_CHECK_INTERVAL_MS: 30_000,
 
+	/**
+	 * How often the two local-service lists (webhook inboxes, OAuth issuers) are
+	 * re-read.
+	 *
+	 * They are polled at all because this app is not the only client that can
+	 * start one: the MCP server exposes the same lifecycle to an agent, and curl
+	 * reaches the engine directly. Without a poll the Dock's running-services
+	 * indicator would only ever report what this window itself started, which is
+	 * the opposite of what it promises.
+	 *
+	 * 10s rather than the health check's 30s because a service the user just
+	 * started elsewhere should show up while they are still looking, and rather
+	 * than the runs list's 5s because neither list changes on its own - only
+	 * when somebody acts.
+	 */
+	SERVICES_POLL_INTERVAL_MS: 10_000,
+
 	/** Wait after asking electron to restart the engine before refetching. */
 	ENGINE_RESTART_WAIT_MS: 1500,
 

@@ -5,7 +5,16 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { FolderOpen, Clock, Braces, Info, PanelRight, RefreshCw, Settings } from "lucide-react";
+import {
+	FolderOpen,
+	Clock,
+	Braces,
+	Info,
+	PanelRight,
+	Radio,
+	RefreshCw,
+	Settings,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import {
@@ -17,6 +26,7 @@ import {
 } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
+import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 
 interface DrawerButton {
@@ -72,6 +82,25 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		icon: <Braces className="w-4 h-4" />,
 		label: "Variables",
 		shortcut: formatChord({ mod: true, shift: true, key: "U" }),
+	},
+	{
+		view: "services",
+		/*
+		 * `Radio`: the group is inboxes, OAuth issuers and (with #481) mock
+		 * servers - things that sit there *listening*, which is what the
+		 * broadcast arcs say and what none of the alternatives do. `Server`
+		 * reads as a remote host, which is the thing these stand in for rather
+		 * than what they are; `Play` is the load-test run mark; `Plug` reads as
+		 * a connection to something else, and the point of a local service is
+		 * that there is nothing else.
+		 *
+		 * Distinct in the strip: it is the only glyph made of concentric arcs -
+		 * Collections a solid trapezoid, History a filled circle, Variables two
+		 * open curves, Settings a round cog.
+		 */
+		icon: <Radio className="w-4 h-4" />,
+		label: "Services",
+		shortcut: formatChord({ mod: true, shift: true, key: "S" }),
 	},
 	{
 		view: "settings",
@@ -214,6 +243,50 @@ function PendingRestart() {
 	return pendingRestart ? <PendingRestartButton /> : null;
 }
 
+/**
+ * A local service is listening somewhere - the one thing that was invisible
+ * outside the surface that started it (issue #502).
+ *
+ * A webhook inbox recorded a request whether or not its tab was open, and an
+ * OAuth issuer had no app surface at all, so "is something still running?" was
+ * a question the app could not answer anywhere. It sits beside the connection
+ * light because that is this strip's ambient-status region, and because these
+ * are the same kind of fact: what the engine is doing on the user's behalf.
+ *
+ * **Nothing renders when nothing runs.** The Dock's middle is ambient, and a
+ * standing "0 services" would spend a permanent line on the ordinary case.
+ * Guarded by `Dock.services.test.tsx` - rendering it unconditionally fails.
+ */
+function RunningServices() {
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const count = useRunningServiceCount();
+
+	if (count === 0) return null;
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				{/*
+				 * A button, not a chip: knowing a listener is up is only half the
+				 * need - the other half is getting to it, and the drawer is where
+				 * it can be stopped or copied. `success-text` is the accessible
+				 * pair the connection light above uses for the same 12px dot.
+				 */}
+				<button
+					onClick={() => activateDrawerView("services")}
+					className="flex items-center gap-1 text-xs text-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				>
+					<span className="w-1.5 h-1.5 rounded-full bg-current" />
+					{count === 1 ? "1 service" : `${count} services`}
+				</button>
+			</TooltipTrigger>
+			<TooltipContent side="top">
+				<p>Local services are running. Open the Services sidebar.</p>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 function PendingRestartButton() {
 	const { restart, isRestarting } = useEngineRestart();
 
@@ -273,7 +346,7 @@ export function Dock() {
 			 */}
 			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
 				{/* Left - drawer switchers.
-				    <nav>: these four choose what the sidebar shows, which is the
+				    <nav>: these five choose what the sidebar shows, which is the
 				    app's primary navigation. Not role="toolbar" - that promises
 				    arrow-key traversal between the buttons, which this does not
 				    implement, and claiming it would mislead a keyboard user. */}
@@ -294,6 +367,8 @@ export function Dock() {
 				{/* Middle - ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
 					<EngineStatus />
+
+					<RunningServices />
 
 					<PendingRestart />
 

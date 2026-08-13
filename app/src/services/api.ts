@@ -70,6 +70,12 @@ import type {
 	ListInboxesResponse,
 	StartInboxRequest,
 	ClearInboxCapturesResponse,
+	MockIssuer,
+	ListMockIssuersResponse,
+	StartMockIssuerRequest,
+	StartMockIssuerResponse,
+	UpdateMockIssuerRequest,
+	StopMockIssuerResponse,
 } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
@@ -312,6 +318,35 @@ export const apiService = {
 	async clearInboxCaptures(inboxId: string): Promise<ClearInboxCapturesResponse> {
 		return await httpClient.delete<ClearInboxCapturesResponse>(
 			API_ENDPOINTS.INBOX_CAPTURES_CLEAR(inboxId)
+		);
+	},
+
+	// OAuth 2.0 mock issuer (issue #479)
+	async listMockIssuers(): Promise<MockIssuer[]> {
+		const response = await httpClient.get<ListMockIssuersResponse>(API_ENDPOINTS.MOCK_ISSUER);
+		return response.issuers;
+	},
+
+	async startMockIssuer(request: StartMockIssuerRequest = {}): Promise<StartMockIssuerResponse> {
+		return await httpClient.post<StartMockIssuerResponse>(
+			API_ENDPOINTS.MOCK_ISSUER_START,
+			request
+		);
+	},
+
+	/**
+	 * Change what a *running* issuer does. Only the three mutable settings are
+	 * accepted - a port, client list or claim set cannot move under a bound
+	 * listener, and the engine refuses one rather than half-applying it.
+	 */
+	async updateMockIssuer(issuerId: string, update: UpdateMockIssuerRequest): Promise<MockIssuer> {
+		return await httpClient.put<MockIssuer>(API_ENDPOINTS.MOCK_ISSUER_BY_ID(issuerId), update);
+	},
+
+	async stopMockIssuer(issuerId: string): Promise<StopMockIssuerResponse> {
+		return await httpClient.post<StopMockIssuerResponse>(
+			API_ENDPOINTS.MOCK_ISSUER_STOP(issuerId),
+			{}
 		);
 	},
 

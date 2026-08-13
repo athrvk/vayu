@@ -54,6 +54,10 @@ vi.mock("@/queries", () => ({
 		enabled: false,
 	}),
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
+	// The Dock's running-services indicator reads both service lists; with none
+	// running it renders nothing, which is the state this file wants anyway.
+	useInboxesQuery: () => ({ data: [] }),
+	useMockIssuersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
@@ -104,13 +108,14 @@ describe("the variables icon", () => {
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		const buttons = Array.from(nav.querySelectorAll("button"));
 
-		expect(buttons).toHaveLength(4);
+		// Five since Services joined the strip (issue #502).
+		expect(buttons).toHaveLength(5);
 		const perButton = buttons.map((b) => iconNames(b).join("+"));
 		expect(new Set(perButton).size).toBe(perButton.length);
 	});
 
 	it("keeps the bolt out of the drawer switchers entirely", () => {
-		// `Zap` means "load test" in this app. Any of the four wearing it would
+		// `Zap` means "load test" in this app. Any of the five wearing it would
 		// re-introduce the same misreading in a different slot.
 		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
@@ -148,7 +153,7 @@ describe("the variables icon", () => {
 				onSearch={() => {}}
 				onHistory={() => {}}
 				onVariables={() => {}}
-				onInbox={() => {}}
+				onServices={() => {}}
 			/>
 		);
 		const tile = screen.getByRole("button", { name: /Variables/ });

@@ -101,7 +101,7 @@ export default function WelcomeScreen() {
 						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
-						onInbox={() => openTab({ type: "inbox", entityId: null })}
+						onServices={() => activateDrawerView("services")}
 					/>
 				)}
 			</div>

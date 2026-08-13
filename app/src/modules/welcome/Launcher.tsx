@@ -16,7 +16,7 @@
 // `Braces` is the app-wide mark for variables - see the note in
 // `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
 // records rather than `{{name}}` substitutions.
-import { Download, Plus, Braces, History, Inbox, Search } from "lucide-react";
+import { Download, Plus, Braces, History, Radio, Search } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
@@ -31,7 +31,7 @@ interface LauncherProps {
 	onSearch: () => void;
 	onHistory: () => void;
 	onVariables: () => void;
-	onInbox: () => void;
+	onServices: () => void;
 }
 
 function plural(n: number, word: string) {
@@ -46,7 +46,7 @@ export function Launcher({
 	onSearch,
 	onHistory,
 	onVariables,
-	onInbox,
+	onServices,
 }: LauncherProps) {
 	return (
 		<div className="flex flex-col gap-8">
@@ -67,10 +67,13 @@ export function Launcher({
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
 					<ActionTile icon={History} label="History" onClick={onHistory} />
 					<ActionTile icon={Braces} label="Variables" onClick={onVariables} />
-					{/* The receiving half of the app. It has no drawer view to
-					    switch to - an inbox is engine state, not a stored record
-					    - so this tile is how it is reached. */}
-					<ActionTile icon={Inbox} label="Inbox" onClick={onInbox} />
+					{/* The local services - the webhook inbox, the OAuth mock
+					    issuer. Like History, this tile activates a drawer view
+					    rather than opening a tab: the inbox used to be reachable
+					    from here and nowhere else, and a tile that teaches where
+					    a whole family of features lives outlives one that opens
+					    a single tab (issue #502). */}
+					<ActionTile icon={Radio} label="Services" onClick={onServices} />
 				</div>
 			</section>
 
