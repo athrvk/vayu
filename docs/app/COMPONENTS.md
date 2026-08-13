@@ -13,9 +13,9 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 
 ```
 <App />                                  // App.tsx - mounts providers, kicks off health/prefetch queries, OS theme sync
-├── <TitleBar />                         // components/layout/TitleBar.tsx - h-[38px] drag region + logo + tabs + env pill
-│   ├── Logo (all platforms)
-│   ├── <TabStrip />                     // Open tabs + "+" button
+├── <TitleBar />                         // components/layout/TitleBar.tsx - --titlebar-height drag region: icon + centered search bar + env pill
+│   ├── AppIcon (Windows only - the system-menu control)
+│   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <UpdateBanner />
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
@@ -26,6 +26,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <HistoryList />              //   history view
     │   ├── <VariablesCategoryTree />    //   variables view
     │   └── <SettingsCategoryTree />     //   settings view
+    ├── <TabStrip />                     // Open tabs + "+" button - over main+context, left edge = drawer edge
     ├── main content (switched on active tab type)
     │   ├── <WelcomeScreen />            // type="welcome"     modules/welcome/
     │   ├── <RequestBuilder />           // type="request"     modules/request-builder/
@@ -45,22 +46,43 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 
 Root component. Renders `<TitleBar />` over `<Shell />`. On mount it wires up app-wide concerns via hooks/queries: OS/Electron theme sync (`useElectronTheme`), engine health polling (`useHealthQuery`), and prefetching of server state (`usePrefetchCollectionsAndRequests`, `useRunsQuery`, `useScriptCompletionsQuery`).
 
+### The two chrome rows
+
+Top chrome is 32px + 32px, and the split is what makes both halves work:
+
+```
+[ icon | ............ centered search bar ............ | env switcher | controls ]  <- title row, --titlebar-height
+[ drawer header band | tab strip over main + context, left edge = drawer edge    ]  <- --tabstrip-height
+[ drawer body        | main content                    | context bar             ]
+[ dock                                                                           ]
+```
+
+The title row belongs to the **window** (it is what drags it, and what the macOS traffic lights and the Windows caption overlay are drawn into); the second row belongs to the **content**. Tabs switch the main area and the context bar and never the drawer, so the strip is scoped to that column and its left edge follows the drawer's resize handle - it is the drawer's flex sibling, so there is no width to keep in sync. The drawer's own half of the row is `DrawerPanel`'s header band.
+
+Both rows are tokenized: `--titlebar-height` (mirrored in `electron/constants.ts`, which sizes the real window frame and cannot read CSS) and `--tabstrip-height` (renderer-only - nothing the main process draws is that tall). `titlebar-height.test.ts` holds each token to its readers, and a top-anchored toast subtracts **both** (`constants/toast.ts`).
+
+Tabs used to live in the title row. They are content-width and overflow into a dropdown, so every pixel another control took there converted directly into overflowed tabs - which is why a search bar could not simply be added beside them.
+
 ### `TitleBar` (`components/layout/TitleBar.tsx`)
 
-Custom window title bar (Electron frameless window, h-[38px]). Platform-specific controls:
+Custom window title bar (Electron frameless window, `--titlebar-height`). Renders nothing outside Electron - there is no window chrome to draw. A 3-column grid (`1fr auto 1fr`), so the search bar is centred on the *window* rather than on whatever space the two clusters leave.
 
-- **All platforms:** Logo (left), `<TabStrip />` (center, flexes to fill).
-- **macOS:** Native traffic light inset (~80px left); no HTML window controls.
-- **Windows:** Native window overlay; no HTML controls in the bar.
-- **Linux:** Custom HTML min/max/close buttons (right); `EnvPill` showing active environment.
+- **All platforms:** `<CommandSearchBar />` (centre), `EnvPill` (right).
+- **macOS:** Native traffic light inset (`--traffic-light-inset`, 104px left); no HTML window controls.
+- **Windows:** App icon as the system-menu control (left); native window overlay, no HTML controls in the bar.
+- **Linux:** Custom HTML min/max/close buttons (right).
 
-The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`. Keep `no-drag` on the interactive elements themselves, never on a layout wrapper: the `TabStrip` wrapper flexes to fill the bar, so marking *it* `no-drag` turns all the empty space right of the last tab into a dead zone the window can't be dragged by. `TabStrip` sets `no-drag` on its own tab row for this reason.
+The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag` - a drag area ignores every pointer event, so a control that forgets is dead rather than merely awkward. Opting out per control or per cluster is fine; opting out a wrapper that spans the row's slack is not, because that slack is what the window is dragged by. → `TitleBar.search-bar.test.tsx`.
 
 The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load - it only appears to work in dev, where Vite serves it over HTTP.
 
+### `CommandSearchBar` (`components/layout/CommandSearchBar.tsx`)
+
+The palette's visible entry point, in the title row. A `<button>` styled as an input: it looks like a field because that is what makes ⌘K discoverable, but typing happens in the palette's own input - a real field here would be a second query state and a second ranked list to keep in step. Clicking sets `paletteOpen`; the hint it prints comes from `PALETTE_CHORD` (`constants/shortcuts.ts`), the same constant `CommandPalette`'s listener matches, so the bar cannot advertise a chord nothing handles.
+
 ### `TabStrip` (`components/layout/TabStrip.tsx`)
 
-Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open tabs, active tab, add/close/focus methods).
+Horizontal row of open tabs plus a "+" button, rendered by `Shell` over the content column (not in the title bar). Reads from `useTabsStore` (open tabs, active tab, add/close/focus methods). Takes its height from `--tabstrip-height` and carries no `app-region` markers - nothing down here drags the window.
 
 Labels and icons come from `tab-descriptors.ts`, a sibling module rather than this file, because the command palette lists the same tabs and must name them identically - a tab that reads "GET /v1/orders" in the strip and "Request" in the palette is two answers to one question.
 
@@ -74,23 +96,26 @@ Labels and icons come from `tab-descriptors.ts`, a sibling module rather than th
 
 Main layout: tab-centric with resizable drawer, split/overlay context bar, and docked footer.
 
-- **One uniform layout for every tab** - `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
+- **One uniform layout for every tab** - `Drawer` (left) + a content column holding `TabStrip` over main + `ContextBar`. No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
 - **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
-- **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four.
+- **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four. `relative` sits on the main+context row rather than on the outer one, so the overlay stops at the tab strip instead of covering the tabs it belongs to.
+- **The restructure must not remount tab content.** Drawer state is upstream of the column the active tab renders into, so a `key` derived from it - or a wrapper mounted only while the drawer is closed - throws away an unsaved body, a scroll position, a Monaco model. → `shell-tab-identity.test.tsx`.
 - **`<ImportModal />`** and **`<CommandPalette />`** mounted once each as global overlays; visibility in a store rather than in the Shell.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of four views per `useLayoutStore.drawerView`:
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of four views per `useLayoutStore.drawerView`. Every view is titled: its `DrawerPanel` header is the drawer's half of the second chrome row, sharing `--tabstrip-height` and its bottom rule with the tab strip across the resize handle, with an optional tools slot beside the title.
 
-- **`collections`** - `CollectionTree` (hierarchical collections + requests).
-- **`history`** - `HistoryList` (past runs, filtered/sorted).
-- **`variables`** - `VariablesCategoryTree` (variable scopes: globals, collections, environments).
-- **`settings`** - `SettingsCategoryTree` (app + engine setting categories).
+| View | Component | Band tools today |
+|------|-----------|------------------|
+| **`collections`** | `CollectionTree` (hierarchical collections + requests) | add collection, add request, import |
+| **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
+| **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
+| **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
 

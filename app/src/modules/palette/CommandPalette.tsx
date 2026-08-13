@@ -53,8 +53,8 @@ export function CommandPalette() {
 	 * last moment the previous focus still exists.
 	 *
 	 * It also catches every opener, not just the chord: the welcome Launcher's
-	 * Search tile and (later) the title bar's search bar both flip this flag
-	 * through the store.
+	 * Search tile and the title bar's search bar both flip this flag through the
+	 * store.
 	 */
 	useEffect(
 		() =>

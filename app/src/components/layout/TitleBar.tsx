@@ -8,11 +8,18 @@
 /**
  * Custom TitleBar Component
  *
+ * The window's own row: app identity, the search bar, the environment switcher
+ * and the window controls. The document tabs are *not* here - they moved to a
+ * second row scoped to the content area (`Shell`), because this row could not
+ * hold both. Tabs are content-width and overflow into a dropdown, so every
+ * pixel another control took converted directly into overflowed tabs, and a
+ * real search bar is worth ~360 of them.
+ *
  * Height comes from --titlebar-height, not a bare h-[38px], because the toast
  * viewport subtracts it when the stack is anchored to the top of the window.
  * The value must still match TITLEBAR_HEIGHT in electron/constants.ts, which
  * sizes the real window frame and cannot read a CSS variable.
- * macOS: traffic lights inset (~80px), no HTML controls
+ * macOS: traffic lights inset (~104px), no HTML controls
  * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
  */
@@ -28,7 +35,7 @@ import {
 	DropdownMenuItem,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { TabStrip } from "./TabStrip";
+import { CommandSearchBar } from "./CommandSearchBar";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 
 const isElectron = !!window.electronAPI;
@@ -264,33 +271,37 @@ export default function TitleBar() {
 	return (
 		// <header>: the app's banner region, so it is reachable as a landmark
 		// rather than being an unnamed div in the accessibility tree.
+		//
+		// A 3-column grid rather than flex-with-spacers: the search bar is centred
+		// on the *window*, which is what "command center" means in every app that
+		// has one, and equal 1fr side columns are the only way to get that when the
+		// two clusters are different widths. Both sides carry `min-w-0` so a long
+		// environment name truncates instead of pushing the bar off centre.
 		<header
-			className="titlebar h-[var(--titlebar-height)] flex items-center bg-panel border-b border-border shrink-0 select-none"
+			className="titlebar h-[var(--titlebar-height)] grid grid-cols-[1fr_auto_1fr] items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
-			{/* macOS: space for native traffic lights */}
-			{/* Reserved for the traffic lights; the width is a token so it cannot
-			    drift from the position Electron gives them. */}
-			{isMac && <div className="shrink-0 w-[var(--traffic-light-inset)]" />}
+			<div className="flex min-w-0 items-center h-full">
+				{/* macOS: space for native traffic lights */}
+				{/* Reserved for the traffic lights; the width is a token so it cannot
+				    drift from the position Electron gives them. */}
+				{isMac && <div className="shrink-0 w-[var(--traffic-light-inset)]" />}
 
-			{/* Logo - all platforms. The icon is imported as a module, not referenced
-			    as "/icon.png": `base: "./"` means a root-absolute path does not
-			    resolve under the packaged file:// build. */}
-			<AppIcon />
-
-			{/* TabStrip - fills available width. This wrapper stays a drag region so
-			    the empty space to the right of the last tab moves the window on every
-			    platform; TabStrip marks its own tab row `no-drag`. */}
-			<div
-				className="flex-1 flex overflow-hidden h-full"
-				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-			>
-				<TabStrip />
+				{/* Logo - Windows only (it is the system-menu control there). The icon
+				    is imported as a module, not referenced as "/icon.png": `base: "./"`
+				    means a root-absolute path does not resolve under the packaged
+				    file:// build. */}
+				<AppIcon />
 			</div>
+
+			{/* The palette's entry point. Bounded rather than fluid: a search field
+			    the width of the window reads as a document title, and the row's whole
+			    remaining area stays draggable. */}
+			<CommandSearchBar className="w-[min(44vw,28rem)]" />
 
 			{/* Right controls */}
 			<div
-				className="flex items-center gap-2 px-3 shrink-0"
+				className="flex min-w-0 items-center justify-end gap-2 px-3 h-full"
 				style={
 					{
 						WebkitAppRegion: "no-drag",

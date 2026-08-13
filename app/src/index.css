@@ -385,11 +385,11 @@
 		--dock-height: 2rem;
 
 		/*
-		 * Height of the TitleBar, the strip holding the document tabs.
+		 * Height of the TitleBar, the window row holding the search bar.
 		 *
 		 * Same reason as --dock-height, at the other edge. The toast stack can
 		 * now be anchored to the top of the window, and `position: fixed` means
-		 * it would sit on top of the tab strip unless it subtracts this. Two
+		 * it would sit on top of the title row unless it subtracts this. Two
 		 * files had the 38px independently - TitleBar.tsx and TITLEBAR_HEIGHT in
 		 * electron/constants.ts - and the toast viewport would have been a third.
 		 * Theme-independent, so declared once.
@@ -399,6 +399,23 @@
 		 * and `toast-position.test.tsx` holds the two together.
 		 */
 		--titlebar-height: 32px;
+
+		/*
+		 * Height of the second chrome row: the tab strip over the content area,
+		 * and the drawer's header band beside it.
+		 *
+		 * One token for both because they are one band - the strip's left edge
+		 * is the drawer's right edge, so a drawer header of a different height
+		 * puts a visible step in the rule that runs across the window. It is
+		 * also the third thing a top-anchored toast has to clear, after the
+		 * title row (see --titlebar-height and constants/toast.ts).
+		 *
+		 * No mirror in electron/constants.ts, unlike the title row above - nothing
+		 * the main process draws is this tall. The frame, the Windows caption
+		 * overlay and the macOS traffic lights all size to the title row alone,
+		 * so a constant there would have no reader.
+		 */
+		--tabstrip-height: 32px;
 	}
 
 	/*
@@ -421,10 +438,10 @@
 		 * platforms diverge again. */
 		--titlebar-height: 32px;
 		/*
-		 * Width reserved for the traffic lights, so the first tab does not sit
-		 * under them. A 20px lead plus three 12px buttons on a 20px pitch ends at
-		 * 84px; 104 leaves a 20px gutter before the first tab. At 80 it was 16px,
-		 * which read as the lights being crammed against the tab strip. Mirrors TRAFFIC_LIGHT_INSET in
+		 * Width reserved for the traffic lights, so the title row's leading
+		 * content does not sit under them. A 20px lead plus three 12px buttons on
+		 * a 20px pitch ends at 84px; 104 leaves a 20px gutter after the cluster.
+		 * At 80 it was 16px, which read as crammed. Mirrors TRAFFIC_LIGHT_INSET in
 		 * electron/constants.ts, which positions the buttons themselves -
 		 * titlebar-height.test.ts holds the two together.
 		 */

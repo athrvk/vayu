@@ -46,8 +46,9 @@ export type ToastPosition =
  * because the offsets are not interchangeable: the viewport is `position:
  * fixed`, so it anchors to the window and not to the layout, and both the top
  * and bottom edges of the window are occupied by app chrome. A bottom position
- * has to clear the Dock and a top position has to clear the title bar, so each
- * edge carries its own token - never a round number. See
+ * has to clear the Dock and a top position has to clear the title row *and* the
+ * tab strip under it, so each edge carries its own tokens - never a round
+ * number. See
  * `toast-position.test.tsx`, which exists because a plain `bottom-4` once put
  * the stack on top of the Dock.
  *
@@ -62,7 +63,14 @@ export interface ToastPositionOption extends LabeledOption<ToastPosition> {
 }
 
 const BOTTOM = "bottom-[calc(var(--dock-height)+1rem)]";
-const TOP = "top-[calc(var(--titlebar-height)+1rem)]";
+/*
+ * Both chrome rows, not just the title bar. The top of the window is two bands
+ * now - the title row, and the tab strip beside the drawer's header - and a
+ * stack that cleared only the first landed on whichever of the two was under
+ * it. Every top position crosses at least one of them: left over the drawer
+ * band, centre and right over the tabs.
+ */
+const TOP = "top-[calc(var(--titlebar-height)+var(--tabstrip-height)+1rem)]";
 
 /*
  * Order matters: this array is rendered straight into a 3-column grid, so the

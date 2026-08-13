@@ -11,6 +11,7 @@ import { ImportModal } from "@/modules/collections/ImportModal";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
 import { ContextBar } from "./ContextBar";
+import { TabStrip } from "./TabStrip";
 import RequestBuilder from "@/modules/request-builder";
 import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
@@ -187,12 +188,32 @@ export default function Shell() {
 			    content, and the request-only ContextBar. No tab type takes over
 			    the row, so the Dock's drawer switchers always have a Drawer to act
 			    on. */}
-			<div className="flex flex-1 overflow-hidden relative">
+			<div className="flex flex-1 overflow-hidden">
 				<Drawer />
-				<main className="flex-1 overflow-hidden flex flex-col min-w-0">
-					{renderTabContent(activeTab)}
-				</main>
-				<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+				{/*
+				 * The content column: tab strip on top, then main + ContextBar.
+				 *
+				 * The strip is scoped to this column rather than spanning the window
+				 * because that is the region tabs actually switch - the drawer is a
+				 * global navigator and keeps its own header band beside this row.
+				 * Its left edge therefore follows the drawer's resize handle for
+				 * free: the column is the drawer's flex sibling, so there is no
+				 * width to compute or keep in sync.
+				 *
+				 * `relative` moved down with the strip, onto the main+context row:
+				 * the ContextBar's overlay mode (<1200px) positions against its
+				 * nearest positioned ancestor, and from the outer row it would now
+				 * cover the tabs it belongs to.
+				 */}
+				<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+					<TabStrip />
+					<div className="flex flex-1 overflow-hidden relative">
+						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+							{renderTabContent(activeTab)}
+						</main>
+						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+					</div>
+				</div>
 			</div>
 			<Dock />
 		</div>
