@@ -37,6 +37,8 @@ export { RequestNotFoundError } from "./collections";
 // Runs (History)
 export {
 	useRunsQuery,
+	useRunSearchQuery,
+	RUN_SEARCH_LIMIT,
 	useAllRunsQuery,
 	flattenRunPages,
 	runsTotal,

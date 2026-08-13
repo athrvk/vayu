@@ -1,0 +1,103 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * Individual settings, as palette results.
+ *
+ * The registry already offers one command per settings *section*, which reaches
+ * the twelve screens. This reaches the ~65 entries on them: a user who knows
+ * the app has a request timeout should not have to guess which of five engine
+ * categories owns it, and `dbCacheSize` - the name every doc, log line and MCP
+ * call uses - should find its row even though the screen labels it "Cache Size".
+ *
+ * Two things it deliberately does not do:
+ *
+ * - **It does not index panels.** `SettingsIndexEntry` has a `panel` kind, and
+ *   the command registry already generates a command per panel from the same
+ *   registry; indexing them here would put every settings screen in the group
+ *   twice, under two rows that do the same thing.
+ * - **It does not own a matcher.** `searchSettings` is the sidebar's ranking,
+ *   and a palette that ranked settings differently from the settings sidebar
+ *   would be two answers to one question. One index, one ranking, two UIs.
+ */
+
+import { useMemo } from "react";
+import { Search } from "lucide-react";
+import { useLayoutStore, useTabsStore } from "@/stores";
+import { useSettingsStore } from "@/modules/settings/settings-store";
+import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
+import { searchSettings, type SettingsIndexEntry } from "@/lib/settings-index";
+import { DEEP_GROUP_LIMIT, type PaletteItem } from "../types";
+
+/**
+ * Reveal one settings entry - the same two calls in the same order as the
+ * sidebar's own result rows and the registry's section commands: select first,
+ * then open, so the tab renders the asked-for panel rather than the previous
+ * selection for one frame. The anchor is what `useRevealedSetting` scrolls to
+ * and outlines.
+ */
+function reveal(entry: SettingsIndexEntry): void {
+	useSettingsStore.getState().setSelectedCategory(entry.category, entry.anchor);
+	useTabsStore.getState().openTab({ type: "settings", entityId: null });
+}
+
+export function useSettingsItems(query: string): PaletteItem[] {
+	const index = useSettingsIndex();
+	const needle = query.trim();
+
+	return useMemo(() => {
+		// Deep search is search. The palette's empty state answers "what was I
+		// just doing", and sixty-five settings rows are not that.
+		if (needle === "") return [];
+
+		const matches = searchSettings(index, needle).filter((entry) => entry.kind !== "panel");
+		const shown = matches.slice(0, DEEP_GROUP_LIMIT);
+
+		const items: PaletteItem[] = shown.map((entry) => ({
+			id: `setting:${entry.kind}:${entry.id}`,
+			kind: "settings" as const,
+			title: entry.label,
+			// The engine key is part of what the row says, because that is what
+			// docs, logs and MCP calls name the setting; an app setting has no
+			// such name, so its subtitle is just the panel that holds it.
+			subtitle:
+				entry.kind === "engine"
+					? `${entry.categoryLabel} · ${entry.id}`
+					: entry.categoryLabel,
+			// Everything `searchSettings` matched on, so cmdk - which filters the
+			// rendered list a second time - cannot hide a row this source has
+			// already decided matches. Its own `value` covers label and subtitle.
+			keywords: [entry.id, ...entry.keywords, entry.description],
+			perform: () => reveal(entry),
+		}));
+
+		// Only when there is more, and never as a consolation prize: an escape
+		// row over an exhausted result set would send the user to a surface that
+		// shows them the same rows again.
+		if (matches.length > shown.length) {
+			items.push({
+				id: "setting:search-more",
+				kind: "settings" as const,
+				title: `Search settings for “${needle}”…`,
+				subtitle: `${matches.length} matches`,
+				icon: Search,
+				escape: true,
+				keywords: [needle],
+				perform: () => {
+					// The sidebar's box reads this, so the drawer opens already
+					// filtered - the palette finds, the destination browses.
+					useSettingsStore.getState().setSearchQuery(needle);
+					useLayoutStore.getState().setDrawerOpen(true);
+					useLayoutStore.getState().setDrawerView("settings");
+					useTabsStore.getState().openTab({ type: "settings", entityId: null });
+				},
+			});
+		}
+
+		return items;
+	}, [index, needle]);
+}

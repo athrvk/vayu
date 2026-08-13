@@ -439,7 +439,9 @@ Adding an app panel is three edits and no branching: a member on `ClientSettings
 
 ### Search
 
-`lib/settings-index.ts` is a **pure** module: `buildSettingsIndex` flattens three catalogues into one list - the app panels (`app-panels.ts`), the settings inside them (`app-settings.ts`) and the engine entries from `GET /config` - and `searchSettings` filters and ranks it (label, then id, then keywords, then description, then category label; an empty query means "not searching" and returns everything). It is deliberately free of React and stores so the sidebar's search box and the command palette's settings source share one corpus.
+`lib/settings-index.ts` is a **pure** module: `buildSettingsIndex` flattens three catalogues into one list - the app panels (`app-panels.ts`), the settings inside them (`app-settings.ts`) and the engine entries from `GET /config` - and `searchSettings` filters and ranks it (label, then id, then keywords, then description, then category label; an empty query means "not searching" and returns everything). It is deliberately free of React and stores.
+
+`modules/settings/useSettingsIndex.ts` is the half that names the catalogues and reads the `/config` query. Both consumers call it - the sidebar's search box and the palette's `useSettingsItems` source - rather than each assembling the four inputs inline, which is the "one branch defines it, the other re-derives it" wiring defect this repo keeps finding. One index, one ranking, two UIs. The sidebar's query text lives in `settings-store` (`searchQuery`) for the same reason the index is shared: the palette's escape row hands its query over, so the drawer opens already filtered.
 
 **Index the settings, not the screens.** The first version held panel titles and engine entries only, and a user searching "theme", "color" or "font" got nothing - the panel that holds all three is called "Appearance" and describes itself as "the look and feel of the application". `app-settings.ts` is the app-side catalogue that fixes it: one `AppSettingDescriptor` per setting (`anchor`, `panel`, `label`, `searchText`, optional `keywords` for the words a user types that the copy never uses - "dark mode", "accent", "zoom"). A new app setting needs an entry here, or it is unfindable.
 
@@ -527,11 +529,14 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
 - **`CommandPalette.tsx`** - the dialog, the chord, focus restoration, the open flag
   (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted), and the host
   for the dialogs its commands open (see `useCommandSurfaces.ts` below).
-- **`sources/`** - one hook per family, each returning `PaletteItem[]`: `useTabItems` (open
+- **`sources/`** - one hook per family, each returning `PaletteItem[]`. Two shapes of source:
+  the **shallow** ones return everything they know and let cmdk filter it - `useTabItems` (open
   tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
-  tabs). `commandItems.ts` is the fourth and is a plain function, not a hook: it owns no data,
-  it maps the [command registry](#command-registry-libcommands) onto the same shape. Adding
-  environments or runs later is a new source and nothing else.
+  tabs) - while the **deep** ones take the query, because their corpus is too large to render:
+  `useSettingsItems` (every app setting and engine entry, through the shared settings index),
+  `useVariableItems` (environment names and variable keys across every scope) and `useRunItems`
+  (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
+  data, it maps the [command registry](#command-registry-libcommands) onto the same shape.
 - **`useCommandSurfaces.ts`** - the collection picker, the run dialog and the theme hook, which
   three commands need and no store can hold. Their original hosts are not always on screen (the
   welcome screen's picker only on the welcome tab, the tree's run dialog only while the drawer
@@ -559,9 +564,34 @@ Three things about it are load-bearing:
 Ranking: cmdk's own match score once anything is typed; on the empty query, `rankForEmptyQuery`
 puts the most recent first - focus time for tabs (`tabFocusedAt` in `tabs-store`, session-scoped),
 last-run time for requests (from the run history already in cache). Groups render in a fixed
-order (Tabs, Requests, Collections, Views, Commands, Settings) so the list does not reshuffle as
-you type. Settings is its own group rather than more Commands: twelve sections would bury the
-handful of things the palette can actually *do*.
+order (Tabs, Requests, Collections, Views, Commands, Settings, Variables, Runs) so the list does
+not reshuffle as you type. Settings is its own group rather than more Commands: twelve sections
+would bury the handful of things the palette can actually *do*.
+
+Four rules govern the deep sources, and each exists because of a way the naive version fails:
+
+- **They contribute nothing to the empty query.** The palette's empty state answers "what was I
+  just doing"; ~65 settings entries and every variable key in the app are not that, and a
+  server-backed group must not fetch for a palette nobody typed into.
+- **Each caps itself at `DEEP_GROUP_LIMIT` rows and offers an escape row** - `Search settings
+  for "x"…`, `Search runs for "x"…` - that opens the surface built for browsing the rest, with
+  the query carried over (the settings sidebar's `searchQuery`, the History drawer's, whose
+  other filters the escape resets so a stale one cannot hide what was just promised). The row
+  appears only when there *is* more. Variables has none: no surface browses variables across
+  scopes, so it would have nowhere to go.
+- **An escape row renders in a group of its own**, below the results. cmdk re-sorts a group's
+  items by score, and an escape row has to carry the query verbatim to survive that filter -
+  which would score it above every result it is an escape from. A separate group has its own
+  item container, so nothing sorts across the boundary.
+- **A deep row carries what matched in its `keywords`**, because cmdk filters the rendered list
+  a second time and would otherwise drop rows the source already matched - decisively so for
+  runs, where the engine matched against stored snapshot text that no row prints.
+
+Two invariants are tested rather than commented. **A variable's value is never indexed**, secret
+or not (`secret` is a masking hint, so trusting it would leak every token nobody flagged) - held
+in `sources/useVariableItems.test.ts` against the source's output, because cmdk's second filter
+would hide an indexed value from any DOM assertion. And **an engine that is down hides the Runs
+group silently**: typing is idle input, and idle input must never raise a toast.
 
 **Entry points:** the chord, and the `Search` tile on the welcome Launcher. The title bar's
 search bar (#529) is the third and becomes the primary one - it flips the same store flag.

@@ -9,9 +9,16 @@
  * The palette's list: every source, grouped and ranked.
  *
  * Mounted only while the palette is open - the same cost model the context
- * bar's sections use. The sources read collections, requests and run history,
- * and a palette that is shut has no business holding query observers on any of
- * it.
+ * bar's sections use. The sources read collections, requests, settings,
+ * variables and run history, and a palette that is shut has no business holding
+ * query observers on any of it.
+ *
+ * Two shapes of source meet here. The shallow ones return everything they know
+ * and let cmdk filter it; the deep ones (settings, variables, runs) search
+ * corpora too large to render - so they take the query, rank and cap it
+ * themselves, and offer an escape row into the surface that browses the rest.
+ * An escape row renders in a group of its own below the results, which is what
+ * keeps cmdk's score sort from lifting it above them - see `PaletteItem.escape`.
  */
 
 import { useMemo } from "react";
@@ -29,6 +36,9 @@ import { useTabItems } from "./sources/useTabItems";
 import { useEntityItems } from "./sources/useEntityItems";
 import { useViewItems } from "./sources/useViewItems";
 import { commandItems } from "./sources/commandItems";
+import { useSettingsItems } from "./sources/useSettingsItems";
+import { useVariableItems } from "./sources/useVariableItems";
+import { useRunItems } from "./sources/useRunItems";
 
 interface PaletteResultsProps {
 	/** The live query, so ranking can tell "nothing typed" from "no match". */
@@ -48,14 +58,29 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	const entities = useEntityItems();
 	const views = useViewItems();
 	const commands = commandItems(commandContext);
+	const settings = useSettingsItems(query);
+	const variables = useVariableItems(query);
+	const runs = useRunItems(query);
 
 	const grouped = useMemo(() => {
-		const all = [...tabs, ...entities, ...views, ...commands];
-		return PALETTE_GROUPS.map((kind) => ({
-			kind,
-			items: rankForEmptyQuery(all.filter((item) => item.kind === kind)),
-		})).filter((group) => group.items.length > 0);
-	}, [tabs, entities, views, commands]);
+		const all = [
+			...tabs,
+			...entities,
+			...views,
+			...commands,
+			...settings,
+			...variables,
+			...runs,
+		];
+		return PALETTE_GROUPS.map((kind) => {
+			const ofKind = all.filter((item) => item.kind === kind);
+			return {
+				kind,
+				items: rankForEmptyQuery(ofKind.filter((item) => !item.escape)),
+				escapes: ofKind.filter((item) => item.escape),
+			};
+		}).filter((group) => group.items.length > 0 || group.escapes.length > 0);
+	}, [tabs, entities, views, commands, settings, variables, runs]);
 
 	/*
 	 * cmdk hides a group whose items all filter out, so the count has to come
@@ -81,6 +106,17 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 								<PaletteRow key={item.id} item={item} onPick={onPick} />
 							))}
 						</CommandGroup>
+						{/* Its own group, not the last row of the one above: cmdk
+						    sorts a group's items by score, and an escape row has
+						    to carry the query verbatim to survive the filter -
+						    which would score it above every result it escapes. */}
+						{group.escapes.length > 0 && (
+							<CommandGroup>
+								{group.escapes.map((item) => (
+									<PaletteRow key={item.id} item={item} onPick={onPick} />
+								))}
+							</CommandGroup>
+						)}
 					</div>
 				))}
 			</CommandList>

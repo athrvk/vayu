@@ -9,9 +9,22 @@
  * History Component Types
  */
 
-import type { RunReport, LoadTestMetrics, MonitorSample } from "@/types";
+import type { Run, RunReport, LoadTestMetrics, MonitorSample } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
+
+/**
+ * How each run type is announced in words.
+ *
+ * Module-level rather than inside `RunItem` because the command palette's Runs
+ * group names them too, and a run that is a "collection" run in the sidebar and
+ * a "scenario" run in the palette is two answers to one question.
+ */
+export const RUN_KIND_LABEL: Record<Run["type"], string> = {
+	load: "load test",
+	design: "request",
+	scenario: "collection",
+};
 
 export interface TabProps {
 	report: RunReport;

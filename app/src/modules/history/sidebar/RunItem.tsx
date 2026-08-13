@@ -8,6 +8,7 @@
 import type React from "react";
 import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
+import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge } from "@/components/shared";
@@ -30,16 +31,6 @@ import {
 	Pin,
 	PinOff,
 } from "lucide-react";
-
-/**
- * How each run type is announced. One map so the row cannot name a type in the
- * label that it does not draw an icon for.
- */
-const RUN_KIND_LABEL: Record<Run["type"], string> = {
-	load: "load test",
-	design: "request",
-	scenario: "collection",
-};
 
 interface RunItemProps {
 	run: Run;

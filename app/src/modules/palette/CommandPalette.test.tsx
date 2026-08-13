@@ -65,6 +65,12 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: COLLECTIONS }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: REQUESTS, isLoading: false }),
 	useRunsQuery: () => ({ data: { pages: runPages } }),
+	// The deep sources (phase 3). Their own behaviour lives in
+	// `deep-sources.test.tsx`; here they only have to exist so the list renders.
+	useConfigQuery: () => ({ data: { entries: [] } }),
+	useEnvironmentsQuery: () => ({ data: [] }),
+	useGlobalsQuery: () => ({ data: undefined }),
+	useRunSearchQuery: () => ({ data: undefined, isError: false }),
 	flattenRunPages: (data?: { pages: { data: unknown[] }[] }) =>
 		data ? data.pages.flatMap((p) => p.data) : [],
 	// Reached through the command surfaces the palette now hosts: the shared

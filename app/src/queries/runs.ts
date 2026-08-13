@@ -103,6 +103,38 @@ export function runsTotal(data: InfiniteData<RunListResponse> | undefined): numb
 	return data?.pages[0]?.pagination.total ?? 0;
 }
 
+/** How many run rows the command palette's Runs group asks the engine for. */
+export const RUN_SEARCH_LIMIT = 7;
+
+/**
+ * One small page of runs matching a free-text query - the command palette's
+ * Runs group.
+ *
+ * Its own hook rather than {@link useRunsQuery} with a `q`, for three reasons
+ * that all come from the caller being a search box rather than a list: it wants
+ * one page and never pages further, it must not install a 5s poll for every
+ * query a user types through, and its rows must not join the infinite-list
+ * caches the delete patch walks (see `queryKeys.runs.searches`).
+ *
+ * No `staleTime`: the palette mounts its sources only while it is open, so a
+ * refetch on open is one small request and is what keeps a run deleted since
+ * the last search out of the list. `retry: false` because an engine that is
+ * down is an answer here - the group hides rather than making a typist wait
+ * through a retry budget.
+ *
+ * Disabled on an empty query: the palette's empty state is "what you were just
+ * doing", which is the job of the tab and request sources.
+ */
+export function useRunSearchQuery(q: string) {
+	const search = q.trim();
+	return useQuery({
+		queryKey: queryKeys.runs.search(search),
+		queryFn: () => apiService.listRuns({ q: search, limit: RUN_SEARCH_LIMIT }),
+		enabled: search !== "",
+		retry: false,
+	});
+}
+
 /**
  * Fetch every run (all pages) as a flat list. For callers that need the whole
  * set rather than a polled page - counting and clearing history in Settings.
