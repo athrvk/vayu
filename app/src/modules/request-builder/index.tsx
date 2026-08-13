@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
+import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import { useTabsStore, useSessionStore, useDashboardStore, useToastStore } from "@/stores";
 import {
 	useRequestQuery,
@@ -614,6 +615,10 @@ export default function RequestBuilder() {
 				onStartLoadTest={handleStartLoadTest}
 			>
 				<RequestBuilderLayout />
+				{/* Renders nothing. Publishes this builder's live draft to the
+				    command registry, so the palette's "Load test …" runs the
+				    request as currently edited rather than as last saved. */}
+				<LoadTestCommandSurface />
 			</RequestBuilderProvider>
 
 			{/* Load Test Configuration Dialog */}

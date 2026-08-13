@@ -540,7 +540,9 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
 - **`useCommandSurfaces.ts`** - the collection picker, the run dialog and the theme hook, which
   three commands need and no store can hold. Their original hosts are not always on screen (the
   welcome screen's picker only on the welcome tab, the tree's run dialog only while the drawer
-  is open), so the palette mounts its own - the same components, driven by the same calls.
+  is open), so the palette mounts its own - the same components, driven by the same calls. It
+  also merges the surfaces a *mounted feature* contributes (the request builder's live draft,
+  for "Load test …") - see [Command Registry](#command-registry-libcommands).
 - **`types.ts`** - the `PaletteItem` shape, the fixed group order, and `rankForEmptyQuery`.
 - **`PaletteResults.tsx`** - grouping and rendering. **Mounted only while the palette is open**,
   the same cost rule the context bar applies to a collapsed section: a shut palette holds no
@@ -607,12 +609,14 @@ in step or could enumerate them.
 - **`types.ts`** - `Command` (`id`, `title`, `keywords`, `group`, `icon`, `available?`,
   `perform`) and `CommandContext`. A `title` may be a function of the context, which is how a
   contextual command names its target: `Run "payments"`, not `Run collection`.
-- **`registry.ts`** - the roster. Actions (new request, import, run collection, close tab,
-  toggle theme, open settings) plus one command per settings section, **generated** from
+- **`registry.ts`** - the roster. Actions (new request, import, run collection, load test, close
+  tab, toggle theme, open settings) plus one command per settings section, **generated** from
   `app-panels.ts` and `engine-categories.ts` so a section added there appears here without an
   edit and cannot be named differently.
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
+- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. One
+  slot, one contributor: the request builder's start-load-test handler.
 
 Two rules make it work without a dependency-injection tangle:
 
@@ -623,10 +627,41 @@ Two rules make it work without a dependency-injection tangle:
   than throwing when picked. `CommandSurfaces` is optional on the context; the menu bridge omits
   it, so "New request" is simply not among the commands it can run.
 
+### When a surface is a store, and when it is a live contribution
+
+Most of what a `perform` needs is a store, and a store is always the answer when the state
+outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two halves:
+
+- **Host-owned** (`newRequest`, `runCollection`, `toggleThemeMode`) - dialogs and hooks that are
+  React but that *any* rendering caller can mount for itself. The palette does exactly that in
+  `useCommandSurfaces`, so offering `surfaces` at all means offering these three.
+- **Contributed by a mounted feature** (`startLoadTest`) - state that exists only inside one
+  component tree and cannot be lifted without copying it. Starting a load test needs the request
+  builder's **live editor draft**, before autosave has run; the palette is a sibling of
+  `RequestBuilderProvider`, so a command reading a store would find only the last *saved* request
+  and would silently run the old URL after an edit. The builder publishes its own handler through
+  `live-surfaces.ts` (`useRegisterLoadTestSurface`, mounted by
+  `modules/request-builder/components/LoadTestCommandSurface.tsx`), `useCommandSurfaces` merges
+  what is registered, and the command is `available` exactly while that contribution stands - so
+  it is absent rather than inert while no builder is on screen, and closing the tab removes it.
+  Nothing about the load test moves: the single-active-run policy, the ceilings check and
+  `LoadTestConfigDialog` all stay in the builder.
+
+The rejected alternative is worth naming, because it is the tempting one: reading the draft out
+of the provider from outside it, or recomposing the payload inside the command, would be a second
+copy of `buildExecBody` and of the run policy - the "hand-rolled copy of a primitive" defect this
+registry exists to remove.
+
+The channel is deliberately **one slot with one contributor**, not a registry of arbitrary named
+surfaces. A second feature with the same live-draft problem (a "Send request" command has it)
+joins that file as a second slot rather than inventing a second channel - but not before it
+exists.
+
 Consumers: `modules/palette/sources/commandItems.ts` (the Commands and Settings groups) and
 `hooks/useMenuActions.ts` (Preferences… → `open-settings`). `lib/commands/registry.test.ts` walks
 the roster and asserts every entry says something and that the settings roster still covers both
-catalogues.
+catalogues; `modules/request-builder/load-test-command-surface.test.tsx` holds the live channel to
+handing over the request *as edited*, and to clearing itself on unmount.
 
 ## Toaster (`components/shared/Toaster.tsx`)
 

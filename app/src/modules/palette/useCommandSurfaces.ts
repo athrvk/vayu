@@ -20,12 +20,19 @@
  * and syncs instances through Electron's `theme-changed` event - so a toggle
  * from here reaches the Appearance panel's radio group the same way an OS theme
  * change does.
+ *
+ * A fourth surface is **not** hosted here, and cannot be: starting a load test
+ * needs the request builder's live editor draft, which exists only inside a
+ * provider the palette is a sibling of. The mounted builder contributes it
+ * through `lib/commands/live-surfaces.ts` and this hook merges what is
+ * registered, so the command is offered while a builder is on screen and absent
+ * the rest of the time.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { useElectronTheme } from "@/hooks/useElectronTheme";
-import type { CommandSurfaces } from "@/lib/commands";
+import { useLiveCommandSurfaceStore, type CommandSurfaces } from "@/lib/commands";
 import type { Collection } from "@/types";
 import type { NewRequestPickerProps } from "@/hooks/useNewRequest";
 
@@ -41,6 +48,7 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 	const { newRequest, pickerProps } = useNewRequest();
 	const { isDark, setTheme } = useElectronTheme();
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
+	const startLoadTest = useLiveCommandSurfaceStore((s) => s.startLoadTest);
 
 	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
 
@@ -52,9 +60,17 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 		[isDark, setTheme]
 	);
 
+	// Spread rather than assigned: the command's availability asks whether the key
+	// is defined, and `startLoadTest: undefined` would answer that correctly today
+	// but only by accident of how the check is spelled.
 	const surfaces = useMemo<CommandSurfaces>(
-		() => ({ newRequest, runCollection: setRunTarget, toggleThemeMode }),
-		[newRequest, toggleThemeMode]
+		() => ({
+			newRequest,
+			runCollection: setRunTarget,
+			toggleThemeMode,
+			...(startLoadTest ? { startLoadTest } : {}),
+		}),
+		[newRequest, toggleThemeMode, startLoadTest]
 	);
 
 	return { surfaces, pickerProps, runTarget, dismissRunDialog };
