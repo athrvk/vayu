@@ -109,6 +109,7 @@ describe("availability", () => {
 		expect(ids).not.toContain("new-request");
 		expect(ids).not.toContain("run-collection");
 		expect(ids).not.toContain("toggle-theme");
+		expect(ids).not.toContain("run-load-test");
 		// Nothing is open, so there is no tab to close either.
 		expect(ids).not.toContain("close-tab");
 		// These two need only stores, so the menu bridge can offer them.
@@ -127,10 +128,34 @@ describe("availability", () => {
 		expect(availableCommands(fullContext()).map((c) => c.id)).toContain("run-collection");
 	});
 
+	/*
+	 * The load-test command is the one entry a host cannot satisfy by mounting a
+	 * dialog: it needs the request builder's live draft, contributed while that
+	 * builder is on screen. So a palette host offering everything it *owns* is
+	 * still not enough - which is the mount race, tested here as a state rather
+	 * than as a timing.
+	 */
+	it("hides the load-test command until a mounted builder contributes it", () => {
+		const requestTab: CommandContext = {
+			activeTab: { id: "t1", type: "request", entityId: "r1" },
+			activeTabLabel: "Charge card",
+			activeCollection: null,
+			surfaces: surfaces(),
+		};
+		expect(availableCommands(requestTab).map((c) => c.id)).not.toContain("run-load-test");
+
+		const contributed: CommandContext = {
+			...requestTab,
+			surfaces: { ...surfaces(), startLoadTest: () => {} },
+		};
+		expect(availableCommands(contributed).map((c) => c.id)).toContain("run-load-test");
+	});
+
 	it("names the target of a contextual command, so Enter holds no surprise", () => {
 		const ctx = fullContext();
 		expect(commandTitle(commandById("run-collection"), ctx)).toBe('Run "Payments"');
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe('Close "Payments"');
+		expect(commandTitle(commandById("run-load-test"), ctx)).toBe('Load test "Payments"');
 	});
 
 	it("falls back to a generic close title when nothing knows the label", () => {
@@ -140,6 +165,7 @@ describe("availability", () => {
 			activeCollection: null,
 		};
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe("Close tab");
+		expect(commandTitle(commandById("run-load-test"), ctx)).toBe("Load test this request");
 	});
 });
 
@@ -173,6 +199,16 @@ describe("performing", () => {
 
 		commandById("close-tab").perform(ctx);
 		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
+
+	it("starts a load test through the contributed handler, never a copy of one", () => {
+		let started = 0;
+		const ctx: CommandContext = {
+			...fullContext(),
+			surfaces: { ...surfaces(), startLoadTest: () => started++ },
+		};
+		commandById("run-load-test").perform(ctx);
+		expect(started).toBe(1);
 	});
 
 	it("hands the collection to the host rather than running it itself", () => {

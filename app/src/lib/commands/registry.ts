@@ -24,7 +24,9 @@
  * added there appears here without an edit, and cannot be named differently.
  */
 
-import { Download, Play, Plus, Settings, SunMoon, X } from "lucide-react";
+// `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
+// load run in the strip (`tab-descriptors.ts`). The palette uses the same bolt.
+import { Download, Play, Plus, Settings, SunMoon, X, Zap } from "lucide-react";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -81,6 +83,25 @@ const ACTION_COMMANDS: readonly Command[] = [
 		perform: (ctx) => {
 			if (ctx.activeCollection) ctx.surfaces?.runCollection(ctx.activeCollection);
 		},
+	},
+	{
+		id: "run-load-test",
+		// Named like the other contextual commands. The label is the tab strip's,
+		// so the row and the tab it acts on cannot read differently.
+		title: (ctx) =>
+			ctx.activeTabLabel ? `Load test "${ctx.activeTabLabel}"` : "Load test this request",
+		keywords: ["load", "benchmark", "stress", "performance", "rps", "throughput", "start"],
+		group: "action",
+		icon: Zap,
+		/*
+		 * The one surface no host can mount for itself. Starting a load test needs
+		 * the request builder's live draft, so the mounted builder contributes the
+		 * handler through `live-surfaces.ts` and this command is available exactly
+		 * while that contribution stands - not merely while a request tab is open,
+		 * which is true a frame before the builder has finished loading it.
+		 */
+		available: (ctx) => ctx.surfaces?.startLoadTest !== undefined,
+		perform: (ctx) => ctx.surfaces?.startLoadTest?.(),
 	},
 	{
 		id: "close-tab",

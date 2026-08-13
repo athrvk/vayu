@@ -41,6 +41,13 @@ export type CommandGroup = "action" | "settings";
  * mounted them. A caller that has not (the native menu bridge) simply omits
  * this, and the commands that need it declare themselves unavailable rather
  * than throwing when picked.
+ *
+ * Two kinds of entry live here, and the difference is who supplies them. The
+ * required three are the *host's*: a surface that renders the palette can mount
+ * all three itself, so offering `surfaces` at all means offering those. The
+ * optional ones are contributed by a **mounted feature** through
+ * `live-surfaces.ts` - present only while that feature is on screen, which is
+ * why they are optional even for a host that offers everything it owns.
  */
 export interface CommandSurfaces {
 	/** Create a request, asking which collection when that is ambiguous. */
@@ -49,6 +56,12 @@ export interface CommandSurfaces {
 	runCollection: (collection: Collection) => void;
 	/** Flip the app between light and dark. */
 	toggleThemeMode: () => void;
+	/**
+	 * Start a load test for the request the builder currently holds - the live
+	 * editor draft, not the saved copy. Contributed by the mounted request
+	 * builder; absent whenever none is mounted.
+	 */
+	startLoadTest?: () => void;
 }
 
 /**

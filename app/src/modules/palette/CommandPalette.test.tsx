@@ -33,6 +33,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CommandPalette } from "./CommandPalette";
 import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
+import { useLiveCommandSurfaceStore } from "@/lib/commands";
 
 const COLLECTIONS = [
 	{ id: "c1", name: "Payments", parentId: undefined },
@@ -140,6 +141,7 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useImportModalStore.setState({ isOpen: false });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
+	useLiveCommandSurfaceStore.setState({ startLoadTest: null });
 });
 afterEach(cleanup);
 
@@ -347,6 +349,38 @@ describe("commands", () => {
 		open();
 		// Named after its target, so Enter holds no surprise.
 		expect(screen.getByText('Run "Payments"')).toBeInTheDocument();
+	});
+
+	/*
+	 * The join the two ends cannot prove on their own: the registry declares the
+	 * command available when a surface exists, the builder publishes one, and this
+	 * hook is what carries the second to the first. Drop the merge in
+	 * `useCommandSurfaces` and the row never appears.
+	 */
+	it("offers the load-test command only while a mounted builder contributes it", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		// Named after the tab, like the other contextual commands. The request
+		// query is stubbed empty here, so the strip calls this tab "Request".
+		expect(screen.queryByText('Load test "Request"')).not.toBeInTheDocument();
+		cleanup();
+
+		const started = vi.fn();
+		useLiveCommandSurfaceStore.setState({ startLoadTest: started });
+		renderPalette();
+		open();
+		expect(screen.getByText('Load test "Request"')).toBeInTheDocument();
+
+		typeQuery('Load test "Req');
+		pressEnter();
+
+		expect(started).toHaveBeenCalledTimes(1);
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 
 	it("keeps the run dialog on screen after the pick closes the palette", () => {
