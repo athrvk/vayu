@@ -446,6 +446,41 @@ export class EngineClient {
 		}
 		return ticks.slice(-limit);
 	}
+
+	// --- Local services: the OAuth 2.0 mock issuer ---------------------------
+	//
+	// Every issuer binds `127.0.0.1` and the engine takes no host for it
+	// (`mock_issuer.cpp`: "127.0.0.1 only, never configurable"), so none of these
+	// three reaches anything off the machine - which is why the tools over them
+	// carry no allowlist check.
+
+	/**
+	 * Start a mock issuer: `POST /mock-issuer/start`. The engine assigns the id
+	 * and, for `port: 0`, the port; the reply carries `issuerId`, `issuerUrl`,
+	 * `tokenUrl`, `authorizeUrl` and the per-issuer `signingKey`.
+	 */
+	startMockIssuer(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/mock-issuer/start", payload, signal);
+	}
+
+	/** The running mock issuers: `GET /mock-issuer` → `{issuers: [...]}`. */
+	listMockIssuers(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/mock-issuer", undefined, signal);
+	}
+
+	/**
+	 * Stop one: `POST /mock-issuer/:id/stop`. An unknown id is a 404, which
+	 * arrives as an {@link EngineRequestError} rather than a silent success -
+	 * "the issuer you meant is gone" and "it stopped" are different answers.
+	 */
+	stopMockIssuer(issuerId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"POST",
+			`/mock-issuer/${encodeURIComponent(issuerId)}/stop`,
+			undefined,
+			signal
+		);
+	}
 }
 
 /** True for the rejection a fetch produces when its signal aborts. */

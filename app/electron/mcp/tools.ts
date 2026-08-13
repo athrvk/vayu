@@ -123,9 +123,11 @@ export interface ToolResult {
 
 /**
  * Capability class surfaced in Settings for per-tool control; each maps to a
- * distinct gate profile: `read` (inspection, ungated), `execute` (sends a
- * request to a target host - allowlist), `write` (mutates saved data/config -
- * write toggle), `load` (starts/stops load tests - allowlist + caps + confirm).
+ * gate profile: `read` (inspection, ungated), `execute` (has an effect outside
+ * this process without touching saved data - allowlist when it sends to a
+ * target host, none when the effect is a loopback service the engine hosts, as
+ * for the mock issuer), `write` (mutates saved data/config - write toggle),
+ * `load` (starts/stops load tests - allowlist + caps + confirm).
  */
 export type ToolCategory = "read" | "execute" | "write" | "load";
 
@@ -986,6 +988,49 @@ function describeCascade(scope: CascadeScope): string {
 		`Deleting "${scope.name}" also destroys ${scope.descendants} sub-collection(s) and ` +
 		`${scope.requests} saved request(s) inside it. This cannot be undone.`
 	);
+}
+
+// --- Mock issuer -------------------------------------------------------------
+
+/**
+ * The fields `POST /mock-issuer/start` accepts, in the engine's spelling
+ * (`parse_mock_issuer_settings`, engine/src/http/routes/mock_issuer.cpp). One
+ * list rather than a hand-written object literal per field, so the payload
+ * builder and the tool's input schema cannot drift apart.
+ */
+const MOCK_ISSUER_START_KEYS = [
+	"port",
+	"expiresInSeconds",
+	"claims",
+	"clients",
+	"failureMode",
+	"slowMs",
+	"issueRefreshTokens",
+] as const;
+
+/** The failure modes the issuer's `/token` endpoint can be put into. */
+const MOCK_ISSUER_FAILURE_MODES = ["none", "slow", "server_error", "invalid_client"] as const;
+
+/**
+ * The start body, carrying only the fields the caller actually named - an
+ * absent one must stay absent, because the engine reads a present field with a
+ * bad type or an out-of-range value as an error rather than falling back to the
+ * default, and `undefined` would serialize to `null`.
+ *
+ * The engine's *limits* (the 31-day expiry ceiling, the 60s slow ceiling, 32
+ * clients, 8 concurrent issuers) are deliberately not restated in the schema:
+ * they live in `core/constants.hpp`, an out-of-range value comes back as a
+ * `400 mock_issuer_invalid_config` naming the bound, and a second copy here
+ * would be a second thing to keep in step - one that refuses values the engine
+ * accepts the moment either side moves. What the schema does own is the shape:
+ * a claims object, an integer port, a failure mode from the closed set above.
+ */
+function mockIssuerStartPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload: Record<string, unknown> = {};
+	for (const key of MOCK_ISSUER_START_KEYS) {
+		if (args[key] !== undefined) payload[key] = args[key];
+	}
+	return payload;
 }
 
 // --- Tool definitions --------------------------------------------------------
@@ -2154,6 +2199,119 @@ export const TOOLS: McpTool[] = [
 				return engineErrorResult(err);
 			}
 		},
+	},
+	{
+		name: "start_mock_issuer",
+		category: "execute",
+		// Nothing in the renderer reads issuers today (`rg -i issuer app/src` is
+		// empty), so there is no entity to invalidate: an `McpDataEntity` with no
+		// reader is the written-never-read defect that field exists to prevent.
+		// #502 adds the Services drawer that lists them - when it lands, an
+		// "issuer" entity belongs here and on its query.
+		invalidates: [],
+		description:
+			"Start a local OAuth 2.0 mock issuer and return its id, token URL, authorize URL and signing key. Use it to test an auth flow offline: start an issuer, point a request's oauth2 auth at the returned tokenUrl, run it with run_request, and assert on what the target received - no real identity provider, so no 2FA prompts, provider rate limits or account lockouts in the loop. It needs no allowlist entry: the engine binds every issuer to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. The access token is an HS256 JWT signed with the returned signingKey - hand that key to the service under test and it can verify the mock's tokens. Set a short expiresInSeconds (with issueRefreshTokens) to exercise the 401-then-refresh path, and failureMode to exercise retry handling. At most 8 issuers run at once; stop yours with stop_mock_issuer when you are done.",
+		annotations: {
+			title: "Start mock OAuth issuer",
+			readOnlyHint: false,
+			// It binds a loopback listener and mints tokens for it: it destroys no
+			// saved data and reaches nothing off the machine.
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			port: z
+				.number()
+				.int()
+				.min(0)
+				.max(65535)
+				.optional()
+				.describe("Port to bind on 127.0.0.1. Default 0 - the engine picks a free one."),
+			expiresInSeconds: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe(
+					"Lifetime of a minted access token, in seconds (default 3600). Set it low to make a token expire mid-test."
+				),
+			claims: z
+				.record(z.unknown())
+				.optional()
+				.describe(
+					'Extra JWT claims, e.g. {"sub": "alice", "roles": ["admin"]}. iss, iat, exp and jti are always the issuer\'s own; sub, client_id and scope are filled in only when you do not set them.'
+				),
+			clients: z
+				.array(
+					z.object({
+						clientId: z.string().min(1).describe("Client id this issuer accepts."),
+						clientSecret: z
+							.string()
+							.optional()
+							.describe("Secret that client must then present."),
+					})
+				)
+				.optional()
+				.describe(
+					"Clients the issuer accepts. Omit (the default) to accept any client id."
+				),
+			failureMode: z
+				.enum(MOCK_ISSUER_FAILURE_MODES)
+				.optional()
+				.describe(
+					'How /token misbehaves: "none" (default), "slow" (answers after slowMs), "server_error" (500), "invalid_client" (401).'
+				),
+			slowMs: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe('Delay before /token answers, in milliseconds. Only "slow" reads it.'),
+			issueRefreshTokens: z
+				.boolean()
+				.optional()
+				.describe(
+					"Return a refresh_token alongside the access token, so a refresh grant can be tested. A refresh rotates its token - the presented one is spent."
+				),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.startMockIssuer(mockIssuerStartPayload(args), signal)),
+	},
+	{
+		name: "list_mock_issuers",
+		category: "read",
+		invalidates: [],
+		description:
+			"List the OAuth 2.0 mock issuers running right now, each with its id, urls, signing key, port, token expiry, failure mode and configured client count. Use it to find an issuer started earlier in the session, or to confirm one was stopped.",
+		annotations: {
+			title: "List mock OAuth issuers",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listMockIssuers(signal)),
+	},
+	{
+		name: "stop_mock_issuer",
+		category: "execute",
+		// See start_mock_issuer - no renderer reader yet, #502 adds one.
+		invalidates: [],
+		description:
+			"Stop a running OAuth 2.0 mock issuer and free its port. Tokens it already minted stay valid until they expire - nothing verifies them against the issuer once it is gone. An unknown id is an error, not a silent success.",
+		annotations: {
+			title: "Stop mock OAuth issuer",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			issuerId: z.string().describe("Issuer ID to stop (from start_mock_issuer)."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.stopMockIssuer(requireStr(args, "issuerId"), signal)),
 	},
 ];
 
