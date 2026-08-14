@@ -20,6 +20,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useResponseStore } from "@/stores/response-store";
 import { useSaveStore } from "@/stores/save-store";
+import { useDataFileStore } from "@/stores/data-file-store";
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import type {
 	Collection,
@@ -318,6 +319,19 @@ export function useDeleteCollectionMutation() {
 			 */
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			/*
+			 * The remembered data-file path goes with the collection (issue #599)
+			 * - a path kept for a collection that no longer exists is a filesystem
+			 * location persisted for nothing.
+			 *
+			 * The deleted id only, for the same reason the caches above are
+			 * invalidated wholesale rather than patched: which rows the engine's
+			 * cascade took is engine-side knowledge, and re-deriving the subtree
+			 * here would be the second definition of "descendant" that comment
+			 * exists to prevent. A descendant's entry is left behind and is inert
+			 * - it is keyed by an id nothing renders, so nothing reads it.
+			 */
+			useDataFileStore.getState().clearDataFile(deletedId);
 		},
 	});
 }

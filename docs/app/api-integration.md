@@ -285,6 +285,21 @@ apiService.updateCollection(data): Promise<Collection>   // PUT  /collections/:i
 apiService.deleteCollection(id): Promise<void>
 ```
 
+A collection carries **`dataSchema`** - the data contract it declares (issue
+#599): `{columns?: string[], declaredAt?: number, fileName?: string}`, where
+`{}` means it declares none. `CollectionTransformer` normalizes it field by
+field rather than casting, because a row can come from an engine that predates
+the column and every reader treats `columns` as a string array; use
+`hasDataContract(schema)` instead of hand-rolling the check, since a cleared
+contract is `{}` and not `undefined`.
+
+On `updateCollection` the field is `CollectionDataSchema | null`, like
+`parentId`: the engine reads absent as "keep the declared contract" and an
+explicit `null` as "reset to none", so the Data tab's **Clear** is only
+expressible as a null that survives to the wire. The rows behind the schema are
+never sent by these calls at all - they ride only the `POST /runs` payload, and
+are persisted by neither side.
+
 #### Requests
 
 ```typescript

@@ -299,6 +299,19 @@ Json serialize (const vayu::db::Collection& c) {
     json["preRequestScript"]  = c.pre_request_script;
     json["postRequestScript"] = c.post_request_script;
 
+    // The declared data contract. Same try-parse-with-default block as
+    // variables: a row written before the column existed holds "", and an
+    // unparseable blob is no more a schema than an absent one.
+    if (c.data_schema.empty ()) {
+        json["dataSchema"] = Json::object ();
+    } else {
+        try {
+            json["dataSchema"] = Json::parse (c.data_schema);
+        } catch (const std::exception&) {
+            json["dataSchema"] = Json::object ();
+        }
+    }
+
     return json;
 }
 

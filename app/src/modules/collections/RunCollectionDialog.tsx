@@ -45,7 +45,7 @@
  * arrival-rate executor, which Vayu does not implement - so it is not offered.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -61,8 +61,14 @@ import {
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
-import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
+import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
+import {
+	DataFileError,
+	decodeDataFile,
+	describeDataSchemaDiff,
+	parseDataFile,
+} from "@/services/data-files";
 import type { Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
@@ -110,13 +116,74 @@ export default function RunCollectionDialog({
 	 * same, and picking a file used to clear both. One of those is a count the
 	 * user chose, and clearing it turns "run this sequence once" into a full
 	 * pass per row - the opposite of what they asked for, silently.
+	 *
+	 * A ref rather than state: nothing renders from it, and the pre-fill below
+	 * resolves asynchronously - a state value captured in that effect's closure
+	 * would be the one from mount, and would clear a `1` typed while the file
+	 * was still being read.
 	 */
-	const [iterationsTouched, setIterationsTouched] = useState(false);
+	const iterationsTouched = useRef(false);
 	const [dataFile, setDataFile] = useState<SelectedDataFile | null>(null);
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [loadTest, setLoadTest] = useState(false);
 	const [virtualUsers, setVirtualUsers] = useState(DEFAULT_VIRTUAL_USERS);
 	const [durationSeconds, setDurationSeconds] = useState(DEFAULT_DURATION_SECONDS);
+	/**
+	 * A file that could not be re-read - moved, renamed, or over a cap that has
+	 * since been lowered. Kept apart from `dataFileError`, which is a *blocking*
+	 * refusal of a file the user just picked: this one leaves the picker empty
+	 * and usable, because picking the file again is the whole fix.
+	 */
+	const [prefillNote, setPrefillNote] = useState<string | null>(null);
+
+	const rememberedFile = useDataFileStore((s) => s.locations[collection.id]);
+
+	/**
+	 * Pre-fill from the file this collection was last run with (issue #599).
+	 *
+	 * Part of mount, which is what preserves the dialog's mount-is-reset
+	 * contract: the options still start at their defaults every time this
+	 * component appears, and one of those defaults is now "the file you
+	 * declared", rather than a value carried over from a previous open.
+	 *
+	 * Deliberately runs once and not on `rememberedFile` changes: writing the
+	 * store while the dialog is open (the user picks a different file) must not
+	 * yank the selection back to what was remembered.
+	 */
+	useEffect(() => {
+		if (!rememberedFile?.path) return;
+		let cancelled = false;
+		const read = window.electronAPI?.readDataFile;
+		if (!read) return; // No Electron, no path to re-read - the picker stands.
+
+		void read(rememberedFile.path)
+			.then(({ bytes, fileName }) => {
+				if (cancelled) return;
+				// The same decode and the same parser the picker runs, so a file
+				// re-read here cannot disagree with the file as it was picked.
+				const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
+				const parsed = parseDataFile(text, fileName);
+				setDataFile({ fileName, parsed, path: rememberedFile.path });
+				// Same rule as a hand-picked file: a pristine `1` becomes "one
+				// pass per row", a typed one is the user's.
+				if (!iterationsTouched.current) {
+					setIterations((current) => (current === "1" ? "" : current));
+				}
+			})
+			.catch((e: unknown) => {
+				if (cancelled) return;
+				setPrefillNote(
+					e instanceof DataFileError || e instanceof Error
+						? e.message
+						: `The declared file is no longer at ${rememberedFile.fileName} - pick it again.`
+				);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design; see above.
+	}, []);
 
 	/*
 	 * Empty is a meaningful value only with a data file: it means "one pass per
@@ -148,6 +215,17 @@ export default function RunCollectionDialog({
 		: iterationsValid && !dataFileError;
 
 	/*
+	 * The chosen file against the contract the collection declares (issue #599).
+	 * A mismatch is a warning and never blocks: a missing column fails loudly
+	 * engine-side at bind time, and a file that carries extra columns is simply
+	 * a file with extra columns. What it buys is hearing about it here rather
+	 * than at iteration 1.
+	 */
+	const schemaDiff = dataFile
+		? describeDataSchemaDiff(collection.dataSchema?.columns ?? [], dataFile.parsed.columns)
+		: [];
+
+	/*
 	 * Picking a file clears the *pristine* `1`, so the field shows what the run
 	 * will do (one pass per row) instead of quietly contradicting the preview
 	 * above it. A count the user typed is theirs and is left alone - including a
@@ -155,7 +233,10 @@ export default function RunCollectionDialog({
 	 */
 	const handleSelectDataFile = (next: SelectedDataFile | null) => {
 		setDataFile(next);
-		if (next && !iterationsTouched && iterations === "1") setIterations("");
+		// A file the user picks by hand replaces whatever was pre-filled, so the
+		// note about a file that could not be re-read has nothing left to say.
+		if (next) setPrefillNote(null);
+		if (next && !iterationsTouched.current && iterations === "1") setIterations("");
 		if (!next && iterationsBlank) setIterations("1");
 	};
 
@@ -354,7 +435,7 @@ export default function RunCollectionDialog({
 										dataFile ? String(dataFile.parsed.rows.length) : undefined
 									}
 									onChange={(e) => {
-										setIterationsTouched(true);
+										iterationsTouched.current = true;
 										setIterations(e.target.value);
 									}}
 									className="w-24 shrink-0"
@@ -373,6 +454,15 @@ export default function RunCollectionDialog({
 						</>
 					)}
 
+					{/* A file that could not be re-read is a warning, not a blocker -
+					    the run is startable without one, and picking the file again
+					    is the whole remedy. */}
+					{prefillNote && (
+						<Callout severity="warning" title="The remembered data file">
+							{prefillNote}
+						</Callout>
+					)}
+
 					<DataFilePicker
 						selected={dataFile}
 						onSelect={handleSelectDataFile}
@@ -380,6 +470,7 @@ export default function RunCollectionDialog({
 						onError={setDataFileError}
 						iterations={explicitIterations}
 						loadTest={loadTest}
+						additionalWarnings={schemaDiff}
 						disabled={startRun.isPending}
 					/>
 

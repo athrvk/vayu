@@ -89,7 +89,8 @@ class ScenarioPlanTest : public ::testing::Test {
     int order                     = 0,
     const std::string& auth       = "",
     const std::string& pre_script = "",
-    int64_t created_at            = 1) {
+    int64_t created_at            = 1,
+    const std::string& data_schema = "{}") {
         vayu::db::Collection col;
         col.id = id;
         if (!parent_id.empty ()) {
@@ -98,6 +99,7 @@ class ScenarioPlanTest : public ::testing::Test {
         col.name               = "Collection " + id;
         col.auth               = auth;
         col.pre_request_script = pre_script;
+        col.data_schema        = data_schema;
         col.order              = order;
         col.created_at         = created_at;
         col.updated_at         = created_at;
@@ -702,6 +704,41 @@ TEST_F (ScenarioPlanTest, ADataTokenOutsideTheUrlIsRefusedToo) {
     refused ("", R"({"mode":"json","content":"{\"id\":\"{{data.id}}\"}"})");
     refused ("",
     R"({"mode":"form-data","fields":[{"key":"id","value":"{{data.id}}","enabled":true}]})");
+}
+
+TEST_F (ScenarioPlanTest, TheNoDataRefusalCitesTheCollectionsDeclaredColumns) {
+    // The reader that makes storing a contract worth anything (issue #599).
+    // `resolve_scenario` already loaded this collection and threw it away;
+    // capturing it is what lets the refusal say which file to run with rather
+    // than only that one is missing. Revert the capture and this reddens.
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"", /*created_at=*/1,
+    R"({"columns":["id","email"],"declaredAt":1700000000000})");
+    seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("declared columns: id, email"), std::string::npos)
+    << resolved.error;
+}
+
+TEST_F (ScenarioPlanTest, TheNoDataRefusalStaysUnchangedWithoutAContract) {
+    // The other half: a collection that declares nothing must not grow an empty
+    // parenthetical, and a schema that is not one degrades to no tail at all
+    // rather than to a message about columns that are not column names.
+    for (const char* schema : { "{}", "", "not json", R"({"columns":"id"})",
+             R"({"columns":[7]})" }) {
+        reset_database ();
+        seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"",
+        /*created_at=*/1, schema);
+        seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
+
+        const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+        EXPECT_FALSE (resolved.ok) << schema;
+        EXPECT_EQ (resolved.error.find ("declared columns"), std::string::npos)
+        << schema << " -> " << resolved.error;
+    }
 }
 
 TEST_F (ScenarioPlanTest, ThePrefixAloneDoesNotBlockARunWithoutData) {

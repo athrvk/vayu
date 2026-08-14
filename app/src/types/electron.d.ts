@@ -126,6 +126,18 @@ interface ElectronAPI {
 	 */
 	getFilePath: (file: File) => string;
 
+	/**
+	 * Re-read a collection's declared data file by path (issue #599). Rejects
+	 * with a message the dialog can show as-is when the extension is not one
+	 * Vayu opens, the file has moved, or it is over the engine's
+	 * `maxScenarioDataBytes`.
+	 *
+	 * Bytes rather than text: `services/data-files/decode.ts` owns decoding, and
+	 * a file re-read here must not disagree with the same file read through the
+	 * picker. Absent outside Electron, so every caller has a no-Electron path.
+	 */
+	readDataFile: (path: string) => Promise<{ bytes: Uint8Array; fileName: string }>;
+
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }

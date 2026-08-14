@@ -60,6 +60,15 @@ import { formatBytes } from "@/modules/settings/utils/format-size";
 export interface SelectedDataFile {
 	fileName: string;
 	parsed: ParsedDataFile;
+	/**
+	 * Where the file is on this machine, when Electron could say (issue #599).
+	 *
+	 * Only ever used to *remember* the file - `data-file-store` keys it by
+	 * collection so the Run dialog can pre-fill next time. Empty in a browser
+	 * and for a drag-and-drop of remote content, which is why every reader of it
+	 * has a no-path path.
+	 */
+	path?: string;
 }
 
 export interface DataFilePickerProps {
@@ -88,6 +97,22 @@ export interface DataFilePickerProps {
 	 * row at once.
 	 */
 	loadTest?: boolean;
+	/**
+	 * What the file is being picked *for* (issue #599).
+	 *
+	 * `"run"` is the original job and the default. `"declare"` is the Data tab:
+	 * the same picker, the same parser and the same refusals, but the file is
+	 * being read to declare a contract from, so there is no iteration count to
+	 * resolve and nothing yet to say about how a row will be bound.
+	 */
+	mode?: "run" | "declare";
+	/**
+	 * Warnings from outside the parser, shown in the same slot as its own - the
+	 * file-versus-contract diff is the caller that has them, and a user reading
+	 * "here is what is odd about this file" should not have to look in two
+	 * places for the list.
+	 */
+	additionalWarnings?: string[];
 	disabled?: boolean;
 }
 
@@ -109,6 +134,8 @@ export default function DataFilePicker({
 	onError,
 	iterations,
 	loadTest,
+	mode = "run",
+	additionalWarnings,
 	disabled,
 }: DataFilePickerProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -150,7 +177,11 @@ export default function DataFilePicker({
 					);
 					return;
 				}
-				onSelect({ fileName: file.name, parsed });
+				// The path is Electron's to give (`webUtils`, inside the preload)
+				// and is absent in a browser or for remote drag-and-drop, so it
+				// is carried when there is one and simply not when there is not.
+				const path = window.electronAPI?.getFilePath(file) || undefined;
+				onSelect({ fileName: file.name, parsed, path });
 				onError(null);
 			} catch (e) {
 				refuse(
@@ -183,7 +214,13 @@ export default function DataFilePicker({
 				<Label htmlFor="run-collection-data-file" className="leading-snug">
 					Data file
 					<span className="block text-xs font-normal text-muted-foreground">
-						{loadTest ? (
+						{mode === "declare" ? (
+							<>
+								The file the contract is read from. Its columns become the declared{" "}
+								{"{{data.column}}"} names; its rows stay on this machine and are
+								never saved.
+							</>
+						) : loadTest ? (
 							<>
 								One row per iteration, shared across virtual users so no two hold
 								the same row at once. Columns read as {"{{data.column}}"}.
@@ -251,16 +288,25 @@ export default function DataFilePicker({
 					{/* A load run has no pass count to resolve against - it repeats for
 					    its duration - so the resolved-iterations sentence would be
 					    arithmetic about a number that does not exist. What it says
-					    instead is the property the shared cursor buys. */}
-					<p className="text-xs text-muted-foreground">
-						{loadTest
-							? `${rowCount} ${rowCount === 1 ? "row" : "rows"}, bound one per iteration across every virtual user - they repeat from the top once they run out.`
-							: resolved === rowCount
-								? `${resolved} ${resolved === 1 ? "iteration" : "iterations"}, one per row.`
-								: resolved < rowCount
-									? `${resolved} ${resolved === 1 ? "iteration" : "iterations"} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
-									: `${resolved} iterations over ${rowCount} ${rowCount === 1 ? "row" : "rows"} - the rows repeat from the top once they run out.`}
-					</p>
+					    instead is the property the shared cursor buys. Declaring a
+					    contract has no run behind it at all, so it says neither. */}
+					{mode === "declare" ? (
+						<p className="text-xs text-muted-foreground">
+							{selected.parsed.columns.length}{" "}
+							{selected.parsed.columns.length === 1 ? "column" : "columns"} to
+							declare, read from {rowCount} {rowCount === 1 ? "row" : "rows"}.
+						</p>
+					) : (
+						<p className="text-xs text-muted-foreground">
+							{loadTest
+								? `${rowCount} ${rowCount === 1 ? "row" : "rows"}, bound one per iteration across every virtual user - they repeat from the top once they run out.`
+								: resolved === rowCount
+									? `${resolved} ${resolved === 1 ? "iteration" : "iterations"}, one per row.`
+									: resolved < rowCount
+										? `${resolved} ${resolved === 1 ? "iteration" : "iterations"} - Iterations is set, so ${rowCount - resolved} of the ${rowCount} rows will not be used.`
+										: `${resolved} iterations over ${rowCount} ${rowCount === 1 ? "row" : "rows"} - the rows repeat from the top once they run out.`}
+						</p>
+					)}
 
 					{/* The grid scrolls rather than widening the dialog: a file
 					    with twenty columns must not push the footer off-screen. */}
@@ -295,7 +341,7 @@ export default function DataFilePicker({
 						</p>
 					)}
 
-					{selected.parsed.warnings.map((warning) => (
+					{[...selected.parsed.warnings, ...(additionalWarnings ?? [])].map((warning) => (
 						<p key={warning} className="text-xs text-muted-foreground">
 							{warning}
 						</p>

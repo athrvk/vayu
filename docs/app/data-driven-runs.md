@@ -2,7 +2,8 @@
 
 A collection run can be driven by a file: one row per iteration, its columns
 readable from the requests themselves and from scripts. Pick the file in the
-**Run collection** dialog, beside Iterations and Load test.
+**Run collection** dialog, beside Iterations and Load test - or declare it once
+on the collection's **Data** tab and have the dialog pre-fill it.
 
 This page is the file's contract - what Vayu accepts, what it refuses, and what
 a value becomes once it is bound.
@@ -151,9 +152,54 @@ preview exists to remove.
 shared cursor, so no two hold the same row at once, and the rows repeat for as
 long as the duration lasts. The row count says nothing about how long the run is.
 
+## Declaring the contract: the Data tab
+
+A file picked in the Run dialog is parsed, sent and forgotten, so at the moment
+you write `{{data.email}}` in a URL nothing in Vayu knows that column exists.
+The collection's **Data** tab is where you say so: pick the file, check the
+preview, and press **Declare columns**.
+
+What that stores, and what it does not:
+
+| | Where it lives | Travels with the collection? |
+|---|---|---|
+| The **columns** | On the collection, as `dataSchema` | Yes - and through import |
+| The file's **path** | This machine only, in local app storage | No |
+| The file's **rows** | Nowhere | No |
+
+Declaring changes no binding rule - a token still binds from the row the run
+carries. What it buys is everything that needs to know the columns *before* a
+run:
+
+- **The Run dialog pre-fills.** If the declared file is still where you left it,
+  opening **Run collection** re-reads it and previews it, ready to start. Move
+  or rename the file and the dialog says so and offers the picker - it is a
+  note, not a refusal.
+- **A file that does not match is flagged**, in both directions and in both
+  places: a declared column the file is missing (every `{{data.x}}` written
+  against it would fail to bind at iteration 1) and a column the file carries
+  that the contract does not declare (usually the sign of a contract that has
+  drifted, or of the wrong file). Both are warnings; the run is still yours to
+  start.
+- **The engine's refusal names the columns.** Starting a run whose requests
+  carry `{{data.*}}` with no file is already refused before anything is sent;
+  with a contract declared, that message lists the columns the collection
+  expects, so it says which file to run with rather than only that one is
+  missing.
+
+**Re-declare from this file** replaces the columns when your file changes shape;
+**Clear** removes the contract and forgets the remembered path.
+
+Vayu only ever re-opens a file whose extension is one of the formats above, and
+only up to the same `maxScenarioDataBytes` a run may carry - the remembered path
+is not a general licence to read your disk.
+
 ## Nothing is stored
 
 The rows ride the run payload and are dropped when the dialog closes. They are
 user data of unknown sensitivity - credentials, customer records - so neither
-the app nor the engine persists them, and the file itself is read fresh each
-time you pick it.
+the app nor the engine persists them, and the file itself is read fresh every
+time - whether you pick it or the dialog pre-fills it from the declared path.
+
+Declaring a contract does not change this. What is saved is the *shape* of the
+file - its column names, and its name for display - never a cell of it.

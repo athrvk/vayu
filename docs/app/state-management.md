@@ -231,6 +231,47 @@ Editing an environment's variables deliberately sends no `isActive`
 variable edit re-activate an environment from a stale read, deactivating
 whichever one the engine actually holds.
 
+#### `data-file-store.ts` - Where Each Collection's Data File Lives
+
+Remembers **where** a collection's data file is on this machine, so the Run
+dialog can pre-fill it instead of asking for it every run (issue #599).
+
+**State:**
+```typescript
+{
+  locations: Record<string, { path: string; fileName: string }>  // keyed by collection id
+}
+```
+
+**Key Methods:**
+```typescript
+const { setDataFile, clearDataFile } = useDataFileStore();
+setDataFile(collectionId, { path, fileName });
+```
+
+**Persistence:** `vayu.data-files` (v1)
+
+**Two things this store deliberately is not.** It is not the *contract* - the
+declared columns are the same on every machine, so they live on the engine's
+collection row as `dataSchema` and travel through import; a path is true of one
+filesystem only and stays here, never reaching the engine, an export or MCP. And
+it never holds **rows**: a data file's contents are user data of unknown
+sensitivity and are persisted nowhere in Vayu, which `data-file-store.test.ts`
+asserts against the persisted payload rather than against the store's surface.
+
+The path is written when the user declares a contract in the Data tab
+(`CollectionDetail/DataTab.tsx`), obtained through the preload's existing
+`getFilePath` bridge, and dropped when the collection is deleted or its contract
+cleared. Reading it back needs the gated `dataFile:read` IPC
+(`electron/data-file.ts`), because the renderer otherwise cannot name a path.
+
+The persisted payload is normalized through **both** `migrate` and `merge`:
+`migrate` runs only on a version mismatch, and the common case is a
+same-version payload, so an entry that is not a `{path, fileName}` pair of
+strings would otherwise reach the read IPC *as a path*. A bad entry is dropped
+rather than repaired - there is nothing to repair a path to, and the picker is
+one click away.
+
 #### `engine-store.ts` - Engine Connection & Restart State
 
 Merged store managing engine connection status and restart-required notifications (for config changes that need an engine restart).

@@ -203,6 +203,12 @@ inline auto make_storage (const std::string& path) {
     make_column ("auth", &Collection::auth),               // NEW: JSON auth config
     make_column ("pre_request_script", &Collection::pre_request_script),   // NEW: JS
     make_column ("post_request_script", &Collection::post_request_script), // NEW: JS
+    // The declared data contract (issue #599). NOT NULL with a default_value on
+    // the `keywords` precedent, so sync_schema can ALTER TABLE ADD COLUMN it
+    // onto an existing, non-empty collections table - every pre-existing row
+    // backfills to `{}`, which is what "declares no contract" is spelled as.
+    make_column ("data_schema", &Collection::data_schema,
+    default_value (std::string ("{}"))),
     make_column ("order", &Collection::order),
     make_column ("created_at", &Collection::created_at),
     make_column ("updated_at", &Collection::updated_at)),
