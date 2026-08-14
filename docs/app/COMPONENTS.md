@@ -506,7 +506,10 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   Services drawer orders by port for the same reason. Every mutation this tab owns reports its
   failure as a toast (`reportFailure`), which is the one discipline the whole inbox lifecycle
   follows; Stop and Clear used to pass no `onError` at all (#555, item 7 - taken there rather than in
-  #556's tab pass, which both issues named as the shared brush).
+  #556's tab pass, which both issues named as the shared brush). The header's copy control answers
+  to the same discipline through the shared `useCopy` (see [Services](#services-modulesservices)) -
+  it is not a mutation, but it is the other thing here that can fail, and it claimed success
+  regardless until #565.
 - `CannedResponseControls.tsx` - all four fields the engine serves: reply status and delay inline,
   body and headers behind a disclosure that opens on its own when either is set. It showed status and
   delay only, so a reply body or header set configured by an MCP tool or a bare curl was invisible
@@ -616,7 +619,12 @@ both activate it.
   full URLs are three near-identical monospace strings differing in one digit. The URL is still on
   the row and also rides the copy control's tooltip, which says so when the inbox is **stopped** -
   a stopped inbox's URL copies perfectly well and then refuses connections, a long way from the
-  cause. Rows are ordered **by port**, because the engine lists them in map order (not stable across
+  cause. Every copy control here goes through the shared `useCopy` hook (`hooks/useCopy.ts`), which
+  **awaits** `writeText` and toasts the failure: the promise rejects on a denied permission or an
+  unfocused document, and a `void` call with an unconditional "copied" reports a refusal as a
+  success while the rejection goes unhandled. It is a shared hook rather than a local one because
+  the inbox tab's header offers the same URL and kept that exact defect after the drawer's fix
+  (#555 item 6, then #565 item 1) - a hand-rolled copy does not receive the primitive's fixes. Rows are ordered **by port**, because the engine lists them in map order (not stable across
   polls) and the record carries no creation stamp; the inbox tab's switcher orders the same way.
   Creating one **toasts and flashes** the new row for `TIMING.ROW_FLASH_MS` - it lands wherever its
   ephemeral port sorts, not at the end. The activator's verb is `sr-only` text **prefixed to** the

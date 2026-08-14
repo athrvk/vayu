@@ -54,6 +54,7 @@ import {
 	useUpdateMockIssuerMutation,
 } from "@/queries";
 import { useTabsStore, useToastStore } from "@/stores";
+import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
 import type { Inbox, MockIssuer, MockIssuerFailureMode } from "@/types";
@@ -169,31 +170,6 @@ function ServiceGroup({ title, action, children }: ServiceGroupProps) {
 
 /** `px-3 py-2 text-left`: a drawer group's line, not a centred pane. */
 const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
-
-/**
- * Copy, and say so only once it worked.
- *
- * `writeText` returns a promise that *rejects* - a denied permission, a
- * document that is not focused, a platform with no clipboard behind the API -
- * and this fired it with `void` and toasted "copied" unconditionally, so a
- * failed copy was reported as a success and the user pasted whatever was on the
- * clipboard before. Every other copy site in the app already awaits; this is
- * the one that did not.
- */
-function useCopy() {
-	const showToast = useToastStore((s) => s.showToast);
-	return async (value: string, what: string) => {
-		try {
-			await navigator.clipboard.writeText(value);
-			showToast(`${what} copied`, "success");
-		} catch (error) {
-			showToast(
-				error instanceof Error ? `Could not copy: ${error.message}` : "Could not copy",
-				"error"
-			);
-		}
-	};
-}
 
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);

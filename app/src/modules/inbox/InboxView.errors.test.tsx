@@ -22,6 +22,10 @@
  * Mutation-check: drop the `onError` from either `mutate` call in
  * `modules/inbox/index.tsx` and the matching case here fails.
  *
+ * The header's copy control answers to the same discipline and is pinned at the
+ * bottom of this file (issue #565, item 1) - it is not a mutation, but it is
+ * the other thing on this tab that can fail and used to say it had not.
+ *
  * The transport is mocked and the real query hooks run, so a refusal travels
  * the same mutation path the app uses.
  */
@@ -37,6 +41,7 @@ const listInboxes = vi.fn();
 const listInboxCaptures = vi.fn();
 const stopInbox = vi.fn();
 const clearInboxCaptures = vi.fn();
+const writeText = vi.fn();
 
 vi.mock("@/services/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/services/api")>();
@@ -109,7 +114,8 @@ beforeEach(() => {
 	clearInboxCaptures.mockReset().mockResolvedValue({ inboxId: "inbox_a", cleared: 1 });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useToastStore.setState({ toasts: [] });
-	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn() } });
+	writeText.mockReset().mockResolvedValue(undefined);
+	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 });
 
 describe("a refused mutation in the inbox tab", () => {
@@ -162,5 +168,50 @@ describe("a refused mutation in the inbox tab", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /stop/i }));
 		await waitFor(() => expect(stopInbox).toHaveBeenCalledWith("inbox_a"));
 		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+});
+
+/*
+ * The same discipline for the copy control (issue #565, item 1). The drawer's
+ * row got the awaiting path in #555 item 6; this header button kept the defect
+ * that fix removed - `void writeText(...)` and an unconditional "copied", so a
+ * refusal read as a success and the rejection went unhandled. Both surfaces now
+ * take the same `useCopy`.
+ *
+ * Mutation-check: point the button back at a bare `void
+ * navigator.clipboard.writeText` with an unconditional success toast and the
+ * refusal case here fails.
+ */
+describe("the inbox tab's copy control", () => {
+	it("does not claim a copy that the clipboard refused", async () => {
+		writeText.mockRejectedValue(new Error("Clipboard write denied"));
+		renderTab();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await waitFor(() => expect(firstToast()).toMatchObject({ variant: "error" }));
+		expect(firstToast().message).toMatch(/Clipboard write denied/);
+	});
+
+	it("names the failure even when the rejection is not an Error", async () => {
+		writeText.mockRejectedValue("denied");
+		renderTab();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await waitFor(() =>
+			expect(firstToast()).toMatchObject({ variant: "error", message: "Could not copy" })
+		);
+	});
+
+	it("says so when the copy worked", async () => {
+		renderTab();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await waitFor(() =>
+			expect(firstToast()).toMatchObject({
+				variant: "success",
+				message: "Inbox URL copied",
+			})
+		);
+		expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:41234/");
 	});
 });
