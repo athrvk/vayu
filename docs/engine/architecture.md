@@ -94,6 +94,21 @@ caller sends `"confirmNonLoopback": true`, and the inbox then reports `loopback:
 read so the UI can badge it. A capture is stored in plaintext like the rest of the request store -
 a webhook payload can carry a signature or a token, and nothing here treats it as credential-grade.
 
+### Streaming consumers
+
+A **streaming request** (`POST /execute` with `"stream": true`, issue #573) is the one worker in
+the engine that owns a curl transfer without being a run in `RunManager`. `SseStreamManager`
+(`engine/include/vayu/http/sse_stream.hpp`) holds one thread per live stream: the thread performs
+the transfer, parses SSE frames into a bounded per-run ring, and calls back into the route's
+`record_design_result` when it terminates. `GET /runs/:runId/events` relays the ring; a finished
+stream stays readable for `liveRetentionMs` and is then swept, its thread joined.
+
+It runs the *listener* lifecycle discipline even though it owns no listener, and for the same
+reason: its workers write run rows through `Database` and read the design-mode cookie jar, both of
+which must outlive them. So the manager is a member of `Server` declared before `server_`, and its
+destructor signals every worker to stop and then joins them all - signal first, join second, so
+teardown costs one stream's stop latency rather than the sum.
+
 Each on-demand listener is owned by a manager that is a **member of `Server`, declared before
 `server_`** (`engine/include/vayu/http/server.hpp`). Members are destroyed in reverse order, so the
 route lambdas holding references to a manager are gone before its destructor stops and joins the

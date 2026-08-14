@@ -336,6 +336,32 @@ void ingest_header_line (std::string_view line, Headers& headers) {
     }
 }
 
+void apply_jar_cookies (CURL* curl,
+CookieJar& jar,
+const std::string& scope,
+const std::vector<CookieWrite>& writes) {
+    curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
+    curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
+    for (const auto& line : apply_cookie_writes (jar.lines_for (scope), writes)) {
+        curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
+    }
+}
+
+void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope) {
+    struct curl_slist* held = nullptr;
+    if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) != CURLE_OK) {
+        return;
+    }
+    std::vector<std::string> lines;
+    for (const struct curl_slist* item = held; item != nullptr; item = item->next) {
+        if (item->data) {
+            lines.emplace_back (item->data);
+        }
+    }
+    curl_slist_free_all (held);
+    jar.store (scope, std::move (lines));
+}
+
 CurlPhaseTimes read_phase_times (CURL* curl) {
     CurlPhaseTimes times;
     curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &times.total);

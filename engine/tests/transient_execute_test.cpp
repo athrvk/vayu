@@ -50,15 +50,6 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/types.hpp"
 
-namespace vayu::http::routes {
-// Defined in execution.cpp. Records a finished design execution against its
-// run row, or nothing at all when `run_id` is absent.
-void record_design_result (vayu::db::Database& db,
-const std::optional<std::string>& run_id,
-const vayu::Request& request,
-const vayu::Response& response);
-} // namespace vayu::http::routes
-
 namespace {
 
 using nlohmann::json;
@@ -212,6 +203,48 @@ TEST_F (RecordDesignResultTest, ARecordedExecutionStoresTheTraceAndCompletesTheR
     auto row = db_->get_run (id);
     ASSERT_TRUE (row.has_value ());
     EXPECT_EQ (row->status, vayu::RunStatus::Completed);
+}
+
+// The non-streaming path, unchanged by issue #573: no `events` node, and the
+// terminal status still comes from the response alone. This is the golden half
+// of the streaming work - a stream-shaped trace on an ordinary send would break
+// every restore that reads one.
+TEST_F (RecordDesignResultTest, AnOrdinaryRecordCarriesNoEventsNode) {
+    const auto id = seed_running_run ("run_plain");
+
+    record_design_result (*db_, id, sent_request (), ok_response ());
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    auto trace = json::parse (results[0].trace_data);
+    EXPECT_FALSE (trace.contains ("events"));
+}
+
+// A stream that the user stopped is `Stopped` - neither the `Completed` nor the
+// `Failed` its response alone implies, so the status has to be stated.
+TEST_F (RecordDesignResultTest, AStreamRecordCarriesItsEventsAndItsOwnStatus) {
+    const auto id = seed_running_run ("run_streamed");
+
+    vayu::http::routes::StreamRecord record;
+    record.events = json{ { "items", json::array ({ json{ { "data", "hi" } } }) },
+        { "totalEvents", 9 }, { "eventsTruncated", true }, { "endReason", "stopped" } };
+    record.status = vayu::RunStatus::Stopped;
+
+    record_design_result (*db_, id, sent_request (), ok_response (), &record);
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    auto trace = json::parse (results[0].trace_data);
+    ASSERT_TRUE (trace.contains ("events"));
+    EXPECT_EQ (trace["events"]["totalEvents"], 9);
+    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
+    // The request/response bodies are still capped by `cap_trace_bodies`; the
+    // events node carries its own cap, applied when it was built.
+    EXPECT_EQ (trace["events"]["items"].size (), 1u);
+
+    auto row = db_->get_run (id);
+    ASSERT_TRUE (row.has_value ());
+    EXPECT_EQ (row->status, vayu::RunStatus::Stopped);
 }
 
 TEST_F (RecordDesignResultTest, ARecordedFailureMarksTheRunFailed) {

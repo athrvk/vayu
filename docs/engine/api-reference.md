@@ -486,7 +486,8 @@ hand-maintained value-to-label map. `value` and `default` are always strings;
   suffix drifted out of step with the mechanism and misinformed the settings
   screen and the MCP `update_config` result at the same time.
 - **`advanced`** - an internal with no everyday user story (`dbBusyTimeout`, the
-  three `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`). Still
+  three `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`,
+  `sseIdleTimeoutMs`). Still
   live and still settable; the app renders these collapsed under an "Advanced"
   section at the bottom of their category.
 
@@ -2024,9 +2025,66 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "maxRedirects": 10,                  // Optional, default 10
   "verifySSL": true,                   // Optional, default true
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
-  "transient": false                   // Optional, default false - see below
+  "transient": false,                  // Optional, default false - see below
+  "stream": false,                     // Optional, default false - see below
+  "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
+  "maxStreamEvents": 100000            // Optional, streaming only - see below
 }
 ```
+
+**`stream` consumes a `text/event-stream` response live** (issue #573) instead
+of buffering it. It changes the *execution model*, so it is declared rather than
+detected: the engine creates the run row, hands the transfer to a managed
+consumer worker, and answers **`202`** at once with the run and the URL its
+events arrive on. Nothing about a non-streaming send changes.
+
+```json
+{
+  "runId": "run_1234567890",
+  "eventsUrl": "/runs/run_1234567890/events",
+  "status": "running"
+}
+```
+
+The worker parses SSE frames into a bounded in-memory ring that
+[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
+`events` node into the run's stored trace when the stream ends, so History
+restores the timeline.
+
+**Every stream ends, and the run says why.** Five terminations, never "the
+timeout happened to fire":
+
+| Reason | What happened |
+|--------|---------------|
+| `completed` | The server closed the stream |
+| `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
+| `maxStreamEvents` | The event cap was reached |
+| `maxStreamDurationMs` | The duration cap elapsed |
+| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` |
+
+The whole-transfer `timeout` is deliberately **not** applied to a stream - it
+would kill a healthy one mid-flight. The only deadline is the idle one, and the
+two caps above are what bound a stream that talks forever. `maxStreamDurationMs`
+(1000–86400000) and `maxStreamEvents` (1–10000000) override the configured
+defaults per request; sending either **without** `"stream": true` is a **400**,
+since a cap that quietly did not apply is worse than no cap.
+
+Refused with a **400** rather than silently reinterpreted:
+
+- a non-boolean `stream` (`'stream' must be a boolean`);
+- `"stream": true` with `"transient": true` - a stream **is** its run row: the
+  row is what `eventsUrl` names, what carries the status, and what a stop
+  finds, and a transient execution creates none;
+- `"stream": true` with a pre- or post-request script - a post-request script
+  asserts on a response that does not exist until the stream closes. Streams
+  reach scripts as a buffered `pm.response.events` in a later release; until
+  then this is refused rather than silently skipped;
+- `stream` on `POST /runs` (`errorCode: "invalid_run_config"`) - a load run's
+  completion accounting has no place for a response that never ends.
+
+Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
+`sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see
+[GET /config](#get-config)).
 
 **`transient` runs the request without recording it** (issue #382). The
 execution is otherwise identical - same composition, the cookie jar named by
@@ -3216,6 +3274,72 @@ window on both sides, 1000–500000) and `liveRetentionMs`
 (post-completion retention, 0–600000ms; 0 disables retention) are configurable
 via `POST /config`.
 
+### GET /runs/:runId/events
+
+Relay a streaming run's events via Server-Sent Events (issue #573). Started by
+`POST /execute` with `"stream": true`, which returns this URL as `eventsUrl`.
+
+The endpoint replays the run's retained events, then tails until the stream
+terminates, and closes with a `complete` event naming the termination reason.
+Like the live-metrics topic, the ring is retained for `liveRetentionMs` after
+the stream ends, so a client that connects late - even after a short stream has
+already finished - still receives the whole series.
+
+**Events:**
+```
+event: open
+id: 0
+data: {"statusCode":200,"statusText":"OK","headers":{"content-type":"text/event-stream"}}
+
+event: message
+id: 1
+data: {"event":"token","data":"Hello","sourceId":"42","receivedAt":1234567890}
+
+event: complete
+data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
+```
+
+- `open` is published once, as soon as the response's header block arrives, so
+  even a late consumer learns what the stream connected to.
+- `message` carries one upstream event: its `event` name (`message` when the
+  origin sent none), its `data` (multiple `data:` lines joined with `\n`), the
+  origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
+  `sseMaxEventBytes` is stored as a prefix and says so in band, with
+  `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
+- `complete`'s `reason` is one of `completed`, `stopped`, `maxStreamEvents`,
+  `maxStreamDurationMs`, `idleTimeout`, `error`; see
+  [POST /execute](#post-execute).
+
+**`sourceId` is not the resume point.** `id:` on the wire is this relay's own
+frame offset, which is what `?lastEventId=` / `Last-Event-ID` takes; `sourceId`
+is what the *origin* would want back. Conflating them would make one of the two
+resumes silently wrong.
+
+**Resume** picks up at the frame *after* the one named, so a dropped consumer
+re-renders nothing. The header wins over the query parameter when both are
+present (`EventSource` cannot set a header on a fresh connection, so a client
+owning its retry uses the parameter). Unlike the inbox's capture ids, frame ids
+start at **0**, so `lastEventId=0` means "I saw frame 0" rather than "from the
+start"; absence is what means the start. A present-but-unreadable value is a
+**400** (`invalid_last_event_id`) rather than a silent replay from 0. A resume
+point older than the retained window is fast-forwarded to the oldest retained
+frame rather than looping on ids that will never come back.
+
+**One consumer at a time.** Each stream parks a cpp-httplib pool thread for its
+whole life, so a second concurrent watcher is a `409`
+(`run_events_in_use`) - but a claim whose holder has stopped writing for two
+keep-alive intervals is taken over instead of refused, since `EventSource`
+treats a 409 as fatal and a reconnect racing the previous socket's death would
+otherwise kill the stream for good.
+
+**Responses:**
+- `200` - SSE stream (live stream, or finished one still within the retention
+  window).
+- `400` - unreadable `lastEventId` / `Last-Event-ID`.
+- `409` - already being streamed.
+- `404` - no stream for this run, or it expired past `liveRetentionMs`; the body
+  hints `GET /runs/:runId/report`, whose trace carries the stored `events` node.
+
 ## Runs
 
 ### GET /runs
@@ -3453,6 +3577,15 @@ everywhere else for the same run.
 A run that is already finished answers `{"status": "<status>", "runId": ...,
 "message": "Run already <status>"}`; one that is not in memory answers
 `{"status": "stopped", "runId": ..., "message": "Run was not active"}`.
+
+**A streaming design run** (`POST /execute` with `"stream": true`) is stopped
+here too: the endpoint asks its consumer worker to end the transfer, waits up to
+the same 5s, and answers `{"runId": ..., "status": "stopped", "message":
+"Stream stopped", "totalEvents": N}`. The worker owns the terminal write, so the
+run reaches `stopped` with its trace and its true event count together; the
+stream's `complete` event carries `"reason": "stopped"`. A stream that had
+already terminated keeps the reason it recorded rather than being rewritten as a
+user stop.
 
 ### GET /runs/:runId/report
 
