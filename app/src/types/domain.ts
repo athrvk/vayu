@@ -548,6 +548,23 @@ export interface RunResultStreamEvents {
 }
 
 /**
+ * The `scripts` node a **streaming** design run adds to its stored trace
+ * (issue #575) - the pre- and post-request scripts' output, keyed exactly as
+ * the live `/execute` response body keys it.
+ *
+ * Every field is optional for the reason the engine builder makes it so: a key
+ * is written only when it has something to say, so a run whose script logged
+ * nothing and asserted nothing stores an absent node rather than three empty
+ * lists.
+ */
+export interface RunResultScripts {
+	testResults?: TestResult[];
+	consoleLogs?: ConsoleLogEntry[];
+	preScriptError?: string;
+	postScriptError?: string;
+}
+
+/**
  * One HTTP exchange's trace, as the engine stores it. A design-mode trace
  * (`POST /request` -> `store_result`, execution.cpp) nests the request and
  * response; a load-test trace flattens timing and status onto the object
@@ -646,6 +663,18 @@ export interface RunResultTrace {
 	 * so reopening a finished stream from History shows its timeline again.
 	 */
 	events?: RunResultStreamEvents;
+	/**
+	 * What a **streaming** run's scripts produced (issue #575), under the same
+	 * four key names the live `/execute` body uses - one engine builder
+	 * (`build_script_result_node`) fills both, so a restored Tests pane and a
+	 * live one cannot disagree about what a failed assertion looks like.
+	 *
+	 * Stored rather than returned because there is nobody left to return it to:
+	 * a streaming send is answered `202` before its post-request script has run.
+	 * A buffered send carries these in its response and stores none of them, so
+	 * this node is present on streaming traces only.
+	 */
+	scripts?: RunResultScripts;
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by

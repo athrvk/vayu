@@ -20,6 +20,8 @@
  */
 
 import { prepareRequest } from "./prepare";
+import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
+import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** Wrap a value so a POSIX shell passes it through byte for byte. */
@@ -40,6 +42,23 @@ export function generateCurl(
 		// it did not choose makes the server read the body as a single part.
 		if (isFormData && name.toLowerCase() === "content-type") continue;
 		args.push(`-H ${shellQuote(`${name}: ${value}`)}`);
+	}
+
+	if (prepared.stream) {
+		// `-N` is curl's unbuffered mode, and it is what `parseCurl` reads back
+		// as the stream setting - the round trip issue #575 asks for.
+		args.push("-N");
+		// The header the setting implies, added only where the request declares
+		// none: the same rule the app's toggle applies through
+		// `autoHeaderToAdd`, so a snippet and the request it came from ask the
+		// server for the same thing. A declared Accept - even a different one -
+		// is the author's and is emitted above untouched.
+		const accept = autoHeaderToAdd(
+			ACCEPT_HEADER,
+			SSE_ACCEPT,
+			prepared.headers.map(([key, value]) => ({ key, value, enabled: true }))
+		);
+		if (accept) args.push(`-H ${shellQuote(`${ACCEPT_HEADER}: ${accept}`)}`);
 	}
 
 	if (prepared.basicAuth) {

@@ -20,7 +20,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -53,6 +55,16 @@ namespace sse_constants = vayu::core::constants::sse;
  * Serves three shapes of `text/event-stream` a test needs and a live endpoint
  * cannot be asked for: a finite scripted stream, one that never stops talking,
  * and one that connects and then says nothing at all.
+ *
+ * `/scripted` writes whatever chunks it was built with, so a test supplies the
+ * shape it needs - several events in one write, one event split across two,
+ * or frames the parser must reject - rather than each shape needing its own
+ * endpoint. `pace()` puts a delay between those writes, which is what separates
+ * "arrived incrementally" from "arrived in one buffer" for a consumer that
+ * cannot tell the difference after the fact.
+ *
+ * This is the home for stream fixtures, and the Go `scripts/test/mock-server.go`
+ * is not: its 5s write timeout kills any stream held open longer than that.
  */
 class StreamServer {
     public:
@@ -61,10 +73,14 @@ class StreamServer {
         // A stream outlives cpp-httplib's stock 5s write budget by design.
         svr_.set_write_timeout (60, 0);
 
-        svr_.Get ("/scripted", [this] (const httplib::Request&, httplib::Response& res) {
+        svr_.Get ("/scripted", [this] (const httplib::Request& req, httplib::Response& res) {
+            note_request (req);
             res.set_chunked_content_provider (
             "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
                 for (const auto& chunk : chunks_) {
+                    if (pace_ms_ > 0) {
+                        std::this_thread::sleep_for (std::chrono::milliseconds (pace_ms_));
+                    }
                     if (!sink.write (chunk.data (), chunk.size ())) {
                         return false;
                     }
@@ -118,12 +134,36 @@ class StreamServer {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
 
+    /// Wait @p ms between writes on `/scripted`. Set before the request.
+    void pace (int ms) {
+        pace_ms_ = ms;
+    }
+
+    /// A header the last `/scripted` request carried, or "" - the only way to
+    /// prove a pre-request script's edit reached the wire rather than the plan.
+    std::string received_header (const std::string& name) const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        const auto found = received_headers_.find (name);
+        return found == received_headers_.end () ? std::string () : found->second;
+    }
+
     private:
+    void note_request (const httplib::Request& req) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        received_headers_.clear ();
+        for (const auto& [key, value] : req.headers) {
+            received_headers_[key] = value;
+        }
+    }
+
     httplib::Server svr_;
     std::thread thread_;
     int port_ = 0;
     std::vector<std::string> chunks_;
     std::atomic<bool> stopping_{ false };
+    std::atomic<int> pace_ms_{ 0 };
+    mutable std::mutex received_mutex_;
+    std::map<std::string, std::string, std::less<>> received_headers_;
 };
 
 vayu::Request get_request (const std::string& url) {
@@ -201,16 +241,19 @@ TEST (StreamFlag, TransientAloneIsStillFine) {
     EXPECT_FALSE (flag.value);
 }
 
-// Refused rather than silently skipped - a script that never runs and never
-// says so is the "written but never read" defect in its loudest form.
-TEST (StreamFlag, AScriptOnAStreamingRequestIsRefused) {
-    // Both spellings a payload can carry, read through the one name table
+// Phase 3 (#575) turned the refusal into a feature: a stream's scripts now run,
+// the pre-request one before the transfer and the post-request one over
+// `pm.response.events` once it has terminated. This pins the flag reader's half
+// of that - it must stop rejecting the payload - and
+// `TheStreamsPostRequestScriptSeesItsEvents` below pins that they actually run.
+TEST (StreamFlag, ScriptsNoLongerRefuseAStreamingRequest) {
+    // Every spelling a payload can carry, read through the one name table
     // `read_pre_request_script` / `read_post_request_script` own.
-    for (const char* key : { "preRequestScript", "postRequestScript" }) {
+    for (const char* key : { "preRequestScript", "postRequestScript", "tests" }) {
         const auto flag = read_stream_flag (
-        json{ { "stream", true }, { key, "pm.test('x', () => {})" } });
-        EXPECT_FALSE (flag.ok) << key;
-        EXPECT_NE (flag.error.find ("script"), std::string::npos) << key;
+        json{ { "stream", true }, { key, "pm.test('x', function () {})" } });
+        EXPECT_TRUE (flag.ok) << key << ": " << flag.error;
+        EXPECT_TRUE (flag.value) << key;
     }
 }
 
@@ -765,6 +808,253 @@ TEST_F (RelayTest, AnExpiredStreamIsSweptAndReads404) {
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 404);
     EXPECT_EQ (manager_.size (), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Scripts over a stream (issue #575)
+//
+// Driven through the real `POST /execute` handler rather than through
+// `consume_sse_stream`, because the thing under test is precisely the wiring
+// the route owns: which scripts run, on which thread, against which event list,
+// and where their results are stored. A test that called the pieces directly
+// would pass with the route handing the post-request script a *copy* of the
+// events node - the drift the shared pointer exists to prevent.
+// ---------------------------------------------------------------------------
+
+/// `POST /execute` and `GET /runs/:id/events` on one real server, so a
+/// streaming send can be driven the way a client drives it.
+class StreamExecuteTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_sse_execute.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
+        nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
+        inbox_manager_, mock_server_manager_, manager_ });
+        vayu::http::routes::register_execution_routes (*ctx_);
+        vayu::http::routes::register_event_stream_routes (*ctx_);
+        svr_.set_write_timeout (60, 0);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        ctx_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// An origin that writes @p count events, one per chunk, paced so the
+    /// consumer really does assemble them over time.
+    void serve (int count) {
+        std::vector<std::string> chunks;
+        for (int i = 0; i < count; ++i) {
+            chunks.push_back ("id: e" + std::to_string (i) +
+            "\nevent: tick\ndata: {\"n\": " + std::to_string (i) + "}\n\n");
+        }
+        origin_ = std::make_unique<StreamServer> (std::move (chunks));
+        origin_->pace (2);
+    }
+
+    /// Send @p payload as a streaming execute and return the run id it created.
+    std::string start (json payload) {
+        payload["method"] = "GET";
+        payload["url"]    = origin_->url ("/scripted");
+        payload["stream"] = true;
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/execute", payload.dump (), "application/json");
+        EXPECT_TRUE (response);
+        if (!response) {
+            return {};
+        }
+        EXPECT_EQ (response->status, 202) << response->body;
+        return json::parse (response->body).value ("runId", std::string ());
+    }
+
+    /// The stored trace, once the run has reached a terminal status. Polled off
+    /// the row rather than the manager: the trace is written by the worker's
+    /// completion callback, and the row's status is what says it has run.
+    json trace_for (const std::string& run_id) {
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (15);
+        while (std::chrono::steady_clock::now () < deadline) {
+            auto results = db_->get_results (run_id);
+            if (!results.empty ()) {
+                return json::parse (results[0].trace_data);
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+        ADD_FAILURE () << "no result row was ever stored for " << run_id;
+        return json::object ();
+    }
+
+    void set_config (const char* key, const std::string& value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        entry->value = value;
+        db_->save_config_entry (*entry);
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    SseStreamManager manager_;
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+    std::unique_ptr<StreamServer> origin_;
+};
+
+// The acceptance criterion: a script asserts over what the stream delivered,
+// and the entries carry the shape the surface promises.
+TEST_F (StreamExecuteTest, TheStreamsPostRequestScriptSeesItsEvents) {
+    serve (3);
+    const auto run_id = start (json{ { "postRequestScript", R"JS(
+        pm.test('three events', function () {
+            pm.expect(pm.response.events.length).to.equal(3);
+        });
+        pm.test('names and ids came through', function () {
+            pm.expect(pm.response.events[0].event).to.equal('tick');
+            pm.expect(pm.response.events[0].id).to.equal('e0');
+            pm.expect(JSON.parse(pm.response.events[2].data).n).to.equal(2);
+        });
+        pm.test('the whole stream is here', function () {
+            pm.expect(pm.response.totalEvents).to.equal(3);
+            pm.expect(pm.response.eventsTruncated).to.equal(false);
+        });
+    )JS" } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    const auto& scripts = trace["scripts"];
+    ASSERT_TRUE (scripts.contains ("testResults")) << scripts.dump (2);
+    ASSERT_EQ (scripts["testResults"].size (), 3u);
+    for (const auto& test : scripts["testResults"]) {
+        EXPECT_TRUE (test["passed"].get<bool> ())
+        << test["name"] << ": " << test.value ("error", "");
+    }
+    EXPECT_FALSE (scripts.contains ("postScriptError")) << scripts.dump (2);
+}
+
+// The other half of the same fact: what the script read and what the trace
+// stored are one node, so a reader of either sees the same truncation.
+TEST_F (StreamExecuteTest, TruncationIsVisibleToTheScriptAndMatchesTheTrace) {
+    set_config ("sseMaxStoredEvents", "2");
+    serve (5);
+    const auto run_id = start (json{ { "postRequestScript", R"JS(
+        pm.test('the list is a prefix and says so', function () {
+            pm.expect(pm.response.eventsTruncated).to.equal(true);
+            pm.expect(pm.response.events.length).to.equal(2);
+            pm.expect(pm.response.totalEvents).to.equal(5);
+        });
+    )JS" } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    ASSERT_EQ (trace["scripts"]["testResults"].size (), 1u);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
+    << trace["scripts"]["testResults"][0].value ("error", "");
+    // Stated twice on purpose: the assertion above proves the script saw it,
+    // and this proves the stored node the app restores from says the same.
+    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
+    EXPECT_EQ (trace["events"]["totalEvents"], 5);
+    EXPECT_EQ (trace["events"]["items"].size (), 2u);
+}
+
+// A pre-request script on a stream is not a special case - it edits the request
+// that goes on the wire, exactly as it does on a buffered send. Proven off the
+// origin's own record of what arrived, not off the plan.
+TEST_F (StreamExecuteTest, ThePreRequestScriptsEditReachesTheWire) {
+    serve (1);
+    const auto run_id = start (
+    json{ { "preRequestScript", "pm.request.headers.add({ key: 'X-From-Script', value: 'yes' });" },
+    { "postRequestScript", R"JS(
+        pm.test('the stream still ran', function () {
+            pm.expect(pm.response.events.length).to.equal(1);
+        });
+    )JS" } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ());
+    EXPECT_EQ (origin_->received_header ("X-From-Script"), "yes");
+}
+
+// Absent, not empty. A stream that produced nothing has an empty list; a
+// response that was never a stream has no list at all, and `typeof` is what
+// tells them apart.
+TEST_F (StreamExecuteTest, AnOrdinarySendHasNoEventsSurfaceAtAll) {
+    serve (1);
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    const json payload = { { "method", "GET" },
+        { "url", origin_->url ("/scripted") }, { "postRequestScript", R"JS(
+        pm.test('not a stream', function () {
+            pm.expect(typeof pm.response.events).to.equal('undefined');
+            pm.expect(typeof pm.response.totalEvents).to.equal('undefined');
+            pm.expect(typeof pm.response.eventsTruncated).to.equal('undefined');
+        });
+    )JS" } };
+
+    auto response = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (response);
+    ASSERT_EQ (response->status, 200) << response->body;
+    const auto body = json::parse (response->body);
+    ASSERT_TRUE (body.contains ("testResults")) << body.dump (2);
+    EXPECT_TRUE (body["testResults"][0]["passed"].get<bool> ())
+    << body["testResults"][0].value ("error", "");
+}
+
+// A stream with no scripts stores no `scripts` node - an empty one would put an
+// always-empty Tests pane on every streamed response.
+TEST_F (StreamExecuteTest, AStreamWithoutScriptsStoresNoScriptNode) {
+    serve (2);
+    const auto run_id = start (json::object ());
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_FALSE (trace.contains ("scripts")) << trace.dump (2);
+    EXPECT_EQ (trace["events"]["items"].size (), 2u);
+}
+
+// Malformed frames are the origin's problem, not the run's: the parser drops
+// them and the stream still terminates by a rule that names itself, with the
+// events that were well formed intact.
+TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
+    origin_ = std::make_unique<StreamServer> (std::vector<std::string>{
+    ": a comment line, dispatched to nobody\n\n", "event: no-data-so-never-dispatched\n\n",
+    "data: kept\n\n", "retry: notanumber\ndata: also kept\n\n" });
+    const auto run_id = start (json{ { "postRequestScript", R"JS(
+        pm.test('only the frames that carried data arrived', function () {
+            pm.expect(pm.response.totalEvents).to.equal(2);
+            pm.expect(pm.response.events[0].data).to.equal('kept');
+            pm.expect(pm.response.events[1].data).to.equal('also kept');
+        });
+    )JS" } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
+    << trace["scripts"]["testResults"][0].value ("error", "");
+    EXPECT_EQ (trace["events"]["endReason"], "completed");
 }
 
 } // namespace

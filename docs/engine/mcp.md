@@ -151,7 +151,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute`            | allowlist                  |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `create_collection`    | write    | `POST /collections`                          | write toggle               |
 | `update_collection`    | write    | `PUT /collections/:id` (merge-patch)         | write toggle               |
@@ -386,6 +386,20 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   request the call sent. A `postRequestScript` reads the same set as
   `pm.request.headers` (see
   [scripting.md](scripting.md#request-object-pmrequest)).
+- **Streaming** - `run_request` takes `stream: true` for a `text/event-stream`
+  endpoint (issue #575). `tools/call` is request/response, so the tool does not
+  stream to the agent: it starts the run, reads the relay for at most
+  `streamBudgetMs` (default 5000, maximum 60000) collecting at most
+  `maxStreamEvents` (default 50), and returns those events with **which bound it
+  stopped at** beside them - `completed`, `capReached` or `budgetExhausted`, plus
+  `totalEvents` where the completion frame reported it. The three are separate
+  because the follow-up differs: a completed stream is finished, a capped read
+  wants a larger cap, and an exhausted budget means the run is still going and
+  `stop_run` ends it. The flag is sent on **every** call, never elided and never
+  inherited from a stored row - the two answers have different shapes, so the
+  tool decides which one it is about to parse rather than a default deciding for
+  it. The allowlist gate is unchanged: it runs on the composed URL before
+  anything is sent.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`

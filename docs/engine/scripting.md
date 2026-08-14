@@ -202,6 +202,78 @@ is the serialised header block - `Name: Value\r\n` per header - reconstructed
 from the parsed headers, so it is close to but not byte-exact with what came off
 the wire. An empty body reports `0`, not an absent property.
 
+### `pm.response.events` - a streamed run's events
+
+A request sent with the **Event stream** setting on (`"stream": true` on
+`POST /execute`) has no single response body; it has a list of events. The
+post-request script runs **once, after the stream has terminated**, and reads
+that list:
+
+```javascript
+const events = pm.response.events || [];
+
+pm.test('the server said it was done', function () {
+    pm.expect(events.some(function (e) { return e.event === 'done'; })).to.be.true;
+});
+
+pm.test('every token frame parsed', function () {
+    events.forEach(function (e) {
+        if (e.event === 'token') pm.expect(JSON.parse(e.data).text).to.be.a('string');
+    });
+});
+```
+
+Each entry is `{ event, id, data }`:
+
+| Field | |
+|-------|--|
+| `event` | The frame's `event:` name, or `"message"` where it carried none - the SSE spec's default, resolved by the parser so no script has to. |
+| `id` | The origin's `id:`, **absent** when it sent none. Not the relay's own frame id, which is a different number and would make a comparison silently wrong. |
+| `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
+| `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
+
+**Buffered, never live.** The sandbox is synchronous and has no event loop (see
+[Limitations](#limitations)), so a per-event callback is not a feature
+that was left out - it is one the runtime cannot have. The script runs when the
+stream is over, against what was retained.
+
+**Check the markers before asserting over the whole stream.** The stored list is
+bounded by `sseMaxStoredEvents`, and a script that counted a prefix would report
+a wrong number with total confidence:
+
+```javascript
+if (!pm.response.eventsTruncated) {
+    pm.test('exactly three events', function () {
+        pm.expect((pm.response.events || []).length).to.equal(3);
+    });
+}
+pm.test('the stream produced something', function () {
+    pm.expect(pm.response.totalEvents || 0).to.be.above(0);
+});
+```
+
+`pm.response.totalEvents` is every event the run received, including those
+beyond the stored list; `pm.response.eventsTruncated` is the engine's own
+comparison of the two, not something derived from a cap the script cannot see.
+Both mirror the markers on the run's stored trace, because they are read from
+the same node.
+
+**Absent, not empty, on an ordinary response.** All three properties are missing
+unless the run was a stream, so `typeof` separates "this was not a stream" from
+"this stream produced nothing" - a distinction an empty array would erase:
+
+```javascript
+if (typeof pm.response.events === 'undefined') {
+    console.log('not a streaming request');
+}
+```
+
+A streaming send is answered `202` before its script has run, so the results go
+to the run's trace rather than into a response body - the app's Tests and
+Console panes show them when the stream finishes, and
+[`GET /runs/:runId/report`](api-reference.md#get-runsrunidreport) carries them
+under the trace's `scripts` node.
+
 ### Reading response headers
 
 ```javascript

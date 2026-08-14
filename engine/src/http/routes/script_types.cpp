@@ -423,19 +423,33 @@ std::string field_type (const std::string& detail) {
     const auto [stripped, optional] = split_optional_suffix (base);
     base                            = stripped;
 
+    // `T[]` is the element type, listed. Written as a suffix rather than as its
+    // own accepted spelling so a list of anything the table can already name
+    // (`pm.response.events` is `object[]`) declares as a real array - iterable,
+    // with a `length` and a `map` - instead of falling through to `void` and
+    // making every use of it an editor error on correct code.
+    std::string suffix;
+    if (base.size () > 2 && base.compare (base.size () - 2, 2, "[]") == 0) {
+        base   = trim (base.substr (0, base.size () - 2));
+        suffix = "[]";
+    }
+
     std::string resolved;
     if (base == "number" || base == "string" || base == "boolean" || base == "any") {
         resolved = base;
     } else if (base == "object") {
         resolved = ANY_OBJECT;
     } else if (is_string_literal_union (base)) {
-        resolved = base;
+        // `('a' | 'b')[]` - a union needs its parentheses back before the
+        // suffix, or the array binds to the last alternative alone.
+        resolved = suffix.empty () ? base : "(" + base + ")";
     } else {
         // Prose rather than a type - an assertion getter restating its own
         // name, or a description. `void` is the honest answer, and
         // `void | undefined` is not a type, so the suffix goes with it.
         return "void";
     }
+    resolved += suffix;
     return optional ? resolved + std::string (OPTIONAL_SUFFIX) : resolved;
 }
 

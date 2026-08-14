@@ -362,3 +362,50 @@ describe("parseCommand - failure modes", () => {
 		});
 	});
 });
+
+/**
+ * `-N` / `--no-buffer` is how a stream is consumed from a terminal, so it maps
+ * onto the request's Event stream setting rather than being skipped as an
+ * output nicety (issue #575). The generator emits it back, and
+ * `codegen.test.ts` holds that half of the round trip.
+ */
+describe("parseCommand - curl -N is the stream setting", () => {
+	test.each([["-N"], ["--no-buffer"]])("%s turns the stream on", (flag) => {
+		const parsed = parseCommand(`curl ${flag} https://api.example.com/events`);
+		expect(parsed?.stream).toBe(true);
+	});
+
+	test("a command without it leaves the stream off", () => {
+		const parsed = parseCommand("curl https://api.example.com/events");
+		expect(parsed?.stream).toBe(false);
+	});
+
+	test("the Accept the setting implies is added when the command declares none", () => {
+		const parsed = parseCommand("curl -N https://api.example.com/events");
+		expect(parsed?.headers).toEqual(kv([{ key: "Accept", value: "text/event-stream" }]));
+	});
+
+	test("a declared Accept is the author's and is never overridden", () => {
+		const parsed = parseCommand(
+			"curl -N -H 'Accept: application/stream+json' https://api.example.com/events"
+		);
+		expect(parsed?.headers).toEqual(kv([{ key: "Accept", value: "application/stream+json" }]));
+	});
+
+	test("an Accept already naming the stream type is not duplicated", () => {
+		const parsed = parseCommand(
+			"curl --no-buffer -H 'accept: text/event-stream' https://api.example.com/events"
+		);
+		expect(parsed?.headers).toHaveLength(1);
+	});
+
+	test("a POST body still imports beside the flag", () => {
+		const parsed = parseCommand(
+			`curl -N -X POST -H 'Content-Type: application/json' -d '{"since":1}' https://api.example.com/events`
+		);
+		expect(parsed?.stream).toBe(true);
+		expect(parsed?.method).toBe("POST");
+		expect(parsed?.bodyMode).toBe("json");
+		expect(parsed?.body).toBe('{"since":1}');
+	});
+});

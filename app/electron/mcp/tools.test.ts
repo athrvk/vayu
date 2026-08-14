@@ -56,6 +56,9 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
 		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
+		consumeStreamEvents: vi
+			.fn()
+			.mockResolvedValue({ events: [], completed: true, capReached: false }),
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
@@ -1235,6 +1238,155 @@ describe("dispatchTool", () => {
 			url: "https://api.example.com/users",
 			// Body is emitted as { mode, content } - the shape the engine reads.
 			body: { mode: "json", content: '{"a":1}' },
+		});
+	});
+
+	/**
+	 * `stream: true` (issue #575). `tools/call` is request/response, so an agent
+	 * is never handed a stream - it is handed what the stream produced inside
+	 * bounds it named, with the bound it stopped at stated beside the payload.
+	 */
+	describe("run_request with stream: true", () => {
+		const allow = { allowlist: ["api.example.com"] };
+		const started = { runId: "run_s", eventsUrl: "/runs/run_s/events", status: "running" };
+
+		function streamingClient(consumed: Record<string, unknown>) {
+			return fakeClient({
+				executeRequest: vi.fn().mockResolvedValue(started),
+				consumeStreamEvents: vi.fn().mockResolvedValue(consumed),
+			});
+		}
+
+		test("the flag is sent explicitly on every call, streaming or not", async () => {
+			const off = fakeClient();
+			await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x" },
+				ctxWith(off, allow)
+			);
+			const offPayload = (off.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			// Never elided: the two answers have different shapes, so a caller
+			// that let a default decide would not know which one to parse.
+			expect(offPayload).toMatchObject({ stream: false });
+
+			const on = streamingClient({ events: [], completed: true, capReached: false });
+			await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true },
+				ctxWith(on, allow)
+			);
+			const onPayload = (on.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(onPayload).toMatchObject({ stream: true });
+		});
+
+		test("returns the events with the bounds it read them under", async () => {
+			const client = streamingClient({
+				events: [{ event: "tick", data: "1" }],
+				completed: true,
+				capReached: false,
+				endReason: "completed",
+				totalEvents: 1,
+			});
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(res.structuredContent).toMatchObject({
+				runId: "run_s",
+				completed: true,
+				capReached: false,
+				budgetExhausted: false,
+				endReason: "completed",
+				totalEvents: 1,
+				eventCount: 1,
+			});
+			expect(client.consumeStreamEvents).toHaveBeenCalledWith("run_s", 50, 5_000, undefined);
+		});
+
+		test("a capped read says so rather than reading as the whole stream", async () => {
+			const client = streamingClient({
+				events: [{ event: "tick" }, { event: "tick" }],
+				completed: false,
+				capReached: true,
+			});
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true, maxStreamEvents: 2 },
+				ctxWith(client, allow)
+			);
+			// The three stopping conditions are separate because the follow-up
+			// differs; collapsing them into "partial" would lose that.
+			expect(res.structuredContent).toMatchObject({
+				completed: false,
+				capReached: true,
+				budgetExhausted: false,
+				maxStreamEvents: 2,
+			});
+			expect(firstText(res)).toMatch(/still streaming/i);
+		});
+
+		test("a read that ran out its budget is neither complete nor capped", async () => {
+			const client = streamingClient({ events: [], completed: false, capReached: false });
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true, streamBudgetMs: 200 },
+				ctxWith(client, allow)
+			);
+			expect(res.structuredContent).toMatchObject({
+				budgetExhausted: true,
+				streamBudgetMs: 200,
+			});
+		});
+
+		test("a budget beyond the ceiling is refused before anything is sent", async () => {
+			const client = streamingClient({ events: [], completed: true, capReached: false });
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true, streamBudgetMs: 600_000 },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/60000 or less/);
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
+
+		test("the allowlist still gates the resolved URL", async () => {
+			const client = streamingClient({ events: [], completed: true, capReached: false });
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://elsewhere.test/events", stream: true },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBe(true);
+			expect(client.executeRequest).not.toHaveBeenCalled();
+			expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+		});
+
+		test("an answer with no runId is handed back rather than followed", async () => {
+			const client = fakeClient({
+				executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
+			});
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/events", stream: true },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+		});
+
+		test("the tool description names its bounds before the payload", () => {
+			const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema as Record<
+				string,
+				{ description?: string }
+			>;
+			// The `aaba1d8` discipline: a caveat an agent reads after believing
+			// the data is a caveat that arrived too late.
+			expect(schema.stream.description).toMatch(/BOUNDED/);
+			expect(schema.stream.description).toMatch(/streamBudgetMs/);
+			expect(schema.stream.description).toMatch(/maxStreamEvents/);
 		});
 	});
 

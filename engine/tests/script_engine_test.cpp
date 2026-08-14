@@ -3990,3 +3990,174 @@ TEST_F (ScriptEngineTest, AStashedIterationDataRefusesOnceTheRowIsGone) {
     EXPECT_NE (second_result.error_message.find ("not available here"), std::string::npos)
     << second_result.error_message;
 }
+
+// ============================================================================
+// pm.response.events - a streamed run's buffered event list (issue #575)
+// ============================================================================
+//
+// The three properties are one fact about one arrival set, and the decision
+// worth pinning is the same one `pm.iterationData` makes: absence is *absent*.
+// A script asking "was this a stream?" can only get an answer if the binding is
+// missing when it was not one, and a script asserting over the whole stream can
+// only be right if the markers say when it is looking at a prefix.
+
+/// A streamed run's test context: the stored `events` trace node the route
+/// hands the post-request script, verbatim.
+static ScriptContext streamed_test (const Request& request,
+const Response& response,
+Environment& env,
+const nlohmann::json& events) {
+    ScriptContext ctx   = ScriptContext::for_test (request, response);
+    ctx.environment     = &env;
+    ctx.response_events = &events;
+    return ctx;
+}
+
+TEST_F (ScriptEngineTest, ResponseEventsCarriesEachEntrysNameIdAndData) {
+    const nlohmann::json events{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "tick" }, { "data", "{\"n\":1}" },
+                                 { "sourceId", "e1" }, { "receivedAt", 17 } },
+        nlohmann::json{ { "event", "message" }, { "data", "plain" }, { "receivedAt", 18 } } }) },
+        { "totalEvents", 2 }, { "eventsTruncated", false }, { "endReason", "completed" }
+    };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("entries read back", function() {
+            pm.expect(pm.response.events.length).to.equal(2);
+            pm.expect(pm.response.events[0].event).to.equal("tick");
+            pm.expect(pm.response.events[0].id).to.equal("e1");
+            pm.expect(JSON.parse(pm.response.events[0].data).n).to.equal(1);
+            pm.expect(pm.response.events[1].event).to.equal("message");
+            pm.expect(pm.response.events[1].data).to.equal("plain");
+        });
+        pm.test("an event the origin never named has no id at all", function() {
+            pm.expect(typeof pm.response.events[1].id).to.equal("undefined");
+        });
+        pm.test("the markers mirror the node", function() {
+            pm.expect(pm.response.totalEvents).to.equal(2);
+            pm.expect(pm.response.eventsTruncated).to.equal(false);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 3u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// The whole point of the markers: a stored list shorter than the stream must
+// never read as the stream. Truncation is the node's own comparison, not
+// `items.length` against a cap the script cannot see.
+TEST_F (ScriptEngineTest, ResponseEventsReportsATruncatedListAsOne) {
+    const nlohmann::json events{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "tick" }, { "data", "1" } } }) },
+        { "totalEvents", 40 }, { "eventsTruncated", true }, { "endReason", "maxEvents" }
+    };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("a prefix says it is one", function() {
+            pm.expect(pm.response.events.length).to.equal(1);
+            pm.expect(pm.response.totalEvents).to.equal(40);
+            pm.expect(pm.response.eventsTruncated).to.equal(true);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// An event whose data hit the per-event byte cap is a prefix of what the origin
+// sent, and says so in band - the same disclosure the stored node makes.
+TEST_F (ScriptEngineTest, ResponseEventsDisclosesAPerEventTruncation) {
+    const nlohmann::json events{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "big" }, { "data", "abc" },
+                                 { "dataTruncated", true }, { "dataBytes", 9000 } },
+        nlohmann::json{ { "event", "small" }, { "data", "ok" } } }) },
+        { "totalEvents", 2 }, { "eventsTruncated", false }
+    };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("a cut event is flagged and a whole one is not", function() {
+            pm.expect(pm.response.events[0].dataTruncated).to.equal(true);
+            pm.expect(typeof pm.response.events[1].dataTruncated).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Absent, not empty. An ordinary send binds none of the three, so `typeof`
+// separates "this was not a stream" from "this stream produced nothing" - the
+// distinction an empty array would erase.
+TEST_F (ScriptEngineTest, AnOrdinaryResponseBindsNoEventSurface) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("no event surface", function() {
+            pm.expect(typeof pm.response.events).to.equal("undefined");
+            pm.expect(typeof pm.response.totalEvents).to.equal("undefined");
+            pm.expect(typeof pm.response.eventsTruncated).to.equal("undefined");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// A stream that produced nothing is the other side of that: the surface is
+// there and empty, which is what lets a script tell the two apart.
+TEST_F (ScriptEngineTest, AStreamThatProducedNothingBindsAnEmptyList) {
+    const nlohmann::json events{ { "items", nlohmann::json::array () },
+        { "totalEvents", 0 }, { "eventsTruncated", false }, { "endReason", "idle" } };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("empty but present", function() {
+            pm.expect(typeof pm.response.events).to.equal("object");
+            pm.expect(pm.response.events.length).to.equal(0);
+            pm.expect(pm.response.totalEvents).to.equal(0);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Contexts are pooled, so the object a script stashed survives into the next
+// execution. A non-streaming run after a streamed one must not still be
+// carrying the stream's list - the leak `pm.iterationData` had.
+TEST_F (ScriptEngineTest, ThePooledContextDoesNotCarryEventsIntoTheNextRun) {
+    const nlohmann::json events{ { "items",
+                                 nlohmann::json::array ({ nlohmann::json{
+                                 { "event", "tick" }, { "data", "1" } } }) },
+        { "totalEvents", 1 }, { "eventsTruncated", false } };
+    auto first        = streamed_test (request, response, env, events);
+    auto first_result = engine.execute ("pm.response.events.length;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second_result = engine.execute_test (R"JS(
+        pm.test("the next run is not a stream", function() {
+            pm.expect(typeof pm.response.events).to.equal("undefined");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+    ASSERT_EQ (second_result.tests.size (), 1u);
+    EXPECT_TRUE (second_result.tests[0].passed) << second_result.tests[0].error_message;
+}

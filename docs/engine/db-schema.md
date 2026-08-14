@@ -135,9 +135,12 @@ a transfer option the executor applies but a choice of *which delivery path*
 runs, read off the `POST /execute` payload by `read_stream_flag`; the column is
 where the app's Event stream toggle persists so the choice survives a tab switch
 and a bulk import carries it. `payload_from_stored` does not add it to a by-id
-composition, so an MCP `run_request` against a stream-flagged row still gets a
-buffered send rather than a `202` it cannot read - `pm.response.events` and the
-MCP stream consume arrive with issue #575.
+composition, so a client that pipes `POST /compose` into `POST /execute` - MCP's
+`run_collection_smoke`, among others - still gets a buffered send rather than a
+`202` it never asked to parse. **That stays true now that MCP can stream**
+(issue #575): `run_request` sets `stream` from its own argument on every call
+rather than inheriting it from a row, and the app's Code panel reads the flag off
+the request row rather than out of the composed payload, for the same reason.
 
 All four columns are `NOT NULL` with a `DEFAULT`, which is what lets
 `sync_schema()` add them to an existing, non-empty `requests` table - a

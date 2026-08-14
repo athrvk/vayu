@@ -251,6 +251,20 @@ const std::string& script_type) {
     return result;
 }
 
+void bind_script_scopes (vayu::runtime::ScriptContext& ctx,
+ScriptVariableScopes& scopes,
+vayu::http::CookieJar& jar,
+const std::string& cookie_scope,
+std::vector<vayu::http::CookieWrite>* writes) {
+    ctx.cookie_jar          = &jar;
+    ctx.cookie_scope        = cookie_scope;
+    ctx.cookie_writes       = writes;
+    ctx.environment         = &scopes.environment;
+    ctx.globals             = &scopes.globals;
+    ctx.collectionVariables = &scopes.collection;
+    ctx.collectionAncestors = &scopes.collection_ancestors;
+}
+
 ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
@@ -270,18 +284,12 @@ bool verbose) {
 
     const auto bind = [&] (vayu::runtime::ScriptContext& ctx,
                       std::vector<vayu::http::CookieWrite>* writes) {
-        ctx.cookie_jar          = &jar;
-        ctx.cookie_scope        = cookie_scope;
-        ctx.cookie_writes       = writes;
-        ctx.environment         = &scopes.environment;
-        ctx.globals             = &scopes.globals;
-        ctx.collectionVariables = &scopes.collection;
-        ctx.collectionAncestors = &scopes.collection_ancestors;
-        ctx.request_id          = inputs.request_id;
-        ctx.request_name        = inputs.request_name;
-        ctx.iteration           = inputs.iteration;
-        ctx.iteration_count     = inputs.iteration_count;
-        ctx.in_scenario         = inputs.in_scenario;
+        bind_script_scopes (ctx, scopes, jar, cookie_scope, writes);
+        ctx.request_id      = inputs.request_id;
+        ctx.request_name    = inputs.request_name;
+        ctx.iteration       = inputs.iteration;
+        ctx.iteration_count = inputs.iteration_count;
+        ctx.in_scenario     = inputs.in_scenario;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.

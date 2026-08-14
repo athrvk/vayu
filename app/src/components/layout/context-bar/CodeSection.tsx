@@ -84,10 +84,20 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 	if (!request) return <SectionEmpty>No request loaded</SectionEmpty>;
 
+	/*
+	 * `stream` is laid over the composed payload rather than read out of it,
+	 * because `POST /compose` deliberately does not carry the flag (see the
+	 * `stream` column in engine types.hpp): a composed payload is handed
+	 * straight to `/execute` by callers that would then get a `202` they never
+	 * asked to parse. The setting lives on the row, which this component
+	 * already has, so the snippet reads it from there in both modes.
+	 */
 	const source: SnippetRequest | null =
 		mode === "templated"
 			? templatedRequest(request, ancestors)
-			: ((composed.data as SnippetRequest | undefined) ?? null);
+			: composed.data
+				? { ...(composed.data as SnippetRequest), stream: request.stream }
+				: null;
 
 	const secrets = [
 		...Object.values(getAllVariables())

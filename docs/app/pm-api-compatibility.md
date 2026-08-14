@@ -20,6 +20,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
+| Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear`, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
@@ -313,6 +314,36 @@ chain - a misspelling, or an idiom Vayu does not implement such as the negated
 `pm.response.to.not.be.ok`. This is deliberate: a paren-less assertion is an
 expression statement, so a name that merely evaluated to `undefined` would
 report PASS against a broken API.
+
+### Streamed events (`pm.response.events`) - Vayu-specific
+
+Postman has no equivalent: it has no streaming request type, so nothing in its
+`pm` surface names one. A request sent with the **Event stream** setting on gets
+three extra properties on `pm.response`, and the post-request script runs once,
+after the stream has terminated:
+
+```javascript
+const events = pm.response.events || [];
+pm.test('the stream said done', function () {
+    pm.expect(events.some(function (e) { return e.event === 'done'; })).to.be.true;
+});
+```
+
+**Buffered, not live, and that is structural rather than a limitation of this
+release.** The sandbox is synchronous with no event loop - `setTimeout` and
+friends are declared absent for exactly that reason - so there is no "later" for
+a per-event callback to run in. A script sees the retained list, once.
+
+`pm.response.totalEvents` and `pm.response.eventsTruncated` come with it. The
+list is bounded by the engine's `sseMaxStoredEvents`, so a script that means to
+assert over the *whole* stream has to check `eventsTruncated` first; counting a
+prefix would otherwise report a wrong number with complete confidence.
+
+All three are **absent** on an ordinary response rather than empty, so
+`typeof pm.response.events === 'undefined'` distinguishes "not a stream" from "a
+stream that produced nothing" - the same absent-not-empty rule
+`pm.iterationData` follows. Full reference in
+[scripting.md](../engine/scripting.md#pmresponseevents---a-streamed-runs-events).
 
 ### Response cookies (`pm.response.cookies`)
 

@@ -93,6 +93,34 @@ export function eventsFromTrace(
 	};
 }
 
+/**
+ * The stored `scripts` node, as the response pane's four script fields
+ * (issue #575).
+ *
+ * Only a **streaming** design run's trace carries it, and for a reason worth
+ * knowing here: that send was answered `202` before its post-request script had
+ * run, so the trace is the only route its test results ever take. A buffered
+ * send's results arrive in the `/execute` body and are not stored, which is why
+ * an ordinary restored run still shows no Tests pane.
+ *
+ * The keys are the engine's own (`build_script_result_node`), identical to the
+ * live body's, so nothing is renamed on the way through - a rename here would
+ * be the one place the live pane and the restored pane could drift.
+ */
+export function scriptsFromTrace(
+	trace: NonNullable<RunResultSample["trace"]>
+): Pick<ResponseState, "testResults" | "consoleLogs" | "preScriptError" | "postScriptError"> {
+	const node = trace.scripts;
+	if (!node) return {};
+
+	return {
+		...(Array.isArray(node.testResults) && { testResults: node.testResults }),
+		...(Array.isArray(node.consoleLogs) && { consoleLogs: node.consoleLogs }),
+		...(node.preScriptError && { preScriptError: node.preScriptError }),
+		...(node.postScriptError && { postScriptError: node.postScriptError }),
+	};
+}
+
 /** Sniff a body's render mode the same way the live execute path does. */
 function detectBodyType(body: string): ResponseState["bodyType"] {
 	try {
@@ -189,6 +217,7 @@ export function responseFromRunResult(
 			// A stream that failed still received whatever it received before it
 			// did, and the node is written on the failure path too.
 			...eventsFromTrace(trace),
+			...scriptsFromTrace(trace),
 		};
 	}
 
@@ -229,5 +258,6 @@ export function responseFromRunResult(
 		timing: timingFromTrace(trace, result.latencyMs),
 		restoredFrom,
 		...eventsFromTrace(trace),
+		...scriptsFromTrace(trace),
 	};
 }

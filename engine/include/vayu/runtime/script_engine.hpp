@@ -161,6 +161,32 @@ struct ScriptContext {
     const nlohmann::json* iteration_data = nullptr;
 
     /**
+     * @brief The completed stream's events, read as `pm.response.events`, or
+     *        null where the run was not a stream (issue #575).
+     *
+     * Points at the very `events` node the run's trace stores
+     * (`vayu::http::stream_trace_node`): `items`, `totalEvents` and
+     * `eventsTruncated`. Sharing the node rather than copying it out is what
+     * makes "the markers a script reads mirror the markers the trace records"
+     * true by construction instead of by a second cap applied here - a script
+     * that refuses to assert over a partial list and a reader looking at the
+     * stored trace must never disagree about whether the list is partial.
+     *
+     * Null is the ordinary case and reaches the script as an **absent**
+     * `pm.response.events`, not an empty array - the same rule
+     * `iteration_data` follows, for the same reason: "this response was not a
+     * stream" is a fact a script may branch on, and an empty array would make
+     * it indistinguishable from a stream that produced nothing.
+     *
+     * A streaming run's post-request script is the only caller that sets it:
+     * it runs once, after the stream has terminated, over the bounded stored
+     * list. The sandbox is synchronous with no event loop (see
+     * `ABSENT_GLOBALS` in script_types.cpp), so a live per-event callback is
+     * not a feature that was skipped - it is one the runtime cannot have.
+     */
+    const nlohmann::json* response_events = nullptr;
+
+    /**
      * @brief Whether this script runs inside an ordered sequence, and may
      *        therefore redirect it (issue #355).
      *

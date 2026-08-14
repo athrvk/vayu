@@ -101,7 +101,10 @@ struct ContextData {
     /// The row `pm.iterationData` reads, or null - see
     /// `ScriptContext::iteration_data`, which owns the rationale.
     const nlohmann::json* iteration_data = nullptr;
-    bool has_error                       = false;
+    /// The stream's stored `events` trace node `pm.response.events` reads, or
+    /// null - see `ScriptContext::response_events`, which owns the rationale.
+    const nlohmann::json* response_events = nullptr;
+    bool has_error                        = false;
     std::string error_message;
 
     /**
@@ -3073,6 +3076,71 @@ JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JS
     return list;
 }
 
+/**
+ * Bind the streamed response's event list and its two markers onto
+ * `pm.response`, or bind nothing at all (issue #575).
+ *
+ * Three properties, one arrival set: `events` is the bounded stored list,
+ * `totalEvents` is how many the stream actually received, and
+ * `eventsTruncated` says whether the two differ. A script that asserts over a
+ * prefix believing it has the whole stream is the failure this exists to make
+ * impossible, so the markers are never optional decoration - they are bound
+ * with the list or the list is not bound.
+ *
+ * Absent, not empty, for a non-stream response: `typeof pm.response.events`
+ * separates "not a stream" from "a stream with no events", which an empty
+ * array could not. Same rule as `pm.request.body` and `pm.iterationData`.
+ *
+ * Entries are `{ event, id?, data, dataTruncated? }`. The stored node spells
+ * the upstream id `sourceId` because a relay frame id sits beside it there;
+ * inside a script there is only one id to mean, so it is `id`. `id` is absent
+ * when the origin sent none, rather than `""` - a script comparing ids must be
+ * able to see that there was nothing to compare.
+ */
+void install_response_events (JSContext* ctx, JSValue response, const nlohmann::json* node) {
+    if (!node || !node->is_object ()) {
+        return;
+    }
+
+    JSValue events       = JS_NewArray (ctx);
+    uint32_t index       = 0;
+    const auto items     = node->find ("items");
+    const bool has_items = items != node->end () && items->is_array ();
+    if (has_items) {
+        for (const auto& item : *items) {
+            if (!item.is_object ()) {
+                continue;
+            }
+            JSValue entry = JS_NewObject (ctx);
+            const std::string name = item.value ("event", std::string ("message"));
+            JS_SetPropertyStr (ctx, entry, "event",
+            JS_NewStringLen (ctx, name.data (), name.size ()));
+            const std::string data = item.value ("data", std::string ());
+            JS_SetPropertyStr (ctx, entry, "data",
+            JS_NewStringLen (ctx, data.data (), data.size ()));
+            if (const auto source_id = item.find ("sourceId");
+                source_id != item.end () && source_id->is_string ()) {
+                const auto id = source_id->get<std::string> ();
+                JS_SetPropertyStr (
+                ctx, entry, "id", JS_NewStringLen (ctx, id.data (), id.size ()));
+            }
+            // Per-event truncation is disclosed in band exactly as the stored
+            // node discloses it: an event whose data is a prefix must never
+            // read as a whole one.
+            if (item.value ("dataTruncated", false)) {
+                JS_SetPropertyStr (ctx, entry, "dataTruncated", JS_NewBool (ctx, 1));
+            }
+            JS_SetPropertyUint32 (ctx, events, index++, entry);
+        }
+    }
+
+    JS_SetPropertyStr (ctx, response, "events", events);
+    JS_SetPropertyStr (ctx, response, "totalEvents",
+    JS_NewInt64 (ctx, node->value ("totalEvents", static_cast<int64_t> (index))));
+    JS_SetPropertyStr (ctx, response, "eventsTruncated",
+    JS_NewBool (ctx, node->value ("eventsTruncated", false) ? 1 : 0));
+}
+
 void setup_pm_response (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -3143,6 +3211,12 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_NewCFunction (ctx, js_response_cookies, "cookies", 0), JS_UNDEFINED,
         JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom (ctx, cookies_atom);
+
+        // pm.response.events / totalEvents / eventsTruncated - a streamed run
+        // only. Bound together or not at all: a script that reads the list
+        // without its markers cannot tell a whole stream from its prefix, and
+        // the three are one fact about one arrival set.
+        install_response_events (ctx, response, data->response_events);
 
         // pm.response.to.have chain for Postman-compatible assertions
         JS_SetPropertyStr (ctx, response, "to", create_response_to_object (ctx));
@@ -5192,6 +5266,7 @@ class ScriptEngine::Impl {
         ctx_data.iteration           = ctx.iteration;
         ctx_data.iteration_count     = ctx.iteration_count;
         ctx_data.iteration_data      = ctx.iteration_data;
+        ctx_data.response_events     = ctx.response_events;
         // Both per-execution: the capability is this caller's, and the request
         // budget starts full for every script rather than carrying over
         // through a pooled context.

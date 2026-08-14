@@ -34,6 +34,14 @@ export function generatePython(
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
 	const notes = [...prepared.notes];
+	// Said rather than emitted: this target's stock idiom buffers the whole
+	// body, so a snippet that looked like the request would simply hang on an
+	// endless stream. A stated limit is better than a command that stalls.
+	if (prepared.stream) {
+		notes.push(
+			"The response is an event stream. This snippet buffers it; pass stream=True to requests and iterate response.iter_lines() to consume events as they arrive."
+		);
+	}
 	const lines: string[] = ["import requests", ""];
 
 	const headers: Array<[string, string]> = [];
