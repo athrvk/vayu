@@ -586,9 +586,23 @@ than assuming all eight are there and flat:
 
 | Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps `dataRowCount` alone. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `general_engine`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
+The `request` node also carries **`rawRequest`** - the message the transfer actually put on the
+wire, the same string the live [`POST /execute`](api-reference.md#post-execute) response returns
+(issue #348). It is what a restored raw-request view reads, because it is the only copy that
+carries what libcurl added on our own behalf: the [cookie jar](architecture.md#cookie-jar)'s
+`Cookie` line, `Accept`, the real `Content-Length`. Values in it are **not redacted**, matching
+the live field's contract - it lands in the same node that already stores the resolved
+`Authorization` header among `request.headers` (see [Security](architecture.md#security) for why
+this column and `runs.config_snapshot` answer differently). The key is **absent** on a step that
+sent nothing (a `pm.execution.skipRequest()`) and on every row written before #348, so a reader
+falls back to rebuilding the view from `method`/`url`/`headers`/`body` -
+`restore-response.ts`'s `sentSide` is that reader.
+
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
-not live in SQLite forever. When a body is cut, its node gains two keys:
+not live in SQLite forever. `request.rawRequest` ends with that same body and is capped to the
+same limit, **body half only** - its header block is never cut, being the reason the field is
+stored at all. When a body is cut, its node gains two keys:
 
 | Key on `request` / `response` | Type | Meaning |
 |-------------------------------|------|---------|

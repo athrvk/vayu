@@ -110,6 +110,98 @@ describe("responseFromRunResult", () => {
 		);
 	});
 
+	/**
+	 * The gap issue #348 closed. `trace.request.headers` is the *composed* map
+	 * and libcurl attaches the jar's cookies itself, so a view rebuilt from it
+	 * can never show a `Cookie` line - the same request showed one right after
+	 * a send and none after a reload. The engine now stores the wire message it
+	 * already had; this asserts the restored view reads it rather than
+	 * rebuilding around it.
+	 *
+	 * Mutation-check: drop the `request.rawRequest ||` preference in `sentSide`
+	 * and this fails on the missing `Cookie` line.
+	 */
+	it("prefers the stored wire message, cookies and all, over rebuilding one", () => {
+		const wire =
+			"GET /users HTTP/1.1\r\n" +
+			"Host: api.example.test\r\n" +
+			"Accept: application/json\r\n" +
+			"Cookie: session=abc123\r\n" +
+			"\r\n";
+
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "GET",
+						url: "https://api.example.test/users",
+						headers: { Accept: "application/json" },
+						rawRequest: wire,
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toBe(wire);
+		// The composed map is still what the Headers tab shows - it is the
+		// engine's own sent record, and the two panes are not the same view.
+		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });
+	});
+
+	/**
+	 * A row written before #348 has no `rawRequest`, and a restored run from
+	 * last week has to keep rendering. Same fallback shape as
+	 * `trace.response?.httpVersion`.
+	 */
+	it("falls back to rebuilding when the row predates the stored wire message", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "GET",
+						url: "https://api.example.test/users",
+						headers: { Accept: "application/json" },
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toBe(
+			"GET /users HTTP/1.1\r\n" +
+				"Host: api.example.test\r\n" +
+				"Accept: application/json\r\n" +
+				"\r\n"
+		);
+	});
+
+	/**
+	 * A failed transfer stores the engine's synthesized message rather than
+	 * nothing, so the preference has to hold on the error path too - that path
+	 * builds its `ResponseState` through a different branch of
+	 * `responseFromRunResult`, and only `sentSide` is shared.
+	 */
+	it("prefers the stored wire message on a run that never reached a server", () => {
+		const restored = responseFromRunResult(
+			sample({
+				statusCode: 0,
+				trace: {
+					request: {
+						method: "GET",
+						url: "https://nope.example.test/",
+						headers: {},
+						rawRequest: "GET / HTTP/2\r\nHost: nope.example.test\r\n\r\n",
+					},
+					error_type: "CONNECTION_FAILED",
+					error_message: "Could not connect to host",
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toBe("GET / HTTP/2\r\nHost: nope.example.test\r\n\r\n");
+	});
+
 	it("returns null when the run result carries neither an exchange nor an error", () => {
 		expect(responseFromRunResult(undefined)).toBeNull();
 		expect(responseFromRunResult(sample({ trace: { dnsMs: 4.2 } }))).toBeNull();

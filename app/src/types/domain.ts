@@ -500,6 +500,20 @@ export interface RunResultTrace {
 		bodyTruncated?: boolean;
 		/** The request body's original byte length, present only when truncated. */
 		bodyBytes?: number;
+		/**
+		 * The wire message the transfer actually sent - `build_result_trace`'s
+		 * copy of the live response's `rawRequest` (issue #348), stored so a
+		 * restored raw view shows the `Cookie` line the jar attached instead of
+		 * rebuilding a session-less request from `headers`. Absent on rows
+		 * written before that change and on a step that sent nothing, which is
+		 * why `restore-response.ts`'s `sentSide` keeps `buildRawRequest` as its
+		 * fallback. Values are **not redacted** - same contract as the live
+		 * field (see `docs/engine/api-reference.md`).
+		 *
+		 * Its body half is capped at `maxTraceBodyBytes` like `body` is; the
+		 * header block is never cut.
+		 */
+		rawRequest?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;

@@ -2049,6 +2049,16 @@ final hop, matching the response beside it. A transfer that failed before
 sending anything (DNS failure, connection refused) has no frame to read, and
 falls back to a request synthesized from what was composed.
 
+**The stored trace keeps the same string**, as `trace_data.request.rawRequest`
+on the design run this execute created (and on each step row of a scenario run)
+- so reopening a run shows the raw request the live view showed, cookies
+included, rather than one rebuilt from `headers` that never had them. Its body
+half is capped at `maxTraceBodyBytes` like `body` is, and the key is absent both
+on a step that sent nothing and on rows written before the field existed; see
+[db-schema](db-schema.md#results). The redaction posture is the live field's,
+for the reason [Security](architecture.md#security) records: a trace is the
+record of what was sent.
+
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
 `"test"` for the post-request one) and `level` is the `console.*` method that was

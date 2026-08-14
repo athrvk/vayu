@@ -14,6 +14,7 @@
 
 #include <ostream>
 #include <sstream>
+#include <string_view>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/form_body.hpp"
@@ -205,11 +206,48 @@ void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
     }
 }
 
+// Cap the body half of a request node's `rawRequest`, leaving the header block
+// whole.
+//
+// The stored wire message ends with the same body the `body` field beside it
+// carries, so the cap has to reach it too - otherwise a 50 MB POST lands in
+// `trace_data` in full through the field that was added last, which is the
+// bloat `cap_node_body` exists to bound.
+//
+// The cut is body-side only, and deliberately so: the header block is the whole
+// reason the field is stored (it carries the `Cookie` line libcurl attached),
+// and a `maxTraceBodyBytes` smaller than the headers would eat exactly what a
+// reader opened the tab for. A message with no blank line has no body to cap
+// and is left alone.
+//
+// No separate truncation marker: the cut lands at the same limit `cap_node_body`
+// applies to the node's own `body`, so the `bodyTruncated`/`bodyBytes` pair it
+// records already tells a reader this trace's request body is a stored slice.
+void cap_node_raw_request (nlohmann::json& node, size_t max_body_bytes) {
+    if (!node.is_object () || !node.contains ("rawRequest") ||
+    !node["rawRequest"].is_string ()) {
+        return;
+    }
+    const std::string raw = node["rawRequest"].get<std::string> ();
+
+    static constexpr std::string_view HEADER_BODY_SEPARATOR = "\r\n\r\n";
+    const size_t separator = raw.find (HEADER_BODY_SEPARATOR);
+    if (separator == std::string::npos) {
+        return;
+    }
+
+    const size_t body_start = separator + HEADER_BODY_SEPARATOR.size ();
+    if (raw.size () - body_start > max_body_bytes) {
+        node["rawRequest"] = raw.substr (0, body_start + max_body_bytes);
+    }
+}
+
 } // namespace
 
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
     if (trace.contains ("request")) {
         cap_node_body (trace["request"], max_body_bytes);
+        cap_node_raw_request (trace["request"], max_body_bytes);
     }
     if (trace.contains ("response")) {
         cap_node_body (trace["response"], max_body_bytes);
