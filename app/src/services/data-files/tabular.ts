@@ -21,7 +21,12 @@
  *
  * The tokenizer's only job is text to a grid. Header rules, blank rows and
  * typing all live in `index.ts`, where they are shared with the JSON paths.
+ * The one exception is the unterminated quote, which is a *grammar* fault and
+ * so has to be caught here - by the time the grid exists it looks like an
+ * ordinary tall cell.
  */
+
+import { DataFileError } from "./errors";
 
 /** One physical row of cells, before any header or shape rule is applied. */
 export type TabularRow = string[];
@@ -36,12 +41,22 @@ export type TabularRow = string[];
  *
  * The final row is emitted even without a trailing newline, and a single
  * trailing newline does not produce a phantom empty row.
+ *
+ * Text that ends while a quoted field is still open throws: emitting the cell
+ * anyway would fold every remaining line into it, and a one-column file makes
+ * that invisible to the ragged-row check downstream. A stray unclosed quote is
+ * the most ordinary way a CSV is corrupted, so it is named, with the line the
+ * quote opened on.
  */
 export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 	const rows: TabularRow[] = [];
 	let row: TabularRow = [];
 	let field = "";
 	let inQuotes = false;
+	// Counted over *physical* lines, newlines inside quotes included, so the
+	// reported line is the one the user sees in an editor.
+	let line = 1;
+	let quoteOpenedOnLine = 0;
 	// Distinguishes "no cell has started on this row" from "the current cell is
 	// empty", which is what keeps a trailing newline from adding a row while a
 	// line reading `a,` still yields two cells.
@@ -70,6 +85,7 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 					inQuotes = false;
 				}
 			} else {
+				if (char === "\n") line++;
 				field += char;
 			}
 			continue;
@@ -77,6 +93,7 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 
 		if (char === '"' && field === "") {
 			inQuotes = true;
+			quoteOpenedOnLine = line;
 			rowStarted = true;
 			continue;
 		}
@@ -89,15 +106,23 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 			// CRLF and a lone CR both end the row; the LF is consumed with it so
 			// a Windows export does not gain an empty row between every line.
 			if (text[i + 1] === "\n") i++;
+			line++;
 			endRow();
 			continue;
 		}
 		if (char === "\n") {
+			line++;
 			endRow();
 			continue;
 		}
 		rowStarted = true;
 		field += char;
+	}
+
+	if (inQuotes) {
+		throw new DataFileError(
+			`The file ends inside a quoted value that starts on line ${quoteOpenedOnLine}. Everything after it would be read as one cell - close the quote, or double it ("") if the value contains one.`
+		);
 	}
 
 	if (rowStarted || field !== "" || row.length > 0) endRow();

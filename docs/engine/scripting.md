@@ -870,9 +870,9 @@ was none; the app's step list shows that rather than an empty `200`.
 ## Data rows (`pm.iterationData`)
 
 A collection run can be given a set of rows - a CSV, TSV, JSON or JSONL file the
-app parses and sends inline on the run payload as `scenario.data`. **Row
-`i % rows` binds to iteration `i`**, and that row is what `pm.iterationData`
-reads:
+app parses and sends inline on the run payload as `scenario.data`
+([the file format](../app/data-driven-runs.md)). **Row `i % rows` binds to
+iteration `i`**, and that row is what `pm.iterationData` reads:
 
 ```javascript
 pm.iterationData.get('username');  // this iteration's value for that column

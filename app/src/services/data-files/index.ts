@@ -28,9 +28,11 @@
  * rather than leaving it to be discovered.
  *
  * Everything here is pure: text in, rows out. Reading the file is the caller's
- * (a `FileReader`, exactly as `ImportModal` does it - no Electron dialog IPC).
+ * (a `FileReader`, exactly as `ImportModal` does it - no Electron dialog IPC),
+ * and turning its bytes into that text is {@link decodeDataFile}'s.
  */
 
+import { DataFileError } from "./errors";
 import { isBlankRow, parseDelimited } from "./tabular";
 
 export type DataFileFormat = "csv" | "tsv" | "json" | "jsonl";
@@ -53,18 +55,6 @@ export interface ParsedDataFile {
 	 * never blocks a run, and anything that should is thrown instead.
 	 */
 	warnings: string[];
-}
-
-/**
- * A file that cannot become rows. The message names the row, line or column at
- * fault, because "could not parse" sends the user back to a file they have no
- * reason to suspect a particular part of.
- */
-export class DataFileError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "DataFileError";
-	}
 }
 
 const EXTENSION_FORMATS: Record<string, DataFileFormat> = {
@@ -198,12 +188,73 @@ function columnsOf(rows: DataFileRow[]): string[] {
 	return columns;
 }
 
+/** How many columns a single warning names before it summarises the rest. */
+const UNEVEN_COLUMNS_NAMED = 5;
+
+/**
+ * Warn about columns the union has but some rows lack.
+ *
+ * A CSV cannot get here - a short row is already a refusal - but JSON and JSONL
+ * have no header, so `columnsOf` unions the keys and a file whose row 7 dropped
+ * `email` previews a full `email` column. Without this, the run starts, six
+ * iterations execute, and iteration 7 dies on the engine's missing-column error:
+ * exactly the late refusal the picker exists to move earlier.
+ *
+ * A warning and not an error, because an uneven column may simply go
+ * unreferenced - only the collection's steps know whether `{{data.email}}` is
+ * ever written, and this layer does not see them.
+ */
+function warnAboutUnevenColumns(columns: string[], rows: DataFileRow[], warnings: string[]): void {
+	const uneven = columns
+		.map((column) => ({
+			column,
+			missing: rows.reduce((n, row) => (column in row ? n : n + 1), 0),
+		}))
+		.filter((c) => c.missing > 0);
+	if (uneven.length === 0) return;
+
+	for (const { column, missing } of uneven.slice(0, UNEVEN_COLUMNS_NAMED)) {
+		warnings.push(
+			`Column "${column}" is missing from ${missing} of ${rows.length} ${rows.length === 1 ? "row" : "rows"} - a {{data.${column}}} token will fail on those iterations.`
+		);
+	}
+	const rest = uneven.length - UNEVEN_COLUMNS_NAMED;
+	if (rest > 0) {
+		warnings.push(
+			`${rest} more ${rest === 1 ? "column is" : "columns are"} missing from some rows.`
+		);
+	}
+}
+
+/**
+ * A `.json` file that is really JSON Lines is a common mistake, and the raw
+ * `JSON.parse` error about it ("Unexpected non-whitespace character after JSON
+ * at position 12") names nothing a user can act on. If the first line alone is
+ * a row object, say so.
+ */
+function looksLikeJsonLines(text: string): boolean {
+	const firstLine = text.split(/\r?\n/).find((line) => line.trim() !== "");
+	if (firstLine === undefined) return false;
+	try {
+		const parsed: unknown = JSON.parse(firstLine);
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+	} catch {
+		return false;
+	}
+}
+
 function parseJsonArray(text: string, warnings: string[]): ParsedDataFile {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
 	} catch (e) {
-		throw new DataFileError(`The file is not valid JSON: ${(e as Error).message}`);
+		throw new DataFileError(
+			`The file is not valid JSON: ${(e as Error).message}${
+				looksLikeJsonLines(text)
+					? " - this looks like JSON Lines, one object per line. Rename it .jsonl or .ndjson."
+					: ""
+			}`
+		);
 	}
 	if (!Array.isArray(parsed)) {
 		throw new DataFileError(
@@ -211,7 +262,9 @@ function parseJsonArray(text: string, warnings: string[]): ParsedDataFile {
 		);
 	}
 	const rows = parsed.map((row, index) => assertRowObject(row, `Row ${index}`));
-	return { format: "json", columns: columnsOf(rows), rows, warnings };
+	const columns = columnsOf(rows);
+	warnAboutUnevenColumns(columns, rows, warnings);
+	return { format: "json", columns, rows, warnings };
 }
 
 function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
@@ -237,7 +290,9 @@ function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
 	if (blanks > 0) {
 		warnings.push(`Skipped ${blanks} blank ${blanks === 1 ? "line" : "lines"}.`);
 	}
-	return { format: "jsonl", columns: columnsOf(rows), rows, warnings };
+	const columns = columnsOf(rows);
+	warnAboutUnevenColumns(columns, rows, warnings);
+	return { format: "jsonl", columns, rows, warnings };
 }
 
 /**
@@ -290,3 +345,5 @@ export function resolveIterationCount(
 }
 
 export { parseDelimited } from "./tabular";
+export { DataFileError } from "./errors";
+export { decodeDataFile, type DecodedDataFile } from "./decode";

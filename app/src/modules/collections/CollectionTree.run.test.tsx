@@ -59,6 +59,9 @@ vi.mock("@/queries", () => ({
 		isPending: false,
 		error: null,
 	}),
+	// The run dialog's data-file picker reads the engine's two data caps
+	// through `useDataFileLimits`; no case here picks a file.
+	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
 vi.mock("@/services", () => ({
