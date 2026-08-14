@@ -34,6 +34,7 @@ const listInboxes = vi.fn();
 const listMockIssuers = vi.fn();
 const startInbox = vi.fn();
 const stopInbox = vi.fn();
+const deleteInbox = vi.fn();
 const startMockIssuer = vi.fn();
 const stopMockIssuer = vi.fn();
 const updateMockIssuer = vi.fn();
@@ -48,6 +49,7 @@ vi.mock("@/services/api", async (importOriginal) => {
 			listMockIssuers: () => listMockIssuers(),
 			startInbox: (...a: unknown[]) => startInbox(...a),
 			stopInbox: (...a: unknown[]) => stopInbox(...a),
+			deleteInbox: (...a: unknown[]) => deleteInbox(...a),
 			startMockIssuer: (...a: unknown[]) => startMockIssuer(...a),
 			stopMockIssuer: (...a: unknown[]) => stopMockIssuer(...a),
 			updateMockIssuer: (...a: unknown[]) => updateMockIssuer(...a),
@@ -65,6 +67,7 @@ function inbox(overrides: Partial<Inbox> = {}): Inbox {
 		port: 41234,
 		running: true,
 		loopback: true,
+		captureCount: 0,
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};
@@ -105,6 +108,7 @@ beforeEach(() => {
 	listMockIssuers.mockReset().mockResolvedValue([]);
 	startInbox.mockReset().mockResolvedValue(inbox());
 	stopInbox.mockReset().mockResolvedValue(inbox({ running: false }));
+	deleteInbox.mockReset().mockResolvedValue({ inboxId: "inbox_a", capturesDeleted: 0 });
 	startMockIssuer.mockReset().mockResolvedValue({
 		issuerId: "iss_new",
 		issuerUrl: "http://127.0.0.1:42001",
@@ -133,10 +137,17 @@ describe("the services drawer", () => {
 		expect(screen.getByText(/mint your own OAuth 2.0 tokens locally/i)).toBeInTheDocument();
 	});
 
-	it("starts an inbox from the group's own affordance", async () => {
+	/*
+	 * "New inbox", not "Start inbox": the affordance always mints a new listener,
+	 * and beside a stopped row the old Play icon and wording read as "restart
+	 * that one" - which it never did (issue #553).
+	 */
+	it("mints a new inbox from the group's own affordance, and says that is what it does", async () => {
+		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "Start inbox" }));
+		fireEvent.click(await screen.findByRole("button", { name: "New inbox" }));
 		await waitFor(() => expect(startInbox).toHaveBeenCalled());
+		expect(screen.queryByRole("button", { name: /^start inbox$/i })).not.toBeInTheDocument();
 	});
 });
 
@@ -199,6 +210,39 @@ describe("an inbox row", () => {
 		renderPanel();
 		expect(await screen.findByText("Stopped")).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: /stop inbox/i })).not.toBeInTheDocument();
+	});
+
+	/*
+	 * The row a stopped inbox most needs. Stopping is terminal by design - the
+	 * record and its captures stay readable until the engine exits - so without
+	 * a delete here every stopped inbox was permanent, and the group's own
+	 * affordance minted more (issue #553).
+	 */
+	it("deletes a stopped inbox, which nothing else here can remove", async () => {
+		listInboxes.mockResolvedValue([inbox({ running: false })]);
+		renderPanel();
+		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
+	});
+
+	it("asks before destroying captures, naming what would be lost", async () => {
+		listInboxes.mockResolvedValue([inbox({ captureCount: 37 })]);
+		renderPanel();
+
+		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		expect(await screen.findByText(/37 recorded requests/i)).toBeInTheDocument();
+		expect(deleteInbox).not.toHaveBeenCalled();
+
+		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
+	});
+
+	it("deletes a running inbox too - the engine stops it on the way", async () => {
+		listInboxes.mockResolvedValue([inbox()]);
+		renderPanel();
+		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
+		expect(stopInbox).not.toHaveBeenCalled();
 	});
 });
 

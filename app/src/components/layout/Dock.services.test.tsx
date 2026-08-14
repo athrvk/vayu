@@ -62,6 +62,7 @@ function inbox(overrides: Partial<Inbox> = {}): Inbox {
 		port: 41234,
 		running: true,
 		loopback: true,
+		captureCount: 0,
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};

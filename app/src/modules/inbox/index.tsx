@@ -26,7 +26,7 @@
  */
 
 import { useState } from "react";
-import { Copy, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
+import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import {
 	Badge,
 	Button,
@@ -50,6 +50,8 @@ import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 import { CaptureDetail } from "./CaptureDetail";
+import { DeleteInboxDialog } from "./DeleteInboxDialog";
+import { useInboxDeletion } from "./useInboxDeletion";
 import { useInboxLive } from "./useInboxLive";
 
 function formatTime(ms: number): string {
@@ -84,6 +86,32 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 				{capture.bodyBytes} bytes{capture.query ? ` · ?${capture.query}` : ""}
 			</span>
 		</button>
+	);
+}
+
+/**
+ * The tab's half of inbox deletion (issue #553).
+ *
+ * Its own component so the hook is never called for an inbox that does not
+ * exist - `InboxView` returns its empty state before there is one to delete.
+ * It passes the capture total it already has, which the record's polled count
+ * can lag behind by up to a services poll.
+ */
+function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: number }) {
+	const deletion = useInboxDeletion(inbox, listedTotal);
+	return (
+		<>
+			<Button
+				variant="outline"
+				size="sm"
+				onClick={deletion.requestDelete}
+				disabled={deletion.isDeleting}
+			>
+				<Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+				Delete
+			</Button>
+			<DeleteInboxDialog deletion={deletion} />
+		</>
 	);
 }
 
@@ -242,13 +270,17 @@ export default function InboxView() {
 				)}
 
 				<div className="ml-auto flex items-center gap-2">
+					{/* Eraser, not the bin: Delete sits beside it and takes the
+					    whole inbox, and two adjacent destructive controls sharing one
+					    icon is how a listener gets deleted by someone meaning to empty
+					    the list. */}
 					<Button
 						variant="outline"
 						size="sm"
 						onClick={() => clearCaptures.mutate(inbox.inboxId)}
 						disabled={clearCaptures.isPending || captures.length === 0}
 					>
-						<Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+						<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
 						Clear
 					</Button>
 					{inbox.running ? (
@@ -267,6 +299,13 @@ export default function InboxView() {
 							Start new
 						</Button>
 					)}
+					{/* Last, and the only control here that ends the record rather than
+					    the listener. Before it, a stopped inbox could only be left
+					    behind (issue #553). */}
+					<DeleteInboxButton
+						inbox={inbox}
+						listedTotal={capturesQuery.data?.pagination.total ?? 0}
+					/>
 				</div>
 			</header>
 

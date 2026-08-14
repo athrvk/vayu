@@ -601,6 +601,13 @@ export interface Inbox {
 	running: boolean;
 	/** False when the inbox is reachable beyond this machine - badge it. */
 	loopback: boolean;
+	/**
+	 * How many captures this inbox is holding - what deleting it would destroy.
+	 *
+	 * Up to one services poll old, so a surface that also holds the capture list
+	 * knows better; see `capturesAtRisk` in `modules/inbox/useInboxDeletion.ts`.
+	 */
+	captureCount: number;
 	response: InboxCannedResponse;
 }
 
@@ -649,6 +656,12 @@ export interface InboxCapturesResponse {
 export interface ClearInboxCapturesResponse {
 	inboxId: string;
 	cleared: number;
+}
+
+/** What `DELETE /inbox/:id` reports it destroyed - record plus captures. */
+export interface DeleteInboxResponse {
+	inboxId: string;
+	capturesDeleted: number;
 }
 
 // OAuth 2.0 mock issuer API (issue #479). Engine-process state like an inbox:

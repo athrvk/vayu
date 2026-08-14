@@ -116,7 +116,7 @@ Resizable sidebar (220–480px default, per view). The single left navigation fo
 | **`collections`** | `CollectionTree` (hierarchical collections + requests) | add collection, add request, import |
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
 | **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
-| **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers) | start inbox, new issuer |
+| **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers) | new inbox, new issuer |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
@@ -475,8 +475,10 @@ The receiving half of the app (issue #480): an engine-hosted listener that recor
 sent to it, so building a webhook consumer needs no cloud tunnel. Engine contract:
 `docs/engine/api-reference.md` (Webhook Inbox).
 
-- `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop, the URL with a copy control, the
-  running/live badge, the inbox switcher, the capture list and the detail pane. The switcher is a
+- `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop/clear/delete, the URL with a copy
+  control, the running/live badge, the inbox switcher, the capture list and the detail pane. Clear
+  (Eraser) empties the capture list; Delete (bin) ends the inbox itself, so the two adjacent
+  destructive controls do not share an icon. The switcher is a
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
   what is already on screen) and ordered by port - the engine lists in map order, which is not
   stable across polls, and a switcher whose entries move under the pointer is worse than none. An
@@ -503,6 +505,12 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   reflects the stop inside the close instead of on the next `SERVICES_POLL_INTERVAL_MS` poll. A
   refetch that failed leaves the last good list, which still says running - a blip must still
   retry.
+- `useInboxDeletion.ts` / `DeleteInboxDialog.tsx` - deleting an inbox (issue #553), shared with the
+  Services drawer so the two surfaces cannot disagree about when the confirmation appears or what it
+  says is at stake. An inbox holding captures confirms and names their count; one holding none is
+  deleted outright. `capturesAtRisk` takes the higher of the record's polled `captureCount` and the
+  capture total a surface already holds - the record lags a services poll behind the live stream, so
+  trusting it alone would let the tab destroy a capture it is displaying.
 - `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
 
 **One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
@@ -536,9 +544,12 @@ both activate it.
 - `ServicesPanel.tsx` - the view. Two groups today, **Webhook inboxes** and **OAuth issuers**, each
   with its own start affordance in the group header and a one-sentence empty state saying what the
   service would give you - this drawer is also the features' discoverability. An inbox row opens the
-  inbox *tab* (the drawer lists, the tab shows the captures); an issuer row expands in place to its
-  token and authorize URLs, a copy for the HS256 signing key, its configuration in one line, and a
-  live `failureMode` switch. Mock servers (#481) get a third group when they exist - deliberately no
+  inbox *tab* (the drawer lists, the tab shows the captures) and carries copy, stop (running rows
+  only) and **delete** (every row); an issuer row expands in place to its token and authorize URLs,
+  a copy for the HS256 signing key, its configuration in one line, and a live `failureMode` switch.
+  The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
+  new listener, and as a Play labelled "Start inbox" beside a stopped row it read as "restart that
+  one", which nothing here does (issue #553). Mock servers (#481) get a third group when they exist - deliberately no
   placeholder until then.
 - `NewIssuerDialog.tsx` - the start form: token lifetime, failure mode (plus its delay), and a JSON
   claims box. Everything is validated before it is sent, because the engine refuses a bad config

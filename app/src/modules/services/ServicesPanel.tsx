@@ -27,7 +27,7 @@
  */
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Copy, KeyRound, Play, Plus, Square } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
 import { DrawerPanel, EmptyState, ErrorState, TruncatedText } from "@/components/shared";
 import {
 	Badge,
@@ -49,6 +49,8 @@ import {
 import { useTabsStore, useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import type { Inbox, MockIssuer, MockIssuerFailureMode } from "@/types";
+import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
+import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
 import { FAILURE_MODE_LABELS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
 
@@ -78,7 +80,7 @@ interface ServiceRowProps {
 	activateLabel: string;
 	running: boolean;
 	children: React.ReactNode;
-	/** Trailing controls: copy, stop. */
+	/** Trailing controls: copy, stop, delete. */
 	actions?: React.ReactNode;
 	leading?: React.ReactNode;
 }
@@ -124,7 +126,7 @@ function ServiceRow({
 
 interface ServiceGroupProps {
 	title: string;
-	/** The group's own start affordance - "Start inbox", "New issuer…". */
+	/** The group's own create affordance - "New inbox", "New issuer…". */
 	action?: React.ReactNode;
 	children: React.ReactNode;
 }
@@ -157,54 +159,72 @@ function InboxRow({ inbox }: { inbox: Inbox }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
 	const stopInbox = useStopInboxMutation();
+	// No capture list on this surface, so the record's own count is all it knows.
+	const deletion = useInboxDeletion(inbox);
 
 	return (
-		<ServiceRow
-			running={inbox.running}
-			// The tab is a singleton pointed at one inbox, so the row hands it the
-			// id it names - without it the tab showed whichever inbox it had last
-			// (in practice the first), and the row's label was a lie (issue #554).
-			onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
-			activateLabel={`Open inbox on port ${inbox.port}`}
-			actions={
-				<>
-					<TooltipIconButton
-						label="Copy inbox URL"
-						icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-						onClick={() => copy(inbox.url, "Inbox URL")}
-					/>
-					{inbox.running && (
+		<>
+			<ServiceRow
+				running={inbox.running}
+				// The tab is a singleton pointed at one inbox, so the row hands it the
+				// id it names - without it the tab showed whichever inbox it had last
+				// (in practice the first), and the row's label was a lie (issue #554).
+				onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
+				activateLabel={`Open inbox on port ${inbox.port}`}
+				actions={
+					<>
 						<TooltipIconButton
-							label={`Stop inbox on port ${inbox.port}`}
-							icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
-							disabled={stopInbox.isPending}
-							onClick={() =>
-								stopInbox.mutate(inbox.inboxId, {
-									onError: (error) =>
-										showToast(
-											error instanceof Error
-												? error.message
-												: "Could not stop the inbox",
-											"error"
-										),
-								})
-							}
+							label="Copy inbox URL"
+							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+							onClick={() => copy(inbox.url, "Inbox URL")}
 						/>
-					)}
-				</>
-			}
-		>
-			<TruncatedText className="font-mono text-xs">{inbox.url}</TruncatedText>
-			{/* An inbox reachable beyond this machine is badged wherever it is
-			    named - the standing reminder that the engine's non-loopback
-			    confirmation was given. */}
-			{!inbox.loopback && (
-				<Badge variant="chip" className="bg-status-warning-fill text-primary-foreground">
-					{inbox.bind}
-				</Badge>
-			)}
-			{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
-		</ServiceRow>
+						{inbox.running && (
+							<TooltipIconButton
+								label={`Stop inbox on port ${inbox.port}`}
+								icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+								disabled={stopInbox.isPending}
+								onClick={() =>
+									stopInbox.mutate(inbox.inboxId, {
+										onError: (error) =>
+											showToast(
+												error instanceof Error
+													? error.message
+													: "Could not stop the inbox",
+												"error"
+											),
+									})
+								}
+							/>
+						)}
+						{/* On every row, running or not. A stopped inbox had no way off
+						    this list at all before: it stayed until the engine process
+						    exited, while the group's affordance minted more of them
+						    (issue #553). Deleting a running one stops it on the way. */}
+						<TooltipIconButton
+							label={`Delete inbox on port ${inbox.port}`}
+							icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+							disabled={deletion.isDeleting}
+							onClick={deletion.requestDelete}
+						/>
+					</>
+				}
+			>
+				<TruncatedText className="font-mono text-xs">{inbox.url}</TruncatedText>
+				{/* An inbox reachable beyond this machine is badged wherever it is
+				    named - the standing reminder that the engine's non-loopback
+				    confirmation was given. */}
+				{!inbox.loopback && (
+					<Badge
+						variant="chip"
+						className="bg-status-warning-fill text-primary-foreground"
+					>
+						{inbox.bind}
+					</Badge>
+				)}
+				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
+			</ServiceRow>
+			<DeleteInboxDialog deletion={deletion} />
+		</>
 	);
 }
 
@@ -413,9 +433,16 @@ export default function ServicesPanel() {
 				<ServiceGroup
 					title="Webhook inboxes"
 					action={
+						/* "New inbox", matching the issuer group's "New issuer", and a
+						   Plus rather than a Play: this always mints a *new* listener,
+						   and beside a stopped row a Play labelled "Start inbox" read
+						   as "restart that one" (issue #553). Restart is deliberately
+						   not a thing an inbox does - delete it and start another,
+						   since the captures are what a restart would have to decide
+						   about and this way the user decides instead. */
 						<TooltipIconButton
-							label="Start inbox"
-							icon={<Play className="h-3.5 w-3.5" aria-hidden="true" />}
+							label="New inbox"
+							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
 							disabled={startInbox.isPending}
 							onClick={start}
 						/>

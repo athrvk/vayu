@@ -73,6 +73,25 @@ export function useStopInboxMutation() {
 	});
 }
 
+/**
+ * Delete an inbox and the captures it holds (issue #553).
+ *
+ * Unlike a stop, there is nothing left to read afterwards - so the captures
+ * cache entry is dropped rather than invalidated. An invalidation would refetch
+ * an id the engine now answers `404` for, leaving an error state describing a
+ * list that no longer exists.
+ */
+export function useDeleteInboxMutation() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (inboxId: string) => apiService.deleteInbox(inboxId),
+		onSuccess: (_result, inboxId) => {
+			queryClient.removeQueries({ queryKey: queryKeys.inbox.captures(inboxId) });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.list() });
+		},
+	});
+}
+
 export function useUpdateInboxResponseMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
