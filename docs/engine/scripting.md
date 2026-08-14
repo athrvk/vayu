@@ -922,10 +922,11 @@ script throws rather than answering with the finished run's row.
 **To put the row into the request itself, use `{{data.column}}` instead.** A
 script reads `pm.iterationData` *after* its step's request was composed, so it
 cannot change where the request goes without editing `pm.request` by hand. The
-reserved `data.*` namespace does that directly: a URL, header or body carrying
-`{{data.email}}` has it substituted with the iteration's row immediately before
-the send. It is a namespace, not a variable scope - it cannot be read or
-written through `pm.variables` - and it is documented under
+reserved `data.*` namespace does that directly: a URL, header, body, form field
+or **credential** carrying `{{data.email}}` has it substituted with the
+iteration's row immediately before the send. It is a namespace, not a variable
+scope - it cannot be read or written through `pm.variables` - and it is
+documented under
 [Scenario runs](api-reference.md#scenario-runs).
 
 ### It is read-only

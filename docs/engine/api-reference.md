@@ -2598,7 +2598,8 @@ as a smaller one:
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the transport's own body cap would drop the connection instead of explaining itself. |
-| A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. |
+| A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
+| A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -2681,10 +2682,24 @@ the ordinary unknown-name rule instead.
 **Where a token participates.** Exhaustively: the **URL** (path and query
 string alike, so a token in a stored request's params reaches it once they are
 joined into the URL), every **header name** and **header value**, the **raw
-body**, and **both halves of every form field** (`x-www-form-urlencoded` and
-`form-data`). Nothing else - in particular a `{{data.*}}` written into an
-**auth** field is not bound today, and script text is never interpolated at all
-(a script reads its row through `pm.iterationData`).
+body**, **both halves of every form field** (`x-www-form-urlencoded` and
+`form-data`), and the **credential fields** of the request's auth - the bearer
+**token**, basic auth's **username** and **password**, and an api key's **name**
+and **value**. Script text is never interpolated at all (a script reads its row
+through `pm.iterationData`).
+
+> **Credentials bind before they are encoded.** A credentials file behind basic
+> auth is the canonical data-driven run, so a step whose credentials carry a
+> `{{data.*}}` keeps them unresolved in the plan and applies its auth *per
+> iteration* instead: the row is bound first, and only then does the username
+> and password become one base64 `Authorization`, or an api key become a
+> percent-encoded query parameter. Every other step still resolves its auth once,
+> when the plan is composed.
+>
+> **OAuth 2.0 is the exception, and it is refused rather than ignored.** Its
+> token is acquired once, when the run is planned, so no iteration exists for a
+> row to reach - a `{{data.*}}` anywhere in an `oauth2` config is a `400` at
+> `POST /runs` naming the token, with or without a data set.
 
 **What a cell renders as.** The CSV/TSV path produces only strings, so the first
 row is the ordinary case; a JSON or JSONL file may carry any type:

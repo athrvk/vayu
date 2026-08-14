@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <variant>
 
 namespace vayu::http {
@@ -55,6 +56,49 @@ UnsupportedAuth>;
  * expected to be resolved app-side; if it reaches here it is treated as no-op.
  */
 Auth parse_auth (const nlohmann::json& auth);
+
+/**
+ * @brief Visit every credential string a parsed auth carries, in a fixed order.
+ *
+ * The fields a user types a secret into, and so the fields a `{{data.column}}`
+ * token may legitimately sit in: the bearer token, both halves of basic auth,
+ * and an api key's name and value. Driving the same variant `apply_auth`
+ * consumes is what keeps the two from drifting - a new mode is a compile error
+ * here as well, through the same static_assert.
+ *
+ * `@p auth` may be `const`; the visitor then receives `const std::string&`.
+ *
+ * **OAuth 2.0 is deliberately absent.** Its config is not a credential the
+ * request carries but the input to a token acquisition that happens once, when
+ * a plan is resolved; there is no per-iteration acquisition for a row to reach,
+ * so a data token in it is refused rather than walked
+ * (`core::resolve_scenario`, issue #591).
+ */
+template <typename AuthRef, typename Visit>
+void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
+    std::visit (
+    [&visit] (auto& a) {
+        using T = std::decay_t<decltype (a)>;
+
+        if constexpr (std::is_same_v<T, BearerAuth>) {
+            visit (a.token);
+        } else if constexpr (std::is_same_v<T, BasicAuth>) {
+            visit (a.username);
+            visit (a.password);
+        } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
+            visit (a.key);
+            visit (a.value);
+        } else if constexpr (std::is_same_v<T, NoAuth> || std::is_same_v<T, OAuth2Auth>) {
+            // Nothing to bind: no credential at all, and an oauth2 config is
+            // handled where it is refused rather than here.
+        } else {
+            static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
+            // digest / aws / ntlm are stored but never executed, so a token in
+            // one binds nothing and reaches no wire.
+        }
+    },
+    auth);
+}
 
 /**
  * @brief Outcome of resolving auth onto a request.

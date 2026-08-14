@@ -396,11 +396,17 @@ const ScenarioExecution& execution) {
         request.cookie_lines            = vu->cookies;
 
         // The data pass, per iteration and before the send. A step carrying no
-        // `{{data.*}}` token has an empty template and is not walked at all,
+        // `{{data.*}}` token has empty templates and is not walked at all,
         // which is what makes a token-free plan free per iteration.
-        if (!step.data_template.empty () && row) {
+        if (row && !(step.data_template.empty () && step.auth_template.empty ())) {
             auto bound = apply_data_template (
             request, step.data_template, execution.data_rows[*row], *row);
+            if (bound.ok) {
+                // Then the credentials, which is why the plan left them typed:
+                // they have to carry the row's values *before* `apply_auth`
+                // base64-encodes them onto the request (issue #591).
+                bound = bind_step_auth (request, step, execution.data_rows[*row], *row);
+            }
             if (!bound.ok) {
                 // Nothing goes on the wire, so nothing will ever complete for
                 // this step: this path owns the whole accounting a completion

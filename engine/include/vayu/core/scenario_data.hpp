@@ -61,6 +61,17 @@
  * binds a row per iteration per virtual user (issue #449). Both modes drive the
  * same template rather than one keeping a scanner of its own, so a step binds
  * identically however it is executed.
+ *
+ * ## Credentials are bound before they are encoded
+ *
+ * A credentials file driving basic auth is the canonical data-driven run, and
+ * the fields above cannot serve it: `apply_auth` collapses a username and a
+ * password into one base64 `Authorization` value, so a `{{data.user}}` resolved
+ * into the plan is already unreadable by the time anything scans the built
+ * request - it went out as base64 of the literal token text, silently (issue
+ * #591). `tokenize_auth_fields` therefore splits the *typed* credentials
+ * instead, and a step that carries one binds them and applies its auth per
+ * iteration rather than at plan time.
  */
 
 #include <cstddef>
@@ -70,6 +81,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -168,6 +180,48 @@ struct StepDataTemplate {
 const StepDataTemplate& tmpl,
 const nlohmann::json& row,
 size_t row_index);
+
+/**
+ * Split @p auth's credential strings around their `{{data.column}}` tokens.
+ *
+ * The same splitter the request walk drives, over `walk_auth_credentials`
+ * instead of `walk_bindable_fields` - one field list per walk, and the join
+ * below drives the identical walk, so neither can address a credential the
+ * other does not.
+ *
+ * Every credential binds **verbatim**: a token, a username and an api key are
+ * plain text, not a document with a quoting rule, and what escaping they need
+ * (base64 for basic auth, percent-encoding for an api key in the query) is
+ * `apply_auth`'s to add *after* the bind - which is the whole point of binding
+ * before the auth is applied.
+ *
+ * Empty for the ordinary step, whose credentials carry no token and whose auth
+ * is therefore resolved into the plan once, as it always was.
+ */
+[[nodiscard]] StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth);
+
+/**
+ * Join @p tmpl's credentials against @p row, in place on @p auth.
+ *
+ * @p auth must be the parsed auth @p tmpl was split from, for the same reason
+ * `apply_data_template` needs the request it was split from: a credential is
+ * addressed by its position in the walk.
+ */
+[[nodiscard]] DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
+const StepDataTemplate& tmpl,
+const nlohmann::json& row,
+size_t row_index);
+
+/**
+ * The first `{{data.column}}` in any string of @p value, recursively, written
+ * back with its braces - or `nullopt` when it carries none.
+ *
+ * For a block that has no bind to offer at all and must therefore refuse rather
+ * than defer: an OAuth 2.0 config, whose token is acquired once when the plan
+ * is resolved. Object *keys* are not scanned - a column name where a config key
+ * belongs is not a placement anyone means.
+ */
+[[nodiscard]] std::optional<std::string> first_data_token_in (const nlohmann::json& value);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
