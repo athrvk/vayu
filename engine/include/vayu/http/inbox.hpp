@@ -236,25 +236,14 @@ class InboxManager {
     /**
      * Claim the single live-stream slot for an inbox.
      *
-     * Each SSE stream occupies one cpp-httplib pool thread for as long as it is
-     * open (the server uses the default task queue), so an unbounded number of
-     * watchers on one inbox is an unbounded number of parked threads.
-     *
-     * A claim held by a **provably dead** stream is taken over rather than
-     * refused (issue #506): the holder only notices its socket died when the
-     * next write fails, up to one poll interval later, so a client reconnecting
-     * inside that window used to meet a 409 - which `EventSource` treats as
-     * fatal, killing the stream for good. A holder that has not written
-     * successfully for `LIVE_CLAIM_STALE_INTERVALS` poll intervals is not
-     * writing, so its slot is given to the newcomer. Every live holder writes
-     * at least a keep-alive each interval, so a genuinely live stream is never
-     * evicted and a second concurrent watcher is still refused.
+     * The rule itself - one holder, takeover of a provably dead one, a token
+     * an evicted holder cannot act on - belongs to `LiveClaimSlot`, which each
+     * inbox owns one of; these three methods add only the inbox lookup and the
+     * window. That window is `LIVE_CLAIM_STALE_INTERVALS` of *this* inbox's
+     * poll interval, so a slower cadence widens it with no second decision.
      *
      * Returns the claim, or nullopt when the inbox does not exist or is watched
-     * by a live stream. The claim identifies *which* claim the caller holds:
-     * an evicted holder passing its own token to `note_live_write` /
-     * `release_live` is a no-op there, so it can neither keep its successor's
-     * clock alive nor release its successor's slot.
+     * by a live stream.
      */
     std::optional<LiveClaim> try_claim_live (const std::string& inbox_id);
 
@@ -264,20 +253,19 @@ class InboxManager {
      *
      * False means the claim was taken over while this stream was not writing -
      * the caller must end its stream without releasing, since the slot now
-     * belongs to someone else.
+     * belongs to someone else. A deleted inbox reports false for the same
+     * reason: there is no slot left to hold.
      */
     bool note_live_write (const std::string& inbox_id, LiveClaim claim);
 
-    /// Release @p claim's slot. A no-op when @p claim is no longer the holder.
+    /// Release @p claim's slot. A no-op when @p claim is no longer the holder,
+    /// or when the inbox is gone.
     void release_live (const std::string& inbox_id, LiveClaim claim);
 
     private:
     struct Inbox;
     std::mutex mutex_;
     std::map<std::string, std::unique_ptr<Inbox>> inboxes_;
-    /// Source of claim tokens; monotonic so a token is never reused, and
-    /// therefore never mistaken for a later claim on the same inbox.
-    LiveClaim next_live_claim_ = 1;
 
     void teardown_locked (Inbox& inbox);
 };
