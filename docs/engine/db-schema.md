@@ -89,6 +89,7 @@ Stores individual HTTP request definitions.
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
+| `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -121,19 +122,29 @@ placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
-**follow_redirects / max_redirects / http_version** - the request's execution
-options, surfaced in the request builder's **Settings** tab and serialized as
-`followRedirects` / `maxRedirects` / `httpVersion`. They mirror the executable
-`vayu::Request` fields of the same name, so the saved options are what
-`POST /execute` and `POST /runs` apply - `http_version` governs both Send and
-load test alike; there is no separate per-run protocol control.
+**follow_redirects / max_redirects / http_version / stream** - the request's
+execution options, surfaced in the request builder's **Settings** tab and
+serialized as `followRedirects` / `maxRedirects` / `httpVersion` / `stream`. The
+first three mirror the executable `vayu::Request` fields of the same name, so the
+saved options are what `POST /execute` and `POST /runs` apply - `http_version`
+governs both Send and load test alike; there is no separate per-run protocol
+control.
 
-All three columns are `NOT NULL` with a `DEFAULT`, which is what lets
+**`stream` has no `vayu::Request` mirror**, deliberately (issue #574). It is not
+a transfer option the executor applies but a choice of *which delivery path*
+runs, read off the `POST /execute` payload by `read_stream_flag`; the column is
+where the app's Event stream toggle persists so the choice survives a tab switch
+and a bulk import carries it. `payload_from_stored` does not add it to a by-id
+composition, so an MCP `run_request` against a stream-flagged row still gets a
+buffered send rather than a `202` it cannot read - `pm.response.events` and the
+MCP stream consume arrive with issue #575.
+
+All four columns are `NOT NULL` with a `DEFAULT`, which is what lets
 `sync_schema()` add them to an existing, non-empty `requests` table - a
 `NOT NULL` column with no default cannot be added by `ALTER TABLE ADD COLUMN`.
-Rows written before the columns existed backfill to `1` / `10` / `'auto'`, i.e.
-the behaviour they already had (a row predating this column could only ever
-have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
+Rows written before the columns existed backfill to `1` / `10` / `'auto'` / `0`,
+i.e. the behaviour they already had (a row predating `http_version` could only
+ever have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
 clamped to `0..100` on write.
 
 **http_version** stores `Request::http_version` (the *requested* protocol, an

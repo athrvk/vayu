@@ -53,6 +53,9 @@ const state = { status: 200 };
 vi.mock("@/modules/request-builder/context", () => ({
 	useRequestBuilderContext: () => ({
 		isExecuting: false,
+		// For its id alone - the pane selects a live event stream against the
+		// request on screen (issue #574), and this one has none.
+		request: { id: null },
 		response: {
 			status: state.status,
 			statusText: state.status === 0 ? "Error" : "OK",

@@ -57,6 +57,42 @@ export function timingFromTrace(
 	};
 }
 
+/**
+ * The stored `events` node, as the response pane's four fields (issue #574).
+ *
+ * Only a **streaming** design run's trace carries this node
+ * (`stream_trace_node`, engine/src/http/sse_stream.cpp), so an absent one is
+ * what tells the Events tab "this was not a stream" from "this stream produced
+ * nothing" - hence `undefined` rather than an empty list.
+ *
+ * `totalEvents` and `eventsTruncated` are carried across rather than recomputed
+ * from `items.length`: the engine compared the true total against what it
+ * stored, and a reader here does not know what the cap was when the run
+ * happened. Recomputing would quietly turn a truncated list into a complete
+ * one.
+ *
+ * Rows written before the node existed simply have no key, so every field
+ * defaults - the same discipline the `rawRequest` and `httpVersion` fallbacks
+ * above follow.
+ */
+export function eventsFromTrace(
+	trace: NonNullable<RunResultSample["trace"]>
+): Pick<ResponseState, "events" | "totalEvents" | "eventsTruncated" | "streamEndReason"> {
+	const node = trace.events;
+	if (!node) return {};
+
+	const items = Array.isArray(node.items) ? node.items : [];
+	return {
+		events: items,
+		totalEvents: typeof node.totalEvents === "number" ? node.totalEvents : items.length,
+		eventsTruncated: node.eventsTruncated === true,
+		// Absent rather than guessed: a stream whose stored node names no reason
+		// gets no termination banner, which is honest. Every node the current
+		// engine writes carries one.
+		...(node.endReason && { streamEndReason: node.endReason }),
+	};
+}
+
 /** Sniff a body's render mode the same way the live execute path does. */
 function detectBodyType(body: string): ResponseState["bodyType"] {
 	try {
@@ -150,6 +186,9 @@ export function responseFromRunResult(
 			restoredFrom,
 			errorCode: trace.error_type,
 			errorMessage,
+			// A stream that failed still received whatever it received before it
+			// did, and the node is written on the failure path too.
+			...eventsFromTrace(trace),
 		};
 	}
 
@@ -189,5 +228,6 @@ export function responseFromRunResult(
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
 		restoredFrom,
+		...eventsFromTrace(trace),
 	};
 }

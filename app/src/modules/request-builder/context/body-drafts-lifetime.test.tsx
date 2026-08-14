@@ -41,7 +41,7 @@ import { render, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import { switchBody } from "../utils/body-drafts";
-import type { AutoContentType, RequestState } from "../types";
+import type { AutoHeader, RequestState } from "../types";
 
 // The provider is wired to variable resolution, the save manager and several
 // TanStack Query hooks. None of them matter to a ref's lifetime.
@@ -161,9 +161,9 @@ describe("drafts across a tab switch", () => {
  * screen, so a panel-local record is gone by the next mode change - and then
  * nothing removes the header, which is the bug the record exists to fix.
  */
-const ADDED: AutoContentType = { requestId: "req_a", rowId: "row_1", value: "application/json" };
+const ADDED: AutoHeader = { requestId: "req_a", rowId: "row_1", value: "application/json" };
 
-const contentType: { read: AutoContentType | null } = { read: null };
+const contentType: { read: AutoHeader | null } = { read: null };
 
 function ContentTypeStandIn({ write }: { write?: boolean }) {
 	const { getAutoContentType, setAutoContentType } = useRequestBuilderContext();

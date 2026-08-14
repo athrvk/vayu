@@ -34,7 +34,9 @@ vi.mock("@/components/ui/code-editor", () => ({
 // The viewer reads its response from context; feed it a fixed one per render.
 let response: ResponseState | null = null;
 vi.mock("../../context", () => ({
-	useRequestBuilderContext: () => ({ response, isExecuting: false }),
+	// `request` for its id alone - the pane selects a live event stream against
+	// the request on screen (issue #574), and these responses have none.
+	useRequestBuilderContext: () => ({ response, isExecuting: false, request: { id: null } }),
 }));
 
 // Imported after the mocks above are registered.

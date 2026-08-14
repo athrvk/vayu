@@ -60,6 +60,18 @@ export interface ResponseStatusBarProps {
 	 * now. See the age chip below for why the difference is shown.
 	 */
 	restoredFrom?: { runId?: string; at: string };
+	/**
+	 * A stream is open on this response, and how many events have arrived
+	 * (issue #574).
+	 *
+	 * On the bar rather than only in the Events tab because a stream has no
+	 * completed exchange to describe: `time` and `size` say nothing while it
+	 * runs, and without this the band would announce a 200 and then look
+	 * finished for as long as the stream kept going. Omitted entirely on a
+	 * response that is not a live stream - a chip present on every response is a
+	 * chip nobody reads.
+	 */
+	streaming?: { events: number };
 	className?: string;
 }
 
@@ -72,6 +84,7 @@ export function ResponseStatusBar({
 	httpVersionDowngraded,
 	receivedAt,
 	restoredFrom,
+	streaming,
 	className,
 }: ResponseStatusBarProps) {
 	/*
@@ -132,6 +145,26 @@ export function ResponseStatusBar({
 				statusText={statusText}
 				className="h-5 px-1.5 text-[10px]"
 			/>
+
+			{/*
+			 * A live stream, and its running count. First after the status chip
+			 * because while it is there it is the thing that is still happening -
+			 * the numbers to its right describe an exchange that has not finished.
+			 * The pulsing dot is the same mark the load-test button uses, for the
+			 * same reason: no static colour says "live".
+			 */}
+			{streaming && (
+				<div className="flex items-center gap-1.5 text-xs text-status-success-text">
+					<span
+						aria-hidden="true"
+						className="size-1.5 rounded-full bg-status-success animate-pulse"
+					/>
+					<span className="tabular-nums">
+						Streaming - {streaming.events.toLocaleString()}{" "}
+						{streaming.events === 1 ? "event" : "events"}
+					</span>
+				</div>
+			)}
 
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">

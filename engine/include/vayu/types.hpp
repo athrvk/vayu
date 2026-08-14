@@ -841,6 +841,14 @@ struct Request {
     bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
     int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
     std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
+    // Consume this request's response as a `text/event-stream` (issue #574).
+    // Stored rather than chosen per send, because it changes what Send *is* for
+    // this endpoint - the execution model, not one run's options - and a toggle
+    // that reset on every tab switch would have to be re-found every time. The
+    // executable `vayu::Request` has no mirror of it: `POST /execute` reads the
+    // flag off the payload (`read_stream_flag`), and the by-id compose path
+    // deliberately does not send it - see `payload_from_stored`.
+    bool stream = false; // INTEGER NOT NULL DEFAULT 0
     int64_t created_at;
     int64_t updated_at;
 };

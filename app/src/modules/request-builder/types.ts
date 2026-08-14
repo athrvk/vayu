@@ -30,6 +30,8 @@ import type {
 	ResolvedVariable,
 	ResponseTiming,
 	ScriptPart,
+	StreamEndReason,
+	StreamEvent,
 	VariableOrigin,
 	VariableScope,
 } from "@/types";
@@ -93,19 +95,23 @@ export interface BodyConfig {
 }
 
 /**
- * The Content-Type row a body mode added on its way in, so leaving that mode can
- * take it back. Written by `BodyPanel` through the context accessors; the rule
- * that reads it is in `components/RequestTabs/panels/body/content-type.ts`.
+ * A header row a *setting* added on its way in, so leaving that setting can
+ * take it back. Two settings own one each: the body mode's `Content-Type`
+ * (written by `BodyPanel`) and the Event stream toggle's `Accept` (written by
+ * `SettingsPanel`). Both go through the context accessors; the rule that reads
+ * them is in `utils/auto-header.ts`.
  *
  * By **row id**, not by value: `Content-Type: application/json` typed by the
- * user and the identical row this panel wrote look the same and must not be
+ * user and the identical row a panel wrote look the same and must not be
  * treated the same. `value` is kept beside it so a row the user has since
- * retyped is recognised as no longer ours.
+ * retyped is recognised as no longer ours. The header *name* is not stored -
+ * each record lives in a slot dedicated to one header, and the rule is told
+ * which name it is working on.
  *
  * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
  * record belonging to another request is dropped rather than applied.
  */
-export interface AutoContentType {
+export interface AutoHeader {
 	requestId: string | null;
 	rowId: string;
 	value: string;
@@ -146,6 +152,16 @@ export interface RequestState {
 	maxRedirects: number;
 	/** Protocol to negotiate. See `Request.httpVersion` for the full rationale. */
 	httpVersion: HttpVersion;
+	/**
+	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
+	 *
+	 * Not a {@link BodyMode}: the request's body semantics are untouched, and
+	 * a stream is a GET as often as it is a POST. What it changes is the
+	 * *execution model* - `POST /execute` answers `202 {runId, eventsUrl}`
+	 * instead of the exchange, and the events arrive over
+	 * `GET /runs/:id/events`.
+	 */
+	stream: boolean;
 }
 
 // ============================================================================
@@ -234,7 +250,42 @@ export interface ResponseState {
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 	preScriptError?: string;
 	postScriptError?: string;
+	/**
+	 * The events a streaming request received (issue #574), bounded by the
+	 * engine's `sseMaxStoredEvents`. Set only by `restore-response.ts`, from the
+	 * stored trace's `events` node - a live stream's rows arrive over the relay
+	 * and live in `execution-events-store` until the run finishes and this
+	 * replaces them.
+	 *
+	 * Absent, not empty, on a non-streaming response: the Events tab tells "this
+	 * was not a stream" from "this stream produced nothing" by which of the two
+	 * it is looking at.
+	 */
+	events?: StreamEvent[];
+	/**
+	 * Every event the run received, which is **not** `events.length` when the
+	 * stored list was capped. Carried so a reader is never invited to count the
+	 * rows and call that the total.
+	 */
+	totalEvents?: number;
+	/** The stored list is a prefix - the engine's own comparison, not derived. */
+	eventsTruncated?: boolean;
+	/** Why the stream ended. Named, always, rather than left to be inferred. */
+	streamEndReason?: StreamEndReason;
 }
+
+/**
+ * What starting a stream answered (issue #574).
+ *
+ * A union rather than "the run, or null": a stream that was refused has a real
+ * failure to show - the engine names why, and `stream` combined with a script
+ * or with `transient` is a `400` a user needs to read - so the failure travels
+ * as the response it should render, not as an absence the caller has to invent
+ * a message for. `null` stays reserved for "there was nothing to send".
+ */
+export type StreamStartResult =
+	| { ok: true; runId: string; eventsUrl: string }
+	| { ok: false; response: ResponseState };
 
 // ============================================================================
 // Context Types
@@ -285,8 +336,18 @@ export interface RequestBuilderContextValue {
 	 * record has to outlive the panel, or the header outlives the mode that
 	 * needed it, which is the bug it exists to fix.
 	 */
-	getAutoContentType: () => AutoContentType | null;
-	setAutoContentType: (auto: AutoContentType | null) => void;
+	getAutoContentType: () => AutoHeader | null;
+	setAutoContentType: (auto: AutoHeader | null) => void;
+
+	/**
+	 * The same, for the `Accept: text/event-stream` row the Event stream toggle
+	 * writes (issue #574). A second slot rather than one keyed by header name:
+	 * there are exactly two settings that own a header, each owns a different
+	 * one, and a map would let a caller read the wrong record by passing the
+	 * wrong string.
+	 */
+	getAutoAccept: () => AutoHeader | null;
+	setAutoAccept: (auto: AutoHeader | null) => void;
 
 	// Response State
 	response: ResponseState | null;
@@ -313,6 +374,21 @@ export interface RequestBuilderContextValue {
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;
 	isExecuting: boolean;
+	/**
+	 * A stream this builder started is still open (issue #574).
+	 *
+	 * Distinct from `isExecuting`, which the streaming send clears the moment
+	 * the engine answers `202`: there is no request in flight any more, and the
+	 * response pane must render rather than sit on a spinner while the events
+	 * arrive. This is what turns Send into Stop and what the status band reads.
+	 */
+	isStreaming: boolean;
+	/**
+	 * Stop the stream this builder started, at the engine
+	 * (`POST /runs/:id/stop`). A no-op when nothing is streaming - the button
+	 * that calls it is only rendered while one is.
+	 */
+	stopStream: () => Promise<void>;
 	isSaving: boolean;
 	hasUnsavedChanges: boolean;
 	saveStatus: "idle" | "pending" | "saving" | "saved" | "error";

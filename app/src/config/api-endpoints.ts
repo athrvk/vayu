@@ -119,6 +119,12 @@ export const API_ENDPOINTS = {
 	// Real-time stats (SSE, memory-based, faster)
 	METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
+	// A streaming request's own events have no constant here on purpose
+	// (issue #574): `POST /execute` answers a stream with the `eventsUrl` it
+	// created, and `useExecutionEvents` opens exactly that. A second spelling
+	// of the path in this file would be a copy that can disagree with the
+	// engine's own answer, and the answer is the one that is right.
+
 	// Time-series metrics (JSON, paginated). Always JSON - no format param.
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
 		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,

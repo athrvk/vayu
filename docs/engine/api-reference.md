@@ -745,16 +745,17 @@ then `id` - the same contract `GET /collections` has for collections. See
     "followRedirects": true,
     "maxRedirects": 10,
     "httpVersion": "auto",
+    "stream": false,
     "updatedAt": 1234567890,
     "createdAt": 1234567890
   }
 ]
 ```
 
-`followRedirects` / `maxRedirects` / `httpVersion` are the request's stored
-execution options. They are always present in the response: a request saved
-before these columns existed reads back as the engine defaults
-(`true` / `10` / `"auto"`), which is the behaviour it already had.
+`followRedirects` / `maxRedirects` / `httpVersion` / `stream` are the request's
+stored execution options. They are always present in the response: a request
+saved before these columns existed reads back as the engine defaults
+(`true` / `10` / `"auto"` / `false`), which is the behaviour it already had.
 `httpVersion` is `"auto"` | `"http1.1"` | `"http2"` - what was *requested*, not
 what was negotiated; see [POST /execute](#post-execute) for the negotiated
 value on a response.
@@ -789,6 +790,7 @@ entry.
   "followRedirects": true,
   "maxRedirects": 10,
   "httpVersion": "auto",
+  "stream": false,
   "createdAt": 1234567890,
   "updatedAt": 1234567890
 }
@@ -822,10 +824,20 @@ the null-vs-absent rule.
                                       // omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
-  "httpVersion": "auto"              // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
+  "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
                                       // from the "defaultHttpVersion" config entry
+  "stream": false                    // Optional, consume the response as an event stream.
+                                      // Default false - see below
 }
 ```
+
+**`stream` is the saved half of [`POST /execute`'s `stream`](#post-execute)**
+(issue #574). It records that *this endpoint* is a `text/event-stream`, which is
+a property of the endpoint rather than of one send, so the app's Event stream
+toggle persists here and a bulk import carries it. The engine never acts on the
+stored value by itself: `POST /execute` reads the flag off the payload it is
+given, and the by-id compose path deliberately does not add it, so an existing
+caller that composes by id keeps getting a buffered send.
 
 **Response:** The created request object, carrying the engine-generated `id`.
 
@@ -855,11 +867,11 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 `order` appends in the destination - see [Ordering](#ordering). An update that
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
-`PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects`
-leaves the stored values untouched; sending `null` resets them to `true` / `10`.
-A non-boolean
-`followRedirects` or a non-integer `maxRedirects` is ignored rather than
-rejected. `maxRedirects` is clamped to `0..100` on the way in.
+`PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
+`stream` leaves the stored values untouched; sending `null` resets them to
+`true` / `10` / `false`. A non-boolean
+`followRedirects` or `stream`, or a non-integer `maxRedirects`, is ignored rather
+than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored

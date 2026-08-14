@@ -571,6 +571,35 @@ There is deliberately no `stopMonitoring` on the service and no `clear` on the s
 
 **Non-persisted** (fresh per session).
 
+#### `execution-events-store.ts` - Live Streaming-Request Events
+
+The live half of a **streaming design request** (issue #574): `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the upstream's own events arrive over `GET /runs/:id/events`. `modules/request-builder/hooks/useExecutionEvents` pushes each relayed frame in here and the response pane's Events tab reads it, so the rows survive switching to another request tab and back - the same split, and the same reason, as `scenario-run-store` above.
+
+It holds **one** stream: a second Send is what ends the first, so two are not a state the builder can reach. It also holds the **request** the stream belongs to, not only the run - one `RequestBuilderProvider` serves every request tab, so "are these rows mine?" is a question about the request on screen and a run id alone cannot answer it. Both the provider and the viewer select against `requestId`, which is what stops a stream started elsewhere appearing under a request that never streamed.
+
+**State:**
+```typescript
+{
+  requestId: string | null      // Whose Send started this stream
+  runId: string | null          // The run the engine created; what a Stop names
+  eventsUrl: string | null      // Engine-relative, exactly as the answer gave it
+  open: StreamOpen | null       // What the stream connected to (the `open` frame)
+  events: StreamEvent[]         // Received so far, oldest first
+  totalEvents: number | null    // The engine's own count, from the `complete` frame
+  isStreaming: boolean
+  endReason: StreamEndReason | null
+  error: string | null          // A transport failure on the relay
+}
+```
+
+**Every write is addressed to a run, and a write for a run the store is not holding is dropped.** Not defensive tidiness: the relay replays its retained ring on connect, so a frame from a stream that has already been replaced can still arrive on a socket that has not finished closing - and those rows landing under the send that replaced it is the worst failure here, because such a timeline looks real.
+
+`totalEvents` is set only from the `complete` frame (falling back to what arrived, so it is never left null once a stream has ended). While the stream runs, the arrived-so-far count is `events.length`; reporting anything else would be a total nothing had counted. It matters because it is **not** the row count once a list has been capped, and the Events tab's truncation disclosure compares the two.
+
+Once the run reaches a terminal status the **stored** trace is the complete record: the provider fetches the report, `restore-response.ts` maps its `events` node onto `ResponseState`, and the tab reads that instead - the two-sources-one-list handoff `ScenarioRunView` makes. What lives here is only ever what arrived on the socket, bounded by the engine's retained ring rather than by anything this side.
+
+**Non-persisted** (fresh per session).
+
 #### `import-modal-store.ts` - Import Modal UI
 
 Simple modal state for the collection import dialog.
@@ -1401,24 +1430,36 @@ body (GraphQL's body is already in the `graphql` bucket). It carries its own
 `requestId` for the drafts' reason, and `ownVariablesDraft` - not a second reset
 in the provider - is what drops one belonging to another request.
 
-### `RequestBuilderContext` - the added Content-Type row
+### `RequestBuilderContext` - the headers a setting added
 
 ```typescript
-getAutoContentType: () => AutoContentType | null
-setAutoContentType: (auto: AutoContentType | null) => void
+getAutoContentType: () => AutoHeader | null
+setAutoContentType: (auto: AutoHeader | null) => void
+getAutoAccept: () => AutoHeader | null
+setAutoAccept: (auto: AutoHeader | null) => void
 ```
 
-Which `Content-Type` row a body mode added on its way in, so that leaving the
-mode can take it back. GraphQL is sent as a JSON envelope and genuinely needs
+Which header row a *setting* added on its way in, so that leaving the setting
+can take it back. Two settings own one each: the body mode's `Content-Type`
+(written by `BodyPanel`) and the Event stream toggle's
+`Accept: text/event-stream` (written by `SettingsPanel`, issue #574). Two named
+slots rather than one map keyed by header name - there are exactly two, each
+owns a different header, and a map would let a caller read the wrong record by
+passing the wrong string.
+
+GraphQL is sent as a JSON envelope and genuinely needs
 `Content-Type: application/json`, so `BodyPanel` appends one - but nothing
 removed it, so a single visit to GraphQL left the header on the request for
 good, including after switching back to `none`, which sends no body at all.
 
 The record is `{ requestId, rowId, value }` and the rule that reads it is
-`switchContentType` in
-`modules/request-builder/components/RequestTabs/panels/body/content-type.ts`,
-called once per mode change: it removes the remembered row when the new mode
-does not need that same header, then adds whatever the new mode does need.
+`switchAutoHeader` in `modules/request-builder/utils/auto-header.ts`, called
+once per change: it removes the remembered row when the new setting does not
+need that same header, then adds whatever the new setting does need - both
+halves in one pass over one array, because two `updateField("headers", …)`
+calls would compute the second against the array they had before the first.
+`panels/body/content-type.ts` is now just the body-mode half: which
+`Content-Type` a mode requires, plus the delegation.
 
 Three things it is deliberate about:
 
@@ -1430,10 +1471,10 @@ Three things it is deliberate about:
   serves every request tab, and row ids are not unique across a duplicated
   request.
 
-In the provider rather than in `BodyPanel` for the drafts' reason and one of its
+In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
-by the next mode change - and then nothing removes the header, which is the bug
-the record exists to fix. Ephemeral, like the drafts: what is persisted is the
+by the next change - and then nothing removes the header, which is the bug the
+record exists to fix. Ephemeral, like the drafts: what is persisted is the
 header row itself, in `request.headers`.
 
 ### `useSaveManager()` - Auto-Save Manager

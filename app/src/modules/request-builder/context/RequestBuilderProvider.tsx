@@ -30,14 +30,18 @@ import {
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 } from "@/queries";
-import { useSessionStore, useResponseStore } from "@/stores";
+import { useSessionStore, useResponseStore, useExecutionEventsStore } from "@/stores";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
+import { apiService } from "@/services";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/queries";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
-	AutoContentType,
+	AutoHeader,
 	RequestState,
 	ResponseState,
 	RequestTab,
+	StreamStartResult,
 	VariableInfo,
 	VariableScope,
 	RequestBuilderContextValue,
@@ -45,6 +49,7 @@ import type {
 import { resolveAuthForSend } from "../utils/auth-resolution";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
+import { useExecutionEvents } from "../hooks/useExecutionEvents";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -74,6 +79,15 @@ interface RequestBuilderProviderProps {
 	legacyPostScript?: string;
 	collectionId?: string | null;
 	onExecute?: (request: RequestState) => Promise<ResponseState | null>;
+	/**
+	 * Send a stream-flagged request (issue #574). Separate from `onExecute`
+	 * because the two answers are different things, not two shapes of one: a
+	 * buffered send returns the exchange, a streamed one returns the run to
+	 * follow and there is no exchange yet. A builder given no handler cannot
+	 * stream - the History run view's detached copy is one - and Send falls back
+	 * to the buffered path rather than doing nothing.
+	 */
+	onExecuteStream?: (request: RequestState) => Promise<StreamStartResult | null>;
 	onSave?: (request: RequestState) => Promise<void>;
 	onStartLoadTest?: (request: RequestState) => void;
 }
@@ -88,6 +102,7 @@ export default function RequestBuilderProvider({
 	legacyPostScript,
 	collectionId,
 	onExecute,
+	onExecuteStream,
 	onSave,
 	onStartLoadTest,
 }: RequestBuilderProviderProps) {
@@ -259,10 +274,24 @@ export default function RequestBuilderProvider({
 	 * drafts: the record names its own request and `switchContentType` drops one
 	 * belonging to another.
 	 */
-	const autoContentTypeRef = useRef<AutoContentType | null>(null);
+	const autoContentTypeRef = useRef<AutoHeader | null>(null);
 	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
-	const setAutoContentType = useCallback((auto: AutoContentType | null) => {
+	const setAutoContentType = useCallback((auto: AutoHeader | null) => {
 		autoContentTypeRef.current = auto;
+	}, []);
+
+	/*
+	 * The `Accept: text/event-stream` row the Event stream toggle added, so
+	 * turning the toggle off can take it back (issue #574). Here rather than in
+	 * `SettingsPanel` for the reason above it: Radix unmounts an inactive
+	 * `TabsContent`, so a panel-local record is gone the moment you look at
+	 * another tab - and then the header outlives the setting that needed it,
+	 * which is exactly the bug the record exists to prevent.
+	 */
+	const autoAcceptRef = useRef<AutoHeader | null>(null);
+	const getAutoAccept = useCallback(() => autoAcceptRef.current, []);
+	const setAutoAccept = useCallback((auto: AutoHeader | null) => {
+		autoAcceptRef.current = auto;
 	}, []);
 
 	// Variable resolution
@@ -564,15 +593,146 @@ export default function RequestBuilderProvider({
 		return scopes;
 	}, [globalsData, collections, collectionId, environments, activeEnvironmentId]);
 
+	/*
+	 * The live stream this builder started, if it is still the one the store is
+	 * holding. Selected against `request.id` for the same reason the execute
+	 * result is: one provider serves every request tab, so rows belonging to a
+	 * stream started from another request must not appear under this one.
+	 */
+	const streamRunId = useExecutionEventsStore((s) =>
+		s.requestId && s.requestId === requestId ? s.runId : null
+	);
+	const isStreaming = useExecutionEventsStore(
+		(s) => s.isStreaming && !!s.requestId && s.requestId === requestId
+	);
+	const streamEndReason = useExecutionEventsStore((s) =>
+		s.requestId && s.requestId === requestId ? s.endReason : null
+	);
+
+	// One subscription, owned here: the store names which stream, and the
+	// provider is the component that outlives every panel that reads it.
+	useExecutionEvents();
+
+	/*
+	 * When the stream ends, replace the live rows with what the run stored.
+	 *
+	 * The two-sources-one-list handoff `ScenarioRunView` makes, at the moment
+	 * the source changes: while the stream is open the Events tab reads the
+	 * store, and the completed run's trace is the record - bounded by
+	 * `sseMaxStoredEvents` and carrying the truthful `totalEvents` /
+	 * `eventsTruncated` markers, which the live list has no way to know. Without
+	 * this the tab would keep showing whatever happened to arrive on the socket,
+	 * and a switch to another request and back would show nothing at all, since
+	 * the durable copy of a response is the response store.
+	 *
+	 * The report is fetched directly rather than through the last-design-run
+	 * query the cold-start restore uses: that query is keyed by request and its
+	 * restore is gated on having answered once, so waiting for it to refetch
+	 * would race the cache. Here the run id is already known.
+	 */
+	useEffect(() => {
+		if (!streamRunId || !streamEndReason) return;
+		let cancelled = false;
+		void (async () => {
+			try {
+				const report = await apiService.getRunReport(streamRunId);
+				const restored = responseFromRunResult(report?.results?.[0], streamRunId);
+				if (cancelled || !restored) return;
+				// Keyed by the request that streamed, exactly like the execute
+				// path: `storeSetResponse` is safe even if the builder has since
+				// moved on, and the live pane is only touched when it has not.
+				if (requestId) storeSetResponse(requestId, restored);
+				if (currentRequestIdRef.current === requestId) setLocalResponse(restored);
+			} catch {
+				// The rows already on screen came from the stream itself and are
+				// still true; failing to fetch the stored copy does not make them
+				// false, so nothing is torn down. The stream's own end reason is
+				// what the tab reports either way.
+			}
+			if (cancelled) return;
+			// A stream that ended is a finished design run: History and the
+			// context bar's Recent sends both list it, and neither is told by
+			// anything else.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
+			if (requestId) {
+				void queryClient.invalidateQueries({
+					queryKey: queryKeys.runs.recentDesign(requestId),
+				});
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [streamRunId, streamEndReason, requestId, storeSetResponse]);
+
+	/** Stop the stream this builder started, at the engine. */
+	const stopStream = useCallback(async () => {
+		if (!streamRunId) return;
+		try {
+			await apiService.stopRun(streamRunId);
+			// Nothing is set here on success: the engine drives the run to a
+			// terminal status and the relay's `complete` frame - carrying
+			// `reason: "stopped"` - is what ends the stream on this side. Ending
+			// it locally would report a reason the run never recorded.
+		} catch (error) {
+			console.error("Failed to stop the event stream:", error);
+		}
+	}, [streamRunId]);
+
 	// Execute request
 	const executeRequest = useCallback(async () => {
-		if (!onExecute) return;
-
 		// Snapshot the request as it is at Send. If the user switches to another
 		// request before this resolves, the result must land on the request that
 		// actually ran - not on whatever is on screen when it finishes.
 		const executingRequest = request;
 		const executingId = executingRequest.id;
+
+		/*
+		 * A stream-flagged request takes the other endpoint answer (issue #574):
+		 * `202 {runId, eventsUrl}` and no exchange. The buffered path is still
+		 * the fallback when this builder was given no stream handler, because a
+		 * Send that silently did nothing is worse than one that buffers.
+		 */
+		if (executingRequest.stream && onExecuteStream) {
+			setIsExecuting(true);
+			setLocalResponse(null);
+			// The previous stream's rows belong to the send that is being
+			// replaced. Cleared here rather than on arrival of the first event,
+			// so a stream that never opens does not leave the last one on screen.
+			useExecutionEventsStore.getState().clear();
+			try {
+				const started = await onExecuteStream(executingRequest);
+				if (!started) return;
+				if (!started.ok) {
+					if (executingId) storeSetResponse(executingId, started.response);
+					if (currentRequestIdRef.current === executingId) {
+						setLocalResponse(started.response);
+					}
+					return;
+				}
+				useExecutionEventsStore.getState().startStream({
+					requestId: executingId,
+					runId: started.runId,
+					eventsUrl: started.eventsUrl,
+				});
+			} catch (error) {
+				console.error("Request execution failed:", error);
+			} finally {
+				/*
+				 * Cleared even though the stream has only just begun. The request
+				 * is no longer in flight - the engine has the transfer and has
+				 * answered - and leaving the spinner up would hide the Events tab
+				 * behind "Sending…" for the whole life of the stream. `isStreaming`
+				 * is what reports the rest.
+				 */
+				if (currentRequestIdRef.current === executingId) {
+					setIsExecuting(false);
+				}
+			}
+			return;
+		}
+
+		if (!onExecute) return;
 
 		setIsExecuting(true);
 		setLocalResponse(null);
@@ -600,7 +760,7 @@ export default function RequestBuilderProvider({
 				setIsExecuting(false);
 			}
 		}
-	}, [request, onExecute, storeSetResponse]);
+	}, [request, onExecute, onExecuteStream, storeSetResponse]);
 
 	// Start load test
 	const startLoadTest = useCallback(() => {
@@ -622,6 +782,8 @@ export default function RequestBuilderProvider({
 			setVariablesDraft,
 			getAutoContentType,
 			setAutoContentType,
+			getAutoAccept,
+			setAutoAccept,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -631,6 +793,8 @@ export default function RequestBuilderProvider({
 			activeTab,
 			setActiveTab,
 			isExecuting,
+			isStreaming,
+			stopStream,
 			isSaving,
 			hasUnsavedChanges,
 			saveStatus,
@@ -658,6 +822,8 @@ export default function RequestBuilderProvider({
 			setVariablesDraft,
 			getAutoContentType,
 			setAutoContentType,
+			getAutoAccept,
+			setAutoAccept,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -666,6 +832,8 @@ export default function RequestBuilderProvider({
 			legacyPostScript,
 			activeTab,
 			isExecuting,
+			isStreaming,
+			stopStream,
 			isSaving,
 			hasUnsavedChanges,
 			saveStatus,

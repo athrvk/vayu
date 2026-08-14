@@ -263,6 +263,14 @@ export interface Request {
 	 * value space - do not unify them.
 	 */
 	httpVersion: HttpVersion;
+	/**
+	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
+	 * Stored on the request because it describes the *endpoint* rather than one
+	 * send, so the builder's Event stream toggle survives a tab switch and a
+	 * bulk import carries it. Always present: a request saved before the column
+	 * existed reads back `false`, which is what it was.
+	 */
+	stream: boolean;
 	order: number;
 	createdAt: string;
 	updatedAt: string;
@@ -456,6 +464,90 @@ export interface ScenarioStepEvent {
 }
 
 /**
+ * Why a streaming run's event stream ended (issue #573).
+ *
+ * Every stream ends by a rule that can name itself - the engine never reports
+ * "the timeout happened to fire" - and the same six words reach the relay's
+ * `complete` frame and the stored trace. `"completed"` is the only one that
+ * means the *server* closed the stream; the rest are bounds this side applied,
+ * which is why the Events tab says which one fired rather than just stopping.
+ */
+export type StreamEndReason =
+	| "completed"
+	| "stopped"
+	| "maxStreamEvents"
+	| "maxStreamDurationMs"
+	| "idleTimeout"
+	| "error";
+
+/** Every {@link StreamEndReason}, for exhaustiveness checks and narrowing. */
+export const STREAM_END_REASONS: readonly StreamEndReason[] = [
+	"completed",
+	"stopped",
+	"maxStreamEvents",
+	"maxStreamDurationMs",
+	"idleTimeout",
+	"error",
+] as const;
+
+/**
+ * One event from a `text/event-stream` upstream, as both the live relay
+ * (`GET /runs/:id/events`, `event: message`) and the stored trace carry it.
+ *
+ * `sourceId` is the **origin's** own `id:` field, not the relay frame id the
+ * `lastEventId` resume takes - conflating the two would make one of the two
+ * resumes silently wrong (see `docs/engine/api-reference.md`). An event larger
+ * than `sseMaxEventBytes` arrives as a prefix with `dataTruncated` set and
+ * `dataBytes` holding the size as sent, never silently cut.
+ */
+export interface StreamEvent {
+	/** The origin's `event:` name, or `"message"` when it sent none. */
+	event: string;
+	/** The `data:` lines, joined with `\n`. */
+	data: string;
+	sourceId?: string;
+	/** Engine-side arrival time, Unix ms. */
+	receivedAt?: number;
+	dataTruncated?: boolean;
+	dataBytes?: number;
+}
+
+/**
+ * The relay's `open` frame: what the stream connected to, published once as
+ * soon as the response's header block arrives so even a late consumer learns
+ * it.
+ */
+export interface StreamOpen {
+	statusCode: number;
+	statusText: string;
+	headers: Record<string, string>;
+}
+
+/** The relay's `complete` frame, which closes every stream. */
+export interface StreamComplete {
+	runId: string;
+	reason: StreamEndReason;
+	/** Every event received, whatever was retained. */
+	totalEvents: number;
+}
+
+/**
+ * The `events` node a **streaming** design run adds to its stored trace - the
+ * only node the other trace writers never carry.
+ *
+ * `eventsTruncated` is the engine's own comparison of `totalEvents` against
+ * what it stored, not something derived here from a cap the reader would have
+ * to know: a stream that ended under the cap and one whose tail was dropped
+ * must stay distinguishable long after the cap has been changed.
+ */
+export interface RunResultStreamEvents {
+	items: StreamEvent[];
+	totalEvents: number;
+	eventsTruncated: boolean;
+	endReason: StreamEndReason;
+}
+
+/**
  * One HTTP exchange's trace, as the engine stores it. A design-mode trace
  * (`POST /request` -> `store_result`, execution.cpp) nests the request and
  * response; a load-test trace flattens timing and status onto the object
@@ -547,6 +639,13 @@ export interface RunResultTrace {
 		 */
 		httpVersionDowngraded?: boolean;
 	};
+	/**
+	 * Present on a **streaming** design run's trace only (issue #573), which is
+	 * why it is optional here rather than on a stream-specific trace type: one
+	 * `results` row shape serves every writer. Read by `restore-response.ts`,
+	 * so reopening a finished stream from History shows its timeline again.
+	 */
+	events?: RunResultStreamEvents;
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by

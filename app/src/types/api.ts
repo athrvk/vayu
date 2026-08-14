@@ -151,6 +151,8 @@ export interface CreateRequestRequest {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
+	/** Consume the response as an event stream - see {@link Request.stream}. */
+	stream?: boolean;
 	order?: number;
 }
 
@@ -176,6 +178,8 @@ export interface UpdateRequestRequest {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
+	/** Consume the response as an event stream - see {@link Request.stream}. */
+	stream?: boolean;
 	order?: number;
 }
 
@@ -301,9 +305,45 @@ export interface ExecuteRequestRequest {
 	 * History like anyone else's.
 	 */
 	transient?: boolean;
+	/**
+	 * Consume the response as a `text/event-stream` instead of buffering it
+	 * (issue #573). It changes the *execution model*, not a transfer option, so
+	 * the endpoint answers `202` with {@link ExecuteStreamResponse} rather than
+	 * the exchange.
+	 *
+	 * Sent on **every** execute, never elided when false - the same
+	 * single-choke-point rule the redirect policy and `httpVersion` follow, and
+	 * for a sharper reason here: the two answers have different *shapes*, so a
+	 * caller that let an engine-side default decide would not know which one it
+	 * was about to parse.
+	 *
+	 * The engine refuses `stream` combined with `transient` (a stream is its run
+	 * row) or with a pre-/post-request script (a script asserts on a response
+	 * that does not exist until the stream closes), with a `400` naming which.
+	 * Streams reach scripts as `pm.response.events` in a later release.
+	 */
+	stream?: boolean;
 }
 
 export type ExecuteRequestResponse = SanityResult;
+
+/**
+ * What `POST /execute` answers for a streaming request: `202`, at once, with
+ * the run row it created and the URL its events arrive on. There is no
+ * exchange to return - the transfer has only just been handed to the engine's
+ * consumer worker.
+ *
+ * `eventsUrl` is engine-relative (`/runs/:id/events`) and is used **as given**
+ * rather than rebuilt from `runId`: the engine names where its own events are,
+ * and a second spelling of that path in `api-endpoints.ts` would be a copy that
+ * can disagree with the answer. An answer missing either field is a malformed
+ * answer and fails loudly rather than being guessed at.
+ */
+export interface ExecuteStreamResponse {
+	runId: string;
+	eventsUrl: string;
+	status: string;
+}
 
 /**
  * ComposeRequestRequest - the `POST /compose` body (issue #226).

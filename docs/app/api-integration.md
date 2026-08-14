@@ -663,9 +663,50 @@ export const API_ENDPOINTS = {
    `collectionId` chain and the active `environmentId`, and returns the
    execute-ready payload (issue #226)
 4. **API Call**: `apiService.executeRequest()` with the composed payload,
-   unchanged → `POST /execute`
+   unchanged → `POST /execute`, carrying `stream: false` explicitly
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
+
+**`stream` is sent on every execute, never elided.** It follows the same
+never-elide rule as `httpVersion` and the redirect policy, for a sharper
+reason: the endpoint's two answers are different *shapes*, so a caller that let
+an engine-side default decide would not know which one it was about to parse.
+
+### Streaming Request Execution (issue #574)
+
+A request whose **Event stream** setting is on takes the same composition and a
+different answer. `composeForSend` is shared with the buffered path - the two
+must put the identical request on the wire, or a stream would measure something
+Send does not - and only the last two steps differ:
+
+4. **API Call**: `apiService.executeStreamRequest()` → `POST /execute` with
+   `stream: true`, answered `202 {runId, eventsUrl, status}` at once. There is
+   no exchange yet: the engine has created the run row and handed the transfer
+   to a managed consumer worker.
+5. **Tail**: `useExecutionEvents` opens an `EventSource` on the answer's
+   `eventsUrl` **as given** - the engine names where its own events are, and a
+   second spelling of that path in `api-endpoints.ts` would be a copy that can
+   disagree with the answer. Frames land in `execution-events-store`; the
+   Events tab renders them live.
+6. **Swap to stored truth**: on the relay's `complete` frame the provider
+   fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
+   `events` node onto the response, which is the record from then on.
+
+**A different `EventSource` from the `SSEClient` singleton below.** That client
+belongs to load and scenario runs, is a single connection whose lifetime is the
+dashboard's, and deliberately never reconnects. This one owns its retry, for
+the reason `useInboxLive` does (issue #506): `EventSource` treats any non-200
+as fatal, and a reconnect landing inside the engine's stale-claim window meets
+a `409 run_events_in_use` from the claim the previous socket still holds - so a
+single unlucky disconnect would otherwise end the stream for the life of the
+tab, silently. Resume travels as `?lastEventId=`, which picks up at the frame
+*after* the one named, so a dropped consumer re-renders nothing.
+
+An answer missing `runId` or `eventsUrl` is a malformed answer and throws,
+rather than leaving the pane on "streaming" with no run to stop. Refusals -
+`stream` with `transient`, or with a pre-/post-request script - come back as a
+`400` the user has to read, so they are rendered as the response *and* raised
+as a toast.
 
 The renderer sends the **inline** compose shape (`{ request, collectionId,
 environmentId }`) rather than compose-by-id, because Send executes the *editor

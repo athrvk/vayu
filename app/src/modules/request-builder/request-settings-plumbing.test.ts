@@ -85,6 +85,35 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		});
 	}
 
+	/**
+	 * `stream` has the same load hop and the same save hop, and a *different*
+	 * execute hop, which is the point (issue #574).
+	 *
+	 * The other three fields ride the composed payload as
+	 * `field: request.field`. This one selects which endpoint answer the send
+	 * takes, so each path declares the flag it means unconditionally - the
+	 * buffered execute sends `stream: false`, the streaming service sends
+	 * `stream: true` - and the request's own flag is read once, in the provider,
+	 * to choose between them. Passing `request.stream` through instead would
+	 * make it possible for the payload and the path taken to disagree, which is
+	 * the one thing that must be unrepresentable here.
+	 */
+	it("loads the event-stream flag from the saved request and persists it on save", () => {
+		expect(hops(source ?? "", "fetchedRequest", "stream")).toBe(1);
+		expect(hops(source ?? "", "request", "stream")).toBe(1);
+	});
+
+	it("declares stream on the buffered execute rather than letting it default", () => {
+		expect(source).toContain("stream: false");
+	});
+
+	it("never sends stream with a load test - the engine refuses it on a run", () => {
+		// `POST /runs` 400s a payload carrying `stream` (`invalid_run_config`):
+		// a load run's completion accounting has no place for a response that
+		// never ends.
+		expect(hops(source ?? "", "pendingLoadTestRequest", "stream")).toBe(0);
+	});
+
 	it("takes the load test's protocol from the request, never from the dialog's config", () => {
 		// The load dialog decides load shape (rps, duration, concurrency), not
 		// request semantics. A `config.httpVersion` here would mean a second

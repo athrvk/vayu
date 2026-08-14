@@ -37,7 +37,7 @@ import {
 	CONTENT_TYPE,
 } from "./content-type";
 import { ContentTypeNotice } from "./ContentTypeNotice";
-import type { AutoContentType } from "../../../../types";
+import type { AutoHeader } from "../../../../types";
 import type { KeyValueItem } from "@/types";
 
 const header = (key: string, value: string, enabled = true): KeyValueItem => ({
@@ -96,7 +96,7 @@ describe("when a mode needs a Content-Type", () => {
 });
 
 describe("taking it back", () => {
-	const ours = (row: KeyValueItem): AutoContentType => ({
+	const ours = (row: KeyValueItem): AutoHeader => ({
 		requestId: REQUEST,
 		rowId: row.id,
 		value: row.value,
@@ -112,7 +112,7 @@ describe("taking it back", () => {
 		// Undo means "undo what I just did", not "delete any Content-Type" - and
 		// the user's own row is identical apart from its id.
 		const headers = [header(CONTENT_TYPE, "application/json")];
-		const someoneElses: AutoContentType = {
+		const someoneElses: AutoHeader = {
 			requestId: REQUEST,
 			rowId: "a-row-we-never-wrote",
 			value: "application/json",

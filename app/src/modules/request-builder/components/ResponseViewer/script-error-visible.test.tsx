@@ -33,9 +33,12 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	CodeEditor: ({ value }: { value?: string }) => <div data-testid="body-content">{value}</div>,
 }));
 
-const state: { response: ResponseState | null; isExecuting: boolean } = {
+// `request` is read for its id alone - the pane selects the live event stream
+// against the request on screen (issue #574), and these responses have none.
+const state: { response: ResponseState | null; isExecuting: boolean; request: { id: null } } = {
 	response: null,
 	isExecuting: false,
+	request: { id: null },
 };
 vi.mock("../../context", () => ({
 	useRequestBuilderContext: () => state,

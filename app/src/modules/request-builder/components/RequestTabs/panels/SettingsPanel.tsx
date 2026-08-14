@@ -8,13 +8,19 @@
 /**
  * SettingsPanel Component
  *
- * Per-request execution settings: the protocol to negotiate, and the redirect
- * policy. The engine has always accepted `followRedirects` / `maxRedirects` and
- * defaulted to following, but nothing in the app sent them, so a 3xx was
- * followed silently and never reached the response pane. All three fields are
- * stored on the request and sent on every Send and every load test, never
- * elided even when they equal the default - see the comment on the payload
- * fields in `index.tsx` and `types/api.ts`.
+ * Per-request execution settings: the protocol to negotiate, the redirect
+ * policy, and whether the response is consumed as an event stream. The engine
+ * has always accepted `followRedirects` / `maxRedirects` and defaulted to
+ * following, but nothing in the app sent them, so a 3xx was followed silently
+ * and never reached the response pane. Every field here is stored on the
+ * request and sent on every Send and every load test, never elided even when it
+ * equals the default - see the comment on the payload fields in `index.tsx` and
+ * `types/api.ts`.
+ *
+ * **Event stream is a setting, not a body mode** (issue #574). The request's
+ * body semantics are untouched by it - a stream is a GET as often as it is a
+ * POST - and what it changes is how the response is *delivered*, which is
+ * exactly what this tab is for.
  *
  * `verifySSL` is deliberately not exposed here - it weakens transport security
  * and was deferred.
@@ -31,26 +37,53 @@ import {
 	Switch,
 } from "@/components/ui";
 import {
+	ACCEPT_HEADER,
 	DEFAULT_MAX_REDIRECTS,
 	HTTP_VERSIONS,
 	MAX_MAX_REDIRECTS,
 	MIN_MAX_REDIRECTS,
+	SSE_ACCEPT,
 	isHttpVersion,
 } from "@/constants/request";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../../context";
+import { switchAutoHeader } from "../../../utils/auto-header";
 
 const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
 const PROTOCOL_LABEL = "Protocol";
+const STREAM_LABEL = "Event stream";
 
 export default function SettingsPanel() {
-	const { request, updateField } = useRequestBuilderContext();
+	const { request, setRequest, updateField, getAutoAccept, setAutoAccept } =
+		useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
 
 	const handleProtocolChange = (value: string) => {
 		if (!isHttpVersion(value)) return;
 		updateField("httpVersion", value);
+	};
+
+	/**
+	 * Turning the stream on arms `Accept: text/event-stream`; turning it off
+	 * takes that row back out again.
+	 *
+	 * `setRequest` once rather than two `updateField` calls: the flag and the
+	 * headers are one change, and the rule computes the new header list from the
+	 * current one - a second call would compute against the array it had before
+	 * the first. A request that already declares an `Accept` keeps it; see
+	 * `utils/auto-header.ts` for why ownership is by row id.
+	 */
+	const handleStreamChange = (checked: boolean) => {
+		const next = switchAutoHeader(
+			ACCEPT_HEADER,
+			checked ? SSE_ACCEPT : null,
+			request.headers,
+			request.id,
+			getAutoAccept()
+		);
+		setRequest({ stream: checked, headers: next.headers });
+		setAutoAccept(next.auto);
 	};
 
 	/**
@@ -160,6 +193,53 @@ export default function SettingsPanel() {
 						: "Only applies while Follow redirects is on."}
 				</p>
 			</div>
+
+			<div className="space-y-1">
+				<h3 className="text-sm font-medium">Streaming</h3>
+				<p className="text-xs text-muted-foreground">
+					How this request reads a response that never ends. Applies to Send; a load test
+					always buffers.
+				</p>
+			</div>
+
+			<div className="flex items-start justify-between gap-4">
+				<div className="min-w-0">
+					<Label htmlFor="setting-stream" className="text-sm font-medium">
+						{STREAM_LABEL}
+					</Label>
+					<p className="text-xs text-muted-foreground mt-0.5">
+						Send returns as soon as the stream opens and events arrive live in the
+						Events tab, instead of waiting for a body that never completes. Adds{" "}
+						<code>
+							{ACCEPT_HEADER}: {SSE_ACCEPT}
+						</code>{" "}
+						unless this request already declares one.
+					</p>
+				</div>
+				{/* Radix renders a button, not an input - see the redirect switch above
+				    for why both the id and the aria-label are set. */}
+				<Switch
+					id="setting-stream"
+					checked={request.stream}
+					onCheckedChange={handleStreamChange}
+					aria-label={STREAM_LABEL}
+				/>
+			</div>
+
+			{/*
+			 * Said here rather than left to a 400 at Send. The engine refuses a
+			 * streaming request that carries scripts - a test asserts on a response
+			 * that does not exist until the stream closes - and the scripts a send
+			 * carries include the ones inherited from the collection chain, which is
+			 * not visible from this tab at all.
+			 */}
+			{request.stream && (
+				<p className="text-xs text-muted-foreground">
+					Pre-request and Tests scripts cannot run on a streaming request yet - the engine
+					refuses the send rather than skipping them silently. Streams reach scripts as{" "}
+					<code>pm.response.events</code> in a later release.
+				</p>
+			)}
 		</div>
 	);
 }

@@ -362,6 +362,7 @@ Json serialize (const vayu::db::Request& r) {
     json["followRedirects"]   = r.follow_redirects;
     json["maxRedirects"]      = r.max_redirects;
     json["httpVersion"]       = r.http_version;
+    json["stream"]            = r.stream;
     json["updatedAt"]         = r.updated_at;
     json["createdAt"]         = r.created_at;
     return json;
@@ -987,6 +988,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
+    out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
     out << "}";
