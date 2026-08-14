@@ -52,6 +52,41 @@ std::string describe_step (size_t index, const vayu::db::Request& row) {
 }
 
 /**
+ * The tail the no-data refusal carries when the collection declares a data
+ * contract (issue #599): ` (declared columns: id, email)`, or empty when it
+ * declares none.
+ *
+ * The refusal already says "run the collection with a data file"; a user whose
+ * collection has declared its columns can be told *which* file, which is the
+ * difference between re-reading the request and picking one. Anything the
+ * schema cannot be trusted to hold - it is a stored blob, and an older or
+ * hand-edited row may hold anything - degrades to no tail rather than to a
+ * message about column names that are not strings.
+ */
+std::string declared_columns_hint (const vayu::db::Collection& collection) {
+    nlohmann::json schema;
+    try {
+        schema = nlohmann::json::parse (collection.data_schema);
+    } catch (const std::exception&) {
+        return {};
+    }
+    if (!schema.is_object () || !schema.contains ("columns") || !schema["columns"].is_array ()) {
+        return {};
+    }
+    std::string names;
+    for (const auto& column : schema["columns"]) {
+        if (!column.is_string ()) {
+            continue;
+        }
+        if (!names.empty ()) {
+            names += ", ";
+        }
+        names += column.get<std::string> ();
+    }
+    return names.empty () ? std::string{} : " (declared columns: " + names + ")";
+}
+
+/**
  * The ordered request rows a scenario covers, before anything is composed.
  *
  * Split from composition so the plan-size cap can reject an oversized folder
@@ -248,7 +283,11 @@ const ScenarioResolveOptions& options) {
     }
     const ScenarioRequest& request = resolution.request;
 
-    if (!db.get_collection (request.collection_id)) {
+    // Captured, not just probed: the collection carries the declared data
+    // contract, and the no-data refusal below is the reader that makes storing
+    // one worth anything.
+    const auto collection = db.get_collection (request.collection_id);
+    if (!collection) {
         return invalid ("No collection with id '" + request.collection_id + "'");
     }
 
@@ -311,7 +350,7 @@ const ScenarioResolveOptions& options) {
                 ", but this run has no 'scenario.data' set. A data token has "
                 "no row to bind to and would reach the wire written as it "
                 "stands - run the collection with a data file, or remove the "
-                "token from the request.");
+                "token from the request." + declared_columns_hint (*collection));
             }
         }
 

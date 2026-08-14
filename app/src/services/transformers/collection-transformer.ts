@@ -12,8 +12,30 @@
  * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Collection, RequestAuth, VariableValue } from "@/types";
+import type { Collection, CollectionDataSchema, RequestAuth, VariableValue } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
+
+/**
+ * The declared data contract, or `{}` when the row predates the column or holds
+ * something that is not a schema.
+ *
+ * Normalized field by field rather than cast: this row can come from an engine
+ * older than the `data_schema` column, and every consumer downstream (the tab's
+ * diff, the runner's warnings) treats `columns` as a string array without
+ * re-checking. A blob that got in another way must not become the first
+ * `undefined` the diff iterates.
+ */
+function toDataSchema(raw: unknown): CollectionDataSchema {
+	const record = asRecord(raw);
+	if (!record) return {};
+	const schema: CollectionDataSchema = {};
+	if (Array.isArray(record.columns)) {
+		schema.columns = record.columns.filter((c): c is string => typeof c === "string");
+	}
+	if (typeof record.declaredAt === "number") schema.declaredAt = record.declaredAt;
+	if (typeof record.fileName === "string") schema.fileName = record.fileName;
+	return schema;
+}
 
 /**
  * A collection row as the engine sends it. Typed as a bag of unknowns rather
@@ -43,6 +65,7 @@ export class CollectionTransformer {
 			variables: (asRecord(raw.variables) ?? {}) as Record<string, VariableValue>,
 			preRequestScript: asStr(raw.preRequestScript) ?? "",
 			postRequestScript: asStr(raw.postRequestScript) ?? "",
+			dataSchema: toDataSchema(raw.dataSchema),
 			auth,
 			createdAt: new Date(raw.createdAt as string | number).toISOString(),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),

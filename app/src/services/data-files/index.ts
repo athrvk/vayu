@@ -347,3 +347,4 @@ export function resolveIterationCount(
 export { parseDelimited } from "./tabular";
 export { DataFileError } from "./errors";
 export { decodeDataFile, type DecodedDataFile } from "./decode";
+export { diffDataSchema, describeDataSchemaDiff, type DataSchemaDiff } from "./schema-diff";

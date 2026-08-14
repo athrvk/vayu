@@ -73,6 +73,15 @@ export const ENGINE_RESTART_MAX_RETRIES = 3;
 export const ENGINE_RESTART_BASE_DELAY_MS = 1000;
 /** Pause between stop and start during restart so the port is released. */
 export const ENGINE_PORT_RELEASE_DELAY_MS = 500;
+/**
+ * Seed for the engine's `maxScenarioDataBytes`, used by the data-file read
+ * channel only while the engine cannot answer `GET /config` (see data-file.ts).
+ *
+ * Not the rule - the live setting is. Mirrors `DATA_FILE_MAX_BYTES` in
+ * src/constants/data-files.ts, duplicated here for the same reason the engine
+ * port is: the main process cannot import renderer modules.
+ */
+export const DATA_FILE_MAX_BYTES_SEED = 16 * 1024 * 1024;
 
 // Window
 export const WINDOW_DEFAULT_WIDTH = 1400;

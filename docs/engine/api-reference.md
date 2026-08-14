@@ -648,7 +648,8 @@ the null-vs-absent rule.
   "name": "My API",        // Required, no default (null is a 400)
   "parentId": null,         // Optional, null for root
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
-  "variables": {}           // Optional, collection-scoped variables
+  "variables": {},          // Optional, collection-scoped variables
+  "dataSchema": {}          // Optional, the declared data contract - see below
 }
 ```
 
@@ -670,7 +671,8 @@ its value, an explicit `null` resets it to the default.
   "name": "Renamed",       // Optional; null is a 400 (no default)
   "parentId": null,         // Optional, null moves it to the root
   "order": 3,               // Optional; a move with no order appends - see Ordering
-  "variables": null         // Optional, null resets to {}
+  "variables": null,        // Optional, null resets to {}
+  "dataSchema": null        // Optional, null clears the declared contract
 }
 ```
 
@@ -694,6 +696,26 @@ cycle would make the cascade delete below loop forever. Both cases return `400`:
 Parent *existence* is intentionally not checked: the import orchestrator creates
 collections in bulk, so requiring the parent to exist first would couple to
 import ordering. Only self-parent and descendant cycles are rejected.
+
+**`dataSchema` (both verbs, and `POST /import/apply`):** the data contract the
+collection declares - which columns its data files carry, so `{{data.column}}`
+and `pm.iterationData` can be checked before a run (issue #599).
+
+```json
+{"columns":["id","email"],"declaredAt":1700000000000,"fileName":"users.csv"}
+```
+
+`{}` means the collection declares no contract, and is what an absent field on
+create and an explicit `null` on update both resolve to. A present value must be
+an object (`400` otherwise, like `variables` and `auth`), and its contents are
+validated: `columns` an array of unique, non-empty strings - at most 1024 of
+them, each at most 256 characters - `declaredAt` a number, `fileName` a string.
+Each violation is a `400` naming the field (`Invalid 'dataSchema.columns': ...`)
+that writes nothing.
+
+The schema is stored; the file's **rows are not**, anywhere, and neither is its
+path - it is machine-local and stays app-side. See
+[Data-driven runs](../app/data-driven-runs.md).
 
 ### DELETE /collections/:id
 
@@ -2686,6 +2708,12 @@ body**, and **both halves of every form field** (`x-www-form-urlencoded` and
 **auth** field is not bound today, and script text is never interpolated at all
 (a script reads its row through `pm.iterationData`).
 
+Which columns a collection *expects* is a separate, declared thing - see
+`dataSchema` under [Collections](#collections) and
+[Data-driven runs](../app/data-driven-runs.md). Declaring it changes no binding
+rule; it is what lets the refusal above name the columns, and what the app
+checks a picked file against before the run.
+
 **What a cell renders as.** The CSV/TSV path produces only strings, so the first
 row is the ordinary case; a JSON or JSONL file may carry any type:
 
@@ -2737,7 +2765,16 @@ a branch can read.
 A run sent **without a `data` set at all** whose plan still carries a `data.*`
 token is refused outright, before any run row exists: nothing would bind the
 token, so every iteration would send the literal text `{{data.id}}`. The `400`
-names the step and the token. Starting such a collection as a quick smoke check
+names the step and the token, and - when the collection
+[declares a data contract](#collections) - the columns it declares, so the
+message says which file to run with rather than only that one is missing:
+
+```
+step 1 (request 'Fetch user', id 'req_a') carries {{data.id}}, but this run has
+no 'scenario.data' set. ... (declared columns: id, email)
+```
+
+Starting such a collection as a quick smoke check
 means running it with a data file - a one-row set is enough - because the run
 this refuses would not have exercised the endpoint either.
 

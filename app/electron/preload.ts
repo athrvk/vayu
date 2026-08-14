@@ -189,6 +189,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		}
 	},
 
+	// Re-read a collection's declared data file by path (issue #599) - the one
+	// channel on which the renderer *does* name a path, because the Run dialog
+	// has to re-open a file the user picked in an earlier session and the `File`
+	// is long gone. Gated in the main process (extension allowlist + the
+	// engine's fetched byte cap); see electron/data-file.ts for why that gate is
+	// the whole answer. Bytes, not text: the renderer decodes with the same
+	// module the picker uses, so the two paths cannot disagree about a file.
+	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string }> =>
+		ipcRenderer.invoke("dataFile:read", path),
+
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.
 	onBeforeQuit: (callback: () => void | Promise<void>) => {

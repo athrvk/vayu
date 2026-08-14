@@ -814,6 +814,11 @@ struct Collection {
     std::string auth;         // JSON - Auth config (mode + fields), never 'inherit'
     std::string pre_request_script;  // JS - runs before every request in this collection
     std::string post_request_script; // JS - runs after every request in this collection
+    // JSON - the data contract this collection declares (issue #599):
+    // {"columns":[...], "declaredAt": ms, "fileName"?: "users.csv"}. `{}` means
+    // no contract. The *schema* lives here, never the rows - a data file's rows
+    // are user data of unknown sensitivity and are persisted nowhere.
+    std::string data_schema{ "{}" };
     int order;
     int64_t created_at;
     int64_t updated_at;

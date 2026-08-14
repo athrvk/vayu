@@ -320,7 +320,7 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     200);
     const auto before = *db_->get_collection (id);
 
-    for (const char* field : { "variables", "auth" }) {
+    for (const char* field : { "variables", "auth", "dataSchema" }) {
         for (const json& bad : wrong_shapes ()) {
             auto [status, body] =
             update_collection_response (*db_, id, json{ { field, bad } });
@@ -336,10 +336,11 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     const auto after = *db_->get_collection (id);
     EXPECT_EQ (after.variables, before.variables);
     EXPECT_EQ (after.auth, before.auth);
+    EXPECT_EQ (after.data_schema, before.data_schema);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected) {
-    for (const char* field : { "variables", "auth" }) {
+    for (const char* field : { "variables", "auth", "dataSchema" }) {
         for (const json& bad : wrong_shapes ()) {
             auto [status, body] = create_collection_response (
             *db_, json{ { "name", "N" }, { field, bad } });
@@ -350,6 +351,89 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected)
     }
     EXPECT_TRUE (db_->get_collections ().empty ())
     << "a rejected create must not leave a record behind";
+}
+
+// --- The declared data contract (issue #599) ---------------------------------
+
+TEST_F (ResourceWriteRouteTest, CollectionDataSchemaRoundTripsAndFollowsTheNullRule) {
+    // The whole point of storing the contract on the row: it has to survive the
+    // trip, and it has to obey the same null-vs-absent rule as every sibling
+    // field, because "Clear" is only expressible as an explicit null.
+    auto [create_status, created] = create_collection_response (*db_, json{ { "name", "N" } });
+    ASSERT_EQ (create_status, 200);
+    const std::string id = created["id"];
+    EXPECT_TRUE (created["dataSchema"].is_object ());
+    EXPECT_TRUE (created["dataSchema"].empty ()) << "absent on create means no contract";
+
+    const json schema{ { "columns", json::array ({ "id", "email" }) },
+        { "declaredAt", 1700000000000 }, { "fileName", "users.csv" } };
+    auto [set_status, set] = update_collection_response (*db_, id, json{ { "dataSchema", schema } });
+    ASSERT_EQ (set_status, 200);
+    EXPECT_EQ (set["dataSchema"], schema);
+
+    // Absent -> keep. A rename must not silently drop the contract.
+    auto [keep_status, keep] = update_collection_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (keep_status, 200);
+    EXPECT_EQ (keep["dataSchema"], schema) << "absent means keep";
+
+    // Null -> reset to the default, which is "declares no contract".
+    auto [clear_status, cleared] =
+    update_collection_response (*db_, id, json{ { "dataSchema", nullptr } });
+    ASSERT_EQ (clear_status, 200);
+    EXPECT_TRUE (cleared["dataSchema"].is_object ());
+    EXPECT_TRUE (cleared["dataSchema"].empty ());
+    EXPECT_EQ (db_->get_collection (id)->data_schema, "{}");
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
+    // A blob that parses as an object is not yet a schema. Each of these would
+    // otherwise be stored and only fail much later - as a refusal message naming
+    // things that are not column names, or as a diff no file can satisfy.
+    const std::string id = make_collection ();
+
+    const std::vector<std::pair<json, const char*>> bad{
+        { json{ { "columns", "id,email" } }, "columns" },
+        { json{ { "columns", json::array ({ "id", 7 }) } }, "columns" },
+        { json{ { "columns", json::array ({ "id", "" }) } }, "columns" },
+        { json{ { "columns", json::array ({ "id", "id" }) } }, "columns" },
+        { json{ { "columns", json::array ({ std::string (257, 'x') }) } }, "columns" },
+        { json{ { "columns", json::array ({ "id" }) }, { "declaredAt", "yesterday" } },
+        "declaredAt" },
+        { json{ { "columns", json::array ({ "id" }) }, { "fileName", 7 } }, "fileName" },
+    };
+
+    for (const auto& [schema, names] : bad) {
+        auto [status, body] = update_collection_response (*db_, id, json{ { "dataSchema", schema } });
+        EXPECT_EQ (status, 400) << schema.dump ();
+        EXPECT_NE (body["error"]["message"].get<std::string> ().find (names), std::string::npos)
+        << body["error"]["message"];
+        EXPECT_EQ (db_->get_collection (id)->data_schema, "{}")
+        << "a rejected write must store nothing - " << schema.dump ();
+    }
+
+    // Over the column-count cap, built rather than listed above.
+    json many = json::object ();
+    many["columns"] = json::array ();
+    for (int i = 0; i <= 1024; ++i) {
+        many["columns"].push_back ("c" + std::to_string (i));
+    }
+    auto [many_status, many_body] =
+    update_collection_response (*db_, id, json{ { "dataSchema", many } });
+    EXPECT_EQ (many_status, 400);
+    EXPECT_NE (many_body["error"]["message"].get<std::string> ().find ("1024"), std::string::npos);
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionDataSchemaAcceptsAContractWithoutOptionalFields) {
+    // `declaredAt` and `fileName` are optional, and an empty object is the
+    // canonical "no contract" - neither may be turned into a refusal by the
+    // contents check, which only ever looks at what is present.
+    for (const json& fine : { json::object (), json{ { "columns", json::array ({ "id" }) } },
+             json{ { "columns", json::array () } } }) {
+        auto [status, body] =
+        create_collection_response (*db_, json{ { "name", "N" }, { "dataSchema", fine } });
+        EXPECT_EQ (status, 200) << fine.dump ();
+        EXPECT_EQ (body["dataSchema"], fine);
+    }
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateKeepsCycleGuard) {
