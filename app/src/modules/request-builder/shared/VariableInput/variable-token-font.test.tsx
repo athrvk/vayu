@@ -30,30 +30,27 @@
  * inline style was the only thing that could override the inherited font.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { variableSupportStub } from "@/test/variable-support";
 import VariableInput from "./index";
 
-vi.mock("../../context/RequestBuilderContext", () => ({
-	useRequestBuilderContext: () => ({
-		getAllVariables: () => ({
-			base_url: { value: "https://api.example.com", scope: "global" },
-		}),
-		// The token now hovers to a tooltip and its popover lists every other
-		// definition, so the stub owes both of these.
-		getVariableOrigins: () => [],
-		writableScopes: [],
-		updateVariable: () => {},
-		resolveString: (s: string) => s,
-	}),
-}));
+/* Handed in rather than mocked - see the note in dynamic-variable-token.test. */
+const scope = variableSupportStub({
+	base_url: { value: "https://api.example.com", scope: "global" },
+});
 
 /** The input rendered with a variable in it, which is what builds the overlay. */
 function withVariable() {
 	const { container } = render(
 		<TooltipProvider>
-			<VariableInput value="{{base_url}}/users" onChange={() => {}} placeholder="URL" />
+			<VariableInput
+				value="{{base_url}}/users"
+				onChange={() => {}}
+				placeholder="URL"
+				variables={scope}
+			/>
 		</TooltipProvider>
 	);
 	return container;

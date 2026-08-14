@@ -16,6 +16,7 @@ import { useCallback } from "react";
 import { detectCommand, parseCommand } from "@/services/curl/parseCurl";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "../../shared/VariableInput";
+import { useVariableSupport } from "../../hooks/useVariableSupport";
 import { parseQueryParams } from "../../utils/url";
 
 interface UrlInputProps {
@@ -24,6 +25,7 @@ interface UrlInputProps {
 
 export default function UrlInput({ className }: UrlInputProps) {
 	const { request, updateField, setRequest } = useRequestBuilderContext();
+	const variables = useVariableSupport();
 
 	// Sync params from URL when URL changes directly
 	const handleUrlChange = useCallback(
@@ -69,6 +71,7 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// make a poor spoken name, and it is withheld entirely once the URL
 			// contains a variable.
 			aria-label="Request URL"
+			variables={variables}
 			className={className ?? "w-full"}
 		/>
 	);

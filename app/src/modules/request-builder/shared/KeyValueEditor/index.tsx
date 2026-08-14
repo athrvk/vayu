@@ -27,6 +27,14 @@
  *
  * **The trailing blank row** comes from one `withTrailingBlank` rather than two
  * copies that had drifted.
+ *
+ * **Its variable scope arrives as a prop** (`variables`), not from
+ * `useRequestBuilderContext()`. That hook throws with no provider above it, so
+ * reading it in the row's body made the app's key/value primitive structurally
+ * unmountable anywhere else, and the inbox and the variables module each grew
+ * their own copy (#564). Omit the prop and the table resolves nothing and
+ * offers no autocomplete, which is what a surface with no variables should
+ * show.
  */
 
 import { useCallback } from "react";
@@ -49,6 +57,7 @@ export default function KeyValueEditor({
 	readOnly = false,
 	keySuggestions,
 	allowFiles = false,
+	variables,
 	canEdit = () => true, // Default: allow editing all items
 	canRemove = () => true, // Default: allow removing all items
 	canDisable = () => true, // Default: allow disabling all items
@@ -180,6 +189,7 @@ export default function KeyValueEditor({
 						readOnly={readOnly}
 						keySuggestions={keySuggestions}
 						allowFiles={allowFiles}
+						variables={variables}
 						onUpdate={handleUpdate}
 						onPickFile={handlePickFile}
 						onToggleKind={handleToggleKind}

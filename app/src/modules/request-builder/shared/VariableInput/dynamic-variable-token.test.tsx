@@ -23,28 +23,26 @@
  * editable one, not the generator.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-
-const variables: Record<string, { value: string; scope: string }> = {};
-
-vi.mock("../../context/RequestBuilderContext", () => ({
-	useRequestBuilderContext: () => ({
-		getAllVariables: () => variables,
-		getVariableOrigins: () => [],
-		writableScopes: [],
-		updateVariable: () => {},
-		resolveString: (s: string) => s,
-	}),
-}));
-
+import { variableSupportStub } from "@/test/variable-support";
+import type { ResolvedVariable } from "@/types";
 import VariableInput from "./index";
+
+const variables: Record<string, ResolvedVariable> = {};
+
+/*
+ * The scope is a prop now, not a mocked module. This file used to `vi.mock` the
+ * request-builder context because the component reached for it in its body -
+ * the coupling that made the key/value table unmountable anywhere else (#564).
+ */
+const scope = variableSupportStub(variables);
 
 function overlayOf(value: string) {
 	const { container } = render(
 		<TooltipProvider>
-			<VariableInput value={value} onChange={() => {}} placeholder="URL" />
+			<VariableInput value={value} onChange={() => {}} placeholder="URL" variables={scope} />
 		</TooltipProvider>
 	);
 	const overlay = container.querySelector('[aria-hidden="true"]');
