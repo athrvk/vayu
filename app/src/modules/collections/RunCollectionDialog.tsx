@@ -104,6 +104,14 @@ export default function RunCollectionDialog({
 
 	const [recursive, setRecursive] = useState(false);
 	const [iterations, setIterations] = useState("1");
+	/*
+	 * Whether the user has typed in the Iterations field, which the value alone
+	 * cannot say: a deliberately typed `1` and the untouched default read the
+	 * same, and picking a file used to clear both. One of those is a count the
+	 * user chose, and clearing it turns "run this sequence once" into a full
+	 * pass per row - the opposite of what they asked for, silently.
+	 */
+	const [iterationsTouched, setIterationsTouched] = useState(false);
 	const [dataFile, setDataFile] = useState<SelectedDataFile | null>(null);
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [loadTest, setLoadTest] = useState(false);
@@ -140,13 +148,14 @@ export default function RunCollectionDialog({
 		: iterationsValid && !dataFileError;
 
 	/*
-	 * Picking a file clears an untouched `1`, so the field shows what the run
+	 * Picking a file clears the *pristine* `1`, so the field shows what the run
 	 * will do (one pass per row) instead of quietly contradicting the preview
-	 * above it. A count the user typed is theirs and is left alone.
+	 * above it. A count the user typed is theirs and is left alone - including a
+	 * typed `1`, which is why this reads the touched flag and not the value.
 	 */
 	const handleSelectDataFile = (next: SelectedDataFile | null) => {
 		setDataFile(next);
-		if (next && iterations === "1") setIterations("");
+		if (next && !iterationsTouched && iterations === "1") setIterations("");
 		if (!next && iterationsBlank) setIterations("1");
 	};
 
@@ -344,7 +353,10 @@ export default function RunCollectionDialog({
 									placeholder={
 										dataFile ? String(dataFile.parsed.rows.length) : undefined
 									}
-									onChange={(e) => setIterations(e.target.value)}
+									onChange={(e) => {
+										setIterationsTouched(true);
+										setIterations(e.target.value);
+									}}
 									className="w-24 shrink-0"
 									aria-invalid={!iterationsValid}
 								/>

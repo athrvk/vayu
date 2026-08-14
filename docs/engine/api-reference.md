@@ -2603,8 +2603,17 @@ than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does
 | `maxScenarioSteps`    | `200`   | 1-10000    | Largest plan one run may resolve to. The sequence is composed up front and held in memory, and a load-mode scenario allocates a latency histogram per step, so this bounds memory rather than expressing a preference. |
 | `maxScenarioDataRows` | `1000`  | 1-1000000  | Largest inline `data` array. The app parses the CSV/TSV/JSON/JSONL file and sends the rows - the engine never reads a file from disk - so this bounds the payload that decision costs. |
 | `maxScenarioDataBytes` | `16777216` | 1024-104857600 | Largest inline `data` array measured in bytes of JSON. The row bound alone does not bound the payload, since one row may hold a megabyte in a single cell. |
+
 | `maxScenarioStoredSteps` | `5000` | 0-1000000 | Per-step `results` rows one run stores; `0` stores every step. Steps that did not pass are kept first, successes fill the rest, and what was thinned is reported in the run summary. |
 | `maxStepsPerIteration` | `0` | 0-1000000 | How many steps one iteration may execute before it is cut off. `pm.execution.setNextRequest` can send an iteration backwards, so a cycle would otherwise run forever. `0` derives the bound from the plan - ten times its step count, never below 100 - so a straight-through iteration can never trip it. |
+
+The two data bounds are also enforced by the app *before* the run, against the
+file it is about to parse, so a set this endpoint would refuse is named while
+the file can still be changed. The **file format** those rows come from - which
+extensions are read, the header row's rules, quoting, encoding, and what a CSV
+cell's type becomes - is the app's contract and is documented once, in
+[Data-Driven Runs](../app/data-driven-runs.md). This endpoint only ever receives
+rows.
 
 #### Scenario runs
 

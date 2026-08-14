@@ -72,6 +72,18 @@ describe("parseDelimited", () => {
 			["x\ty", "z"],
 		]);
 	});
+
+	it("refuses text that ends inside a quoted value, naming the line it opened on", () => {
+		// Without this the three intended rows become one cell holding all of
+		// them, and a one-column file makes that invisible to the ragged check.
+		expect(() => parseDelimited('name\n"alice\nbob\ncarol', ",")).toThrow(
+			/ends inside a quoted value that starts on line 2/
+		);
+	});
+
+	it("counts the opening line over physical lines, quoted newlines included", () => {
+		expect(() => parseDelimited('a\n"one\ntwo"\n"unclosed', ",")).toThrow(/line 4/);
+	});
 });
 
 describe("detectDataFileFormat", () => {
@@ -198,6 +210,46 @@ describe("parseDataFile - JSON and JSONL", () => {
 		expect(() => parseDataFile('{"a":1}\n[1,2]', "rows.jsonl")).toThrow(
 			/Line 2 is an array, not an object/
 		);
+	});
+
+	it("warns about a column some rows lack, naming how many", () => {
+		// The union hides it: `email` previews as a full column, and without the
+		// warning the run dies at the iteration that binds the row without it.
+		const parsed = parseDataFile('[{"id":1,"email":"a@b.c"},{"id":2},{"id":3}]', "rows.json");
+		expect(parsed.columns).toEqual(["id", "email"]);
+		expect(
+			parsed.warnings.some((w) =>
+				/Column "email" is missing from 2 of 3 rows.*\{\{data\.email\}\}/.test(w)
+			)
+		).toBe(true);
+	});
+
+	it("warns per column in JSONL too, and summarises past the fifth", () => {
+		// Neither row shares a column with the other, so all eight of the union's
+		// columns are uneven - five named, the rest counted.
+		const wide = JSON.stringify(Object.fromEntries("abcdefg".split("").map((k) => [k, 1])));
+		const parsed = parseDataFile(`${wide}\n{"z":1}`, "rows.jsonl");
+		const uneven = parsed.warnings.filter((w) => w.startsWith("Column "));
+		expect(uneven).toHaveLength(5);
+		expect(
+			parsed.warnings.some((w) => w === "3 more columns are missing from some rows.")
+		).toBe(true);
+	});
+
+	it("says nothing when every row carries every column", () => {
+		const parsed = parseDataFile('[{"a":1},{"a":2}]', "rows.json");
+		expect(parsed.warnings.some((w) => w.startsWith("Column "))).toBe(false);
+	});
+
+	it("points a .json file holding JSON Lines at the right extension", () => {
+		expect(() => parseDataFile('{"a":1}\n{"a":2}', "rows.json")).toThrow(
+			/looks like JSON Lines.*Rename it \.jsonl or \.ndjson/
+		);
+	});
+
+	it("does not blame JSON Lines for JSON that is merely broken", () => {
+		expect(() => parseDataFile('[{"a":1},', "rows.json")).toThrow(/not valid JSON/);
+		expect(() => parseDataFile('[{"a":1},', "rows.json")).not.toThrow(/JSON Lines/);
 	});
 });
 

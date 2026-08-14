@@ -12,8 +12,13 @@
  * The preview is not decoration. The engine rejects a bad data set with a
  * `400`, which is correct but late: by then the user has clicked Run and is
  * reading a message about a file they cannot see. Everything the engine would
- * refuse - a ragged row, a duplicated column, a non-object - is refused here
- * first, against the parsed file, with the row or line named.
+ * refuse - a ragged row, a duplicated column, a non-object, a set over
+ * `maxScenarioDataRows` or `maxScenarioDataBytes` - is refused here first,
+ * against the parsed file, with the row, line or setting named.
+ *
+ * The two caps are **fetched, never restated** ({@link useDataFileLimits}): a
+ * user who raises one engine-side and still cannot pick the file would have no
+ * way to tell which side refused it.
  *
  * The **resolved iteration count** is the other half, and it is the one that
  * surprises people: an explicit `iterations` wins over the row count and the
@@ -43,10 +48,13 @@ import { Callout } from "@/components/shared";
 import {
 	DATA_FILE_ACCEPT,
 	DataFileError,
+	decodeDataFile,
 	parseDataFile,
 	resolveIterationCount,
 	type ParsedDataFile,
 } from "@/services/data-files";
+import { useDataFileLimits } from "@/hooks/useDataFileLimits";
+import { formatBytes } from "@/modules/settings/utils/format-size";
 
 /** A chosen file: its name, for the user, and its rows, for the payload. */
 export interface SelectedDataFile {
@@ -104,21 +112,48 @@ export default function DataFilePicker({
 	disabled,
 }: DataFilePickerProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
+	const { maxRows, maxBytes } = useDataFileLimits();
+
+	/**
+	 * A file that does not parse leaves no selection behind - a half-chosen file
+	 * is how a run goes out with rows nobody saw.
+	 */
+	const refuse = (message: string) => {
+		onSelect(null);
+		onError(message);
+	};
 
 	const handleFile = (file: File) => {
+		/*
+		 * Checked against the file on disk, before a byte of it is read: a
+		 * several-hundred-megabyte file would otherwise be pulled wholesale into
+		 * a renderer string, and what failed then would be the transport rather
+		 * than a message naming the setting. The engine measures the *serialized
+		 * rows*, which for CSV are larger than the file (every row repeats the
+		 * column names), so a file over the cap is a data set over it too.
+		 */
+		if (file.size > maxBytes) {
+			refuse(
+				`The file is ${formatBytes(file.size)}, over the ${formatBytes(maxBytes)} a run may carry. Raise the maxScenarioDataBytes engine setting, or split the file.`
+			);
+			return;
+		}
+
 		const reader = new FileReader();
 		reader.onload = () => {
 			try {
-				onSelect({
-					fileName: file.name,
-					parsed: parseDataFile(String(reader.result), file.name),
-				});
+				const { text } = decodeDataFile(reader.result as ArrayBuffer);
+				const parsed = parseDataFile(text, file.name);
+				if (parsed.rows.length > maxRows) {
+					refuse(
+						`The file has ${parsed.rows.length} rows, over the ${maxRows} a run may carry. Raise the maxScenarioDataRows engine setting, or split the file.`
+					);
+					return;
+				}
+				onSelect({ fileName: file.name, parsed });
 				onError(null);
 			} catch (e) {
-				// A file that does not parse leaves no selection behind - a
-				// half-chosen file is how a run goes out with rows nobody saw.
-				onSelect(null);
-				onError(
+				refuse(
 					e instanceof DataFileError
 						? e.message
 						: `Could not read the file: ${(e as Error).message}`
@@ -126,10 +161,9 @@ export default function DataFilePicker({
 			}
 		};
 		reader.onerror = () => {
-			onSelect(null);
-			onError("Could not read the file.");
+			refuse("Could not read the file.");
 		};
-		reader.readAsText(file);
+		reader.readAsArrayBuffer(file);
 	};
 
 	const clear = () => {

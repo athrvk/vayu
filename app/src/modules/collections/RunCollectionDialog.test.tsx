@@ -33,6 +33,9 @@ const startRunState = {
 
 vi.mock("@/queries", () => ({
 	useStartScenarioRunMutation: () => startRunState,
+	// The picker reads the two engine data caps through `useDataFileLimits`.
+	// Empty entries leave it on the seeds, which no case here goes near.
+	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
 const startMonitoring = vi.fn();
@@ -276,6 +279,31 @@ describe("a data file", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("data");
 		// The blanked field goes back to 1, so the run is still valid.
+		expect(mutate.mock.calls[0][0].scenario.iterations).toBe(1);
+	});
+
+	it("clears a pristine 1 on pick, so the field says what the run will do", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await pickFile("users.csv", "user\nada\ngrace\nalan");
+
+		// Emptied, not left contradicting the "3 iterations, one per row" above.
+		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+	});
+
+	it("keeps a 1 the user typed, which the value alone cannot tell from the default", async () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		const field = screen.getByRole("spinbutton", { name: /iterations/i });
+		// Typed, not left at the default - it happens to be the same string, and
+		// clearing it would turn one pass into a full pass per row.
+		fireEvent.change(field, { target: { value: "2" } });
+		fireEvent.change(field, { target: { value: "1" } });
+
+		await pickFile("users.csv", "user\nada\ngrace\nalan");
+
+		expect(field).toHaveProperty("value", "1");
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		expect(mutate.mock.calls[0][0].scenario.iterations).toBe(1);
 	});
 
