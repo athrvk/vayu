@@ -35,6 +35,14 @@ class MethodEchoServer {
         svr.Post ("/echo", [] (const httplib::Request& req, httplib::Response& res) {
             res.set_content ("POST:" + req.body, "text/plain");
         });
+        // How the request framed its body, which is the only place the
+        // difference between "an empty body" and "a body of unknown length"
+        // shows up. See BodylessPostDeclaresAZeroLengthBody.
+        svr.Post ("/framing", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_content ("len=" + req.get_header_value ("Content-Length") +
+            ";te=" + req.get_header_value ("Transfer-Encoding"),
+            "text/plain");
+        });
         svr.Get ("/big", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (std::string (kBigBodyBytes, 'x'), "text/plain");
         });
@@ -158,6 +166,42 @@ TEST_F (CurlTransferTest, BodylessGetAndPostAreUnchanged) {
     auto post_result  = run_once (post);
     ASSERT_TRUE (post_result.is_ok ());
     EXPECT_EQ (post_result.value ().body, "POST:payload");
+}
+
+// A POST with no body is an ordinary request (a trigger endpoint, a logout),
+// and CURLOPT_POST on its own does not describe one: with no POSTFIELDS and no
+// POSTFIELDSIZE, libcurl treats the length as unknown and pulls the body from
+// its *default read callback*, which reads `stdin`. The engine sets no read
+// callback, so such a request took whatever the process's stdin happened to be.
+//
+// The framing asserted here is what every stdin gets wrong: the request goes
+// out chunked and length-less, which a server answering a trigger or logout
+// POST may refuse with a 411. The hang is the half that depends on stdin - the
+// read sits inside libcurl's callback on the transfer thread, out of
+// CURLOPT_TIMEOUT_MS's reach, so it blocks until stdin closes. A shell's
+// /dev/null EOFs at once and hides it; lukka/run-cmake spawns ctest with a pipe
+// it never writes to, which is where this surfaced, 60 seconds at a time.
+//
+// So this asserts the declared length rather than the hang: red in a
+// millisecond under any stdin, rather than red only under some and only after
+// a ctest timeout.
+//
+// Mutation-check: drop the POSTFIELDSIZE line from apply_method_and_body and
+// both cases below report an unset length.
+TEST_F (CurlTransferTest, BodylessPostDeclaresAZeroLengthBody) {
+    vayu::Request post;
+    post.method = vayu::HttpMethod::POST;
+    post.url    = server->url ("/framing");
+
+    auto loop_result = run_once (post);
+    ASSERT_TRUE (loop_result.is_ok ());
+    EXPECT_EQ (loop_result.value ().body, "len=0;te=")
+    << "a bodyless POST must declare Content-Length: 0, not an unknown length";
+
+    vayu::http::Client client;
+    auto client_result = client.send (post);
+    ASSERT_TRUE (client_result.is_ok ());
+    EXPECT_EQ (client_result.value ().body, "len=0;te=");
 }
 
 // HEAD with a body cannot be honoured (NOBODY resets the method and drops the

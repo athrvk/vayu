@@ -253,6 +253,27 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // is both unnecessary and destructive here.
         if (!mime) {
             curl_easy_setopt (curl, CURLOPT_POST, 1L);
+            // CURLOPT_POST alone does not say "no body" - it says "a body, of a
+            // length I have not told you", and libcurl then reads that body
+            // from its default read callback, which is `stdin`. Declaring the
+            // length as zero is what makes a bodyless POST a bodyless POST.
+            //
+            // Without it the request goes out chunked and length-less, which
+            // the servers that answer a trigger or a logout POST are entitled
+            // to refuse with a 411 - and which no other client sends. Worse
+            // where stdin is not already at EOF: the read happens inside
+            // libcurl's callback on the transfer thread, so CURLOPT_TIMEOUT_MS
+            // never fires and the transfer blocks until stdin closes. The app
+            // spawns the daemon with stdin ignored and a shell redirects it
+            // from /dev/null, so both EOF at once and hid this; an engine
+            // started by hand on a terminal, or under a parent that pipes stdin
+            // and never writes to it, hangs outright.
+            //
+            // The body-bearing branch above sets POSTFIELDSIZE for the same
+            // reason; this is the case with no body to set it for.
+            if (!has_body) {
+                curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, 0L);
+            }
         }
         break;
     case HttpMethod::PUT:
