@@ -62,7 +62,7 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 ### Listeners
 
 This is the engine's whole listener inventory. The management API is the only long-lived one;
-three more are opened on demand, and the rule that separates them is where each may bind.
+four more are opened on demand, and the rule that separates them is where each may bind.
 
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
@@ -70,6 +70,7 @@ three more are opened on demand, and the rule that separates them is where each 
 | OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
 | [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response |
+| [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped |
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
@@ -83,6 +84,10 @@ are different reasons:
   configured - so exposing it to a LAN exposes capture-and-echo and nothing more. A webhook source
   on another host is a real case; a management API on another host is not one worth the blast
   radius.
+- A **mock server** re-serves stored response bodies verbatim, and a recorded response carries
+  whatever the real one carried - a session cookie, a token, a customer record. That is closer to
+  publishing the request store than to publishing an echo, so it has no `bind` field at all rather
+  than a confirmation gate.
 
 Even so, wide is never the default: `bind` outside 127.0.0.0/8 and `::1` is refused unless the
 caller sends `"confirmNonLoopback": true`, and the inbox then reports `loopback: false` on every
@@ -93,11 +98,13 @@ Each on-demand listener is owned by a manager that is a **member of `Server`, de
 `server_`** (`engine/include/vayu/http/server.hpp`). Members are destroyed in reverse order, so the
 route lambdas holding references to a manager are gone before its destructor stops and joins the
 listener threads - and the `Database` those threads write to, being external to `Server`, is still
-alive at that point. All three managers run that lifecycle - bind, wait for the accept loop, stop,
+alive at that point. All four managers run that lifecycle - bind, wait for the accept loop, stop,
 join, release - through one shared `ManagedListener`
 (`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
-one of three copies; what stays per-manager is the route registration, the error each bind failure
-answers with, and the OAuth attempt TTL sweep.
+one of four copies; what stays per-manager is the route registration, the error each bind failure
+answers with, and the OAuth attempt TTL sweep. The mock server is the one built on the helper rather
+than ported to it: #505 extracted it before this listener existed, which was the whole point of
+extracting it when the third one landed.
 
 That shared listener is also what keeps two of them off one port. Every live listener claims its
 address:port there, and an **explicitly requested** port a live listener already holds is refused

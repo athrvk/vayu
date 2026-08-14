@@ -98,6 +98,14 @@ export {
 	useStopMockIssuerMutation,
 } from "./mock-issuer";
 
+// Collection mock server (issue #481 phase 2)
+export {
+	useMockServersQuery,
+	useMockServerRoutesQuery,
+	useStartMockServerMutation,
+	useStopMockServerMutation,
+} from "./mock-server";
+
 // Health & Config
 export { useHealthQuery } from "./health";
 export { useConfigQuery, useUpdateConfigMutation } from "./config";

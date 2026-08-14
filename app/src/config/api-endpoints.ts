@@ -160,6 +160,15 @@ export const API_ENDPOINTS = {
 	MOCK_ISSUER_BY_ID: (issuerId: string) => `/mock-issuer/${issuerId}`,
 	MOCK_ISSUER_STOP: (issuerId: string) => `/mock-issuer/${issuerId}/stop`,
 
+	// Collection mock server (issue #481 phase 2). Engine-process state like the
+	// two above, so the same verb-path shape. There is no DELETE and no PUT: a
+	// mock's route table is a start-time snapshot of the collection, so changing
+	// what it serves means starting another one, and stopping is what ends it.
+	MOCK_SERVER: `/mock`,
+	MOCK_SERVER_START: `/mock/start`,
+	MOCK_SERVER_STOP: (mockId: string) => `/mock/${mockId}/stop`,
+	MOCK_SERVER_ROUTES: (mockId: string) => `/mock/${mockId}/routes`,
+
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,
 	OAUTH2_AUTHORIZE_START: `/oauth2/authorize/start`,

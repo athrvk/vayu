@@ -595,6 +595,31 @@ constexpr size_t MAX_PER_REQUEST = 100;
 } // namespace request_example
 
 /**
+ * @brief Local mock server bounds (issue #481 phase 2)
+ *
+ * Rails rather than preferences, the same split the inbox and the issuer draw:
+ * every value here bounds a resource the *caller* of the mock does not pay for
+ * - listener threads, and the route table one collection can make the engine
+ * hold. What a user actually tunes per mock (latency, error rate) is request
+ * payload, not config.
+ */
+namespace mock_server {
+/// Concurrently running mocks. Each owns a listener thread plus cpp-httplib's
+/// own accept loop, so this is a thread budget - the same one the issuer's
+/// MAX_ISSUERS is.
+constexpr size_t MAX_SERVERS = 8;
+/// Routes one mock may hold. A collection tree is walked whole at start, so
+/// this bounds what a single `POST /mock/start` materialises; past it the start
+/// is refused rather than the tail silently dropped.
+constexpr size_t MAX_ROUTES = 2000;
+/// Ceiling on the injected per-response delay. It holds a cpp-httplib pool
+/// thread for its whole duration - and the teardown join waits for it - so it
+/// is bounded well below any client timeout, exactly as the inbox's canned
+/// delay is.
+constexpr int MAX_LATENCY_MS = 30000;
+} // namespace mock_server
+
+/**
  * @brief Database optimization configuration
  */
 namespace database {

@@ -215,6 +215,33 @@ issuer leaves the list altogether, unlike an inbox, which stays listed with
 bound listener and the engine refuses one with a `400` rather than half-applying
 it.
 
+#### Collection mock server
+
+```typescript
+apiService.listMockServers(): Promise<MockServer[]>
+apiService.startMockServer(request: StartMockServerRequest): Promise<MockServer>
+apiService.stopMockServer(mockId): Promise<StopMockServerResponse>
+apiService.listMockServerRoutes(mockId): Promise<MockServerRoute[]>
+```
+
+A loopback listener answering a collection's saved example responses on the
+paths its requests describe (issue #481 phase 2). `collectionId` is the only
+required field; `latencyMs` and `errorRatePct` are the injection knobs, and an
+out-of-range value is a `400` rather than a clamp.
+
+Two surfaces, deliberately split. `CollectionDetail/MockServerControl` is the
+only one that can **start** one, because a mock needs a collection and the
+Services drawer has none selected; the drawer's Mock servers group lists and
+stops whatever is running, wherever it came from. Both read the same polled
+list, so a mock started in one is visible in the other within a poll.
+
+`listMockServerRoutes` is **not** polled: the route table is a snapshot taken
+when the mock started and a running mock does not reload the collection, so it is
+fetched once per expanded row (`staleTime: Infinity`). Stopping drops the record
+engine-side - unlike an inbox, which stays listed with `running: false` - so the
+mutation *removes* the routes cache entry instead of invalidating it, which would
+refetch an id the engine now answers `404` for.
+
 #### Create vs update
 
 For collections, requests and environments the engine splits the write verbs:
@@ -589,6 +616,15 @@ export const API_ENDPOINTS = {
     `/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,
   INBOX_CAPTURES_CLEAR: (inboxId: string) => `/inbox/${inboxId}/requests`,
   INBOX_LIVE: (inboxId: string) => `/inbox/${inboxId}/live`,
+
+  // Collection mock server - a loopback listener answering the collection's
+  // saved examples. Verb paths for the same reason the inbox uses them. No PUT
+  // and no DELETE: the route table is a start-time snapshot, so changing what a
+  // mock serves means starting another one, and stopping is what ends it.
+  MOCK_SERVER: "/mock",
+  MOCK_SERVER_START: "/mock/start",
+  MOCK_SERVER_STOP: (mockId: string) => `/mock/${mockId}/stop`,
+  MOCK_SERVER_ROUTES: (mockId: string) => `/mock/${mockId}/routes`,
 
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,

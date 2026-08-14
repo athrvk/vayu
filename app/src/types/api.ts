@@ -735,6 +735,68 @@ export interface StopMockIssuerResponse {
 	stopped: boolean;
 }
 
+// Collection mock server API (issue #481 phase 2). Engine-process state like an
+// inbox or an issuer: the engine holds each mock on its own loopback listener,
+// serving the collection's saved examples, and a restart forgets every one.
+
+/** One running mock server, as `POST /mock/start` and `GET /mock` describe it. */
+export interface MockServer {
+	mockId: string;
+	collectionId: string;
+	/** Named at start time - the collection may since have been renamed. */
+	collectionName: string;
+	/** `http://127.0.0.1:<port>`, with no trailing slash: a base to point at. */
+	url: string;
+	port: number;
+	latencyMs: number;
+	errorRatePct: number;
+	/** Requests in the collection subtree the mock is serving. */
+	routeCount: number;
+	/**
+	 * How many of those have no saved example and so answer 501.
+	 *
+	 * The number that explains an otherwise empty-looking mock, which is why it
+	 * is reported rather than left to be discovered one 501 at a time.
+	 */
+	routesWithoutExample: number;
+	createdAt: number;
+}
+
+export interface StartMockServerRequest {
+	collectionId: string;
+	/** 0 (the default) binds an ephemeral port. */
+	port?: number;
+	/** Artificial delay before every answer, 0-30000. */
+	latencyMs?: number;
+	/** Share of answers replaced by a synthesized 500, 0-100. */
+	errorRatePct?: number;
+}
+
+export interface ListMockServersResponse {
+	data: MockServer[];
+}
+
+export interface StopMockServerResponse {
+	mockId: string;
+	stopped: boolean;
+}
+
+/** One entry of a mock's route table, as `GET /mock/:id/routes` reports it. */
+export interface MockServerRoute {
+	requestId: string;
+	requestName: string;
+	method: string;
+	/** The normalized template, e.g. `/pets/{{petId}}`. */
+	path: string;
+	hasExample: boolean;
+	/** The example's status, or 0 when there is no example to serve. */
+	status: number;
+}
+
+export interface ListMockServerRoutesResponse {
+	data: MockServerRoute[];
+}
+
 // Health & Config API
 export type GetHealthResponse = EngineHealth;
 

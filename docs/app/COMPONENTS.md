@@ -116,7 +116,7 @@ Resizable sidebar (220–480px default, per view). The single left navigation fo
 | **`collections`** | `CollectionTree` (hierarchical collections + requests) | add collection, add request, import |
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
 | **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
-| **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers) | new inbox, new issuer |
+| **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers, mock servers) | new inbox, new issuer |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
@@ -324,7 +324,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 
 ### `CollectionDetail/` (screen `"collection-detail"`)
 
-Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count; five tabs:
+Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count, and - right-aligned - the mock-server control; five tabs:
 
 | Tab | Component | Notes |
 |---|---|---|
@@ -333,6 +333,15 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
+
+`MockServerControl.tsx` is the header's right-hand control and the only surface that can **start** a
+mock server (issue #481 phase 2), because it is the only one holding a collection. With none running
+for this collection it is a **Run mock server** button; with one running it is a chip carrying the
+base URL, the route count and how many of those routes have no example, plus copy and stop. It picks
+its mock by `collectionId` and, when several match, by the **lowest port** - nothing stops a user
+starting two mocks of one collection, and the engine's list order is not stable across polls. There
+is deliberately no restart: a mock's route table is a start-time snapshot, so stop-and-start is the
+only way to pick up an edit, and the stop tooltip says so.
 
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh).
 
@@ -602,17 +611,28 @@ One home for the app's **local services** - the things that keep listening after
 (issue #502). Rendered as the `services` drawer view; the Dock's indicator and the welcome tile
 both activate it.
 
-- `ServicesPanel.tsx` - the view. Two groups today, **Webhook inboxes** and **OAuth issuers**, each
-  with its own start affordance in the group header and a one-sentence empty state saying what the
-  service would give you - this drawer is also the features' discoverability. An inbox row opens the
+- `ServicesPanel.tsx` - the view. Three groups: **Webhook inboxes**, **OAuth issuers** and **Mock
+  servers**, each with a one-sentence empty state saying what the service would give you - this
+  drawer is also the features' discoverability. The first two carry their own start affordance in
+  the group header; the third deliberately does not (see below). An inbox row opens the
   inbox *tab* (the drawer lists, the tab shows the captures) and carries copy, stop (running rows
   only) and **delete** (every row); an issuer row expands in place to its token and authorize URLs,
   a copy for the HS256 signing key, its configuration in one line, a live `failureMode` switch, and
   - in `slow` only - the delay that mode answers after, committed on blur rather than per keystroke.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
   new listener, and as a Play labelled "Start inbox" beside a stopped row it read as "restart that
-  one", which nothing here does (issue #553). Mock servers (#481) get a third group when they exist - deliberately no
-  placeholder until then.
+  one", which nothing here does (issue #553).
+
+  **Mock servers (#481 phase 2) have no start affordance here, and that is not an omission**: a
+  mock needs a collection to serve, and this drawer has none selected. The collection header owns
+  the start (`CollectionDetail/MockServerControl`); this group owns the list, so a mock started from
+  any collection - or from an MCP tool, or curl - can be found and stopped where every other running
+  listener is. A mock row leads with the **collection name** (two mocks of one collection differ
+  only by port) and expands in place to its base URL, its latency/error-rate line, and the **route
+  table** from `GET /mock/:id/routes` - the answer to the only question this surface gets asked,
+  "why did the mock 404 that?". The table is fetched when the row is opened and never polled: it is
+  a start-time snapshot that cannot change under a running mock. Stopping a mock removes it from the
+  list, like an issuer and unlike an inbox, because a mock holds nothing that outlives its listener.
 
   Row semantics, all from issue #555. An inbox row **leads with `Port NNNN`** and demotes the URL
   behind it: the port is the part that varies and the part a user names an inbox by, while three

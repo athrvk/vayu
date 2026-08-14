@@ -1601,6 +1601,155 @@ goes to the newcomer; the evicted stream ends on its next write. Every live
 stream writes at least a keep-alive each interval, so a genuinely live watcher is
 never evicted and a second concurrent one is still refused.
 
+## Mock Server
+
+A **mock server** is a listener that answers a collection's [saved
+examples](#request-examples) on the paths its requests describe. It is what
+examples are *for*: import a spec, and the responses it documented become a
+running upstream you can build a frontend against, or point a Vayu load run at,
+without a cloud plan or a second machine.
+
+**Lifetime is the engine process**, exactly as for an inbox and an issuer - a
+verb path starts it, ids are not restorable across restarts, and stopping one
+**drops its record**. There is no stopped state to read: a mock holds nothing
+that outlives its listener, unlike an inbox and its captures.
+
+**Load-testing against a mock is a supported workflow**, and it is the one this
+listener exists for as much as frontend development: a mock is a
+known-latency, zero-cost upstream on the same machine, so a run against it
+measures the *generator* rather than someone else's service, and costs nobody a
+bill. Start the mock, then point a run at one of its paths:
+
+```bash
+curl -s localhost:9876/mock/start -d '{"collectionId":"col_abc123","latencyMs":5}'
+# -> {"mockId":"mock_5f2a","url":"http://127.0.0.1:43117", ...}
+
+curl -s localhost:9876/runs -d '{
+  "mode":"constant_rps","targetRps":500,"duration":"30s",
+  "url":"http://127.0.0.1:43117/pets","method":"GET"
+}'
+```
+
+`latencyMs` is what makes the baseline realistic rather than degenerate, and
+`errorRatePct` is how a run's error handling and [threshold
+verdict](#post-runs) get exercised without breaking a real service.
+
+**Loopback only.** There is no `bind` field. Unlike an inbox - which serves
+capture-and-echo and nothing else, so a LAN-visible one is defensible - a mock
+re-serves stored response bodies verbatim, and a recorded response can carry
+whatever the real one did. See [architecture.md](architecture.md#listeners).
+
+**The route table is a start-time snapshot.** It is built once, from the
+collection and every collection under it (an OpenAPI import files its requests
+in a folder per tag, so the subtree is the only useful unit), and a running mock
+does not reload edits: stop it and start it again.
+
+**How a request is matched.**
+
+- The stored URL is reduced to a path: scheme and host - or the `{{baseUrl}}`
+  variable standing in for them - the query and the fragment are all dropped.
+- All three template spellings are one wildcard segment: `{{petId}}` (Vayu and
+  Postman), `{petId}` (OpenAPI) and `:petId` (Postman's other form). A wildcard
+  matches exactly one non-empty segment. The normalization is pinned to the
+  importers' own by `engine/tests/fixtures/path-template-conformance.json`,
+  which both suites read - the app writes these URLs and the mock reads them
+  back.
+- **Specificity wins, not registration order**: `/pets/mine` answers
+  `GET /pets/mine` even when `/pets/{{petId}}` was stored first.
+- A trailing slash and a repeated `/` are the same route.
+
+**What a miss says.** The message is most of the debugging value, so the three
+outcomes are distinct rather than one blanket 404:
+
+| Case | Status | `code` | Message names |
+|------|--------|--------|---------------|
+| No request has that path | 404 | `mock_no_route` | The method and path, and how many routes are served |
+| The path matches, the method does not | 404 | `mock_method_mismatch` | The matching path template and the methods it *is* served for |
+| A route matched but its request has no saved example | 501 | `mock_no_example` | The request's name, and that an example must be saved or imported |
+
+**Bounds** (rails, not settings): at most **8** mock servers at once (a listener
+thread each), at most **2000** routes in one table, and `latencyMs` capped at
+**30000** - it holds a listener thread for its whole duration and a stop waits
+on that join.
+
+### POST /mock/start
+
+**Request:**
+```json
+{
+  "collectionId": "col_abc123",
+  "port": 0,
+  "latencyMs": 0,
+  "errorRatePct": 0
+}
+```
+
+`collectionId` is required. `port` 0 (the default) binds a free one.
+`latencyMs` (0 - 30000) delays every answer; `errorRatePct` (0 - 100) replaces
+that share of answers with a synthesized `500` carrying `mock_injected_error`.
+Every out-of-range value is a `400` rather than a clamp.
+
+**Response:**
+```json
+{
+  "mockId": "mock_5f2a",
+  "collectionId": "col_abc123",
+  "collectionName": "Pet Store",
+  "url": "http://127.0.0.1:43117",
+  "port": 43117,
+  "latencyMs": 0,
+  "errorRatePct": 0,
+  "routeCount": 12,
+  "routesWithoutExample": 3,
+  "createdAt": 1735689600000
+}
+```
+
+`url` has **no trailing slash** - it is a base to concatenate a path onto.
+`routesWithoutExample` is the number that explains an otherwise empty-looking
+mock, which is why it is reported rather than left to be discovered one `501` at
+a time.
+
+**Errors:** `404` for a collection that does not exist; `400`
+`mock_no_requests` when the collection and its subtree hold none (a listener
+that 404s everything is never what the caller meant); `400`
+`mock_too_many_routes` past the table bound; `409` `mock_limit_reached` at the
+server budget; `409` `mock_bind_failed` when the requested port is taken,
+naming the holder when this engine is the one holding it.
+
+### GET /mock
+
+`{"data": [...]}` - every running mock, in the shape above.
+
+### GET /mock/:mockId/routes
+
+The table the mock is serving. This is how "the mock 404s that path" gets
+diagnosed without sending a request per guess.
+
+```json
+{
+  "data": [
+    {
+      "requestId": "req_1",
+      "requestName": "Get pet",
+      "method": "GET",
+      "path": "/pets/{{petId}}",
+      "hasExample": true,
+      "status": 200
+    }
+  ]
+}
+```
+
+`status` is `0` when `hasExample` is false - there is no example whose status it
+could be. `404` for an unknown mock.
+
+### POST /mock/:mockId/stop
+
+Stops the listener and drops the record: `{"mockId": "...", "stopped": true}`,
+or `404`. In-flight answers - including one inside its configured `latencyMs` -
+are joined before this returns.
+
 ## Authentication
 
 The engine **resolves auth server-side**. Every request's `auth` object (on

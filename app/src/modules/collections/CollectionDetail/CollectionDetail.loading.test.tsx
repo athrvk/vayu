@@ -47,6 +47,9 @@ vi.mock("./AuthTab", () => ({ default: () => null }));
 vi.mock("./InfoTab", () => ({ default: () => null }));
 vi.mock("./ScriptTab", () => ({ default: () => null }));
 vi.mock("./VariablesTab", () => ({ default: () => null }));
+// The header's mock-server control reaches the engine and the toast store;
+// this file is about the tab shell, and its own suite covers the control.
+vi.mock("./MockServerControl", () => ({ default: () => null }));
 
 beforeEach(() => {
 	state.collections = { data: [], isLoading: false };

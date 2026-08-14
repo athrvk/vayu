@@ -38,6 +38,7 @@ const deleteInbox = vi.fn();
 const startMockIssuer = vi.fn();
 const stopMockIssuer = vi.fn();
 const updateMockIssuer = vi.fn();
+const listMockServers = vi.fn();
 
 vi.mock("@/services/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/services/api")>();
@@ -53,6 +54,7 @@ vi.mock("@/services/api", async (importOriginal) => {
 			startMockIssuer: (...a: unknown[]) => startMockIssuer(...a),
 			stopMockIssuer: (...a: unknown[]) => stopMockIssuer(...a),
 			updateMockIssuer: (...a: unknown[]) => updateMockIssuer(...a),
+			listMockServers: () => listMockServers(),
 		},
 	};
 });
@@ -106,6 +108,7 @@ beforeEach(() => {
 	cleanup();
 	listInboxes.mockReset().mockResolvedValue([]);
 	listMockIssuers.mockReset().mockResolvedValue([]);
+	listMockServers.mockReset().mockResolvedValue([]);
 	startInbox.mockReset().mockResolvedValue(inbox());
 	stopInbox.mockReset().mockResolvedValue(inbox({ running: false }));
 	deleteInbox.mockReset().mockResolvedValue({ inboxId: "inbox_a", capturesDeleted: 0 });
