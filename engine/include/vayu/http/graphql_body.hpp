@@ -58,4 +58,19 @@ namespace vayu::http {
  */
 [[nodiscard]] std::string graphql_wire_body (const std::string& content);
 
+/**
+ * @brief Whether a `graphql` body's `content` is already the JSON envelope.
+ *
+ * The first two of `graphql_wire_body`'s three cases, asked as a question:
+ * `graphql_wire_body` passes such a body through untouched and wraps anything
+ * else. It is exported because a second caller needs the same answer for a
+ * different reason - the `{{data.*}}` binder escapes a token that lands inside
+ * a JSON string literal, and only an envelope has any (a bare document is
+ * escaped wholesale when it is wrapped, so escaping it first would double it).
+ *
+ * One classifier for both, rather than a second copy that could call a body an
+ * envelope on one side of the bind and a document on the other.
+ */
+[[nodiscard]] bool graphql_body_is_enveloped (const std::string& content);
+
 } // namespace vayu::http

@@ -885,6 +885,19 @@ pm.iterationData.toObject();       // the whole row as a plain object
 as a number, and a CSV column arrives as a string, because that is what the
 file said.
 
+**The row reaches a request through a different channel, with a different type
+story.** `pm.iterationData` hands a script the cell as the value it is - a
+number stays a number, a `null` stays `null`, and a branch can read either.
+`{{data.column}}` (see
+[api-reference.md](api-reference.md#scenario-runs)) hands
+the *request* the cell as **text**, because a URL, a header and a body are text;
+its type only survives where the surrounding document has types of its own,
+which is why placement inside or outside a JSON string literal is what decides
+whether `{{data.n}}` arrives as `2` or `"2"`. The two also disagree about
+`null` on purpose: a script may branch on it, while a token that substituted it
+would write nothing where a value belonged, so the bind errors instead. An
+optional column belongs on this side of the line.
+
 `has` answers presence, the same way `pm.environment.has` and its siblings do.
 A column whose value is `null` is `true` - the row carries it - which is the
 fact `get` alone cannot state without the reader knowing that an absent column

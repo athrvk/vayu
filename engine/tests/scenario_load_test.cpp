@@ -50,6 +50,7 @@ class ScenarioMockServer {
     struct Hit {
         std::string path;
         std::string cookie; // The `Cookie` header as received; "" when absent.
+        std::string body;   // The request body as received; "" for a GET.
     };
 
     explicit ScenarioMockServer (size_t login_rendezvous = 0)
@@ -78,6 +79,14 @@ class ScenarioMockServer {
                 res.set_content ("{}", "application/json");
             });
         }
+
+        // The body a bind produced, read off the wire rather than off the plan:
+        // a body that binds cleanly and is then re-encoded downstream is still
+        // a corrupt request (issue #593).
+        svr.Post ("/body", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/body");
+            res.set_content ("{}", "application/json");
+        });
 
         // A `{{data.*}}` token substitutes into the path, so the row a virtual
         // user bound is readable off the wire rather than inferred from a
@@ -124,7 +133,7 @@ class ScenarioMockServer {
     private:
     void record (const httplib::Request& req, const std::string& path) {
         std::lock_guard<std::mutex> lock (hits_mtx_);
-        hits_.push_back ({ path, req.get_header_value ("Cookie") });
+        hits_.push_back ({ path, req.get_header_value ("Cookie"), req.body });
     }
 
     httplib::Server svr;
@@ -865,6 +874,55 @@ TEST_F (ScenarioLoadTest, AnAbsentColumnErrorsTheStepInsteadOfSendingIt) {
     << errors[0].error_message;
     EXPECT_NE (errors[0].error_message.find ("step1"), std::string::npos)
     << "the message does not name the step it failed on: " << errors[0].error_message;
+}
+
+// A quote-bearing cell used to put invalid JSON on the wire, silently, at the
+// run's full rate (issue #593). Asserted off the wire because that is where the
+// corruption was: the bind, the build and the wire encoding all have to agree.
+TEST_F (ScenarioLoadTest, AQuoteBearingCellReachesTheWireAsValidJson) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/body") });
+    execution.plan.steps[0].request.method    = vayu::HttpMethod::POST;
+    execution.plan.steps[0].request.body.mode = vayu::BodyMode::Json;
+    execution.plan.steps[0].request.body.content = R"({"who":"u","note":"{{data.note}}"})";
+    with_data (execution, { json{ { "note", R"(has,comma "quoted")" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto hits = server.hits_for ("/body");
+    ASSERT_EQ (hits.size (), 1u);
+    const auto sent = json::parse (hits[0].body, nullptr, false);
+    ASSERT_FALSE (sent.is_discarded ())
+    << "a bound body reached the wire unparseable: " << hits[0].body;
+    EXPECT_EQ (sent.at ("note").get<std::string> (), R"(has,comma "quoted")");
+}
+
+// A null cell is refused under load the same way a missing column is: nothing
+// is sent, and the run's error store carries the sentence that names it.
+TEST_F (ScenarioLoadTest, ANullCellErrorsTheStepInsteadOfErasingTheValue) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/body") });
+    execution.plan.steps[0].request.method       = vayu::HttpMethod::POST;
+    execution.plan.steps[0].request.body.mode    = vayu::BodyMode::Json;
+    execution.plan.steps[0].request.body.content = R"({"n":{{data.n}}})";
+    with_data (execution, { json{ { "n", nullptr } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_TRUE (server.hits_for ("/body").empty ())
+    << "a body with an erased value reached the wire";
+    EXPECT_EQ (state->steps_errored.load (), 1u);
+
+    const auto& errors = context_->metrics_collector->errors ();
+    ASSERT_FALSE (errors.empty ());
+    EXPECT_NE (errors[0].error_message.find ("{{data.n}}"), std::string::npos)
+    << errors[0].error_message;
+    EXPECT_NE (errors[0].error_message.find ("null"), std::string::npos)
+    << errors[0].error_message;
 }
 
 // A recorded result carries the row it was bound to, so a failure under load is

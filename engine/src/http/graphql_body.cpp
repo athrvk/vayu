@@ -47,7 +47,9 @@ bool opens_as_json_object (std::string_view text) {
     return !rest.empty () && rest.front () == '"';
 }
 
-bool is_enveloped (const std::string& content) {
+} // namespace
+
+bool graphql_body_is_enveloped (const std::string& content) {
     // Non-throwing parse: a body arrives from a user and being unreadable is
     // an expected answer here, not an exceptional one.
     const auto parsed = nlohmann::json::parse (content, nullptr, false);
@@ -61,10 +63,8 @@ bool is_enveloped (const std::string& content) {
     return query != parsed.end () && query->is_string ();
 }
 
-} // namespace
-
 std::string graphql_wire_body (const std::string& content) {
-    if (content.empty () || is_enveloped (content)) {
+    if (content.empty () || graphql_body_is_enveloped (content)) {
         return content;
     }
     return nlohmann::json{ { "query", content } }.dump ();

@@ -7,9 +7,13 @@
 
 #include "vayu/core/scenario_data.hpp"
 
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 
+#include "vayu/http/graphql_body.hpp"
 #include "vayu/http/request_composer.hpp"
 
 namespace vayu::core {
@@ -34,6 +38,40 @@ std::string token_for (const std::string& column) {
     return "{{" + std::string (vayu::http::DATA_NAMESPACE_PREFIX) + column + "}}";
 }
 
+/// What kind of text a visited field is, for the one rule that depends on it.
+enum class FieldContext : std::uint8_t {
+    /// A URL, a header, a form field, a text body: no quoting rule of its own.
+    Plain,
+    /// A body whose text is a JSON document, so a token may land inside a
+    /// string literal and has to be escaped when it does.
+    JsonDocument,
+};
+
+/**
+ * Whether this request's body text is a JSON document.
+ *
+ * `Json` and `JsonRpc` always are. A `graphql` body is either shape - the JSON
+ * envelope or a bare GraphQL document - so it is asked, through the same
+ * classifier the envelope itself uses; a bare document is *not* a JSON document
+ * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
+ * escaping first would double every quote.
+ *
+ * Every other mode is plain text as far as a bind is concerned. The XML body
+ * mode #580 would add is the one to revisit: its quoting rules are not JSON's,
+ * so it needs its own encoding rather than this one.
+ */
+FieldContext body_context (const vayu::Body& body) {
+    switch (body.mode) {
+    case vayu::BodyMode::Json:
+    case vayu::BodyMode::JsonRpc: return FieldContext::JsonDocument;
+    case vayu::BodyMode::GraphQL:
+        return vayu::http::graphql_body_is_enveloped (body.content) ?
+        FieldContext::JsonDocument :
+        FieldContext::Plain;
+    default: return FieldContext::Plain;
+    }
+}
+
 /**
  * The one list of strings a data row binds: URL, header names and values, raw
  * body, and both halves of every form field.
@@ -47,28 +85,60 @@ std::string token_for (const std::string& column) {
  * payload carries headers as `[{key, value}]`, and `resolve_json_strings`
  * resolves every string value in that array, key included. A map cannot have
  * its keys rewritten in place, so this rebuilds it.
+ *
+ * Each field is visited with the context it sits in, so the splitter can decide
+ * a token's encoding from the same walk that hands out its position.
  */
 template <typename Visit>
 void walk_bindable_fields (vayu::Request& request, Visit&& visit) {
-    visit (request.url);
+    visit (request.url, FieldContext::Plain);
 
     if (!request.headers.empty ()) {
         vayu::Headers rebound;
         for (const auto& [name, value] : request.headers) {
             std::string bound_name  = name;
             std::string bound_value = value;
-            visit (bound_name);
-            visit (bound_value);
+            visit (bound_name, FieldContext::Plain);
+            visit (bound_value, FieldContext::Plain);
             rebound.emplace (std::move (bound_name), std::move (bound_value));
         }
         request.headers = std::move (rebound);
     }
 
-    visit (request.body.content);
+    // Read before the visit: the join rewrites the content in place, and a
+    // bound body is not the text the mode was decided from.
+    const FieldContext content_context = body_context (request.body);
+    visit (request.body.content, content_context);
     for (auto& field : request.body.fields) {
-        visit (field.key);
-        visit (field.value);
+        visit (field.key, FieldContext::Plain);
+        visit (field.value, FieldContext::Plain);
     }
+}
+
+/**
+ * Whether the text so far has left us inside a JSON string literal.
+ *
+ * Only the literal chunks are scanned, never a bound value, and that is sound
+ * precisely because of the encoding this decides: a value bound inside a string
+ * is escaped, so it cannot close the string, and one bound outside is rendered
+ * as balanced JSON. Either way the state after a token is the state before it.
+ */
+bool advance_json_string_state (std::string_view literal, bool in_string) {
+    bool escaped = false;
+    for (const char c : literal) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (in_string && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (c == '"') {
+            in_string = !in_string;
+        }
+    }
+    return in_string;
 }
 
 /**
@@ -77,7 +147,7 @@ void walk_bindable_fields (vayu::Request& request, Visit&& visit) {
  */
 class FieldSplitter {
     public:
-    void operator() (std::string& field) {
+    void operator() (std::string& field, FieldContext context) {
         const size_t position = next_field_++;
         if (field.empty ()) {
             return;
@@ -90,9 +160,16 @@ class FieldSplitter {
         entry.field    = position;
         entry.literals = std::move (split.literals);
         entry.columns.reserve (split.names.size ());
-        for (const auto& name : split.names) {
+        entry.encodings.reserve (split.names.size ());
+        bool in_string = false;
+        for (size_t i = 0; i < split.names.size (); ++i) {
             entry.columns.push_back (
-            name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()));
+            split.names[i].substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()));
+            if (context == FieldContext::JsonDocument) {
+                in_string = advance_json_string_state (entry.literals[i], in_string);
+            }
+            entry.encodings.push_back (in_string ? DataValueEncoding::JsonString :
+                                                   DataValueEncoding::Verbatim);
         }
         template_.fields.push_back (std::move (entry));
     }
@@ -107,6 +184,50 @@ class FieldSplitter {
 };
 
 /**
+ * @p text as the inside of a JSON string literal.
+ *
+ * Only what JSON forbids raw is rewritten - the quote, the backslash and the
+ * control characters - so every other byte survives the bind exactly as the
+ * cell wrote it. Deliberately *not* `nlohmann::json::dump`, which additionally
+ * validates UTF-8 and would throw on a cell a latin-1 CSV produced; a bind is
+ * not the place to reject bytes the rest of the request would have carried.
+ */
+std::string escape_json_string_content (const std::string& text) {
+    std::string out;
+    out.reserve (text.size ());
+    for (const char c : text) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\b': out += "\\b"; break;
+        case '\f': out += "\\f"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (static_cast<unsigned char> (c) < 0x20) {
+                constexpr const char* kHex = "0123456789abcdef";
+                out += "\\u00";
+                out += kHex[(static_cast<unsigned char> (c) >> 4U) & 0x0FU];
+                out += kHex[static_cast<unsigned char> (c) & 0x0FU];
+            } else {
+                out += c;
+            }
+        }
+    }
+    return out;
+}
+
+/// The rendered cell as it is written into the text around it.
+std::string encode_data_value (const nlohmann::json& value, DataValueEncoding encoding) {
+    std::string rendered = render_data_value (value);
+    if (encoding == DataValueEncoding::JsonString) {
+        return escape_json_string_content (rendered);
+    }
+    return rendered;
+}
+
+/**
  * Join the templated fields of one step against one row.
  *
  * Failure is recorded rather than thrown: the caller is a per-step path in a
@@ -119,7 +240,7 @@ class TemplateJoiner {
     : template_ (tmpl), row_ (row), row_index_ (row_index) {
     }
 
-    void operator() (std::string& field) {
+    void operator() (std::string& field, FieldContext /*context*/) {
         const size_t position = next_field_++;
         // The templates are in ascending walk order, so one cursor finds them
         // all without searching - every field between two of them is untouched.
@@ -142,7 +263,19 @@ class TemplateJoiner {
                 " does not have (columns: " + describe_columns (row_) + ")";
                 return;
             }
-            out += render_data_value (*cell);
+            // Same rule as a missing column, one type down: the token says the
+            // value comes from the file, and a null cell has none to give.
+            // Writing "" here is the quiet wrong request the namespace exists
+            // to remove - `{"n": }` for a typed placement, a blank field for a
+            // quoted one (issue #593).
+            if (cell->is_null ()) {
+                result_.ok    = false;
+                result_.error = token_for (entry.columns[i]) +
+                " names a column that is null in data row " +
+                std::to_string (row_index_) + " - a data token substitutes a value, and this row has none for it";
+                return;
+            }
+            out += encode_data_value (*cell, entry.encodings[i]);
             out += entry.literals[i + 1];
         }
         field = std::move (out);
@@ -187,8 +320,9 @@ StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
     // trade.
     vayu::Request scratch = request;
     FieldSplitter splitter;
-    walk_bindable_fields (
-    scratch, [&splitter] (std::string& field) { splitter (field); });
+    walk_bindable_fields (scratch, [&splitter] (std::string& field, FieldContext context) {
+        splitter (field, context);
+    });
     return splitter.take ();
 }
 
@@ -200,8 +334,9 @@ size_t row_index) {
         return DataBindResult{ true, {} };
     }
     TemplateJoiner joiner (tmpl, row, row_index);
-    walk_bindable_fields (
-    request, [&joiner] (std::string& field) { joiner (field); });
+    walk_bindable_fields (request, [&joiner] (std::string& field, FieldContext context) {
+        joiner (field, context);
+    });
     return joiner.result ();
 }
 

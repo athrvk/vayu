@@ -2678,11 +2678,61 @@ resolution that shares it) leaves a `data.*` token written exactly as it stands
 for that reason; `{{data.}}` with no column after it names nothing and follows
 the ordinary unknown-name rule instead.
 
+**Where a token participates.** Exhaustively: the **URL** (path and query
+string alike, so a token in a stored request's params reaches it once they are
+joined into the URL), every **header name** and **header value**, the **raw
+body**, and **both halves of every form field** (`x-www-form-urlencoded` and
+`form-data`). Nothing else - in particular a `{{data.*}}` written into an
+**auth** field is not bound today, and script text is never interpolated at all
+(a script reads its row through `pm.iterationData`).
+
+**What a cell renders as.** The CSV/TSV path produces only strings, so the first
+row is the ordinary case; a JSON or JSONL file may carry any type:
+
+| Cell | Substituted text |
+|------|------------------|
+| String | The string, byte for byte - no quoting round trip |
+| Number | As JSON writes it: `7`, `-1.5` |
+| Boolean | `true` / `false` |
+| Object / array | Compact JSON: `{"a":1}`, `[1,2]` |
+| `null` | Nothing - the bind **errors** instead, see below |
+
+**Placement is typed, and that is the point.** In a JSON body, a token written
+*inside* a string literal produces a string and a token written *outside* one
+produces the value's own JSON type:
+
+```json
+{ "id": "{{data.id}}", "n": {{data.n}}, "flag": {{data.flag}} }
+```
+
+sends `"id":"42"`, `"n":2`, `"flag":true` for a JSON file's `{"id":"42","n":2,"flag":true}`.
+Write `"n":"{{data.n}}"` instead and the number arrives quoted; that is the
+knob, not a bug.
+
+**A value cannot break the document it lands in.** For a body whose text is a
+JSON document - `json`, `jsonrpc`, and a `graphql` body written as the
+`{"query": ...}` envelope - a token inside a string literal binds **escaped**,
+so a cell carrying `"`, `\` or a newline arrives as its own text inside valid
+JSON rather than ending the string early. A token outside a string literal is
+not escaped, which is what keeps typed placement working. Nowhere else is
+anything escaped: a URL, a header, a form field and a `text` body take the
+rendered value byte for byte, and a bare (un-enveloped) GraphQL document is
+escaped once, later, when the engine wraps it.
+
 A token naming a column the bound row does not carry **errors the step before
 anything is sent**, with a message naming the token, the row index and the
 columns the row does have. Substituting an empty string would send a request
 quietly pointing somewhere else, which is the failure this namespace exists to
 remove.
+
+A cell that is present but **`null`** errors the same way, naming the token and
+the row. It is the same failure one type down - the token says the value comes
+from the file and the file says there is none - and writing `""` for it would
+send `{"n": }` for a typed placement or a quietly blank field for a quoted one.
+A column that is legitimately optional belongs in a script, through
+`pm.iterationData` (see
+[scripting.md](scripting.md#data-rows-pmiterationdata)), where `null` is a value
+a branch can read.
 
 A run sent **without a `data` set at all** whose plan still carries a `data.*`
 token is refused outright, before any run row exists: nothing would bind the
