@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ImportOrchestrator, type ImportApi } from "./orchestrator";
 import { assignTempIds } from "./assign-ids";
+import { parseImport } from "./factory";
 import type { ImportResult } from "./types";
 import type { ImportApplyRequest, VariableValue } from "@/types";
 
@@ -146,6 +149,32 @@ describe("ImportOrchestrator", () => {
 		expect(stated.maxRedirects).toBe(3);
 		expect(Object.keys(unstated)).not.toContain("followRedirects");
 		expect(Object.keys(unstated)).not.toContain("maxRedirects");
+	});
+
+	it("stores an imported request's query inside its url (issue #590)", async () => {
+		/*
+		 * The end of the chain the issue traced: whatever `url` this payload
+		 * carries is what the engine stores, what the builder loads into the URL
+		 * bar, and what every execution path - design Send, scenario run, load
+		 * run - sends verbatim, since no engine path reads `params[]` at all. So
+		 * the query has to be in `url` by the time the import is applied, not
+		 * repaired later by the user's first edit of the Params table.
+		 */
+		const result = assignTempIds(
+			parseImport(
+				readFileSync(join(__dirname, "__fixtures__", "postman-v21.json"), "utf8"),
+				opts
+			)
+		);
+		const { api, calls } = fakeApi();
+		await new ImportOrchestrator(api).run(result, opts);
+
+		const listUsers = calls[0].requests.find((r) => r.name === "List users")!;
+		expect(listUsers.url).toBe("{{baseUrl}}/users?page=1");
+		expect(listUsers.params).toEqual([
+			{ key: "page", value: "1", enabled: true },
+			{ key: "trace", value: "1", enabled: false },
+		]);
 	});
 
 	it("sends the whole tree in exactly one /import/apply call", async () => {

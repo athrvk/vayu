@@ -107,7 +107,7 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
 | `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
-| parameters with `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present |
+| parameters with `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present. `parseImport` also joins them onto the `url` as **bare keys** (`?verbose`), since the stub carries no value - see [The url/params invariant](./README.md#the-urlparams-invariant) |
 | parameters with `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameters with `in: "path"` / `in: "cookie"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars`. Cookie params are dropped. |
 | `op.requestBody` | `body` | via `buildBody` (see [Request body](#request-body-generation)) |
