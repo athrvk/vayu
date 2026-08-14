@@ -47,6 +47,7 @@ import {
 	useUpdateInboxResponseMutation,
 } from "@/queries";
 import { useTabsStore, useToastStore } from "@/stores";
+import { useCopy } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -124,6 +125,7 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
+	const copy = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
@@ -144,8 +146,8 @@ export default function InboxView() {
 
 	// The engine lists inboxes in map order, which is not stable across polls -
 	// so both the switcher's entries and the fallback below order by port. An
-	// inbox record carries no creation stamp; whether it should is #555's
-	// decision, and port is the stable key the record has today.
+	// inbox record carries no creation stamp and does not gain one - #555
+	// answered that - and port is the stable key the record has.
 	const ordered = [...inboxes].sort((a, b) => a.port - b.port);
 
 	// Derived, not synced into state: the engine is the list of inboxes, and an
@@ -242,10 +244,7 @@ export default function InboxView() {
 					variant="ghost"
 					size="sm"
 					aria-label="Copy inbox URL"
-					onClick={() => {
-						void navigator.clipboard.writeText(inbox.url);
-						showToast("Inbox URL copied", "success");
-					}}
+					onClick={() => void copy(inbox.url, "Inbox URL")}
 				>
 					<Copy className="h-3.5 w-3.5" aria-hidden="true" />
 				</Button>

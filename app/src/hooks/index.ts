@@ -17,6 +17,7 @@ export { useElectronTheme } from "./useElectronTheme";
 export { useResizable } from "./useResizable";
 export { useOverflowTitle } from "./useOverflowTitle";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";
+export { useCopy } from "./useCopy";
 
 // Note: useCollections, useRuns, useHealthCheck have been replaced by TanStack Query hooks
 // Import from @/queries instead

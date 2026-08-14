@@ -196,6 +196,17 @@ writes rows that cannot see each other yet, so an omitted `order` gives the
 payload's items consecutive slots starting from the append point - see
 [POST /import/apply](#post-importapply).
 
+**Any writer producing several sibling rows at once owes them distinct
+`order`s** - the import applier is the instance of a general rule, not a special
+case. The `createdAt` leg is a millisecond stamp, so rows written inside one
+tick tie on it and fall through to `id`, which compares random UUIDs: stable
+across reads of the same data, but arbitrary with respect to the order the
+caller meant. Single-row creates need nothing extra, because the append scan
+already sees every stored sibling and hands out a fresh slot. The rule is on the
+writer rather than on a finer timestamp: a microsecond stamp would still tie
+under a fast enough writer, and it would make row identity depend on clock
+resolution across the three platforms Vayu builds on.
+
 **Repositioning several rows at once** is [`POST /reorder`](#post-reorder), not a
 run of `PUT`s. Each `PUT` is its own write under its own lock, so a reorder
 expressed as N sibling `PUT`s is last-write-wins between concurrent clients, can

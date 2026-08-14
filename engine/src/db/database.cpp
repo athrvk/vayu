@@ -700,9 +700,16 @@ std::vector<Collection> Database::get_collections () {
     // a collection among its equal-`order` siblings - and the sidebar, the MCP
     // smoke tool and a scenario plan each saw a different shuffle. `created_at`
     // second matches what the renderer displays; `id` last makes the result a
-    // total order even for rows written in the same millisecond. The renderer's
-    // comparator applies the identical rule, pinned by
-    // tests/fixtures/tree-order-conformance.json.
+    // total order even for rows written in the same millisecond. That last leg
+    // compares random UUIDs, so it is stable across reads but arbitrary with
+    // respect to the order the caller meant - which is why the contract puts
+    // the duty on the writer (issue #565): anything producing several siblings
+    // at once owes them distinct `order`s, as build_collection_rows and the
+    // examples import already do. A finer timestamp was rejected: it still ties
+    // under a fast enough writer, and it would make row identity depend on
+    // clock resolution across three platforms. See the Ordering section of
+    // docs/engine/api-reference.md. The renderer's comparator applies the
+    // identical rule, pinned by tests/fixtures/tree-order-conformance.json.
     return impl_->storage.get_all<Collection> (multi_order_by (order_by (&Collection::order),
     order_by (&Collection::created_at), order_by (&Collection::id)));
 }
