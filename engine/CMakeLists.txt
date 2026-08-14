@@ -273,6 +273,7 @@ add_library(vayu_core STATIC
     src/http/cookie_jar.cpp
     src/http/form_body.cpp
     src/http/graphql_body.cpp
+    src/http/jsonrpc_body.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
@@ -465,6 +466,7 @@ if(VAYU_BUILD_TESTS)
         tests/cookie_jar_test.cpp
         tests/form_body_test.cpp
         tests/graphql_body_test.cpp
+        tests/jsonrpc_body_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/execution_http_version_test.cpp

@@ -8,9 +8,17 @@
 /**
  * BodyPanel Component
  *
- * Mode selection, and whichever editor that mode needs: a code editor for JSON
- * and text, the key/value table for form-data and urlencoded, and `GraphQLBody`
- * for GraphQL.
+ * Mode selection, and whichever editor that mode needs: a code editor for JSON,
+ * JSON-RPC and text, the key/value table for form-data and urlencoded, and
+ * `GraphQLBody` for GraphQL.
+ *
+ * **JSON-RPC is a plain JSON pane, deliberately.** Its call is one JSON text -
+ * the envelope around it (`"jsonrpc":"2.0"`, and an `id` when the call names
+ * none) is completed engine-side at the chokepoint every client shares, so
+ * there is nothing here for a structured editor to edit. That is the opposite
+ * of GraphQL, whose query and variables are two documents the user writes
+ * separately, and it is why this mode adds a `BODY_MODES` row and a language
+ * rather than a component.
  *
  * **GraphQL used to live here**, and was roughly 40% of the file - the only
  * mode with an editor pair, an introspection lifecycle and a header side effect
@@ -66,6 +74,7 @@ const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }
 	{ value: "json", label: "JSON", contentType: "application/json" },
 	{ value: "text", label: "Text", contentType: "text/plain" },
 	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
+	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
 	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
 	{
 		value: "x-www-form-urlencoded",
@@ -303,7 +312,10 @@ export default function BodyPanel() {
 	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
 	const hasVariables = containsVariableToken(request.body);
 	const resolvedBody = request.body ? resolveString(request.body) : "";
-	const isCodeMode = request.bodyMode === "json" || request.bodyMode === "text";
+	const isCodeMode =
+		request.bodyMode === "json" ||
+		request.bodyMode === "text" ||
+		request.bodyMode === "jsonrpc";
 	const isTable =
 		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
 	const tableItems = request.bodyMode === "form-data" ? request.formData : request.urlEncoded;
@@ -393,7 +405,11 @@ export default function BodyPanel() {
 						) : (
 							<CodeEditor
 								height="100%"
-								language={request.bodyMode === "json" ? "json" : "plaintext"}
+								language={
+									request.bodyMode === "json" || request.bodyMode === "jsonrpc"
+										? "json"
+										: "plaintext"
+								}
 								value={request.body || ""}
 								onChange={(v) => updateField("body", v ?? "")}
 								onMount={handleEditorMount}

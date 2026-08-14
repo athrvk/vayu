@@ -1358,10 +1358,13 @@ What the body modes you are not looking at were holding. A request stores
 handed the same string to a different reader. Switching from JSON to GraphQL
 therefore read the payload as a raw query string and destroyed it.
 
-Two buckets, not six: `json` and `text` are one raw string differing only in
-highlighting, so text carries between them deliberately; `graphql` is an
-envelope and keeps its own; the two form modes use `formData` / `urlEncoded`
-and never touch `body`. The rule lives in
+Two buckets, not seven: `json`, `text` and `jsonrpc` are one raw string
+differing only in highlighting, so text carries between them deliberately;
+`graphql` is an envelope this side parses into two panes and keeps its own; the
+two form modes use `formData` / `urlEncoded` and never touch `body`. `jsonrpc`
+sits in the raw bucket because nothing here reads its text as a structure - its
+frame is completed engine-side at wire time, so the pane holds one plain JSON
+document. The rule lives in
 `modules/request-builder/utils/body-drafts.ts`.
 
 Two things about it are deliberate and easy to undo by accident:

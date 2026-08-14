@@ -125,6 +125,15 @@ Json serialize (const Request& request) {
             body_json["mode"]    = "graphql";
             body_json["content"] = request.body.content;
             break;
+        // Stored as the string the user wrote, never as re-serialized JSON: the
+        // envelope is completed at wire time (`jsonrpc_body.hpp`), so a
+        // round-trip through storage that reformatted it would change bytes the
+        // user never edited - and a body still holding `{{tokens}}` is not JSON
+        // to re-serialize in the first place.
+        case BodyMode::JsonRpc:
+            body_json["mode"]    = "jsonrpc";
+            body_json["content"] = request.body.content;
+            break;
         default: break;
         }
 
@@ -630,6 +639,8 @@ Result<Request> deserialize_request (const Json& json) {
                     request.body.mode = BodyMode::Binary;
                 } else if (mode == "graphql") {
                     request.body.mode = BodyMode::GraphQL;
+                } else if (mode == "jsonrpc") {
+                    request.body.mode = BodyMode::JsonRpc;
                 }
             }
 

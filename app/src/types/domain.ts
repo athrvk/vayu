@@ -18,7 +18,14 @@ export type { HttpVersion };
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
-export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
+export type BodyMode =
+	| "none"
+	| "json"
+	| "text"
+	| "graphql"
+	| "jsonrpc"
+	| "form-data"
+	| "x-www-form-urlencoded";
 
 export type AuthMode =
 	| "none"
@@ -86,7 +93,7 @@ export interface FormFieldEntry extends KeyValueEntry {
  */
 export type RequestBody =
 	| { mode: "none" }
-	| { mode: "json" | "text" | "graphql"; content: string }
+	| { mode: "json" | "text" | "graphql" | "jsonrpc"; content: string }
 	| { mode: "form-data"; fields: FormFieldEntry[] }
 	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] };
 

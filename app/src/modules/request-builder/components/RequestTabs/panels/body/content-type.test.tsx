@@ -54,11 +54,16 @@ describe("when a mode needs a Content-Type", () => {
 		expect(contentTypeToAdd("graphql", [])).toBe("application/json");
 	});
 
+	it("asks for one on JSON-RPC, whose frame is JSON too", () => {
+		expect(contentTypeToAdd("jsonrpc", [])).toBe("application/json");
+	});
+
 	it.each(["none", "json", "text", "form-data", "x-www-form-urlencoded"] as const)(
 		"asks for nothing on %s",
 		(mode) => {
-			// Only GraphQL writes a header the user did not type. The other modes
-			// declare a content type, but the engine sets it from the mode.
+			// Only the two envelope modes write a header the user did not type.
+			// The others declare a content type, but the engine sets it from the
+			// mode.
 			expect(contentTypeToAdd(mode, [])).toBeNull();
 		}
 	);
@@ -211,13 +216,27 @@ describe("what a mode change does to the header", () => {
 	});
 
 	it("keeps the row when the next mode needs the same header", () => {
-		// No mode pair does this today; the rule is here so adding one does not
-		// silently churn the Headers tab by removing and re-adding the row.
+		// The rule is here so a mode pair sharing a header does not silently churn
+		// the Headers tab by removing and re-adding the row.
 		const on = intoGraphql();
 		const again = switchContentType("graphql", on.headers, REQUEST, on.auto);
 		expect(again.headers).toBe(on.headers);
 		expect(again.auto).toBe(on.auto);
 		expect(again.added).toBeNull();
+	});
+
+	it("keeps it across GraphQL and JSON-RPC, which need the same one", () => {
+		// The pair the rule above was written for before either existed: both are
+		// JSON envelopes, so the row stays put - same id, still ours - and the
+		// notice does not fire for a header that was already there.
+		const on = intoGraphql();
+		const rpc = switchContentType("jsonrpc", on.headers, REQUEST, on.auto);
+		expect(rpc.headers).toBe(on.headers);
+		expect(rpc.auto).toBe(on.auto);
+		expect(rpc.added).toBeNull();
+
+		// And leaving JSON-RPC still takes back the row GraphQL added.
+		expect(switchContentType("none", rpc.headers, REQUEST, rpc.auto).headers).toEqual(base);
 	});
 });
 

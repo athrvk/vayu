@@ -203,7 +203,7 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 		return { mode: "x-www-form-urlencoded", fields: items(request.urlEncoded) };
 	}
 	if (mode !== "none" && request.body) {
-		return { mode: mode as "json" | "text" | "graphql", content: request.body };
+		return { mode: mode as "json" | "text" | "graphql" | "jsonrpc", content: request.body };
 	}
 	return { mode: "none" };
 }
