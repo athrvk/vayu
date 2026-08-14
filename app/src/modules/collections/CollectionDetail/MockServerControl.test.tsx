@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useToastStore } from "@/stores";
@@ -164,5 +164,120 @@ describe("the collection header's mock-server control", () => {
 		// The record dies with the listener, so the header goes back to offering
 		// a start rather than a stopped chip.
 		expect(await screen.findByRole("button", { name: /run mock server/i })).toBeInTheDocument();
+	});
+});
+
+/*
+ * The options dialog (issue #570). The engine has taken `latencyMs` and
+ * `errorRatePct` since #481 phase 2 and the drawer has displayed both, so the
+ * defect this closes is a UI naming a setting it offered no way to change.
+ *
+ * The dialog is exercised through the control rather than on its own, because
+ * the wiring is the part that was missing: a dialog collecting two numbers that
+ * never reach `startMockServer` would satisfy any test of the form alone.
+ */
+describe("the mock server options dialog", () => {
+	const openDialog = async () => {
+		renderControl();
+		fireEvent.click(await screen.findByRole("button", { name: "Mock server options" }));
+		return within(await screen.findByRole("dialog"));
+	};
+
+	it("sends the latency and error rate that were typed", async () => {
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByRole("spinbutton", { name: /latency/i }), {
+			target: { value: "250" },
+		});
+		fireEvent.change(dialog.getByRole("spinbutton", { name: /error rate/i }), {
+			target: { value: "5" },
+		});
+		fireEvent.click(dialog.getByRole("button", { name: /start mock server/i }));
+
+		await waitFor(() =>
+			expect(startMockServer).toHaveBeenCalledWith({
+				collectionId: "col_1",
+				latencyMs: 250,
+				errorRatePct: 5,
+			})
+		);
+		// A started mock leaves nothing to configure, so the form goes.
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+	});
+
+	it("sends both knobs off when the dialog is opened and submitted untouched", async () => {
+		const dialog = await openDialog();
+		fireEvent.click(dialog.getByRole("button", { name: /start mock server/i }));
+		await waitFor(() =>
+			expect(startMockServer).toHaveBeenCalledWith({
+				collectionId: "col_1",
+				latencyMs: 0,
+				errorRatePct: 0,
+			})
+		);
+	});
+
+	/*
+	 * The engine answers a `400 bad_request` naming the field and not the bound,
+	 * so the form has to carry the range itself - and say it in words, since a
+	 * reddened field beside a greyed-out Start states that something is wrong
+	 * and never which field or why.
+	 */
+	it.each([
+		["latency", /latency/i, "30001", /0 to 30000/],
+		["error rate", /error rate/i, "101", /0 to 100/],
+	])(
+		"refuses an out-of-range %s by name, and sends nothing",
+		async (_name, label, value, bound) => {
+			const dialog = await openDialog();
+			fireEvent.change(dialog.getByRole("spinbutton", { name: label }), {
+				target: { value },
+			});
+
+			expect(dialog.getByText(bound)).toBeInTheDocument();
+			const start = dialog.getByRole("button", { name: /start mock server/i });
+			expect(start).toBeDisabled();
+			fireEvent.click(start);
+			expect(startMockServer).not.toHaveBeenCalled();
+		}
+	);
+
+	it("refuses an emptied field rather than reading it as zero", async () => {
+		// `Number("")` is 0 and a whole number, so every other check passes it -
+		// this is the one case where the form would send what was not typed.
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByRole("spinbutton", { name: /latency/i }), {
+			target: { value: "" },
+		});
+		expect(dialog.getByRole("button", { name: /start mock server/i })).toBeDisabled();
+		expect(startMockServer).not.toHaveBeenCalled();
+	});
+
+	it("shows the engine's refusal in the form, and does not also toast it", async () => {
+		startMockServer.mockRejectedValue(
+			new Error("Collection 'Pet Store' (and everything under it) has no requests to serve")
+		);
+		const dialog = await openDialog();
+		fireEvent.click(dialog.getByRole("button", { name: /start mock server/i }));
+
+		expect(await dialog.findByText(/no requests to serve/i)).toBeInTheDocument();
+		// The dialog stays open on a failure, so a toast behind it would report
+		// the same message twice and lose it once.
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+
+	it("does not greet the next open with the last failure", async () => {
+		// The mutation lives in the control and outlives the dialog, so an
+		// unreset error would be a Callout about a start the user has moved on
+		// from.
+		startMockServer.mockRejectedValue(new Error("has no requests to serve"));
+		renderControl();
+		fireEvent.click(await screen.findByRole("button", { name: /run mock server/i }));
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]?.message).toMatch(/no requests to serve/i)
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Mock server options" }));
+		const dialog = within(await screen.findByRole("dialog"));
+		expect(dialog.queryByText(/no requests to serve/i)).not.toBeInTheDocument();
 	});
 });

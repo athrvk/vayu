@@ -235,6 +235,14 @@ Services drawer has none selected; the drawer's Mock servers group lists and
 stops whatever is running, wherever it came from. Both read the same polled
 list, so a mock started in one is visible in the other within a poll.
 
+The knobs are sent from that control's options dialog and nowhere else
+(`StartMockServerDialog`, issue #570), bounds-checked against
+`mock-server-options.ts` before the request leaves - the engine's `400` names
+the field but not the range. There is no update verb: `latencyMs` and
+`errorRatePct` are read per response and so *could* change under a running
+mock, but a run pointed at one has to be able to say which configuration
+produced its numbers, so they are frozen at start like the route table.
+
 `listMockServerRoutes` is **not** polled: the route table is a snapshot taken
 when the mock started and a running mock does not reload the collection, so it is
 fetched once per expanded row (`staleTime: Infinity`). Stopping drops the record

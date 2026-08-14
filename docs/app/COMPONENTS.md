@@ -322,6 +322,22 @@ starting two mocks of one collection, and the engine's list order is not stable 
 is deliberately no restart: a mock's route table is a start-time snapshot, so stop-and-start is the
 only way to pick up an edit, and the stop tooltip says so.
 
+Beside the button, not in front of it, is a **Mock server options** control opening
+`StartMockServerDialog.tsx` - the start form for `latencyMs` and `errorRatePct` (issue #570). The
+split is the point: the common case is "serve this collection with nothing set" and stays one click,
+while the two knobs matter to the load run you point at a mock rather than to poking a route by
+hand. A dialog on the way in would charge the common case for the uncommon one;
+[`NewIssuerDialog`](#services-modulesservices) has no equivalent split because an issuer has no
+defaults-only case worth one click. The bounds (`0-30000ms`, `0-100%`) live in
+`mock-server-options.ts` mirroring `constants::mock_server::`, and the form refuses an out-of-range
+or emptied value **with the range in words** - the engine's `400` names the field and not the bound.
+The mutation stays in `MockServerControl` and the dialog reports its failure as a `Callout` instead
+of a toast behind an open form; opening the dialog resets it, so a failed one-click start does not
+greet the next open. Neither knob is mutable on a running mock: they are read per response and so
+*could* be, but a run against a mock has to be able to say which configuration produced its numbers
+- the same reason the route table is frozen - so there is no `PUT /mock/:id` and the stop tooltip
+names all three as start-time.
+
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh).
 
 All five tabs hold their edits in a draft; four of them commit it without being asked. Info commits on blur (name) and on `onCommit` (description); both Script tabs commit when focus leaves the editor; Variables autosaves through `VariableTableEditor`. Info and the Script tabs take the draft, the resync and the mutation reset from [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model) and render no Save button at all - the hook owns the mutation reset on a collection switch, which had been hand-rolled per tab with one tab omitting it.
@@ -609,7 +625,11 @@ both activate it.
   listener is. A mock row leads with the **collection name** (two mocks of one collection differ
   only by port) and expands in place to its base URL, its latency/error-rate line, and the **route
   table** from `GET /mock/:id/routes` - the answer to the only question this surface gets asked,
-  "why did the mock 404 that?". The table is fetched when the row is opened and never polled: it is
+  "why did the mock 404 that?". The latency/error-rate line **reports**, and correctly offers no
+  control: both are set when the mock starts (the collection header's options dialog, issue #570)
+  and are start-time for the same reason the route table is, so a live switch here - the shape the
+  issuer row's `failureMode` takes - would need a `PUT /mock/:id` the engine deliberately does not
+  have. The table is fetched when the row is opened and never polled: it is
   a start-time snapshot that cannot change under a running mock. Stopping a mock removes it from the
   list, like an issuer and unlike an inbox, because a mock holds nothing that outlives its listener.
 
