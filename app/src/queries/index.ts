@@ -80,11 +80,14 @@ export { useCookiesQuery, useClearCookiesMutation } from "./cookies";
 export {
 	useInboxesQuery,
 	useInboxCapturesQuery,
+	useLoadMoreInboxCapturesMutation,
 	useStartInboxMutation,
 	useStopInboxMutation,
 	useDeleteInboxMutation,
 	useUpdateInboxResponseMutation,
 	useClearInboxCapturesMutation,
+	mergeCapture,
+	mergeCaptures,
 } from "./inbox";
 
 // OAuth 2.0 mock issuer

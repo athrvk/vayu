@@ -40,6 +40,9 @@ export * from "./RowActionsMenu";
 // HTTP method display (single source of truth)
 export * from "./MethodBadge";
 
+// "Reachable on <bind>" - wherever a non-loopback local service is named
+export * from "./NonLoopbackBadge";
+
 // Truncated text that scrolls on hover (tab strip)
 export * from "./ScrollOnOverflow";
 

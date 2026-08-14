@@ -28,7 +28,13 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
-import { DrawerPanel, EmptyState, ErrorState, TruncatedText } from "@/components/shared";
+import {
+	DrawerPanel,
+	EmptyState,
+	ErrorState,
+	NonLoopbackBadge,
+	TruncatedText,
+} from "@/components/shared";
 import {
 	Badge,
 	Select,
@@ -210,17 +216,7 @@ function InboxRow({ inbox }: { inbox: Inbox }) {
 				}
 			>
 				<TruncatedText className="font-mono text-xs">{inbox.url}</TruncatedText>
-				{/* An inbox reachable beyond this machine is badged wherever it is
-				    named - the standing reminder that the engine's non-loopback
-				    confirmation was given. */}
-				{!inbox.loopback && (
-					<Badge
-						variant="chip"
-						className="bg-status-warning-fill text-primary-foreground"
-					>
-						{inbox.bind}
-					</Badge>
-				)}
+				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
 			</ServiceRow>
 			<DeleteInboxDialog deletion={deletion} />

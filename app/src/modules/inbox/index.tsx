@@ -36,11 +36,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { Callout, EmptyState, ErrorState } from "@/components/shared";
+import { Callout, EmptyState, ErrorState, NonLoopbackBadge } from "@/components/shared";
 import {
 	useClearInboxCapturesMutation,
 	useInboxCapturesQuery,
 	useInboxesQuery,
+	useLoadMoreInboxCapturesMutation,
 	useStartInboxMutation,
 	useStopInboxMutation,
 	useUpdateInboxResponseMutation,
@@ -53,6 +54,7 @@ import { CaptureDetail } from "./CaptureDetail";
 import { DeleteInboxDialog } from "./DeleteInboxDialog";
 import { useInboxDeletion } from "./useInboxDeletion";
 import { useInboxLive } from "./useInboxLive";
+import { cannedResponseKey } from "./utils";
 
 function formatTime(ms: number): string {
 	return new Date(ms).toLocaleTimeString();
@@ -82,8 +84,13 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 					{formatTime(capture.receivedAt)}
 				</span>
 			</span>
+			{/* The truncation marker belongs here as well as in the detail pane:
+			    scanning the list for the payload that broke something, a row
+			    reading "8 MB" is a row whose body is a prefix, and nothing said
+			    so until it was opened (issue #556). */}
 			<span className="text-xs text-muted-foreground">
-				{capture.bodyBytes} bytes{capture.query ? ` · ?${capture.query}` : ""}
+				{capture.bodyBytes} bytes{capture.bodyTruncated ? " (truncated)" : ""}
+				{capture.query ? ` · ?${capture.query}` : ""}
 			</span>
 		</button>
 	);
@@ -150,6 +157,9 @@ export default function InboxView() {
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
 	const captures = capturesQuery.data?.data ?? [];
+	const capturesTotal = capturesQuery.data?.pagination.total ?? 0;
+	const hasMoreCaptures = capturesQuery.data?.pagination.hasMore === true;
+	const loadMore = useLoadMoreInboxCapturesMutation();
 	const live = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
 
 	const selectedCaptureId =
@@ -176,6 +186,25 @@ export default function InboxView() {
 						mutationError instanceof Error
 							? mutationError.message
 							: "Could not start the inbox",
+						"error"
+					),
+			}
+		);
+	};
+
+	const loadMoreCaptures = () => {
+		if (!inbox) return;
+		loadMore.mutate(
+			// The offset is what is on screen: the stream has prepended everything
+			// recorded since the last fetch, so the next unseen capture sits at
+			// exactly this index (see the mutation's own note).
+			{ inboxId: inbox.inboxId, offset: captures.length },
+			{
+				onError: (mutationError) =>
+					showToast(
+						mutationError instanceof Error
+							? mutationError.message
+							: "Could not load more captures",
 						"error"
 					),
 			}
@@ -231,20 +260,7 @@ export default function InboxView() {
 					<Copy className="h-3.5 w-3.5" aria-hidden="true" />
 				</Button>
 
-				{/*
-				 * An inbox reachable beyond this machine is badged wherever it is
-				 * named. The engine already refused to bind wide without an
-				 * explicit confirmation; this is the standing reminder that the
-				 * confirmation was given.
-				 */}
-				{!inbox.loopback && (
-					<Badge
-						variant="chip"
-						className="bg-status-warning-fill text-primary-foreground"
-					>
-						Reachable on {inbox.bind}
-					</Badge>
-				)}
+				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				<Badge variant="outline">
 					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
@@ -302,19 +318,17 @@ export default function InboxView() {
 					{/* Last, and the only control here that ends the record rather than
 					    the listener. Before it, a stopped inbox could only be left
 					    behind (issue #553). */}
-					<DeleteInboxButton
-						inbox={inbox}
-						listedTotal={capturesQuery.data?.pagination.total ?? 0}
-					/>
+					<DeleteInboxButton inbox={inbox} listedTotal={capturesTotal} />
 				</div>
 			</header>
 
 			{/* Keyed on what the engine is serving, so a change made elsewhere
 			    re-seeds the drafts by remount rather than by an effect. */}
 			<CannedResponseControls
-				key={`${inbox.inboxId}:${inbox.response.status}:${inbox.response.delayMs}`}
+				key={cannedResponseKey(inbox.inboxId, inbox.response)}
 				response={inbox.response}
 				pending={updateResponse.isPending}
+				stopped={!inbox.running}
 				onApply={applyResponse}
 			/>
 
@@ -346,8 +360,17 @@ export default function InboxView() {
 				<aside className="flex w-72 min-h-0 shrink-0 flex-col border-r border-border">
 					<div className="flex items-center justify-between px-3 py-2">
 						<span className="text-xs font-medium text-muted-foreground">Captured</span>
-						<Badge variant="outline">{capturesQuery.data?.pagination.total ?? 0}</Badge>
+						<Badge variant="outline">{capturesTotal}</Badge>
 					</div>
+					{/* What the list is showing against what the inbox holds. The
+					    surface fetched one page and said nothing about the rest, so
+					    an inbox at its retention ceiling showed the newest 50 and
+					    read as an inbox that had received 50 (issue #556). */}
+					{captures.length < capturesTotal && (
+						<p className="px-3 pb-1 text-xs text-muted-foreground">
+							Showing {captures.length} of {capturesTotal}
+						</p>
+					)}
 					<div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
 						{captures.length === 0 ? (
 							<EmptyState
@@ -355,19 +378,32 @@ export default function InboxView() {
 								title="Nothing received yet. Point a webhook at the URL above."
 							/>
 						) : (
-							captures.map((capture) => (
-								<CaptureRow
-									key={capture.id}
-									capture={capture}
-									selected={selectedCapture?.id === capture.id}
-									onSelect={() =>
-										setSelection({
-											inboxId: inbox.inboxId,
-											captureId: capture.id,
-										})
-									}
-								/>
-							))
+							<>
+								{captures.map((capture) => (
+									<CaptureRow
+										key={capture.id}
+										capture={capture}
+										selected={selectedCapture?.id === capture.id}
+										onSelect={() =>
+											setSelection({
+												inboxId: inbox.inboxId,
+												captureId: capture.id,
+											})
+										}
+									/>
+								))}
+								{hasMoreCaptures && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="mt-1 w-full"
+										onClick={loadMoreCaptures}
+										disabled={loadMore.isPending}
+									>
+										{loadMore.isPending ? "Loading…" : "Load more"}
+									</Button>
+								)}
+							</>
 						)}
 					</div>
 				</aside>

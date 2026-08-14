@@ -16,10 +16,11 @@
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { mergeCapture } from "@/queries";
 import type { InboxCapture, InboxCapturesResponse } from "@/types";
 import { CaptureDetail } from "./CaptureDetail";
 import { captureUrl } from "./utils";
-import { mergeCapture, parseCaptureEvent } from "./useInboxLive";
+import { parseCaptureEvent } from "./useInboxLive";
 
 function capture(overrides: Partial<InboxCapture> = {}): InboxCapture {
 	return {

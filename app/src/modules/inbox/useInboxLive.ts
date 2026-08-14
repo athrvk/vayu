@@ -23,7 +23,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import { queryKeys } from "@/queries";
+// `mergeCapture` lives with the query that owns this cache entry, not here: the
+// fetch and the load-more pages write through the same union, and a second copy
+// of that rule is how two writers come to disagree about one list.
+import { mergeCapture, queryKeys } from "@/queries";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 
 /** Narrow one SSE payload to a capture, or reject it. */
@@ -50,34 +53,6 @@ export function parseCaptureEvent(raw: unknown): InboxCapture | null {
 		bodyBytes: typeof e.bodyBytes === "number" ? e.bodyBytes : 0,
 		bodyTruncated: e.bodyTruncated === true,
 		remoteAddr: typeof e.remoteAddr === "string" ? e.remoteAddr : "",
-	};
-}
-
-/**
- * Prepend @p capture to a cached page, newest first.
- *
- * Idempotent on the capture id: the first fetch and the stream overlap by
- * however many captures arrived between them, and a duplicate row is a row the
- * user cannot tell from a second delivery of the same webhook.
- */
-export function mergeCapture(
-	cached: InboxCapturesResponse | undefined,
-	capture: InboxCapture
-): InboxCapturesResponse {
-	const existing = cached?.data ?? [];
-	if (existing.some((c) => c.id === capture.id)) {
-		return cached as InboxCapturesResponse;
-	}
-	const total = (cached?.pagination.total ?? existing.length) + 1;
-	return {
-		data: [capture, ...existing],
-		pagination: {
-			total,
-			limit: cached?.pagination.limit ?? existing.length + 1,
-			offset: cached?.pagination.offset ?? 0,
-			returned: existing.length + 1,
-			hasMore: cached?.pagination.hasMore ?? false,
-		},
 	};
 }
 
