@@ -97,7 +97,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
 ```typescript
 {
   drawerOpen: boolean                    // Is the left drawer visible?
-  drawerView: DrawerView                 // "collections" | "history" | "variables" | "settings"
+  drawerView: DrawerView                 // "collections" | "history" | "variables" | "services" | "settings"
   drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number

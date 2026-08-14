@@ -651,6 +651,77 @@ export interface ClearInboxCapturesResponse {
 	cleared: number;
 }
 
+// OAuth 2.0 mock issuer API (issue #479). Engine-process state like an inbox:
+// the engine holds each issuer on its own loopback listener and a restart
+// forgets every one of them, so nothing here is stored client-side either.
+
+/** What `/token` answers with, so retry and error handling are testable. */
+export type MockIssuerFailureMode = "none" | "slow" | "server_error" | "invalid_client";
+
+/** One running issuer, as `GET /mock-issuer` and the `PUT` reply describe it. */
+export interface MockIssuer {
+	issuerId: string;
+	/** Base URL - the OAuth `iss` of every token it mints. */
+	issuerUrl: string;
+	tokenUrl: string;
+	authorizeUrl: string;
+	/** HS256 secret the service under test verifies this issuer's tokens with. */
+	signingKey: string;
+	port: number;
+	expiresInSeconds: number;
+	failureMode: MockIssuerFailureMode;
+	/** How long `slow` mode waits before answering; ignored in every other mode. */
+	slowMs: number;
+	issueRefreshTokens: boolean;
+	/** 0 accepts any client id; otherwise the id must be one of the configured ones. */
+	clientCount: number;
+	createdAt: number;
+}
+
+export interface MockIssuerClient {
+	clientId: string;
+	clientSecret?: string;
+}
+
+export interface StartMockIssuerRequest {
+	/** 0 (the default) binds an ephemeral port. */
+	port?: number;
+	expiresInSeconds?: number;
+	claims?: Record<string, unknown>;
+	clients?: MockIssuerClient[];
+	failureMode?: MockIssuerFailureMode;
+	slowMs?: number;
+	issueRefreshTokens?: boolean;
+}
+
+/**
+ * The start call answers with the URLs and the key only - not the full record.
+ * The list is what carries the settings back, which is why starting one
+ * invalidates it rather than writing the reply into the cache.
+ */
+export interface StartMockIssuerResponse {
+	issuerId: string;
+	issuerUrl: string;
+	tokenUrl: string;
+	authorizeUrl: string;
+	signingKey: string;
+}
+
+export interface ListMockIssuersResponse {
+	issuers: MockIssuer[];
+}
+
+/** Only these three can change under a bound listener; the rest are a 400. */
+export interface UpdateMockIssuerRequest {
+	expiresInSeconds?: number;
+	failureMode?: MockIssuerFailureMode;
+	slowMs?: number;
+}
+
+export interface StopMockIssuerResponse {
+	stopped: boolean;
+}
+
 // Health & Config API
 export type GetHealthResponse = EngineHealth;
 

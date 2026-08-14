@@ -108,6 +108,14 @@ export const queryKeys = {
 		captures: (inboxId: string) => [...queryKeys.inbox.all, "captures", inboxId] as const,
 	},
 
+	// OAuth 2.0 mock issuers (issue #479). One key: the engine reports every
+	// running issuer in one call and there is no per-issuer read - stopping one
+	// removes it from the same list.
+	mockIssuer: {
+		all: ["mockIssuer"] as const,
+		list: () => [...queryKeys.mockIssuer.all, "list"] as const,
+	},
+
 	// Warm-cache pass over every collection's requests (see
 	// usePrefetchCollectionsAndRequests). Keyed here rather than inline so it
 	// can be invalidated when the set of collections changes - it succeeds once

@@ -17,14 +17,25 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { TIMING } from "@/config/timing";
 import type { InboxCannedResponse, StartInboxRequest } from "@/types";
 import { queryKeys } from "./keys";
 
-/** Every inbox this engine has started, running or stopped. */
+/**
+ * Every inbox this engine has started, running or stopped.
+ *
+ * Polled - unlike the captures below, which the stream owns. The list changes
+ * when *somebody* starts or stops an inbox, and this window is not the only one
+ * who can: the MCP tools and a bare curl reach the same routes. The Services
+ * drawer and the Dock's running-services indicator both promise to show a
+ * running listener wherever it came from, which a list only this app's own
+ * mutations refreshed could not do.
+ */
 export function useInboxesQuery() {
 	return useQuery({
 		queryKey: queryKeys.inbox.list(),
 		queryFn: () => apiService.listInboxes(),
+		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
 	});
 }
 

@@ -25,6 +25,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <CollectionTree />           //   collections view (default)
     │   ├── <HistoryList />              //   history view
     │   ├── <VariablesCategoryTree />    //   variables view
+    │   ├── <ServicesPanel />            //   services view - modules/services/
     │   └── <SettingsCategoryTree />     //   settings view
     ├── <TabStrip />                     // Open tabs + "+" button - over main+context, left edge = drawer edge
     ├── main content (switched on active tab type)
@@ -98,7 +99,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 - **One uniform layout for every tab** - `Drawer` (left) + a content column holding `TabStrip` over main + `ContextBar`. No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
-- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
@@ -108,13 +109,14 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of four views per `useLayoutStore.drawerView`. Every view is titled: its `DrawerPanel` header is the drawer's half of the second chrome row, sharing `--tabstrip-height` and its bottom rule with the tab strip across the resize handle, with an optional tools slot beside the title.
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of five views per `useLayoutStore.drawerView`. Every view is titled: its `DrawerPanel` header is the drawer's half of the second chrome row, sharing `--tabstrip-height` and its bottom rule with the tab strip across the resize handle, with an optional tools slot beside the title.
 
 | View | Component | Band tools today |
 |------|-----------|------------------|
 | **`collections`** | `CollectionTree` (hierarchical collections + requests) | add collection, add request, import |
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
 | **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
+| **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers) | start inbox, new issuer |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
@@ -215,8 +217,9 @@ HTTPie takes headers as bare `Name:value` words and a body as `--raw`, so the co
 
 Footer bar (h-8, shrink-0). Horizontal layout:
 
-- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
+- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Services (⇧⌘S), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. When the engine is *down* the indicator becomes a focusable tooltip carrying `engineError` - the health poll's reason, which was previously recorded and rendered nowhere, so a refused connection, a timeout and a TLS failure all read as one word. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
+- **Middle - running services:** a dot plus "2 services" whenever at least one local service (a running webhook inbox, an OAuth issuer) is up, and **nothing at all when none is** - the Dock's middle is ambient, and a standing "0 services" would spend a permanent line on the ordinary case. Clicking it activates the Services drawer, which is where a service can be read, copied or stopped. Before it, a running inbox was invisible outside its own tab and an issuer was invisible everywhere. → `Dock.services.test.tsx` (mutation-checked: rendered unconditionally, the absent-case tests fail).
 - **Middle - pending restart:** once a setting the engine marks `requiresRestart` has been saved, a "Restart pending" button appears beside the connection status and restarts the engine in place (`useEngineRestart`, shared with the Settings banner so the two cannot diverge). It tracks saves made since this renderer connected - not a comparison against the engine's running values, which it does not report - so it says *saved*, not *in effect*, and does not survive a renderer reload. A failed restart leaves the signal standing and reports the reason as a toast.
 - **Right - toggles:** Context bar toggle (⌘I). Pressed when the bar is open *and* the active tab is one it has content for, so the highlight always matches what is on screen.
 
@@ -499,8 +502,44 @@ never dirty - both stated explicitly in `tabs-store`, since a *missing* answer r
 "clean" and is what once made a dirty Settings tab LRU-evictable
 (`components/layout/tab-type-coverage.test.ts` guards all three switches).
 
-**Entry point:** the `Inbox` tile on the welcome Launcher. It has no Drawer view to switch to -
-an inbox is not a stored record - so there is nothing for a Dock button to act on.
+**Entry points:** the **Services** drawer view, which lists every inbox and opens this tab (issue
+#502), and the palette's `Inbox` entry. The welcome Launcher's tile is now `Services` rather than
+`Inbox` - it teaches where the whole family of local services lives instead of opening one tab -
+and the Dock's running-services indicator activates the same view. Until #502 the Launcher tile was
+the *only* way in, and a running inbox was invisible once its tab was closed.
+
+## Services (`modules/services/`)
+
+One home for the app's **local services** - the things that keep listening after you switch tabs
+(issue #502). Rendered as the `services` drawer view; the Dock's indicator and the welcome tile
+both activate it.
+
+- `ServicesPanel.tsx` - the view. Two groups today, **Webhook inboxes** and **OAuth issuers**, each
+  with its own start affordance in the group header and a one-sentence empty state saying what the
+  service would give you - this drawer is also the features' discoverability. An inbox row opens the
+  inbox *tab* (the drawer lists, the tab shows the captures); an issuer row expands in place to its
+  token and authorize URLs, a copy for the HS256 signing key, its configuration in one line, and a
+  live `failureMode` switch. Mock servers (#481) get a third group when they exist - deliberately no
+  placeholder until then.
+- `NewIssuerDialog.tsx` - the start form: token lifetime, failure mode (plus its delay), and a JSON
+  claims box. Everything is validated before it is sent, because the engine refuses a bad config
+  with a `400` rather than falling back to a default, and a claims typo is otherwise invisible until
+  a token comes back without the claim. Mounted only while open, so the mount is the reset.
+- `useRunningServices.ts` - `useRunningServiceCount()`, shared by the drawer and the Dock. One place
+  because the two lists disagree on their own terms: a stopped inbox stays listed with
+  `running: false`, while a stopped issuer is gone from the engine's list entirely.
+- `failure-modes.ts` - the four `failureMode` labels, the engine's bounds, and the row's
+  one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
+  differently.
+
+**No new tab type.** An issuer's whole management surface fits a row plus a dialog, and a `TabType`
+costs three switch statements and the coverage guard. The inbox keeps its tab because a capture
+list needs the width.
+
+**Data:** `queries/inbox.ts` and `queries/mock-issuer.ts`, both polled at
+`TIMING.SERVICES_POLL_INTERVAL_MS`. They are polled rather than driven by this app's own mutations
+alone because the MCP tools and a bare curl reach the same engine routes - an indicator that only
+knew what this window started would contradict its own promise.
 
 ## Welcome (`modules/welcome/`)
 
@@ -512,7 +551,8 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
 - `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
-  request, Search, Import, History, Variables, Inbox. Search opens the command palette - the
+  request, Search, Import, History, Variables, Services. Services and History both activate a
+  drawer view rather than opening a tab. Search opens the command palette - the
   chord alone is undiscoverable, and this grid is where the app teaches its own surfaces.
 - `LauncherSkeleton.tsx` - one skeleton tile per real tile. It has drifted a tile behind the
   Launcher before; `WelcomeScreen.test.tsx` now asserts both grids against one constant.

@@ -149,6 +149,15 @@ export const API_ENDPOINTS = {
 	INBOX_CAPTURES_CLEAR: (inboxId: string) => `/inbox/${inboxId}/requests`,
 	INBOX_LIVE: (inboxId: string) => `/inbox/${inboxId}/live`,
 
+	// OAuth 2.0 mock issuer (issue #479). Engine-process state like an inbox, so
+	// the same verb-path shape: START creates one, the id paths update and stop
+	// it. There is no DELETE - stopping is what ends an issuer, and the record
+	// goes with it (unlike an inbox, which stays readable once stopped).
+	MOCK_ISSUER: `/mock-issuer`,
+	MOCK_ISSUER_START: `/mock-issuer/start`,
+	MOCK_ISSUER_BY_ID: (issuerId: string) => `/mock-issuer/${issuerId}`,
+	MOCK_ISSUER_STOP: (issuerId: string) => `/mock-issuer/${issuerId}/stop`,
+
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,
 	OAUTH2_AUTHORIZE_START: `/oauth2/authorize/start`,

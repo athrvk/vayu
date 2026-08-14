@@ -188,6 +188,26 @@ clears only the jar used when no environment is selected, and an id clears that
 environment's. It reaches `DELETE /cookies` with the parameter absent, present
 and empty, or present with the id, respectively.
 
+#### OAuth 2.0 mock issuer
+
+```typescript
+apiService.listMockIssuers(): Promise<MockIssuer[]>
+apiService.startMockIssuer(request?: StartMockIssuerRequest): Promise<StartMockIssuerResponse>
+apiService.updateMockIssuer(issuerId, update: UpdateMockIssuerRequest): Promise<MockIssuer>
+apiService.stopMockIssuer(issuerId): Promise<StopMockIssuerResponse>
+```
+
+A local issuer that mints HS256 tokens on demand (issue #479); the Services
+drawer (`modules/services/`) is the surface, added in #502 - before it these
+routes had no client but curl and the MCP tools. Two asymmetries the surface has
+to respect: `startMockIssuer` answers with the URLs and the signing key **only**,
+not the full record, so the list is refetched rather than patched; and a stopped
+issuer leaves the list altogether, unlike an inbox, which stays listed with
+`running: false`. `updateMockIssuer` accepts only `expiresInSeconds`,
+`failureMode` and `slowMs` - a port, client list or claim set cannot move under a
+bound listener and the engine refuses one with a `400` rather than half-applying
+it.
+
 #### Create vs update
 
 For collections, requests and environments the engine splits the write verbs:

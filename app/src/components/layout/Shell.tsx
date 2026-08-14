@@ -115,12 +115,16 @@ export default function Shell() {
 			if (!(e.metaKey || e.ctrlKey)) return;
 			const key = e.key.toLowerCase();
 
-			// ⇧⌘E / ⇧⌘H / ⇧⌘U - drawer view switchers (match Dock tooltips)
+			// ⇧⌘E / ⇧⌘H / ⇧⌘U / ⇧⌘S - drawer view switchers (match Dock tooltips)
 			if (e.shiftKey) {
 				const views: Record<string, DrawerView> = {
 					e: "collections",
 					h: "history",
 					u: "variables",
+					// ⌘S is save, so the services view takes the shifted pair - free
+					// in both maps: the renderer binds no other ⇧⌘ chord and the
+					// native menu's only one is ⇧⌘W (close window).
+					s: "services",
 				};
 				const view = views[key];
 				if (view) {
