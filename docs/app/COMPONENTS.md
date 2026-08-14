@@ -219,7 +219,7 @@ Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Services (⇧⌘S), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. When the engine is *down* the indicator becomes a focusable tooltip carrying `engineError` - the health poll's reason, which was previously recorded and rendered nowhere, so a refused connection, a timeout and a TLS failure all read as one word. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
-- **Middle - running services:** a dot plus "2 services" whenever at least one local service (a running webhook inbox, an OAuth issuer) is up, and **nothing at all when none is** - the Dock's middle is ambient, and a standing "0 services" would spend a permanent line on the ordinary case. Clicking it activates the Services drawer, which is where a service can be read, copied or stopped. Before it, a running inbox was invisible outside its own tab and an issuer was invisible everywhere. → `Dock.services.test.tsx` (mutation-checked: rendered unconditionally, the absent-case tests fail).
+- **Middle - running services:** a dot plus "2 services" whenever at least one local service (a running webhook inbox, an OAuth issuer) is up, and **nothing at all when none is** - the Dock's middle is ambient, and a standing "0 services" would spend a permanent line on the ordinary case. A **disconnected engine counts as none**, whatever the query cache still holds: services are engine-*process* state, so they died with it, and the gate lives in `useRunningServiceCount` rather than here so no later reader has to re-derive the caveat. Clicking it **reveals** the Services drawer (`revealDrawerView`, never `activateDrawerView`) - an ambient chip pointing at a surface must not be the thing that hides it, and on the toggling call it closed the drawer whenever it was already on Services. Before it, a running inbox was invisible outside its own tab and an issuer was invisible everywhere. → `Dock.services.test.tsx` (mutation-checked: rendered unconditionally, the absent-case tests fail; on `activateDrawerView`, the reveal case fails).
 - **Middle - pending restart:** once a setting the engine marks `requiresRestart` has been saved, a "Restart pending" button appears beside the connection status and restarts the engine in place (`useEngineRestart`, shared with the Settings banner so the two cannot diverge). It tracks saves made since this renderer connected - not a comparison against the engine's running values, which it does not report - so it says *saved*, not *in effect*, and does not survive a renderer reload. A failed restart leaves the signal standing and reports the reason as a toast.
 - **Right - toggles:** Context bar toggle (⌘I). Pressed when the bar is open *and* the active tab is one it has content for, so the highlight always matches what is on screen.
 
@@ -482,7 +482,11 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
   what is already on screen) and ordered by port - the engine lists in map order, which is not
   stable across polls, and a switcher whose entries move under the pointer is worse than none. An
-  inbox record carries no creation stamp; whether it should is #555's decision.
+  inbox record carries no creation stamp and does not gain one - #555 answered that, and the
+  Services drawer orders by port for the same reason. Every mutation this tab owns reports its
+  failure as a toast (`reportFailure`), which is the one discipline the whole inbox lifecycle
+  follows; Stop and Clear used to pass no `onError` at all (#555, item 7 - taken there rather than in
+  #556's tab pass, which both issues named as the shared brush).
 - `CannedResponseControls.tsx` - all four fields the engine serves: reply status and delay inline,
   body and headers behind a disclosure that opens on its own when either is set. It showed status and
   delay only, so a reply body or header set configured by an MCP tool or a bare curl was invisible
@@ -575,18 +579,42 @@ both activate it.
   service would give you - this drawer is also the features' discoverability. An inbox row opens the
   inbox *tab* (the drawer lists, the tab shows the captures) and carries copy, stop (running rows
   only) and **delete** (every row); an issuer row expands in place to its token and authorize URLs,
-  a copy for the HS256 signing key, its configuration in one line, and a live `failureMode` switch.
+  a copy for the HS256 signing key, its configuration in one line, a live `failureMode` switch, and
+  - in `slow` only - the delay that mode answers after, committed on blur rather than per keystroke.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
   new listener, and as a Play labelled "Start inbox" beside a stopped row it read as "restart that
   one", which nothing here does (issue #553). Mock servers (#481) get a third group when they exist - deliberately no
   placeholder until then.
+
+  Row semantics, all from issue #555. An inbox row **leads with `Port NNNN`** and demotes the URL
+  behind it: the port is the part that varies and the part a user names an inbox by, while three
+  full URLs are three near-identical monospace strings differing in one digit. The URL is still on
+  the row and also rides the copy control's tooltip, which says so when the inbox is **stopped** -
+  a stopped inbox's URL copies perfectly well and then refuses connections, a long way from the
+  cause. Rows are ordered **by port**, because the engine lists them in map order (not stable across
+  polls) and the record carries no creation stamp; the inbox tab's switcher orders the same way.
+  Creating one **toasts and flashes** the new row for `TIMING.ROW_FLASH_MS` - it lands wherever its
+  ephemeral port sorts, not at the end. The activator's verb is `sr-only` text **prefixed to** the
+  row's content, never an `aria-label`: a label *replaces* the content in the accessible name, so
+  the URL, `Stopped`, and the reachable-beyond-this-machine badge were all inaudible and a stopped
+  row read identically to a running one.
+
+  **No user-editable inbox name** (#555's stated decision point, answered *no*). A name would be an
+  engine field - `InboxInfo` carries none, so it would need storage, a `PUT /inbox/:id` key and a
+  wire-shape change - to label something whose whole identity is already the port it holds. `Port
+  NNNN` ships instead and needs nothing from the engine. Revisit only if inboxes ever outlive the
+  engine process, where a port is no longer a stable name.
 - `NewIssuerDialog.tsx` - the start form: token lifetime, failure mode (plus its delay), and a JSON
   claims box. Everything is validated before it is sent, because the engine refuses a bad config
   with a `400` rather than falling back to a default, and a claims typo is otherwise invisible until
-  a token comes back without the claim. Mounted only while open, so the mount is the reset.
+  a token comes back without the claim. Every refusal **names its bound in words**: a reddened field
+  beside a greyed-out Start says something is wrong and never which field or why, and `aria-invalid`
+  alone announces "invalid" with no correction. Mounted only while open, so the mount is the reset.
 - `useRunningServices.ts` - `useRunningServiceCount()`, shared by the drawer and the Dock. One place
   because the two lists disagree on their own terms: a stopped inbox stays listed with
-  `running: false`, while a stopped issuer is gone from the engine's list entirely.
+  `running: false`, while a stopped issuer is gone from the engine's list entirely - and because a
+  **disconnected engine is running none of them**, which is the gate this hook holds so that no
+  caller renders a green count off a stale cache (issue #555).
 - `failure-modes.ts` - the four `failureMode` labels, the engine's bounds, and the row's
   one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
   differently.

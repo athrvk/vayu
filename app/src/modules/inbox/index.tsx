@@ -176,18 +176,24 @@ export default function InboxView() {
 		);
 	}
 
+	/**
+	 * One error discipline for the whole inbox lifecycle (issue #555, item 7).
+	 *
+	 * Start, update, delete and the drawer's own stop all toasted their failure;
+	 * this tab's Stop and Clear passed no `onError` at all, so a refused stop
+	 * left a button that had visibly done nothing and no reason anywhere. Taken
+	 * here rather than in #556's tab pass, which both issues name as the shared
+	 * brush - whichever landed second was to skip it.
+	 */
+	const reportFailure = (fallback: string) => (mutationError: unknown) =>
+		showToast(mutationError instanceof Error ? mutationError.message : fallback, "error");
+
 	const start = () => {
 		startInbox.mutate(
 			{},
 			{
 				onSuccess: (started) => show(started.inboxId),
-				onError: (mutationError) =>
-					showToast(
-						mutationError instanceof Error
-							? mutationError.message
-							: "Could not start the inbox",
-						"error"
-					),
+				onError: reportFailure("Could not start the inbox"),
 			}
 		);
 	};
@@ -199,15 +205,7 @@ export default function InboxView() {
 			// recorded since the last fetch, so the next unseen capture sits at
 			// exactly this index (see the mutation's own note).
 			{ inboxId: inbox.inboxId, offset: captures.length },
-			{
-				onError: (mutationError) =>
-					showToast(
-						mutationError instanceof Error
-							? mutationError.message
-							: "Could not load more captures",
-						"error"
-					),
-			}
+			{ onError: reportFailure("Could not load more captures") }
 		);
 	};
 
@@ -215,15 +213,7 @@ export default function InboxView() {
 		if (!inbox) return;
 		updateResponse.mutate(
 			{ inboxId: inbox.inboxId, response },
-			{
-				onError: (mutationError) =>
-					showToast(
-						mutationError instanceof Error
-							? mutationError.message
-							: "Could not update the response",
-						"error"
-					),
-			}
+			{ onError: reportFailure("Could not update the response") }
 		);
 	};
 
@@ -293,7 +283,11 @@ export default function InboxView() {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => clearCaptures.mutate(inbox.inboxId)}
+						onClick={() =>
+							clearCaptures.mutate(inbox.inboxId, {
+								onError: reportFailure("Could not clear the captures"),
+							})
+						}
 						disabled={clearCaptures.isPending || captures.length === 0}
 					>
 						<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
@@ -303,7 +297,11 @@ export default function InboxView() {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => stopInbox.mutate(inbox.inboxId)}
+							onClick={() =>
+								stopInbox.mutate(inbox.inboxId, {
+									onError: reportFailure("Could not stop the inbox"),
+								})
+							}
 							disabled={stopInbox.isPending}
 						>
 							<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />

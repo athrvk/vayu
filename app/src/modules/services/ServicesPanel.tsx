@@ -26,7 +26,7 @@
  * teaches a reader less than its absence does.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
 import {
 	DrawerPanel,
@@ -37,6 +37,7 @@ import {
 } from "@/components/shared";
 import {
 	Badge,
+	Input,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -53,11 +54,12 @@ import {
 	useUpdateMockIssuerMutation,
 } from "@/queries";
 import { useTabsStore, useToastStore } from "@/stores";
+import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
 import type { Inbox, MockIssuer, MockIssuerFailureMode } from "@/types";
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
-import { FAILURE_MODE_LABELS, failureModeSummary } from "./failure-modes";
+import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
 
 /**
@@ -82,13 +84,15 @@ function StatusDot({ running }: { running: boolean }) {
 interface ServiceRowProps {
 	/** What the row does when the row itself - or its activator - is clicked. */
 	onActivate: () => void;
-	/** Names the activator. Icon-only trailing controls carry their own. */
-	activateLabel: string;
+	/** The verb, prefixed to the row's own content to name the activator. */
+	actionLabel: string;
 	running: boolean;
 	children: React.ReactNode;
 	/** Trailing controls: copy, stop, delete. */
 	actions?: React.ReactNode;
 	leading?: React.ReactNode;
+	/** Highlights the row - a just-created service, so the eye can find it. */
+	flashed?: boolean;
 }
 
 /**
@@ -99,18 +103,32 @@ interface ServiceRowProps {
  * both halves of the hit-area rule in `app/CLAUDE.md`. A row carrying trailing
  * buttons cannot be one big button, so without the pair the responsive area is
  * the label's own bounding box and the padding around it is dead.
+ *
+ * **The verb is `sr-only` text, not an `aria-label`.** A label *replaces* the
+ * element's content when the accessible name is computed, so "Open inbox on
+ * port 41234" silenced everything the row actually says - the URL, "Stopped",
+ * the reachable-beyond-this-machine badge, an issuer's failure mode. A screen
+ * reader heard a row that could not be stopped and a row that could as the same
+ * row. Prefixing instead composes the two: the verb, then the content, in the
+ * order they are read on screen.
  */
 function ServiceRow({
 	onActivate,
-	activateLabel,
+	actionLabel,
 	running,
 	children,
 	actions,
 	leading,
+	flashed,
 }: ServiceRowProps) {
 	return (
 		<div
-			className="flex h-8 cursor-pointer items-center gap-1 px-3 hover:bg-muted/50"
+			className={cn(
+				"flex h-8 cursor-pointer items-center gap-1 px-3 hover:bg-muted/50",
+				// Not a selection - the drawer has none - so a background tint
+				// rather than the accent fill a selected row would carry.
+				flashed && "bg-primary/10"
+			)}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) onActivate();
 			}}
@@ -119,9 +137,9 @@ function ServiceRow({
 			<button
 				type="button"
 				onClick={onActivate}
-				aria-label={activateLabel}
 				className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left text-sm"
 			>
+				<span className="sr-only">{actionLabel}</span>
 				<StatusDot running={running} />
 				{children}
 			</button>
@@ -152,15 +170,32 @@ function ServiceGroup({ title, action, children }: ServiceGroupProps) {
 /** `px-3 py-2 text-left`: a drawer group's line, not a centred pane. */
 const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
 
+/**
+ * Copy, and say so only once it worked.
+ *
+ * `writeText` returns a promise that *rejects* - a denied permission, a
+ * document that is not focused, a platform with no clipboard behind the API -
+ * and this fired it with `void` and toasted "copied" unconditionally, so a
+ * failed copy was reported as a success and the user pasted whatever was on the
+ * clipboard before. Every other copy site in the app already awaits; this is
+ * the one that did not.
+ */
 function useCopy() {
 	const showToast = useToastStore((s) => s.showToast);
-	return (value: string, what: string) => {
-		void navigator.clipboard.writeText(value);
-		showToast(`${what} copied`, "success");
+	return async (value: string, what: string) => {
+		try {
+			await navigator.clipboard.writeText(value);
+			showToast(`${what} copied`, "success");
+		} catch (error) {
+			showToast(
+				error instanceof Error ? `Could not copy: ${error.message}` : "Could not copy",
+				"error"
+			);
+		}
 	};
 }
 
-function InboxRow({ inbox }: { inbox: Inbox }) {
+function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
@@ -172,17 +207,26 @@ function InboxRow({ inbox }: { inbox: Inbox }) {
 		<>
 			<ServiceRow
 				running={inbox.running}
+				flashed={flashed}
 				// The tab is a singleton pointed at one inbox, so the row hands it the
 				// id it names - without it the tab showed whichever inbox it had last
 				// (in practice the first), and the row's label was a lie (issue #554).
 				onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
-				activateLabel={`Open inbox on port ${inbox.port}`}
+				actionLabel="Open inbox"
 				actions={
 					<>
+						{/* The URL rides the tooltip rather than the name: the name is
+						    what a screen reader reads on every row, and three inboxes
+						    would be three near-identical 30-character strings. A
+						    stopped inbox says so here too - the URL copies fine and
+						    then refuses connections, a long way from the cause. */}
 						<TooltipIconButton
 							label="Copy inbox URL"
+							tooltipHint={
+								inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`
+							}
 							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-							onClick={() => copy(inbox.url, "Inbox URL")}
+							onClick={() => void copy(inbox.url, "Inbox URL")}
 						/>
 						{inbox.running && (
 							<TooltipIconButton
@@ -215,7 +259,15 @@ function InboxRow({ inbox }: { inbox: Inbox }) {
 					</>
 				}
 			>
-				<TruncatedText className="font-mono text-xs">{inbox.url}</TruncatedText>
+				{/* The port is what distinguishes one inbox from another and the
+				    only part of the URL that varies, so it leads. The URL stays
+				    visible but demoted - it is the value you copy, not the one you
+				    read a list by, and a column of `http://127.0.0.1:4123x/` in
+				    mono was three rows that looked identical. */}
+				<span className="shrink-0 text-xs">Port {inbox.port}</span>
+				<TruncatedText className="font-mono text-xs text-muted-foreground">
+					{inbox.url}
+				</TruncatedText>
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
 			</ServiceRow>
@@ -263,9 +315,9 @@ function IssuerRow({
 	const stopIssuer = useStopMockIssuerMutation();
 	const updateIssuer = useUpdateMockIssuerMutation();
 
-	const setFailureMode = (failureMode: MockIssuerFailureMode) => {
+	const update = (patch: { failureMode?: MockIssuerFailureMode; slowMs?: number }) => {
 		updateIssuer.mutate(
-			{ issuerId: issuer.issuerId, update: { failureMode } },
+			{ issuerId: issuer.issuerId, update: patch },
 			{
 				onError: (error) =>
 					showToast(
@@ -276,6 +328,8 @@ function IssuerRow({
 		);
 	};
 
+	const setFailureMode = (failureMode: MockIssuerFailureMode) => update({ failureMode });
+
 	return (
 		<>
 			<ServiceRow
@@ -284,7 +338,7 @@ function IssuerRow({
 				// is where this differs from an inbox.
 				running
 				onActivate={onToggle}
-				activateLabel={`${expanded ? "Collapse" : "Expand"} issuer on port ${issuer.port}`}
+				actionLabel={`${expanded ? "Collapse" : "Expand"} issuer on port ${issuer.port}`}
 				leading={
 					expanded ? (
 						<ChevronDown
@@ -323,19 +377,25 @@ function IssuerRow({
 				)}
 			</ServiceRow>
 
+			{/* `surface-sunken`, not a bare `border-rule`: a rule inherits the
+			    `--rule` its enclosing surface declares, and no drawer surface
+			    declares one - so this fell back to the canvas default, which on
+			    `--panel` in dark measures 1.07 and is simply not there. Sunken is
+			    also what this is: the nested detail slab of the row above, the
+			    same treatment the settings cookie rows and the console panes use. */}
 			{expanded && (
-				<div className="border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
+				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
 					<IssuerDetailRow
 						label="Token"
 						value={issuer.tokenUrl}
 						copyLabel="Copy token URL"
-						onCopy={() => copy(issuer.tokenUrl, "Token URL")}
+						onCopy={() => void copy(issuer.tokenUrl, "Token URL")}
 					/>
 					<IssuerDetailRow
 						label="Authorize"
 						value={issuer.authorizeUrl}
 						copyLabel="Copy authorize URL"
-						onCopy={() => copy(issuer.authorizeUrl, "Authorize URL")}
+						onCopy={() => void copy(issuer.authorizeUrl, "Authorize URL")}
 					/>
 					{/* The signing key is the whole point of the issuer being a mock:
 					    it is the HS256 secret the service under test verifies the
@@ -350,7 +410,7 @@ function IssuerRow({
 						<TooltipIconButton
 							label="Copy signing key"
 							icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
-							onClick={() => copy(issuer.signingKey, "Signing key")}
+							onClick={() => void copy(issuer.signingKey, "Signing key")}
 						/>
 					</div>
 
@@ -384,10 +444,116 @@ function IssuerRow({
 							</SelectContent>
 						</Select>
 					</label>
+
+					{/* Slow is the one mode with a parameter, and the switch above
+					    offered no way to see or set it: the issuer answered after
+					    whatever `slowMs` it was *started* with, the summary line
+					    reported that number, and the engine's `PUT` had accepted a
+					    new one all along. Shown only in the mode that reads it -
+					    outside `slow` the value is one the issuer never consults. */}
+					{issuer.failureMode === "slow" && (
+						<IssuerDelayControl
+							// Keyed on what the engine is serving, so a value changed
+							// elsewhere (an MCP tool, a curl) re-seeds the draft by
+							// remount rather than by an effect - the same way
+							// `CannedResponseControls` is keyed in the inbox tab.
+							key={issuer.slowMs}
+							issuerId={issuer.issuerId}
+							slowMs={issuer.slowMs}
+							pending={updateIssuer.isPending}
+							onApply={(slowMs) => update({ slowMs })}
+						/>
+					)}
 				</div>
 			)}
 		</>
 	);
+}
+
+/**
+ * The delay `slow` mode answers after.
+ *
+ * Committed on blur and on Enter rather than per keystroke: every character of
+ * "2000" is a valid number, so a live-committing field would send 2, then 20,
+ * then 200 - three `PUT`s reconfiguring a running listener on the way to the
+ * one the user meant. An out-of-range value is refused here with the bound
+ * named, because the engine answers it with a `400 mock_issuer_invalid_config`
+ * that says nothing about which field.
+ */
+function IssuerDelayControl({
+	issuerId,
+	slowMs,
+	pending,
+	onApply,
+}: {
+	issuerId: string;
+	slowMs: number;
+	pending: boolean;
+	onApply: (slowMs: number) => void;
+}) {
+	const [draft, setDraft] = useState(String(slowMs));
+	const value = Number(draft);
+	const valid = Number.isInteger(value) && value >= 0 && value <= MAX_SLOW_MS;
+	const errorId = `issuer-${issuerId}-slow-error`;
+
+	const commit = () => {
+		if (!valid || value === slowMs) return;
+		onApply(value);
+	};
+
+	return (
+		<div className="py-1">
+			<label className="flex items-center gap-2">
+				<span className="text-xs text-muted-foreground">Delay</span>
+				<Input
+					type="number"
+					min={0}
+					max={MAX_SLOW_MS}
+					step={100}
+					value={draft}
+					onChange={(e) => setDraft(e.target.value)}
+					onBlur={commit}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") commit();
+					}}
+					disabled={pending}
+					aria-invalid={!valid}
+					aria-describedby={valid ? undefined : errorId}
+					className="h-7 flex-1 text-xs"
+				/>
+				<span className="text-xs text-muted-foreground">ms</span>
+			</label>
+			{!valid && (
+				<p id={errorId} className="pt-1 text-xs text-destructive-text">
+					{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+				</p>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Which row was just created, for as long as it takes to notice it.
+ *
+ * Creating an inbox reported nothing at all: the mutation carried an `onError`
+ * and no `onSuccess`, and the new row landed wherever its ephemeral port sorted
+ * rather than at the end, so the only evidence a click had done anything was a
+ * row count nobody was counting. The timer is cleared on unmount and restarted
+ * per flash, so switching drawer views mid-flash leaves nothing running.
+ */
+function useRowFlash() {
+	const [flashedId, setFlashedId] = useState<string | null>(null);
+	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+
+	const flash = (id: string) => {
+		clearTimeout(timer.current ?? undefined);
+		setFlashedId(id);
+		timer.current = setTimeout(() => setFlashedId(null), TIMING.ROW_FLASH_MS);
+	};
+
+	return { flashedId, flash };
 }
 
 export default function ServicesPanel() {
@@ -397,6 +563,7 @@ export default function ServicesPanel() {
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
+	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
 	const inboxes = inboxesQuery.data ?? [];
 	const issuers = issuersQuery.data ?? [];
@@ -411,10 +578,24 @@ export default function ServicesPanel() {
 	const showInboxError = inboxesQuery.isError && inboxes.length === 0;
 	const showIssuerError = issuersQuery.isError && issuers.length === 0;
 
+	/*
+	 * By port. The engine lists inboxes in map order, which is not stable across
+	 * polls, so a row could move while being read and a new one arrived
+	 * anywhere. The record carries no creation stamp - checked, and #555's
+	 * decision is that it does not gain one (see the module doc) - and port is
+	 * the stable key it does have. Same ordering the inbox tab's switcher uses,
+	 * so the two lists cannot disagree about what order inboxes are in.
+	 */
+	const orderedInboxes = [...inboxes].sort((a, b) => a.port - b.port);
+
 	const start = () =>
 		startInbox.mutate(
 			{},
 			{
+				onSuccess: (started) => {
+					showToast(`Inbox started on port ${started.port}`, "success");
+					flashInbox(started.inboxId);
+				},
 				onError: (error) =>
 					showToast(
 						error instanceof Error ? error.message : "Could not start the inbox",
@@ -458,7 +639,13 @@ export default function ServicesPanel() {
 							title="No inbox yet. Start one for a local URL that records every request sent to it - no tunnel, no third party."
 						/>
 					) : (
-						inboxes.map((inbox) => <InboxRow key={inbox.inboxId} inbox={inbox} />)
+						orderedInboxes.map((inbox) => (
+							<InboxRow
+								key={inbox.inboxId}
+								inbox={inbox}
+								flashed={inbox.inboxId === flashedInboxId}
+							/>
+						))
 					)}
 				</ServiceGroup>
 

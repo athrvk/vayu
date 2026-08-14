@@ -19,7 +19,7 @@
  * `activateDrawerView` *toggles* when the drawer is already on that view, which
  * is right for a button pressed twice and wrong for a search result: picking
  * "History" from the palette must show History, never hide it. So the entries
- * here set the view explicitly instead.
+ * here reveal it instead (`revealDrawerView`, the store's non-toggling half).
  */
 
 import { Braces, Clock, Folder, Inbox, Radio, Settings } from "lucide-react";
@@ -76,8 +76,7 @@ const VIEWS: ViewEntry[] = [
 
 export function useViewItems(): PaletteItem[] {
 	const openTab = useTabsStore((s) => s.openTab);
-	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
-	const setDrawerView = useLayoutStore((s) => s.setDrawerView);
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 
 	return VIEWS.map((view) => ({
 		id: `view:${view.title.toLowerCase()}`,
@@ -86,10 +85,7 @@ export function useViewItems(): PaletteItem[] {
 		keywords: view.keywords,
 		icon: view.icon,
 		perform: () => {
-			if (view.drawerView) {
-				setDrawerOpen(true);
-				setDrawerView(view.drawerView);
-			}
+			if (view.drawerView) revealDrawerView(view.drawerView);
 			if (view.tabType) openTab({ type: view.tabType, entityId: null });
 		},
 	}));

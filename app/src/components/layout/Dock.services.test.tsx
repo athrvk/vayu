@@ -26,13 +26,17 @@
  * The transport is mocked and the real queries and hooks run, so the count is
  * computed the way the app computes it - including the asymmetry between the
  * two lists (an inbox stays listed once stopped, an issuer does not).
+ *
+ * Two later claims from issue #555, both about the indicator telling the truth:
+ * a dead engine is running nothing whatever the query cache still holds, and an
+ * ambient chip that points at a surface must never be the thing that hides it.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useLayoutStore } from "@/stores";
+import { useEngineStore, useLayoutStore } from "@/stores";
 import type { Inbox, MockIssuer } from "@/types";
 import { Dock } from "./Dock";
 
@@ -102,6 +106,9 @@ beforeEach(() => {
 	listInboxes.mockReset().mockResolvedValue([]);
 	listMockIssuers.mockReset().mockResolvedValue([]);
 	useLayoutStore.setState({ drawerOpen: true, drawerView: "collections" });
+	// The count is gated on this, and the store's own default is `false` - a
+	// list that answered at all came from an engine that was up.
+	useEngineStore.setState({ isEngineConnected: true, engineError: null });
 });
 
 describe("the services drawer switcher", () => {
@@ -155,5 +162,40 @@ describe("the running-services indicator", () => {
 		fireEvent.click(await screen.findByText("1 service"));
 		expect(useLayoutStore.getState().drawerView).toBe("services");
 		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+	});
+
+	/*
+	 * The switchers to its left toggle, which is right for a button pressed
+	 * twice. This is not one of them: it is an ambient chip *pointing at* the
+	 * drawer, so on `activateDrawerView` it closed the one surface that can stop
+	 * or copy the services it had just announced. Mutation-check: swap
+	 * `revealDrawerView` back for `activateDrawerView` and this fails.
+	 */
+	it("only ever reveals the drawer, even when it is already on services", async () => {
+		useLayoutStore.setState({ drawerOpen: true, drawerView: "services" });
+		listMockIssuers.mockResolvedValue([issuer()]);
+		renderDock();
+		fireEvent.click(await screen.findByText("1 service"));
+		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+		expect(useLayoutStore.getState().drawerView).toBe("services");
+	});
+
+	/*
+	 * Services are engine-*process* state, so a disconnected engine is running
+	 * none of them - but TanStack holds the last good list through failed
+	 * refetches, so the Dock rendered "1 service" in green beside its own
+	 * "Disconnected" light. Mutation-check: drop the gate in
+	 * `useRunningServiceCount` and this fails.
+	 */
+	it("says nothing while the engine is down, whatever the cache still holds", async () => {
+		listInboxes.mockResolvedValue([inbox()]);
+		listMockIssuers.mockResolvedValue([issuer()]);
+		renderDock();
+		// The cache is warm first, so this proves the gate and not a slow query.
+		expect(await screen.findByText("2 services")).toBeInTheDocument();
+
+		useEngineStore.setState({ isEngineConnected: false });
+		await waitFor(() => expect(screen.queryByText(/service/i)).not.toBeInTheDocument());
+		expect(screen.getByText("Disconnected")).toBeInTheDocument();
 	});
 });

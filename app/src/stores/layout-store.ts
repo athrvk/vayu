@@ -75,6 +75,18 @@ interface LayoutState {
 	setDrawerView: (view: DrawerView) => void;
 	/** Open the drawer to a specific view, or toggle it closed if already on that view */
 	activateDrawerView: (view: DrawerView) => void;
+	/**
+	 * Show a view, never hide it - the non-toggling half of the pair above.
+	 *
+	 * `activateDrawerView` toggles when the drawer is already on that view,
+	 * which is right for a switcher pressed twice and wrong for anything that
+	 * *points at* a view: a palette result, or an ambient status chip that says
+	 * something is running. Both of those had hand-rolled the pair
+	 * (`setDrawerOpen(true)` then `setDrawerView`), and the Dock's
+	 * running-services indicator had not - so clicking it with the drawer
+	 * already on Services closed the one surface that could act on them.
+	 */
+	revealDrawerView: (view: DrawerView) => void;
 	setDrawerWidth: (width: number) => void;
 
 	setContextBarOpen: (open: boolean) => void;
@@ -112,6 +124,7 @@ export const useLayoutStore = create<LayoutState>()(
 					drawerView: view,
 					drawerOpen: s.drawerView === view ? !s.drawerOpen : true,
 				})),
+			revealDrawerView: (view) => set({ drawerView: view, drawerOpen: true }),
 			setDrawerWidth: (width) =>
 				set({ drawerWidth: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)) }),
 
