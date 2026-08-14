@@ -59,6 +59,28 @@ Built inline in `parse`.
 | `servers[0].url` | `variables.baseUrl` | only added when a base URL exists: `{ baseUrl: { value, enabled: true } }`; otherwise `variables` is `{}`. Additional `servers[]` are ignored. |
 | `security` / `components.securitySchemes` | `auth` | via `pickPrimaryScheme` + `schemeToAuth` (see [Auth](#auth--security)). Collections never inherit. |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
+| `op.responses` | `examples` | via `buildExamples` (see [Documented responses](#documented-responses)); **absent** when nothing was representable |
+
+**Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
+
+Both lists go through `SkipTally.params` (`openapi-shared.ts`) first. `parameters` is an array per the spec, but a missing `-` in hand-written YAML makes it a mapping, and spreading that used to throw `is not iterable` and abort the **whole file**. A present-but-non-array `parameters` is now treated as empty and counted as a `malformed_spec` `SkippedItem` (once per offending list); an absent `parameters` is normal and counted as nothing. Every other path in the file still imports.
+
+### Documented responses
+
+`op.responses` was visited by no code path before issue #481 - the parser sampled request bodies and walked straight past the half of the spec that says what comes back, so an imported API description documented no responses at all. Each entry now becomes an `ExampleDraft`, stored against the request and (once the mock server lands) served from it.
+
+| OpenAPI (`op.responses[code]`) | Vayu `ExampleDraft` | Notes |
+|--------------------------------|---------------------|-------|
+| the key | `status` | must be a three-digit `100`-`599` code; see below |
+| `description` | `name` | `"{code} - {description}"`, or the bare code when the response describes nothing |
+| the JSON media type's `example` → first `examples[*].value` → `sampleSchema(schema)` | `body` | the same precedence `buildBody` uses for a request body; a string is stored as-is, anything else is `JSON.stringify(value, null, 2)` |
+| the JSON media type key | `contentType`, and a single `Content-Type` header | `application/json`, an `application/json;…` variant or a `+json` suffix, by the same rule request bodies use |
+
+A response `$ref` is resolved (single hop, like the parser's other refs). An `examples` entry is unwrapped from its Example Object - the payload is in `value`, and storing the wrapper would put a body on disk no server would send; an `externalValue` names a URL rather than carrying a payload, so it yields nothing (an import must not fetch).
+
+A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
+
+A key that is not a numeric status - `default`, or a `2XX` wildcard - is **skipped and counted** as `example_no_status`. It documents a real response, but an example is served under one status line and there is no honest value to pick.
 | tag groups | `children` | `[...tagCollections.values()]` |
 | untagged operations | `requests` | |
 
@@ -91,10 +113,6 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.requestBody` | `body` | via `buildBody` (see [Request body](#request-body-generation)) |
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
-
-**Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
-
-Both lists go through `SkipTally.params` (`openapi-shared.ts`) first. `parameters` is an array per the spec, but a missing `-` in hand-written YAML makes it a mapping, and spreading that used to throw `is not iterable` and abort the **whole file**. A present-but-non-array `parameters` is now treated as empty and counted as a `malformed_spec` `SkippedItem` (once per offending list); an absent `parameters` is normal and counted as nothing. Every other path in the file still imports.
 
 ## URL & path parameters
 
@@ -186,7 +204,8 @@ Dropped / not represented:
 - **Scripts:** all `preRequestScript` / `postRequestScript` are `""` (OpenAPI has no scripts; `importScripts` has no effect here).
 - **Environments:** none produced (`environments: []`, `meta.environmentCount: 0`). OpenAPI has no environment concept; `servers[0]` becomes a single `baseUrl` collection variable.
 - **Additional servers:** only `servers[0]` is used; other entries and per-operation `servers` overrides are dropped.
-- **Response schemas, examples beyond request body, callbacks, links, security scopes:** not consumed.
+- **Callbacks, links, security scopes:** not consumed. (Response schemas and examples *are*, since issue #481 - see [Documented responses](#documented-responses).)
+- **Response headers** (`responses[code].headers`): not imported. An example's headers carry only the media type it was stored under.
 - **Cookie parameters** and **path parameters as params**: not emitted (path params live in the URL only).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Multi-tag grouping:** only the first tag groups an operation.
@@ -195,12 +214,13 @@ Dropped / not represented:
 - **Form-field property schemas:** only field **names** and whether the field is a file (`format: binary`) are imported; `required`, other types, and nested structure are not.
 - **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and nothing is counted - unlike a multipart file part, which imports (see [File parts](#file-parts)).
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
+`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
 
 | `SkippedItem.kind` | Counted when |
 |--------------------|--------------|
 | `unsupported_method` | a path item carries a `trace` operation |
 | `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
+| `example_no_status` | a response key is not a three-digit status - `default`, or a `2XX` wildcard |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 
@@ -213,6 +233,8 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 | `schemaFormFields` | `schema-sampler.ts` | field names for an urlencoded / multipart body, resolved through the sampler, each flagged text or file |
 | `importedFilePart`, `unattachedFileParts` | `shared.ts` | build a file form row; count the rows that still need a file, for `meta` |
 | `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `responseExample`, `findJsonMediaType`, `firstNamedExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft; the halves the two OpenAPI parsers share |
+| `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |
 
 This parser does **not** use the Postman/Insomnia-shaped helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 

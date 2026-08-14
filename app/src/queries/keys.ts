@@ -30,6 +30,10 @@ export const queryKeys = {
 			[...queryKeys.requests.lists(), { collectionId }] as const,
 		details: () => [...queryKeys.requests.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.requests.details(), id] as const,
+		// Saved example responses (issue #481). Under the request's own prefix
+		// because they are owned by it: invalidating a request's subtree drops
+		// its examples with it, which is what a delete needs.
+		examples: (id: string) => [...queryKeys.requests.detail(id), "examples"] as const,
 	},
 
 	// Runs (history)

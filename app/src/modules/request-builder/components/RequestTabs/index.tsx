@@ -20,6 +20,7 @@ import HeadersPanel from "./panels/HeadersPanel";
 import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
 import ScriptPanel from "./panels/script/ScriptPanel";
+import ExamplesPanel from "./panels/ExamplesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRequestSettingsNonDefault } from "../../utils/request-state";
 
@@ -69,6 +70,17 @@ export default function RequestTabs() {
 			id: "test-script",
 			label: "Tests",
 			badge: request.testScript.trim() ? 1 : undefined,
+		},
+		{
+			/*
+			 * After the scripts and before Settings: examples describe what the
+			 * request answers with, which belongs beside the request's own
+			 * definition rather than among its execution options. No badge - the
+			 * count lives behind a query, and a tab row that waits on the network
+			 * to finish drawing is worse than one that says nothing until opened.
+			 */
+			id: "examples",
+			label: "Examples",
 		},
 		{
 			id: "settings",
@@ -134,6 +146,8 @@ function TabContent() {
 			return <ScriptPanel variant="pre" />;
 		case "test-script":
 			return <ScriptPanel variant="post" />;
+		case "examples":
+			return <ExamplesPanel />;
 		case "settings":
 			return <SettingsPanel />;
 		default:

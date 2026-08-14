@@ -168,6 +168,13 @@ function flatten(
 			// tests, and "absent" is the state the engine's field appliers read.
 			...(r.followRedirects !== undefined ? { followRedirects: r.followRedirects } : {}),
 			...(r.maxRedirects !== undefined ? { maxRedirects: r.maxRedirects } : {}),
+			// Saved example responses ride nested on their request rather than as a
+			// fourth top-level section: nothing references them, so they need no
+			// temp id, and the engine writes them in the same transaction. Spread
+			// for the same reason as the two fields above - a parser that has no
+			// examples must not send `examples: []`, which reads as "this request
+			// documents no responses" rather than "this format has none".
+			...(r.examples !== undefined ? { examples: r.examples } : {}),
 			order: i,
 		});
 	}

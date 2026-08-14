@@ -149,6 +149,51 @@ the global afterward does not alter a request already saved.
 
 ---
 
+### `request_examples`
+
+Stores saved example responses for a request (issue #481) - what an importer
+found next to it (Postman's `item.response[]`, an OpenAPI operation's
+`responses`) and, once the mock server lands, what that server answers with.
+
+| Column         | Type    | Notes                                             |
+|----------------|---------|---------------------------------------------------|
+| `id`           | TEXT PK | `exa_` + UUID                                     |
+| `request_id`   | TEXT    | FK → `requests.id` (not enforced by SQLite FK)   |
+| `name`         | TEXT    | Required on write; no default                     |
+| `status`       | INTEGER | HTTP status, `100`-`599`; default 200             |
+| `headers`      | TEXT    | JSON array of `KeyValueEntry[]`                   |
+| `body`         | TEXT    | Response body, verbatim; capped (see below)       |
+| `content_type` | TEXT    | Denormalized from `headers`; `""` when unstated   |
+| `order`        | INTEGER | Sort order within the request; default 0          |
+| `created_at`   | INTEGER | Unix ms                                           |
+| `updated_at`   | INTEGER | Unix ms                                           |
+
+**headers** is the same `KeyValueEntry[]` shape a request's headers use, not the
+JSON object [`result_bodies`](#result_bodies) and [`inbox_requests`](#inbox_requests)
+store. A stored example is re-served rather than only displayed, so repeated
+names (`Set-Cookie`) and the author's ordering both have to survive - an object
+keeps neither.
+
+**order** is what makes "the first example" a stable answer. A bulk import
+writes every example of one request in the same millisecond, so `created_at`
+ties for all of them and an id tiebreak would return the author's list
+shuffled; `GET /requests/:id/examples` orders by `order`, then `created_at`,
+then `id`. A create that states no `order` appends after the request's current
+examples, exactly as a new request appends within its collection.
+
+**Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
+them in the same transaction, and the `delete_collection` cascade removes each
+descendant request's examples before the requests themselves. Every read here is
+by `request_id` or by example id, so a row left behind would be unreachable
+rather than merely stale.
+
+**Caps.** A body over `request_example::MAX_BODY_BYTES` (1 MiB) is a `400`, never
+a truncation - a half-body served as if whole is worse than a refused write - and
+a request holds at most `MAX_PER_REQUEST` (100) examples. Both constants live in
+`engine/include/vayu/core/constants.hpp`.
+
+---
+
 ### `environments`
 
 Stores named variable sets.
@@ -795,6 +840,7 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
 | `idx_inbox_requests_inbox_id`| `inbox_requests.inbox_id`| Every inbox read - the capture page, the live poll, the per-insert retention trim and `DELETE /inbox/:id/requests`                |
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
+| `idx_request_examples_request_id` | `request_examples.request_id` | Every example read - `GET /requests/:id/examples`, the create path's append scan, and the `remove_all` in both the request and collection cascades |
 
 `metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per
 second (the retired EAV `metrics` table cost roughly 20 rows for the same second) - so without `run_id`

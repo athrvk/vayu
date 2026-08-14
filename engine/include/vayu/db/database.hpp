@@ -94,7 +94,21 @@ class Database {
     void save_request (const Request& r);
     std::optional<Request> get_request (const std::string& id);
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
+    /// Cascades to the request's examples - see the definition for why they
+    /// cannot be left behind.
     void delete_request (const std::string& id);
+
+    // Saved example responses, owned by a request (issue #481). Every read is
+    // by request id or by example id; there is no all-examples query, because
+    // an example only means anything next to the request it answers.
+
+    void save_request_example (const RequestExample& e);
+    std::optional<RequestExample> get_request_example (const std::string& id);
+    /// Oldest first (created_at, then id) - the order a mock server resolves
+    /// "the first example" in, so it is a contract rather than a detail.
+    std::vector<RequestExample> get_request_examples (const std::string& request_id);
+    int64_t count_request_examples (const std::string& request_id);
+    void delete_request_example (const std::string& id);
 
     /**
      * @brief Persist a whole import in one transaction (issue #96).
@@ -102,14 +116,16 @@ class Database {
      * Either every row lands or none does: a bulk import that failed halfway
      * used to leave the tree half-created and depend on a best-effort
      * client-side rollback to undo it. Rows are written collections -> requests
-     * -> environments so a parent exists before the rows that reference it.
+     * -> examples -> environments so a parent exists before the rows that
+     * reference it.
      * Ids must already be assigned by the caller (`POST /import/apply` resolves
      * its temp ids first), because nothing here can look up a row that the same
      * transaction has not committed yet.
      */
     void import_apply (const std::vector<Collection>& collections,
     const std::vector<Request>& requests,
-    const std::vector<Environment>& environments);
+    const std::vector<Environment>& environments,
+    const std::vector<RequestExample>& examples = {});
 
     /**
      * @brief Persist a whole batch reorder in one transaction (issue #365).

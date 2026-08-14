@@ -566,6 +566,10 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 	malformed_item: ["malformed item", "malformed items"],
 	unsupported_method: ["unsupported method", "unsupported methods"],
 	malformed_spec: ["malformed spec section", "malformed spec sections"],
+	example_no_status: [
+		"example response with no numeric status",
+		"example responses with no numeric status",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {

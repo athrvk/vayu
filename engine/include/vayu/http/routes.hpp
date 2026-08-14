@@ -231,6 +231,49 @@ bool is_create) {
     return std::nullopt;
 }
 
+/**
+ * Same rule for a field stored as a dumped **array** of KeyValueEntry
+ * (`params` / `headers` on a request, `headers` on a saved example). A null
+ * resets to `[]`; a present value must be an array whose every entry carries
+ * string `key`/`value` and boolean `enabled`. Returns the 400 body on a
+ * malformed entry, nullopt otherwise.
+ *
+ * Here rather than in requests.cpp because saved examples store the same shape
+ * and must validate it the same way - a second copy would drift the moment the
+ * entry shape gains a field.
+ */
+[[nodiscard]] inline std::optional<std::pair<int, nlohmann::json>>
+apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = "[]";
+        }
+        return std::nullopt;
+    }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = "[]";
+        return std::nullopt;
+    }
+    if (!value.is_array ()) {
+        return std::make_pair (400,
+        error_body (400, std::string ("Invalid '") + key + "': must be an array of {key, value, enabled}"));
+    }
+    for (size_t i = 0; i < value.size (); ++i) {
+        const auto& entry = value[i];
+        if (!entry.contains ("key") || !entry["key"].is_string () ||
+        !entry.contains ("value") || !entry["value"].is_string () ||
+        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
+            return std::make_pair (400,
+            error_body (400,
+            std::string ("Invalid ") + key + " entry at index " + std::to_string (i) +
+            ": missing required field (key, value, or enabled)"));
+        }
+    }
+    out = value.dump ();
+    return std::nullopt;
+}
+
 /** Same rule for a boolean field. A non-boolean, non-null value is ignored. */
 inline void apply_bool_field (const nlohmann::json& json,
 const char* key,
@@ -427,6 +470,14 @@ const nlohmann::json& json,
 bool is_create);
 std::optional<std::pair<int, nlohmann::json>>
 apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
+/**
+ * Saved example responses (issue #481) follow the same rule, and the same
+ * shared-applier reason: `POST /import/apply` writes examples nested under
+ * their request item, so both paths must agree on what a field means and where
+ * the body cap sits. Defined in examples.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json& json, bool is_create);
 
 /**
  * The outcome of resolving `pm.info.requestName` for a `POST /execute` payload.
@@ -506,6 +557,7 @@ void register_health_routes (RouteContext& ctx);
 void register_config_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
+void register_request_example_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);

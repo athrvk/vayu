@@ -55,7 +55,16 @@ export interface KeyValueItem extends FormFieldEntry {
 
 export type RequestTab =
 	/** The request's own documentation. First in the row - see InfoPanel. */
-	"info" | "params" | "headers" | "body" | "auth" | "pre-script" | "test-script" | "settings";
+	| "info"
+	| "params"
+	| "headers"
+	| "body"
+	| "auth"
+	| "pre-script"
+	| "test-script"
+	/** Saved example responses (issue #481). Read-only, populated by import. */
+	| "examples"
+	| "settings";
 
 export interface TabInfo {
 	id: RequestTab;

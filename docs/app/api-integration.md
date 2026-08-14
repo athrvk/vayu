@@ -139,6 +139,32 @@ apiService.clearCookies(scope?: { environmentId: string | null }): Promise<Clear
 The engine keeps one cookie jar per environment for design-mode requests
 (issue #301); `CookiesCard` in Settings → General shows and clears them.
 
+#### Request examples
+
+```typescript
+apiService.listRequestExamples(requestId): Promise<RequestExample[]>
+```
+
+Saved example responses stored against a request (issue #481) - what an import
+found next to it, and what a mock server will serve. **Read-only from the app**:
+examples arrive by import, so the engine's `POST` / `PUT` / `DELETE` under
+`/requests/:id/examples` have no caller here yet and no endpoint constant beyond
+the list path - a constant with no reader is the defect this repo keeps finding.
+`useRequestExamplesQuery` (`queries/request-examples.ts`) is the one consumer,
+behind the request builder's **Examples** tab.
+
+No transformer, unlike a request row: an example carries no timestamp the app
+renders and no column that predates a schema change, so the wire shape *is* the
+domain shape - minus the `order` and timestamps the `RequestExample` type
+deliberately does not claim, since the list arrives already ordered and nothing
+displays either. The stored order is the contract, not a suggestion: a mock
+server answers with the first example of a matched request, so the panel renders
+the list as received rather than re-sorting it.
+
+Imported examples take a different route entirely: they ride **nested on their
+request item** in `POST /import/apply` (`ImportApplyRequestItem.examples`), not
+through this endpoint, so the whole tree still lands in one engine transaction.
+
 #### Webhook inbox
 
 ```typescript

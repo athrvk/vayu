@@ -86,6 +86,27 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | `item.event[]` (`test`) | `postRequestScript` | via `joinExec`; `""` when `importScripts` is false |
 | `item.protocolProfileBehavior.followRedirects` | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
+| `item.response[]` | `examples` | via `pmExamples` (see [Saved responses](#saved-responses)); **absent** when the item saved none |
+
+### Saved responses
+
+Postman stores a request's recorded responses in `item.response[]`. They were read by nothing until the engine had a table for them (issue #481), so importing a collection whose value *was* its documented responses produced a collection with none - and the loss was not even counted.
+
+`pmExamples(item, ctx)` maps each entry to an `ExampleDraft`:
+
+| Postman (`item.response[]` entry) | Vayu `ExampleDraft` | Notes |
+|-----------------------------------|---------------------|-------|
+| `name` | `name` | fallback `"Example"` |
+| `code` | `status` | only when it is a finite number; otherwise `200`, which is what Postman shows for a saved response with no code |
+| `header[]` | `headers` | via `mapKeyValues` - source order and duplicates (`Set-Cookie`) preserved |
+| `body` | `body` | stored verbatim |
+| `header[]` `Content-Type` | `contentType` | `""` when the recorded response carried none |
+
+`_postman_previewlanguage` is deliberately **not** read into `contentType`: it is an editor mode (`"json"`, `"html"`), not a media type, and storing it would put a value in that field which is not one.
+
+An entry that is not an object counts toward `malformed_item`, the same treatment `pmFolder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
+
+`meta.exampleCount` totals what survived, counted off the drafts by `countExamples` (the same read-the-result approach `unattachedFileParts` uses), and the import preview shows it.
 
 ### Redirect settings
 

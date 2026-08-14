@@ -89,44 +89,6 @@ std::string list_requests_body (vayu::db::Database& db, const std::string& colle
 }
 
 /**
- * Validates a KeyValueEntry array field (`params` / `headers`) and stores it.
- * Under the one null-vs-absent rule a null resets to `[]`; a present value must
- * be an array whose every entry carries string `key`/`value` and boolean
- * `enabled`. Returns the 400 body on a malformed entry, nullopt otherwise.
- */
-static std::optional<std::pair<int, nlohmann::json>>
-apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
-    if (!json.contains (key)) {
-        if (is_create) {
-            out = "[]";
-        }
-        return std::nullopt;
-    }
-    const auto& value = json[key];
-    if (value.is_null ()) {
-        out = "[]";
-        return std::nullopt;
-    }
-    if (!value.is_array ()) {
-        return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key +
-        "': must be an array of {key, value, enabled}"));
-    }
-    for (size_t i = 0; i < value.size (); ++i) {
-        const auto& entry = value[i];
-        if (!entry.contains ("key") || !entry["key"].is_string () ||
-        !entry.contains ("value") || !entry["value"].is_string () ||
-        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
-            return std::make_pair (400,
-            error_body (400, std::string ("Invalid ") + key + " entry at index " +
-            std::to_string (i) + ": missing required field (key, value, or enabled)"));
-        }
-    }
-    out = value.dump ();
-    return std::nullopt;
-}
-
-/**
  * The value new/reset requests' httpVersion is seeded with: the live
  * "defaultHttpVersion" config entry, read fresh on every write (not cached,
  * not vayu::DEFAULT_HTTP_VERSION) so a user-changed global takes effect

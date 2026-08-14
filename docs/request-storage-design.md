@@ -70,7 +70,43 @@ The `trace_data` stores the **RESOLVED** request that was actually sent:
 }
 ```
 
-### 4. Response Viewer
+### 4. Saved Example Responses (Database)
+
+**Location**: `request_examples` table
+**Format**: One stored response per row, owned by a request
+
+Separate from execution history, and deliberately so: a `results` row records a
+response that *happened* and is pruned with its run, while an example is a
+response the request *documents* and lives as long as the request does. Examples
+are what an importer found next to a request - Postman's saved responses, an
+OpenAPI operation's documented ones - which every parser used to drop, because
+there was nowhere to keep them (issue #481).
+
+```json
+{
+  "id": "exa_123",
+  "requestId": "req_123",
+  "name": "200 - A user",
+  "status": 200,
+  "headers": [{ "key": "Content-Type", "value": "application/json", "enabled": true }],
+  "body": "{\"id\":1}",
+  "contentType": "application/json",
+  "order": 0
+}
+```
+
+Unlike a request definition, an example is stored **verbatim**: no `{{variable}}`
+resolution happens on the way in or out, because it records what a server
+answered rather than what a client should send. `order` is part of the contract -
+a mock server serves the first example of a matched request.
+
+Reached through `GET /requests/:id/examples`, written today only by import
+(nested on the request item of `POST /import/apply`, so the whole tree lands in
+one transaction), and shown read-only in the request builder's **Examples** tab.
+Deleting the request - or the collection above it - deletes its examples in the
+same transaction.
+
+### 5. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:
 - Shows exactly what was sent over the wire

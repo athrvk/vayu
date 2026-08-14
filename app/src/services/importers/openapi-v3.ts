@@ -8,6 +8,7 @@
 import type { HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
+	ExampleDraft,
 	ImportOptions,
 	ImportParser,
 	ImportResult,
@@ -17,8 +18,16 @@ import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node
 import { sampleSchema, schemaFormFields } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
-import { resolvePathItem, SkipTally } from "./openapi-shared";
-import { importedFilePart, unattachedFileParts } from "./shared";
+import {
+	deref,
+	exampleBodyText,
+	findJsonMediaType,
+	firstNamedExample,
+	resolvePathItem,
+	responseExample,
+	SkipTally,
+} from "./openapi-shared";
+import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -125,6 +134,7 @@ export class OpenApiV3Parser implements ImportParser {
 				folderCount: tagCollections.size,
 				environmentCount: 0,
 				globalCount: 0,
+				exampleCount: countExamples([root]),
 				skipped: tally.items(),
 				nonExecutableAuth: 0,
 				unattachedFileParts: unattachedFileParts([root]),
@@ -188,6 +198,7 @@ function buildOperation(
 			headers.push({ key: name, value: "", enabled: true });
 		}
 	}
+	const examples = buildExamples(op.responses, resolveRef, tally);
 	return {
 		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
 		description: asStr(op.description) ?? "",
@@ -199,7 +210,51 @@ function buildOperation(
 		auth: { mode: "inherit" },
 		preRequestScript: "",
 		postRequestScript: "",
+		...(examples.length > 0 ? { examples } : {}),
 	};
+}
+
+/**
+ * An operation's `responses` → saved example responses (issue #481).
+ *
+ * `op.responses` was visited by no code path before this: the parser sampled
+ * request bodies and walked straight past the half of the spec that says what
+ * comes back, so importing an API description produced requests with no
+ * documented responses at all.
+ *
+ * Per response, the JSON media type's `example`, else the first entry of its
+ * `examples` map, else a sample generated from its `schema` - the same
+ * precedence `buildBody` uses for a request body, so the two halves of one
+ * operation are filled in by the same rule. A response documenting no body
+ * still imports: `204 No Content` is a real answer and a mock server has to be
+ * able to give it.
+ */
+function buildExamples(
+	responses: unknown,
+	resolveRef: (r: string) => unknown,
+	tally: SkipTally
+): ExampleDraft[] {
+	const map = asRecord(responses);
+	if (!map) return [];
+	const out: ExampleDraft[] = [];
+	for (const [code, rawResponse] of Object.entries(map)) {
+		const draft = responseExample(code, deref(rawResponse, resolveRef), tally, (response) => {
+			const content = asRecord(response.content);
+			if (!content) return undefined;
+			const mediaType = findJsonMediaType(content);
+			if (!mediaType) return undefined;
+			const media = asRecord(content[mediaType]);
+			if (!media) return undefined;
+			const value =
+				media.example ??
+				firstNamedExample(media.examples) ??
+				(media.schema ? sampleSchema(media.schema, resolveRef) : undefined);
+			if (value === undefined) return undefined;
+			return { body: exampleBodyText(value), contentType: mediaType };
+		});
+		if (draft) out.push(draft);
+	}
+	return out;
 }
 
 function findJsonMedia(content: JsonRecord): JsonRecord | undefined {

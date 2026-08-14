@@ -261,6 +261,30 @@ export interface Request {
 	updatedAt: string;
 }
 
+/**
+ * A saved example response stored against a request (issue #481).
+ *
+ * What an importer found next to the request - Postman's saved responses, an
+ * OpenAPI operation's documented ones - and, once the mock server lands, the
+ * response it serves. Read-only in the app today: examples are created by
+ * import, so the request builder lists them and nothing writes one.
+ *
+ * The engine's row carries `order` and timestamps too. They are absent here on
+ * purpose: the list arrives already in `order`, and no surface displays either,
+ * so typing them would claim readers this app does not have.
+ */
+export interface RequestExample {
+	id: string;
+	name: string;
+	/** The HTTP status this example documents. */
+	status: number;
+	/** Response headers as recorded, duplicates and order intact. */
+	headers: KeyValueEntry[];
+	body: string;
+	/** `""` when the source stated no media type - not a guess. */
+	contentType: string;
+}
+
 export interface Environment {
 	id: string;
 	name: string;

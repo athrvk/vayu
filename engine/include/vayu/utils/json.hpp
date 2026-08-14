@@ -47,6 +47,11 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Request& request);
 
 /**
+ * @brief Serialize a saved example response to JSON (issue #481)
+ */
+[[nodiscard]] Json serialize (const vayu::db::RequestExample& example);
+
+/**
  * @brief Serialize an Environment to JSON
  */
 [[nodiscard]] Json serialize (const vayu::db::Environment& environment);

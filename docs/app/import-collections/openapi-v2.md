@@ -89,12 +89,26 @@ Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
 | parameter `in: "path"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars` |
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
+| `op.responses` | `examples` | via `buildSwaggerExamples` (see [Documented responses](#documented-responses)); **absent** when nothing was representable |
 
 **Parameter resolution & merge.** `buildSwaggerOp` concatenates path-item-level `parameters` (passed in as `pathParams`) with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map` (`byKey`), so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
 
 Both lists go through `SkipTally.params` (`openapi-shared.ts`) first, shared with the v3 parser: a `parameters` value that is present but **not an array** (the missing-`-` YAML mistake) used to throw `is not iterable` and abort the whole file. It is now treated as empty and counted as a `malformed_spec` [`SkippedItem`](./README.md#draft-model-the-parser-output-contract); an absent `parameters` is normal and counted as nothing.
 
 **Path items.** Each `spec.paths` entry goes through `resolvePathItem` (`openapi-shared.ts`) before its methods are read, so a path item written as `{"$ref": "..."}` contributes its target's operations instead of vanishing (Swagger 2.0 allows a path-item ref; the resolver is generic, so any in-document pointer works). One hop only. A path item that is not an object, or whose `$ref` does not resolve to one, is counted as `malformed_spec` and skipped.
+
+### Documented responses
+
+Saved example responses (issue #481), from the half of the spec that says what comes back. The 2.0 shape differs from v3 in where the payload lives - `examples` is keyed by MIME type and holds the value **directly** (no Example Object wrapper), and `schema` sits on the response itself rather than under a media type - so this parser supplies that half and shares everything else with v3 through `responseExample` (`openapi-shared.ts`).
+
+| Swagger (`op.responses[code]`) | Vayu `ExampleDraft` | Notes |
+|--------------------------------|---------------------|-------|
+| the key | `status` | must be a three-digit `100`-`599` code |
+| `description` | `name` | `"{code} - {description}"`, or the bare code |
+| `examples[<media type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
+| `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json` |
+
+A response that documents no body still imports (`204` is a real answer), and a key that is not a numeric status - `default`, or a wildcard - is skipped and counted as `example_no_status`.
 
 ## Base URL construction
 
@@ -254,13 +268,13 @@ Dropped / not represented:
 - **Environments:** none produced (`environments: []`, `meta.environmentCount: 0`). Swagger has no environment concept; the `scheme`/`host`/`basePath` triple becomes a single `baseUrl` collection variable.
 - **Additional schemes:** only `schemes[0]` is used; other schemes are dropped.
 - **`collectionFormat`, parameter `type` / `items`, `required`, `default`, `enum` on params:** not consumed - query/header/form params are always empty-value stubs.
-- **`produces`, response schemas, response examples:** not consumed.
+- **Response headers** (`responses[code].headers`): not imported. Response schemas and examples *are*, since issue #481 - see [Documented responses](#documented-responses).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Path parameters as params:** not emitted (path params live in the URL only).
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec` is the only kind this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec` and `example_no_status` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 
@@ -290,8 +304,10 @@ Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeV
 | [`normalizeVars`](./README.md#normalizevars) | `var-normalize.ts` | convert Swagger `{param}` path templates → Vayu `{{param}}` in request URLs |
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from an `in: "body"` parameter `schema` (bounded, ref-resolving) |
 | `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `responseExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft - the half shared with the v3 parser |
+| `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |
 
-This parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
+Beyond `countExamples`, this parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.
 
 ## Related
 

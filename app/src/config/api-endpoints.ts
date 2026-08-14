@@ -36,6 +36,14 @@ export const API_ENDPOINTS = {
 	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
 	REQUESTS_UPDATE: (id: string) => `/requests/${id}`,
 
+	// Saved example responses, nested under their request (issue #481). Nested
+	// rather than a top-level `/examples?requestId=` because an example is owned
+	// by exactly one request - the engine checks the owner before the example.
+	// Only the list path: examples arrive by import in this phase, so the
+	// engine's per-example POST/PUT/DELETE have no caller here yet and a
+	// constant with no reader is the defect this repo keeps finding.
+	REQUEST_EXAMPLES: (requestId: string) => `/requests/${requestId}/examples`,
+
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.
 	REORDER: `/reorder`,

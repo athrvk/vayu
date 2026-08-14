@@ -1090,6 +1090,7 @@ requests: {
   listByCollection: (collectionId) => ["requests", "list", { collectionId }],
   details: () => ["requests", "detail"],
   detail: (id) => ["requests", "detail", id],
+  examples: (id) => ["requests", "detail", id, "examples"],  // saved example responses (#481)
 },
 runs: {
   all: ["runs"],
@@ -1114,7 +1115,10 @@ runs: {
 ```
 
 The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
-query is keyed on is `list()` / `detail(id)`. `runs.lastDesign`,
+query is keyed on is `list()` / `detail(id)`. `requests.examples(id)` sits
+*under* `detail(id)` rather than beside it, because examples are owned by the
+request: invalidating one request's subtree drops its examples with it, which is
+what a request delete needs. `runs.lastDesign`,
 `runs.recentDesign`, `runs.lastCollectionRun` and `runs.baseline` sit under
 `runs.all` but deliberately **not** under `runs.lists()` - see below.
 

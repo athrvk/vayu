@@ -147,7 +147,7 @@ sources), `preRequestScript`, `postRequestScript`, `children: CollectionDraft[]`
 `params: KeyValueEntry[]`, `headers: KeyValueEntry[]`, `body: RequestBody`,
 `auth: RequestAuth` (**`inherit` allowed**, resolved against the collection chain at
 execution time), `preRequestScript`, `postRequestScript`, `followRedirects?: boolean`,
-`maxRedirects?: number`.
+`maxRedirects?: number`, `examples?: ExampleDraft[]`.
 
 Both redirect fields are optional because absent means "leave the engine's default"
 (`followRedirects: true`, `maxRedirects: 10`): a parser sets one only when the source
@@ -158,11 +158,26 @@ item-level `protocolProfileBehavior` (both fields, see [postman.md](./postman.md
 Insomnia's `settingFollowRedirects` (`followRedirects` only - its redirect *limit* is an
 app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md)).
 
+**`ExampleDraft`** - `name`, `status: number`, `headers: KeyValueEntry[]`, `body: string`,
+`contentType: string`. A saved example response the source file carried next to the request
+(issue #481): Postman's `item.response[]`, an OpenAPI operation's `responses`. Every parser
+dropped these before the engine had a table for them - not even counted as skipped. They
+carry no id: the engine assigns one, and the orchestrator nests them on the request item of
+`POST /import/apply` rather than sending a fourth top-level section, since nothing references
+an example. `examples` is optional for the same reason the redirect fields are: a parser with
+no concept of saved responses must not look like one that found none, and array order is the
+stored order - a mock server answers with the first example of a matched request.
+
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
-`environmentCount`, `globalCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`,
-`unattachedFileParts: number`.
+`environmentCount`, `globalCount`, `exampleCount`, `skipped: SkippedItem[]`,
+`nonExecutableAuth: number`, `unattachedFileParts: number`.
+
+`exampleCount` totals the saved example responses across the whole tree, from
+`countExamples(collections)` in `shared.ts` - read off the finished drafts for the same
+reason `unattachedFileParts` is, so the number the preview promises and the drafts about to
+be written cannot disagree.
 
 `unattachedFileParts` counts form-data file rows the import produced with no file attached -
 an OpenAPI spec documents *that* a field is an upload, never *which* file, so those rows
@@ -171,7 +186,7 @@ import complete-but-empty and the user picks the file. Every parser gets it from
 than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
-"malformed_item" | "unsupported_method" | "malformed_spec", count }`.
+"malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -179,7 +194,10 @@ are shapes the source file got wrong - a Postman `item[]` entry that is not an o
 [postman.md](./postman.md)), an OpenAPI path item or `parameters` list that is not what the
 spec allows - stepped over so the rest of the file still imports. The two OpenAPI kinds are
 counted via `SkipTally` in `openapi-shared.ts`, shared by both OpenAPI parsers: they are
-structural clones, and a second copy would drift.
+structural clones, and a second copy would drift. `example_no_status` is a fourth
+non-representability case: an OpenAPI response keyed `default` or `2XX` documents a real
+response, but an example is served under one status line and there is no honest value to
+pick, so it is counted rather than guessed at.
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
