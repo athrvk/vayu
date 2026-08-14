@@ -11,8 +11,8 @@
  * Utilities for converting between params array and text format for bulk edit
  */
 
-import type { KeyValueItem } from "../types";
-import { generateId } from "./id";
+import type { KeyValueItem } from "@/types";
+import { generateId } from "@/lib/id";
 import { splitKeyValueLine, PARAM_SEPARATORS } from "./kv-line";
 
 /**

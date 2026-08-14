@@ -26,7 +26,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { EmptyTableHint } from "./EmptyTableHint";
-import type { KeyValueItem } from "../../../types";
+import type { KeyValueItem } from "@/types";
 
 const blank: KeyValueItem = { id: "1", key: "", value: "", enabled: true };
 const filled: KeyValueItem = { id: "2", key: "Accept", value: "application/json", enabled: true };

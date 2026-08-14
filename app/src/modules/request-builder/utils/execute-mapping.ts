@@ -25,7 +25,7 @@
 
 import type { SanityResult, ScriptPart } from "@/types";
 import type { RequestState, ResponseState } from "../types";
-import { toKeyValueEntries } from "./key-value";
+import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 
 /** The body shape `POST /request` and `POST /run` accept. */
 export interface ExecBody {

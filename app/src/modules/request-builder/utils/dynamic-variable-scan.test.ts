@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { requestUsesDynamicVariables } from "./dynamic-variable-scan";
-import type { KeyValueItem } from "../types";
+import type { KeyValueItem } from "@/types";
 
 const kv = (key: string, value: string, enabled = true): KeyValueItem => ({
 	id: `${key}-${value}`,

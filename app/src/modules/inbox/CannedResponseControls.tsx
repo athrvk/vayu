@@ -30,12 +30,11 @@ import {
 	Label,
 	Textarea,
 } from "@/components/ui";
-import KeyValueEditor from "@/modules/request-builder/shared/KeyValueEditor";
-import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
-import type { KeyValueItem } from "@/modules/request-builder/types";
+import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
+import type { InboxCannedResponse, KeyValueItem } from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
-import type { InboxCannedResponse } from "@/types";
 
 /**
  * The engine's cap on the artificial delay (`MAX_RESPONSE_DELAY_MS`).

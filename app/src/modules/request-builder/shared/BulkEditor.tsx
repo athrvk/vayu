@@ -20,6 +20,14 @@
  * a parse, a format, and the sentence describing the syntax. Everything else is
  * here.
  *
+ * **It stayed in this module when `KeyValueEditor` moved to
+ * `components/shared/` (#567).** Nothing in it is key/value-shaped - it is a
+ * toggle around whatever children it is given - but its only callers are this
+ * module's two panels, and `components/shared/` is for what *several* features
+ * share. It is imported directly rather than re-exported from the table, which
+ * is where a panel used to take both from one place; a shared primitive cannot
+ * re-export something from a feature module.
+ *
  * The draft text is local state on purpose. Bulk edit is a staging area: you
  * paste a block, fix it up, and it commits when you switch back to the table.
  * Parsing on every keystroke would rewrite the request underneath a

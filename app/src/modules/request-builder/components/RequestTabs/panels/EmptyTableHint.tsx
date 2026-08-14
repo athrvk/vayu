@@ -20,7 +20,7 @@
  * always keeps - so this counts rows with content rather than rows.
  */
 
-import type { KeyValueItem } from "../../../types";
+import type { KeyValueItem } from "@/types";
 
 export interface EmptyTableHintProps {
 	items: KeyValueItem[];

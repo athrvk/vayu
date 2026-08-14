@@ -12,9 +12,9 @@
  * Keeps system header logic separate from UI components
  */
 
-import type { KeyValueItem } from "../types";
-import { generateId, generateUUID } from "./id";
-import { createEmptyKeyValue } from "./key-value";
+import type { FormFieldEntry, KeyValueItem } from "@/types";
+import { createEmptyKeyValue, toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
+import { generateId, generateUUID } from "@/lib/id";
 
 // System header keys (case-insensitive)
 export const SYSTEM_HEADER_KEYS = new Set(["user-agent", "x-vayu-version", "x-request-id"]);
@@ -56,6 +56,26 @@ export const createDefaultSystemHeaders = (requestId?: string): KeyValueItem[] =
 			enabled: true,
 			system: true,
 		},
+	];
+};
+
+/**
+ * The stored header entries as editor rows, with the managed system headers in
+ * front of them.
+ *
+ * This used to be `toKeyValueItems(entries, true)`. The conversion moved to the
+ * shared table with the table itself (#567) and the system headers did not go
+ * with it: which headers Vayu manages is the request builder's knowledge, and
+ * the inbox - the other mount site of that table - has none of them. A stored
+ * entry whose key collides with a managed one is dropped, since the managed row
+ * carries the current value.
+ */
+export const toHeaderItems = (entries: FormFieldEntry[] | undefined): KeyValueItem[] => {
+	const systemHeaders = createDefaultSystemHeaders();
+	const systemKeys = new Set(systemHeaders.map((h) => h.key.toLowerCase()));
+	return [
+		...systemHeaders,
+		...toKeyValueItems((entries ?? []).filter((e) => !systemKeys.has(e.key.toLowerCase()))),
 	];
 };
 

@@ -53,7 +53,7 @@ import {
 	responseFromExecuteResult,
 	scriptsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
-import { generateUUID } from "@/modules/request-builder/utils/id";
+import { generateUUID } from "@/lib/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { seedFromRun } from "./design-run-seed";

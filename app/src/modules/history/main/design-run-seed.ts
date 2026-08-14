@@ -21,7 +21,7 @@
 
 import type { Run, Request, RequestAuth, ScriptPart, KeyValueEntry } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
-import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
+import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import {

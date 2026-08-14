@@ -247,29 +247,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`). The Console tab renders whenever the response carries console logs **or** a `preScriptError`/`postScriptError`, so a script that throws before logging still shows its error rather than a silent 200 |
 | `components/LoadTestConfigDialog/` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0. A second disclosure, **Pass/fail budgets**, declares the run's latency / error-rate / throughput limits; the field table and its rules are `budgets.ts`, and the p99 field is seeded from the `sloThresholdMs` client setting so that setting becomes the default budget rather than a parallel notion of "too slow". A budget out of the engine's range blocks Start with a named message instead of being dropped from the payload |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
-| `shared/KeyValueEditor/` | `index`, `KeyValueRow`, `FilePartCell` - reusable key/value table (params, headers, form fields). **Resolution is an input, not an ambient dependency:** the optional `variables` prop carries the [`VariableSupport`](#variable-scope-as-a-prop-variablesupport) scope, and with it omitted the table resolves nothing, shows no `ResolvedPeek` and offers no `{{` autocomplete - the correct reading of a surface with no variables. That is what lets it mount outside `RequestBuilderProvider`; before it, `KeyValueRow` called the context hook in its body and that hook *throws* with no provider, so every other surface hand-rolled its own rows (issue #564). `allowFiles` (form-data only) turns each row into a text/file switch and stays on this table rather than the caller, since only the request builder has a wire format that can carry a file; `FilePartCell` is the value cell of a file part - it picks a file, shows the path, and marks one an import brought in and this app never chose. `lib/file-path.ts` holds the basename rule it shares with the importers |
-| `shared/VariableInput/` | `index`, `EditableVariable`, `DynamicVariableToken` - input with `{{variable}}` highlighting + autocomplete. Takes the same optional `variables` scope; without one it is a plain text field, since a token would paint a name "not defined" and open an editor with nowhere to write. `EditableVariable` is the stored-variable token (hover to read, click to edit, red when nothing defines the name) and takes the scope as a **required** prop, because a token only renders where there is one; `DynamicVariableToken` is the `{{$guid}}` one, which has no stored value to show or edit and must not be painted as undefined |
-| `hooks/`, `utils/` | Module hooks - `useHeadersManager`, and `useVariableSupport`, the one adapter from the request-builder context to the `VariableSupport` prop shape (memoised: it is a prop on a `memo`-wrapped row); `utils/key-value` (flat↔entry conversions), `utils/id` |
-
-### Variable scope as a prop (`VariableSupport`)
-
-`VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
-context - `resolveString`, `getAllVariables`, `getVariableOrigins`,
-`updateVariable`, `writableScopes` - as a plain object a caller hands in.
-
-It exists because reaching for the context instead made two primitives
-unmountable anywhere but the request builder: `useRequestBuilderContext()`
-throws with no provider above it, so `KeyValueEditor`, `VariableInput` and
-`EditableVariable` could not render at all elsewhere, and the surfaces that
-wanted key/value rows wrote their own instead (issue #564). A hand-rolled copy
-of a primitive never receives the primitive's fixes.
-
-The prop is **optional** on `KeyValueEditor` and `VariableInput`, and its
-absence is a real state rather than a degraded one: a canned webhook reply has
-no variable scope, so nothing resolves, no token paints and no autocomplete
-opens. Inside the request builder every mount site passes
-`useVariableSupport()`; `AuthPanel`'s `VariableTextInput` calls that hook itself,
-since it is always under the provider.
+| `shared/BulkEditor.tsx` | The table/text toggle above a `KeyValueEditor`, and the textarea it swaps in - `ParamsPanel` and `HeadersPanel` had a copy each. It stayed in the module when the table left for [`components/shared/`](#shared-keyvalue-editor-componentssharedkeyvalueeditor) (issue #567): the shared bucket is what *several* features share, and only these two panels bulk-edit. The formats are the callers' - headers are `Name: value`, params are `key=value` - so a parse, a format and the syntax note are what it takes in |
+| `hooks/`, `utils/` | Module hooks - `useHeadersManager`, and `useVariableSupport`, the one adapter from the request-builder context to the `VariableSupport` prop shape (memoised: it is a prop on a `memo`-wrapped row); `utils/key-value`, which is now the single execution-shaped helper `toFlatHeaders` (the row-model half - `toKeyValueItems`, `toKeyValueEntries`, `withTrailingBlank` - moved to the table it describes, see [Shared Key/Value Editor](#shared-keyvalue-editor-componentssharedkeyvalueeditor)); `utils/system-headers`, which owns the three managed headers and puts them in front of that conversion in `toHeaderItems`. Id generation is `lib/id.ts`, since `services/curl/` and the history module already reached across the module boundary for it |
 
 > **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, auth). Auth maps `-u`/`--user` (and wget `--http-user`/`--http-password`) to Basic, and curl `--oauth2-bearer` to Bearer; an `Authorization` header is left as a raw header (to preserve `{{variables}}`). Form-shaped `-d`/`--data` without an explicit `Content-Type` maps to `x-www-form-urlencoded` rows (curl's on-the-wire default), while a raw JSON/text blob stays a text body. Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement - identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
 
@@ -518,7 +497,7 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   inbox every control is disabled and says why - the route still merge-patches a stopped record, so
   a live-looking panel there is an edit accepted for a reply nothing will ever send. The reply
   headers are
-  [`KeyValueEditor`](#request-builder-modulesrequest-builder) rows, with no `variables` scope
+  [`KeyValueEditor`](#shared-keyvalue-editor-componentssharedkeyvalueeditor) rows, with no `variables` scope
   passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
   `Input` pairs until #564 made the primitive mountable outside `RequestBuilderProvider`; the
   table's trailing blank row replaced the panel's own "Add header" button.
@@ -1049,6 +1028,74 @@ The reusable OAuth 2.0 auth editor, consumed by the request builder's `AuthPanel
 - `types.ts` - `OAuth2FormProps`, `OAuth2TextInput`.
 
 Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-key.ts`, byte-identical to the engine), and the token queries (`queries/oauth.ts`) sit behind it.
+
+## Shared Key/Value Editor (`components/shared/KeyValueEditor/`)
+
+`index`, `KeyValueRow`, `FilePartCell`, `key-value.ts` - the app's key/value
+table (params, headers, form fields, and a webhook inbox's canned reply
+headers).
+
+**Resolution is an input, not an ambient dependency:** the optional `variables`
+prop carries the [`VariableSupport`](#variable-scope-as-a-prop-variablesupport)
+scope, and with it omitted the table resolves nothing, shows no `ResolvedPeek`
+and offers no `{{` autocomplete - the correct reading of a surface with no
+variables. That is what lets it mount outside `RequestBuilderProvider`; before
+it, `KeyValueRow` called the context hook in its body and that hook *throws*
+with no provider, so every other surface hand-rolled its own rows (issue #564).
+
+`allowFiles` (form-data only) turns each row into a text/file switch and stays
+on this table rather than the caller, since only the request builder has a wire
+format that can carry a file; `FilePartCell` is the value cell of a file part -
+it picks a file, shows the path, and marks one an import brought in and this app
+never chose. `lib/file-path.ts` holds the basename rule it shares with the
+importers.
+
+`key-value.ts` is the table's **row model**: `toKeyValueItems` /
+`toKeyValueEntries` convert between the domain `FormFieldEntry[]` and the
+UI-layer `KeyValueItem[]` (which adds the ephemeral `id` React keys need), and
+`withTrailingBlank` is the one definition of the spare row at the bottom. It
+moved here from `modules/request-builder/utils/` with the table (issue #567),
+because a second mount site needs the same conversion and a primitive cannot
+take it from a feature module. What stayed in the request builder is what no
+table asks for: `toFlatHeaders` (execution-shaped) and the managed system
+headers. `KeyValueItem` and `KeyValueEditorProps` live in `types/ui.ts` for the
+same reason - there is deliberately **no re-export shim** in
+`modules/request-builder/types.ts`, so each name has one import path.
+
+## Shared Variable Input (`components/shared/VariableInput/`)
+
+`index`, `EditableVariable`, `DynamicVariableToken` - input with
+`{{variable}}` highlighting + autocomplete. Takes the same optional `variables`
+scope; without one it is a plain text field, since a token would paint a name
+"not defined" and open an editor with nowhere to write. `EditableVariable` is
+the stored-variable token (hover to read, click to edit, red when nothing
+defines the name) and takes the scope as a **required** prop, because a token
+only renders where there is one; `DynamicVariableToken` is the `{{$guid}}` one,
+which has no stored value to show or edit and must not be painted as undefined.
+
+It sits beside `KeyValueEditor` rather than inside the request builder because
+every row of that table renders one: a shared table reaching into a feature
+module for its cell input is the same inversion one level down (issue #567).
+
+### Variable scope as a prop (`VariableSupport`)
+
+`VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
+context - `resolveString`, `getAllVariables`, `getVariableOrigins`,
+`updateVariable`, `writableScopes` - as a plain object a caller hands in.
+
+It exists because reaching for the context instead made two primitives
+unmountable anywhere but the request builder: `useRequestBuilderContext()`
+throws with no provider above it, so `KeyValueEditor`, `VariableInput` and
+`EditableVariable` could not render at all elsewhere, and the surfaces that
+wanted key/value rows wrote their own instead (issue #564). A hand-rolled copy
+of a primitive never receives the primitive's fixes.
+
+The prop is **optional** on `KeyValueEditor` and `VariableInput`, and its
+absence is a real state rather than a degraded one: a canned webhook reply has
+no variable scope, so nothing resolves, no token paints and no autocomplete
+opens. Inside the request builder every mount site passes
+`useVariableSupport()`; `AuthPanel`'s `VariableTextInput` calls that hook itself,
+since it is always under the provider.
 
 ## UI Primitives (`components/ui/`)
 

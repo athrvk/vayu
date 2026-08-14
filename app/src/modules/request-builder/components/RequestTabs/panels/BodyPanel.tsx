@@ -45,10 +45,12 @@ import {
 	CodeEditor,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
-import KeyValueEditor from "../../../shared/KeyValueEditor";
+import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
-import type { BodyMode, KeyValueItem } from "../../../types";
-import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
+import type { BodyMode } from "../../../types";
+import type { KeyValueItem } from "@/types";
+import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
+import { toFlatHeaders } from "../../../utils/key-value";
 import { containsVariableToken } from "@/constants/variables";
 import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";

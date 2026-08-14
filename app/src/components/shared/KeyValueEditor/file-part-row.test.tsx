@@ -24,7 +24,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import KeyValueEditor from "./index";
-import type { KeyValueItem } from "../../types";
+import type { KeyValueItem } from "@/types";
 
 afterEach(() => {
 	vi.unstubAllGlobals();

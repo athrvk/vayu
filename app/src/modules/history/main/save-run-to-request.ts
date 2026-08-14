@@ -45,8 +45,9 @@ import type {
 	RequestBody,
 	UpdateRequestRequest,
 } from "@/types";
-import type { KeyValueItem, RequestState } from "@/modules/request-builder/types";
-import { toKeyValueEntries } from "@/modules/request-builder/utils/key-value";
+import type { KeyValueItem } from "@/types";
+import type { RequestState } from "@/modules/request-builder/types";
+import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { SYSTEM_HEADER_KEYS } from "@/modules/request-builder/utils/system-headers";
 import type { DesignRunSeed } from "./design-run-seed";
 

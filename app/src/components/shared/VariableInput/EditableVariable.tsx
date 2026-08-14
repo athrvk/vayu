@@ -24,8 +24,7 @@ import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
-import type { VariableSupport } from "@/types";
-import type { VariableScope as RequestBuilderVariableScope } from "../../types";
+import type { VariableScope as RequestBuilderVariableScope, VariableSupport } from "@/types";
 
 export interface EditableVariableProps {
 	/** Variable name */

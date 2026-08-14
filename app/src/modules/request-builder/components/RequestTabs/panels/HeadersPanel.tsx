@@ -17,8 +17,9 @@
  */
 
 import { useRequestBuilderContext } from "../../../context";
-import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
-import type { KeyValueItem } from "../../../types";
+import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { BulkEditor } from "../../../shared/BulkEditor";
+import type { KeyValueItem } from "@/types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import { STANDARD_HEADERS } from "@/constants/http";

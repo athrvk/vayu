@@ -28,8 +28,8 @@
  * at the equals, so anything already typed in the old form still round-trips.
  */
 
-import type { KeyValueItem } from "../types";
-import { generateId } from "./id";
+import type { KeyValueItem } from "@/types";
+import { generateId } from "@/lib/id";
 import { splitKeyValueLine, HEADER_SEPARATORS } from "./kv-line";
 import { VERSION_HEADER_KEY } from "./system-headers";
 

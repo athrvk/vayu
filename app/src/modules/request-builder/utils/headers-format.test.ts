@@ -22,7 +22,7 @@
 import { describe, it, expect } from "vitest";
 import { formatHeadersToText, parseHeadersFromText } from "./headers-format";
 import { VERSION_HEADER_KEY } from "./system-headers";
-import type { KeyValueItem } from "../types";
+import type { KeyValueItem } from "@/types";
 
 /** The parsed shape, minus the generated id that varies per call. */
 const pairs = (text: string, skipVersion = true) =>
