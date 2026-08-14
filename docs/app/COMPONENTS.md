@@ -476,7 +476,11 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
 `docs/engine/api-reference.md` (Webhook Inbox).
 
 - `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop, the URL with a copy control, the
-  running/live badge, the capture list and the detail pane.
+  running/live badge, the inbox switcher, the capture list and the detail pane. The switcher is a
+  `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
+  what is already on screen) and ordered by port - the engine lists in map order, which is not
+  stable across polls, and a switcher whose entries move under the pointer is worse than none. An
+  inbox record carries no creation stamp; whether it should is #555's decision.
 - `CannedResponseControls.tsx` - reply status and delay. Its own component so the two fields can be
   drafts (typing `50` on the way to `500` must not push a 50 at the next caller) and so re-seeding
   them from the engine is a remount - `InboxView` keys it on the served values - rather than a
@@ -493,6 +497,12 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   resumes from the last capture id it saw (`?lastEventId=`, since no API sets a header on a
   fresh connection), and once the retries are spent reports `stopped` so the surface can say
   so and offer a Resume rather than leave the badge reading `Running`.
+  A stream also ends because somebody *stopped* the inbox - from the drawer, an MCP tool or curl -
+  and that close is indistinguishable from a drop. So before spending a retry the hook refetches
+  the inbox list and reads the record: gone or `running: false` means no reconnect, and the tab
+  reflects the stop inside the close instead of on the next `SERVICES_POLL_INTERVAL_MS` poll. A
+  refetch that failed leaves the last good list, which still says running - a blip must still
+  retry.
 - `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
 
 **One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
@@ -501,6 +511,15 @@ watching several at once would spend threads on lists nobody reads. The tab is a
 never dirty - both stated explicitly in `tabs-store`, since a *missing* answer reads the same as
 "clean" and is what once made a dirty Settings tab LRU-evictable
 (`components/layout/tab-type-coverage.test.ts` guards all three switches).
+
+**One tab, but a retargetable one.** The tab's own `entityId` is the address of the inbox it shows,
+and `openTab` on an already-open singleton with a different `entityId` moves that tab rather than
+just focusing it (`tabs-store`). Both writers go through it - a drawer row and the header's
+switcher - so there is exactly one record of which inbox is on screen. Before this the tab had no
+address at all: it showed whichever inbox its own start mutation had last named, falling back to
+the first the engine listed, so a row labelled "Open inbox on port B" opened a tab showing A
+(issue #554). An address the engine no longer lists (a tab restored across an engine restart)
+falls back to the lowest-numbered port.
 
 **Entry points:** the **Services** drawer view, which lists every inbox and opens this tab (issue
 #502), and the palette's `Inbox` entry. The welcome Launcher's tile is now `Services` rather than

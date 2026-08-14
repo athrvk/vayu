@@ -394,3 +394,51 @@ describe("tabFocusedAt", () => {
 		expect(useTabsStore.getState().tabFocusedAt).toBe(before);
 	});
 });
+
+/**
+ * A singleton is one tab, not one address (issue #554).
+ *
+ * The inbox tab is the case that needs it: the Services drawer lists every
+ * inbox and each row opens *this* tab pointed at its own. Deduping on type
+ * alone made the row's promise unkeepable - the tab focused, still showing
+ * whichever inbox it had.
+ */
+describe("opening a singleton that is already open", () => {
+	const inboxTab = () => useTabsStore.getState().openTabs.find((t) => t.type === "inbox");
+
+	it("retargets it at the entity asked for instead of focusing the old one", () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "inbox", entityId: "inbox_a" });
+		const opened = inboxTab()!;
+
+		useTabsStore.getState().openTab({ type: "inbox", entityId: "inbox_b" });
+
+		const { openTabs, activeTabId } = useTabsStore.getState();
+		expect(openTabs.filter((t) => t.type === "inbox")).toHaveLength(1);
+		// The same tab, moved - not a second one, and not a new id, which would
+		// discard the strip position and the focus stamp.
+		expect(inboxTab()!.id).toBe(opened.id);
+		expect(inboxTab()!.entityId).toBe("inbox_b");
+		expect(activeTabId).toBe(opened.id);
+	});
+
+	it("leaves a singleton opened with the same address untouched", () => {
+		useTabsStore.getState().openTab({ type: "inbox", entityId: "inbox_a" });
+		const before = useTabsStore.getState().openTabs;
+
+		useTabsStore.getState().openTab({ type: "inbox", entityId: "inbox_a" });
+
+		// Same array identity: nothing re-rendered on a repeat open.
+		expect(useTabsStore.getState().openTabs).toBe(before);
+	});
+
+	it("still dedupes the addressless singletons, which retargeting cannot move", () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "settings", entityId: null });
+		store.openTab({ type: "settings", entityId: null });
+
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs.filter((t) => t.type === "settings")).toHaveLength(1);
+		expect(openTabs[0].entityId).toBeNull();
+	});
+});

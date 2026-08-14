@@ -24,8 +24,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { queryKeys } from "@/queries";
-import type { InboxCapturesResponse } from "@/types";
+import { queryKeys, useInboxesQuery } from "@/queries";
+import type { Inbox, InboxCapturesResponse } from "@/types";
 import {
 	INBOX_LIVE_MAX_RETRIES,
 	INBOX_LIVE_RETRY_BASE_MS,
@@ -33,6 +33,29 @@ import {
 	inboxLiveRetryDelayMs,
 	useInboxLive,
 } from "./useInboxLive";
+
+const listInboxes = vi.fn();
+
+vi.mock("@/services/api", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/services/api")>();
+	return {
+		...actual,
+		apiService: { ...actual.apiService, listInboxes: () => listInboxes() },
+	};
+});
+
+function record(overrides: Partial<Inbox> = {}): Inbox {
+	return {
+		inboxId: "inbox_a",
+		url: "http://127.0.0.1:4100/",
+		bind: "127.0.0.1",
+		port: 4100,
+		running: true,
+		loopback: true,
+		response: { status: 200, body: "", headers: {}, delayMs: 0 },
+		...overrides,
+	};
+}
 
 /** Every source the hook opened, in order, with its callbacks reachable. */
 class MockEventSource {
@@ -71,14 +94,21 @@ function wrapper(client: QueryClient) {
 	);
 }
 
-/** Fail the open stream and let its scheduled retry fire. */
-function dropAndWait() {
-	act(() => latest().onerror?.());
-	act(() => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 2));
+/**
+ * Fail the open stream and let its scheduled retry fire.
+ *
+ * Async because the reconnect is: before spending a retry the hook asks the
+ * engine whether the listener is still there (issue #554), so the timer is
+ * scheduled a microtask after the error rather than inside it.
+ */
+async function dropAndWait() {
+	await act(async () => void latest().onerror?.());
+	await act(async () => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 2));
 }
 
 beforeEach(() => {
 	MockEventSource.instances = [];
+	listInboxes.mockReset().mockResolvedValue([record()]);
 	vi.stubGlobal("EventSource", MockEventSource);
 	vi.useFakeTimers();
 });
@@ -148,14 +178,14 @@ describe("useInboxLive", () => {
 		expect(cached?.data.map((c) => c.id)).toEqual([7]);
 	});
 
-	it("reconnects after a drop and comes back to Live", () => {
+	it("reconnects after a drop and comes back to Live", async () => {
 		const { result } = renderHook(() => useInboxLive("inbox_a", true), {
 			wrapper: wrapper(makeClient()),
 		});
 		act(() => latest().onopen?.());
 
 		const dropped = latest();
-		dropAndWait();
+		await dropAndWait();
 
 		// The dead source is closed rather than left to a browser retry that a
 		// 409 has already made fatal, and a fresh one takes its place.
@@ -167,7 +197,7 @@ describe("useInboxLive", () => {
 		expect(result.current.watching).toBe(true);
 	});
 
-	it("resumes from the last capture it saw, so the gap is not lost", () => {
+	it("resumes from the last capture it saw, so the gap is not lost", async () => {
 		renderHook(() => useInboxLive("inbox_a", true), { wrapper: wrapper(makeClient()) });
 		act(() => latest().onopen?.());
 		expect(latest().url).not.toContain("lastEventId");
@@ -185,21 +215,21 @@ describe("useInboxLive", () => {
 				})
 			)
 		);
-		dropAndWait();
+		await dropAndWait();
 
 		// A header is not settable on a fresh EventSource, so the resume point
 		// travels as the query parameter the engine reads on the same terms.
 		expect(latest().url).toContain("lastEventId=12");
 	});
 
-	it("gives up after a bounded number of refusals and offers a resume", () => {
+	it("gives up after a bounded number of refusals and offers a resume", async () => {
 		const { result } = renderHook(() => useInboxLive("inbox_a", true), {
 			wrapper: wrapper(makeClient()),
 		});
 
 		// A persistent 409 never opens, so every attempt fails the same way.
 		for (let attempt = 0; attempt <= INBOX_LIVE_MAX_RETRIES; attempt++) {
-			dropAndWait();
+			await dropAndWait();
 		}
 
 		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
@@ -217,12 +247,12 @@ describe("useInboxLive", () => {
 		expect(result.current.watching).toBe(true);
 	});
 
-	it("cancels a scheduled retry on unmount", () => {
+	it("cancels a scheduled retry on unmount", async () => {
 		const { unmount } = renderHook(() => useInboxLive("inbox_a", true), {
 			wrapper: wrapper(makeClient()),
 		});
 		act(() => latest().onopen?.());
-		act(() => latest().onerror?.());
+		await act(async () => void latest().onerror?.());
 
 		const openedBeforeUnmount = sources().length;
 		unmount();
@@ -231,7 +261,7 @@ describe("useInboxLive", () => {
 		expect(sources()).toHaveLength(openedBeforeUnmount);
 	});
 
-	it("cancels a scheduled retry when the inbox changes, and starts the new one clean", () => {
+	it("cancels a scheduled retry when the inbox changes, and starts the new one clean", async () => {
 		const { result, rerender } = renderHook(
 			({ id }: { id: string }) => useInboxLive(id, true),
 			{ wrapper: wrapper(makeClient()), initialProps: { id: "inbox_a" } }
@@ -250,7 +280,7 @@ describe("useInboxLive", () => {
 				})
 			)
 		);
-		act(() => latest().onerror?.());
+		await act(async () => void latest().onerror?.());
 		const openedForA = sources().length;
 
 		rerender({ id: "inbox_b" });
@@ -272,5 +302,58 @@ describe("useInboxLive", () => {
 		expect(sources()).toHaveLength(0);
 		expect(result.current.watching).toBe(false);
 		expect(result.current.stopped).toBe(false);
+	});
+});
+
+/**
+ * What the tab does: the engine's record decides whether a stream is wanted, so
+ * a stop issued anywhere reaches the stream through the list (issue #554).
+ */
+function useWatchedInbox(inboxId: string) {
+	const { data: inboxes = [] } = useInboxesQuery();
+	const inbox = inboxes.find((i) => i.inboxId === inboxId);
+	const live = useInboxLive(inboxId, inbox?.running !== false);
+	return { live, running: inbox?.running };
+}
+
+describe("a stop issued outside this tab", () => {
+	it("reaches the surface within the close, not on the next poll", async () => {
+		const { result } = renderHook(() => useWatchedInbox("inbox_a"), {
+			wrapper: wrapper(makeClient()),
+		});
+		await act(async () => {});
+		act(() => latest().onopen?.());
+		expect(result.current.live.watching).toBe(true);
+
+		// Stopped from the drawer, an MCP tool or curl: the listener goes and
+		// the stream ends exactly the way a dropped connection does.
+		listInboxes.mockResolvedValue([record({ running: false })]);
+		await act(async () => void latest().onerror?.());
+
+		// No timer has advanced, so this cannot have come from the poll.
+		expect(result.current.running).toBe(false);
+
+		await act(async () => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 2));
+
+		// And the retry budget is untouched: no reconnect was attempted against
+		// a listener that is gone on purpose, and the surface does not offer the
+		// Resume that belongs to a stream which gave up.
+		expect(sources()).toHaveLength(1);
+		expect(result.current.live.watching).toBe(false);
+		expect(result.current.live.stopped).toBe(false);
+	});
+
+	it("is told apart from a genuine drop, which still reconnects", async () => {
+		const { result } = renderHook(() => useWatchedInbox("inbox_a"), {
+			wrapper: wrapper(makeClient()),
+		});
+		await act(async () => {});
+		act(() => latest().onopen?.());
+
+		// Same close, but the engine still lists the listener as running.
+		await dropAndWait();
+
+		expect(sources()).toHaveLength(2);
+		expect(result.current.running).toBe(true);
 	});
 });

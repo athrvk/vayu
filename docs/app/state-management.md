@@ -55,7 +55,11 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 ```
 
 **Key Features:**
-- Deduplication: Singleton types (welcome, variables, settings) only allow one tab at a time
+- Deduplication: Singleton types (welcome, variables, settings, inbox) only allow one tab at a
+  time. Opening one that is already open with a *different* `entityId` **retargets** it - same tab
+  id, new address - rather than focusing whatever it was showing. The inbox tab is the case that
+  needs it: every Services drawer row opens that one tab pointed at its own inbox (issue #554).
+  The other three are always opened with a null `entityId`, for which this is a no-op
 - LRU eviction: Oldest non-active, non-exempt, clean tabs are closed when over limit
 - Integration with save-store: dirty tabs are never selected for eviction. The
   guard resolves each tab's save-context key by tab *type* (`isTabDirty`),

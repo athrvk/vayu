@@ -161,7 +161,10 @@ function InboxRow({ inbox }: { inbox: Inbox }) {
 	return (
 		<ServiceRow
 			running={inbox.running}
-			onActivate={() => openTab({ type: "inbox", entityId: null })}
+			// The tab is a singleton pointed at one inbox, so the row hands it the
+			// id it names - without it the tab showed whichever inbox it had last
+			// (in practice the first), and the row's label was a lie (issue #554).
+			onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
 			activateLabel={`Open inbox on port ${inbox.port}`}
 			actions={
 				<>
