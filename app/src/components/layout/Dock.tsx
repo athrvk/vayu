@@ -253,12 +253,17 @@ function PendingRestart() {
  * light because that is this strip's ambient-status region, and because these
  * are the same kind of fact: what the engine is doing on the user's behalf.
  *
- * **Nothing renders when nothing runs.** The Dock's middle is ambient, and a
+ * **Nothing renders when nothing runs** - and a disconnected engine is running
+ * nothing, which `useRunningServiceCount` is what decides (it holds the gate,
+ * so no reader has to remember the caveat). The Dock's middle is ambient, and a
  * standing "0 services" would spend a permanent line on the ordinary case.
  * Guarded by `Dock.services.test.tsx` - rendering it unconditionally fails.
  */
 function RunningServices() {
-	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	// Reveal, never toggle: an ambient chip that says something is listening is
+	// pointing *at* the drawer, so clicking it with the drawer already on
+	// Services used to close the one surface that can act on them.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const count = useRunningServiceCount();
 
 	if (count === 0) return null;
@@ -273,7 +278,7 @@ function RunningServices() {
 				 * pair the connection light above uses for the same 12px dot.
 				 */}
 				<button
-					onClick={() => activateDrawerView("services")}
+					onClick={() => revealDrawerView("services")}
 					className="flex items-center gap-1 text-xs text-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<span className="w-1.5 h-1.5 rounded-full bg-current" />

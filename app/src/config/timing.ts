@@ -43,6 +43,18 @@ export const TIMING = {
 	STATUS_RESET_MS: 2000,
 
 	/**
+	 * How long a just-created row stays highlighted so the eye can find it.
+	 *
+	 * The Services drawer orders inboxes by port, so a new one lands wherever
+	 * its ephemeral port sorts - not at the end. Without the highlight the only
+	 * evidence a click did anything was a row count nobody was counting. Same
+	 * order as `STATUS_RESET_MS`: long enough to be seen after the toast pulls
+	 * the eye elsewhere, short enough that it is over before it reads as a
+	 * selection the user has to clear.
+	 */
+	ROW_FLASH_MS: 2500,
+
+	/**
 	 * How long the collection tree's typeahead buffer survives between
 	 * keystrokes before the next letter starts a fresh search.
 	 *
