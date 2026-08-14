@@ -313,10 +313,18 @@ jobs:
           python -m pip install --quiet pefile
           python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
 
+      # `< /dev/null` is what a shell step already gives ctest here, written
+      # down so it stays true: release.yml pins the same redirect on its own
+      # ctest steps, and the pair is the contract that the suite sees one stdin
+      # in both places. Without it the release path ran ctest under
+      # `lukka/run-cmake`, whose child gets an unwritten pipe - which is how the
+      # v0.16.0 stdin failure passed every pull request and failed on the tag.
+      # See #589; drop the redirect on one side and that class is reachable
+      # again.
       - name: Run engine tests
         working-directory: engine
         shell: bash
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml"
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
 
       # `always()` so a suite that ran and failed is still reported - but on its
       # own that also reports a *pass* for a job that never got as far as
