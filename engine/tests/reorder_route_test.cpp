@@ -80,6 +80,11 @@ class ReorderRouteTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_reorder_route.db";
 
+    // One millisecond apart, which is the entire margin `now_ms()` fails to
+    // guarantee between two rows written inside the same tick.
+    static constexpr int64_t EARLIER = 1700000000000;
+    static constexpr int64_t LATER   = EARLIER + 1;
+
     void SetUp () override {
         cleanup ();
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
@@ -112,6 +117,26 @@ class ReorderRouteTest : public ::testing::Test {
         { "method", "GET" }, { "url", "https://example.com" } });
         EXPECT_EQ (status, 200) << response.dump ();
         return response["id"].get<std::string> ();
+    }
+
+    /**
+     * Forces a collection's stored `order` and `created_at`, bypassing the
+     * routes.
+     *
+     * The create core stamps `created_at` with `now_ms()`, so two collections
+     * created inside one millisecond carry the same stamp. Once `order` is tied
+     * as well, the display order falls through to `id`, which is a random UUID.
+     * A scope built by two bare `make_collection` calls therefore has no stated
+     * order at all, and asserting which row normalization renumbers first is
+     * asserting a coin flip (issue #559). Every test that cares which row wins
+     * states both keys through this.
+     */
+    void set_collection_position (const std::string& id, int order, int64_t created_at) {
+        auto row = db_->get_collection (id);
+        ASSERT_TRUE (row.has_value ());
+        row->order      = order;
+        row->created_at = created_at;
+        db_->create_collection (*row);
     }
 
     /** Forces a row to a stored `order`, bypassing the routes - the legacy shape. */
@@ -389,9 +414,10 @@ TEST_F (ReorderRouteTest, NormalizesTheRootCollectionsWhenParentIdIsNull) {
     const std::string b     = make_collection ("B");
     const std::string child = make_collection ("child", a);
 
-    auto root_row   = db_->get_collection (b);
-    root_row->order = 0; // Tie the two roots, the pre-#360 shape.
-    db_->create_collection (*root_row);
+    // Tie the two roots at the pre-#360 shape, and state the key that breaks
+    // the tie rather than inheriting whatever the clock happened to give them.
+    set_collection_position (a, 0, EARLIER);
+    set_collection_position (b, 0, LATER);
 
     auto [status, response] = reorder_response (*db_,
     json{ { "normalize",
@@ -402,6 +428,33 @@ TEST_F (ReorderRouteTest, NormalizesTheRootCollectionsWhenParentIdIsNull) {
     EXPECT_EQ (db_->get_collection (b)->order, 1);
     // A nested collection is in a different scope and must be left alone.
     EXPECT_EQ (db_->get_collection (child)->order, 0);
+}
+
+/**
+ * The same tied scope with the stamps swapped, so the renumber must come out
+ * the other way round.
+ *
+ * Without this the test above passes just as well against a normalization that
+ * read no `created_at` at all and simply kept whatever order the rows were
+ * created in - two rows and one direction cannot separate "renumbered in stored
+ * order" from "renumbered in creation order".
+ */
+TEST_F (ReorderRouteTest, NormalizesTiedRootsInStoredOrderNotCreationOrder) {
+    const std::string a = make_collection ("A");
+    const std::string b = make_collection ("B");
+
+    // `b` was created second and is stamped first, so stored order and creation
+    // order disagree; stored order is the one normalization owes the client.
+    set_collection_position (a, 0, LATER);
+    set_collection_position (b, 0, EARLIER);
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "normalize",
+    json::array ({ json{ { "type", "collection" }, { "parentId", nullptr } } }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (db_->get_collection (b)->order, 0);
+    EXPECT_EQ (db_->get_collection (a)->order, 1);
 }
 
 // ---------------------------------------------------------------------------
