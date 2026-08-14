@@ -47,14 +47,88 @@ jobs:
       # landing it before setup could never fail a release tag - but here the
       # operator explicitly asked for a submission, and a green tick that
       # published nothing would be worse than an error.
-      - name: Require WINGET_TOKEN
+      #
+      # This checks the token can actually publish, not merely that it exists.
+      # Every prerequisite below surfaces from komac as the same opaque line -
+      # "<user> does not have the correct permissions to execute `CreateRef`" -
+      # after it has already downloaded the installer and rendered all three
+      # manifests, naming neither which prerequisite failed nor which repository
+      # it was denied on. v0.16.0 was lost to exactly that: an expired token
+      # reported as a permissions error, indistinguishable from a missing fork.
+      # Each check below names its own failure, before any work is done.
+      - name: Verify WINGET_TOKEN can publish
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
-          if [ -z "$WINGET_TOKEN" ]; then
+          set -euo pipefail
+
+          if [ -z "${WINGET_TOKEN:-}" ]; then
             echo "::error::WINGET_TOKEN is not set. Create a *classic* PAT with the" \
                  "public_repo scope (fine-grained PATs are not supported by" \
                  "winget-releaser) and add it as a repository secret."
+            exit 1
+          fi
+
+          status=$(curl -sS -o user.json -D user.headers -w '%{http_code}' \
+                   -H "Authorization: token $WINGET_TOKEN" https://api.github.com/user)
+          if [ "$status" != "200" ]; then
+            echo "::error::WINGET_TOKEN did not authenticate (HTTP $status) - it has" \
+                 "most likely expired. Mint a new classic PAT with public_repo scope" \
+                 "and update the repository secret."
+            exit 1
+          fi
+
+          # A classic PAT reports its scopes in x-oauth-scopes. A fine-grained PAT
+          # omits the header entirely, so an empty value here is itself the
+          # diagnosis rather than a missing scope.
+          login=$(jq -r .login user.json)
+          scopes=$(grep -i '^x-oauth-scopes:' user.headers | cut -d: -f2- | tr -d '\r' | xargs || true)
+          echo "Authenticates as: $login"
+          echo "Scopes: ${scopes:-<none - this is a fine-grained PAT>}"
+
+          case ",${scopes// /}," in
+            *,public_repo,* | *,repo,*) ;;
+            *)
+              echo "::error::WINGET_TOKEN lacks the public_repo scope (scopes:" \
+                   "${scopes:-none}). winget-releaser needs a *classic* PAT with" \
+                   "public_repo; a fine-grained PAT reports no scopes at all and" \
+                   "cannot create the submission branch."
+              exit 1
+              ;;
+          esac
+
+          # komac branches in the fork named by KOMAC_FORK_OWNER, which the action
+          # defaults to this repository's owner. The token must own that fork: a
+          # token for a different account authenticates perfectly and is then
+          # denied here, which is why the check is against $login rather than
+          # against the repository owner.
+          fork="$login/winget-pkgs"
+          status=$(curl -sS -o fork.json -w '%{http_code}' \
+                   -H "Authorization: token $WINGET_TOKEN" "https://api.github.com/repos/$fork")
+          if [ "$status" != "200" ]; then
+            echo "::error::$fork is not reachable with this token (HTTP $status)." \
+                 "Fork microsoft/winget-pkgs to $login - komac creates its branch" \
+                 "there, and without the fork the attempt lands on" \
+                 "microsoft/winget-pkgs itself and is refused."
+            exit 1
+          fi
+
+          push=$(jq -r '.permissions.push' fork.json)
+          archived=$(jq -r '.archived' fork.json)
+          parent=$(jq -r '.parent.full_name // "<not a fork>"' fork.json)
+          echo "$fork: push=$push archived=$archived parent=$parent"
+
+          if [ "$push" != "true" ] || [ "$archived" != "false" ]; then
+            echo "::error::WINGET_TOKEN cannot write to $fork (push=$push," \
+                 "archived=$archived). An archived fork reports push=true and still" \
+                 "rejects every write, so unarchive it rather than re-minting the token."
+            exit 1
+          fi
+
+          if [ "$parent" != "microsoft/winget-pkgs" ]; then
+            echo "::error::$fork is not a fork of microsoft/winget-pkgs (parent:" \
+                 "$parent). A plain copy of the repository is not detected as the" \
+                 "fork; delete it and fork microsoft/winget-pkgs afresh."
             exit 1
           fi
 
