@@ -33,6 +33,7 @@ const ipcHandlers = new Map<string, (event: unknown, ...args: unknown[]) => unkn
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
 const checkForUpdates = vi.fn().mockResolvedValue(null);
 const quit = vi.fn();
+const openExternal = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("electron", () => ({
 	app: { getVersion: () => "0.9.0", quit: (...args: unknown[]) => quit(...args) },
@@ -44,7 +45,7 @@ vi.mock("electron", () => ({
 			ipcHandlers.set(channel, fn);
 		},
 	},
-	shell: { openExternal: vi.fn() },
+	shell: { openExternal: (...args: unknown[]) => openExternal(...args) },
 }));
 
 vi.mock("electron-updater", () => ({
@@ -99,11 +100,25 @@ async function loadUpdater(platform: NodeJS.Platform = "win32") {
 const realPlatform = process.platform;
 
 beforeEach(() => {
-	showMessageBox.mockClear();
+	showMessageBox.mockClear().mockResolvedValue({ response: 0 });
 	checkForUpdates.mockClear().mockResolvedValue(null);
+	openExternal.mockClear();
 	currentWindow = makeWindow();
 	vi.stubEnv("NODE_ENV", "production");
 });
+
+/**
+ * Fail the attempt in flight the way electron-updater does: the `error` event
+ * and the `checkForUpdates()` rejection both report the same failure.
+ */
+function failAttempt(err: Error): void {
+	listeners.get("error")?.(err);
+}
+
+/** Let the retry's delay elapse so the second attempt runs. */
+async function letRetryRun(): Promise<void> {
+	await vi.advanceTimersByTimeAsync(2_000);
+}
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -133,10 +148,13 @@ describe("checkForUpdatesNow", () => {
 	});
 
 	it("resolves with the error rather than hanging", async () => {
+		vi.useFakeTimers();
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
 		initAutoUpdater(getWindow);
 		const pending = checkForUpdatesNow("renderer");
-		listeners.get("error")?.(new Error("ENOTFOUND"));
+		failAttempt(new Error("ENOTFOUND"));
+		await letRetryRun();
+		failAttempt(new Error("ENOTFOUND"));
 		await expect(pending).resolves.toEqual({ status: "error", message: "ENOTFOUND" });
 	});
 
@@ -202,6 +220,150 @@ describe("checkForUpdatesNow", () => {
 		);
 		await expect(ipcHandlers.get("update:check")?.(null)).resolves.toMatchObject({
 			status: "unavailable",
+		});
+	});
+});
+
+describe("one transient is not the answer", () => {
+	// A mac check is three sequential HTTPS requests through Chromium's net
+	// stack, and the first one of the session runs on the coldest possible
+	// stack. Treating that attempt's failure as final is what made "check for
+	// updates fails, click again and it works" reproducible.
+
+	it("retries once, and answers with the retry's outcome", async () => {
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("renderer");
+
+		failAttempt(new Error("ERR_NETWORK_CHANGED"));
+		await letRetryRun();
+		listeners.get("update-not-available")?.({});
+
+		// Not "ERR_NETWORK_CHANGED": the user never sees a failure the second
+		// round trip disproved.
+		await expect(pending).resolves.toEqual({ status: "up-to-date", version: "0.9.0" });
+	});
+
+	it("reports one error, and one dialog, when the retry fails too", async () => {
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("menu");
+
+		failAttempt(new Error("ENOTFOUND"));
+		await letRetryRun();
+		failAttempt(new Error("ENOTFOUND"));
+
+		await expect(pending).resolves.toMatchObject({ status: "error" });
+		expect(showMessageBox).toHaveBeenCalledTimes(1);
+	});
+
+	it("spends one attempt on a failure reported twice", async () => {
+		// electron-updater emits `error` *and* rejects `checkForUpdates()` for
+		// the same failure. Counting signals rather than attempts would burn
+		// the whole budget on a single failed round trip, leaving no retry.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		checkForUpdates.mockClear().mockRejectedValue(new Error("ENOTFOUND"));
+
+		const pending = checkForUpdatesNow("renderer");
+		await vi.advanceTimersByTimeAsync(0); // the rejection lands
+		failAttempt(new Error("ENOTFOUND")); // ...and the event for the same failure
+		await letRetryRun();
+		await vi.advanceTimersByTimeAsync(0); // the retry's rejection lands
+
+		await expect(pending).resolves.toMatchObject({ status: "error" });
+		expect(checkForUpdates).toHaveBeenCalledTimes(2);
+	});
+
+	it("retries the check a manual click joined", async () => {
+		// The join is the amplifier: a click that lands while the startup check
+		// is in flight inherits its fate. It has to inherit the retry too.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow); // starts the startup check
+		const first = checkForUpdatesNow("renderer");
+		const joined = checkForUpdatesNow("renderer");
+
+		failAttempt(new Error("ERR_NETWORK_CHANGED"));
+		await letRetryRun();
+		listeners.get("update-available")?.({ version: "1.0.0" });
+
+		await expect(first).resolves.toMatchObject({ status: "available", version: "1.0.0" });
+		await expect(joined).resolves.toEqual(await first);
+	});
+
+	it("keeps one timeout budget across the retry", async () => {
+		// The user clicked once, so the wait they can see stays bounded by one
+		// number - the retry runs inside it, not after it.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("renderer");
+
+		failAttempt(new Error("ERR_NETWORK_CHANGED"));
+		await vi.advanceTimersByTimeAsync(30_000); // the retry ran, and never answered
+
+		await expect(pending).resolves.toEqual({
+			status: "error",
+			message: "The update check timed out.",
+		});
+	});
+
+	it("retries the periodic check without surfacing anything", async () => {
+		vi.useFakeTimers();
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		checkForUpdates.mockClear();
+
+		// Nobody is waiting on the startup check - it still gets its retry.
+		failAttempt(new Error("ERR_NETWORK_CHANGED"));
+		await letRetryRun();
+
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+		expect(showMessageBox).not.toHaveBeenCalled();
+	});
+
+	it("names the error code so the next report arrives diagnosable", async () => {
+		// electron-updater raises coded errors; the code says who is at fault in
+		// a way the message alone does not. It has to reach the panel, which
+		// prints `message` and nothing else.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const coded = Object.assign(new Error("Cannot find latest-mac.yml"), {
+			code: "ERR_UPDATER_LATEST_VERSION_NOT_FOUND",
+		});
+
+		const pending = checkForUpdatesNow("renderer");
+		failAttempt(coded);
+		await letRetryRun();
+		failAttempt(coded);
+
+		await expect(pending).resolves.toEqual({
+			status: "error",
+			message: "Cannot find latest-mac.yml (ERR_UPDATER_LATEST_VERSION_NOT_FOUND)",
+		});
+	});
+
+	it("does not repeat a code the message already carries", async () => {
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const err = Object.assign(new Error("net::ERR_NETWORK_CHANGED"), {
+			code: "net::ERR_NETWORK_CHANGED",
+		});
+
+		const pending = checkForUpdatesNow("renderer");
+		failAttempt(err);
+		await letRetryRun();
+		failAttempt(err);
+
+		await expect(pending).resolves.toEqual({
+			status: "error",
+			message: "net::ERR_NETWORK_CHANGED",
 		});
 	});
 });
@@ -303,13 +465,62 @@ describe("where the result is delivered", () => {
 		);
 	});
 
+	it("leaves an available update to the banner while a window is live", async () => {
+		// The banner is already saying it; a modal on top would be the same news
+		// twice.
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("menu");
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		await pending;
+		expect(showMessageBox).not.toHaveBeenCalled();
+	});
+
+	it("tells the menu about an available update when there is no window", async () => {
+		// The banner is a `webContents.send`, so with no window it goes nowhere -
+		// and on macOS a window-less app is the ordinary state, with the menu
+		// still there to click. Without a dialog the click finds an update and
+		// reports nothing at all.
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		currentWindow = null;
+
+		const pending = checkForUpdatesNow("menu");
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		await pending;
+
+		expect(showMessageBox).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "Vayu 1.0.0 is available" })
+		);
+	});
+
+	it("opens the release notes when that dialog's button is chosen", async () => {
+		// The notify path updates out-of-band, so the release page is the only
+		// action the dialog can offer.
+		showMessageBox.mockResolvedValue({ response: 1 });
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		currentWindow = null;
+
+		const pending = checkForUpdatesNow("menu");
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		await pending;
+		await vi.waitFor(() => expect(openExternal).toHaveBeenCalledTimes(1));
+
+		expect(openExternal).toHaveBeenCalledWith(expect.stringContaining("v1.0.0"));
+	});
+
 	it("stays silent for the periodic check, which nobody is waiting on", async () => {
+		// Fake timers so the silent retry this schedules cannot fire into a
+		// later test - `afterEach` discards them.
+		vi.useFakeTimers();
 		const { initAutoUpdater } = await loadUpdater();
 		initAutoUpdater(getWindow);
 		// No manual check in flight - the interval's events must not pop a
 		// dialog over whatever the user is doing.
 		listeners.get("update-not-available")?.({});
 		listeners.get("error")?.(new Error("offline"));
+		await letRetryRun();
 		expect(showMessageBox).not.toHaveBeenCalled();
 	});
 
