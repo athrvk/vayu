@@ -1,0 +1,117 @@
+{
+  "$comment": "Cross-language conformance fixture for mock-server path templates (issue #481 phase 2). Read by BOTH the engine gtest suite (mock_server_routes_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/services/importers/path-template.conformance.test.ts). The app WRITES the URLs the engine has to read back: an OpenAPI import stores '{{baseUrl}}/pets/{{petId}}' because normalizeVars(path, {pathTemplates: true}) rewrote '{petId}', and the mock server turns that same URL back into the route it serves. A rule answered two ways is an imported request the mock silently cannot route, which is invisible until a 404 nobody can explain. templateCases are the shared half - both sides must produce 'expected' from 'input'. urlCases are the engine's own half: reducing a whole stored request URL (scheme, host, or the variable standing in for both, plus query and fragment) to the path, which the app has no equivalent of.",
+  "templateCases": [
+    {
+      "name": "an OpenAPI path parameter becomes a Vayu variable",
+      "input": "/pets/{petId}",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "an already-Vayu template is left alone",
+      "input": "/pets/{{petId}}",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "padding inside the braces is trimmed",
+      "input": "/pets/{{ petId }}",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "Insomnia's `_.` prefix is dropped",
+      "input": "/pets/{{_.petId}}",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "every parameter in a multi-level path is rewritten",
+      "input": "/users/{userId}/pets/{petId}",
+      "expected": "/users/{{userId}}/pets/{{petId}}"
+    },
+    {
+      "name": "a hyphen is part of a parameter name",
+      "input": "/v1/{version-id}",
+      "expected": "/v1/{{version-id}}"
+    },
+    {
+      "name": "a path with no template is unchanged",
+      "input": "/pets",
+      "expected": "/pets"
+    },
+    {
+      "name": "a dotted name is not an OpenAPI path parameter, so it stays literal",
+      "input": "/report/{a.b}",
+      "expected": "/report/{a.b}"
+    },
+    {
+      "name": "a filtered expression has no Vayu equivalent and is left verbatim",
+      "input": "/search/{{a|upper}}",
+      "expected": "/search/{{a|upper}}"
+    },
+    {
+      "name": "empty braces name nothing and stay literal",
+      "input": "/pets/{}",
+      "expected": "/pets/{}"
+    }
+  ],
+  "urlCases": [
+    {
+      "name": "the variable standing in for scheme and host is dropped",
+      "input": "{{baseUrl}}/pets/{petId}",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "a variable base with no separator still yields an absolute path",
+      "input": "{{host}}pets",
+      "expected": "/pets"
+    },
+    {
+      "name": "scheme, host and query are dropped",
+      "input": "https://api.example.com/v1/pets?limit=10",
+      "expected": "/v1/pets"
+    },
+    {
+      "name": "a fragment is dropped too",
+      "input": "https://api.example.com/pets#recent",
+      "expected": "/pets"
+    },
+    {
+      "name": "a Postman-style :param is the third spelling of one wildcard",
+      "input": "http://localhost:3000/pets/:petId",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": ":param on a host-less URL is rewritten the same way",
+      "input": "/pets/:petId",
+      "expected": "/pets/{{petId}}"
+    },
+    {
+      "name": "a bare authority with no scheme is still an authority",
+      "input": "api.example.com/pets",
+      "expected": "/pets"
+    },
+    {
+      "name": "a host with no path is the root",
+      "input": "https://api.example.com",
+      "expected": "/"
+    },
+    {
+      "name": "a base variable with no path is the root",
+      "input": "{{baseUrl}}",
+      "expected": "/"
+    },
+    {
+      "name": "a trailing slash is not part of the route",
+      "input": "{{baseUrl}}/pets/",
+      "expected": "/pets"
+    },
+    {
+      "name": "an empty segment is collapsed",
+      "input": "{{baseUrl}}/pets//list",
+      "expected": "/pets/list"
+    },
+    {
+      "name": "surrounding whitespace is not part of the URL",
+      "input": "  {{baseUrl}}/pets  ",
+      "expected": "/pets"
+    }
+  ]
+}

@@ -38,6 +38,9 @@ class MockIssuerManager;
 // the same reason as the two managers above - a route TU that never touches an
 // inbox does not pull in the listener machinery.
 class InboxManager;
+// Owns the collection mock servers; defined in mock_server.hpp. Forward-
+// declared for the same reason as the three managers above.
+class MockServerManager;
 } // namespace vayu::http
 
 namespace vayu::http::routes {
@@ -550,6 +553,9 @@ struct RouteContext {
     vayu::http::MockIssuerManager& mock_issuer_manager;
     /// The webhook inboxes (issue #480). Owned by Server; read by `/inbox`.
     vayu::http::InboxManager& inbox_manager;
+    /// The collection mock servers (issue #481 phase 2). Owned by Server; read
+    /// by `/mock`.
+    vayu::http::MockServerManager& mock_server_manager;
 };
 
 // Route registration functions (implemented in separate files)
@@ -571,6 +577,7 @@ void register_oauth_routes (RouteContext& ctx);
 void register_cookie_routes (RouteContext& ctx);
 void register_mock_issuer_routes (RouteContext& ctx);
 void register_inbox_routes (RouteContext& ctx);
+void register_mock_server_routes (RouteContext& ctx);
 
 /**
  * @brief Generate the TypeScript declarations for the `pm.*` script surface.

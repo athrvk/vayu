@@ -78,6 +78,12 @@ import type {
 	StartMockIssuerResponse,
 	UpdateMockIssuerRequest,
 	StopMockIssuerResponse,
+	MockServer,
+	MockServerRoute,
+	ListMockServersResponse,
+	ListMockServerRoutesResponse,
+	StartMockServerRequest,
+	StopMockServerResponse,
 } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
@@ -374,6 +380,35 @@ export const apiService = {
 			API_ENDPOINTS.MOCK_ISSUER_STOP(issuerId),
 			{}
 		);
+	},
+
+	// Collection mock server (issue #481 phase 2)
+	async listMockServers(): Promise<MockServer[]> {
+		const response = await httpClient.get<ListMockServersResponse>(API_ENDPOINTS.MOCK_SERVER);
+		return response.data;
+	},
+
+	async startMockServer(request: StartMockServerRequest): Promise<MockServer> {
+		return await httpClient.post<MockServer>(API_ENDPOINTS.MOCK_SERVER_START, request);
+	},
+
+	async stopMockServer(mockId: string): Promise<StopMockServerResponse> {
+		return await httpClient.post<StopMockServerResponse>(
+			API_ENDPOINTS.MOCK_SERVER_STOP(mockId),
+			{}
+		);
+	},
+
+	/**
+	 * The table a mock is serving - method, path template, and whether the
+	 * request behind it has an example. This is how "the mock answers 404" gets
+	 * diagnosed without sending a request per guess.
+	 */
+	async listMockServerRoutes(mockId: string): Promise<MockServerRoute[]> {
+		const response = await httpClient.get<ListMockServerRoutesResponse>(
+			API_ENDPOINTS.MOCK_SERVER_ROUTES(mockId)
+		);
+		return response.data;
 	},
 
 	// Execution

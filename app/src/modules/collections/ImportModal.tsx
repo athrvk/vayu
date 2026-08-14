@@ -498,9 +498,16 @@ function PreviewView({
 					</div>
 				)}
 			</div>
+			{/* `exampleCount` is here rather than only in the tree because a saved
+			    example is the one thing in an import with no row of its own to
+			    look at - it lands inside a request, and until this line the count
+			    every parser computed was rendered nowhere at all (issue #481,
+			    acceptance criterion 1). Unconditional like the other four: "0
+			    examples" is the answer for a file that carried none, which is
+			    different from a preview that does not mention them. */}
 			<p className="text-[11px] text-muted-foreground">
-				{meta.requestCount} requests · {meta.folderCount} folders · {meta.environmentCount}{" "}
-				environments · {meta.globalCount} globals
+				{meta.requestCount} requests · {meta.folderCount} folders · {meta.exampleCount}{" "}
+				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">

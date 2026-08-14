@@ -21,9 +21,12 @@
  * width); an issuer has no detail surface, so its whole management fits a row
  * that expands plus one dialog, and no new TabType.
  *
- * Mock servers (#481) get a group here when they exist. There is deliberately
- * no placeholder for them: a group that lists nothing and can start nothing
- * teaches a reader less than its absence does.
+ * Mock servers (#481 phase 2) are the third group. Unlike the other two it has
+ * no create affordance, and that is not an omission: a mock needs a collection
+ * to serve, and this drawer has none selected. The collection header owns the
+ * start (`CollectionDetail/MockServerControl`); this owns the list, so a mock
+ * started from any collection - or from curl - can be found and stopped in the
+ * one place every other running listener is.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -48,16 +51,19 @@ import {
 import {
 	useInboxesQuery,
 	useMockIssuersQuery,
+	useMockServerRoutesQuery,
+	useMockServersQuery,
 	useStartInboxMutation,
 	useStopInboxMutation,
 	useStopMockIssuerMutation,
+	useStopMockServerMutation,
 	useUpdateMockIssuerMutation,
 } from "@/queries";
 import { useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
-import type { Inbox, MockIssuer, MockIssuerFailureMode } from "@/types";
+import type { Inbox, MockIssuer, MockIssuerFailureMode, MockServer } from "@/types";
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
@@ -509,6 +515,137 @@ function IssuerDelayControl({
 }
 
 /**
+ * One running mock server, expanding to the table it is serving.
+ *
+ * The route table is the answer to the only question this surface gets asked -
+ * "why did the mock 404 that?" - and it is a start-time snapshot, so it is
+ * fetched once when the row is opened rather than polled. A row that carried
+ * only a URL would leave the user sending requests to find out what the mock
+ * knows about.
+ */
+function MockServerRow({
+	mock,
+	expanded,
+	onToggle,
+}: {
+	mock: MockServer;
+	expanded: boolean;
+	onToggle: () => void;
+}) {
+	const showToast = useToastStore((s) => s.showToast);
+	const copy = useCopy();
+	const stopMock = useStopMockServerMutation();
+	const routesQuery = useMockServerRoutesQuery(expanded ? mock.mockId : null);
+	const routes = routesQuery.data ?? [];
+
+	return (
+		<>
+			<ServiceRow
+				// Every listed mock is running: stopping one drops it from the
+				// engine's list rather than leaving a stopped record, since a mock
+				// holds nothing that outlives its listener. Same as an issuer,
+				// unlike an inbox and its captures.
+				running
+				onActivate={onToggle}
+				actionLabel={`${expanded ? "Collapse" : "Expand"} mock server on port ${mock.port}`}
+				leading={
+					expanded ? (
+						<ChevronDown
+							className="h-3 w-3 shrink-0 text-muted-foreground"
+							aria-hidden="true"
+						/>
+					) : (
+						<ChevronRight
+							className="h-3 w-3 shrink-0 text-muted-foreground"
+							aria-hidden="true"
+						/>
+					)
+				}
+				actions={
+					<>
+						<TooltipIconButton
+							label="Copy mock server URL"
+							tooltipHint={mock.url}
+							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+							onClick={() => void copy(mock.url, "Mock server URL")}
+						/>
+						<TooltipIconButton
+							label={`Stop mock server on port ${mock.port}`}
+							icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+							disabled={stopMock.isPending}
+							onClick={() =>
+								stopMock.mutate(mock.mockId, {
+									onError: (error) =>
+										showToast(
+											error instanceof Error
+												? error.message
+												: "Could not stop the mock server",
+											"error"
+										),
+								})
+							}
+						/>
+					</>
+				}
+			>
+				{/* The collection is what distinguishes one mock from another -
+				    two mocks of one collection differ only by port, and a column
+				    of near-identical loopback URLs is what the inbox rows learned
+				    not to lead with. */}
+				<TruncatedText className="text-xs">{mock.collectionName}</TruncatedText>
+				<span className="shrink-0 text-xs text-muted-foreground">Port {mock.port}</span>
+			</ServiceRow>
+
+			{expanded && (
+				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
+					<IssuerDetailRow
+						label="Base URL"
+						value={mock.url}
+						copyLabel="Copy mock server URL"
+						onCopy={() => void copy(mock.url, "Mock server URL")}
+					/>
+					<p className="py-1 text-xs text-muted-foreground">
+						{mock.latencyMs > 0 ? `${mock.latencyMs}ms latency` : "No added latency"}
+						{mock.errorRatePct > 0 && `, ${mock.errorRatePct}% of answers fail`}
+						{mock.routesWithoutExample > 0 &&
+							`, ${mock.routesWithoutExample} of ${mock.routeCount} routes have no example`}
+					</p>
+					{routesQuery.isError ? (
+						<ErrorState
+							variant="inline"
+							title="Couldn't load the routes"
+							className={cn("justify-start", GROUP_NOTE_CLASS)}
+							onRetry={() => void routesQuery.refetch()}
+						/>
+					) : (
+						<ul className="max-h-48 overflow-y-auto py-1">
+							{routes.map((route) => (
+								<li
+									key={`${route.method} ${route.path} ${route.requestId}`}
+									className="flex items-center gap-1.5 py-0.5"
+								>
+									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
+										{route.method}
+									</span>
+									<TruncatedText className="min-w-0 flex-1 font-mono text-xs">
+										{route.path}
+									</TruncatedText>
+									{/* A route with no example answers 501, so it is
+									    marked rather than listed as if it served. */}
+									<span className="shrink-0 text-[11px] text-muted-foreground">
+										{route.hasExample ? route.status : "no example"}
+									</span>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			)}
+		</>
+	);
+}
+
+/**
  * Which row was just created, for as long as it takes to notice it.
  *
  * Creating an inbox reported nothing at all: the mutation carried an `onError`
@@ -536,13 +673,16 @@ export default function ServicesPanel() {
 	const showToast = useToastStore((s) => s.showToast);
 	const inboxesQuery = useInboxesQuery();
 	const issuersQuery = useMockIssuersQuery();
+	const mocksQuery = useMockServersQuery();
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
+	const [expandedMockId, setExpandedMockId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
 	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
 	const inboxes = inboxesQuery.data ?? [];
 	const issuers = issuersQuery.data ?? [];
+	const mocks = mocksQuery.data ?? [];
 
 	/*
 	 * Per group, and only while that group has nothing to show. Each list is its
@@ -553,6 +693,7 @@ export default function ServicesPanel() {
 	 */
 	const showInboxError = inboxesQuery.isError && inboxes.length === 0;
 	const showIssuerError = issuersQuery.isError && issuers.length === 0;
+	const showMockError = mocksQuery.isError && mocks.length === 0;
 
 	/*
 	 * By port. The engine lists inboxes in map order, which is not stable across
@@ -563,6 +704,9 @@ export default function ServicesPanel() {
 	 * so the two lists cannot disagree about what order inboxes are in.
 	 */
 	const orderedInboxes = [...inboxes].sort((a, b) => a.port - b.port);
+	// Same rule, same reason: the engine lists mocks in map order too, and
+	// `createdAt` would reorder the list every time one is restarted.
+	const orderedMocks = [...mocks].sort((a, b) => a.port - b.port);
 
 	const start = () =>
 		startInbox.mutate(
@@ -657,6 +801,39 @@ export default function ServicesPanel() {
 								onToggle={() =>
 									setExpandedIssuerId((current) =>
 										current === issuer.issuerId ? null : issuer.issuerId
+									)
+								}
+							/>
+						))
+					)}
+				</ServiceGroup>
+
+				{/* No create affordance: a mock needs a collection to serve, and
+				    this drawer has none selected. The collection header starts
+				    one; this is where every running mock can be found. */}
+				<ServiceGroup title="Mock servers">
+					{showMockError ? (
+						<ErrorState
+							variant="inline"
+							title="Couldn't load the mock servers"
+							className={cn("justify-start", GROUP_NOTE_CLASS)}
+							onRetry={() => void mocksQuery.refetch()}
+						/>
+					) : mocks.length === 0 ? (
+						<EmptyState
+							variant="inline"
+							className={GROUP_NOTE_CLASS}
+							title="No mock running. Open a collection and start one to serve its saved example responses on a local URL - a free upstream to build or load-test against."
+						/>
+					) : (
+						orderedMocks.map((mock) => (
+							<MockServerRow
+								key={mock.mockId}
+								mock={mock}
+								expanded={expandedMockId === mock.mockId}
+								onToggle={() =>
+									setExpandedMockId((current) =>
+										current === mock.mockId ? null : mock.mockId
 									)
 								}
 							/>

@@ -20,6 +20,7 @@ import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import InfoTab from "./InfoTab";
+import MockServerControl from "./MockServerControl";
 import ScriptTab from "./ScriptTab";
 import VariablesTab from "./VariablesTab";
 
@@ -128,6 +129,13 @@ export default function CollectionDetail() {
 				<span className="text-xs text-muted-foreground">
 					- {requests.length} request{requests.length !== 1 ? "s" : ""}
 				</span>
+				{/* Right-aligned, because it is an action on the collection rather
+				    than part of its identity. It knows nothing about the tabs
+				    below: a mock serves the whole subtree, which is a property of
+				    the collection, not of whichever tab is open. */}
+				<div className="ml-auto flex min-w-0 items-center">
+					<MockServerControl collectionId={collection.id} />
+				</div>
 			</div>
 
 			{/* Tab bar */}

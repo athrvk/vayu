@@ -75,7 +75,9 @@ describe("ImportModal with a Postman environment export", () => {
 		expect(screen.getByText("Postman Environment")).toBeVisible();
 		expect(screen.getByText("Sample Staging")).toBeVisible();
 		expect(screen.getByText("5 variables")).toBeVisible();
-		expect(screen.getByText(/0 requests · 0 folders · 1 environments/)).toBeVisible();
+		expect(
+			screen.getByText(/0 requests · 0 folders · 0 examples · 1 environments/)
+		).toBeVisible();
 	});
 
 	it("keeps Import enabled - an environment-only import is a real import", async () => {

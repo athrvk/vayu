@@ -116,6 +116,16 @@ export const queryKeys = {
 		list: () => [...queryKeys.mockIssuer.all, "list"] as const,
 	},
 
+	// Collection mock servers (issue #481 phase 2). `list` is every running
+	// mock; `routes` is one mock's table, kept apart because the table is a
+	// start-time snapshot that never changes under a running mock - so it is
+	// fetched once per mock rather than riding on the list's poll.
+	mockServer: {
+		all: ["mockServer"] as const,
+		list: () => [...queryKeys.mockServer.all, "list"] as const,
+		routes: (mockId: string) => [...queryKeys.mockServer.all, "routes", mockId] as const,
+	},
+
 	// Warm-cache pass over every collection's requests (see
 	// usePrefetchCollectionsAndRequests). Keyed here rather than inline so it
 	// can be invalidated when the set of collections changes - it succeeds once

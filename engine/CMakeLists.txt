@@ -403,6 +403,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/cookies.cpp
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
+        src/http/routes/mock_server.cpp
     )
 
     target_link_libraries(vayu-engine PRIVATE
@@ -490,6 +491,7 @@ if(VAYU_BUILD_TESTS)
         tests/oauth_authorize_test.cpp
         tests/mock_issuer_test.cpp
         tests/inbox_test.cpp
+        tests/mock_server_routes_test.cpp
         tests/id_test.cpp
         tests/curl_utils_test.cpp
         tests/curl_transfer_test.cpp
@@ -522,6 +524,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/cookies.cpp
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
+        src/http/routes/mock_server.cpp
         src/http/managed_listener.cpp
     )
     

@@ -77,6 +77,9 @@ vi.mock("@/stores", () => ({
 // drag in a great deal of setup.
 vi.mock("./ScriptTab", () => ({ default: () => null }));
 vi.mock("./VariablesTab", () => ({ default: () => null }));
+// The header's mock-server control reaches the engine and the toast store;
+// this file is about the tab shell, and its own suite covers the control.
+vi.mock("./MockServerControl", () => ({ default: () => null }));
 
 function Screen() {
 	return (
