@@ -73,6 +73,18 @@ function detectBodyType(body: string): ResponseState["bodyType"] {
  * The parts of a restored response that are the same whether the run succeeded
  * or failed: what was sent.
  *
+ * `trace.request.rawRequest` is the engine's own wire message, stored since
+ * issue #348. Preferred whenever it is there, because it is the only version
+ * that carries what libcurl added on our behalf - the `Cookie` line the jar
+ * matched above all, which the composed `headers` map has never held. Without
+ * it the same exchange showed a `Cookie` header right after a send and none
+ * after a reload.
+ *
+ * `buildRawRequest` stays as the fallback rather than being replaced: every row
+ * written before that change has no such field, and a restored run from last
+ * week must still render. Same shape as the `trace.response?.httpVersion`
+ * fallback below it.
+ *
  * `trace.response?.httpVersion` is only present when a response was actually
  * received (`build_result_trace` omits the whole `response` node on an error
  * path, see execution.cpp) - so a run that never reached a server has nothing
@@ -81,17 +93,19 @@ function detectBodyType(body: string): ResponseState["bodyType"] {
  */
 function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 	const request = trace.request;
+	if (!request) return { requestHeaders: {}, rawRequest: undefined };
+
 	return {
-		requestHeaders: request?.headers || {},
-		rawRequest: request
-			? buildRawRequest(
-					request.method || "GET",
-					request.url || "",
-					request.headers || {},
-					request.body,
-					trace.response?.httpVersion
-				)
-			: undefined,
+		requestHeaders: request.headers || {},
+		rawRequest:
+			request.rawRequest ||
+			buildRawRequest(
+				request.method || "GET",
+				request.url || "",
+				request.headers || {},
+				request.body,
+				trace.response?.httpVersion
+			),
 	};
 }
 

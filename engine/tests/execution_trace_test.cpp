@@ -136,6 +136,82 @@ TEST (ExecutionTrace, StoredHttpVersionMatchesTheLiveWireKey) {
     EXPECT_EQ (trace["response"]["httpVersion"], live["httpVersion"]);
 }
 
+// ============================================================================
+// rawRequest - the wire message, stored (issue #348)
+//
+// The live raw-request view reads the transfer's own outbound frame; the
+// restored one used to rebuild the string from the composed header map. Those
+// two disagree the moment the cookie jar attaches anything, because libcurl
+// adds `Cookie` itself and the composed map never sees it - so the same
+// exchange showed a session right after a send and none after a reload.
+// ============================================================================
+
+// A response as `Client::send` leaves it: the wire frame carries the jar's
+// cookie and libcurl's own `Accept`, neither of which is in `request.headers`.
+vayu::Response make_response_with_wire_request () {
+    auto response        = make_response ();
+    response.raw_request = "GET /health HTTP/1.1\r\n"
+                           "Host: 127.0.0.1\r\n"
+                           "accept: application/json\r\n"
+                           "Cookie: session=abc123\r\n"
+                           "\r\n";
+    return response;
+}
+
+TEST (ExecutionTrace, StoresTheWireRequestBesideTheComposedHeaders) {
+    auto trace =
+    build_result_trace (make_request (), make_response_with_wire_request ());
+
+    ASSERT_TRUE (trace["request"].contains ("rawRequest"));
+    EXPECT_NE (trace["request"]["rawRequest"].get<std::string> ().find (
+               "Cookie: session=abc123"),
+    std::string::npos);
+
+    // The composed map is unchanged - it is the *sent record*, not the wire,
+    // and the two are deliberately different views (api-reference.md).
+    EXPECT_FALSE (trace["request"]["headers"].contains ("Cookie"));
+}
+
+// The same invariant style as the timing and httpVersion tests above: what
+// serialize(Response) puts on the live /execute wire is what the stored trace
+// carries, so the live and restored raw views cannot drift apart again.
+TEST (ExecutionTrace, StoredRawRequestMatchesTheLiveWireKey) {
+    auto response = make_response_with_wire_request ();
+
+    auto trace = build_result_trace (make_request (), response);
+    auto live  = vayu::json::serialize (response);
+
+    EXPECT_EQ (trace["request"]["rawRequest"], live["rawRequest"]);
+}
+
+// A step that sent nothing (`pm.execution.skipRequest()`) hands this a default
+// Response. Omitted, not stored empty: the reader prefers this key when it is
+// present, so "" would suppress the fallback synthesis that is the right answer
+// there - and it is what every row written before #348 relies on.
+TEST (ExecutionTrace, OmitsRawRequestWhenNothingWasSent) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace["request"].contains ("rawRequest"));
+}
+
+// A transfer that failed before sending has no frame to read, but `Client::send`
+// synthesizes one from the composed request - so an unreachable host still
+// stores the request it attempted, on the branch that writes no response node.
+TEST (ExecutionTrace, FailedTransferStillStoresItsSynthesizedRequest) {
+    auto response          = make_response_with_wire_request ();
+    response.status_code   = 0;
+    response.error_code    = vayu::ErrorCode::ConnectionFailed;
+    response.error_message = "connection refused";
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_FALSE (trace.contains ("response"));
+    ASSERT_TRUE (trace["request"].contains ("rawRequest"));
+    EXPECT_NE (
+    trace["request"]["rawRequest"].get<std::string> ().find ("GET /health"),
+    std::string::npos);
+}
+
 TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
     auto response          = make_response ();
     response.status_code   = 0;

@@ -299,6 +299,16 @@ makes a session survive from one design-mode request to the next.
   log gets exported and shared, the raw view is read on the machine whose
   Settings already display the same value. A script-written cookie is on that
   frame too, since it goes out on the same transfer.
+- **History keeps that frame too, cookies included.** The jar itself is never
+  persisted, but a design or scenario run stores the message its transfer sent
+  as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the
+  run shows the same `Cookie` line the live view did instead of a session-less
+  request rebuilt from the composed headers (issue #348). That is a deliberate
+  write of credential-grade material, into the node that already stores the
+  resolved `Authorization` header beside it - see [Security](#security) for
+  where the line between this and `runs.config_snapshot` falls. It is bounded
+  by run retention, not by the process: `DELETE /cookies` empties the jar and
+  does not touch stored runs.
 - **Script writes are staged, not applied in place** (`pm.cookies.jar()`, issue
   #337). `capture_jar_cookies` *replaces* a scope's contents with what the
   finishing handle held, so a write dropped into the map beside an in-flight
@@ -867,6 +877,19 @@ data/
   values of sensitive headers (`Authorization`, cookies, etc.). Token request
   bodies/responses are never logged. On-disk encryption (`safeStorage`) and
   mid-run token refresh are deferred.
+- **Where the redaction line falls, and why it is not one line.** Two columns of
+  a run row answer two different questions, and the split is deliberate:
+  `runs.config_snapshot` records the request **as authored**, so
+  `sanitize_config_snapshot` keeps `auth` down to `{mode}` and a scenario run
+  stores the uncomposed URL - a composed plan carries resolved `Authorization`
+  headers and an `apikey` in the query string, and persisting one would route
+  around that allowlist. `results.trace_data` records what was **sent**, which
+  is the only thing it is for: it stores the resolved request headers, and since
+  issue #348 the wire message itself (`request.rawRequest`, the `Cookie` line
+  included). Both are credential-grade, both are plaintext under the v1 posture
+  above, and a trace that hid what went out would have no reason to exist. What
+  bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
+  process - so clearing the cookie jar does not clear the runs that recorded it.
 
 ## Dependencies
 

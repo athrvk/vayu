@@ -109,8 +109,12 @@ const std::vector<vayu::db::Result>& results);
  * gains `bodyTruncated: true` and `bodyBytes` (the original byte length) so a
  * reader can tell a stored slice from the whole body. The cut is on a raw byte
  * boundary - the body is an opaque string - so the caller must dump with
- * `error_handler_t::replace` in case the slice splits a UTF-8 sequence. See
- * docs/engine/db-schema.md (results.trace_data).
+ * `error_handler_t::replace` in case the slice splits a UTF-8 sequence.
+ *
+ * The request node's `rawRequest` ends with that same body, so it is capped to
+ * the same limit - body half only, header block kept whole, since the headers
+ * are what the field is stored for. See docs/engine/db-schema.md
+ * (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
 

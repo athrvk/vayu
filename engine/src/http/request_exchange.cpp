@@ -47,6 +47,31 @@ const vayu::Response& response) {
         trace["request"]["body"] = request.body.content;
     }
 
+    // What the wire carried, so a restored raw-request view says the same thing
+    // the live one did (issue #348). `headers` above is the *composed* map and
+    // has no `Cookie` line - libcurl attaches those itself from the jar - so
+    // rebuilding the view from it client-side showed a session-less request
+    // after a reload and the real one immediately after a send.
+    //
+    // Omitted rather than stored empty when there was no transfer at all (a
+    // `pm.execution.skipRequest()` step hands this a default `Response`): the
+    // reader's fallback synthesis is the right answer there, and "" would
+    // suppress it. A transfer that failed before sending still has a value -
+    // `Client::send` synthesizes one from the composed request - and storing
+    // that is what keeps an unreachable host showing the request it attempted.
+    //
+    // This is credential-grade material and deliberately not redacted, matching
+    // the live field's documented contract: the `Cookie` line lands in the same
+    // node that already stores the resolved `Authorization` header beside it.
+    // The redaction that does apply to run rows is `sanitize_config_snapshot`,
+    // which guards `runs.config_snapshot` - a record of the request as
+    // *authored*. A trace is the record of what was *sent*, and one that hid
+    // what was sent would have no reason to exist. See
+    // docs/engine/architecture.md (Security).
+    if (!response.raw_request.empty ()) {
+        trace["request"]["rawRequest"] = response.raw_request;
+    }
+
     if (!response.has_error ()) {
         // "" when nothing was negotiated, not omitted - same convention as
         // serialize(Response) in json.cpp, so restore-response.ts can't

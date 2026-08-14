@@ -345,6 +345,68 @@ TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
     (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
 }
 
+// ============================================================================
+// cap_trace_bodies - rawRequest (issue #348)
+//
+// The stored wire message ends with the same body the node's `body` field
+// carries, so without a cap of its own the field added last would carry a whole
+// oversized POST into trace_data and route around the guard entirely.
+// ============================================================================
+
+namespace {
+
+// A wire message as `raw_request_from_wire` builds it: header block, blank
+// line, body.
+std::string make_raw_request (const std::string& body) {
+    return "POST / HTTP/1.1\r\nHost: example.test\r\nCookie: "
+           "session=abc\r\n\r\n" +
+    body;
+}
+
+} // namespace
+
+TEST (CapTraceBodies, CapsTheRawRequestBodyAndKeepsTheHeaderBlockWhole) {
+    // A cap far smaller than the header block: the headers are the reason the
+    // field is stored, so the cut is body-side only. Cutting from the front
+    // would take the Cookie line - exactly what a reader opened the tab for.
+    const size_t cap               = 4;
+    auto trace                     = make_trace ("REQUESTBODY", "RESPONSEBODY");
+    trace["request"]["rawRequest"] = make_raw_request ("REQUESTBODY");
+
+    cap_trace_bodies (trace, cap);
+
+    const auto raw = trace["request"]["rawRequest"].get<std::string> ();
+    EXPECT_EQ (raw, make_raw_request ("REQU"));
+    EXPECT_NE (raw.find ("Cookie: session=abc"), std::string::npos);
+    // The node's own body is capped by the same limit, and its metadata is what
+    // tells a reader this request's body is a stored slice.
+    EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
+}
+
+TEST (CapTraceBodies, LeavesAnUnderCapRawRequestVerbatim) {
+    auto trace = make_trace ("small-request", "small-response");
+    trace["request"]["rawRequest"] = make_raw_request ("small-request");
+
+    cap_trace_bodies (trace, 1024);
+
+    EXPECT_EQ (trace["request"]["rawRequest"], make_raw_request ("small-request"));
+}
+
+// A GET's wire message is a header block and an empty body; a synthesized one
+// for a transfer that never connected may carry no blank line at all. Neither
+// has a body to cap, and neither may lose a byte.
+TEST (CapTraceBodies, LeavesABodylessRawRequestAlone) {
+    auto trace                     = make_trace ("", "");
+    trace["request"]["rawRequest"] = make_raw_request ("");
+
+    cap_trace_bodies (trace, 1);
+    EXPECT_EQ (trace["request"]["rawRequest"], make_raw_request (""));
+
+    trace["request"]["rawRequest"] = "GET / HTTP/1.1\r\nHost: example.test";
+    cap_trace_bodies (trace, 1);
+    EXPECT_EQ (trace["request"]["rawRequest"], "GET / HTTP/1.1\r\nHost: example.test");
+}
+
 TEST (CapTraceBodies, IgnoresAnErrorTraceWithNoResponseBody) {
     // An error trace carries error_type/error_message and no response node - the
     // cap must leave it untouched rather than fabricate a body.
