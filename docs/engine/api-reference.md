@@ -831,6 +831,14 @@ the null-vs-absent rule.
 }
 ```
 
+**`params` is builder display state, not the query the engine sends.** The
+engine stores it and hands it back verbatim; nothing in the request-composition
+path ever reads it. `url` is the wire truth, so a query parameter that must
+reach the wire belongs **in `url`** - the app's Params table keeps the two in
+step by rewriting `url` on every edit, and stores disabled rows in `params` only.
+A raw API, MCP or import caller that puts the query only in `params` stores a
+request that sends none of it (issue #590).
+
 **`stream` is the saved half of [`POST /execute`'s `stream`](#post-execute)**
 (issue #574). It records that *this endpoint* is a `text/event-stream`, which is
 a property of the endpoint rather than of one send, so the app's Event stream

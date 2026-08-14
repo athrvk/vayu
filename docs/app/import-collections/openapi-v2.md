@@ -82,7 +82,7 @@ Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
 | `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no `host` was defined (see [URL](#url--path-parameters)) |
-| parameter `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present |
+| parameter `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present. `parseImport` also joins them onto the `url` as **bare keys** (`?verbose`), since the stub carries no value - see [The url/params invariant](./README.md#the-urlparams-invariant) |
 | parameter `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameter `in: "body"` | `body` | sampled via `sampleSchema`; JSON vs text decided by `consumes` (see [Parameters & body](#parameters--body)) |
 | parameter `in: "formData"` | `body` | collected into form fields; the encoding (`x-www-form-urlencoded` vs `form-data`) comes from `consumes` (see [`consumes` → body mode](#consumes--body-mode)) |

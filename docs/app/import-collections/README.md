@@ -42,10 +42,40 @@ raw string ──▶ parseImport() ──▶ assignTempIds() ──▶ ImportOrc
    `PostmanV21 → PostmanV20 → PostmanEnvironment → InsomniaV4 → OpenApiV3 → OpenApiV2`.
    The first parser whose `detect()` returns `true` gets to `parse()`.
 3. No match → throws `UnrecognisedFormatError`.
+4. **Joins each request's enabled params into its `url`** - see
+   [The url/params invariant](#the-urlparams-invariant) below.
 
 The factory parses the raw text **once** and hands every detector the already-parsed
 object (plus the raw string). This is a conscious divergence from the PRD's
 `detect(raw: string)` - detectors receive `(parsed, raw)`.
+
+#### The url/params invariant
+
+A stored request carries its **enabled** query inside `url`; `params[]` mirrors
+it for the editor, disabled rows included (see
+[request-storage-design.md](../../request-storage-design.md)). `url` is what
+every execution path sends verbatim, and no engine path reads `params[]` at all.
+
+Every parser states the query some other way - Postman splits it out of the URL
+into `params[]`, Insomnia keeps a `parameters[]` beside a verbatim URL, the
+OpenAPI parsers synthesize params for a URL that never had a query - so an
+imported request used to go on the wire with its query missing, silently, until
+the user happened to edit the Params table once (issue #590).
+
+`parseImport` closes that with one pass over every request draft,
+`appendParamsToUrl(r.url, r.params)`
+(`modules/request-builder/utils/url.ts`, shared with the Params table rather than
+copied). It **appends**, so a URL that arrived with a query of its own keeps it -
+which is what Insomnia's own send does with its two sources. Each parser's
+mapping stays as documented: `params[]` is still exactly what the source
+declared, and only the enabled rows reach `url`.
+
+Two consequences worth expecting:
+
+- A row disabled in the source stays in the table and out of the URL.
+- A row with a key and no value joins as a **bare key** (`?verbose`), which is
+  what the Params table writes for the same row. The OpenAPI parsers emit
+  value-less stubs, so their URLs now name the declared query parameters.
 
 ### 2. Assign temp IDs - `assign-ids.ts`
 

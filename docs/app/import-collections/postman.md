@@ -127,6 +127,8 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 
 Postman path-segment variables, host arrays, and port are not separately consumed - only `raw` (base) and `query` matter for the object form.
 
+**The split is `pmUrl`'s output, not the stored shape.** `parseImport` rejoins each request's *enabled* params onto its `url` afterwards, because that is where every execution path reads the query from - see [The url/params invariant](./README.md#the-urlparams-invariant). So `{{baseUrl}}/users?page=1&trace=1` with `trace` disabled parses to base + two params here, and is stored as `{{baseUrl}}/users?page=1` with both params still in the table.
+
 ## Body mapping
 
 `pmBody(body, ctx)` switches on `body.mode`. A missing `body` or missing `body.mode` → `{ mode: "none" }`.

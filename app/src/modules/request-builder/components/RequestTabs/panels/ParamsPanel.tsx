@@ -15,37 +15,14 @@
  */
 
 import { useCallback } from "react";
-import { containsVariableToken } from "@/constants/variables";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { KeyValueItem } from "@/types";
 import { formatParamsToText, parseParamsFromText } from "../../../utils/params-format";
+import { buildUrlWithParams } from "../../../utils/url";
 import { EmptyTableHint } from "./EmptyTableHint";
-
-// Build URL from base and params
-// Note: We don't URL-encode values containing {{variables}} - they get resolved and encoded at request time
-function buildUrlWithParams(baseUrl: string, params: KeyValueItem[]): string {
-	const queryStart = baseUrl.indexOf("?");
-	const base = queryStart === -1 ? baseUrl : baseUrl.slice(0, queryStart);
-
-	const enabledParams = params.filter((p) => p.enabled && p.key.trim());
-	if (enabledParams.length === 0) return base;
-
-	const queryString = enabledParams
-		.map((p) => {
-			// Don't encode if contains variable placeholder - will be resolved later
-			const hasVarInKey = containsVariableToken(p.key);
-			const hasVarInValue = containsVariableToken(p.value);
-			const key = hasVarInKey ? p.key : encodeURIComponent(p.key);
-			const value = hasVarInValue ? p.value : encodeURIComponent(p.value);
-			return p.value ? `${key}=${value}` : key;
-		})
-		.join("&");
-
-	return `${base}?${queryString}`;
-}
 
 export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();

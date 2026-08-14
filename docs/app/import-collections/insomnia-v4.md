@@ -79,8 +79,8 @@ Built by `buildRequest`.
 | `name` | `name` | Falls back to `"Untitled"`. |
 | `description` | `description` | Falls back to `""`. |
 | `method` | `method` | Upper-cased; restricted to `GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS`, otherwise defaults to `GET`. |
-| `url` | `url` | `normalizeVars(asString(url))`. |
-| `parameters[]` (`{name,value,disabled,description}`) | `params` | `mapKeyValues`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. |
+| `url` | `url` | `normalizeVars(asString(url))` - taken verbatim, query string and all. `parseImport` then **appends** the enabled `parameters[]` to it (see [The url/params invariant](./README.md#the-urlparams-invariant)), which is what Insomnia itself does with its two query sources on send: a URL written `https://x/y?a=1` beside a `b=2` parameter stores as `https://x/y?a=1&b=2`. |
+| `parameters[]` (`{name,value,disabled,description}`) | `params` | `mapKeyValues`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. Enabled rows also join the `url`, per the row above. |
 | `headers[]` (`{name,value,disabled,description}`) | `headers` | Same mapping as params. |
 | `settingFollowRedirects` (`"global" \| "on" \| "off"`) | `followRedirects` | `"off" → false`, `"on" → true`; `"global"` (Insomnia's default, meaning "use the app setting", which follows redirects) and an absent field leave the draft field **absent**, so the engine default (`true`) applies. Insomnia has no per-request redirect limit, so `maxRedirects` is never imported. |
 | `body` | `body` | Via `insomniaBody`. See [Body mapping](#body-mapping). |

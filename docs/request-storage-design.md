@@ -29,6 +29,25 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 }
 ```
 
+#### The `url` / `params` invariant
+
+**Enabled query parameters live inside `url`. `params[]` mirrors them for the
+editor, disabled entries included.**
+
+`url` is the wire truth: every execution path - design Send, collection scenario
+run, load run - sends it verbatim, and no engine path reads `params[]` at all
+(it is builder display state, see
+[engine/api-reference.md](engine/api-reference.md)). The Params table maintains
+the invariant on the app's side by rewriting `url` on every edit, keeping
+disabled rows in `params[]` only.
+
+A writer that stores the query *only* in `params[]` therefore stores a request
+that sends nothing of it. That was issue #590: every importer split the query
+out of the URL, so an imported request dropped its query on every send until the
+user happened to edit the Params table once. Imports now restore the invariant at
+parse time (`parseImport`, see
+[app/import-collections/README.md](app/import-collections/README.md)).
+
 ### 2. Request Execution
 
 **Process**:
