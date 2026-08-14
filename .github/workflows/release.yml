@@ -420,6 +420,28 @@ jobs:
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
+      # The preflight verifies the token and, critically, syncs the fork with
+      # microsoft/winget-pkgs. komac branches at upstream's head, so a fork that
+      # has fallen behind since the last release cannot have that ref created -
+      # and GitHub reports it as a permissions error, which is why v0.16.0 was
+      # spent replacing a token that was never the problem. The fork drifts
+      # between every release, so this belongs on the automatic path above all.
+      #
+      # Both steps keep the `env.WINGET_TOKEN != ''` guard the submit step has:
+      # this job is a green no-op until the secret exists, so that landing it
+      # can never fail a release tag.
+      - name: Checkout
+        if: env.WINGET_TOKEN != ''
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Preflight and sync the fork
+        if: env.WINGET_TOKEN != ''
+        uses: ./.github/actions/winget-preflight
+        with:
+          token: ${{ env.WINGET_TOKEN }}
+
       - name: Submit manifest to winget-pkgs
         if: env.WINGET_TOKEN != ''
         uses: vedantmgoyal9/winget-releaser@v2
