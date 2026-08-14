@@ -27,6 +27,26 @@ export const MIN_MAX_REDIRECTS = 0;
 export const MAX_MAX_REDIRECTS = 100;
 
 /**
+ * Event-stream defaults (issue #574). `requests.stream` defaults to 0, so a
+ * request saved before the column existed reads back as not a stream - which is
+ * what it was.
+ */
+export const DEFAULT_STREAM = false;
+
+/**
+ * What an event-stream request declares it accepts.
+ *
+ * Added to the headers as a reversible side effect when the toggle goes on
+ * (`utils/auto-header.ts`) and never overriding an `Accept` the user declared,
+ * because a server offering several representations is exactly the case where
+ * a hand-written `Accept` was meant. The engine does not add it - a stream is
+ * declared by the payload's `stream` flag, and the header is what the *origin*
+ * needs in order to answer with one.
+ */
+export const SSE_ACCEPT = "text/event-stream";
+export const ACCEPT_HEADER = "Accept";
+
+/**
  * HTTP protocol a request asks the engine to negotiate. Wire values and
  * labels are the engine's own (`to_string`/`http_version_label` in
  * `engine/src/http/client.cpp` and the `defaultHttpVersion` config entry) -

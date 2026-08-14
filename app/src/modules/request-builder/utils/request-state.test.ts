@@ -38,6 +38,7 @@ describe("isRequestSettingsNonDefault", () => {
 		followRedirects: true,
 		maxRedirects: 10,
 		httpVersion: DEFAULT_HTTP_VERSION,
+		stream: false,
 	} as const;
 
 	it("is false when every field matches the engine defaults", () => {
@@ -56,5 +57,12 @@ describe("isRequestSettingsNonDefault", () => {
 		// This is the case the rename exists for: a request that only changes
 		// its protocol must still badge the Settings tab.
 		expect(isRequestSettingsNonDefault({ ...defaults, httpVersion: "http2" })).toBe(true);
+	});
+
+	it("is true when the event-stream flag is on and nothing else differs", () => {
+		// Same case one field over (issue #574): turning a request into a
+		// stream is the largest change this tab can make, and it must badge
+		// even though every other setting is untouched.
+		expect(isRequestSettingsNonDefault({ ...defaults, stream: true })).toBe(true);
 	});
 });

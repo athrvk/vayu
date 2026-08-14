@@ -45,6 +45,7 @@ import type {
 	ComposeRequestRequest,
 	ComposedRequest,
 	ExecuteRequestRequest,
+	ExecuteStreamResponse,
 	StartLoadTestRequest,
 	StartLoadTestResponse,
 	StartScenarioRunRequest,
@@ -442,6 +443,33 @@ export const apiService = {
 			{ ...data, allowScriptRequests: true },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
+	},
+
+	/**
+	 * The streaming half of the same endpoint (issue #574): `stream: true` makes
+	 * `POST /execute` answer `202 {runId, eventsUrl}` at once instead of the
+	 * exchange, so this returns a different type rather than a `SanityResult`
+	 * with empty fields - the two answers are different shapes and a caller has
+	 * to know which it is holding.
+	 *
+	 * No `proxiedRequestTimeoutMs()`: this call returns as soon as the run row
+	 * exists, and the stream it started is bounded by the engine's own caps
+	 * (`maxStreamDurationMs`, `maxStreamEvents`, the idle timeout), not by a
+	 * client deadline. `allowScriptRequests` is not sent because the engine
+	 * refuses a stream carrying scripts at all.
+	 */
+	async executeStreamRequest(data: ExecuteRequestRequest): Promise<ExecuteStreamResponse> {
+		const answer = await httpClient.post<ExecuteStreamResponse>(API_ENDPOINTS.EXECUTE_REQUEST, {
+			...data,
+			stream: true,
+		});
+		// Loud rather than a stream that silently never opens: without both
+		// fields there is no run to stop and no URL to tail, and the response
+		// pane would sit on "streaming" forever.
+		if (!answer?.runId || !answer?.eventsUrl) {
+			throw new Error("The engine accepted the stream but named no run to follow");
+		}
+		return answer;
 	},
 
 	/** A run's `tests` script is the same script Send runs - see executeRequest. */

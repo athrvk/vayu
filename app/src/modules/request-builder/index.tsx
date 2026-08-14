@@ -39,7 +39,7 @@ import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
-import type { RequestState, ResponseState } from "./types";
+import type { RequestState, ResponseState, StreamStartResult } from "./types";
 import { resolveAuthSource } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
@@ -174,9 +174,89 @@ export default function RequestBuilder() {
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
 			httpVersion: fetchedRequest.httpVersion,
+			stream: fetchedRequest.stream,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
+
+	/**
+	 * The composed payload a Send puts on the wire, and the script parts that
+	 * went into it.
+	 *
+	 * Shared by the buffered and the streaming send (issue #574): the two differ
+	 * only in which endpoint answer they take, and everything up to that point -
+	 * the system headers, the body builder, the collection chain's scripts, the
+	 * engine-side composition - has to be identical, or a stream would measure a
+	 * different request from the one Send sends.
+	 *
+	 * `collectionAncestors` is the live chain, so a stream's refusal for
+	 * carrying scripts is decided by what the send *would* run, not by what this
+	 * request alone declares.
+	 */
+	const composeForSend = useCallback(
+		async (request: RequestState, ownerId: string, ownerCollectionId: string) => {
+			// Flatten enabled headers for execution; inject per-request system headers
+			const headersRecord = toFlatHeaders(request.headers);
+			headersRecord["X-Request-ID"] = generateUUID();
+			const version = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
+			headersRecord["X-Vayu-Version"] = version;
+
+			// Shared with the History run view's send path - see execute-mapping.ts.
+			// Raw: since #226 the engine resolves {{variables}} and inherit auth
+			// (POST /compose), so the editor state goes over as-is - resolving
+			// here too would interpolate the payload twice.
+			const execBody = buildExecBody(request, (s) => s);
+
+			// Script parts: the collection chain root to leaf, then the
+			// request's own. The engine joins them and runs the result as
+			// one script. Joining here meant a stored run could not say
+			// which part came from where.
+			const preScriptParts = scriptParts(
+				collectionAncestors,
+				(c) => c.preRequestScript,
+				ownerId,
+				request.preRequestScript
+			);
+			const postScriptParts = scriptParts(
+				collectionAncestors,
+				(c) => c.postRequestScript,
+				ownerId,
+				request.testScript
+			);
+
+			// Compose engine-side, then execute the composed payload unchanged.
+			// The inline shape (not compose-by-id) is deliberate: Send executes
+			// the *editor state*, which may be ahead of the saved row.
+			const composed = await engineComposeRequest({
+				request: {
+					method: request.method,
+					url: request.url,
+					headers: headersRecord,
+					body: execBody,
+					auth: { ...request.auth },
+					preRequestScripts: preScriptParts,
+					postRequestScripts: postScriptParts,
+					// Always sent, never elided: the engine defaults to
+					// following, so omitting `followRedirects: false` would
+					// silently follow the redirect the user asked to see.
+					followRedirects: request.followRedirects,
+					maxRedirects: request.maxRedirects,
+					// Same rule, same reason: an omitted httpVersion lets the
+					// engine's own default win silently, which is not a
+					// decision this client should hand over.
+					httpVersion: request.httpVersion,
+					// Identity for the script sandbox (pm.info), not an HTTP
+					// field - it rides through composition to /execute.
+					...execIdentity(request),
+				},
+				collectionId: ownerCollectionId,
+				environmentId: activeEnvironmentId || undefined,
+			});
+
+			return { composed, preScriptParts, postScriptParts };
+		},
+		[collectionAncestors, engineComposeRequest, activeEnvironmentId]
+	);
 
 	// Execute request callback
 	const handleExecute = useCallback(
@@ -184,67 +264,18 @@ export default function RequestBuilder() {
 			if (!fetchedRequest) return null;
 
 			try {
-				// Flatten enabled headers for execution; inject per-request system headers
-				const headersRecord = toFlatHeaders(request.headers);
-				headersRecord["X-Request-ID"] = generateUUID();
-				const version =
-					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
-				headersRecord["X-Vayu-Version"] = version;
-
-				// Shared with the History run view's send path - see execute-mapping.ts.
-				// Raw: since #226 the engine resolves {{variables}} and inherit auth
-				// (POST /compose), so the editor state goes over as-is - resolving
-				// here too would interpolate the payload twice.
-				const execBody = buildExecBody(request, (s) => s);
-
-				// Script parts: the collection chain root to leaf, then the
-				// request's own. The engine joins them and runs the result as
-				// one script. Joining here meant a stored run could not say
-				// which part came from where.
-				const preScriptParts = scriptParts(
-					collectionAncestors,
-					(c) => c.preRequestScript,
+				const { composed, preScriptParts, postScriptParts } = await composeForSend(
+					request,
 					fetchedRequest.id,
-					request.preRequestScript
+					fetchedRequest.collectionId
 				);
-				const postScriptParts = scriptParts(
-					collectionAncestors,
-					(c) => c.postRequestScript,
-					fetchedRequest.id,
-					request.testScript
-				);
-
-				// Compose engine-side, then execute the composed payload unchanged.
-				// The inline shape (not compose-by-id) is deliberate: Send executes
-				// the *editor state*, which may be ahead of the saved row.
-				const composed = await engineComposeRequest({
-					request: {
-						method: request.method,
-						url: request.url,
-						headers: headersRecord,
-						body: execBody,
-						auth: { ...request.auth },
-						preRequestScripts: preScriptParts,
-						postRequestScripts: postScriptParts,
-						// Always sent, never elided: the engine defaults to
-						// following, so omitting `followRedirects: false` would
-						// silently follow the redirect the user asked to see.
-						followRedirects: request.followRedirects,
-						maxRedirects: request.maxRedirects,
-						// Same rule, same reason: an omitted httpVersion lets the
-						// engine's own default win silently, which is not a
-						// decision this client should hand over.
-						httpVersion: request.httpVersion,
-						// Identity for the script sandbox (pm.info), not an HTTP
-						// field - it rides through composition to /execute.
-						...execIdentity(request),
-					},
-					collectionId: fetchedRequest.collectionId,
-					environmentId: activeEnvironmentId || undefined,
-				});
 
 				const result = await engineExecuteRequest(
-					{ ...composed, requestId: fetchedRequest.id },
+					// `stream: false` explicitly, never elided - the two answers
+					// this endpoint can give are different *shapes*, so which one
+					// is coming back is not a decision to hand to an engine-side
+					// default. See `ExecuteRequestRequest.stream`.
+					{ ...composed, requestId: fetchedRequest.id, stream: false },
 					activeEnvironmentId || undefined
 				);
 
@@ -306,13 +337,77 @@ export default function RequestBuilder() {
 		},
 		[
 			fetchedRequest,
-			engineComposeRequest,
+			composeForSend,
 			engineExecuteRequest,
 			activeEnvironmentId,
 			queryClient,
-			collectionAncestors,
 			showToast,
 		]
+	);
+
+	/**
+	 * Start a stream-flagged send (issue #574).
+	 *
+	 * The composition is the buffered path's, exactly; only the answer differs -
+	 * `202 {runId, eventsUrl}` and no exchange, because there is none yet. The
+	 * provider takes it from here: it registers the stream and the events hook
+	 * tails it.
+	 *
+	 * A refusal comes back as a response to render rather than as a thrown
+	 * error swallowed at the boundary. The engine's refusals here are ones a
+	 * user has to read and act on - a stream cannot carry scripts, and the
+	 * scripts a send carries include the collection chain's - so the message is
+	 * shown in the pane where the response would have been, and repeated as a
+	 * toast because the pane is easy to miss when the Events tab is the one on
+	 * screen.
+	 */
+	const handleExecuteStream = useCallback(
+		async (request: RequestState): Promise<StreamStartResult | null> => {
+			if (!fetchedRequest) return null;
+
+			try {
+				const { composed } = await composeForSend(
+					request,
+					fetchedRequest.id,
+					fetchedRequest.collectionId
+				);
+
+				const started = await apiService.executeStreamRequest({
+					...composed,
+					requestId: fetchedRequest.id,
+					environmentId: activeEnvironmentId || undefined,
+				});
+
+				// A stream is a design run like any other, so the context bar's
+				// Recent sends list has to hear about it now - it is not polled,
+				// and the run exists from this moment rather than when the stream
+				// ends.
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
+				});
+
+				return { ok: true, runId: started.runId, eventsUrl: started.eventsUrl };
+			} catch (error) {
+				console.error("Stream request failed:", error);
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				showToast(errorMsg, "error");
+				return {
+					ok: false,
+					response: {
+						status: 0,
+						statusText: "Error",
+						headers: {},
+						body: errorMsg,
+						bodyType: "text",
+						time: 0,
+						size: 0,
+						errorCode: "INTERNAL_ERROR",
+						errorMessage: errorMsg,
+					},
+				};
+			}
+		},
+		[fetchedRequest, composeForSend, activeEnvironmentId, queryClient, showToast]
 	);
 
 	// Save request callback
@@ -375,6 +470,7 @@ export default function RequestBuilder() {
 				followRedirects: request.followRedirects,
 				maxRedirects: request.maxRedirects,
 				httpVersion: request.httpVersion,
+				stream: request.stream,
 			});
 		},
 		[fetchedRequest, updateRequestMutation]
@@ -383,8 +479,17 @@ export default function RequestBuilder() {
 	// Start load test callback - shows the config dialog
 	const handleStartLoadTest = useCallback(
 		(request: RequestState) => {
-			// Single-active-run policy: if one is already streaming, point the
-			// user to it instead of starting another.
+			/*
+			 * Single-active-run policy: if one is already streaming, point the
+			 * user to it instead of starting another.
+			 *
+			 * This gate is about *load* runs only. A streaming design request
+			 * (issue #574) is not checked here and deliberately does not block
+			 * one: they are independent surfaces - a design stream holds one
+			 * consumer on one run's events and reports into the response pane,
+			 * while a load run owns the dashboard - and neither can be mistaken
+			 * for the other or read the other's numbers.
+			 */
 			if (useDashboardStore.getState().isStreaming) {
 				openTab({ type: "dashboard", entityId: null });
 				showToast("A load test is already running", "warning");
@@ -615,6 +720,7 @@ export default function RequestBuilder() {
 				initialRequest={initialRequest}
 				collectionId={fetchedRequest.collectionId}
 				onExecute={handleExecute}
+				onExecuteStream={handleExecuteStream}
 				onSave={handleSave}
 				onStartLoadTest={handleStartLoadTest}
 			>

@@ -19,7 +19,7 @@
  * Uses shared ResponseBody component for body display with Pretty/Raw/Preview modes.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
 	Tabs,
 	TabsContent,
@@ -32,6 +32,7 @@ import {
 	Kbd,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
+import { useExecutionEventsStore } from "@/stores";
 import { modKey } from "@/lib/platform";
 import {
 	ResponseBody as SharedResponseBody,
@@ -42,32 +43,92 @@ import {
 } from "@/components/shared/response-viewer";
 import { Callout, EmptyState } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
+import ResponseEvents from "./ResponseEvents";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
+import type { ResponseState } from "../../types";
 
-type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "tests" | "raw-request";
+type ResponseTab =
+	| "body"
+	| "headers"
+	| "cookies"
+	| "timing"
+	| "console"
+	| "tests"
+	| "events"
+	| "raw-request";
 
 export default function ResponseViewer() {
-	const { response, isExecuting } = useRequestBuilderContext();
+	const { request, response, isExecuting } = useRequestBuilderContext();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
 
-	// Loading state
-	if (isExecuting) {
+	/*
+	 * The live stream, when it is this request's (issue #574).
+	 *
+	 * Selected against the request on screen for the same reason the provider
+	 * does it: one builder serves every request tab, and rows from a stream
+	 * started elsewhere must not appear under this one.
+	 */
+	const requestId = request.id ?? null;
+	const streamIsMine = useExecutionEventsStore(
+		(s) => !!s.requestId && !!requestId && s.requestId === requestId
+	);
+	const liveOpen = useExecutionEventsStore((s) => s.open);
+	const liveEvents = useExecutionEventsStore((s) => s.events);
+	const liveIsStreaming = useExecutionEventsStore((s) => s.isStreaming);
+	const liveEndReason = useExecutionEventsStore((s) => s.endReason);
+	const liveTotalEvents = useExecutionEventsStore((s) => s.totalEvents);
+	const liveError = useExecutionEventsStore((s) => s.error);
+
+	const isStreaming = streamIsMine && liveIsStreaming;
+
+	/*
+	 * A stream has no exchange to render until its response headers arrive, so
+	 * the pane is given one built from the relay's `open` frame - the status,
+	 * the status text and the headers, which is everything the engine knows at
+	 * that point. Only when there is no stored response: once the stream ends
+	 * the provider swaps in what the run stored, and that is the record.
+	 *
+	 * Not persisted anywhere, deliberately. It describes a stream that is still
+	 * running, and the durable copy of a response is the one the finished run
+	 * wrote.
+	 */
+	const streamedResponse = useMemo<ResponseState | null>(() => {
+		if (response || !streamIsMine || !liveOpen) return null;
+		return {
+			status: liveOpen.statusCode,
+			statusText: liveOpen.statusText,
+			headers: liveOpen.headers,
+			body: "",
+			bodyType: "text" as const,
+			size: 0,
+			time: 0,
+		};
+	}, [response, streamIsMine, liveOpen]);
+
+	const shown = response ?? streamedResponse;
+
+	// Loading state. A stream that has been accepted but whose headers have not
+	// arrived belongs here too: the send is over - `isExecuting` was cleared
+	// when the engine answered - but there is genuinely nothing to draw yet.
+	if (isExecuting || (isStreaming && !shown)) {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
 					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
-					<p className="text-xs text-muted-foreground">Sending request…</p>
+					<p className="text-xs text-muted-foreground">
+						{isStreaming ? "Opening the event stream…" : "Sending request…"}
+					</p>
 				</div>
 			</div>
 		);
 	}
 
 	// Empty state
-	if (!response) {
+	if (!shown) {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="flex flex-col items-center text-center">
@@ -120,29 +181,48 @@ export default function ResponseViewer() {
 	 * empty state in particular was deleted earlier in this same branch for being
 	 * unreachable - this is what makes it reachable.
 	 */
-	const consoleLogCount = response.consoleLogs?.length ?? 0;
-	const hasScriptError = !!response.preScriptError || !!response.postScriptError;
-	const testResults = response.testResults ?? [];
+	const consoleLogCount = shown.consoleLogs?.length ?? 0;
+	const hasScriptError = !!shown.preScriptError || !!shown.postScriptError;
+	const testResults = shown.testResults ?? [];
+
+	/*
+	 * Two sources, one list (issue #574) - the handoff `ScenarioRunView` makes.
+	 *
+	 * The stored list wins the moment there is one: a finished run's trace is
+	 * the record, and it is the only copy carrying the truthful `totalEvents` /
+	 * `eventsTruncated` markers. `??`, not a length check: a stream that ended
+	 * having received nothing stores `[]`, and that is an answer, not an absence
+	 * to fall back from.
+	 *
+	 * `isStream` is what separates "not a stream" from "a stream with no events
+	 * yet", and it is true for either source - a restored run whose trace has an
+	 * `events` node, or a live one belonging to this request.
+	 */
+	const storedEvents = shown.events;
+	const events = storedEvents ?? (streamIsMine ? liveEvents : []);
+	const isStream = storedEvents !== undefined || streamIsMine;
+	const totalEvents = storedEvents ? shown.totalEvents : (liveTotalEvents ?? undefined);
+	const eventsTruncated = storedEvents ? shown.eventsTruncated : false;
+	const endReason = storedEvents
+		? shown.streamEndReason
+		: (streamIsMine && liveEndReason) || undefined;
 
 	// Client-side error state (status === 0 means no server response)
-	const isClientError = response.status === 0;
+	const isClientError = shown.status === 0;
 
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
 			<div className="flex-1 flex flex-col surface-card overflow-hidden">
 				<ResponseStatusBar
-					status={response.status}
-					statusText={response.statusText}
-					time={response.time}
-					size={response.size}
-					receivedAt={response.receivedAt}
-					restoredFrom={response.restoredFrom}
+					status={shown.status}
+					statusText={shown.statusText}
+					time={shown.time}
+					size={shown.size}
+					receivedAt={shown.receivedAt}
+					restoredFrom={shown.restoredFrom}
 				/>
-				<ClientErrorView
-					errorCode={response.errorCode}
-					errorMessage={response.errorMessage}
-				/>
+				<ClientErrorView errorCode={shown.errorCode} errorMessage={shown.errorMessage} />
 			</div>
 		);
 	}
@@ -159,14 +239,18 @@ export default function ResponseViewer() {
 			 * ResponseStatusBar.
 			 */}
 			<ResponseStatusBar
-				status={response.status}
-				statusText={response.statusText}
-				time={response.time}
-				size={response.size}
-				httpVersion={response.httpVersion}
-				httpVersionDowngraded={response.httpVersionDowngraded}
-				receivedAt={response.receivedAt}
-				restoredFrom={response.restoredFrom}
+				status={shown.status}
+				statusText={shown.statusText}
+				time={shown.time}
+				size={shown.size}
+				httpVersion={shown.httpVersion}
+				httpVersionDowngraded={shown.httpVersionDowngraded}
+				receivedAt={shown.receivedAt}
+				restoredFrom={shown.restoredFrom}
+				// Only while it is actually live. A finished stream's band shows
+				// the exchange it completed, and the Events tab is where its
+				// count and its end reason live.
+				streaming={isStreaming ? { events: events.length } : undefined}
 			/>
 
 			{/* Response Tabs */}
@@ -197,7 +281,7 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger value="headers">
 							<TabLabel>Headers</TabLabel>
-							<TabCount value={Object.keys(response.headers).length} />
+							<TabCount value={Object.keys(shown.headers).length} />
 						</TabsTrigger>
 						<TabsTrigger value="cookies">
 							<TabLabel>Cookies</TabLabel>
@@ -247,6 +331,17 @@ export default function ResponseViewer() {
 								</Badge>
 							)}
 						</TabsTrigger>
+						{/*
+						 * Always rendered, like the seven beside it (issue #59's
+						 * constant tab set) - a normal response gets an honest
+						 * "not an event stream" rather than a tab that comes and
+						 * goes. The count is the *received* total, which is not
+						 * the row count once a stored list has been capped.
+						 */}
+						<TabsTrigger value="events">
+							<TabLabel>Events</TabLabel>
+							<TabCount value={totalEvents ?? events.length} />
+						</TabsTrigger>
 						<TabsTrigger value="raw-request">
 							<TabLabel>Raw</TabLabel>
 						</TabsTrigger>
@@ -269,25 +364,25 @@ export default function ResponseViewer() {
 						 * run opened from History) may hold only the stored slice.
 						 * Say so, and how to get the whole thing back.
 						 */}
-						{response.bodyTruncated && (
+						{shown.bodyTruncated && (
 							<div className="px-4 pt-3 shrink-0">
 								<Callout severity="warning" title="Body truncated for storage">
-									Only the first {formatSize(response.body.length)} of{" "}
-									{formatSize(response.bodyBytes ?? response.body.length)} was
-									kept. Re-send the request to view the full response.
+									Only the first {formatSize(shown.body.length)} of{" "}
+									{formatSize(shown.bodyBytes ?? shown.body.length)} was kept.
+									Re-send the request to view the full response.
 								</Callout>
 							</div>
 						)}
 						<div className="flex-1 min-h-0">
 							<SharedResponseBody
-								body={response.body}
-								bodyRaw={response.bodyRaw}
-								headers={response.headers}
+								body={shown.body}
+								bodyRaw={shown.bodyRaw}
+								headers={shown.headers}
 								showModeToggle
 								/*
 								 * Copy and download live *here*, not on the tab row.
 								 *
-								 * They act on the body - `content={response.body}` - and
+								 * They act on the body - `content={shown.body}` - and
 								 * always did, so on the tab row they sat above Headers,
 								 * Timing and Raw claiming to act on whatever you were
 								 * looking at while copying something else. Moving them
@@ -296,13 +391,13 @@ export default function ResponseViewer() {
 								 * they were taking, which is what let all seven tabs
 								 * render without the strip scrolling.
 								 *
-								 * `response.bodyType` names the download; the history
+								 * `shown.bodyType` names the download; the history
 								 * viewer has no such field and keeps `.txt`.
 								 */
 								actions={
 									<ResponseActions
-										content={response.body}
-										fileExtension={response.bodyType}
+										content={shown.body}
+										fileExtension={shown.bodyType}
 									/>
 								}
 							/>
@@ -311,26 +406,26 @@ export default function ResponseViewer() {
 				</TabsContent>
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 					<ResponseHeadersPanel
-						requestHeaders={response.requestHeaders}
-						responseHeaders={response.headers}
+						requestHeaders={shown.requestHeaders}
+						responseHeaders={shown.headers}
 					/>
 				</TabsContent>
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
-					<ResponseCookies headers={response.headers} />
+					<ResponseCookies headers={shown.headers} />
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
-					{response.timing ? (
-						<ResponseTimingTab timing={response.timing} />
+					{shown.timing ? (
+						<ResponseTimingTab timing={shown.timing} />
 					) : (
 						<EmptyState variant="inline" title="No timing recorded" />
 					)}
 				</TabsContent>
 				<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
 					<ConsoleOutput
-						logs={response.consoleLogs || []}
+						logs={shown.consoleLogs || []}
 						errors={{
-							pre: response.preScriptError,
-							post: response.postScriptError,
+							pre: shown.preScriptError,
+							post: shown.postScriptError,
 						}}
 					/>
 				</TabsContent>
@@ -345,11 +440,19 @@ export default function ResponseViewer() {
 						/>
 					)}
 				</TabsContent>
-				<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
-					<RawRequestResponse
-						rawRequest={response.rawRequest || ""}
-						response={response}
+				<TabsContent value="events" className="mt-0 flex-1 overflow-hidden">
+					<ResponseEvents
+						events={events}
+						totalEvents={totalEvents}
+						eventsTruncated={eventsTruncated}
+						endReason={endReason}
+						isStreaming={isStreaming}
+						isStream={isStream}
+						error={streamIsMine ? liveError : null}
 					/>
+				</TabsContent>
+				<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
+					<RawRequestResponse rawRequest={shown.rawRequest || ""} response={shown} />
 				</TabsContent>
 			</Tabs>
 		</div>

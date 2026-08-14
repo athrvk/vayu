@@ -43,12 +43,21 @@ describe("every send site composes engine-side and never resolves client-side", 
 	});
 
 	it("the builder composes for Send and for a load test", () => {
-		// One compose per send site: handleExecute and handleConfirmLoadTest.
+		/*
+		 * Two compose call sites, not three. `composeForSend` is shared by the
+		 * buffered Send and the streaming one (issue #574) - they differ only in
+		 * which endpoint answer they take, so a second composer for the stream
+		 * would be a copy that could drift into measuring a different request.
+		 * The other site is `handleConfirmLoadTest`.
+		 */
 		const calls = (builder ?? "").match(/engineComposeRequest\(\{/g) ?? [];
 		expect(calls).toHaveLength(2);
 		// The composed result is what gets executed / started, not a rebuilt one.
-		expect(builder).toContain("{ ...composed, requestId: fetchedRequest.id }");
+		expect(builder).toContain("{ ...composed, requestId: fetchedRequest.id, stream: false }");
 		expect(builder).toContain("...(composed as unknown as StartLoadTestRequest)");
+		// The streaming send spreads the same composed payload.
+		expect(builder).toContain("apiService.executeStreamRequest({");
+		expect(builder).toContain("...composed,");
 	});
 
 	it("the run view composes for replay", () => {

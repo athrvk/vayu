@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
@@ -34,7 +34,12 @@ import UrlBar from "./index";
 vi.mock("./MethodSelector", () => ({ default: () => null }));
 vi.mock("./UrlInput", () => ({ default: () => null }));
 
-function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
+interface CtxOverrides {
+	isStreaming?: boolean;
+	stopStream?: () => Promise<void>;
+}
+
+function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBuilderContextValue {
 	return {
 		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
 		setRequest: vi.fn(),
@@ -50,11 +55,17 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 		// Likewise the Content-Type row a body mode added: the Body panel's record.
 		getAutoContentType: () => null,
 		setAutoContentType: vi.fn(),
+		// Likewise the Accept row the Event stream toggle added: the Settings
+		// panel's record (issue #574).
+		getAutoAccept: () => null,
+		setAutoAccept: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",
 		setActiveTab: vi.fn(),
 		isExecuting: false,
+		isStreaming: overrides.isStreaming ?? false,
+		stopStream: overrides.stopStream ?? vi.fn(async () => {}),
 		isSaving: false,
 		hasUnsavedChanges: false,
 		saveStatus: "idle",
@@ -73,12 +84,12 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 	};
 }
 
-function renderBar(canStartLoadTest: boolean) {
+function renderBar(canStartLoadTest: boolean, overrides: CtxOverrides = {}) {
 	return render(
 		// Both buttons carry their shortcut in a tooltip, and Radix throws
 		// without a provider ancestor. The app mounts one at its root.
 		<TooltipProvider>
-			<RequestBuilderContext.Provider value={ctx(canStartLoadTest)}>
+			<RequestBuilderContext.Provider value={ctx(canStartLoadTest, overrides)}>
 				<UrlBar />
 			</RequestBuilderContext.Provider>
 		</TooltipProvider>
@@ -282,5 +293,49 @@ describe("control heights", () => {
 		// of thing nobody can name but everybody sees.
 		const { container } = renderBar(true);
 		expect(container.querySelector(".surface-card")?.className).toContain("h-8");
+	});
+});
+
+/**
+ * While a stream is open, Send is Stop (issue #574).
+ *
+ * A stream ends by being stopped or by hitting one of the engine's bounds, and
+ * sending again while one is open is not something this surface offers - the
+ * run you would be replacing is the one you would be stopping. So the control
+ * has to *become* the available action rather than sit next to it, and the
+ * failure mode worth guarding is the quiet one: a Send button still on screen
+ * during a stream, doing something the user did not mean.
+ */
+describe("the Send button while a stream is open", () => {
+	it("becomes Stop", () => {
+		renderBar(true, { isStreaming: true });
+
+		expect(screen.getByRole("button", { name: /^stop$/i })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+	});
+
+	it("stops the stream at the engine when clicked", () => {
+		const stopStream = vi.fn(async () => {});
+		renderBar(true, { isStreaming: true, stopStream });
+
+		fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+
+		expect(stopStream).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the attached group's shared edge", () => {
+		// Same three-state geometry as Send: the member that owns the left half
+		// squares its right edge wherever Load Test joins it.
+		renderBar(true, { isStreaming: true });
+		expect(screen.getByRole("button", { name: /^stop$/i }).className).toContain("rounded-l-md");
+
+		cleanup();
+		renderBar(false, { isStreaming: true });
+		expect(screen.getByRole("button", { name: /^stop$/i }).className).toContain("rounded-md");
+	});
+
+	it("goes back to Send once the stream has ended", () => {
+		renderBar(true, { isStreaming: false });
+		expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
 	});
 });

@@ -89,8 +89,15 @@ function Hint({
 }
 
 export default function UrlBar() {
-	const { request, isExecuting, executeRequest, startLoadTest, canStartLoadTest } =
-		useRequestBuilderContext();
+	const {
+		request,
+		isExecuting,
+		isStreaming,
+		stopStream,
+		executeRequest,
+		startLoadTest,
+		canStartLoadTest,
+	} = useRequestBuilderContext();
 	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
 	const openTab = useTabsStore((s) => s.openTab);
 
@@ -150,37 +157,72 @@ export default function UrlBar() {
 			    rather than on the group, because the group has a one-member state
 			    and the rules differ between them. */}
 			<div className="flex shrink-0">
-				<Hint chord={SEND_CHORD} label="Send request">
+				{/*
+				 * While a stream is open, Send *is* Stop (issue #574).
+				 *
+				 * Not a second button beside it: a stream ends by being stopped or
+				 * by hitting one of the engine's bounds, and sending again while
+				 * one is open is not a thing this surface offers - the run being
+				 * replaced is exactly the one you would be stopping. So the one
+				 * control does the one available action, on the error tokens
+				 * because stopping is a destructive verb, with the load button's
+				 * live dot for the same reason it has one: a stream is *live*, and
+				 * no static colour says so.
+				 *
+				 * No `Hint` wrapper: Cmd/Ctrl+Enter still sends, and a tooltip
+				 * naming a chord that does something else on the button under the
+				 * pointer would be worse than no tooltip.
+				 */}
+				{isStreaming ? (
 					<button
-						onClick={executeRequest}
-						disabled={!canExecute}
+						onClick={() => void stopStream()}
 						className={cn(
 							"h-8 px-4 inline-flex items-center gap-1.5 shrink-0",
-							"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
-							"border border-primary-fill",
-							/*
-							 * There was no hover state at all. `hover:bg-primary-fill/90` is
-							 * the `Button` primitive's own `default` variant - these are
-							 * hand-rolled so the pair can share an edge, which means they
-							 * carry the convention rather than inherit it. The border moves
-							 * with the fill, or a lighter ring appears around a darkening
-							 * button.
-							 */
-							"hover:bg-primary-fill/90 hover:border-primary-fill/90",
-							"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
+							"text-xs font-semibold font-[inherit] transition-colors",
+							"text-status-error-text bg-status-error/10 hover:bg-status-error/20",
+							"border border-status-error/40",
 							sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
 						)}
 					>
-						{isExecuting ? (
-							<>
-								<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
-								Sending
-							</>
-						) : (
-							"Send"
-						)}
+						<span
+							aria-hidden="true"
+							className="size-1.5 rounded-full bg-status-error animate-pulse"
+						/>
+						Stop
 					</button>
-				</Hint>
+				) : (
+					<Hint chord={SEND_CHORD} label="Send request">
+						<button
+							onClick={executeRequest}
+							disabled={!canExecute}
+							className={cn(
+								"h-8 px-4 inline-flex items-center gap-1.5 shrink-0",
+								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
+								"border border-primary-fill",
+								/*
+								 * There was no hover state at all. `hover:bg-primary-fill/90` is
+								 * the `Button` primitive's own `default` variant - these are
+								 * hand-rolled so the pair can share an edge, which means they
+								 * carry the convention rather than inherit it. The border moves
+								 * with the fill, or a lighter ring appears around a darkening
+								 * button.
+								 */
+								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
+								sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
+							)}
+						>
+							{isExecuting ? (
+								<>
+									<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
+									Sending
+								</>
+							) : (
+								"Send"
+							)}
+						</button>
+					</Hint>
+				)}
 
 				{/* Hidden entirely when the builder cannot load test - a detached copy
 				    of a past design run has no load-test handler, so showing the

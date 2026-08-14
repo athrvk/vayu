@@ -53,7 +53,12 @@ vi.mock("@/queries", () => ({
 	useUpdateEnvironmentMutation: () => ({ mutate: mutateEnvironment }),
 	useLastDesignRunQuery: () => ({ run: null, report: null, isLoading: false }),
 }));
-vi.mock("@/stores", () => ({
+vi.mock("@/stores", async (importOriginal) => ({
+	// The real event-stream store, which the provider reads to know whether a
+	// stream of its own is open (issue #574). Left real rather than stubbed:
+	// it is a plain zustand store with no side effects, and a stub would have
+	// to reproduce its selectors to answer "nothing is streaming".
+	...(await importOriginal<typeof import("@/stores")>()),
 	useSessionStore: () => session,
 	useResponseStore: () => ({ getResponse: () => null, setResponse: vi.fn() }),
 }));

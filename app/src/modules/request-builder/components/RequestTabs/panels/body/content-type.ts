@@ -21,15 +21,23 @@
  * are not the same header: a Content-Type the *user* typed must survive a mode
  * change, and it is indistinguishable by value.
  *
- * The rule is small but it is a *rule*, so it lives here rather than inside a
- * click handler, where the only way to exercise it is to drive a Radix Select
- * through jsdom - which does not commit a value there.
+ * That rule now lives in `utils/auto-header.ts`, because the Event stream
+ * toggle needs the identical one for `Accept` (issue #574). What stays here is
+ * the only part that is about bodies: **which** Content-Type a mode requires.
+ * The rule is small but it is a *rule*, so it lives in a module rather than
+ * inside a click handler, where the only way to exercise it is to drive a Radix
+ * Select through jsdom - which does not commit a value there.
  */
 
-import type { KeyValueEntry } from "@/types";
-import type { AutoContentType, BodyMode } from "../../../../types";
-import type { KeyValueItem } from "@/types";
-import { generateId } from "@/lib/id";
+import type { KeyValueEntry, KeyValueItem } from "@/types";
+import type { AutoHeader, BodyMode } from "../../../../types";
+import {
+	autoHeaderRow,
+	autoHeaderToAdd,
+	switchAutoHeader,
+	withoutAutoHeader,
+	type AutoHeaderSwitch,
+} from "../../../../utils/auto-header";
 
 export const CONTENT_TYPE = "Content-Type";
 
@@ -43,9 +51,6 @@ const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
 	graphql: "application/json",
 	jsonrpc: "application/json",
 };
-
-const isContentType = (item: KeyValueEntry) =>
-	item.key.trim().toLowerCase() === CONTENT_TYPE.toLowerCase();
 
 /** The Content-Type a mode must be sent with, or null if it needs none. */
 export function requiredContentType(mode: BodyMode): string | null {
@@ -63,84 +68,40 @@ export function requiredContentType(mode: BodyMode): string | null {
  * A disabled Content-Type row does not count as declaring one - it is not sent,
  * so the request would go out without the header.
  *
- * Typed on `KeyValueEntry` rather than the UI's `KeyValueItem`: the rule reads
- * only `key` and `enabled`, and the importers ask the same question of rows
- * that have no `id` yet. An imported GraphQL request used to reach the wire as
- * `x-www-form-urlencoded` - libcurl's default - because this fired only on an
- * interactive mode switch, and most GraphQL servers answer that with a 400.
+ * Typed on `KeyValueEntry` rather than the UI's `KeyValueItem` because the
+ * importers ask the same question of rows that have no `id` yet. An imported
+ * GraphQL request used to reach the wire as `x-www-form-urlencoded` - libcurl's
+ * default - because this fired only on an interactive mode switch, and most
+ * GraphQL servers answer that with a 400.
  */
 export function contentTypeToAdd(mode: BodyMode, headers: KeyValueEntry[]): string | null {
-	const required = requiredContentType(mode);
-	if (!required) return null;
-	return headers.some((h) => isContentType(h) && h.enabled) ? null : required;
+	return autoHeaderToAdd(CONTENT_TYPE, requiredContentType(mode), headers);
 }
 
-/**
- * Is this the row we wrote, unchanged?
- *
- * A row the user has since retyped - a different value, or a different header
- * name - is theirs now, and stays. Being switched off does not hand it over:
- * disabling our row is not the same as adopting it.
- */
-const isOurs = (item: KeyValueItem, auto: AutoContentType) =>
-	item.id === auto.rowId && isContentType(item) && item.value === auto.value;
-
 /** The header list with the row this panel added taken back out. */
-export function withoutContentType(headers: KeyValueItem[], auto: AutoContentType): KeyValueItem[] {
-	return headers.filter((h) => !isOurs(h, auto));
+export function withoutContentType(headers: KeyValueItem[], auto: AutoHeader): KeyValueItem[] {
+	return withoutAutoHeader(headers, CONTENT_TYPE, auto);
 }
 
 /** The header row to append, ready for `updateField("headers", …)`. */
 export function contentTypeRow(value: string): KeyValueItem {
-	return { id: generateId(), key: CONTENT_TYPE, value, enabled: true };
+	return autoHeaderRow(CONTENT_TYPE, value);
 }
 
-export interface ContentTypeSwitch {
-	/** Headers for the new mode. The same array when nothing changed. */
-	headers: KeyValueItem[];
-	/** The row this panel now owns, or null if it owns none. */
-	auto: AutoContentType | null;
-	/** The value just added, for the notice, or null if nothing was added. */
-	added: string | null;
-}
+export type ContentTypeSwitch = AutoHeaderSwitch;
 
 /**
  * Remove the header the old mode needed, add the one the new mode does.
  *
- * Both halves in one place: they read and write the same array, and a panel
- * that did them as two `updateField("headers", …)` calls would compute the
- * second against the headers it had before the first.
- *
- * `requestId` is the request being edited *now*. A record belonging to another
- * request is dropped rather than applied - the provider's ref outlives the
- * request that filled it, and row ids are not unique across a duplicated
- * request.
- *
- * Switching between two modes that need the *same* header keeps the row (and
- * the record with it) rather than removing and re-adding it, which would churn
- * the Headers tab and lose the row's position.
+ * `requestId` is the request being edited *now*; see `switchAutoHeader` for
+ * why a record belonging to another request is dropped rather than applied,
+ * and why both halves happen in one pass over one array.
  */
 export function switchContentType(
 	mode: BodyMode,
 	headers: KeyValueItem[],
 	requestId: string | null,
-	auto: AutoContentType | null
+	auto: AutoHeader | null
 ): ContentTypeSwitch {
-	let next = headers;
-	let ours = auto?.requestId === requestId ? auto : null;
-
-	if (ours && requiredContentType(mode) !== ours.value) {
-		next = withoutContentType(next, ours);
-		ours = null;
-	}
-
-	const required = contentTypeToAdd(mode, next);
-	if (!required) return { headers: next, auto: ours, added: null };
-
-	const row = contentTypeRow(required);
-	return {
-		headers: [...next, row],
-		auto: { requestId, rowId: row.id, value: required },
-		added: required,
-	};
+	return switchAutoHeader(CONTENT_TYPE, requiredContentType(mode), headers, requestId, auto);
 }

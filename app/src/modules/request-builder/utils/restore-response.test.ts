@@ -21,7 +21,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { responseFromRunResult, timingFromTrace, type RunResultSample } from "./restore-response";
+import {
+	eventsFromTrace,
+	responseFromRunResult,
+	timingFromTrace,
+	type RunResultSample,
+} from "./restore-response";
 
 /** A design-run result as `GET /runs/:id/report` returns it. */
 function sample(overrides: Partial<RunResultSample> = {}): RunResultSample {
@@ -382,5 +387,88 @@ describe("timingFromTrace", () => {
 
 	it("falls back to the trace total when the result carries no latency", () => {
 		expect(timingFromTrace({ totalMs: 77, firstByteMs: 70 }, undefined)?.totalMs).toBe(77);
+	});
+});
+
+/**
+ * A streaming run's timeline has to survive the same restart (issue #574).
+ *
+ * The whole point of the stored `events` node is that reopening a finished
+ * stream from History shows what it received. Its two markers are the part that
+ * cannot be recomputed here: the engine compared the true total against what it
+ * stored, and a reader on this side does not know what the cap was when the run
+ * happened - so deriving `eventsTruncated` from `items.length` would quietly
+ * turn a capped list into a complete one.
+ */
+describe("eventsFromTrace", () => {
+	it("gives nothing at all for a trace that is not a stream's", () => {
+		// Absent, not empty: the Events tab tells "not a stream" from "a stream
+		// that produced nothing" by exactly this difference.
+		expect(eventsFromTrace({})).toEqual({});
+		expect(responseFromRunResult(sample())).not.toHaveProperty("events");
+	});
+
+	it("restores the list, the markers and the end reason", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					...sample().trace,
+					events: {
+						items: [{ event: "token", data: "hi", sourceId: "7" }],
+						totalEvents: 4000,
+						eventsTruncated: true,
+						endReason: "maxStreamEvents",
+					},
+				},
+			})
+		);
+
+		expect(restored?.events).toEqual([{ event: "token", data: "hi", sourceId: "7" }]);
+		expect(restored?.totalEvents).toBe(4000);
+		expect(restored?.eventsTruncated).toBe(true);
+		expect(restored?.streamEndReason).toBe("maxStreamEvents");
+	});
+
+	it("keeps the engine's total rather than counting the rows", () => {
+		// Mutation check: recompute `totalEvents` from `items.length` here and
+		// this is the assertion that reddens.
+		const restored = eventsFromTrace({
+			events: { items: [], totalEvents: 12, eventsTruncated: true, endReason: "stopped" },
+		});
+		expect(restored.totalEvents).toBe(12);
+		expect(restored.events).toEqual([]);
+	});
+
+	it("restores an empty-but-real timeline as an empty list", () => {
+		const restored = eventsFromTrace({
+			events: { items: [], totalEvents: 0, eventsTruncated: false, endReason: "completed" },
+		});
+		expect(restored.events).toEqual([]);
+		expect(restored.eventsTruncated).toBe(false);
+	});
+
+	it("carries the events of a stream that ended without a response node", () => {
+		// A run that failed before any response still recorded whatever the
+		// stream received, and `build_result_trace` writes the node either way.
+		const restored = responseFromRunResult(
+			sample({
+				statusCode: 0,
+				trace: {
+					request: { method: "GET", url: "https://api.example.test/sse" },
+					error_type: "CONNECTION_FAILED",
+					error_message: "connection reset",
+					events: {
+						items: [{ event: "message", data: "before the drop" }],
+						totalEvents: 1,
+						eventsTruncated: false,
+						endReason: "error",
+					},
+				},
+			})
+		);
+
+		expect(restored?.status).toBe(0);
+		expect(restored?.events).toHaveLength(1);
+		expect(restored?.streamEndReason).toBe("error");
 	});
 });

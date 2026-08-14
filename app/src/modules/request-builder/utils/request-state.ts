@@ -16,6 +16,7 @@ import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
+	DEFAULT_STREAM,
 	type HttpVersion,
 } from "@/constants/request";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
@@ -55,6 +56,7 @@ export const createDefaultRequestState = (
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
 		httpVersion,
+		stream: DEFAULT_STREAM,
 	};
 };
 
@@ -64,20 +66,21 @@ export const createDefaultRequestState = (
  * defaults rather than tracking "the user opened the tab", so a request that is
  * toggled off and back on stops badging again.
  *
- * Covers the redirect policy *and* the protocol: a request that only changes
- * `httpVersion` (redirects left at their defaults) must still badge, which is
- * why this checks all three fields rather than being named (and scoped) after
- * redirects alone.
+ * Covers the redirect policy, the protocol *and* the event-stream flag: a
+ * request that only changes `httpVersion` (redirects left at their defaults)
+ * must still badge, which is why this checks every field the tab owns rather
+ * than being named (and scoped) after redirects alone.
  *
  * Lives here rather than in `SettingsPanel` so that file only exports its
  * component (`react-refresh/only-export-components`).
  */
 export function isRequestSettingsNonDefault(
-	state: Pick<RequestState, "followRedirects" | "maxRedirects" | "httpVersion">
+	state: Pick<RequestState, "followRedirects" | "maxRedirects" | "httpVersion" | "stream">
 ): boolean {
 	return (
 		state.followRedirects !== DEFAULT_FOLLOW_REDIRECTS ||
 		state.maxRedirects !== DEFAULT_MAX_REDIRECTS ||
-		state.httpVersion !== DEFAULT_HTTP_VERSION
+		state.httpVersion !== DEFAULT_HTTP_VERSION ||
+		state.stream !== DEFAULT_STREAM
 	);
 }

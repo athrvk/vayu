@@ -184,6 +184,11 @@ bool is_create) {
         return err;
     }
 
+    // Consume the response as an event stream (issue #574). Through the shared
+    // applier rather than the by-id route alone, so `POST /import/apply` -
+    // which runs this same function over a bulk payload - carries it too.
+    apply_bool_field (json, "stream", r.stream, false, is_create);
+
     return std::nullopt;
 }
 
@@ -378,7 +383,7 @@ void register_request_routes (RouteContext& ctx) {
      * Body params: collectionId, name, method, url (all required), description,
      * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
      * preRequestScript, postRequestScript, order, followRedirects,
-     * maxRedirects, httpVersion (absent/null seeds from the
+     * maxRedirects, stream, httpVersion (absent/null seeds from the
      * "defaultHttpVersion" config entry; an unrecognized value is a 400, never
      * silently coerced).
      * Returns: The created request object, or 400 (body `id`, missing required

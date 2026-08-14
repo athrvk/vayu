@@ -453,6 +453,45 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentKeepsNullResets) {
     EXPECT_EQ (reset["maxRedirects"], 10);
 }
 
+// `requests.stream` (issue #574). It follows the redirect policy's contract
+// exactly - absent keeps, null resets, a non-boolean is ignored rather than
+// rejected - and it is the app's Event stream toggle that persists here, so a
+// round trip that silently dropped it would look like a toggle that works until
+// the tab is reopened.
+TEST_F (ResourceWriteRouteTest, RequestStreamFlagRoundTrips) {
+    const std::string collection = make_collection ();
+
+    auto [created_status, created] = create_request_response (*db_,
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com/sse" } });
+    ASSERT_EQ (created_status, 200);
+    EXPECT_FALSE (created["stream"].get<bool> ())
+    << "a request is not a stream until it is told it is";
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [on_status, on] = update_request_response (*db_, id, json{ { "stream", true } });
+    ASSERT_EQ (on_status, 200);
+    EXPECT_TRUE (on["stream"].get<bool> ());
+
+    // Absent -> keep. This is the hop the toggle would lose on any other write.
+    auto [keep_status, keep] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (keep_status, 200);
+    EXPECT_TRUE (keep["stream"].get<bool> ());
+
+    // Null -> reset to the default.
+    auto [reset_status, reset] = update_request_response (*db_, id, json{ { "stream", nullptr } });
+    ASSERT_EQ (reset_status, 200);
+    EXPECT_FALSE (reset["stream"].get<bool> ());
+
+    // A non-boolean is ignored rather than rejected, like `followRedirects`.
+    ASSERT_EQ (update_request_response (*db_, id, json{ { "stream", true } }).first, 200);
+    auto [ignored_status, ignored] =
+    update_request_response (*db_, id, json{ { "stream", "yes" } });
+    ASSERT_EQ (ignored_status, 200);
+    EXPECT_TRUE (ignored["stream"].get<bool> ());
+}
+
 TEST_F (ResourceWriteRouteTest, RequestNullNoDefaultFieldIsRejected) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);

@@ -231,6 +231,11 @@ inline auto make_storage (const std::string& path) {
     // reorder of the HttpVersion enum. NOT NULL with a default_value so
     // sync_schema can ALTER TABLE ADD COLUMN onto an existing requests table.
     make_column ("http_version", &Request::http_version, default_value ("auto")),
+    // The SSE execution flag (issue #574). Same NOT NULL + default_value shape
+    // as the two above, and for the same reason: sync_schema ALTERs it onto an
+    // existing requests table and every pre-existing row backfills to "not a
+    // stream", which is what they all were.
+    make_column ("stream", &Request::stream, default_value (false)),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 
