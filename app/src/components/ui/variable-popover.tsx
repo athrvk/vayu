@@ -44,6 +44,7 @@ import { Kbd } from "./kbd";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
+import { isDataVariableName } from "@/lib/variable-resolution";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 
@@ -149,12 +150,26 @@ export function VariablePopover({
 
 	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
 
+	/*
+	 * A `data.*` name is not an undefined variable, so none of the undefined
+	 * treatment applies to it: it addresses the reserved data namespace (#402),
+	 * which is disjoint from the scopes. Creating a variable of that name writes
+	 * something that can never answer for the column - both resolvers skip the
+	 * scopes for these names by design - so the offer would be a dead end that
+	 * leaves the token exactly as it was.
+	 *
+	 * Guarded here rather than only at the painter because the popover takes its
+	 * name as a prop and is reachable from any caller that renders a token.
+	 */
+	const isDataName = isDataVariableName(name);
+
 	// Creating is only offered where a write would land somewhere.
 	const creatableScopes = useMemo(
 		() => SCOPE_PREFERENCE.filter((s) => writableScopes?.includes(s)),
 		[writableScopes]
 	);
-	const canCreate = !resolved && !!onValueChange && !disabled && creatableScopes.length > 0;
+	const canCreate =
+		!resolved && !isDataName && !!onValueChange && !disabled && creatableScopes.length > 0;
 	const [createScope, setCreateScope] = useState<VariableScope | null>(null);
 	// Falls back rather than storing a default, so a scope that stops being
 	// writable (the environment was deselected) cannot leave a stale selection
@@ -316,6 +331,10 @@ export function VariablePopover({
 									variant="full"
 									className="h-[18px] leading-none"
 								/>
+							) : isDataName ? (
+								<span className="inline-flex h-[18px] items-center rounded-md border border-muted-foreground/40 px-1.5 text-[10px] leading-none text-muted-foreground">
+									data
+								</span>
 							) : (
 								<span className="inline-flex h-[18px] items-center rounded-md border border-destructive-text/40 px-1.5 text-[10px] leading-none text-destructive-text">
 									undefined
@@ -499,6 +518,11 @@ export function VariablePopover({
 								</Button>
 							</div>
 						</>
+					) : isDataName ? (
+						<div className="text-sm text-muted-foreground">
+							Bound per iteration by the run&rsquo;s data file. Not a variable -
+							defining one with this name would change nothing.
+						</div>
 					) : (
 						<div className="text-sm text-destructive-text">
 							Variable not defined. Define it in Globals, an Environment, or

@@ -33,10 +33,11 @@ import { VariableAutocomplete, SuggestionList } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
-import DynamicVariableToken from "./DynamicVariableToken";
+import RuntimeToken from "./RuntimeToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { isDataVariableName } from "@/lib/variable-resolution";
 
 interface VariableInputProps {
 	value: string;
@@ -340,6 +341,24 @@ export default function VariableInput({
 
 		return segments.map((seg, i) => {
 			if (seg.type === "variable" && seg.varName) {
+				/*
+				 * The reserved namespace is read *before* the scopes, exactly as
+				 * `resolveTemplate` reads it: `data.*` is disjoint from the tiers,
+				 * so a variable someone happened to name `data.email` must not
+				 * answer for the column - and must not paint the token as though
+				 * it had. Only a collection run's iteration binds one.
+				 */
+				if (isDataVariableName(seg.varName)) {
+					return (
+						<span key={`${i}-${seg.varName}`} data-variable-token>
+							<RuntimeToken
+								name={seg.varName}
+								description="Bound by the run's data file"
+								note="per iteration"
+							/>
+						</span>
+					);
+				}
 				const varInfo = allVariables[seg.varName];
 				// A generator only shows through when nothing defines the name -
 				// the same order the resolver uses, so the token cannot describe a
@@ -348,9 +367,10 @@ export default function VariableInput({
 				if (dynamic) {
 					return (
 						<span key={`${i}-${seg.varName}`} data-variable-token>
-							<DynamicVariableToken
+							<RuntimeToken
 								name={dynamic.name}
 								description={dynamic.description}
+								note="generated per use"
 							/>
 						</span>
 					);
