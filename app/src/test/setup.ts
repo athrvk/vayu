@@ -81,6 +81,18 @@ if (hasDom && typeof Element.prototype.setPointerCapture !== "function") {
 	};
 }
 
+/*
+ * jsdom has no layout, so it implements no scrolling either and
+ * `scrollIntoView` is absent from `Element.prototype`. Radix's Select calls it
+ * on the option it is about to highlight when a listbox opens, so without this
+ * the *whole* open throws - the value never changes and the failure surfaces
+ * later as "cannot find the field that mode reveals", nowhere near the cause.
+ * A no-op is the honest stub: there is nothing to scroll.
+ */
+if (hasDom && typeof Element.prototype.scrollIntoView !== "function") {
+	Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 if (typeof globalThis.ResizeObserver === "undefined") {
 	globalThis.ResizeObserver = class {
 		observe() {}

@@ -150,24 +150,44 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
-					<div className="flex items-center justify-between gap-4">
-						<Label htmlFor="new-issuer-expiry" className="leading-snug">
-							Token lifetime
-							<span className="block text-xs font-normal text-muted-foreground">
-								Seconds. What `exp` is stamped with, and what `expires_in` reports.
-							</span>
-						</Label>
-						<Input
-							id="new-issuer-expiry"
-							type="number"
-							min={1}
-							max={MAX_EXPIRES_IN_SECONDS}
-							step={1}
-							value={expiresIn}
-							onChange={(e) => setExpiresIn(e.target.value)}
-							className="w-28 shrink-0"
-							aria-invalid={!expiresInValid}
-						/>
+					{/* The bound in words, not only in `aria-invalid` and a disabled
+					    button. A field that reddens while Start greys out states
+					    that something is wrong and never which field or why - and
+					    `aria-invalid` alone announces "invalid" with no correction.
+					    The claims box below already did this; the two numbers did
+					    not. */}
+					<div className="space-y-1">
+						<div className="flex items-center justify-between gap-4">
+							<Label htmlFor="new-issuer-expiry" className="leading-snug">
+								Token lifetime
+								<span className="block text-xs font-normal text-muted-foreground">
+									Seconds. What `exp` is stamped with, and what `expires_in`
+									reports.
+								</span>
+							</Label>
+							<Input
+								id="new-issuer-expiry"
+								type="number"
+								min={1}
+								max={MAX_EXPIRES_IN_SECONDS}
+								step={1}
+								value={expiresIn}
+								onChange={(e) => setExpiresIn(e.target.value)}
+								className="w-28 shrink-0"
+								aria-invalid={!expiresInValid}
+								aria-describedby={
+									expiresInValid ? undefined : "new-issuer-expiry-error"
+								}
+							/>
+						</div>
+						{!expiresInValid && (
+							<p
+								id="new-issuer-expiry-error"
+								className="text-xs text-destructive-text"
+							>
+								{`A whole number of seconds, 1 to ${MAX_EXPIRES_IN_SECONDS}.`}
+							</p>
+						)}
 					</div>
 
 					<div className="flex items-center justify-between gap-4">
@@ -197,24 +217,37 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 					</div>
 
 					{failureMode === "slow" && (
-						<div className="flex items-center justify-between gap-4">
-							<Label htmlFor="new-issuer-slow" className="leading-snug">
-								Delay
-								<span className="block text-xs font-normal text-muted-foreground">
-									Milliseconds to wait before answering normally.
-								</span>
-							</Label>
-							<Input
-								id="new-issuer-slow"
-								type="number"
-								min={0}
-								max={MAX_SLOW_MS}
-								step={100}
-								value={slowMs}
-								onChange={(e) => setSlowMs(e.target.value)}
-								className="w-28 shrink-0"
-								aria-invalid={!slowMsValid}
-							/>
+						<div className="space-y-1">
+							<div className="flex items-center justify-between gap-4">
+								<Label htmlFor="new-issuer-slow" className="leading-snug">
+									Delay
+									<span className="block text-xs font-normal text-muted-foreground">
+										Milliseconds to wait before answering normally.
+									</span>
+								</Label>
+								<Input
+									id="new-issuer-slow"
+									type="number"
+									min={0}
+									max={MAX_SLOW_MS}
+									step={100}
+									value={slowMs}
+									onChange={(e) => setSlowMs(e.target.value)}
+									className="w-28 shrink-0"
+									aria-invalid={!slowMsValid}
+									aria-describedby={
+										slowMsValid ? undefined : "new-issuer-slow-error"
+									}
+								/>
+							</div>
+							{!slowMsValid && (
+								<p
+									id="new-issuer-slow-error"
+									className="text-xs text-destructive-text"
+								>
+									{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+								</p>
+							)}
 						</div>
 					)}
 
