@@ -2717,9 +2717,7 @@ JSON rather than ending the string early. A token outside a string literal is
 not escaped, which is what keeps typed placement working. Nowhere else is
 anything escaped: a URL, a header, a form field and a `text` body take the
 rendered value byte for byte, and a bare (un-enveloped) GraphQL document is
-escaped once, later, when the engine wraps it. An `xml` body is **not** escaped
-- its own quoting rules are not JSON's, and a token in one is substituted
-verbatim.
+escaped once, later, when the engine wraps it.
 
 A token naming a column the bound row does not carry **errors the step before
 anything is sent**, with a message naming the token, the row index and the
