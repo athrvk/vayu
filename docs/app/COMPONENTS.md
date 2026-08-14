@@ -485,12 +485,18 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   inbox record carries no creation stamp and does not gain one - #555 answered that, and the
   Services drawer orders by port for the same reason. Every mutation this tab owns reports its
   failure as a toast (`reportFailure`), which is the one discipline the whole inbox lifecycle
-  follows; Stop and Clear used to pass no `onError` at all (#555, item 7 - taken here rather than in
+  follows; Stop and Clear used to pass no `onError` at all (#555, item 7 - taken there rather than in
   #556's tab pass, which both issues named as the shared brush).
-- `CannedResponseControls.tsx` - reply status and delay. Its own component so the two fields can be
-  drafts (typing `50` on the way to `500` must not push a 50 at the next caller) and so re-seeding
-  them from the engine is a remount - `InboxView` keys it on the served values - rather than a
-  `setState` inside an effect.
+- `CannedResponseControls.tsx` - all four fields the engine serves: reply status and delay inline,
+  body and headers behind a disclosure that opens on its own when either is set. It showed status and
+  delay only, so a reply body or header set configured by an MCP tool or a bare curl was invisible
+  and uneditable here (issue #556). Its own component so every field can be a draft (typing `50` on
+  the way to `500` must not push a 50 at the next caller) and so re-seeding them from the engine is a
+  remount - `InboxView` keys it on `cannedResponseKey`, which covers all four - rather than a
+  `setState` inside an effect. Apply sends the whole response, not a diff: `PUT /inbox/:id` is a
+  merge-patch, so an omitted `headers` is how a header the user deleted comes back. On a **stopped**
+  inbox every control is disabled and says why - the route still merge-patches a stopped record, so
+  a live-looking panel there is an edit accepted for a reply nothing will ever send.
 - `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
   A capture is an exchange with no response, which that viewer already handles; a request you
   received should read like one you sent.
@@ -515,7 +521,30 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   deleted outright. `capturesAtRisk` takes the higher of the record's polled `captureCount` and the
   capture total a surface already holds - the record lags a services poll behind the live stream, so
   trusting it alone would let the tab destroy a capture it is displaying.
-- `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query.
+- `utils.ts` - `captureUrl`, which rebuilds the absolute URL from the stored path and raw query, and
+  `cannedResponseKey`, the remount key above.
+
+**The capture list is paged, and says so.** The tab fetched one `INBOX_CAPTURES_PAGE_LIMIT` page and
+read the engine's `hasMore` nowhere, so an inbox holding its full retained ring showed the newest 50
+and was indistinguishable from one that had received 50 (issue #556). A `Load more` appends the next
+page and a `Showing N of M` line makes the cut visible. The offset is the accumulated length rather
+than a page counter, and that is exact rather than approximate: the stream prepends every capture
+recorded since the last fetch, so what is on screen is always the newest N the engine holds and the
+next unseen one sits at exactly N. `hasMore` is the page's answer **and** the accumulated one - a
+refetch of the first page reports "this inbox holds more than one page", which says nothing about
+whether the list has already loaded it.
+
+**One cache entry, three writers.** The first fetch, the load-more pages and the live stream all
+write `queryKeys.inbox.captures(id)`, so every write is a union by capture id (`mergeCaptures` in
+`queries/inbox.ts`, with `mergeCapture` for the single streamed one). That is also why a fetch reads
+the cache *after* it resolves and merges into it: replacing meant a capture the stream delivered
+while the GET was in flight was overwritten when the GET landed, vanishing from a list that had
+already shown it. The one writer that must not union is a **clear** - it empties the cache entry
+before invalidating, so the refetch has nothing to merge the destroyed rows back onto.
+
+A capture whose body the engine only kept a prefix of is marked in the row as well as in the detail
+pane: scanning the list for the payload that broke something, a row printing bytes alone is a row
+that does not say its body is a prefix.
 
 **One tab, not one per inbox.** An inbox is engine-process state with no id worth restoring into a
 tab, and the engine permits a single live stream per inbox (each holds a pool thread), so a surface
@@ -874,6 +903,15 @@ Renders nothing when the run captured nothing, and nothing on a run recorded
 before capture existed (the field is absent, not zero) - the same rule
 `SampleRetentionNote` follows. Both surfaces that list captured samples render
 it: the dashboard's Sampled Requests and the history Samples tab.
+
+## Non-Loopback Badge (`components/shared/NonLoopbackBadge.tsx`)
+
+"Reachable on `<bind>`", wherever a local service bound past loopback is named. The engine already
+refused to bind wide without an explicit `confirmNonLoopback`; this is the standing reminder that the
+confirmation was given. One component rather than the same chip twice: the Services drawer and the
+inbox tab both render it, and as two copies they had drifted to two different wordings for one fact
+(issue #556). `variant="chip"` per the Badge rule - any other variant keeps its own `hover:bg-*`,
+which `cn()` does not replace, so the warning fill would turn the accent colour under the pointer.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

@@ -44,6 +44,7 @@ vi.mock("@/queries", () => ({
 			pagination: { total: 0, limit: 50, offset: 0, returned: 0, hasMore: false },
 		},
 	}),
+	useLoadMoreInboxCapturesMutation: () => noop,
 	useStartInboxMutation: () => noop,
 	useStopInboxMutation: () => noop,
 	useDeleteInboxMutation: () => noop,
