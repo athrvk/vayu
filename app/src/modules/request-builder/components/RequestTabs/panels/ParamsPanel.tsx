@@ -18,6 +18,7 @@ import { useCallback } from "react";
 import { containsVariableToken } from "@/constants/variables";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
+import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { KeyValueItem } from "../../../types";
 import { formatParamsToText, parseParamsFromText } from "../../../utils/params-format";
 import { EmptyTableHint } from "./EmptyTableHint";
@@ -47,6 +48,7 @@ function buildUrlWithParams(baseUrl: string, params: KeyValueItem[]): string {
 
 export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
+	const variables = useVariableSupport();
 
 	// Handle params change and sync to URL
 	const handleParamsChange = useCallback(
@@ -101,6 +103,7 @@ export default function ParamsPanel() {
 					valuePlaceholder="Value"
 					showResolved={true}
 					allowDisable={true}
+					variables={variables}
 				/>
 
 				{/*

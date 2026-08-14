@@ -152,4 +152,20 @@ describe("form-data and urlencoded", () => {
 		const { container } = renderPanel({ bodyMode: mode });
 		expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
 	});
+
+	/*
+	 * The table takes its variable scope as a prop now, because the hook it used
+	 * to call throws outside `RequestBuilderProvider` and made the primitive
+	 * unusable anywhere else (#564). The thread from context to prop is a wiring
+	 * bug waiting to happen - the row's own tests hand it a scope directly and
+	 * would stay green with `variables={variables}` deleted from this panel.
+	 * Mutation check: delete it and the marker disappears.
+	 */
+	it("hands the table this request's variable scope", () => {
+		const { container } = renderPanel({
+			bodyMode: "form-data",
+			formData: [{ id: "fd1", key: "region", value: "{{zone}}", enabled: true }],
+		});
+		expect(container.querySelector('[aria-label="Resolved value of region"]')).not.toBeNull();
+	});
 });

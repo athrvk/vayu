@@ -32,21 +32,19 @@
  * appears, and the row's height.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-import { VARIABLE_PATTERN } from "@/constants/variables";
+import { variableSupportStub } from "@/test/variable-support";
 import KeyValueRow from "./KeyValueRow";
 
-vi.mock("../../context/RequestBuilderContext", () => ({
-	useRequestBuilderContext: () => ({
-		resolveString: (s: string) => s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`),
-		getAllVariables: () => ({}),
-		getVariableOrigins: () => [],
-		writableScopes: [],
-		updateVariable: () => {},
-	}),
-}));
+/*
+ * The scope arrives as a prop. This file used to `vi.mock` the request-builder
+ * context, which is precisely why nobody noticed the row could not render
+ * without one (#564) - the mock stood in for a provider that every real caller
+ * outside the builder was missing.
+ */
+const scope = variableSupportStub();
 
 function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 	const { container } = render(
@@ -60,6 +58,7 @@ function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 				showResolved={true}
 				allowDisable={true}
 				readOnly={false}
+				variables={scope}
 				onUpdate={() => {}}
 				onPickFile={() => {}}
 				onToggleKind={() => {}}
@@ -140,6 +139,51 @@ describe("the resolved value", () => {
 	it("is withheld entirely when the caller turns resolution off", () => {
 		const container = row({ showResolved: false });
 		expect(peek(container)).toBeNull();
+	});
+
+	/*
+	 * The mutation check for the prop thread (#564). Drop `variables` at any
+	 * mount site and this row goes from "resolves `{{format}}`" to "shows the
+	 * literal" - which is correct for a surface with no variable scope and
+	 * wrong for the request builder, so the two cases have to be told apart.
+	 */
+	it("resolves through the scope it was handed, not one it reaches for", () => {
+		const marker = peek(row());
+		expect(marker!.getAttribute("aria-label")).toBe("Resolved value of Accept");
+		// The tooltip content only mounts on hover; what proves the thread is
+		// that the marker appeared at all, which needs `resolveString` to have
+		// changed the text.
+		expect(marker).not.toBeNull();
+	});
+
+	it("stays away entirely on a surface with no variable scope", () => {
+		// Not a degraded request builder - an inbox's canned reply headers have
+		// no variables to resolve, so a marker would point at nothing.
+		expect(peek(row({ variables: undefined }))).toBeNull();
+	});
+});
+
+describe("a row with no variable scope at all", () => {
+	/*
+	 * The whole of #564: `KeyValueRow` called `useRequestBuilderContext()` in
+	 * its body and that hook *throws* with no `RequestBuilderProvider` above it,
+	 * so the app's densest table was structurally unavailable to every surface
+	 * that is not the request builder. Restore the hook and this test throws.
+	 */
+	it("renders outside RequestBuilderProvider", () => {
+		const container = row({ variables: undefined });
+		const fields = container.querySelectorAll<HTMLInputElement>('input[type="text"]');
+		expect(fields).toHaveLength(2);
+		expect(fields[0].value).toBe("Accept");
+	});
+
+	it("shows the literal text rather than painting an undefined-variable token", () => {
+		// A `{{format}}` token here would colour as "not defined" and open an
+		// editor with nowhere to write. There is no scope; it is just text.
+		const container = row({ variables: undefined });
+		expect(container.querySelector("[data-variable-token]")).toBeNull();
+		const value = container.querySelectorAll<HTMLInputElement>('input[type="text"]')[1];
+		expect(value.value).toBe("{{format}}");
 	});
 });
 

@@ -26,16 +26,6 @@ import { TooltipProvider } from "@/components/ui";
 import KeyValueEditor from "./index";
 import type { KeyValueItem } from "../../types";
 
-vi.mock("../../context/RequestBuilderContext", () => ({
-	useRequestBuilderContext: () => ({
-		resolveString: (s: string) => s,
-		getAllVariables: () => ({}),
-		getVariableOrigins: () => [],
-		writableScopes: [],
-		updateVariable: () => {},
-	}),
-}));
-
 afterEach(() => {
 	vi.unstubAllGlobals();
 });

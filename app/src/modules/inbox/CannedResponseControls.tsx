@@ -20,7 +20,7 @@
  */
 
 import { useState } from "react";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
 	Button,
 	Collapsible,
@@ -30,6 +30,9 @@ import {
 	Label,
 	Textarea,
 } from "@/components/ui";
+import KeyValueEditor from "@/modules/request-builder/shared/KeyValueEditor";
+import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
+import type { KeyValueItem } from "@/modules/request-builder/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import type { InboxCannedResponse } from "@/types";
@@ -44,15 +47,20 @@ import type { InboxCannedResponse } from "@/types";
  */
 const MAX_RESPONSE_DELAY_MS = 30000;
 
-/** One header draft. `id` keys the row across edits; the name may still be blank. */
-interface HeaderDraft {
-	id: number;
-	name: string;
-	value: string;
-}
-
-function toDrafts(headers: Record<string, string>): HeaderDraft[] {
-	return Object.entries(headers).map(([name, value], index) => ({ id: index, name, value }));
+/**
+ * The served header set as editor rows, with the trailing blank row the table
+ * always keeps.
+ *
+ * `KeyValueEditor` is the app's key/value table and these rows used to be a
+ * hand-rolled pair of `Input`s, because `KeyValueRow` threw outside
+ * `RequestBuilderProvider` (#564). No `variables` is passed: a canned reply has
+ * no variable scope, so nothing resolves and no `{{` autocomplete opens - which
+ * is what a header set the engine echoes verbatim actually is.
+ */
+function toHeaderRows(headers: Record<string, string>): KeyValueItem[] {
+	return toKeyValueItems(
+		Object.entries(headers).map(([key, value]) => ({ key, value, enabled: true }))
+	);
 }
 
 interface CannedResponseControlsProps {
@@ -77,8 +85,8 @@ export function CannedResponseControls({
 	const [statusDraft, setStatusDraft] = useState(String(response.status));
 	const [delayDraft, setDelayDraft] = useState(String(response.delayMs));
 	const [bodyDraft, setBodyDraft] = useState(response.body);
-	const [headerDrafts, setHeaderDrafts] = useState<HeaderDraft[]>(() =>
-		toDrafts(response.headers)
+	const [headerRows, setHeaderRows] = useState<KeyValueItem[]>(() =>
+		toHeaderRows(response.headers)
 	);
 	// Open when there is something to see: a configured body or header set is
 	// part of what the inbox answers with, and a reader who has to go looking
@@ -88,24 +96,6 @@ export function CannedResponseControls({
 	);
 
 	const disabled = stopped || pending;
-
-	const updateHeader = (id: number, field: "name" | "value", next: string) =>
-		setHeaderDrafts((drafts) =>
-			drafts.map((draft) => (draft.id === id ? { ...draft, [field]: next } : draft))
-		);
-
-	const addHeader = () =>
-		setHeaderDrafts((drafts) => [
-			...drafts,
-			{
-				id: drafts.reduce((max, draft) => Math.max(max, draft.id), -1) + 1,
-				name: "",
-				value: "",
-			},
-		]);
-
-	const removeHeader = (id: number) =>
-		setHeaderDrafts((drafts) => drafts.filter((draft) => draft.id !== id));
 
 	/**
 	 * Read the four drafts back, or say which one is wrong.
@@ -132,12 +122,12 @@ export function CannedResponseControls({
 		// A Map, not an object literal, so a header literally named `__proto__`
 		// is a header rather than an assignment nobody meant.
 		const headers = new Map<string, string>();
-		for (const draft of headerDrafts) {
-			const name = draft.name.trim();
-			// A wholly blank row is a row the user added and did not fill; a value
-			// with no name is an edit that would silently go nowhere, since the
-			// engine keys headers by name.
-			if (name === "" && draft.value === "") continue;
+		for (const row of headerRows) {
+			const name = row.key.trim();
+			// A wholly blank row is the table's trailing spare, or one the user
+			// added and did not fill; a value with no name is an edit that would
+			// silently go nowhere, since the engine keys headers by name.
+			if (name === "" && row.value === "") continue;
 			if (name === "") {
 				showToast("A reply header needs a name", "error");
 				return null;
@@ -146,7 +136,7 @@ export function CannedResponseControls({
 				showToast(`Reply header "${name}" is set twice`, "error");
 				return null;
 			}
-			headers.set(name, draft.value);
+			headers.set(name, row.value);
 		}
 
 		// Sent whole, not as a diff. The route is a merge-patch, so an omitted
@@ -160,7 +150,7 @@ export function CannedResponseControls({
 		if (next) onApply(next);
 	};
 
-	const headerCount = headerDrafts.filter((draft) => draft.name.trim() !== "").length;
+	const headerCount = headerRows.filter((row) => row.key.trim() !== "").length;
 
 	return (
 		<Collapsible
@@ -241,48 +231,20 @@ export function CannedResponseControls({
 
 					<div className="flex flex-col gap-1">
 						<span className="text-xs font-medium">Reply headers</span>
-						{headerDrafts.map((draft) => (
-							<div key={draft.id} className="flex items-center gap-2">
-								<Input
-									className="h-7 flex-1 font-mono text-xs"
-									value={draft.name}
-									disabled={disabled}
-									placeholder="Name"
-									aria-label={`Reply header ${draft.id + 1} name`}
-									onChange={(e) => updateHeader(draft.id, "name", e.target.value)}
-								/>
-								<Input
-									className="h-7 flex-1 font-mono text-xs"
-									value={draft.value}
-									disabled={disabled}
-									placeholder="Value"
-									aria-label={`Reply header ${draft.id + 1} value`}
-									onChange={(e) =>
-										updateHeader(draft.id, "value", e.target.value)
-									}
-								/>
-								<Button
-									variant="ghost"
-									size="sm"
-									className="h-7 px-2"
-									disabled={disabled}
-									aria-label={`Remove reply header ${draft.id + 1}`}
-									onClick={() => removeHeader(draft.id)}
-								>
-									<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-								</Button>
-							</div>
-						))}
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-7 self-start"
-							disabled={disabled}
-							onClick={addHeader}
-						>
-							<Plus className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-							Add header
-						</Button>
+						{/*
+						 * No `allowDisable`: a canned header is either in the set the
+						 * engine serves or it is not, and a third "present but off"
+						 * state would be a row the panel keeps and the reply never
+						 * carries. Removing the row is the whole vocabulary.
+						 */}
+						<KeyValueEditor
+							items={headerRows}
+							onChange={setHeaderRows}
+							keyPlaceholder="Name"
+							valuePlaceholder="Value"
+							allowDisable={false}
+							readOnly={disabled}
+						/>
 					</div>
 				</div>
 			</CollapsibleContent>

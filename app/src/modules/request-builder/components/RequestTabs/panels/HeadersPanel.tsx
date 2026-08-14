@@ -20,11 +20,13 @@ import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
 import type { KeyValueItem } from "../../../types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
+import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import { STANDARD_HEADERS } from "@/constants/http";
 import { EmptyTableHint } from "./EmptyTableHint";
 
 export default function HeadersPanel() {
 	const { request, updateField } = useRequestBuilderContext();
+	const variables = useVariableSupport();
 
 	const {
 		displayHeaders,
@@ -71,6 +73,7 @@ export default function HeadersPanel() {
 				showResolved={true}
 				allowDisable={true}
 				keySuggestions={STANDARD_HEADERS}
+				variables={variables}
 				canEdit={canEdit}
 				canRemove={canRemove}
 				canDisable={canDisable}

@@ -31,6 +31,7 @@ import { AUTH_MODE_LABELS, EDITABLE_AUTH_MODES, uneditableAuthLabel } from "@/co
 import type { RequestAuth } from "@/types";
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
+import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import AuthInheritBanner from "./AuthInheritBanner";
 
 /** `inherit` first - a request, unlike a collection, may defer to its parent. */
@@ -52,12 +53,22 @@ const AUTH_MODE_ICONS: Record<PickerMode, typeof Key> = {
 // field). Secret fields (client secret / password) instead use the masked
 // SecretInput with a reveal toggle - masking and {{variable}} token highlighting
 // can't coexist, and hiding the secret at rest wins for those fields.
-const VariableTextInput: AuthTextInput = ({ value, onChange, placeholder, type }) =>
-	type === "password" ? (
+// Always mounted inside `RequestBuilderProvider`, so it reads the scope here
+// rather than threading it through every auth field - `VariableInput` itself no
+// longer knows the context exists (#564).
+const VariableTextInput: AuthTextInput = ({ value, onChange, placeholder, type }) => {
+	const variables = useVariableSupport();
+	return type === "password" ? (
 		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
 	) : (
-		<VariableInput value={value} onChange={onChange} placeholder={placeholder} />
+		<VariableInput
+			value={value}
+			onChange={onChange}
+			placeholder={placeholder}
+			variables={variables}
+		/>
 	);
+};
 
 /** Empty config for a freshly picked mode. */
 function defaultsFor(mode: PickerMode): RequestAuth {

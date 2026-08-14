@@ -26,7 +26,7 @@ import {
 } from "react";
 import { VariableAutocomplete, SuggestionList } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
+import type { ResolvedVariable, VariableSupport } from "@/types";
 import type { VariableScope } from "../../types";
 import EditableVariable from "./EditableVariable";
 import DynamicVariableToken from "./DynamicVariableToken";
@@ -49,7 +49,16 @@ interface VariableInputProps {
 	 * silently left the field anonymous to a screen reader.
 	 */
 	"aria-label"?: string;
+	/**
+	 * The variable scope this field edits inside. Omitted where there is none,
+	 * which makes this a plain text field: no tokens, no `{{` autocomplete, no
+	 * edit popover. See `VariableSupport`.
+	 */
+	variables?: VariableSupport;
 }
+
+/** Stable identity for the no-scope case, so the memos below do not re-run. */
+const NO_VARIABLES: Record<string, ResolvedVariable> = {};
 
 /** The generator table by name, for the overlay's token lookup. */
 const DYNAMIC_BY_NAME = new Map(DYNAMIC_VARIABLES.map((v) => [v.name, v]));
@@ -96,9 +105,8 @@ export default function VariableInput({
 	suggestions = [],
 	onPaste,
 	"aria-label": ariaLabel,
+	variables,
 }: VariableInputProps) {
-	const { getAllVariables, updateVariable } = useRequestBuilderContext();
-
 	const [showSuggestions, setShowSuggestions] = useState(false);
 	const [showPlainSuggestions, setShowPlainSuggestions] = useState(false);
 	const [cursorPosition, setCursorPosition] = useState(0);
@@ -107,9 +115,14 @@ export default function VariableInput({
 	const containerRef = useRef<HTMLDivElement>(null);
 	const isNavigatingRef = useRef(false);
 
-	const allVariables = getAllVariables();
+	const allVariables = variables ? variables.getAllVariables() : NO_VARIABLES;
 	const segments = useMemo(() => parseSegments(value), [value]);
-	const hasVariables = segments.some((s) => s.type === "variable");
+	/*
+	 * With no scope, `{{name}}` is just text: the overlay would paint a token
+	 * claiming the name is undefined, and clicking it would open an editor with
+	 * nowhere to write. The literal the user typed is the honest thing to show.
+	 */
+	const hasVariables = Boolean(variables) && segments.some((s) => s.type === "variable");
 
 	/*
 	 * Check if we should show autocomplete.
@@ -119,16 +132,22 @@ export default function VariableInput({
 	 * file, once for this check and once in `handleSelectVariable` below - which
 	 * is a pair that drifts the moment either is touched.
 	 */
-	const checkForSuggestions = useCallback((inputValue: string, cursorPos: number) => {
-		const context = variableCompletionContext(inputValue.slice(0, cursorPos));
-		if (!context) {
-			setShowSuggestions(false);
-			return;
-		}
-		setSearchQuery(context.query);
-		setShowSuggestions(true);
-		setShowPlainSuggestions(false);
-	}, []);
+	const checkForSuggestions = useCallback(
+		(inputValue: string, cursorPos: number) => {
+			// Nothing to complete from without a scope.
+			const context = variables
+				? variableCompletionContext(inputValue.slice(0, cursorPos))
+				: null;
+			if (!context) {
+				setShowSuggestions(false);
+				return;
+			}
+			setSearchQuery(context.query);
+			setShowSuggestions(true);
+			setShowPlainSuggestions(false);
+		},
+		[variables]
+	);
 
 	const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
 		const newValue = e.target.value;
@@ -297,7 +316,8 @@ export default function VariableInput({
 
 	// Handle variable value change from token popover
 	const handleVariableChange = (name: string, newValue: string, scope: VariableScope) => {
-		updateVariable(name, newValue, scope);
+		// Only reachable from a token, and a token only renders with a scope.
+		variables?.updateVariable(name, newValue, scope);
 	};
 
 	// Focus the hidden input when clicking on the container (but not on variable tokens)
@@ -350,6 +370,9 @@ export default function VariableInput({
 							sourceName={varInfo?.sourceName}
 							onValueChange={handleVariableChange}
 							disabled={disabled}
+							// Non-null by construction: a token only renders under
+							// `hasVariables`, which is false without a scope.
+							variables={variables!}
 						/>
 					</span>
 				);

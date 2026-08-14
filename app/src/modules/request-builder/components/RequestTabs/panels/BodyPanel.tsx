@@ -46,6 +46,7 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
+import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
 import { containsVariableToken } from "@/constants/variables";
@@ -162,6 +163,7 @@ export default function BodyPanel() {
 		setAutoContentType,
 		resolvedAuth,
 	} = useRequestBuilderContext();
+	const variables = useVariableSupport();
 	// The environment scoping GraphQL introspection's compose call - the same id
 	// the builder's Send path passes.
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
@@ -453,6 +455,7 @@ export default function BodyPanel() {
 					// Only multipart can carry a file: urlencoded's wire body is a
 					// string of pairs, and the engine refuses a file part there.
 					allowFiles={request.bodyMode === "form-data"}
+					variables={variables}
 				/>
 			)}
 		</div>

@@ -28,6 +28,7 @@ import type {
 	ScriptPart,
 	VariableOrigin,
 	VariableScope,
+	VariableSupport,
 } from "@/types";
 
 // ============================================================================
@@ -398,6 +399,18 @@ export interface KeyValueEditorProps {
 	 * something that cannot be sent.
 	 */
 	allowFiles?: boolean;
+	/**
+	 * The variable scope the table edits inside, handed in by whoever mounts it.
+	 *
+	 * Omitted where there is none - the inbox's canned reply headers, say - and
+	 * the table then resolves nothing, shows no `ResolvedPeek` and offers no
+	 * `{{` autocomplete. That is the correct reading of a surface with no
+	 * variables, not a degraded one. It is a prop rather than a context read
+	 * because the hook that used to supply it *throws* outside
+	 * `RequestBuilderProvider`, which made this table structurally unusable
+	 * anywhere else (#564).
+	 */
+	variables?: VariableSupport;
 	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
 	canRemove?: (item: KeyValueItem) => boolean;
 	canDisable?: (item: KeyValueItem) => boolean;

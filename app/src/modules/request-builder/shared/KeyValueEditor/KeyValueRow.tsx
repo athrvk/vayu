@@ -14,14 +14,17 @@
  * The resolved value moved out of a column and into `ResolvedPeek` - see the
  * note there for why, and for how it stays out of the way of the variable
  * token's own popover.
+ *
+ * Resolution comes from the optional `variables` prop. With none the row is
+ * still a row: plain fields, no marker, no tokens. See `VariableSupport`.
  */
 
 import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import type { VariableSupport } from "@/types";
 import type { KeyValueItem } from "../../types";
-import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import VariableInput from "../VariableInput";
 import FilePartCell, { type PickedFile } from "./FilePartCell";
 
@@ -35,6 +38,8 @@ interface KeyValueRowProps {
 	keySuggestions?: string[];
 	/** `form-data` only: rows may be switched between a text value and a file. */
 	allowFiles?: boolean;
+	/** The variable scope this row edits inside, or none. See `VariableSupport`. */
+	variables?: VariableSupport;
 	onUpdate: (id: string, field: keyof KeyValueItem, value: string | boolean) => void;
 	/** Sets the file members of one row together - a pick is one edit, not four. */
 	onPickFile: (id: string, file: PickedFile) => void;
@@ -93,6 +98,7 @@ function KeyValueRow({
 	readOnly,
 	keySuggestions,
 	allowFiles = false,
+	variables,
 	onUpdate,
 	onPickFile,
 	onToggleKind,
@@ -102,14 +108,14 @@ function KeyValueRow({
 	canEditValue = true,
 	canDisable = true,
 }: KeyValueRowProps) {
-	const { resolveString } = useRequestBuilderContext();
-
-	const resolvedKey = resolveString(item.key);
-	const resolvedValue = resolveString(item.value);
+	const resolveString = variables?.resolveString;
+	const resolvedKey = resolveString ? resolveString(item.key) : item.key;
+	const resolvedValue = resolveString ? resolveString(item.value) : item.value;
 	/*
 	 * "Contains a variable" is exactly "resolving changed something". A row whose
 	 * text is already literal has nothing to peek at, which is the condition the
-	 * marker keys off.
+	 * marker keys off - and with no scope nothing resolves, so a table outside
+	 * the request builder shows no marker at all rather than an empty one.
 	 */
 	const hasVariables = item.key !== resolvedKey || item.value !== resolvedValue;
 
@@ -162,6 +168,7 @@ function KeyValueRow({
 				placeholder={keyPlaceholder}
 				disabled={keyReadOnly || !item.enabled}
 				suggestions={keySuggestions}
+				variables={variables}
 				className="h-8"
 			/>
 
@@ -179,6 +186,7 @@ function KeyValueRow({
 					onChange={(v) => onUpdate(item.id, "value", v)}
 					placeholder={valuePlaceholder}
 					disabled={valueReadOnly || !item.enabled}
+					variables={variables}
 					className="h-8"
 				/>
 			)}

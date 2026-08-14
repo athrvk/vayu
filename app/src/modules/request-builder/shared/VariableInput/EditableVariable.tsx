@@ -24,7 +24,7 @@ import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
-import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
+import type { VariableSupport } from "@/types";
 import type { VariableScope as RequestBuilderVariableScope } from "../../types";
 
 export interface EditableVariableProps {
@@ -44,6 +44,12 @@ export interface EditableVariableProps {
 	secret?: boolean;
 	/** The environment or collection it came from. Absent for globals. */
 	sourceName?: string;
+	/**
+	 * The scope this token belongs to. Required, not optional as it is further
+	 * up: a token only renders where there *is* a scope, so the popover always
+	 * has origins to list and writable targets to offer (#564).
+	 */
+	variables: VariableSupport;
 }
 
 export default function EditableVariable({
@@ -55,8 +61,9 @@ export default function EditableVariable({
 	disabled = false,
 	secret = false,
 	sourceName,
+	variables,
 }: EditableVariableProps) {
-	const { getVariableOrigins, writableScopes } = useRequestBuilderContext();
+	const { getVariableOrigins, writableScopes } = variables;
 
 	const varInfo = resolved ? { value, scope: scope as VariableScope, secret, sourceName } : null;
 

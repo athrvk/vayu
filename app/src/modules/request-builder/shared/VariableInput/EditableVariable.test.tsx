@@ -34,14 +34,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-
-vi.mock("../../context/RequestBuilderContext", () => ({
-	useRequestBuilderContext: () => ({
-		getVariableOrigins: () => [],
-		writableScopes: [],
-		updateVariable: () => {},
-	}),
-}));
+import { variableSupportStub } from "@/test/variable-support";
 
 // Radix only mounts tooltip content while open, and jsdom synthesises no hover.
 // Forcing `open` is the narrowest way to reach the content this file is about.
@@ -66,6 +59,7 @@ function renderToken(props: Partial<React.ComponentProps<typeof EditableVariable
 				scope="environment"
 				resolved
 				sourceName="Staging"
+				variables={variableSupportStub()}
 				{...props}
 			/>
 		</TooltipProvider>

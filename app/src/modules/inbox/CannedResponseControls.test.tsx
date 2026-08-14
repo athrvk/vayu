@@ -30,6 +30,15 @@ function response(overrides: Partial<InboxCannedResponse> = {}): InboxCannedResp
 	return { status: 200, body: "", headers: {}, delayMs: 0, ...overrides };
 }
 
+/*
+ * The reply headers are `KeyValueEditor` rows now, not hand-rolled `Input`
+ * pairs (#564) - so they are labelled by the table's placeholders and the table
+ * always keeps one trailing blank row to type into, in place of the panel's own
+ * "Add header" button.
+ */
+const headerName = (row: number) => screen.getAllByLabelText("Name")[row];
+const headerValue = (row: number) => screen.getAllByLabelText("Value")[row];
+
 /** The message the panel just refused with. */
 function lastToastMessage(): string | undefined {
 	const { toasts } = useToastStore.getState();
@@ -56,20 +65,16 @@ describe("every field the engine serves", () => {
 		);
 
 		expect(screen.getByLabelText("Reply body")).toHaveValue('{"ok":true}');
-		expect(screen.getByLabelText("Reply header 1 name")).toHaveValue("X-Trace");
-		expect(screen.getByLabelText("Reply header 1 value")).toHaveValue("abc");
+		expect(headerName(0)).toHaveValue("X-Trace");
+		expect(headerValue(0)).toHaveValue("abc");
 
 		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
 		fireEvent.change(screen.getByLabelText("Reply delay (ms)"), { target: { value: "250" } });
 		fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "retry later" } });
-		fireEvent.change(screen.getByLabelText("Reply header 1 value"), {
-			target: { value: "def" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Add header" }));
-		fireEvent.change(screen.getByLabelText("Reply header 2 name"), {
-			target: { value: "Retry-After" },
-		});
-		fireEvent.change(screen.getByLabelText("Reply header 2 value"), { target: { value: "5" } });
+		fireEvent.change(headerValue(0), { target: { value: "def" } });
+		// The trailing blank row is where a new header is typed - no add button.
+		fireEvent.change(headerName(1), { target: { value: "Retry-After" } });
+		fireEvent.change(headerValue(1), { target: { value: "5" } });
 		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
 		// Whole, not a diff: the route is a merge-patch, so a field left out of
@@ -93,7 +98,7 @@ describe("every field the engine serves", () => {
 			/>
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Remove reply header 1" }));
+		fireEvent.click(screen.getAllByLabelText("Remove row")[0]);
 		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 		// An omitted `headers` is what the engine reads as "keep what you have",
 		// which is how a deleted header comes back on the next apply.
@@ -139,7 +144,7 @@ describe("input the engine would refuse", () => {
 			/>
 		);
 
-		fireEvent.change(screen.getByLabelText("Reply header 1 value"), { target: { value: "v" } });
+		fireEvent.change(headerValue(0), { target: { value: "v" } });
 		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 		expect(onApply).not.toHaveBeenCalled();
 		expect(lastToastMessage()).toMatch(/needs a name/);
@@ -156,11 +161,8 @@ describe("input the engine would refuse", () => {
 			/>
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Add header" }));
-		fireEvent.change(screen.getByLabelText("Reply header 2 name"), {
-			target: { value: "X-Trace" },
-		});
-		fireEvent.change(screen.getByLabelText("Reply header 2 value"), { target: { value: "b" } });
+		fireEvent.change(headerName(1), { target: { value: "X-Trace" } });
+		fireEvent.change(headerValue(1), { target: { value: "b" } });
 		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
 		expect(onApply).not.toHaveBeenCalled();
@@ -188,7 +190,9 @@ describe("a stopped inbox", () => {
 		expect(screen.getByLabelText("Reply delay (ms)")).toBeDisabled();
 		expect(screen.getByLabelText("Reply body")).toBeDisabled();
 		expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
-		expect(screen.getByRole("button", { name: "Add header" })).toBeDisabled();
+		expect(headerName(0)).toBeDisabled();
+		expect(headerValue(0)).toBeDisabled();
+		expect(screen.getAllByLabelText("Remove row")[0]).toBeDisabled();
 		expect(screen.getByText(/stopped, so nothing is being served/)).toBeInTheDocument();
 	});
 
@@ -206,6 +210,43 @@ describe("a stopped inbox", () => {
 
 		expect(screen.getByLabelText("Reply status")).toHaveValue("503");
 		expect(screen.getByLabelText("Reply body")).toHaveValue("gone");
-		expect(screen.getByLabelText("Reply header 1 name")).toHaveValue("X-Trace");
+		expect(headerName(0)).toHaveValue("X-Trace");
+	});
+});
+
+describe("the key/value table it borrows", () => {
+	/*
+	 * The point of #564. These rows were plain `Input` pairs because
+	 * `KeyValueRow` called `useRequestBuilderContext()` in its body and that
+	 * hook throws with no provider above it - so the app's key/value primitive,
+	 * and every fix that lands in it, could not reach this panel. Restore the
+	 * hook and this whole file fails to render.
+	 */
+	it("mounts with no RequestBuilderProvider anywhere above it", () => {
+		render(
+			<CannedResponseControls
+				response={response({ headers: { "X-Trace": "abc" } })}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn()}
+			/>
+		);
+		expect(headerName(0)).toHaveValue("X-Trace");
+	});
+
+	it("offers no variable affordances, because a canned reply has no scope", () => {
+		// `{{trace}}` is sent verbatim by the engine. A token here would colour
+		// it "not defined" and open an editor with nowhere to write.
+		const { container } = render(
+			<CannedResponseControls
+				response={response({ headers: { "X-Trace": "{{trace}}" } })}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn()}
+			/>
+		);
+		expect(headerValue(0)).toHaveValue("{{trace}}");
+		expect(container.querySelector("[data-variable-token]")).toBeNull();
+		expect(container.querySelector('[aria-label^="Resolved value of"]')).toBeNull();
 	});
 });
