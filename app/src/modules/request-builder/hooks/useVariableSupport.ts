@@ -16,9 +16,15 @@
  * that shape, rather than a `useMemo` copied into each of the five call sites
  * inside the builder.
  *
- * Memoised on the three members: the object is a prop on a `memo`-wrapped row,
- * so a fresh identity each render would re-render every row of the densest
- * table in the app on every keystroke.
+ * Memoised on its members: the object is a prop on a `memo`-wrapped row, so a
+ * fresh identity each render would re-render every row of the densest table in
+ * the app on every keystroke.
+ *
+ * Every member is read straight off the context, `dataColumns` (the declared
+ * data contract, issue #600) included. The provider resolves that one from the
+ * collections it already holds rather than this hook querying for it: a token
+ * painter that reached for the query cache would need a `QueryClientProvider`
+ * above every mount of `VariableInput`, which is the coupling the prop removed.
  */
 
 import { useMemo } from "react";
@@ -26,8 +32,14 @@ import type { VariableSupport } from "@/types";
 import { useRequestBuilderContext } from "../context/RequestBuilderContext";
 
 export function useVariableSupport(): VariableSupport {
-	const { resolveString, getAllVariables, getVariableOrigins, updateVariable, writableScopes } =
-		useRequestBuilderContext();
+	const {
+		resolveString,
+		getAllVariables,
+		getVariableOrigins,
+		updateVariable,
+		writableScopes,
+		dataColumns,
+	} = useRequestBuilderContext();
 	return useMemo(
 		() => ({
 			resolveString,
@@ -35,7 +47,15 @@ export function useVariableSupport(): VariableSupport {
 			getVariableOrigins,
 			updateVariable,
 			writableScopes,
+			dataColumns,
 		}),
-		[resolveString, getAllVariables, getVariableOrigins, updateVariable, writableScopes]
+		[
+			resolveString,
+			getAllVariables,
+			getVariableOrigins,
+			updateVariable,
+			writableScopes,
+			dataColumns,
+		]
 	);
 }

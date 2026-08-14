@@ -10,7 +10,13 @@
 // preload contract. View/navigation state now lives with its owning store
 // (DrawerView in layout-store, TabType in tabs-store).
 
-import type { FormFieldEntry, ResolvedVariable, VariableOrigin, VariableScope } from "./domain";
+import type {
+	DataContractScope,
+	FormFieldEntry,
+	ResolvedVariable,
+	VariableOrigin,
+	VariableScope,
+} from "./domain";
 
 /** App theme preference. `system` follows the OS via Electron's nativeTheme. */
 export type ThemeSource = "system" | "light" | "dark";
@@ -55,6 +61,21 @@ export interface VariableSupport {
 	 * popover's scope picker cannot offer a target that does not exist.
 	 */
 	writableScopes: VariableScope[];
+	/**
+	 * The data contract in scope, when the chain declares one (issue #600).
+	 *
+	 * Optional, and unlike the members above it is optional *within* a scope
+	 * rather than with it: most collections declare no contract, and a field in
+	 * one is still fully variable-aware. Absent therefore means "nothing
+	 * declared", which is the state phase 1 left every `{{data.*}}` token in -
+	 * so a consumer that never sets it behaves exactly as it did (the #564
+	 * prop-thread contract holds).
+	 *
+	 * It sits here rather than being looked up per token because the lookup is a
+	 * chain walk against the collections cache, and the tokens are rendered
+	 * inside a `memo`-wrapped row that must not re-run one per keystroke.
+	 */
+	dataColumns?: DataContractScope;
 }
 
 /**

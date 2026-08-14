@@ -42,6 +42,7 @@ import { useDataFileStore } from "@/stores";
 import { describeDataSchemaDiff } from "@/services/data-files";
 import { hasDataContract, type Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "../DataFilePicker";
+import ColumnAudit from "./ColumnAudit";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 
 interface DataTabProps {
@@ -172,6 +173,13 @@ export default function DataTab({ collection }: DataTabProps) {
 					</Button>
 				)}
 			</div>
+
+			{/*
+			 * The audit needs no file - it compares the contract to the requests -
+			 * so it sits below the picker rather than inside it, and only once
+			 * there is a contract to compare against.
+			 */}
+			{declaredContract && <ColumnAudit collection={collection} />}
 
 			{declaredContract && !file && (
 				<Callout severity="info" title="Nothing to compare yet">
