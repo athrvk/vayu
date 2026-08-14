@@ -179,3 +179,21 @@ Unlike the automatic job it **fails** rather than skips when `WINGET_TOKEN` is
 missing, because a manual run that published nothing while reporting success
 would be worse than an error. `WINGET_TOKEN` must be a **classic** PAT with
 `public_repo` scope; fine-grained PATs are not supported by the action.
+
+**Every winget credential problem arrives as one opaque line.** komac reports an
+expired token, a fine-grained token, a missing fork, an archived fork and a fork
+owned by another account all as
+`<user> does not have the correct permissions to execute CreateRef` - and only
+after downloading the installer and rendering all three manifests, so the log
+looks like a success until its final line. v0.16.0 failed twice this way. The
+manual workflow therefore preflights the token before doing any work, checking in
+order: it authenticates, it is classic (`x-oauth-scopes` is non-empty and carries
+`public_repo`), and `<token owner>/winget-pkgs` exists, is writable, is not
+archived and is a real fork of `microsoft/winget-pkgs`. Each failure names
+itself. To check the same things by hand, `curl -sI -H "Authorization: token
+$PAT" https://api.github.com/user | grep -i x-oauth-scopes`.
+
+Note the fork is checked against the *token's* owner, not the repository's: a PAT
+belonging to a different account authenticates perfectly and is then denied at
+`CreateRef`. The action's `fork-user` defaults to the repository owner, so the
+two must be the same account unless it is set explicitly.
