@@ -39,7 +39,13 @@ import type { RequestState } from "../../../types";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
-	CodeEditor: () => <div data-testid="code-editor" />,
+	// The language comes through on the stub because it is the whole of what a
+	// mode with no editor of its own gets: JSON-RPC is the plain pane plus
+	// `language="json"`, and a stub that dropped it could not tell that apart
+	// from plaintext.
+	CodeEditor: ({ language }: { language?: string }) => (
+		<div data-testid="code-editor" data-language={language} />
+	),
 }));
 vi.mock("./body/GraphQLBody", () => ({ default: () => <div data-testid="graphql-body" /> }));
 
@@ -101,6 +107,42 @@ describe("the content type a mode implies", () => {
 	it("gives None no content type, because it has none", () => {
 		const { container } = renderPanel({ bodyMode: "none" });
 		expect(container.querySelector("code")).toBeNull();
+	});
+});
+
+/**
+ * JSON-RPC is deliberately the *plain* pane. The envelope around the call is
+ * completed engine-side at the chokepoint every client shares, so there is no
+ * structure for this side to edit - unlike GraphQL, whose query and variables
+ * are two documents and get a component. What the mode does own is JSON
+ * highlighting and the `application/json` its frame is sent as.
+ */
+describe("the JSON-RPC mode", () => {
+	it("uses the plain code editor, not the GraphQL pair", () => {
+		renderPanel({ bodyMode: "jsonrpc" });
+		expect(screen.getByTestId("code-editor")).toBeInTheDocument();
+		expect(screen.queryByTestId("graphql-body")).not.toBeInTheDocument();
+	});
+
+	// Mutation check: drop `jsonrpc` from the editor's language ternary and this
+	// reddens with `plaintext` - a JSON pane with no JSON in it.
+	it("highlights it as JSON", () => {
+		renderPanel({ bodyMode: "jsonrpc" });
+		expect(screen.getByTestId("code-editor")).toHaveAttribute("data-language", "json");
+	});
+
+	it("shows the type its frame is sent as", () => {
+		renderPanel({ bodyMode: "jsonrpc" });
+		expect(screen.getByText("application/json")).toBeInTheDocument();
+	});
+
+	// A JSON-RPC call is where `{{variables}}` earn their keep - the params
+	// change per send and the method does not - so the mode has to reach the
+	// Source/Resolved swap, which only code modes offer.
+	it("offers the resolved preview, because it is a code mode", () => {
+		renderPanel({ bodyMode: "jsonrpc", body: '{"method":"m","params":["{{addr}}"]}' });
+		fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
+		expect(screen.getByText(/resolved-addr/)).toBeInTheDocument();
 	});
 });
 

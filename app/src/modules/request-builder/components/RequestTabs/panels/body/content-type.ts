@@ -33,9 +33,15 @@ import { generateId } from "@/lib/id";
 
 export const CONTENT_TYPE = "Content-Type";
 
-/** GraphQL is sent as a JSON envelope: `{ query, variables }`. */
+/**
+ * Both entries are JSON envelopes the engine completes on the way to the wire:
+ * GraphQL's `{ query, variables }`, and JSON-RPC's `"jsonrpc":"2.0"` frame. A
+ * server that reads either out of a JSON object answers anything else with a
+ * 400, so the header is not a nicety - it is part of what the mode means.
+ */
 const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
 	graphql: "application/json",
+	jsonrpc: "application/json",
 };
 
 const isContentType = (item: KeyValueEntry) =>

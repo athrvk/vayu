@@ -352,7 +352,8 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   request itself, which is what lets an agent-authored script outlive the call
   that wrote it (see *Storing a request's scripts* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
-  (`json` | `text` | `graphql` | `form-data` | `x-www-form-urlencoded`,
+  (`json` | `text` | `graphql` | `jsonrpc` | `form-data` |
+  `x-www-form-urlencoded`,
   default `text`). The two form modes carry their content as **fields**, not as
   a string, so `body` is written as `key=value&key=value` and split into the
   `fields` rows the engine reads - see
@@ -360,15 +361,21 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   `body` may be the bare query document: the engine envelopes it as
   `{"query": ...}` and sends `application/json`, and an envelope written out in
   full is sent unchanged - see
-  [the `graphql` envelope](api-reference.md#the-graphql-envelope).
+  [the `graphql` envelope](api-reference.md#the-graphql-envelope). A `jsonrpc`
+  `body` may be the bare call object: the engine adds `"jsonrpc":"2.0"`, plus
+  `"id":1` when the call names no id, and a frame that already declares a
+  string `"jsonrpc"` is sent byte for byte - which is how an agent chooses its
+  own id or sends a notification - see
+  [the `jsonrpc` envelope](api-reference.md#the-jsonrpc-envelope).
   `create_request` stores the same shape. Every field an agent writes is a **text** part: a
   `form-data` [file part](api-reference.md#file-parts-form-data-only) names a
   path on the user's machine, which an agent cannot choose for them or verify,
   so the tools state the limit rather than inventing a shape for it. A stored
   file part is left alone unless `body` replaces the whole body.
 - **What actually went out** - the engine adds headers an agent never wrote: the
-  body-implied `Content-Type` (a `graphql` body sends `application/json`, an
-  `x-www-form-urlencoded` one sends its own type), a default `User-Agent`, and
+  body-implied `Content-Type` (a `graphql` or `jsonrpc` body sends
+  `application/json`, an `x-www-form-urlencoded` one sends its own type), a
+  default `User-Agent`, and
   the `Cookie` line the jar matched for the environment. So the request an agent
   composed is not the request that was sent, and asserting on the composed one
   is how a correct request gets reported as wrong. `requestHeaders` in the

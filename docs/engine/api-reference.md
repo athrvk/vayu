@@ -248,6 +248,7 @@ so a body that round-trips through storage sends the same bytes.
 | `none` | nothing | no body |
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope (see below) |
+| `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
 
@@ -265,8 +266,8 @@ Three Content-Type rules follow from the encoding:
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
-- `graphql` sets `Content-Type: application/json` under the same rule - a
-  Content-Type the caller wrote wins.
+- `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
+  rule - a Content-Type the caller wrote wins.
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
@@ -295,6 +296,42 @@ or a mistyped one - is passed through unchanged rather than wrapped. Wrapping a
 body the engine could not read would turn a broken envelope into a valid
 request carrying the wrong query. A bare GraphQL document cannot take that
 shape, so nothing legitimate falls into it.
+
+#### The `jsonrpc` envelope
+
+A JSON-RPC 2.0 server refuses a frame that does not declare its version, so a
+`jsonrpc` body is completed on its way to the wire in the same place, and by the
+same rule, as the `graphql` one. `content` may be either shape:
+
+| `content` | Sent as |
+|---|---|
+| a JSON object with a **string** `jsonrpc` member | itself, **byte for byte** |
+| a JSON object without one | itself plus `"jsonrpc":"2.0"`, and `"id":1` if it declares no `id` |
+| a JSON array (a batch call) | itself, verbatim |
+| anything else (a non-object, or text that does not parse) | itself, verbatim |
+
+The added `id` is the constant `1`, never a random or time-derived value: a
+load run sends the same call thousands of times and a replay has to send the
+bytes it replays, so a per-send id would make two runs of the same request
+incomparable. A caller who needs their own ids writes the full frame - which is
+passed through - and so does a caller sending a **notification**, the frame with
+no `id` that a server must not answer. Members the caller wrote keep the order
+they wrote them in, and the two the engine may add go on the end.
+
+The member's *type* is what is checked, not its presence: `{"jsonrpc": 2.0}` is
+the JSON number and the spec asks for the string, so such a frame is completed
+(the version stamped over) rather than sent as the invalid request it is.
+
+A batch array needs nothing done to it - every element carries its own envelope
+- and passes through for the same reason any non-object does: there is no single
+call object to complete.
+
+The unresolved-`{{token}}` caveat is the `graphql` one, and it matters more here
+because a JSON-RPC `params` is where a variable usually sits. Composition
+resolves the body first (`POST /compose`), and the envelope rule then runs on
+the *resolved* text; a body still holding a token at wire time does not parse,
+so it is passed through as typed rather than completed into a well-formed
+request carrying an unresolved template.
 
 #### File parts (`form-data` only)
 

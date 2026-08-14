@@ -50,6 +50,15 @@ describe("which modes share a body", () => {
 		expect(draftKey("graphql")).toBe("graphql");
 	});
 
+	// The decision recorded in the file's header: jsonrpc is one plain JSON
+	// pane, not a structure this side parses - its envelope is completed
+	// engine-side - so it reads and writes the same string json and text do.
+	// Put it in its own bucket and switching JSON to JSON-RPC would blank an
+	// editor showing the same document a moment earlier.
+	it("puts jsonrpc in the raw bucket, because it is one plain document", () => {
+		expect(draftKey("jsonrpc")).toBe("raw");
+	});
+
 	it.each(["none", "form-data", "x-www-form-urlencoded"] as const)(
 		"gives %s none, since it does not use request.body",
 		(mode) => {
@@ -89,6 +98,28 @@ describe("json to text", () => {
 	it("carries it back too", () => {
 		const toText = inA("json", "text", JSON_BODY);
 		expect(inA("text", "json", JSON_BODY, toText.drafts).body).toBe(JSON_BODY);
+	});
+});
+
+describe("json to jsonrpc", () => {
+	const CALL = '{"method":"eth_blockNumber","params":[]}';
+
+	// The shared bucket, from the user's side: the call you were editing as JSON
+	// is still on screen after the switch, and switching back does not blank it.
+	// Mutation check: give jsonrpc its own bucket in `draftKey` and both
+	// assertions redden with an empty editor.
+	it("carries the document over and back, since it is the same string", () => {
+		expect(inA("json", "jsonrpc", CALL).body).toBe(CALL);
+
+		const toRpc = inA("json", "jsonrpc", CALL);
+		expect(inA("jsonrpc", "json", CALL, toRpc.drafts).body).toBe(CALL);
+	});
+
+	// And the bucket boundary that matters: GraphQL's envelope must not reach a
+	// JSON-RPC pane, which is the original bug pointed at the new mode.
+	it("does not hand the GraphQL envelope to the JSON-RPC editor", () => {
+		const out = inA("graphql", "jsonrpc", GQL_BODY);
+		expect(out.body).toBe("");
 	});
 });
 
