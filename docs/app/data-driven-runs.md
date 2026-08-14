@@ -50,7 +50,12 @@ survives, which is JMeter and k6 behaviour and the reason the preview says so.
 JSON and JSONL keep what the file declared - `3` is a number, `true` is a
 boolean, `null` is null.
 
-If you need a number to arrive as a number, use a JSON file.
+If you need a number to arrive as a number, use a JSON file - and write the
+token *outside* the quotes in the body, `{"n": {{data.n}}}`, because that is
+what decides whether it arrives as `2` or `"2"`.
+
+A `null` cell is a value `pm.iterationData` hands to a script and a value a
+`{{data.column}}` token **refuses** - see below.
 
 ## Quoting (CSV and TSV)
 
@@ -119,7 +124,17 @@ by a global, collection or environment variable. See
 A `{{data.column}}` naming a column the bound row does not carry **fails the
 step before anything is sent**. Substituting an empty string would send a
 request quietly pointing somewhere else, which is the failure this namespace
-exists to remove.
+exists to remove. A cell that is present but **`null`** fails the same way, for
+the same reason - the token says the value came from the file. A column that is
+legitimately empty for some rows belongs in a script, where `pm.iterationData`
+hands `null` to a branch that can read it.
+
+A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
+token inside a string literal is escaped as it binds, so `say "hi"` arrives as
+that text inside valid JSON rather than ending the string. A token written
+*outside* a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
+a JSON file's number arrives as a number. Nothing else is escaped: a URL, a
+header, a form field and a plain-text body take the cell byte for byte.
 
 ## How many iterations, and which row
 

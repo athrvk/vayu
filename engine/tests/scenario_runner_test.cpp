@@ -57,6 +57,7 @@ struct SeenRequest {
     std::string target;
     std::string cookie;
     std::string marker; // the X-Marker header, which the tests' scripts set
+    std::string body;   // the request body as received; "" for a GET
 };
 
 /**
@@ -71,8 +72,8 @@ class ScenarioMockServer {
 
         const auto record = [this] (const httplib::Request& req) {
             std::lock_guard<std::mutex> lock (mtx);
-            seen.push_back ({ req.path, req.target,
-            req.get_header_value ("Cookie"), req.get_header_value ("X-Marker") });
+            seen.push_back ({ req.path, req.target, req.get_header_value ("Cookie"),
+            req.get_header_value ("X-Marker"), req.body });
         };
 
         svr.Get ("/ok", [record] (const httplib::Request& req, httplib::Response& res) {
@@ -90,6 +91,13 @@ class ScenarioMockServer {
             if (observer) {
                 observer ();
             }
+            res.set_content ("{}", "application/json");
+        });
+        // The body a step actually sent, which is where a `{{data.*}}` bound
+        // into a JSON body has to be read (issue #593) - the plan's copy would
+        // not show a downstream re-encoding.
+        svr.Post ("/body", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
             res.set_content ("{}", "application/json");
         });
         svr.Get ("/slow", [record] (const httplib::Request& req, httplib::Response& res) {
@@ -188,14 +196,18 @@ class ScenarioRunnerTest : public ::testing::Test {
     const std::string& post_script  = "",
     const std::string& absolute_url = "",
     const std::string& name         = "",
-    const std::string& headers      = "") {
+    const std::string& headers      = "",
+    const std::string& body         = "") {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = "col_1";
         r.name          = name.empty () ? "Step " + id : name;
-        r.method        = vayu::HttpMethod::GET;
+        // A body is what a POST is for, so the two travel together rather than
+        // leaving a caller to remember the method.
+        r.method = body.empty () ? vayu::HttpMethod::GET : vayu::HttpMethod::POST;
         r.url     = absolute_url.empty () ? server_->url (path) : absolute_url;
         r.headers = headers;
+        r.body    = body;
         r.pre_request_script  = pre_script;
         r.post_request_script = post_script;
         r.order               = order;
@@ -1095,6 +1107,48 @@ TEST_F (ScenarioRunnerTest, ATokenNamingAnAbsentColumnErrorsTheStepWithoutSendin
     EXPECT_FALSE (trace.contains ("response"));
     EXPECT_NE (
     trace["request"]["url"].get<std::string> ().find ("{{data.absent}}"), std::string::npos);
+}
+
+// A cell carrying a quote used to end the JSON string it was dropped into and
+// put a malformed body on the wire, silently (issue #593). Read off the wire,
+// because the bind, the build and the wire encoding all have to agree.
+TEST_F (ScenarioRunnerTest, AQuoteBearingCellReachesTheWireAsValidJson) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/body", "", "", "", "", "",
+    R"({"mode":"json","content":"{\"note\":\"{{data.note}}\"}"})");
+
+    const auto run_id = start_with_data (json::array (
+    { { { "note", "has,comma \"quoted\"" } }, { { "note", "line\nbreak\\slash" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    for (const auto& hit : seen) {
+        const auto sent = json::parse (hit.body, nullptr, false);
+        ASSERT_FALSE (sent.is_discarded ())
+        << "a bound body reached the wire unparseable: " << hit.body;
+    }
+    EXPECT_EQ (json::parse (seen[0].body).at ("note").get<std::string> (), "has,comma \"quoted\"");
+    EXPECT_EQ (json::parse (seen[1].body).at ("note").get<std::string> (), "line\nbreak\\slash");
+}
+
+// A null cell is the missing-column failure one type down, and is refused the
+// same way: nothing is sent, and the step's error names the token.
+TEST_F (ScenarioRunnerTest, ANullCellErrorsTheStepWithoutSending) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/body", "", "", "", "", "",
+    R"({"mode":"json","content":"{\"n\":{{data.n}}}"})");
+
+    const auto run_id = start_with_data (json::array ({ { { "n", nullptr } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "a body with an erased value reached the wire";
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_NE (rows[0].error.find ("{{data.n}}"), std::string::npos) << rows[0].error;
+    EXPECT_NE (rows[0].error.find ("null"), std::string::npos) << rows[0].error;
 }
 
 // The test script reads the same row its request was built from: asserting a

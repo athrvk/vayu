@@ -36,6 +36,23 @@
  * composed steps and returns a `400` rather than starting a run whose every
  * iteration would send the literal token (issue #415).
  *
+ * A cell that is **null** is the same failure again, one type down: the token
+ * says the value comes from the file and the file says there is none, so the
+ * bind errors rather than writing nothing where a value belonged (issue #593).
+ *
+ * ## A value is written for the document it lands in
+ *
+ * Substitution is textual, so a value carrying a `"` used to end the JSON
+ * string it was dropped into and put a malformed body on the wire, silently
+ * (issue #593). A token inside a string literal of a JSON body therefore binds
+ * **escaped**: the cell's text stays what it was, and the document stays
+ * readable. A token placed *outside* a string literal - `{"n":{{data.n}}}` -
+ * still binds verbatim, which is what makes typed placement work.
+ *
+ * Nothing else is escaped: a URL, a header, a form field and a text body take
+ * the rendered value byte for byte, because none of them is a document with a
+ * quoting rule of its own.
+ *
  * ## Split once, joined per row
  *
  * A step is tokenised when the plan is resolved (`tokenize_data_fields`) and
@@ -47,6 +64,7 @@
  */
 
 #include <cstddef>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -65,6 +83,21 @@ struct DataBindResult {
     std::string error;
 };
 
+/**
+ * How one token's rendered value is written into the text around it.
+ *
+ * Decided at split time, per token, because the surrounding literals are what
+ * answer it and they do not change per row - the join must not re-derive this
+ * for every iteration of every virtual user.
+ */
+enum class DataValueEncoding : std::uint8_t {
+    /// The rendered text, byte for byte. Every field but a JSON document.
+    Verbatim,
+    /// Escaped as JSON string content (`"`, `\` and the control characters),
+    /// for a token sitting inside a string literal of a JSON body.
+    JsonString,
+};
+
 /** One bindable field, split once around the `{{data.column}}` it carries. */
 struct DataFieldTemplate {
     /// Which string this is, counted in `walk_bindable_fields` order. Both the
@@ -75,6 +108,8 @@ struct DataFieldTemplate {
     std::vector<std::string> literals;
     /// The column names, with the `data.` prefix already stripped.
     std::vector<std::string> columns;
+    /// One per entry of `columns`, in the same order.
+    std::vector<DataValueEncoding> encodings;
 };
 
 /**
@@ -110,6 +145,11 @@ struct StepDataTemplate {
  * the shared walk rewrites in place and nothing is actually rewritten here -
  * which is affordable exactly because resolution happens once per run, over a
  * plan already bounded by `maxScenarioSteps`.
+ *
+ * The body's **mode** is read here as well as its text: it is what decides
+ * whether the body is a JSON document, and so whether a token inside a string
+ * literal binds escaped. A template is therefore only valid for a request whose
+ * body mode is the one it was split from.
  */
 [[nodiscard]] StepDataTemplate tokenize_data_fields (const vayu::Request& request);
 
@@ -137,6 +177,12 @@ size_t row_index);
  * type: numbers and booleans render as JSON writes them (`7`, `true`), `null`
  * renders empty, and an object or array renders as compact JSON so a nested
  * value can still be dropped into a body.
+ *
+ * The rendering is what a value *reads* as; whether it is then escaped for the
+ * document it lands in is the encoding above. **A null cell never reaches a
+ * request through the binder** - `apply_data_template` refuses it, for the same
+ * reason a missing column is refused - so the empty rendering here is the
+ * answer to "what does this value say", not a value the wire ever sees.
  */
 [[nodiscard]] std::string render_data_value (const nlohmann::json& value);
 

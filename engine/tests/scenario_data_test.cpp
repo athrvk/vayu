@@ -21,6 +21,7 @@
 #include <string>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/types.hpp"
 
@@ -192,6 +193,172 @@ TEST (ScenarioDataBindTest, ASubstitutedValueIsNeverRescanned) {
 
     ASSERT_TRUE (result.ok) << result.error;
     EXPECT_EQ (request.url, "https://api.test/{{data.b}}");
+}
+
+// ---------------------------------------------------------------------------
+// A value is written for the document it lands in (issue #593)
+// ---------------------------------------------------------------------------
+
+TEST (ScenarioDataJsonBodyTest, AQuoteBearingCellCannotBreakTheJsonBody) {
+    // Wire-proven before the fix: `{"note":"has,comma "quoted""}` went out as
+    // it stands. Revert the escaping and this body stops parsing.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"note":"{{data.note}}"})";
+
+    const auto result =
+    bind_data_row (request, json{ { "note", R"(has,comma "quoted")" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    const auto parsed = json::parse (request.body.content, nullptr, false);
+    ASSERT_FALSE (parsed.is_discarded ()) << request.body.content;
+    // The cell's text is intact, not merely parseable: escaping must not eat
+    // the value it was protecting.
+    EXPECT_EQ (parsed.at ("note").get<std::string> (), R"(has,comma "quoted")");
+}
+
+TEST (ScenarioDataJsonBodyTest, BackslashesAndControlCharactersAreEscapedToo) {
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"p":"{{data.p}}"})";
+
+    const auto result =
+    bind_data_row (request, json{ { "p", "C:\\tmp\nline\twith\x01" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    const auto parsed = json::parse (request.body.content, nullptr, false);
+    ASSERT_FALSE (parsed.is_discarded ()) << request.body.content;
+    EXPECT_EQ (parsed.at ("p").get<std::string> (), "C:\\tmp\nline\twith\x01");
+}
+
+TEST (ScenarioDataJsonBodyTest, ATypedPlacementOutsideAStringStaysUnquoted) {
+    // The escaping is decided per token, from the literals around it: the same
+    // body carries one token inside a string and one outside, and only the
+    // first is escaped. Escape both and the number arrives as `"2"`.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"n":{{data.n}},"note":"{{data.note}}"})";
+
+    const auto result =
+    bind_data_row (request, json{ { "n", 2 }, { "note", R"(a "b")" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    const auto parsed = json::parse (request.body.content, nullptr, false);
+    ASSERT_FALSE (parsed.is_discarded ()) << request.body.content;
+    EXPECT_TRUE (parsed.at ("n").is_number ()) << request.body.content;
+    EXPECT_EQ (parsed.at ("n").get<int> (), 2);
+    EXPECT_EQ (parsed.at ("note").get<std::string> (), R"(a "b")");
+}
+
+TEST (ScenarioDataJsonBodyTest, AnEscapedQuoteInTheTemplateDoesNotFlipTheState) {
+    // The state scan has to read the template's own escapes the way JSON does,
+    // or the token after `\"` is judged to be outside the string it is in.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"note":"said \" then {{data.note}}"})";
+
+    const auto result = bind_data_row (request, json{ { "note", R"(x"y)" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    const auto parsed = json::parse (request.body.content, nullptr, false);
+    ASSERT_FALSE (parsed.is_discarded ()) << request.body.content;
+    EXPECT_EQ (parsed.at ("note").get<std::string> (), R"(said " then x"y)");
+}
+
+TEST (ScenarioDataJsonBodyTest, ANonJsonBodyTakesTheValueByteForByte) {
+    // A text body has no quoting rule of its own, so escaping it would corrupt
+    // the value instead of protecting the document.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Text;
+    request.body.content = "note: {{data.note}}";
+
+    const auto result = bind_data_row (request, json{ { "note", R"(a "b" \ c)" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, R"(note: a "b" \ c)");
+}
+
+TEST (ScenarioDataJsonBodyTest, TheUrlAndHeadersAreNeverEscapedForAJsonBody) {
+    // The context is per field, not per request: a JSON body must not make the
+    // URL of the same request start escaping quotes.
+    auto request = request_with_url ("https://api.test/?q={{data.q}}");
+    request.headers["X-Note"] = "{{data.q}}";
+    request.body.mode         = vayu::BodyMode::Json;
+    request.body.content      = R"({"q":"{{data.q}}"})";
+
+    const auto result = bind_data_row (request, json{ { "q", R"(a"b)" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, R"(https://api.test/?q=a"b)");
+    EXPECT_EQ (request.headers.at ("X-Note"), R"(a"b)");
+    EXPECT_EQ (request.body.content, R"({"q":"a\"b"})");
+}
+
+TEST (ScenarioDataJsonBodyTest, AGraphqlEnvelopeIsAJsonDocumentAndABareOneIsNot) {
+    // `graphql` content is either shape. The envelope has string literals a
+    // token can sit inside; a bare document is escaped wholesale when
+    // `graphql_wire_body` wraps it, so escaping it here would double it.
+    {
+        auto request         = request_with_url ("https://api.test/");
+        request.body.mode    = vayu::BodyMode::GraphQL;
+        request.body.content = R"({"query":"{ u(n:\"{{data.n}}\") }"})";
+
+        ASSERT_TRUE (bind_data_row (request, json{ { "n", R"(a"b)" } }, 0).ok);
+        const auto parsed = json::parse (request.body.content, nullptr, false);
+        ASSERT_FALSE (parsed.is_discarded ()) << request.body.content;
+        EXPECT_EQ (parsed.at ("query").get<std::string> (), R"({ u(n:"a"b") })");
+    }
+    {
+        auto request         = request_with_url ("https://api.test/");
+        request.body.mode    = vayu::BodyMode::GraphQL;
+        request.body.content = R"({ u(n: "{{data.n}}") })";
+
+        ASSERT_TRUE (bind_data_row (request, json{ { "n", "ada" } }, 0).ok);
+        EXPECT_EQ (request.body.content, R"({ u(n: "ada") })");
+    }
+}
+
+TEST (ScenarioDataJsonBodyTest, ABoundJsonRpcCallStillGetsItsEnvelope) {
+    // The downstream compounding the corruption caused: the wire-time envelope
+    // parses the body, so a body broken by the bind was passed through
+    // unstamped. Binding cleanly is what un-breaks it.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::JsonRpc;
+    request.body.content = R"({"method":"note","params":{"t":"{{data.t}}"}})";
+
+    ASSERT_TRUE (bind_data_row (request, json{ { "t", R"(a"b)" } }, 0).ok);
+
+    const auto wire =
+    json::parse (vayu::http::jsonrpc_wire_body (request.body.content), nullptr, false);
+    ASSERT_FALSE (wire.is_discarded ()) << request.body.content;
+    EXPECT_EQ (wire.at ("jsonrpc").get<std::string> (), "2.0");
+    EXPECT_EQ (wire.at ("params").at ("t").get<std::string> (), R"(a"b)");
+}
+
+TEST (ScenarioDataJsonBodyTest, ANullCellIsAnErrorNotAnErasedValue) {
+    // The missing-column principle, one type down. Render it as "" instead and
+    // this body goes out as `{"n": }` - invalid, silently.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"n":{{data.n}}})";
+
+    const auto result = bind_data_row (request, json{ { "n", nullptr } }, 4);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.n}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("null"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 4"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataJsonBodyTest, ANullCellIsRefusedWhereverItIsPlaced) {
+    // Not a JSON-body rule: a null in a URL is the same quietly-blank field.
+    auto request      = request_with_url ("https://api.test/u/{{data.id}}");
+    const auto result = bind_data_row (request, json{ { "id", nullptr } }, 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.id}}"), std::string::npos) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/u/{{data.id}}")
+    << "a refused bind must not have half-written the field";
 }
 
 // ---------------------------------------------------------------------------
