@@ -74,14 +74,46 @@ interface PendingCheck {
  * How long to wait for an answer before giving up. Without this a check that
  * never gets a reply - a hung connection, a feed that stalls after the TCP
  * handshake - leaves the settings button spinning with no way back.
+ *
+ * This is one budget for the whole check, retry included: the user clicked once
+ * and the wait they can see must stay bounded by one number. A retry that runs
+ * out of budget reports the timeout rather than the first error - the first
+ * error is logged either way.
  */
 const CHECK_TIMEOUT_MS = 30_000;
+
+/**
+ * A check gets one automatic retry, because on a cold network stack the first
+ * answer is often not the truth.
+ *
+ * A mac check is three sequential HTTPS requests through Chromium's net stack,
+ * and a transient there (`ERR_NETWORK_CHANGED` while Wi-Fi settles after launch
+ * or wake is the textbook one) used to become the final answer. The join rule
+ * below amplifies it: a click that lands while the startup check is in flight
+ * inherits that check's fate, so the coldest possible attempt answered a click
+ * made minutes later. Retrying once absorbs that without giving up the join.
+ */
+const MAX_CHECK_ATTEMPTS = 2;
+
+/** Long enough for a settling network stack, short enough to still feel like one click. */
+const RETRY_DELAY_MS = 2_000;
 
 let intervalTimer: NodeJS.Timeout | null = null;
 /** True once initAutoUpdater has configured the updater (not in dev). */
 let updaterReady = false;
 let pendingCheck: PendingCheck | null = null;
 let resolveWindow: WindowAccessor | null = null;
+
+/**
+ * Attempts started for the check cycle in flight, 0 when none is.
+ *
+ * Module state rather than a field on `PendingCheck` because the periodic and
+ * startup checks retry too, and nobody is waiting on those.
+ */
+let attempt = 0;
+/** The attempt whose failure has already been acted on - see `handleCheckFailure`. */
+let failedAttempt = 0;
+let retryTimer: NodeJS.Timeout | null = null;
 
 /**
  * How the updater finds the window to talk to, asked fresh every time.
@@ -98,6 +130,100 @@ export type WindowAccessor = () => BrowserWindow | null;
 function liveWindow(): BrowserWindow | null {
 	const win = resolveWindow?.() ?? null;
 	return win && !win.isDestroyed() ? win : null;
+}
+
+/**
+ * The fullest description of a failed check we can give the user.
+ *
+ * electron-updater raises coded errors (`newError(message, code)`), and the
+ * code is the part worth reporting: "Cannot find latest-mac.yml" and
+ * `ERR_UPDATER_LATEST_VERSION_NOT_FOUND` say different things about who is at
+ * fault. The message is what the settings panel and the menu dialog print, so
+ * the code has to travel inside it - there is no second field for a reader to
+ * miss.
+ */
+function describeError(err: unknown): string {
+	if (!(err instanceof Error)) return String(err);
+	const parts = [err.message];
+	const code: unknown = (err as { code?: unknown }).code;
+	if (typeof code === "string" && code && !err.message.includes(code)) {
+		parts.push(`(${code})`);
+	}
+	// Some codes already embed their cause in the message; only add one that is
+	// not already there. Read off the object rather than `err.cause`: the
+	// electron tsconfig's lib predates it, and a failure description is not a
+	// reason to move the whole target.
+	const cause: unknown = (err as { cause?: unknown }).cause;
+	const causeText =
+		cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
+	if (causeText && !err.message.includes(causeText)) parts.push(`- ${causeText}`);
+	return parts.join(" ");
+}
+
+/** Drop a scheduled retry - the cycle ended, or a newer one replaced it. */
+function clearRetry(): void {
+	if (retryTimer) {
+		clearTimeout(retryTimer);
+		retryTimer = null;
+	}
+}
+
+/** Ask electron-updater for the feed. Failures land in `handleCheckFailure`. */
+function runCheckAttempt(): void {
+	autoUpdater.checkForUpdates().catch((err: unknown) => {
+		// The `error` event fires for the same failure, so this and the handler
+		// both report it; `handleCheckFailure` acts on an attempt once.
+		handleCheckFailure(err);
+	});
+}
+
+/** Start a check with a full retry budget. Every check path goes through here. */
+function startCheckCycle(): void {
+	clearRetry();
+	attempt = 1;
+	failedAttempt = 0;
+	runCheckAttempt();
+}
+
+/** The cycle is over: an answer arrived, the budget is spent, or we are quitting. */
+function endCheckCycle(): void {
+	clearRetry();
+	attempt = 0;
+	failedAttempt = 0;
+}
+
+/**
+ * Retry once, then report.
+ *
+ * A single failure is not an answer - it is one round trip that did not work.
+ * The first one is logged at `error` level on the way past, because the retry
+ * would otherwise hide a *deterministic* failure behind a working second
+ * attempt, and then the only trace of the real mechanism is gone.
+ */
+function handleCheckFailure(err: unknown): void {
+	const message = describeError(err);
+
+	// One failure reaches here twice (the event and the promise rejection).
+	// Answering the attempt rather than the signal keeps that from spending the
+	// whole budget on a single failed round trip.
+	if (attempt > 0 && failedAttempt === attempt) return;
+	failedAttempt = attempt;
+
+	if (attempt > 0 && attempt < MAX_CHECK_ATTEMPTS) {
+		console.error(`[Updater] first check failed, retrying once: ${message}`);
+		retryTimer = setTimeout(() => {
+			retryTimer = null;
+			attempt += 1;
+			runCheckAttempt();
+		}, RETRY_DELAY_MS);
+		// Node keeps the process alive for a pending timer; a retry must not
+		// hold up quit.
+		retryTimer.unref?.();
+		return;
+	}
+
+	endCheckCycle();
+	settleCheck({ status: "error", message });
 }
 
 /**
@@ -173,6 +299,7 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 					: undefined,
 		};
 		send("update:available", payload);
+		endCheckCycle();
 		settleCheck({ status: "available", ...payload });
 	});
 
@@ -182,21 +309,23 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 
 	// Only surfaced for user-initiated checks; the periodic check stays silent.
 	autoUpdater.on("update-not-available", () => {
+		endCheckCycle();
 		settleCheck({ status: "up-to-date", version: app.getVersion() });
 	});
 
 	autoUpdater.on("error", (err) => {
 		console.error("[Updater] error:", err);
-		settleCheck({ status: "error", message: err.message });
+		handleCheckFailure(err);
 	});
 
 	updaterReady = true;
 
-	const check = () =>
-		autoUpdater.checkForUpdates().catch((err) => console.error("[Updater] check failed:", err));
-
-	void check();
-	intervalTimer = setInterval(() => void check(), CHECK_INTERVAL_MS);
+	// The startup and periodic checks retry on the same budget. They stay
+	// silent - `settleCheck` answers nobody when no one is waiting - but the
+	// startup one runs on the coldest network stack of the session, so it is
+	// the attempt that most needs a second try.
+	startCheckCycle();
+	intervalTimer = setInterval(() => startCheckCycle(), CHECK_INTERVAL_MS);
 }
 
 /**
@@ -207,9 +336,29 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
  * dialog is shown unparented rather than not at all, which is the macOS
  * all-windows-closed case for the menu's "Check for Updates…".
  */
-function showUpdateDialog(options: Electron.MessageBoxOptions): void {
+function showUpdateDialog(
+	options: Electron.MessageBoxOptions
+): Promise<Electron.MessageBoxReturnValue> {
 	const win = liveWindow();
-	void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
+	return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+}
+
+/**
+ * Announce an available release to a menu check that has no window to show the
+ * banner in. The release-notes button is the only action the notify path has -
+ * the update itself happens out-of-band there.
+ */
+function showAvailableDialog(version: string, url: string): void {
+	void showUpdateDialog({
+		type: "info",
+		message: `Vayu ${version} is available`,
+		detail: `You're on ${app.getVersion()}.`,
+		buttons: ["OK", "Release notes"],
+		defaultId: 0,
+		cancelId: 0,
+	}).then(({ response }) => {
+		if (response === 1) void shell.openExternal(url);
+	});
 }
 
 /**
@@ -236,21 +385,28 @@ function settleCheck(result: UpdateCheckResult): void {
 	// on top of it would be redundant.
 	if (pending.source === "menu") {
 		if (result.status === "up-to-date") {
-			showUpdateDialog({
+			void showUpdateDialog({
 				type: "info",
 				message: "You're up to date",
 				detail: `Vayu ${result.version} is the latest version.`,
 				buttons: ["OK"],
 			});
 		} else if (result.status === "error") {
-			showUpdateDialog({
+			void showUpdateDialog({
 				type: "error",
 				message: "Couldn't check for updates",
 				detail: result.message,
 				buttons: ["OK"],
 			});
+		} else if (result.status === "available" && !liveWindow()) {
+			// "available" normally needs no dialog - the banner is already
+			// showing it. But the banner is a `webContents.send`, and with no
+			// window there is nothing to send it to: the menu click would
+			// otherwise find an update and say nothing at all. On macOS a
+			// window-less app is the ordinary state, and the menu is still
+			// there to click.
+			showAvailableDialog(result.version, result.releaseUrl);
 		}
-		// "available" needs no dialog - the update banner is already showing it.
 	}
 
 	pending.settle(result);
@@ -268,7 +424,7 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 			detail: "Update checks only run in packaged builds of Vayu.",
 		};
 		if (source === "menu") {
-			showUpdateDialog({
+			void showUpdateDialog({
 				type: "info",
 				message: "Updates unavailable",
 				detail: result.detail,
@@ -287,6 +443,9 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 		settle = resolve;
 	});
 	const timer = setTimeout(() => {
+		// The budget covers the retry too, so a timeout ends the cycle - a
+		// retry still in flight has nobody left to answer.
+		endCheckCycle();
 		settleCheck({ status: "error", message: "The update check timed out." });
 	}, CHECK_TIMEOUT_MS);
 	// Node keeps the process alive for a pending timer; this one must not hold
@@ -294,12 +453,7 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 	timer.unref?.();
 	pendingCheck = { source, settle, promise, timer };
 
-	autoUpdater.checkForUpdates().catch((err) => {
-		// The `error` event usually fires too, but not for every rejection -
-		// settling here as well is safe because settleCheck is idempotent.
-		console.error("[Updater] manual check failed:", err);
-		settleCheck({ status: "error", message: err instanceof Error ? err.message : String(err) });
-	});
+	startCheckCycle();
 
 	return promise;
 }
@@ -316,6 +470,7 @@ export function disposeAutoUpdater(): void {
 		clearInterval(intervalTimer);
 		intervalTimer = null;
 	}
+	endCheckCycle();
 	takePendingCheck()?.settle({ status: "error", message: "The update check was cancelled." });
 	resolveWindow = null;
 }
