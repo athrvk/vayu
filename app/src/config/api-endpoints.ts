@@ -143,6 +143,8 @@ export const API_ENDPOINTS = {
 	INBOX: `/inbox`,
 	INBOX_START: `/inbox/start`,
 	INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,
+	// PUT patches the canned response; DELETE removes the inbox and cascades its
+	// captures - the only way one leaves the list before the process does.
 	INBOX_BY_ID: (inboxId: string) => `/inbox/${inboxId}`,
 	INBOX_CAPTURES: (inboxId: string, limit: number, offset: number) =>
 		`/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,

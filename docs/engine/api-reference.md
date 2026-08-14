@@ -1404,7 +1404,7 @@ no create/update split ([POST creates, PUT updates](#resource-writes-create-vs-u
 applies to collections, requests and environments), ids are not restorable
 across restarts, and `POST /inbox/start` is a verb path for that reason. Stopping
 an inbox frees its listener but keeps the record - and therefore its captures -
-readable until the engine exits.
+readable until the engine exits; `DELETE /inbox/:inboxId` is what removes both.
 
 **Binding is a trust decision.** The default is `127.0.0.1`. Any other address
 is refused unless the caller also sends `"confirmNonLoopback": true`, and the
@@ -1482,9 +1482,14 @@ this way, since the kernel does not hand out a port it is already using.
   "port": 41235,
   "running": true,
   "loopback": true,
+  "captureCount": 0,
   "response": { "status": 200, "body": "", "headers": {}, "delayMs": 0 }
 }
 ```
+
+`captureCount` is how many captures the inbox is holding right now - what a
+`DELETE /inbox/:inboxId` would destroy with it. Every route that returns an
+inbox fills it, so a client can word a confirmation without a second round trip.
 
 ### GET /inbox
 
@@ -1501,7 +1506,26 @@ so a client can send back what `start` handed it. `404` for an unknown id.
 ### POST /inbox/:inboxId/stop
 
 Stop the listener. Returns the inbox with `running: false`. Captures survive;
-`404` for an unknown id.
+`404` for an unknown id. A stop is not a delete - `DELETE /inbox/:inboxId` is.
+
+### DELETE /inbox/:inboxId
+
+Stop the listener, drop the record, and delete its captures with it:
+`{"inboxId": "...", "capturesDeleted": 12}`. `404` for an unknown id.
+
+**A running inbox is stopped rather than refused** - one call, because the
+caller's intent is that the inbox be gone. That is safe rather than racy
+because the teardown joins every in-flight handler before returning, so nothing
+can still be capturing when the rows are cleared. The order is stop, then
+clear, then drop the record: a database failure therefore leaves the inbox in
+place - stopped, and deletable again - rather than orphaning captures no inbox
+could list.
+
+The captures dying *with* the record is the point, and is why `stop` keeps them:
+they go by explicit user intent here, instead of the record living to the end of
+the process to protect them. **There is deliberately no restart route**: delete
+and start a new inbox. A restart would have to decide what happens to the
+existing captures, and this way the user decides.
 
 ### GET /inbox/:inboxId/requests
 

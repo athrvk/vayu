@@ -301,13 +301,14 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     }
 
     nlohmann::json out;
-    out["inboxId"]  = info.inbox_id;
-    out["url"]      = info.url;
-    out["bind"]     = info.bind;
-    out["port"]     = info.port;
-    out["running"]  = info.running;
-    out["loopback"] = info.loopback;
-    out["response"] = std::move (response);
+    out["inboxId"]      = info.inbox_id;
+    out["url"]          = info.url;
+    out["bind"]         = info.bind;
+    out["port"]         = info.port;
+    out["running"]      = info.running;
+    out["loopback"]     = info.loopback;
+    out["captureCount"] = info.capture_count;
+    out["response"]     = std::move (response);
     return out;
 }
 
@@ -539,6 +540,24 @@ bool InboxManager::stop (const std::string& inbox_id) {
     return true;
 }
 
+std::optional<int64_t>
+InboxManager::remove (vayu::db::Database& db, const std::string& inbox_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto it = inboxes_.find (inbox_id);
+    if (it == inboxes_.end ()) {
+        return std::nullopt;
+    }
+    // Stop first: the join inside it is what makes "no capture can still be
+    // landing" true, so the clear below cannot race a webhook into rows that
+    // outlive the record. See the header for why the order is load-bearing.
+    teardown_locked (*it->second);
+    const int64_t deleted = db.clear_inbox_requests (inbox_id);
+    inboxes_.erase (it);
+    vayu::utils::log_info (
+    "Inbox deleted: " + inbox_id + " (" + std::to_string (deleted) + " captures)");
+    return deleted;
+}
+
 std::optional<InboxInfo> InboxManager::get (const std::string& inbox_id) {
     std::lock_guard<std::mutex> lock (mutex_);
     auto it = inboxes_.find (inbox_id);
@@ -665,6 +684,21 @@ void send_parse_error (httplib::Response& res, const InboxParseError& error) {
 } // namespace
 
 /**
+ * The wire shape of an inbox with its capture count filled in.
+ *
+ * `captureCount` is the one field the manager cannot answer - captures are
+ * database rows - so every route that hands an inbox back fills it through
+ * here. One place rather than four, because the failure mode of the fourth
+ * copy is not a compile error: it is a `0` that reads as "nothing to lose"
+ * beside a delete confirmation. Extracted (like `inbox_captures_response`) so
+ * that wiring is covered without an in-process HTTP server.
+ */
+nlohmann::json inbox_json (vayu::db::Database& db, InboxInfo info) {
+    info.capture_count = db.count_inbox_requests (info.inbox_id);
+    return inbox_info_json (info);
+}
+
+/**
  * Testable core of `GET /inbox/:id/requests`: the capture page in the
  * `{data, pagination}` envelope every list endpoint returns, or a 404 for an
  * inbox the manager does not know. Extracted so the wiring is covered without
@@ -760,7 +794,7 @@ void register_inbox_routes (RouteContext& ctx) {
                 result.error_code);
                 return;
             }
-            send_json (res, inbox_info_json (result.info));
+            send_json (res, inbox_json (ctx.db, result.info));
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "POST /inbox/start - Error: " + std::string (e.what ()));
@@ -771,7 +805,7 @@ void register_inbox_routes (RouteContext& ctx) {
     /**
      * POST /inbox/:id/stop
      * Frees the listener. The record and its captures stay readable until the
-     * engine exits, so a stop is not a delete.
+     * engine exits - a stop is not a delete, and `DELETE /inbox/:id` is.
      */
     ctx.server.Post (R"(/inbox/([^/]+)/stop)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -785,14 +819,43 @@ void register_inbox_routes (RouteContext& ctx) {
             send_error (res, 404, "Inbox not found");
             return;
         }
-        send_json (res, inbox_info_json (*info));
+        send_json (res, inbox_json (ctx.db, *info));
+    });
+
+    /**
+     * DELETE /inbox/:id
+     * Stop the listener, drop the record, and delete its captures with it -
+     * the only way a stopped inbox leaves the list before the process does.
+     * A running inbox is stopped rather than refused: the caller asked for it
+     * to be gone, and the teardown joins before the captures are cleared.
+     *
+     * `[^/]+` cannot span a `/`, so this pattern never swallows
+     * `/inbox/:id/requests` - the two DELETE routes are disjoint whatever
+     * order they are registered in.
+     */
+    ctx.server.Delete (R"(/inbox/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const std::string inbox_id = req.matches[1];
+        try {
+            const auto deleted = ctx.inbox_manager.remove (ctx.db, inbox_id);
+            if (!deleted) {
+                send_error (res, 404, "Inbox not found");
+                return;
+            }
+            send_json (res,
+            nlohmann::json{ { "inboxId", inbox_id }, { "capturesDeleted", *deleted } });
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "DELETE /inbox/:id - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
     });
 
     /** GET /inbox - every inbox this process has started, running or stopped. */
     ctx.server.Get ("/inbox", [&ctx] (const httplib::Request&, httplib::Response& res) {
         nlohmann::json data = nlohmann::json::array ();
         for (const auto& info : ctx.inbox_manager.list ()) {
-            data.push_back (inbox_info_json (info));
+            data.push_back (inbox_json (ctx.db, info));
         }
         send_json (res, nlohmann::json{ { "data", std::move (data) } });
     });
@@ -828,7 +891,7 @@ void register_inbox_routes (RouteContext& ctx) {
             send_error (res, 404, "Inbox not found");
             return;
         }
-        send_json (res, inbox_info_json (*info));
+        send_json (res, inbox_json (ctx.db, *info));
     });
 
     /**

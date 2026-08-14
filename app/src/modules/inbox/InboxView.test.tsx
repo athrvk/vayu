@@ -30,6 +30,7 @@ const inbox: Inbox = {
 	port: 4100,
 	running: true,
 	loopback: true,
+	captureCount: 0,
 	response: { status: 200, body: "", delayMs: 0, headers: {} },
 };
 
@@ -45,6 +46,7 @@ vi.mock("@/queries", () => ({
 	}),
 	useStartInboxMutation: () => noop,
 	useStopInboxMutation: () => noop,
+	useDeleteInboxMutation: () => noop,
 	useUpdateInboxResponseMutation: () => noop,
 	useClearInboxCapturesMutation: () => noop,
 }));

@@ -45,6 +45,14 @@ struct InboxInfo {
     bool running = true;
     /// False when `bind` is neither 127.0.0.0/8 nor ::1; the UI badges those.
     bool loopback = true;
+    /// How many captures this inbox is holding - what a delete would take with
+    /// it, which is why a client needs it before asking to delete one.
+    ///
+    /// The one field InboxManager cannot answer: captures live in the database,
+    /// not the manager. The routes fill it from there (`inbox_json` in
+    /// inbox.cpp), so a wire shape built without a database reports 0 rather
+    /// than a wrong number.
+    int64_t capture_count = 0;
     InboxCannedResponse response;
 };
 
@@ -196,6 +204,29 @@ class InboxManager {
     /// Stop the listener, keeping the record (and its captures) readable.
     /// False when no such inbox exists; stopping a stopped inbox is a no-op.
     bool stop (const std::string& inbox_id);
+
+    /**
+     * Stop the listener, drop the record, and delete its captures.
+     *
+     * The counterpart `stop()` deliberately is not: a stopped inbox stays
+     * readable, and before this existed that made every stopped inbox a
+     * permanent row (issue #553). The captures die *with* the record here, by
+     * explicit user intent, which is the honest resolution of the objection
+     * that kept delete out of `stop()`.
+     *
+     * A running inbox is stopped rather than refused - one call, because the
+     * caller's intent is "make it gone". That is safe rather than racy because
+     * `ManagedListener::stop()` joins every in-flight handler before returning,
+     * so once the teardown is done no capture can still be landing.
+     *
+     * Ordering is stop, then clear, then erase. A clear that throws therefore
+     * leaves the record in place - stopped, and deletable again - rather than
+     * orphaning rows that no inbox could ever list.
+     *
+     * @return how many captures were deleted, or nullopt when no such inbox
+     *         exists. A database failure propagates as an exception.
+     */
+    std::optional<int64_t> remove (vayu::db::Database& db, const std::string& inbox_id);
 
     std::optional<InboxInfo> get (const std::string& inbox_id);
     std::vector<InboxInfo> list ();

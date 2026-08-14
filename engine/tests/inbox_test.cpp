@@ -32,6 +32,8 @@ InboxManager& manager,
 const std::string& inbox_id,
 int64_t limit,
 int64_t offset);
+// Defined in inbox.cpp; the wire shape every inbox route answers with.
+nlohmann::json inbox_json (vayu::db::Database& db, vayu::http::InboxInfo info);
 } // namespace vayu::http::routes
 
 namespace {
@@ -368,6 +370,76 @@ TEST_F (InboxListenerTest, StopFreesTheListenerAndKeepsTheHistory) {
     << "a stopped inbox must refuse further connections";
 }
 
+/*
+ * Delete is what stop deliberately is not. Before it existed, a stopped inbox
+ * was a row nothing could remove until the engine exited (issue #553).
+ */
+TEST_F (InboxListenerTest, DeleteFreesTheListenerAndTakesTheCapturesWithIt) {
+    auto started = start ();
+    {
+        auto client = client_for (started.info);
+        ASSERT_TRUE (client.Post ("/hook", "{}", "application/json"));
+        ASSERT_TRUE (client.Post ("/hook", "{}", "application/json"));
+    }
+    ASSERT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
+
+    // A running inbox is stopped rather than refused: one call, because the
+    // caller's intent is "make it gone".
+    const auto deleted = manager_->remove (*db_, started.info.inbox_id);
+    ASSERT_TRUE (deleted.has_value ());
+    EXPECT_EQ (*deleted, 2);
+
+    EXPECT_FALSE (manager_->get (started.info.inbox_id).has_value ());
+    EXPECT_TRUE (manager_->list ().empty ());
+    // The cascade: dropping it leaves rows no inbox can ever list again.
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 0);
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (0, 300000); // 300ms
+    EXPECT_FALSE (client.Post ("/hook", "{}", "application/json"))
+    << "a deleted inbox must refuse further connections";
+
+    // Gone means gone: a second delete is a 404, not a second success.
+    EXPECT_FALSE (manager_->remove (*db_, started.info.inbox_id).has_value ());
+    EXPECT_FALSE (manager_->remove (*db_, "inbox_nope").has_value ());
+}
+
+TEST_F (InboxListenerTest, DeleteTakesOnlyItsOwnInboxsCaptures) {
+    auto kept   = start ();
+    auto doomed = start ();
+    auto keeper = client_for (kept.info);
+    auto sender = client_for (doomed.info);
+    ASSERT_TRUE (keeper.Post ("/hook", "{}", "application/json"));
+    ASSERT_TRUE (sender.Post ("/hook", "{}", "application/json"));
+
+    ASSERT_EQ (manager_->remove (*db_, doomed.info.inbox_id).value_or (-1), 1);
+
+    EXPECT_EQ (db_->count_inbox_requests (kept.info.inbox_id), 1)
+    << "an unrelated inbox lost its captures";
+    EXPECT_TRUE (manager_->get (kept.info.inbox_id).has_value ());
+}
+
+/*
+ * A live stream holds the deleted inbox's claim slot. It notices at its next
+ * poll, and what it must not do on the way out is release a slot that has
+ * since been handed to somebody else - the same rule an evicted holder follows.
+ */
+TEST_F (InboxListenerTest, DeleteLeavesAnAttachedLiveStreamNothingToStrand) {
+    auto started     = start ();
+    const auto claim = manager_->try_claim_live (started.info.inbox_id);
+    ASSERT_TRUE (claim.has_value ());
+
+    ASSERT_TRUE (manager_->remove (*db_, started.info.inbox_id).has_value ());
+
+    // What the stream's own loop checks: the inbox is gone, so it breaks out.
+    EXPECT_FALSE (manager_->get (started.info.inbox_id).has_value ());
+    EXPECT_FALSE (manager_->note_live_write (started.info.inbox_id, *claim));
+    // And the release on the way out finds nothing to release, rather than
+    // reaching into a record that no longer exists.
+    manager_->release_live (started.info.inbox_id, *claim);
+    SUCCEED ();
+}
+
 TEST_F (InboxListenerTest, ASecondInboxCannotShareARunningInboxsPort) {
     // Without the listener's port guard this second start succeeds on Linux -
     // cpp-httplib binds with SO_REUSEPORT - and the kernel then splits the
@@ -671,6 +743,30 @@ TEST_F (InboxStorageTest, TheCaptureListCoreAnswers404ForAnUnknownInboxAndPages)
     EXPECT_FALSE (page2["pagination"]["hasMore"].get<bool> ());
 }
 
+/*
+ * The count a delete confirmation is worded from. It is the one field the
+ * manager cannot answer, so a route that built the wire shape without it would
+ * report 0 - which reads as "nothing to lose" beside a destructive action.
+ */
+TEST_F (InboxStorageTest, TheWireShapeCarriesWhatTheInboxIsHolding) {
+    InboxManager manager;
+    auto started = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (started.ok) << started.error_message;
+    const std::string inbox_id = started.info.inbox_id;
+
+    EXPECT_EQ (
+    vayu::http::routes::inbox_json (*db_, started.info)["captureCount"], 0);
+
+    for (int i = 0; i < 3; ++i) {
+        append (inbox_id, "body" + std::to_string (i), 100);
+    }
+    // Read back from the manager, as every route does: the count is filled in
+    // from the database rather than carried on the record.
+    auto info = manager.get (inbox_id);
+    ASSERT_TRUE (info.has_value ());
+    EXPECT_EQ (vayu::http::routes::inbox_json (*db_, *info)["captureCount"], 3);
+}
+
 TEST (InboxWireShape, CaptureAndInfoCarryEveryFieldTheUiReads) {
     vayu::db::InboxRequest capture;
     capture.id             = 12;
@@ -712,6 +808,9 @@ TEST (InboxWireShape, CaptureAndInfoCarryEveryFieldTheUiReads) {
     EXPECT_TRUE (info_wire["running"].get<bool> ());
     EXPECT_EQ (info_wire["response"]["status"], 204);
     EXPECT_TRUE (info_wire["response"]["headers"].is_object ());
+    // Present even on a shape built without a database, so a client never has
+    // to tell "no captures" apart from "the field is missing".
+    EXPECT_EQ (info_wire["captureCount"], 0);
 }
 
 } // namespace

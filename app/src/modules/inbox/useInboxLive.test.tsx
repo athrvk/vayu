@@ -52,6 +52,7 @@ function record(overrides: Partial<Inbox> = {}): Inbox {
 		port: 4100,
 		running: true,
 		loopback: true,
+		captureCount: 0,
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};

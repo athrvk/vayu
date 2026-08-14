@@ -71,6 +71,7 @@ import type {
 	ListInboxesResponse,
 	StartInboxRequest,
 	ClearInboxCapturesResponse,
+	DeleteInboxResponse,
 	MockIssuer,
 	ListMockIssuersResponse,
 	StartMockIssuerRequest,
@@ -304,6 +305,18 @@ export const apiService = {
 
 	async stopInbox(inboxId: string): Promise<Inbox> {
 		return await httpClient.post<Inbox>(API_ENDPOINTS.INBOX_STOP(inboxId), {});
+	},
+
+	/**
+	 * Delete the inbox and the captures it is holding (issue #553).
+	 *
+	 * Stronger than `stopInbox`, which frees the listener and leaves the record
+	 * - and its captures - readable for the life of the engine process. A
+	 * running inbox is stopped by the engine on the way, so this is one call
+	 * whatever state the inbox is in.
+	 */
+	async deleteInbox(inboxId: string): Promise<DeleteInboxResponse> {
+		return await httpClient.delete<DeleteInboxResponse>(API_ENDPOINTS.INBOX_BY_ID(inboxId));
 	},
 
 	/**

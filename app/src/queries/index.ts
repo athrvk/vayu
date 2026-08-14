@@ -82,6 +82,7 @@ export {
 	useInboxCapturesQuery,
 	useStartInboxMutation,
 	useStopInboxMutation,
+	useDeleteInboxMutation,
 	useUpdateInboxResponseMutation,
 	useClearInboxCapturesMutation,
 } from "./inbox";

@@ -171,6 +171,7 @@ through this endpoint, so the whole tree still lands in one engine transaction.
 apiService.listInboxes(): Promise<Inbox[]>
 apiService.startInbox(request?: StartInboxRequest): Promise<Inbox>
 apiService.stopInbox(inboxId): Promise<Inbox>
+apiService.deleteInbox(inboxId): Promise<DeleteInboxResponse>
 apiService.updateInboxResponse(inboxId, response: Partial<InboxCannedResponse>): Promise<Inbox>
 apiService.listInboxCaptures(inboxId, limit?, offset?): Promise<InboxCapturesResponse>
 apiService.clearInboxCaptures(inboxId): Promise<ClearInboxCapturesResponse>
@@ -182,6 +183,12 @@ merge-patch - an omitted field keeps what the inbox is serving - and the live
 capture stream (`INBOX_LIVE`) is a plain `EventSource` rather than `SSEClient`,
 which maps load-test metrics specifically. Captures arriving on that stream are
 merged into the `listInboxCaptures` cache, so there is one list.
+`deleteInbox` is the stronger of the two lifecycle calls: `stopInbox` frees the
+listener and leaves the record and its captures readable for the life of the
+engine process, while a delete takes both (issue #553). Its mutation *removes*
+the captures cache entry rather than invalidating it - an invalidation would
+refetch an id the engine now `404`s. `Inbox.captureCount` is what a delete would
+destroy, and is what the confirmation is worded from.
 `clearCookies` distinguishes three cases the way the engine does, and they are
 not interchangeable: **omitted** clears every jar, `{ environmentId: null }`
 clears only the jar used when no environment is selected, and an id clears that
@@ -576,6 +583,7 @@ export const API_ENDPOINTS = {
   INBOX: "/inbox",
   INBOX_START: "/inbox/start",
   INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,
+  // PUT patches the canned response; DELETE removes the inbox and its captures.
   INBOX_BY_ID: (inboxId: string) => `/inbox/${inboxId}`,
   INBOX_CAPTURES: (inboxId: string, limit: number, offset: number) =>
     `/inbox/${inboxId}/requests?limit=${limit}&offset=${offset}`,
