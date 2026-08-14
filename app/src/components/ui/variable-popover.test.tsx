@@ -251,6 +251,54 @@ describe("an undefined variable can define itself", () => {
 	});
 });
 
+/**
+ * A `data.*` name is unresolved for a reason no creation can fix: the namespace
+ * (#402) is disjoint from the scopes, so both resolvers skip them and a variable
+ * literally named `data.email` can never answer for the column. Offering Create
+ * writes a dead definition and leaves the token exactly as it was.
+ */
+describe("a reserved data-namespace name", () => {
+	/**
+	 * Everything writable, so the refusal can only come from the name - an empty
+	 * `writableScopes` withholds Create too, and would prove nothing.
+	 */
+	const unresolvedNamed = (name: string) =>
+		renderPopover({
+			name,
+			varInfo: null,
+			resolved: false,
+			trigger: <span>{`{{${name}}}`}</span>,
+			writableScopes: ["global", "collection", "environment"],
+		});
+
+	it("offers no way to create it", () => {
+		unresolvedNamed("data.email");
+		const panel = open();
+		expect(within(panel).queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
+		expect(within(panel).queryByLabelText(/value for new variable/i)).not.toBeInTheDocument();
+		expect(
+			within(panel).queryByRole("button", { name: "Environment" })
+		).not.toBeInTheDocument();
+	});
+
+	it("says where the value comes from instead of calling it undefined", () => {
+		unresolvedNamed("data.email");
+		const panel = open();
+		expect(within(panel).getByText(/Bound per iteration/)).toBeInTheDocument();
+		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).queryByText("undefined")).not.toBeInTheDocument();
+		expect(within(panel).getByText("data")).toBeInTheDocument();
+	});
+
+	it("leaves the prefix alone, which names no column", () => {
+		// `{{data.}}` is not in the namespace - it follows the ordinary
+		// unknown-name rule, and a variable called `data.` would resolve.
+		unresolvedNamed("data.");
+		const panel = open();
+		expect(within(panel).getByRole("button", { name: "Create" })).toBeInTheDocument();
+	});
+});
+
 describe("why this value won", () => {
 	const shadowed: VariableOrigin[] = [
 		origin({ scope: "global", value: "http://localhost:8080" }),

@@ -1112,14 +1112,33 @@ same reason - there is deliberately **no re-export shim** in
 
 ## Shared Variable Input (`components/shared/VariableInput/`)
 
-`index`, `EditableVariable`, `DynamicVariableToken` - input with
+`index`, `EditableVariable`, `RuntimeToken` - input with
 `{{variable}}` highlighting + autocomplete. Takes the same optional `variables`
 scope; without one it is a plain text field, since a token would paint a name
-"not defined" and open an editor with nowhere to write. `EditableVariable` is
-the stored-variable token (hover to read, click to edit, red when nothing
-defines the name) and takes the scope as a **required** prop, because a token
-only renders where there is one; `DynamicVariableToken` is the `{{$guid}}` one,
-which has no stored value to show or edit and must not be painted as undefined.
+"not defined" and open an editor with nowhere to write.
+
+**A token has three states, and the overlay decides between them in the order
+`resolveTemplate` does** - reserved namespace first, then the scopes, then the
+generator table:
+
+| Token | Painted by | Looks like |
+|-------|-----------|------------|
+| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted, "Bound by the run's data file / per iteration", no popover |
+| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click edits or creates |
+| `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
+
+`EditableVariable` takes the scope as a **required** prop, because a token only
+renders where there is one. `RuntimeToken` serves both run-time cases - a value
+produced when the request is sent rather than stored anywhere - and is one
+component rather than two because they differ only in the words of the tooltip.
+
+The namespace check comes **before** the scope lookup deliberately: `data.*` is
+disjoint from the tiers, so a variable someone happens to name `data.email`
+neither answers for the column nor may paint the token as though it had. Reading
+the scopes first would show a resolved token carrying a value the engine will
+never send. The same rule keeps the create offer out of `VariablePopover` for
+these names - a variable of that name can never resolve, so offering to make one
+is a dead end that leaves the token exactly as it was.
 
 It sits beside `KeyValueEditor` rather than inside the request builder because
 every row of that table renders one: a shared table reaching into a feature

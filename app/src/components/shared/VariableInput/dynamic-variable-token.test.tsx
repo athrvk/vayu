@@ -67,9 +67,14 @@ describe("a known dynamic variable in the overlay", () => {
 
 	it("offers nothing to edit - a generated value has no stored definition", () => {
 		const overlay = overlayOf("{{$guid}}");
-		// EditableVariable's trigger is a button (the popover trigger); the
-		// generator token is a plain span.
-		expect(overlay.querySelector("button")).toBeNull();
+		/*
+		 * EditableVariable's trigger is the popover's; the generator token is a
+		 * plain span. Query the *role*: that trigger is a `<span role="button">`
+		 * rather than a `<button>`, because an inline token must not break the
+		 * text flow - so the `querySelector("button")` this used to run matched
+		 * neither token and passed while checking nothing.
+		 */
+		expect(overlay.querySelector('[role="button"]')).toBeNull();
 	});
 });
 

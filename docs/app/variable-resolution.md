@@ -54,9 +54,18 @@ engine's `resolve_template` and the renderer's `resolveTemplate` - leave it
 written exactly as it stands, because only a scenario run's iteration knows
 which row is bound; the run's worker substitutes it immediately before each
 send. A `data.*` token in an ordinary Send therefore reaches the wire as
-written, and appears unresolved in the UI, which is the honest reading: there
-is no row. `{{data.}}` with nothing after the dot names no column and follows
-the ordinary unknown-name rule (resolves to `""`) instead.
+written: there is no row. `{{data.}}` with nothing after the dot names no column
+and follows the ordinary unknown-name rule (resolves to `""`) instead.
+
+**The UI paints it as its own state, not as a broken variable.** Unresolved is
+the accurate word for what the resolvers do with the token, but it is the wrong
+thing to *show*: the builder used to render `{{data.email}}` red, hover it to
+"not defined", and offer to create a variable of that name - which, the
+namespace being disjoint, can never answer for the column. So a `data.*` token
+gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
+data file, and no surface offers to create one. See
+[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+for the three token states.
 
 A **collection run** is the one place that reading is not left to the user: a
 run started without a data file whose plan still carries a `data.*` token is
