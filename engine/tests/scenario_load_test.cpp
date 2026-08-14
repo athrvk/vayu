@@ -30,8 +30,10 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/utils/encoding.hpp"
 
 namespace {
 
@@ -51,6 +53,10 @@ class ScenarioMockServer {
         std::string path;
         std::string cookie; // The `Cookie` header as received; "" when absent.
         std::string body;   // The request body as received; "" for a GET.
+        // The `Authorization` as received; "" when absent. Read off the wire
+        // because a credential bound from a data row is only correct once it is
+        // encoded, and the encoding is what used to hide the bug (issue #591).
+        std::string authorization;
     };
 
     explicit ScenarioMockServer (size_t login_rendezvous = 0)
@@ -133,7 +139,8 @@ class ScenarioMockServer {
     private:
     void record (const httplib::Request& req, const std::string& path) {
         std::lock_guard<std::mutex> lock (hits_mtx_);
-        hits_.push_back ({ path, req.get_header_value ("Cookie"), req.body });
+        hits_.push_back ({ path, req.get_header_value ("Cookie"), req.body,
+        req.get_header_value ("Authorization") });
     }
 
     httplib::Server svr;
@@ -233,6 +240,17 @@ class ScenarioLoadTest : public ::testing::Test {
             step.data_template = vayu::core::tokenize_data_fields (step.request);
         }
         execution.data_rows = rows;
+    }
+
+    /// Give every step the deferred auth `resolve_scenario` leaves behind for
+    /// credentials carrying a `{{data.*}}` token - through the resolver's own
+    /// two calls, for the same reason `with_data` uses the real splitter.
+    static void with_deferred_auth (vayu::core::ScenarioExecution& execution,
+    const json& auth) {
+        for (auto& step : execution.plan.steps) {
+            step.auth          = vayu::http::parse_auth (auth);
+            step.auth_template = vayu::core::tokenize_auth_fields (step.auth);
+        }
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -834,6 +852,60 @@ TEST_F (ScenarioLoadTest, AStepWithoutADataTokenCarriesNoTemplate) {
 
     EXPECT_EQ (server.hits_for ("/s0").size (), 1u)
     << "the untemplated step was still sent unchanged";
+}
+
+// A credentials file, end to end and read off the wire: every virtual user
+// sends its *own* row's credentials, base64-encoded after the bind rather than
+// around it. Before this, the header on every one of these was
+// base64("{{data.user}}:{{data.pass}}") - a literal token nobody ever saw,
+// because the encoding hid it (issue #591).
+TEST_F (ScenarioLoadTest, ACredentialsFileBindsPerIterationOnTheWire) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo") });
+    with_data (execution,
+    { json{ { "user", "alice" }, { "pass", "pw0" } },
+    json{ { "user", "bob" }, { "pass", "pw1" } } });
+    with_deferred_auth (execution,
+    json{ { "mode", "basic" }, { "username", "{{data.user}}" },
+    { "password", "{{data.pass}}" } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    std::vector<std::string> sent;
+    for (const auto& hit : server.hits_for ("/echo")) {
+        sent.push_back (hit.authorization);
+    }
+    EXPECT_EQ (sent,
+    (std::vector<std::string>{ "Basic " + vayu::utils::base64_encode ("alice:pw0"),
+    "Basic " + vayu::utils::base64_encode ("bob:pw1") }));
+}
+
+// The credential half of the failure path: a column the row does not carry ends
+// the step before the send, exactly as one in the URL does - never a request
+// with a blank password.
+TEST_F (ScenarioLoadTest, AnAbsentColumnInACredentialErrorsTheStepInsteadOfSendingIt) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo") });
+    with_data (execution, { json{ { "user", "alice" } } });
+    with_deferred_auth (execution,
+    json{ { "mode", "basic" }, { "username", "{{data.user}}" },
+    { "password", "{{data.missing}}" } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/echo").size (), 0u)
+    << "a request whose credentials could not bind reached the wire";
+    EXPECT_EQ (state->steps_errored.load (), 1u);
+    EXPECT_EQ (context_->in_flight (), 0u);
+
+    const auto& errors = context_->metrics_collector->errors ();
+    ASSERT_FALSE (errors.empty ());
+    EXPECT_NE (errors[0].error_message.find ("{{data.missing}}"), std::string::npos)
+    << errors[0].error_message;
 }
 
 // A token naming a column the bound row does not carry fails the step loudly:
