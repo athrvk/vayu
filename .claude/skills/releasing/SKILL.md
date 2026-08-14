@@ -180,20 +180,49 @@ missing, because a manual run that published nothing while reporting success
 would be worse than an error. `WINGET_TOKEN` must be a **classic** PAT with
 `public_repo` scope; fine-grained PATs are not supported by the action.
 
-**Every winget credential problem arrives as one opaque line.** komac reports an
-expired token, a fine-grained token, a missing fork, an archived fork and a fork
-owned by another account all as
-`<user> does not have the correct permissions to execute CreateRef` - and only
-after downloading the installer and rendering all three manifests, so the log
-looks like a success until its final line. v0.16.0 failed twice this way. The
-manual workflow therefore preflights the token before doing any work, checking in
-order: it authenticates, it is classic (`x-oauth-scopes` is non-empty and carries
-`public_repo`), and `<token owner>/winget-pkgs` exists, is writable, is not
-archived and is a real fork of `microsoft/winget-pkgs`. Each failure names
-itself. To check the same things by hand, `curl -sI -H "Authorization: token
-$PAT" https://api.github.com/user | grep -i x-oauth-scopes`.
+### When winget publishing fails, suspect the fork before the token
 
-Note the fork is checked against the *token's* owner, not the repository's: a PAT
-belonging to a different account authenticates perfectly and is then denied at
-`CreateRef`. The action's `fork-user` defaults to the repository owner, so the
-two must be the same account unless it is set explicitly.
+**Every winget problem arrives as one opaque line.** An expired token, a
+fine-grained token, a missing fork, an archived fork, a fork owned by another
+account and a fork merely *out of date* all reach the log as
+`<user> does not have the correct permissions to execute CreateRef` - and only
+after komac has downloaded the installer and rendered all three manifests, so
+the run reads as a success until its final line.
+
+**The usual cause is the stale fork, and the message points at the token.**
+v0.16.0 was spent minting tokens for that reason. komac branches at
+*upstream's* head commit, so a fork that does not contain that commit cannot
+have the ref created at it, and GitHub phrases the refusal as permissions.
+Syncing the fork published immediately, with the token that had just "failed".
+[komac#1142](https://github.com/russellbanks/Komac/issues/1142) reports the same
+symptom and the same fix. Note also that REST write access is *not* evidence:
+`POST /repos/<fork>/git/refs` returned 201 throughout, because it creates a ref
+at a commit the fork already has, while komac's GraphQL `createRef` at
+upstream's head was refused.
+
+`.github/actions/winget-preflight` runs before komac in both publishing
+workflows and covers all of it: the token authenticates, is classic
+(`x-oauth-scopes` non-empty and carrying `public_repo`), owns a
+`<token owner>/winget-pkgs` that is writable, unarchived and a real fork of
+`microsoft/winget-pkgs`; then it **syncs that fork** via `merge-upstream`; then
+it creates and deletes a throwaway branch through the same GraphQL mutation
+komac uses. Each failure names itself, and the sync means the common one stops
+happening rather than being diagnosed faster.
+
+It is an action rather than a step in each workflow because both the
+tag-triggered job and the manual one need it, and the copy not being debugged is
+the copy that drifts.
+
+Two things it deliberately does *not* do. It cannot repair a fork that has
+**diverged** from upstream (`merge-upstream` answers 409): resetting the branch
+would discard whatever was committed on top of it, so it stops and says so. And
+it resolves the fork from the **token's** owner, not the repository's - a PAT
+belonging to another account authenticates perfectly and is denied only at the
+branch. `fork-user` defaults to the repository owner, so the two must be the
+same account unless it is set explicitly.
+
+To check a token by hand:
+`curl -sI -H "Authorization: token $PAT" https://api.github.com/user | grep -i
+x-oauth-scopes`. To check the fork, compare
+`git ls-remote https://github.com/<you>/winget-pkgs master` against the same for
+`microsoft/winget-pkgs`.

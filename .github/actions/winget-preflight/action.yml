@@ -1,0 +1,215 @@
+name: Winget publish preflight
+description: >
+  Verify WINGET_TOKEN can publish, bring the winget-pkgs fork up to date, and
+  prove the branch komac needs can actually be created - before komac runs.
+
+# Every winget credential and fork problem reaches the log as one opaque line,
+# "<user> does not have the correct permissions to execute `CreateRef`", emitted
+# only after komac has downloaded the installer and rendered all three
+# manifests. The line names neither which prerequisite failed nor which
+# repository the write was refused on, so an expired token, a fine-grained
+# token, a missing fork and a *stale* fork are indistinguishable from the log.
+#
+# v0.16.0 was lost to exactly that, twice. The token was replaced first because
+# the message says "permissions"; the real cause was a fork 11 days behind
+# microsoft/winget-pkgs, and syncing it published immediately with the same
+# token that had just "failed" (komac issue #1142 reports the identical
+# symptom and the identical fix).
+#
+# So the fork sync below is the fix, not a precaution: komac branches at
+# *upstream's* head commit, and a fork that does not contain that commit cannot
+# have a ref created at it. The fork falls behind between every release, so
+# without this the failure returns on a schedule.
+#
+# Both workflows that publish use this, which is why it is an action rather
+# than a step: the tag-triggered job in release.yml and the manual
+# winget-publish.yml would otherwise carry two copies of it, and the copy that
+# is not being debugged is the one that drifts.
+
+inputs:
+  token:
+    description: >
+      Classic PAT with the public_repo scope, belonging to the account that owns
+      the winget-pkgs fork. Fine-grained PATs are not supported by komac.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verify WINGET_TOKEN
+      id: token
+      shell: bash
+      env:
+        WINGET_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${WINGET_TOKEN:-}" ]; then
+          echo "::error::WINGET_TOKEN is not set. Create a *classic* PAT with the" \
+               "public_repo scope (fine-grained PATs are not supported by" \
+               "winget-releaser) and add it as a repository secret."
+          exit 1
+        fi
+
+        status=$(curl -sS -o user.json -D user.headers -w '%{http_code}' \
+                 -H "Authorization: token $WINGET_TOKEN" https://api.github.com/user)
+        if [ "$status" != "200" ]; then
+          echo "::error::WINGET_TOKEN did not authenticate (HTTP $status) - it has" \
+               "most likely expired. Mint a new classic PAT with public_repo scope" \
+               "and update the repository secret."
+          exit 1
+        fi
+
+        # A classic PAT reports its scopes in x-oauth-scopes. A fine-grained PAT
+        # omits the header entirely, so an empty value here is itself the
+        # diagnosis rather than a missing scope.
+        login=$(jq -r .login user.json)
+        scopes=$(grep -i '^x-oauth-scopes:' user.headers | cut -d: -f2- | tr -d '\r' | xargs || true)
+        echo "Authenticates as: $login"
+        echo "Scopes: ${scopes:-<none - this is a fine-grained PAT>}"
+
+        case ",${scopes// /}," in
+          *,public_repo,* | *,repo,*) ;;
+          *)
+            echo "::error::WINGET_TOKEN lacks the public_repo scope (scopes:" \
+                 "${scopes:-none}). komac needs a *classic* PAT with public_repo;" \
+                 "a fine-grained PAT reports no scopes at all."
+            exit 1
+            ;;
+        esac
+
+        # komac branches in the fork named by KOMAC_FORK_OWNER, which
+        # winget-releaser defaults to the repository owner. The token must own
+        # that fork: a token for a different account authenticates perfectly and
+        # is denied only at the branch, which is why this resolves the fork from
+        # $login rather than from the repository owner.
+        fork="$login/winget-pkgs"
+        status=$(curl -sS -o fork.json -w '%{http_code}' \
+                 -H "Authorization: token $WINGET_TOKEN" "https://api.github.com/repos/$fork")
+        if [ "$status" != "200" ]; then
+          echo "::error::$fork is not reachable with this token (HTTP $status)." \
+               "Fork microsoft/winget-pkgs to $login - komac creates its branch" \
+               "there, and without the fork the attempt lands on" \
+               "microsoft/winget-pkgs itself and is refused."
+          exit 1
+        fi
+
+        push=$(jq -r '.permissions.push' fork.json)
+        archived=$(jq -r '.archived' fork.json)
+        parent=$(jq -r '.parent.full_name // "<not a fork>"' fork.json)
+        branch=$(jq -r '.default_branch' fork.json)
+        echo "$fork: push=$push archived=$archived parent=$parent default=$branch"
+
+        if [ "$push" != "true" ] || [ "$archived" != "false" ]; then
+          echo "::error::WINGET_TOKEN cannot write to $fork (push=$push," \
+               "archived=$archived). An archived fork reports push=true and still" \
+               "rejects every write, so unarchive it rather than re-minting the token."
+          exit 1
+        fi
+
+        if [ "$parent" != "microsoft/winget-pkgs" ]; then
+          echo "::error::$fork is not a fork of microsoft/winget-pkgs (parent:" \
+               "$parent). A plain copy of the repository is not detected as the" \
+               "fork; delete it and fork microsoft/winget-pkgs afresh."
+          exit 1
+        fi
+
+        {
+          echo "fork=$fork"
+          echo "branch=$branch"
+        } >> "$GITHUB_OUTPUT"
+
+    # The one that actually keeps releases working. komac creates its branch at
+    # upstream's current head, so a fork missing that commit fails - reported as
+    # a permissions error, which sends everyone to the token instead.
+    - name: Sync the fork with upstream
+      shell: bash
+      env:
+        WINGET_TOKEN: ${{ inputs.token }}
+        FORK: ${{ steps.token.outputs.fork }}
+        BRANCH: ${{ steps.token.outputs.branch }}
+      run: |
+        set -euo pipefail
+
+        status=$(curl -sS -o merge.json -w '%{http_code}' -X POST \
+                 -H "Authorization: token $WINGET_TOKEN" \
+                 -H 'Accept: application/vnd.github+json' \
+                 "https://api.github.com/repos/$FORK/merge-upstream" \
+                 -d "{\"branch\":\"$BRANCH\"}")
+
+        if [ "$status" = "200" ]; then
+          # merge_type is fast-forward, merge, or none (already current).
+          echo "$FORK@$BRANCH: $(jq -r '.merge_type // "unknown"' merge.json)" \
+               "- $(jq -r '.message // ""' merge.json)"
+          exit 0
+        fi
+
+        # 409 means the fork has diverged from upstream and cannot fast-forward,
+        # which breaks komac exactly the way being behind does. It needs a human:
+        # resetting the branch discards whatever was committed on top of it.
+        if [ "$status" = "409" ]; then
+          echo "::error::$FORK@$BRANCH has diverged from microsoft/winget-pkgs and" \
+               "cannot be fast-forwarded. Reset the fork's $BRANCH to upstream (or" \
+               "delete and re-fork); komac cannot branch from it as it stands."
+          exit 1
+        fi
+
+        echo "::error::Could not sync $FORK@$BRANCH with upstream (HTTP $status):" \
+             "$(jq -r '.message // "no message"' merge.json)"
+        exit 1
+
+    # The REST reachability check above passes on a token that still cannot
+    # publish: komac creates its branch through the GraphQL createRef mutation,
+    # and REST write access was demonstrably green while that mutation was being
+    # refused. So exercise the real mutation, on the real fork, at the same
+    # commit komac will branch from - now that the sync has made the fork's head
+    # upstream's head - and delete the branch again.
+    - name: Verify branch creation via GraphQL
+      shell: bash
+      env:
+        WINGET_TOKEN: ${{ inputs.token }}
+        FORK: ${{ steps.token.outputs.fork }}
+        BRANCH: ${{ steps.token.outputs.branch }}
+      run: |
+        set -euo pipefail
+
+        owner=${FORK%/*}
+        name=${FORK#*/}
+        probe="komac-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+        query='query($o:String!,$n:String!){repository(owner:$o,name:$n){id defaultBranchRef{target{oid}}}}'
+        payload=$(jq -n --arg q "$query" --arg o "$owner" --arg n "$name" \
+                  '{query:$q,variables:{o:$o,n:$n}}')
+        resp=$(curl -sS -H "Authorization: bearer $WINGET_TOKEN" \
+               -X POST -d "$payload" https://api.github.com/graphql)
+
+        repo_id=$(jq -r '.data.repository.id // empty' <<< "$resp")
+        oid=$(jq -r '.data.repository.defaultBranchRef.target.oid // empty' <<< "$resp")
+        if [ -z "$repo_id" ] || [ -z "$oid" ]; then
+          echo "::error::GraphQL could not read $FORK: $(jq -c '.errors // .' <<< "$resp")"
+          exit 1
+        fi
+
+        mutation='mutation($r:ID!,$n:String!,$o:GitObjectID!){createRef(input:{repositoryId:$r,name:$n,oid:$o}){ref{name}}}'
+        payload=$(jq -n --arg q "$mutation" --arg r "$repo_id" \
+                  --arg n "refs/heads/$probe" --arg o "$oid" \
+                  '{query:$q,variables:{r:$r,n:$n,o:$o}}')
+        resp=$(curl -sS -H "Authorization: bearer $WINGET_TOKEN" \
+               -X POST -d "$payload" https://api.github.com/graphql)
+
+        # GraphQL answers 200 with an errors array rather than an HTTP status,
+        # so the body is the only place the refusal appears.
+        if [ "$(jq -r 'has("errors")' <<< "$resp")" = "true" ]; then
+          echo "::error::WINGET_TOKEN cannot create a branch in $FORK, which is" \
+               "what komac does first:" \
+               "$(jq -r '[.errors[].message] | join("; ")' <<< "$resp")"
+          exit 1
+        fi
+
+        echo "Created and will remove $FORK@$probe at $oid"
+
+        # Best-effort: a leftover probe branch is harmless, and failing the job
+        # over the cleanup would fail a publish that is demonstrably fine.
+        curl -sS -o /dev/null -w 'probe branch deleted: %{http_code}\n' -X DELETE \
+          -H "Authorization: token $WINGET_TOKEN" \
+          "https://api.github.com/repos/$FORK/git/refs/heads/$probe" || true
