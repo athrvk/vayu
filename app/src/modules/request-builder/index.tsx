@@ -41,8 +41,10 @@ import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { resolveAuthSource } from "./utils/auth-resolution";
-import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
-import { generateUUID } from "./utils/id";
+import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
+import { toHeaderItems } from "./utils/system-headers";
+import { toFlatHeaders } from "./utils/key-value";
+import { generateUUID } from "@/lib/id";
 import { scriptParts } from "./utils/script-parts";
 import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
 import {
@@ -159,7 +161,7 @@ export default function RequestBuilder() {
 			method: fetchedRequest.method,
 			url: fetchedRequest.url,
 			params: toKeyValueItems(fetchedRequest.params),
-			headers: toKeyValueItems(fetchedRequest.headers, true), // inject system headers
+			headers: toHeaderItems(fetchedRequest.headers),
 			bodyMode,
 			body: rawBody,
 			formData: toKeyValueItems(formFields),
@@ -639,4 +641,4 @@ export default function RequestBuilder() {
 // Re-export types for external use. The context hook is not re-exported here:
 // every consumer imports it from `./context` directly, and a value export
 // alongside the component would cost this file its fast refresh.
-export type { RequestState, ResponseState, KeyValueItem } from "./types";
+export type { RequestState, ResponseState } from "./types";

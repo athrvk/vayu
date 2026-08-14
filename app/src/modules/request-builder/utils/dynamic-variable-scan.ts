@@ -18,7 +18,8 @@
  */
 
 import { containsDynamicVariable } from "@/lib/dynamic-variables";
-import type { KeyValueItem, RequestState } from "../types";
+import type { KeyValueItem } from "@/types";
+import type { RequestState } from "../types";
 
 function anyRow(rows: KeyValueItem[] | undefined): boolean {
 	return (rows ?? []).some(

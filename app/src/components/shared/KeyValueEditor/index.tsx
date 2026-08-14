@@ -8,9 +8,16 @@
 /**
  * KeyValueEditor Component
  *
- * The table behind four surfaces: Query Params, Headers, form-data and
- * urlencoded. It is the densest data surface in the app, which is what most of
- * the decisions below are about.
+ * The table behind the request builder's Query Params, Headers, form-data and
+ * urlencoded tabs, and the webhook inbox's canned reply headers. It is the
+ * densest data surface in the app, which is what most of the decisions below
+ * are about.
+ *
+ * **It lives here rather than under `modules/request-builder/`** because two
+ * feature modules mount it and `components/shared/` is what features share
+ * (#567). The bulk table/text toggle that sits above it in the builder's two
+ * panels did *not* come along: `BulkEditor` has one feature's panels as its
+ * only callers, so it stayed in `modules/request-builder/shared/`.
  *
  * **Rows were 48px.** `VariableInput` is `h-9` (36px), the row added `p-1` and
  * the stack added `space-y-1` - so eight headers cost 384px, in a panel whose
@@ -38,14 +45,10 @@
  */
 
 import { useCallback } from "react";
-import type { KeyValueItem, KeyValueEditorProps } from "../../types";
-import { withTrailingBlank } from "../../utils/key-value";
+import type { KeyValueItem, KeyValueEditorProps } from "@/types";
+import { withTrailingBlank } from "./key-value";
 import KeyValueRow from "./KeyValueRow";
 import type { PickedFile } from "./FilePartCell";
-
-// Re-exported here so a panel takes the table and its text form from one place.
-export { BulkEditor } from "./BulkEditor";
-export type { BulkEditorProps } from "./BulkEditor";
 
 export default function KeyValueEditor({
 	items,

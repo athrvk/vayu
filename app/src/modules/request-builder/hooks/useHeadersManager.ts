@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import type { KeyValueItem } from "../types";
+import type { KeyValueItem } from "@/types";
 import { ensureSystemHeaders } from "../utils/system-headers";
 import { canEditHeaderField, canRemoveHeader, canDisableHeader } from "../utils/system-headers";
 import { formatHeadersToText, parseHeadersFromText } from "../utils/headers-format";

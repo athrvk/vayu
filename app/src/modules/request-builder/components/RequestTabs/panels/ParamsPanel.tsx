@@ -17,9 +17,10 @@
 import { useCallback } from "react";
 import { containsVariableToken } from "@/constants/variables";
 import { useRequestBuilderContext } from "../../../context";
-import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
+import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
-import type { KeyValueItem } from "../../../types";
+import type { KeyValueItem } from "@/types";
 import { formatParamsToText, parseParamsFromText } from "../../../utils/params-format";
 import { EmptyTableHint } from "./EmptyTableHint";
 

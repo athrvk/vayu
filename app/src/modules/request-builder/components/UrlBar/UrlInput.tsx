@@ -15,7 +15,7 @@
 import { useCallback } from "react";
 import { detectCommand, parseCommand } from "@/services/curl/parseCurl";
 import { useRequestBuilderContext } from "../../context";
-import VariableInput from "../../shared/VariableInput";
+import VariableInput from "@/components/shared/VariableInput";
 import { useVariableSupport } from "../../hooks/useVariableSupport";
 import { parseQueryParams } from "../../utils/url";
 

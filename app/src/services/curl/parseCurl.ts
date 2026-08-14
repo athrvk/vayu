@@ -24,8 +24,9 @@
  */
 
 import type { HttpMethod } from "@/types";
-import type { BodyMode, KeyValueItem, RequestState } from "@/modules/request-builder/types";
-import { generateId } from "@/modules/request-builder/utils/id";
+import type { BodyMode, KeyValueItem } from "@/types";
+import type { RequestState } from "@/modules/request-builder/types";
+import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { tokenize } from "./tokenize";

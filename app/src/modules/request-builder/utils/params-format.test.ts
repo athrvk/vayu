@@ -28,7 +28,7 @@
 
 import { describe, it, expect } from "vitest";
 import { formatParamsToText, parseParamsFromText } from "./params-format";
-import type { KeyValueItem } from "../types";
+import type { KeyValueItem } from "@/types";
 
 const pairs = (text: string) => parseParamsFromText(text).map(({ key, value }) => ({ key, value }));
 

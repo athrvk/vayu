@@ -10,7 +10,7 @@
 // preload contract. View/navigation state now lives with its owning store
 // (DrawerView in layout-store, TabType in tabs-store).
 
-import type { ResolvedVariable, VariableOrigin, VariableScope } from "./domain";
+import type { FormFieldEntry, ResolvedVariable, VariableOrigin, VariableScope } from "./domain";
 
 /** App theme preference. `system` follows the OS via Electron's nativeTheme. */
 export type ThemeSource = "system" | "light" | "dark";
@@ -55,4 +55,58 @@ export interface VariableSupport {
 	 * popover's scope picker cannot offer a target that does not exist.
 	 */
 	writableScopes: VariableScope[];
+}
+
+/**
+ * UI-layer extension of KeyValueEntry with a stable React key (`id`).
+ * The `id` is ephemeral - it is NOT persisted to the backend.
+ * Strip it with `toKeyValueEntries()` before sending to the API.
+ *
+ * It extends `FormFieldEntry` rather than `KeyValueEntry` because one table
+ * serves params, headers and both form modes, and only `form-data` rows carry
+ * the file members - all optional, so a header row is unchanged. The editor
+ * only offers them where `allowFiles` says it may.
+ *
+ * It lives here, beside {@link VariableSupport}, rather than in
+ * `modules/request-builder/types.ts`: it is the row model of a shared
+ * primitive, and a primitive under `components/shared/` cannot take its own
+ * props type from a feature module (issue #567).
+ */
+export interface KeyValueItem extends FormFieldEntry {
+	id: string;
+	system?: boolean; // true = row is managed by the system (e.g. X-Request-ID)
+}
+
+/** Props of the shared key/value table (`components/shared/KeyValueEditor`). */
+export interface KeyValueEditorProps {
+	items: KeyValueItem[];
+	onChange: (items: KeyValueItem[]) => void;
+	keyPlaceholder?: string;
+	valuePlaceholder?: string;
+	showResolved?: boolean;
+	allowDisable?: boolean;
+	readOnly?: boolean;
+	keySuggestions?: string[];
+	/**
+	 * Offer each row a file part (`form-data` only). Off everywhere else,
+	 * because a header, a query param and a urlencoded field have no file form
+	 * on the wire - the engine refuses one - so the affordance would promise
+	 * something that cannot be sent.
+	 */
+	allowFiles?: boolean;
+	/**
+	 * The variable scope the table edits inside, handed in by whoever mounts it.
+	 *
+	 * Omitted where there is none - the inbox's canned reply headers, say - and
+	 * the table then resolves nothing, shows no `ResolvedPeek` and offers no
+	 * `{{` autocomplete. That is the correct reading of a surface with no
+	 * variables, not a degraded one. It is a prop rather than a context read
+	 * because the hook that used to supply it *throws* outside
+	 * `RequestBuilderProvider`, which made this table structurally unusable
+	 * anywhere else (#564).
+	 */
+	variables?: VariableSupport;
+	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
+	canRemove?: (item: KeyValueItem) => boolean;
+	canDisable?: (item: KeyValueItem) => boolean;
 }

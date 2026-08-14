@@ -27,8 +27,9 @@
  */
 
 import type { KeyValueEntry } from "@/types";
-import type { AutoContentType, BodyMode, KeyValueItem } from "../../../../types";
-import { generateId } from "../../../../utils/id";
+import type { AutoContentType, BodyMode } from "../../../../types";
+import type { KeyValueItem } from "@/types";
+import { generateId } from "@/lib/id";
 
 export const CONTENT_TYPE = "Content-Type";
 

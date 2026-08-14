@@ -18,7 +18,7 @@ import {
 	DEFAULT_MAX_REDIRECTS,
 	type HttpVersion,
 } from "@/constants/request";
-import { createEmptyKeyValue } from "./key-value";
+import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
 import { createDefaultSystemHeaders } from "./system-headers";
 
 /**

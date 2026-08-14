@@ -6,7 +6,12 @@
  */
 
 /**
- * VariableInput Component (Request Builder)
+ * VariableInput Component
+ *
+ * Shared rather than request-builder-local because every `KeyValueRow` renders
+ * one: a table under `components/shared/` reaching into a feature module for
+ * its cell input is the same layering inversion the table's own move fixed
+ * (#567).
  *
  * Hybrid input with variable syntax support:
  * - Uses a hidden input for text entry
@@ -26,8 +31,7 @@ import {
 } from "react";
 import { VariableAutocomplete, SuggestionList } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { ResolvedVariable, VariableSupport } from "@/types";
-import type { VariableScope } from "../../types";
+import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
 import DynamicVariableToken from "./DynamicVariableToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";

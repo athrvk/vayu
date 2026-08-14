@@ -23,8 +23,7 @@ import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { VariableSupport } from "@/types";
-import type { KeyValueItem } from "../../types";
+import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
 import FilePartCell, { type PickedFile } from "./FilePartCell";
 

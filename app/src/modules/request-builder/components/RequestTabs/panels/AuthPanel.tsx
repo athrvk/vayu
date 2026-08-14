@@ -30,7 +30,7 @@ import { defaultOAuth2Config } from "@/services/oauth/defaults";
 import { AUTH_MODE_LABELS, EDITABLE_AUTH_MODES, uneditableAuthLabel } from "@/constants/auth-modes";
 import type { RequestAuth } from "@/types";
 import { useRequestBuilderContext } from "../../../context";
-import VariableInput from "../../../shared/VariableInput";
+import VariableInput from "@/components/shared/VariableInput";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import AuthInheritBanner from "./AuthInheritBanner";
 

@@ -31,7 +31,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { VariablePopover } from "./variable-popover";
 import { SecretInput } from "./secret-input";
 import { TooltipProvider } from "./tooltip";
-import KeyValueRow from "@/modules/request-builder/shared/KeyValueEditor/KeyValueRow";
+import KeyValueRow from "@/components/shared/KeyValueEditor/KeyValueRow";
 import { RequestBuilderContext } from "@/modules/request-builder/context/RequestBuilderContext";
 import type { RequestBuilderContextValue } from "@/modules/request-builder/types";
 

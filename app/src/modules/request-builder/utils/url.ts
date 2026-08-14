@@ -9,8 +9,8 @@
  * URL utilities for the request builder.
  */
 
-import type { KeyValueItem } from "../types";
-import { generateId } from "./id";
+import type { KeyValueItem } from "@/types";
+import { generateId } from "@/lib/id";
 
 /**
  * Parse the query string of a URL into key/value items.

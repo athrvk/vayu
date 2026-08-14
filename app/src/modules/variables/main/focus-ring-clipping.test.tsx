@@ -41,7 +41,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import VariableTableEditor from "./VariableTableEditor";
-import KeyValueRow from "@/modules/request-builder/shared/KeyValueEditor/KeyValueRow";
+import KeyValueRow from "@/components/shared/KeyValueEditor/KeyValueRow";
 import { TooltipProvider } from "@/components/ui";
 import type { Collection } from "@/types";
 

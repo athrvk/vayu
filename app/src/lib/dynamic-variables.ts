@@ -65,7 +65,7 @@ function pick(items: readonly string[]): string {
  * RFC 4122 v4, built on `getRandomValues` rather than `crypto.randomUUID` so the
  * renderer, the MCP main process and the test environments all take the same
  * path - `randomUUID` needs a secure context and is absent from some of them.
- * Deliberately not `utils/id.ts`'s `generateUUID`, which is `Math.random`-based:
+ * Deliberately not `lib/id.ts`'s `generateUUID`, which is `Math.random`-based:
  * that one stamps an `X-Request-ID` header, this one can end up as the primary
  * key a load test writes a few hundred thousand times.
  */

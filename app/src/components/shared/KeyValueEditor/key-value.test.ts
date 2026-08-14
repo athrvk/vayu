@@ -16,7 +16,7 @@
 
 import { describe, it, expect } from "vitest";
 import { toKeyValueEntries, withTrailingBlank } from "./key-value";
-import type { KeyValueItem } from "../types";
+import type { KeyValueItem } from "@/types";
 
 const fileRow: KeyValueItem = {
 	id: "r1",

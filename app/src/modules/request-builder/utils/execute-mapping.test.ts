@@ -19,7 +19,8 @@ import { describe, it, expect } from "vitest";
 import { buildExecBody, execIdentity, responseFromExecuteResult } from "./execute-mapping";
 import { createDefaultRequestState } from "./request-state";
 import type { SanityResult } from "@/types";
-import type { KeyValueItem, RequestState } from "../types";
+import type { KeyValueItem } from "@/types";
+import type { RequestState } from "../types";
 
 function result(overrides: Partial<SanityResult> = {}): SanityResult {
 	return {

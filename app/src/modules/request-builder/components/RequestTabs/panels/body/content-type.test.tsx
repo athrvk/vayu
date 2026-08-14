@@ -37,7 +37,8 @@ import {
 	CONTENT_TYPE,
 } from "./content-type";
 import { ContentTypeNotice } from "./ContentTypeNotice";
-import type { AutoContentType, KeyValueItem } from "../../../../types";
+import type { AutoContentType } from "../../../../types";
+import type { KeyValueItem } from "@/types";
 
 const header = (key: string, value: string, enabled = true): KeyValueItem => ({
 	id: `${key}-${value}`,
