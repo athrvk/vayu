@@ -20,6 +20,7 @@
 #include "vayu/http/mock_server.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/sse_stream.hpp"
 
 namespace vayu::http {
 
@@ -58,11 +59,17 @@ class Server {
     // - see managed_listener.hpp. The cookie jar is here for the first half of
     // the reason alone: an in-flight /execute holds a reference to it, and it is
     // process-lifetime by design (see cookie_jar.hpp).
+    //
+    // SseStreamManager owns curl transfers rather than listeners, and is here
+    // for exactly the same reason: its workers write run rows through db_ and
+    // read cookie_jar_, and its destructor stops and joins every one of them.
+    // Declared after the jar so it is destroyed before it.
     OAuth2AuthorizeManager oauth_authorize_manager_;
     CookieJar cookie_jar_;
     MockIssuerManager mock_issuer_manager_;
     InboxManager inbox_manager_;
     MockServerManager mock_server_manager_;
+    SseStreamManager sse_manager_;
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{ false };

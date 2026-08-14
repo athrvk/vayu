@@ -339,7 +339,8 @@ TEST_F (ConfigRouteTest, NoSeededLabelSpellsOutMaxMinOrCarriesAUnit) {
 TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
     const std::set<std::string> expected = { "dbBusyTimeout",
         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs",
-        "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs" };
+        "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs",
+        "sseIdleTimeoutMs" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";

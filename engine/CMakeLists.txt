@@ -268,6 +268,8 @@ add_library(vayu_core STATIC
     src/http/script_parts.cpp
     src/http/request_exchange.cpp
     src/http/set_cookie.cpp
+    src/http/sse_parser.cpp
+    src/http/sse_stream.cpp
     src/http/cookie_jar.cpp
     src/http/form_body.cpp
     src/http/graphql_body.cpp
@@ -403,6 +405,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/cookies.cpp
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
+        src/http/routes/events.cpp
         src/http/routes/mock_server.cpp
     )
 
@@ -445,6 +448,8 @@ if(VAYU_BUILD_TESTS)
         tests/import_route_test.cpp
         tests/import_apply_route_test.cpp
         tests/config_route_test.cpp
+        tests/sse_parser_test.cpp
+        tests/sse_stream_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp
         tests/runs_route_test.cpp
@@ -524,6 +529,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/cookies.cpp
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
+        src/http/routes/events.cpp
         src/http/routes/mock_server.cpp
         src/http/managed_listener.cpp
     )

@@ -11,6 +11,7 @@
  */
 
 #include "vayu/http/routes.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/metrics_helper.hpp"
@@ -1279,6 +1280,46 @@ void register_run_routes (RouteContext& ctx) {
                 ", status=" + to_string (run->status));
                 auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
                 run_id, to_string (run->status));
+                res.set_content (response.dump (), "application/json");
+                return;
+            }
+
+            // A streaming design run is stopped by asking its consumer worker
+            // to end the transfer (issue #573). Checked before the load-run
+            // path because a design run has no `RunContext` at all: without
+            // this it fell through to the not-active branch, which flips the
+            // row to Stopped while the worker keeps consuming - a run reported
+            // finished that is still holding a socket.
+            //
+            // The worker owns the terminal write, so the row is left alone
+            // here: `record_design_result` sets `Stopped` when it settles,
+            // which is also when the trace and the true event count land.
+            if (ctx.sse_manager.request_stop (run_id)) {
+                vayu::utils::log_info (
+                "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
+                // Waited on rather than answered immediately, so the caller is
+                // told what actually happened - the same budget the load path
+                // gives a graceful stop. A transfer notices within one progress
+                // callback, so this all but always settles at once.
+                auto stream = ctx.sse_manager.get (run_id);
+                const auto deadline = std::chrono::steady_clock::now () +
+                std::chrono::seconds (5);
+                while (stream && !stream->closed () &&
+                std::chrono::steady_clock::now () < deadline) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                }
+                const bool settled = !stream || stream->closed ();
+
+                nlohmann::json response;
+                response["runId"]  = run_id;
+                response["status"] = to_string (settled ? vayu::RunStatus::Stopped :
+                                                          vayu::RunStatus::Running);
+                response["message"] = settled ?
+                "Stream stopped" :
+                "Stop signalled; the stream has not settled yet";
+                if (stream) {
+                    response["totalEvents"] = stream->total_events ();
+                }
                 res.set_content (response.dump (), "application/json");
                 return;
             }

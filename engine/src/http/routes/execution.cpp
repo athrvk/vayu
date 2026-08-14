@@ -32,6 +32,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/id.hpp"
@@ -250,6 +251,97 @@ TransientFlag read_transient_flag (const nlohmann::json& json) {
     return flag;
 }
 
+/**
+ * @brief Read `POST /execute`'s `stream` flag and its caps (issue #573).
+ *
+ * Non-static: sse_stream_test.cpp drives it directly, the suite having no
+ * in-process HTTP route harness. See routes.hpp for the refusal set.
+ */
+StreamFlag read_stream_flag (const nlohmann::json& json) {
+    StreamFlag flag;
+
+    // A cap on a non-streaming payload is refused too. It reads as a bound the
+    // caller expects to apply, and silently ignoring it is how an unbounded run
+    // gets mistaken for a capped one.
+    const auto read_cap = [&json, &flag] (const char* key, int64_t low, int64_t high,
+                          std::optional<int64_t>& out) {
+        const auto field = json.find (key);
+        if (field == json.end () || field->is_null ()) {
+            return true;
+        }
+        if (!field->is_number_integer ()) {
+            flag.ok = false;
+            flag.error = std::string ("'") + key + "' must be an integer (got " +
+            field->type_name () + ")";
+            return false;
+        }
+        const int64_t value = field->get<int64_t> ();
+        if (value < low || value > high) {
+            flag.ok    = false;
+            flag.error = std::string ("'") + key + "' must be between " +
+            std::to_string (low) + " and " + std::to_string (high) + " (got " +
+            std::to_string (value) + ")";
+            return false;
+        }
+        out = value;
+        return true;
+    };
+
+    const auto field = json.find ("stream");
+    if (field != json.end () && !field->is_null ()) {
+        if (!field->is_boolean ()) {
+            flag.ok = false;
+            // Stricter than a silent false, and for the loudest of the reasons:
+            // a caller that sends `"true"` would get a buffered send and wait
+            // for a response the endpoint never finishes.
+            flag.error = "'stream' must be a boolean (got " +
+            std::string (field->type_name ()) + ")";
+            return flag;
+        }
+        flag.value = field->get<bool> ();
+    }
+
+    namespace sse_limits = vayu::core::constants::sse;
+    if (!read_cap ("maxStreamDurationMs", sse_limits::MIN_STREAM_DURATION_MS,
+        sse_limits::STREAM_DURATION_MS_CEILING, flag.max_duration_ms) ||
+    !read_cap ("maxStreamEvents", sse_limits::MIN_STREAM_EVENTS,
+    sse_limits::STREAM_EVENTS_CEILING, flag.max_events)) {
+        return flag;
+    }
+
+    if (!flag.value) {
+        if (flag.max_duration_ms || flag.max_events) {
+            flag.ok    = false;
+            flag.error = "'maxStreamDurationMs' and 'maxStreamEvents' apply to a "
+                         "streaming request only - set 'stream': true, or drop them";
+        }
+        return flag;
+    }
+
+    const auto transient = json.find ("transient");
+    if (transient != json.end () && transient->is_boolean () && transient->get<bool> ()) {
+        flag.ok    = false;
+        flag.error = "'stream' and 'transient' cannot be combined: a stream is "
+                     "identified by its run row - that is what the events URL "
+                     "names, what carries its status, and what stopping it finds "
+                     "- and a transient execution creates none";
+        return flag;
+    }
+
+    if (!vayu::http::read_post_request_script (json).empty () ||
+    !vayu::http::read_pre_request_script (json).empty ()) {
+        flag.ok    = false;
+        flag.error = "scripts cannot run on a streaming request yet: a "
+                     "post-request script asserts on a response that does not "
+                     "exist until the stream closes. Refused rather than "
+                     "silently skipped; streams reach scripts as "
+                     "'pm.response.events' in a later release";
+        return flag;
+    }
+
+    return flag;
+}
+
 namespace {
 
 // Build the final response JSON with script results
@@ -388,15 +480,10 @@ std::optional<std::string> check_duration_field (const nlohmann::json& config, c
 /**
  * @brief Record a finished design execution against its run row.
  *
- * Writes the result trace, moves the run to its terminal status, and trims the
- * run history. Logs on failure rather than throwing: a storage problem must not
- * turn a request the user already sent into an error.
- *
- * @param run_id The row to record against, or `std::nullopt` for a **transient**
- * execution (issue #382), which records nothing at all. Both `POST /execute`
- * call sites - the auth-failure path and the completed-exchange path - go
- * through here, so "transient leaves no trace" is decided in exactly one place
- * rather than guarded twice at the call sites.
+ * Declared in routes.hpp. Every `POST /execute` call site - the auth-failure
+ * path, the completed-exchange path and the streaming worker's completion
+ * callback - goes through here, so "transient leaves no trace" is decided in
+ * exactly one place rather than guarded three times at the call sites.
  *
  * Non-static: transient_execute_test.cpp drives it against a real database,
  * the suite having no in-process HTTP route harness.
@@ -404,7 +491,8 @@ std::optional<std::string> check_duration_field (const nlohmann::json& config, c
 void record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
-const vayu::Response& response) {
+const vayu::Response& response,
+const StreamRecord* stream) {
     if (!run_id) {
         return;
     }
@@ -428,6 +516,15 @@ const vayu::Response& response) {
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
+        // Added *after* the body cap deliberately: `cap_trace_bodies` walks the
+        // request/response body nodes and does not reach this one, so the
+        // events list carries its own cap, applied when it was built
+        // (`stream_trace_node`). Putting it here rather than before makes that
+        // impossible to misread as covered.
+        if (stream) {
+            trace["events"] = stream->events;
+        }
+
         // A capped body may split a UTF-8 sequence, and the raw response body can
         // be arbitrary bytes - dump with error_handler_t::replace so a lone
         // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
@@ -436,7 +533,10 @@ const vayu::Response& response) {
         trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         db.add_result (db_result);
 
-        auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
+        // A stream names its own terminal status: one the user stopped is
+        // `Stopped`, which neither the response nor the error flag can say.
+        auto status = stream ? stream->status :
+        (has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed);
         db.update_run_status_with_retry (*run_id, status);
 
         // A design run reached a terminal status - trim the run history so
@@ -490,6 +590,18 @@ const vayu::core::MonitorLimits& monitor_limits) {
     if (config.contains ("transient") && !config["transient"].is_null ()) {
         return "'transient' is not valid on a run - it applies to POST /execute "
                "only, because a run is identified by the row it creates";
+    }
+
+    // `stream` belongs to `POST /execute` alone in this phase (issue #573).
+    // Refused rather than ignored, and for the same reason `transient` is: a
+    // caller that sends it believes this run will deliver events live, and it
+    // is about to buffer every response into a load test's metrics instead.
+    // Load-mode streaming arrives with the caps that keep the completion-driven
+    // refill loop's invariants (issue #576).
+    if (config.contains ("stream") && !config["stream"].is_null ()) {
+        return "'stream' is not valid on a run - it applies to POST /execute "
+               "only, because a load run's completion accounting has no place "
+               "for a response that never ends";
     }
 
     // The duration-shaped fields are the only non-numeric ones here, and the
@@ -622,6 +734,16 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
+        // Beside the transient flag and for the same reason: `stream` changes
+        // the execution model, so a malformed one must be a 400 before anything
+        // is built or written rather than a send the caller did not ask for.
+        const auto stream = read_stream_flag (json);
+        if (!stream.ok) {
+            vayu::utils::log_warning ("POST /execute - " + stream.error);
+            send_error (res, 400, stream.error);
+            return;
+        }
+
         // Build the request once: deserialize + timeout + auth. A malformed
         // payload fails here (before any run record is created); an auth
         // failure is surfaced after the run exists (below).
@@ -699,27 +821,6 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
-        // Initialize script engine
-        vayu::runtime::ScriptConfig script_config;
-        script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
-        "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-        script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-        script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-        script_config.enable_console = ctx.db.get_config_bool (
-        "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
-        // Payload-level, not config-level: whether a script may send is a
-        // property of *who asked for this execution*, not of the installation.
-        // Absent means no - see ScriptConfig::allow_send_request.
-        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
-
-        vayu::runtime::ScriptEngine script_engine (script_config);
-
-        // Load variables. Mutated in place by both scripts, then persisted
-        // once below.
-        auto scopes = load_script_variable_scopes (ctx.db, run);
-
         // Take the request built above. Auth is already resolved into its
         // headers/url, so pm.request reflects the real outgoing set - and
         // because the pre-request script runs after that and writes back into
@@ -750,6 +851,86 @@ void register_execution_routes (RouteContext& ctx) {
         // looking at. See cookie_jar.hpp for the scope decision.
         const std::string cookie_scope =
         run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
+
+        // A streaming request diverges here: there is no synchronous exchange to
+        // run. The transfer moves to a managed consumer worker and the route
+        // answers at once with the run and the URL its events arrive on
+        // (issue #573). `stream` and `transient` are mutually exclusive, so
+        // `run_id` is always set on this path.
+        if (stream.value) {
+            vayu::http::SseStreamRequest spec;
+            spec.run_id          = *run_id;
+            spec.request         = std::move (request);
+            spec.limits          = vayu::http::read_sse_limits (ctx.db);
+            spec.max_duration_ms = stream.max_duration_ms;
+            spec.max_events      = stream.max_events;
+            spec.cookie_jar      = &ctx.cookie_jar;
+            spec.cookie_scope    = cookie_scope;
+            // Persistence stays the route's decision even though it happens on
+            // the worker thread - `ctx.db` outlives the manager, which is why
+            // the manager is declared before `server_` (see server.hpp).
+            spec.on_complete = [&db = ctx.db, id = *run_id] (const vayu::Request& sent,
+                               const vayu::Response& response,
+                               const vayu::http::SseStreamContext& context) {
+                StreamRecord record;
+                record.events = vayu::http::stream_trace_node (context);
+                record.status =
+                context.end_reason () == vayu::http::SseEndReason::Stopped ?
+                vayu::RunStatus::Stopped :
+                (response.has_error () ? vayu::RunStatus::Failed :
+                                         vayu::RunStatus::Completed);
+                record_design_result (db, id, sent, response, &record);
+            };
+
+            auto context = ctx.sse_manager.start (std::move (spec));
+            if (!context) {
+                // The daemon is draining its workers, or - impossibly - the id
+                // collided. The row exists but nothing will consume it, so it
+                // is failed here rather than left `running` forever.
+                vayu::utils::log_warning (
+                "POST /execute - Stream refused for run: " + *run_id);
+                try {
+                    ctx.db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
+                } catch (const std::exception& e) {
+                    vayu::utils::log_error (
+                    "Failed to fail a refused stream run: " + std::string (e.what ()));
+                }
+                send_error (res, 503, "Engine is shutting down");
+                return;
+            }
+
+            nlohmann::json body;
+            body["runId"]     = *run_id;
+            body["eventsUrl"] = "/runs/" + *run_id + "/events";
+            body["status"]    = to_string (vayu::RunStatus::Running);
+            res.status        = 202;
+            res.set_content (body.dump (), "application/json");
+            return;
+        }
+
+        // Initialize script engine. Built here rather than above the stream
+        // branch because a QuickJS runtime is not free and a streaming request
+        // has no script to run on it - `read_stream_flag` refuses a payload
+        // carrying one rather than building an engine nothing would use.
+        vayu::runtime::ScriptConfig script_config;
+        script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
+        "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
+        script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
+        "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
+        script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
+        "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
+        script_config.enable_console = ctx.db.get_config_bool (
+        "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+        // Payload-level, not config-level: whether a script may send is a
+        // property of *who asked for this execution*, not of the installation.
+        // Absent means no - see ScriptConfig::allow_send_request.
+        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
+
+        vayu::runtime::ScriptEngine script_engine (script_config);
+
+        // Load variables. Mutated in place by both scripts, then persisted
+        // once below.
+        auto scopes = load_script_variable_scopes (ctx.db, run);
 
         // Pre-request script, send, test script - the sequence a scenario step
         // performs too, which is why it lives in request_exchange.cpp rather

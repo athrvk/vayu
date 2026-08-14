@@ -38,6 +38,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/execute` | Send a single request (auth resolved engine-side) |
 | POST | `/runs` | Start a load test run |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
+| GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
@@ -95,6 +96,17 @@ Three things worth knowing before you design around them:
   transport failure, and callers (`DesignRunView`) must keep those apart - only
   a real 404 becomes `RequestNotFoundError`. `GET /requests?collectionId=` still
   lists a collection's requests.
+- **A streaming request is a different execution model, declared not detected**
+  (#573). `POST /execute` with `"stream": true` creates the run row, hands the
+  transfer to a managed consumer worker (`SseStreamManager`, declared before
+  `server_` like the listener managers) and answers `202 {runId, eventsUrl}`;
+  `GET /runs/:runId/events` relays a bounded ring of parsed events, and the
+  completed run's trace carries a bounded `events` node. **Every stream ends by
+  a rule that can name itself** - server close, `POST /runs/:id/stop`,
+  `maxStreamEvents`, `maxStreamDurationMs`, or the idle timeout - never a
+  whole-transfer deadline, which is deliberately not set on this path. `stream`
+  with `transient`, with a script, or on `POST /runs` is a **400** rather than a
+  silent reinterpretation.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

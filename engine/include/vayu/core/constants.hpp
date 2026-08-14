@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -467,6 +468,61 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// see docs/engine/benchmarks.md for the measured cost.
 constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 } // namespace metrics_collector
+
+/**
+ * @brief SSE request configuration (issue #573)
+ *
+ * The seeds and bounds of the six `sse*` settings. Every one of them exists
+ * because a stream is unbounded by nature: it has no content length, no promise
+ * to end, and no ceiling on how much it will send. These are where each of
+ * those turns into a number the engine can hold a stream to.
+ */
+namespace sse {
+/// Events retained in memory per run for replay and tail, seeding
+/// `sseMaxRetainedEvents`. An LLM completion is a few hundred tokens, so the
+/// stock ring holds a whole one and then some.
+constexpr std::size_t MAX_RETAINED_EVENTS     = 2000;
+constexpr std::size_t MIN_RETAINED_EVENTS     = 10;
+constexpr std::size_t RETAINED_EVENTS_CEILING = 200000;
+
+/// Bytes of one event's `data` kept, seeding `sseMaxEventBytes`. Also the cap
+/// on any single unterminated line, which is what bounds the parser itself.
+constexpr std::size_t MAX_EVENT_BYTES     = 64 * 1024;
+constexpr std::size_t MIN_EVENT_BYTES     = 256;
+constexpr std::size_t EVENT_BYTES_CEILING = 8UL * 1024 * 1024;
+
+/// Events written into a completed run's trace, seeding `sseMaxStoredEvents`.
+/// Smaller than the ring: the ring is a live window that dies with the run,
+/// this is on disk for as long as the run is retained.
+constexpr std::size_t MAX_STORED_EVENTS     = 500;
+constexpr std::size_t STORED_EVENTS_CEILING = 100000;
+
+/// Default per-request caps, seeding `sseMaxStreamDurationMs` and
+/// `sseMaxStreamEvents`. Ten minutes is longer than any single model response
+/// and far shorter than a leaked worker thread.
+constexpr int64_t MAX_STREAM_DURATION_MS     = 600000;
+constexpr int64_t MIN_STREAM_DURATION_MS     = 1000;
+constexpr int64_t STREAM_DURATION_MS_CEILING = 86400000;
+
+constexpr int64_t MAX_STREAM_EVENTS     = 100000;
+constexpr int64_t MIN_STREAM_EVENTS     = 1;
+constexpr int64_t STREAM_EVENTS_CEILING = 10000000;
+
+/// How long a stream may deliver nothing before it is ended as idle, seeding
+/// `sseIdleTimeoutMs`. Enforced through `CURLOPT_LOW_SPEED_TIME`, whose
+/// resolution is whole seconds, so a value is rounded up to the next second and
+/// the floor is one second.
+constexpr int64_t IDLE_TIMEOUT_MS         = 60000;
+constexpr int64_t MIN_IDLE_TIMEOUT_MS     = 1000;
+constexpr int64_t IDLE_TIMEOUT_MS_CEILING = 3600000;
+
+/// How many keep-alive intervals a relay may go without a successful write
+/// before its claim is considered dead and a reconnect may take it over - the
+/// #506 rule, with the same two-interval window the inbox uses.
+constexpr int RELAY_KEEPALIVE_MS          = 15000;
+constexpr int RELAY_POLL_INTERVAL_MS      = 50;
+constexpr int RELAY_CLAIM_STALE_INTERVALS = 2;
+} // namespace sse
 
 /**
  * @brief Webhook inbox configuration (issue #480)

@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
 
@@ -147,6 +148,44 @@ Response error_response (const Error& error);
  * Shared by both clients so the two cannot drift apart again.
  */
 void ingest_header_line (std::string_view line, Headers& headers);
+
+/**
+ * @brief Hand a scope's stored cookies to libcurl's cookie engine.
+ *
+ * Three steps, in this order: enable the engine (`CURLOPT_COOKIEFILE` with an
+ * empty path reads no file and turns it on), flush whatever the handle still
+ * holds, then inject. The flush matters because `curl_easy_reset` deliberately
+ * keeps a handle's cookies - without it a handle reused for a second send, or
+ * one whose jar was cleared from Settings mid-session, would carry cookies the
+ * jar no longer has.
+ *
+ * From here on libcurl decides what actually goes on the wire: which cookies
+ * match the URL, which expired, and what a `Set-Cookie` in the response
+ * replaces. See cookie_jar.hpp for why that is deliberately not our code.
+ *
+ * A script's staged @p writes are applied on top of the stored lines here
+ * rather than in the jar, so the transfer carries them and its capture persists
+ * them - the ordering cookie_jar.hpp describes.
+ *
+ * Shared by the single-request client and the SSE stream consumer so the two
+ * cannot drift into sending different sessions for the same request.
+ */
+void apply_jar_cookies (CURL* curl,
+CookieJar& jar,
+const std::string& scope,
+const std::vector<CookieWrite>& writes);
+
+/**
+ * @brief Store what the transfer left in the handle's jar back into the scope.
+ *
+ * Called even when the transfer failed, for the same reason the timing reads
+ * are: a redirect chain that dies on its last hop still collected the cookies
+ * of the hops that succeeded, and dropping those would make a login flow depend
+ * on the last request having gone well. A stream that ends on a cap is the same
+ * case - it authenticated successfully, it just did not run to the server's own
+ * end.
+ */
+void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope);
 
 /**
  * @brief libcurl's cumulative phase timers, in seconds, for one transfer.

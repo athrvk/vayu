@@ -2344,6 +2344,87 @@ void Database::seed_default_config () {
     "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
     "0", "3650", std::nullopt, now })));
 
+    // SSE requests (issue #573). All six are read once when a stream starts, so
+    // a change applies to the next stream - no restart - and one run's events
+    // are all bounded by a single rule rather than by whatever the setting
+    // happened to be at each arrival.
+    upsert_config (keywords ({ "eventsource" }) (ConfigEntry{ "sseMaxRetainedEvents",
+    std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer",
+    "Stream Events Retained",
+    "How many of a streaming request's events are held in memory for the Events "
+    "timeline. Older ones are dropped as new ones arrive, so this is how far "
+    "back a long stream can be scrolled while it is running; the completed run "
+    "stores its own, separate list. Each event costs roughly its own size in "
+    "memory.",
+    "observability", std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS),
+    std::to_string (vayu::core::constants::sse::MIN_RETAINED_EVENTS),
+    std::to_string (vayu::core::constants::sse::RETAINED_EVENTS_CEILING),
+    std::nullopt, now }));
+
+    upsert_config (unit ("bytes") (keywords ({ "eventsource" }) (
+    ConfigEntry{ "sseMaxEventBytes",
+    std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer",
+    "Stream Event Size Limit",
+    "How much of a single streamed event is kept. A larger event is held as a "
+    "prefix and flagged as truncated, never silently cut - the event reports "
+    "the size as received either way. This is also what bounds the parser "
+    "itself, so a server that sends without a line break cannot exhaust memory.",
+    "observability", std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES),
+    std::to_string (vayu::core::constants::sse::MIN_EVENT_BYTES),
+    std::to_string (vayu::core::constants::sse::EVENT_BYTES_CEILING),
+    std::nullopt, now })));
+
+    upsert_config (keywords ({ "eventsource" }) (
+    ConfigEntry{ "sseMaxStoredEvents",
+    std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer",
+    "Stream Events Stored Per Run",
+    "How many events a finished streaming run keeps on disk, so reopening it "
+    "from History shows the timeline again. A run that received more says so - "
+    "the stored list is marked truncated and carries the true total. 0 keeps "
+    "the count and no events.",
+    "observability", std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS),
+    "0", std::to_string (vayu::core::constants::sse::STORED_EVENTS_CEILING),
+    std::nullopt, now }));
+
+    upsert_config (unit ("ms") (keywords ({ "eventsource" }) (
+    ConfigEntry{ "sseMaxStreamDurationMs",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer",
+    "Stream Duration Limit",
+    "How long a streaming request may run before the engine ends it and says "
+    "so. A stream has no content length and no promise to end, so this is the "
+    "backstop that keeps one from holding a worker forever. A request may ask "
+    "for a shorter limit of its own.",
+    "observability", std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS),
+    std::to_string (vayu::core::constants::sse::MIN_STREAM_DURATION_MS),
+    std::to_string (vayu::core::constants::sse::STREAM_DURATION_MS_CEILING),
+    std::nullopt, now })));
+
+    upsert_config (keywords ({ "eventsource" }) (ConfigEntry{ "sseMaxStreamEvents",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer",
+    "Stream Event Limit",
+    "How many events a streaming request may receive before the engine ends it "
+    "and says so. The count backstop beside the time one, for a stream that "
+    "talks fast rather than long. A request may ask for a lower limit of its "
+    "own.",
+    "observability", std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS),
+    std::to_string (vayu::core::constants::sse::MIN_STREAM_EVENTS),
+    std::to_string (vayu::core::constants::sse::STREAM_EVENTS_CEILING),
+    std::nullopt, now }));
+
+    upsert_config (advanced (unit ("ms") (keywords ({ "eventsource" }) (
+    ConfigEntry{ "sseIdleTimeoutMs",
+    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer",
+    "Stream Idle Timeout",
+    "How long a stream may deliver nothing before the engine ends it. This is "
+    "the one deadline a stream gets - a whole-transfer timeout would kill a "
+    "healthy stream mid-flight - so it must be longer than the quietest gap "
+    "the endpoint you are watching leaves between events. Enforced at whole-"
+    "second resolution.",
+    "observability", std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS),
+    std::to_string (vayu::core::constants::sse::MIN_IDLE_TIMEOUT_MS),
+    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING),
+    std::nullopt, now }))));
+
     // Webhook inbox. All three are read once when an inbox starts, so a change
     // applies to the next inbox started - no restart. The running listener keeps
     // what it was started with, which is what makes one inbox's captures a set

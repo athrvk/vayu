@@ -9,6 +9,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/live_claim.hpp"
 
 #include <cstdint>
 #include <map>
@@ -158,15 +159,6 @@ nlohmann::json inbox_info_json (const InboxInfo& info);
 
 /** The wire shape of one capture, shared by the list and the live stream. */
 nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture);
-
-/**
- * Identifies one live-stream claim on one inbox.
- *
- * Never zero and never reused, so a stream that was evicted while it was not
- * writing cannot act on the claim that replaced it - see
- * InboxManager::try_claim_live.
- */
-using LiveClaim = std::uint64_t;
 
 /**
  * Owns the engine's webhook inbox listeners (issue #480).

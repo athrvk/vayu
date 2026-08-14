@@ -169,56 +169,6 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 }
 
 /**
- * @brief Hand the scope's stored cookies to libcurl's cookie engine.
- *
- * Three steps, in this order: enable the engine (`CURLOPT_COOKIEFILE` with an
- * empty path reads no file and turns it on), flush whatever the handle still
- * holds, then inject. The flush matters because `curl_easy_reset` deliberately
- * keeps a handle's cookies - without it a `Client` reused for a second send,
- * or one whose jar was cleared from Settings mid-session, would carry cookies
- * the jar no longer has.
- *
- * From here on libcurl decides what actually goes on the wire: which cookies
- * match the URL, which expired, and what a `Set-Cookie` in the response
- * replaces. See cookie_jar.hpp for why that is deliberately not our code.
- *
- * A script's staged writes are applied on top of the stored lines here rather
- * than in the jar, so the transfer carries them and its capture persists them
- * - the ordering cookie_jar.hpp describes.
- */
-void apply_jar_cookies (CURL* curl, const ClientConfig& config) {
-    curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
-    curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
-    for (const auto& line : apply_cookie_writes (
-         config.cookie_jar->lines_for (config.cookie_scope), config.cookie_writes)) {
-        curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
-    }
-}
-
-/**
- * @brief Store what the transfer left in the handle's jar back into the scope.
- *
- * Called even when the transfer failed, for the same reason the timing reads
- * are: a redirect chain that dies on its last hop still collected the cookies
- * of the hops that succeeded, and dropping those would make a login flow
- * depend on the last request having gone well.
- */
-void capture_jar_cookies (CURL* curl, const ClientConfig& config) {
-    struct curl_slist* held = nullptr;
-    if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) != CURLE_OK) {
-        return;
-    }
-    std::vector<std::string> lines;
-    for (const struct curl_slist* item = held; item != nullptr; item = item->next) {
-        if (item->data) {
-            lines.emplace_back (item->data);
-        }
-    }
-    curl_slist_free_all (held);
-    config.cookie_jar->store (config.cookie_scope, std::move (lines));
-}
-
-/**
  * @brief The raw-request view, built from the header block libcurl actually sent.
  *
  * @p header_frame is a whole CURLINFO_HEADER_OUT frame - request line included,
@@ -507,7 +457,8 @@ Result<Response> Client::send (const Request& request) {
     // Cookie jar (issue #301) - only when a caller opted in; see
     // ClientConfig::cookie_jar.
     if (impl_->config.cookie_jar) {
-        apply_jar_cookies (curl, impl_->config);
+        detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
+        impl_->config.cookie_scope, impl_->config.cookie_writes);
     }
 
     // Perform the request. Stamp submission just before perform so that
@@ -530,7 +481,8 @@ Result<Response> Client::send (const Request& request) {
     // Before any error return below: a failed transfer can still have
     // collected cookies - see capture_jar_cookies.
     if (impl_->config.cookie_jar) {
-        capture_jar_cookies (curl, impl_->config);
+        detail::capture_jar_cookies (curl, *impl_->config.cookie_jar,
+        impl_->config.cookie_scope);
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)

@@ -41,6 +41,9 @@ class InboxManager;
 // Owns the collection mock servers; defined in mock_server.hpp. Forward-
 // declared for the same reason as the three managers above.
 class MockServerManager;
+// Owns the streaming consumers; defined in sse_stream.hpp. Forward-declared for
+// the same reason as the four managers above.
+class SseStreamManager;
 } // namespace vayu::http
 
 namespace vayu::http::routes {
@@ -529,6 +532,81 @@ struct TransientFlag {
 TransientFlag read_transient_flag (const nlohmann::json& json);
 
 /**
+ * The outcome of reading `POST /execute`'s `stream` flag and its caps
+ * (issue #573).
+ *
+ * `ok == false` carries the 400 the route answers with. Every rejection here is
+ * loud rather than a fallback, because the flag changes the *execution model* -
+ * a caller that believed it asked for a stream and got a buffered send would
+ * wait for a response that never comes, and one that believed its cap applied
+ * would get an unbounded run.
+ */
+struct StreamFlag {
+    bool ok = true;
+    std::string error;
+    bool value = false;
+    /// Present only when the payload named one; absent means the configured
+    /// default. Kept as absent-vs-value rather than pre-resolved so the run
+    /// records which caps the *caller* chose.
+    std::optional<int64_t> max_duration_ms;
+    std::optional<int64_t> max_events;
+};
+
+/**
+ * Read `stream`, `maxStreamDurationMs` and `maxStreamEvents` off a
+ * `POST /execute` payload, and refuse the combinations that cannot mean
+ * anything.
+ *
+ * Two are refused, both because a stream **is** its run row:
+ *
+ * - `transient: true`, which asks for no row at all - there would be nothing
+ *   for `eventsUrl` to name, nothing to carry the status, and nothing for
+ *   `POST /runs/:id/stop` to find.
+ * - a post-request script, which needs a response that does not exist until the
+ *   stream closes. Streams reach scripts in phase 3 (issue #575) as a buffered
+ *   `pm.response.events`; until then, asking is a 400 rather than a script that
+ *   silently never runs.
+ *
+ * Extracted from the handler so sse_stream_test.cpp can drive it directly,
+ * matching the suite's other route-core tests.
+ */
+StreamFlag read_stream_flag (const nlohmann::json& json);
+
+/**
+ * The stream-only half of a recorded design result (issue #573).
+ *
+ * Passed to `record_design_result` rather than written by the stream worker
+ * itself, so "what a design run persists" stays one decision in one place -
+ * including the transient rule, which a second recording path would have to
+ * remember to honour.
+ */
+struct StreamRecord {
+    /// The bounded `events` node, from `stream_trace_node`.
+    nlohmann::json events;
+    /// The run's terminal status. A stream that was stopped is `Stopped`, which
+    /// is neither the `Completed` nor the `Failed` the response alone implies.
+    vayu::RunStatus status = vayu::RunStatus::Completed;
+};
+
+/**
+ * @brief Record a finished design execution against its run row.
+ *
+ * Writes the result trace, moves the run to its terminal status, and trims the
+ * run history. Logs on failure rather than throwing: a storage problem must not
+ * turn a request the user already sent into an error.
+ *
+ * @param run_id `std::nullopt` for a **transient** execution (issue #382),
+ *        which records nothing at all - the single choke point that rule lives
+ *        at.
+ * @param stream The streaming additions, or nullptr for an ordinary send.
+ */
+void record_design_result (vayu::db::Database& db,
+const std::optional<std::string>& run_id,
+const vayu::Request& request,
+const vayu::Response& response,
+const StreamRecord* stream = nullptr);
+
+/**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */
@@ -556,6 +634,9 @@ struct RouteContext {
     /// The collection mock servers (issue #481 phase 2). Owned by Server; read
     /// by `/mock`.
     vayu::http::MockServerManager& mock_server_manager;
+    /// The streaming consumers (issue #573). Owned by Server; started by
+    /// `/execute`, read by `/runs/:id/events`, stopped by `/runs/:id/stop`.
+    vayu::http::SseStreamManager& sse_manager;
 };
 
 // Route registration functions (implemented in separate files)
@@ -577,6 +658,7 @@ void register_oauth_routes (RouteContext& ctx);
 void register_cookie_routes (RouteContext& ctx);
 void register_mock_issuer_routes (RouteContext& ctx);
 void register_inbox_routes (RouteContext& ctx);
+void register_event_stream_routes (RouteContext& ctx);
 void register_mock_server_routes (RouteContext& ctx);
 
 /**
