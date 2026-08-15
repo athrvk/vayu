@@ -19,6 +19,7 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
+import ExportSpecDialog from "./ExportSpecDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
@@ -381,6 +382,16 @@ export default function CollectionTree() {
 					<RunCollectionDialog
 						collection={panel.runTarget}
 						onOpenChange={(open) => !open && panel.dismissRunDialog()}
+					/>
+				)}
+
+				{/* Mounted on the same terms as the run dialog above, and for the
+				    same reasons: one per panel, only once a folder has been chosen,
+				    and the mount is what resets the format choice. */}
+				{panel.exportTarget && (
+					<ExportSpecDialog
+						collection={panel.exportTarget}
+						onOpenChange={(open) => !open && panel.dismissExportDialog()}
 					/>
 				)}
 

@@ -1,0 +1,88 @@
+{
+	"openapi": "3.0.3",
+	"x-vendor-note": "kept verbatim by export - Vayu models none of this",
+	"info": {
+		"title": "Petstore",
+		"version": "2.4.1",
+		"x-internal-owner": "platform-team"
+	},
+	"servers": [{ "url": "https://api.example.com/v1" }],
+	"tags": [{ "name": "pets", "description": "Everything about pets" }],
+	"paths": {
+		"/pets": {
+			"get": {
+				"operationId": "listPets",
+				"summary": "List pets",
+				"tags": ["pets"],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": { "type": "integer" }
+					},
+					{ "$ref": "#/components/parameters/TraceId" }
+				],
+				"responses": {
+					"200": {
+						"description": "A list of pets",
+						"content": {
+							"application/json": {
+								"schema": { "$ref": "#/components/schemas/Pet" }
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "createPet",
+				"summary": "Create a pet",
+				"tags": ["pets"],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"content": {
+							"application/json": {
+								"schema": { "$ref": "#/components/schemas/Pet" }
+							}
+						}
+					}
+				}
+			}
+		},
+		"/pets/{petId}": {
+			"delete": {
+				"operationId": "deletePet",
+				"summary": "Delete a pet",
+				"parameters": [
+					{
+						"name": "petId",
+						"in": "path",
+						"required": true,
+						"schema": { "type": "string" }
+					}
+				],
+				"responses": { "204": { "description": "Gone" } }
+			}
+		}
+	},
+	"components": {
+		"parameters": {
+			"TraceId": {
+				"name": "X-Trace-Id",
+				"in": "header",
+				"schema": { "type": "string" }
+			}
+		},
+		"schemas": {
+			"Pet": {
+				"type": "object",
+				"properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+			},
+			"Unused": {
+				"type": "object",
+				"description": "referenced by nothing - must survive an export"
+			}
+		}
+	}
+}
