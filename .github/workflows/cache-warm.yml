@@ -1,0 +1,262 @@
+name: Warm build cache
+
+# Populates the vcpkg binary cache in the **default-branch cache scope**, which
+# is the only scope a tagged release build can read.
+#
+# GitHub Actions caches are ref-scoped, and the rules are unforgiving:
+#
+#   - a run can restore caches from its own ref and from the default branch;
+#   - a run **cannot** restore a cache created for a *different tag*;
+#   - a `pull_request` run's cache is written to `refs/pull/N/merge` and can
+#     only be restored by re-runs of that same pull request - not by the base
+#     branch, not by other pull requests.
+#
+# See https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
+# ("Restrictions for accessing a cache").
+#
+# So `pr-tests.yml`, which runs only on `pull_request`, writes caches that
+# nothing else can ever read, and `release.yml`, which runs on a tag push, can
+# read only its own (empty, first-run) tag scope plus `refs/heads/master`. Until
+# this workflow existed the *only* thing writing to the master scope was
+# `codeql.yml` - Linux-only, and deliberately sccache-less. That is why the
+# macOS and Windows release legs had never once seen a warm dependency cache,
+# and why v0.17.0 built curl, openssl and libsodium from source on all three
+# platforms. `restore-keys` does not help: it is a key-prefix fallback *within*
+# the scopes a run can already read, not a way out of the scope boundary.
+#
+# Deliberately **not** here: an engine compile to warm sccache. It would not
+# help a release. `engine/include/vayu/core/constants.hpp` builds
+# `DEFAULT_USER_AGENT` from `VAYU_VERSION_STRING`, and 46 files include that
+# header (transitively, near enough all 68 translation units), so the version
+# bump in a release commit changes the preprocessed text of essentially every
+# object file. sccache is content-addressed on exactly that text, so a release
+# commit misses by construction no matter how warm master is. The one time it
+# ever hit - 98.42% on the v0.16.0 retry - the *same tag* had already compiled
+# the *same commit* in a failed attempt an hour earlier. Until that include is
+# narrowed (move `DEFAULT_USER_AGENT` out of `constants.hpp` so a version bump
+# touches ~5 translation units instead of ~68), warming sccache here would burn
+# ~25 minutes of runner time per merge to speed up nothing.
+#
+# vcpkg, by contrast, is pure win: its ABI hash covers the ports, the triplet
+# and the compiler, and *not* the top-level manifest, so the dependency
+# archives stay valid across every release forever.
+
+on:
+  # The cache key changes only when the dependency set or the vcpkg baseline
+  # changes, so that is exactly when the archives need rebuilding.
+  push:
+    branches: [master]
+    paths:
+      - 'engine/vcpkg.json'
+      - '.github/workflows/cache-warm.yml'
+  # The guard below is cheap and catches the regressions that would quietly
+  # switch this workflow off, so it runs before they can merge.
+  pull_request:
+    branches: [master]
+    paths:
+      - 'engine/vcpkg.json'
+      - '.github/workflows/*.yml'
+      - 'build.py'
+  # Weekly, because GitHub evicts cache entries that have not been *accessed*
+  # in 7 days. Reads from pull requests normally keep the entry alive, so this
+  # is a backstop for quiet weeks rather than the main path - and a hit makes
+  # the job a ~1 minute no-op.
+  schedule:
+    - cron: '0 6 * * 1'
+  # Lets the first seeding happen on demand rather than waiting for the next
+  # dependency change.
+  workflow_dispatch:
+
+# NOT `cancel-in-progress: true`. A cancelled run saves nothing, and this
+# workflow exists solely for its save step - cancelling it is indistinguishable
+# from never running it. `codeql.yml` cancels, which is why a burst of merges
+# leaves the master scope unrefreshed; that is correct for an analysis job and
+# wrong for this one.
+concurrency:
+  group: cache-warm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # A warming job whose cache key does not match the key of the job it is
+  # warming is dead weight that still costs runner minutes, and nothing would
+  # report it - the release build would simply go on missing. So the key is
+  # asserted identical across every workflow that caches vcpkg, rather than
+  # trusted to stay in step by hand.
+  guard:
+    name: Cache key agreement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Assert every workflow shares one vcpkg cache key
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Matched as a whole `key:` line, anchored. Two traps this avoids:
+          # a token pattern like `vcpkg-[^ ]*` stops at the first space, so it
+          # would compare only `vcpkg-${{ runner.os }}-${{` and pass happily
+          # while the rest of the key diverged; and an unanchored pattern
+          # matches this step's own text in this very file, so the guard would
+          # end up grading its own source instead of the workflow.
+          #
+          # codeql.yml hardcodes `Linux` where the others interpolate
+          # `runner.os`; it only ever runs on ubuntu, so those are the same
+          # string. Normalise that one difference, require exact equality for
+          # everything else.
+          files=(release.yml pr-tests.yml codeql.yml cache-warm.yml)
+          keys=() commits=()
+          for f in "${files[@]}"; do
+            p=".github/workflows/$f"
+            key=$(grep -oE '^[[:space:]]*key: vcpkg-.*$' "$p" | head -1 \
+                  | sed -E 's/^[[:space:]]*key: //; s/vcpkg-Linux-/vcpkg-\$\{\{ runner.os \}\}-/')
+            commit=$(grep -oE "VCPKG_COMMIT: '[0-9a-f]{40}'" "$p" | head -1)
+            # A guard that matched nothing would pass forever. Fail instead.
+            if [ -z "$key" ] || [ -z "$commit" ]; then
+              echo "::error::$p has no vcpkg cache key line or no VCPKG_COMMIT - this guard just stopped guarding it." >&2
+              exit 1
+            fi
+            keys+=("$key"); commits+=("$commit")
+            echo "  $f"
+            echo "      $key"
+            echo "      $commit"
+          done
+          for i in "${!files[@]}"; do
+            if [ "${keys[$i]}" != "${keys[0]}" ] || [ "${commits[$i]}" != "${commits[0]}" ]; then
+              echo "::error::${files[$i]} disagrees with ${files[0]} on the vcpkg cache key or baseline. They must match exactly, or the warmed cache is unreachable from the build that needs it." >&2
+              exit 1
+            fi
+          done
+          echo "All ${#files[@]} workflows agree."
+
+      - name: Assert engine/vcpkg.json carries no version field
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `version` is optional for a top-level (consuming) manifest and
+          # nothing reads it - the engine's version lives in VERSION,
+          # CMakeLists.txt and version.hpp. It is excluded from vcpkg's ABI
+          # hash, so it never invalidated a real dependency; it only ever
+          # invalidated the *cache key*, which hashes the file whole. Bumping
+          # it on every release is what guaranteed a cold cache at exactly the
+          # moment a warm one mattered most. build.py enforces the same rule at
+          # bump time; this catches a hand edit.
+          if python3 -c "import json,sys; sys.exit(0 if 'version' in json.load(open('engine/vcpkg.json')) else 1)"; then
+            echo "::error file=engine/vcpkg.json::Remove the 'version' field - it is hashed into the CI vcpkg cache key, so bumping it makes every release rebuild every dependency from source." >&2
+            exit 1
+          fi
+          echo "engine/vcpkg.json has no version field."
+
+  warm:
+    name: Warm vcpkg cache on ${{ matrix.os }}
+    # Guard first: if the keys disagree, warming the wrong key helps nobody.
+    needs: guard
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            preset: linux-prod
+          - os: windows-latest
+            preset: windows-prod
+          # macOS is the one platform where the release matrix is not the same
+          # shape as the pull-request matrix: release.yml builds arm64 and x64
+          # separately and lipos them together, so both triplets' dependencies
+          # have to be in the archive for a release to be warm. Handled by the
+          # second configure step below.
+          - os: macos-latest
+            preset: macos-prod-arm64
+    timeout-minutes: 90
+    env:
+      # Keep these three byte-identical to release.yml and pr-tests.yml. The
+      # `guard` job above fails the build if they drift.
+      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        # Same set release.yml installs: vcpkg builds libsodium from source
+        # through its autotools path and runs autoreconf first.
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      # Configure only - no `buildPreset`. Configuring runs vcpkg in manifest
+      # mode, which is what populates `.vcpkg-archives`; compiling the engine
+      # afterwards would add nothing this cache can carry (see the note at the
+      # top about sccache and the version header).
+      #
+      # No sccache here either, on purpose: nothing in this job compiles engine
+      # sources, and vcpkg's own dependency builds are already cached by the
+      # archives themselves.
+      - name: Resolve dependencies
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ matrix.preset }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      # The second macOS triplet. release.yml builds x64 through Rosetta and
+      # lipos it with arm64; without this the x64 half of every release still
+      # compiles its dependencies from source and macOS stays the long pole.
+      - name: Resolve dependencies (macOS x64)
+        if: runner.os == 'macOS'
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: macos-prod-x64
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Report what the cache now holds
+        shell: bash
+        run: |
+          count=$(find .vcpkg-archives -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')
+          size=$(du -sh .vcpkg-archives 2>/dev/null | cut -f1)
+          echo "### Warmed \`${{ runner.os }}\` vcpkg cache" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Packages archived: \`${count:-0}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Archive size: \`${size:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+          # An empty archive directory means the configure step never ran vcpkg
+          # and this workflow saved nothing useful - which would otherwise look
+          # exactly like success.
+          if [ "${count:-0}" -eq 0 ]; then
+            echo "::error::No vcpkg archives were produced - nothing was warmed." >&2
+            exit 1
+          fi
