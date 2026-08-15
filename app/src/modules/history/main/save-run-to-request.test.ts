@@ -176,6 +176,34 @@ describe("applyRunToRequest", () => {
 		expect(patch.bodyType).toBe("json");
 	});
 
+	it("round-trips a jsonrpc body, the mode the widened cast added", () => {
+		// `bodyFromSeed` widened a cast to admit `jsonrpc` and no test ever ran
+		// one through, so the mode was covered by `pnpm type-check` alone - and
+		// a cast proves only that the compiler agrees, never that the value
+		// arrives. This is the runtime half: give `bodyFromSeed` a mode
+		// whitelist that forgets `jsonrpc`, or stop the seed carrying the mode,
+		// and the body falls back to `{mode:"none"}` here.
+		const live = liveRequest();
+		const jsonrpcRun = run({
+			configSnapshot: {
+				method: "POST",
+				url: "https://api.example.test/rpc",
+				body: {
+					mode: "jsonrpc",
+					content: '{"jsonrpc":"2.0","method":"getUser","params":[1],"id":1}',
+				},
+			},
+		} as Partial<Run>);
+
+		const patch = applyRunToRequest(seedFromRun(jsonrpcRun, live), live);
+
+		expect(patch.body).toEqual({
+			mode: "jsonrpc",
+			content: '{"jsonrpc":"2.0","method":"getUser","params":[1],"id":1}',
+		});
+		expect(patch.bodyType).toBe("jsonrpc");
+	});
+
 	it("omits scripts entirely for a run that has only the old glued string", () => {
 		const legacy = run({
 			configSnapshot: {

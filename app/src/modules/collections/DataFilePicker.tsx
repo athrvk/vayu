@@ -222,8 +222,9 @@ export default function DataFilePicker({
 							</>
 						) : loadTest ? (
 							<>
-								One row per iteration, shared across virtual users so no two hold
-								the same row at once. Columns read as {"{{data.column}}"}.
+								One row per iteration, claimed from a cursor every virtual user
+								shares. Rows repeat once they run out, so users share a row past
+								that point. Columns read as {"{{data.column}}"}.
 							</>
 						) : (
 							<>
