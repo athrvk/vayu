@@ -27,9 +27,9 @@
  * What this tab deliberately does not do: create, delete or edit requests.
  * Binding an existing collection matches what is already there and stamps
  * identity on the matches - the operations with no request, and the requests
- * with no operation, are *reported* and left alone. Acting on that difference is
- * sync (#627), which needs the three-bucket diff and the user-touched
- * protection this phase has no shape for yet.
+ * with no operation, are *reported* and left alone. The Sync section (#654)
+ * holds to the same line: it re-reads the document and says what moved, and
+ * acting on that difference is #655.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -51,6 +51,7 @@ import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { hasSpecBinding, type Collection } from "@/types";
 import { formatRelative } from "./format";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
+import SpecSync from "./SpecSync";
 
 interface SpecTabProps {
 	collection: Collection;
@@ -315,6 +316,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					)}
 				</div>
 			)}
+
+			{bound && <SpecSync spec={spec} specFile={specFile} requests={requests} />}
 
 			<SaveFailed mutation={bindSpec} what="the spec binding" />
 			<SaveFailed mutation={updateCollection} what="the spec binding" />

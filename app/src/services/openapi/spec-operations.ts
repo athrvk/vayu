@@ -22,10 +22,29 @@
 
 import type { SpecOperation } from "@/types";
 import { parseImport } from "@/services/importers/factory";
-import type { CollectionDraft } from "@/services/importers/types";
+import type { CollectionDraft, RequestDraft } from "@/services/importers/types";
+
+/**
+ * One operation, and the request an import of this document would build for it
+ * (issue #654).
+ *
+ * The draft is what makes "the spec changed this request" answerable without a
+ * second opinion about what a document means: sync compares what the collection
+ * holds against what an import *would* produce, so the two can only disagree if
+ * the document did.
+ */
+export interface SpecRequestDraft {
+	operation: SpecOperation;
+	draft: RequestDraft;
+}
 
 /** What a document turned out to describe. */
 export interface ReadSpecResult {
+	/**
+	 * Every operation the document declares, in document order, paired with the
+	 * request an import would build for it.
+	 */
+	requests: SpecRequestDraft[];
 	/** Every operation the document declares, in document order. */
 	operations: SpecOperation[];
 	/** The parser that claimed it - "OpenAPI 3.0", "OpenAPI 2.0 (Swagger)". */
@@ -57,18 +76,22 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 	// would need updating every time a parser is added or renamed.
 	if (!root?.spec) throw new NotASpecError(result.meta.format);
 
-	const operations: SpecOperation[] = [];
-	collect(root, operations);
+	const requests: SpecRequestDraft[] = [];
+	collect(root, requests);
 	return {
-		operations,
+		requests,
+		// Derived rather than collected a second time: one walk, so a reader that
+		// wants identities and a reader that wants drafts cannot disagree about
+		// what the document declares.
+		operations: requests.map((r) => r.operation),
 		format: result.meta.format,
 		title: root.name,
 	};
 }
 
-function collect(collection: CollectionDraft, out: SpecOperation[]): void {
+function collect(collection: CollectionDraft, out: SpecRequestDraft[]): void {
 	for (const request of collection.requests) {
-		if (request.specOperation) out.push(request.specOperation);
+		if (request.specOperation) out.push({ operation: request.specOperation, draft: request });
 	}
 	for (const child of collection.children) collect(child, out);
 }

@@ -122,12 +122,73 @@ already there:
 The result is stated before anything is written - how many matched, how many
 requests carry no operation, how many operations have no request - and only the
 matches are stamped. **Nothing is created, deleted or rewritten**: acting on the
-difference is what syncing a changed spec will do, and it needs a diff this
-phase does not draw.
+difference is what applying a sync will do.
+
+## Checking a bound spec for changes
+
+A contract moves. The **Sync** section of the Spec tab re-reads the bound
+document and tells you what moved - and, for now, only tells you: **checking
+writes nothing at all**, so it costs nothing to ask.
+
+Where it re-reads from is what the binding recorded:
+
+| The spec was… | Checking re-reads it… |
+|---|---|
+| Fetched from a URL | From that URL |
+| Picked as a file | From that file, in the desktop app, on the machine that picked it |
+| Pasted, or picked on another machine | Not at all - it says so, and offers binding again |
+
+What comes back is bundled exactly as an import bundles it, so a spec written
+across several files is compared as the same one document that was stored. If it
+is **byte for byte** what the collection is bound to, the answer is "up to date"
+and nothing further is computed.
+
+### The three buckets
+
+Otherwise the difference is reported by **operation identity** - the
+`operationId`, method and templated path each request recorded when it was
+bound:
+
+- **New operations** the document declares that no request in this collection is.
+- **Operations the document no longer declares**, listed by the request that
+  still claims them. Those requests are not going anywhere; they are simply no
+  longer described by the contract.
+- **Changed** - the request is still that operation, and one or more of the
+  fields an import writes (name, description, URL, params, headers, body) is no
+  longer what the document produces.
+
+Everything else is counted as unchanged, and requests carrying no operation at
+all are counted separately: the contract never described them, so the comparison
+leaves them out and says how many it left out.
+
+### Renames, and what is never guessed
+
+An operation that moves is followed rather than reported as a deletion and an
+addition:
+
+- A **path that changed** under a stable `operationId` follows the `operationId`.
+- An **`operationId` that changed** under a stable path follows the path. A
+  renamed path *parameter* - `/pets/{petId}` to `/pets/{id}` - is the same
+  endpoint, the same rule binding uses.
+- **Both changed at once** is reported as one operation gone and one arrived,
+  because there is nothing left to follow, and a wrong identity is what would
+  make a later apply rewrite the wrong request.
+
+### What you edited is marked as yours
+
+A changed field is marked **edited here** when what the request holds is neither
+what the new document produces *nor* what the bound one did. That is the only
+evidence that a person put it there, and it is what stops applying a sync from
+quietly reverting your work. When the bound document itself cannot be read, the
+section says so for that request instead of guessing which side a difference came
+from.
+
+**Saved response examples are not compared yet.** Which of them a sync may
+replace - the ones an import created, never the ones you saved - is decided
+where a sync applies changes, so they are compared there.
 
 ## What is not here yet
 
-Re-fetching a bound document and applying its changes, validating responses
-against their declared schemas, contract coverage on a run report, and export
-back out to an OpenAPI document. Each is its own phase; this page grows with
-them.
+Applying what a check found, validating responses against their declared
+schemas, contract coverage on a run report, and export back out to an OpenAPI
+document. Each is its own phase; this page grows with them.
