@@ -10,7 +10,7 @@
  * on "it parses", because a re-serialization that normalized the declaration or
  * collapsed the whitespace would still parse and would still be wrong; the
  * derived header is asserted at the socket, because the rule that skips it when
- * the caller set one lives two functions away (`body_content_type_header`).
+ * the caller set one lives two functions away (`body_content_type_value`).
  *
  * Both drivers are exercised - the design-run `Client::send` and the load-run
  * `EventLoop` - for the reason the sibling modes are: they share

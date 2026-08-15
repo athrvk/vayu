@@ -2550,6 +2550,11 @@ and an h2 request rendered in HTTP/1 form - none of which appear in
 issued them. It carries the two the engine derives at send time - the
 body-implied `Content-Type` and the default `User-Agent` - and drops a
 `form-data` `Content-Type`, which libcurl writes itself with the boundary. It
+also drops **an enabled header whose value is empty or only whitespace**: a
+header line with nothing after the colon is libcurl's spelling for *remove this
+header*, so such a row never reaches the wire on any transport and is not
+reported as sent either. To send a header that is present with an empty value,
+give it a value - the engine does not emit libcurl's `Key;` form. It
 does not carry libcurl's own additions or the jar's `Cookie` line; those are
 `rawRequest`'s alone. A test script's `pm.request.headers` reads this same set
 (see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion

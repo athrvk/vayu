@@ -115,6 +115,15 @@ class EchoServer {
         return found == headers_.end () ? std::string () : found->second;
     }
 
+    /// Whether the header arrived at all. The distinction {@link header}
+    /// cannot make: an empty-valued header and an absent one both read as
+    /// `""` there, and telling them apart is the whole question when what is
+    /// under test is which headers reached the wire (issue #662).
+    bool has_header (const std::string& name) const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return headers_.find (name) != headers_.end ();
+    }
+
     /// The request target as received - {@link path} plus the query string,
     /// still percent-encoded. What a test asserts against when the encoding
     /// itself is the point (an api key placed in the query).
