@@ -33,7 +33,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
-| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, data-driven collection runs only, see below |
+| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run or a send-with-row, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -466,6 +466,11 @@ A collection run can be given rows - the app parses the CSV or JSON file and
 sends them inline on the run payload; the engine never opens a file. Row
 `i % rows` binds to iteration `i`, so `iterations` above the row count wraps.
 
+A **single send** can bind one row as well: the request builder's Send-with-row
+caret and MCP's `run_request` both take one row on `POST /execute`, which is
+what makes a script that reads `pm.iterationData` testable without starting a
+run. `pm.info.iteration` is then `0` of `1` - the send is row 0 of 1.
+
 Divergences from Postman:
 
 - **It is `undefined` when the run has no data**, rather than an empty scope
@@ -709,7 +714,7 @@ A completion entry says a member may be absent by ending its `detail` in
 union (`iteration: number | undefined`), and a surface that has members of its own has no
 union to carry it, so the optionality moves onto the property name -
 `pm.iterationData` is declared **`iterationData?: { ... }`**, because it is `undefined`
-outside a data-driven collection run.
+outside a data-driven run or a send-with-row.
 
 That marker shows in hover, and deliberately does **not** produce a squiggle: the worker
 runs with `strictNullChecks` **off**, and without it an optional property is

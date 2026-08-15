@@ -29,6 +29,7 @@ beforeAll(() => {
 });
 
 const contract: DataContractScope = {
+	collectionId: "col-checkout",
 	collectionName: "Checkout flow",
 	columns: ["id", "email"],
 };

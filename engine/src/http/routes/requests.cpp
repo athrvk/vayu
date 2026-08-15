@@ -110,6 +110,65 @@ static std::string http_version_seed (vayu::db::Database& db) {
 }
 
 /**
+ * Applies `specOperation` - which operation of the bound spec this request is
+ * (issue #637) - under the same null-vs-absent rule as every other field, with
+ * `null`/absent-on-create meaning "declares no operation" (a NULL column).
+ *
+ * Its own helper rather than `apply_json_field`, because the column is nullable:
+ * `apply_json_field` resets to a *text* default, and `"{}"` there would be a
+ * second spelling of "no operation" that every reader - the serializers, the
+ * diff in #627, the coverage count in #629 - would have to learn.
+ *
+ * Contents are validated, not merely shaped. `method` and `path` are what make
+ * the identity an identity: an operation with neither is not one, and a
+ * `spec_operation` holding half of one would fail much later, as a request that
+ * silently matches nothing in the spec it is supposedly bound to. `path` is the
+ * templated path, so it is required to start with `/` - a concrete URL stored
+ * here would never match the document it came from.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+apply_spec_operation_field (const nlohmann::json& json, std::optional<std::string>& out, bool is_create) {
+    if (!json.contains ("specOperation")) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return std::nullopt;
+    }
+    const auto& value = json["specOperation"];
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return std::nullopt;
+    }
+    if (!value.is_object ()) {
+        return std::make_pair (400,
+        error_body (400, "Invalid 'specOperation': must be a JSON object or null"));
+    }
+
+    for (const char* key : { "method", "path" }) {
+        if (!value.contains (key) || !value[key].is_string () ||
+        value[key].get<std::string> ().empty ()) {
+            return std::make_pair (400,
+            error_body (400, std::string ("Invalid 'specOperation.") + key +
+            "': must be a non-empty string"));
+        }
+    }
+    if (value["path"].get<std::string> ().front () != '/') {
+        return std::make_pair (400,
+        error_body (400,
+        "Invalid 'specOperation.path': must be the templated path from the "
+        "document and start with '/' (e.g. '/pets/{petId}')"));
+    }
+    if (value.contains ("operationId") && !value["operationId"].is_null () &&
+    !value["operationId"].is_string ()) {
+        return std::make_pair (400,
+        error_body (400, "Invalid 'specOperation.operationId': must be a string"));
+    }
+
+    out = value.dump ();
+    return std::nullopt;
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
@@ -188,6 +247,14 @@ bool is_create) {
     // applier rather than the by-id route alone, so `POST /import/apply` -
     // which runs this same function over a bulk payload - carries it too.
     apply_bool_field (json, "stream", r.stream, false, is_create);
+
+    // Operation identity (issue #637). Here rather than in the by-id route, for
+    // the same reason `stream` is: `POST /import/apply` runs this same applier,
+    // and an importer that recovered the operation a request came from must be
+    // able to store it in the one call that writes the tree.
+    if (auto err = apply_spec_operation_field (json, r.spec_operation, is_create)) {
+        return err;
+    }
 
     return std::nullopt;
 }
@@ -383,9 +450,10 @@ void register_request_routes (RouteContext& ctx) {
      * Body params: collectionId, name, method, url (all required), description,
      * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
      * preRequestScript, postRequestScript, order, followRedirects,
-     * maxRedirects, stream, httpVersion (absent/null seeds from the
-     * "defaultHttpVersion" config entry; an unrecognized value is a 400, never
-     * silently coerced).
+     * maxRedirects, stream, specOperation ({operationId?, method, path} naming
+     * the operation of the collection's bound spec this request is, or null for
+     * none), httpVersion (absent/null seeds from the "defaultHttpVersion"
+     * config entry; an unrecognized value is a 400, never silently coerced).
      * Returns: The created request object, or 400 (body `id`, missing required
      * field, bad field shape).
      */

@@ -29,6 +29,36 @@ describe("extractHost", () => {
 	test("returns null for unresolved template variables", () => {
 		expect(extractHost("{{baseUrl}}/users")).toBeNull();
 	});
+	/**
+	 * Where the template sits decides whether the host is knowable (issue #601).
+	 *
+	 * A `{{data.id}}` in the path is not waiting on a client to resolve it - it
+	 * survives composition by design so the engine can bind a data row against
+	 * it - and no value substituted after the authority can move the request to
+	 * another server. Refusing those made `run_request`'s data row unusable in
+	 * the position it is most often written.
+	 *
+	 * The authority cases below are the ones that still have to be refused, and
+	 * are why this is positional rather than "ignore braces": a template in the
+	 * hostname, the port or the userinfo names a target nothing here can know.
+	 */
+	test.each([
+		["https://api.example.com/users/{{data.id}}", "api.example.com"],
+		["https://api.example.com/users?id={{data.id}}", "api.example.com"],
+		["https://api.example.com/u#{{data.frag}}", "api.example.com"],
+		["api.example.com:8080/{{data.id}}", "api.example.com"],
+	])("reads the host of %s, whose template is past the authority", (url, host) => {
+		expect(extractHost(url)).toBe(host);
+	});
+	test.each([
+		"https://{{host}}/users",
+		"https://api.{{env}}.example.com/users",
+		"https://api.example.com:{{port}}/users",
+		"https://{{user}}:pw@api.example.com/users",
+		"{{baseUrl}}",
+	])("keeps %s unresolvable - the template is in the authority", (url) => {
+		expect(extractHost(url)).toBeNull();
+	});
 	test("returns null for empty input", () => {
 		expect(extractHost("")).toBeNull();
 	});

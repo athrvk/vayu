@@ -270,6 +270,52 @@ void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
     }
 }
 
+namespace {
+
+/**
+ * The `specOperation` value both request serializers emit (issue #637).
+ *
+ * Shared rather than written twice on purpose: `serialize` backs
+ * `GET /requests/:id` and `serialize_to_stream` backs `GET /requests`, and a
+ * field added to one and forgotten in the other is this file's standing trap -
+ * the two views of the same row would disagree about whether a request names an
+ * operation at all. One reading, called from both.
+ *
+ * `null` for a column that is NULL and for a blob that no longer parses: the
+ * two are the same answer to "which operation is this", and every block around
+ * here degrades the same way rather than failing the read it sits in.
+ */
+Json spec_operation_node (const std::optional<std::string>& stored) {
+    if (!stored.has_value () || stored->empty ()) {
+        return nullptr;
+    }
+    try {
+        auto parsed = Json::parse (*stored);
+        return parsed.is_object () ? parsed : Json (nullptr);
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+}
+
+} // namespace
+
+Json serialize (const vayu::db::SpecDocument& s) {
+    Json json;
+    json["id"] = s.id;
+    // Verbatim, and the whole of it: the Spec tab renders this text, a re-fetch
+    // diffs against it, and a validator resolves `$ref`s through it. A cap here
+    // would be a truncation nothing downstream could detect - the write path is
+    // where the size is refused.
+    json["content"] = s.content;
+    // Null rather than "" when the document did not come from a URL, so a client
+    // can offer "re-fetch" for exactly the documents that have somewhere to
+    // re-fetch from.
+    json["sourceUrl"] = s.source_url.has_value () ? Json (*s.source_url) : Json (nullptr);
+    json["fetchedAt"] = s.fetched_at;
+    json["hash"]      = s.hash;
+    return json;
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;
@@ -316,6 +362,20 @@ Json serialize (const vayu::db::Collection& c) {
             json["dataSchema"] = Json::parse (c.data_schema);
         } catch (const std::exception&) {
             json["dataSchema"] = Json::object ();
+        }
+    }
+
+    // The OpenAPI binding (issue #637). Same try-parse-with-default block, and
+    // `{}` for the same two cases: a row written before the column existed, and
+    // a blob that no longer parses. Both mean "bound to nothing", which is what
+    // an empty object says.
+    if (c.openapi.empty ()) {
+        json["openapi"] = Json::object ();
+    } else {
+        try {
+            json["openapi"] = Json::parse (c.openapi);
+        } catch (const std::exception&) {
+            json["openapi"] = Json::object ();
         }
     }
 
@@ -383,6 +443,12 @@ Json serialize (const vayu::db::Request& r) {
     json["maxRedirects"]      = r.max_redirects;
     json["httpVersion"]       = r.http_version;
     json["stream"]            = r.stream;
+    // Operation identity (issue #637). Always present as a key, `null` when the
+    // request declares none - the column is nullable, and a client that has to
+    // tell "no operation" from "key not serialized yet" would be guessing. An
+    // unparseable blob reads as null for the same reason the blocks above
+    // degrade to their defaults.
+    json["specOperation"] = spec_operation_node (r.spec_operation);
     json["updatedAt"]         = r.updated_at;
     json["createdAt"]         = r.created_at;
     return json;
@@ -1012,6 +1078,9 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
+    // Through the same `spec_operation_node` the object serializer uses, so the
+    // list route and the single route cannot come to disagree about it.
+    out << "\"specOperation\":" << spec_operation_node (r.spec_operation).dump () << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
     out << "}";

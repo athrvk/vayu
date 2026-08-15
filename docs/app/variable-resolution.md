@@ -452,7 +452,7 @@ Three rules make the offered set match what the call can actually read:
   contract in scope (issue #600) - the same list the `{{data.*}}` tokens are
   painted against, so an editor and the builder cannot disagree. Optional
   chaining counts as the dot it is (`pm.iterationData?.get("`), because the
-  surface is `undefined` outside a data-driven run and its own documentation
+  surface is `undefined` outside a data-driven run or a send-with-row, and its own documentation
   tells scripts to guard before calling. Nothing is offered when the chain
   declares no contract.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a

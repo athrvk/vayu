@@ -797,6 +797,26 @@ const DEFAULT_STREAM_BUDGET_MS = 5_000;
  *  that asked to wait five minutes would hold the whole MCP session. */
 const MAX_STREAM_BUDGET_MS = 60_000;
 
+/**
+ * One data row bound to a single send (issue #601).
+ *
+ * The agent-facing half of what the app's Send-with-row does: `{{data.column}}`
+ * tokens substitute against this row and both scripts read it as
+ * `pm.iterationData`, without a collection run existing. `run_collection_smoke`
+ * deliberately stays out of it - it has no scenario path at all (see mcp.md).
+ *
+ * The failure shape is named in the description because it is the useful half:
+ * a column the row does not carry is a `400` naming the token and the row's
+ * columns, and *nothing is sent* - so an agent reading the error can fix the
+ * request rather than wondering what went out.
+ */
+const dataRowInput = z
+	.record(z.unknown())
+	.optional()
+	.describe(
+		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers and body is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. Auth credentials cannot carry a {{data.*}} token on a single send - they are applied before the row is read - so move such a token into the URL, a header or the body. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
+	);
+
 const streamInput = z
 	.boolean()
 	.optional()
@@ -1313,6 +1333,7 @@ export const TOOLS: McpTool[] = [
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
+			data: dataRowInput,
 			preRequestScript: z
 				.string()
 				.optional()
@@ -1364,6 +1385,13 @@ export const TOOLS: McpTool[] = [
 			// instead of the arguments the agent actually gave.
 			const linkId = str(args, "requestId");
 			if (linkId !== undefined) payload.requestId = linkId;
+
+			// Beside the composed payload, not through composition: `{{data.*}}`
+			// survives `/compose` by design (`request_composer.hpp`), so the
+			// tokens are still written when `/execute` binds them against this
+			// row (issue #601). Absent means today's send, unchanged.
+			const dataRow = args.data;
+			if (dataRow !== undefined && dataRow !== null) payload.data = dataRow;
 
 			// Stated on every call, never elided: the two answers have different
 			// *shapes* - `202 {runId, eventsUrl}` against the exchange - so a

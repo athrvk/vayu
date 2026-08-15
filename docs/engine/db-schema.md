@@ -40,6 +40,7 @@ Stores folder/group hierarchy for requests.
 | `pre_request_script` | TEXT    | Default `""`                                 |
 | `post_request_script`| TEXT    | Default `""`                                 |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
+| `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
 | `order`              | INTEGER | Sort order within parent; default 0          |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
@@ -66,6 +67,26 @@ user data of unknown sensitivity and are persisted nowhere - not here, not in a
 run snapshot (which records `dataRowCount` only). The file's path is likewise
 not stored engine-side: it is true of one machine, so the app keeps it in a
 local store. See [Data-driven runs](../app/data-driven-runs.md).
+
+**openapi** - the OpenAPI document this collection is bound to (issue #637):
+
+```json
+{"specId":"spec_3f2b1c9a-...","specHash":"<hex sha256>","syncedAt":1700000000000}
+```
+
+`{}` - the default, and what an explicit `null` on `PUT` resets to - means the
+collection is bound to nothing, so unbinding needs no verb of its own. A
+non-empty object is a binding and must carry a `specId` that resolves to a row in
+[`spec_documents`](#spec_documents); `specHash` records which *version* of the
+document the collection was last synced to, and `syncedAt` when. Shape validation
+lives in `apply_collection_fields` so all three write paths enforce it, and the
+resolvability check sits in the route cores beside `reject_missing_collection` -
+`POST /import/apply` binds specs it is about to write in the same transaction.
+
+The **edge** is stored here; the **document** is not. Several collections may
+bind the same spec, so nothing here owns it: no cascade reaches `spec_documents`,
+and `DELETE /specs/:id` is refused while any collection names the row. NOT NULL
+with a `default_value`, the same migration shape as `data_schema` above.
 
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
 `{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |
@@ -114,6 +135,7 @@ Stores individual HTTP request definitions.
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
+| `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -173,6 +195,28 @@ Rows written before the columns existed backfill to `1` / `10` / `'auto'` / `0`,
 i.e. the behaviour they already had (a row predating `http_version` could only
 ever have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
 clamped to `0..100` on write.
+
+**spec_operation** - which operation of the collection's bound
+[`openapi`](#collections) document this request *is* (issue #637):
+
+```json
+{"operationId":"listPets","method":"GET","path":"/pets/{petId}"}
+```
+
+`method` and `path` are required and `operationId` is optional, because an
+OpenAPI operation may declare none. `path` is the **templated** path from the
+document, never a concrete URL - it is the identity a re-fetched spec is diffed
+against and the key coverage counts by, and a substituted URL would match nothing
+in the document it came from, so a `path` that does not start with `/` is a
+`400`. Two requests may name the same operation.
+
+Nullable rather than `NOT NULL` with a `"{}"` default, unlike the four columns
+above: a request that answers to no operation declares nothing, and `NULL` is
+that - `{}` would be a second spelling of the same absence for every reader to
+handle. A nullable column is `ALTER TABLE ADD COLUMN`-friendly without a default.
+Both request serializers emit it as `specOperation`, `null` when the column is,
+and `apply_request_fields` applies it, so `POST`, `PUT` and `POST /import/apply`
+all carry it.
 
 **http_version** stores `Request::http_version` (the *requested* protocol, an
 enum member spelled as text) - a different value and a different value space
@@ -240,6 +284,52 @@ rather than merely stale.
 a truncation - a half-body served as if whole is worse than a refused write - and
 a request holds at most `MAX_PER_REQUEST` (100) examples. Both constants live in
 `engine/include/vayu/core/constants.hpp`.
+
+---
+
+### `spec_documents`
+
+Stores OpenAPI documents, bound to collections by
+[`collections.openapi`](#collections) (issue #637).
+
+| Column       | Type    | Notes                                              |
+|--------------|---------|----------------------------------------------------|
+| `id`         | TEXT PK | `spec_` + UUID                                     |
+| `content`    | TEXT    | The document, verbatim; capped (see below)         |
+| `source_url` | TEXT    | Where it was fetched from; NULL when pasted/uploaded |
+| `fetched_at` | INTEGER | Unix ms                                            |
+| `hash`       | TEXT    | Hex `sha256(content)`, computed engine-side        |
+
+**content** is stored as text rather than a parsed model, because every feature
+stacked behind this needs the *document*: the Spec tab renders it, sync
+re-fetches and diffs against it, response validation resolves `$ref`s through it,
+and export writes a new one beside it. A parse here would be re-done by each of
+them anyway and would lose whatever the author wrote that the parser did not
+model.
+
+**hash** is the content+hash pair [`body_blobs`](#body_blobs) uses, and is
+**never taken from the caller** - `POST /specs` and `POST /import/apply` both
+compute it through `spec_content_hash`, and a body carrying `hash` or `fetchedAt`
+is a `400`. A scenario run of a bound collection stamps `specId` + `specHash`
+into its [`runs.config_snapshot`](#runs) under `scenario.openapi`, and that stamp
+only means anything because both sides of a later comparison were computed by the
+same code on the same bytes.
+
+**Ownership, and why there is no cascade.** A spec is bound *by* collections
+rather than owned by one: several may bind the same row, and unbinding one must
+leave it there for the others. So nothing deletes a document implicitly -
+`DELETE /specs/:id` is refused with a `409` naming the binder while any
+collection still names it. There is likewise no `PUT /specs/:id`: a document that
+changed is a different document, and rewriting one in place would invalidate the
+hash every run of every bound collection was stamped with.
+
+**Cap.** A document over the live `maxSpecDocumentBytes`
+[`config_entries`](#config_entries) value (default 10 MiB, aligned with
+`json::MAX_FIELD_SIZE`) is a `400` naming the size and the cap, on both write
+paths - never a truncation, and never cpp-httplib's own body cap dropping the
+connection without explaining itself.
+
+A new table, so `sync_schema()` creates it outright and there is no migration.
 
 ---
 

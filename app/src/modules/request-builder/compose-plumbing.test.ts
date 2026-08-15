@@ -52,8 +52,26 @@ describe("every send site composes engine-side and never resolves client-side", 
 		 */
 		const calls = (builder ?? "").match(/engineComposeRequest\(\{/g) ?? [];
 		expect(calls).toHaveLength(2);
-		// The composed result is what gets executed / started, not a rebuilt one.
-		expect(builder).toContain("{ ...composed, requestId: fetchedRequest.id, stream: false }");
+		/*
+		 * The composed result is what gets executed / started, not a rebuilt one.
+		 *
+		 * Asserted as a spread plus the fields laid over it, rather than as one
+		 * literal line: the payload gained `data` for a send-with-row (#601) and
+		 * prettier broke the line, which turned a guard about *composition* red
+		 * over formatting. What has to stay true is that `composed` is spread and
+		 * nothing rebuilds it - so that is what is scanned for.
+		 */
+		// Anchored to the *first* member of the execute call's object literal:
+		// an unbounded `[\s\S]*?` would happily find the `...composed` of the
+		// load-test call further down the file and pass a rebuilt payload.
+		const comments = String.raw`(?:\/\/[^\n]*\n\s*)*`;
+		expect(builder).toMatch(
+			new RegExp(
+				String.raw`engineExecuteRequest\(\s*${comments}\{\s*${comments}\.\.\.composed`
+			)
+		);
+		expect(builder).toContain("requestId: fetchedRequest.id");
+		expect(builder).toContain("stream: false");
 		expect(builder).toContain("...(composed as unknown as StartLoadTestRequest)");
 		// The streaming send spreads the same composed payload.
 		expect(builder).toContain("apiService.executeStreamRequest({");

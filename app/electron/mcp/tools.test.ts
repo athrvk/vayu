@@ -1441,6 +1441,54 @@ describe("dispatchTool", () => {
 	 * `FORM_BODY_MODES` and it arrives split into `fields`, which is issue #381's
 	 * empty-body failure wearing a new mode.
 	 */
+	/**
+	 * A data row rides *beside* the composed payload, not through composition
+	 * (issue #601).
+	 *
+	 * `{{data.*}}` survives `/compose` by design - that is what lets the engine
+	 * bind it per iteration - so the row has to reach `/execute` as its own
+	 * field. Mutation check: pass `data` into the `/compose` body instead and
+	 * the assertion on the execute payload goes red, which is the shape of the
+	 * bug (the tokens would reach the wire written as they stand).
+	 */
+	test("run_request passes a data row to /execute, not to /compose", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{
+				url: "https://api.example.com/users/{{data.id}}",
+				data: { id: "7", email: "ada@example.test" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+
+		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(composeBody.request.data).toBeUndefined();
+		expect(composeBody.data).toBeUndefined();
+
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.data).toEqual({ id: "7", email: "ada@example.test" });
+		// The token is still written when the engine gets it - binding it is the
+		// engine's, and composition deliberately leaves it alone.
+		expect(payload.url).toBe("https://api.example.com/users/{{data.id}}");
+	});
+
+	test("run_request omits data entirely when no row was named", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/users" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// Absent, not an empty object: an empty row is a row, and the engine
+		// reads it as one - `pm.iterationData` would become a scope answering
+		// undefined per key rather than being undefined itself.
+		expect("data" in payload).toBe(false);
+	});
+
 	test("run_request sends an xml document to the engine as written", async () => {
 		const envelope = "<soap:Envelope><soap:Body><Ping/></soap:Body></soap:Envelope>";
 		const client = fakeClient();

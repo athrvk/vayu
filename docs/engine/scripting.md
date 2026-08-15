@@ -976,7 +976,16 @@ A column whose value is `null` is `true` - the row carries it - which is the
 fact `get` alone cannot state without the reader knowing that an absent column
 comes back as `undefined` while a null one comes back as `null`.
 
-**`pm.iterationData` is `undefined` where there is no row** - a single Send, a
+**A single send can bind one row too** - `POST /execute` takes an optional
+`data` object (one row, not the array a run sends), which is what the request
+builder's **Send with row** does and what MCP's `run_request` exposes as `data`.
+Both scripts then read it as `pm.iterationData`, and `pm.info.iteration` is `0`
+with `pm.info.iterationCount` `1` - the send *is* row 0 of 1. This is how a
+script that reads a row gets an edit loop that is not "start a run, find the
+step, read the result"; the row binds `{{data.column}}` in the request as well.
+See [api-reference.md](api-reference.md#post-execute).
+
+**`pm.iterationData` is `undefined` where there is no row** - an ordinary Send, a
 single-request load run's deferred `tests` script, and any run started without a
 data set. A scenario load run's deferred per-step script *does* read one: the
 sampled response carries the row its iteration was bound to, so the row is a

@@ -654,7 +654,8 @@ the null-vs-absent rule.
   "parentId": null,         // Optional, null for root
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
-  "dataSchema": {}          // Optional, the declared data contract - see below
+  "dataSchema": {},         // Optional, the declared data contract - see below
+  "openapi": {}             // Optional, the bound spec document - see below
 }
 ```
 
@@ -677,7 +678,8 @@ its value, an explicit `null` resets it to the default.
   "parentId": null,         // Optional, null moves it to the root
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
-  "dataSchema": null        // Optional, null clears the declared contract
+  "dataSchema": null,       // Optional, null clears the declared contract
+  "openapi": null           // Optional, null unbinds the spec document
 }
 ```
 
@@ -721,6 +723,28 @@ that writes nothing.
 The schema is stored; the file's **rows are not**, anywhere, and neither is its
 path - it is machine-local and stays app-side. See
 [Data-driven runs](../app/data-driven-runs.md).
+
+**`openapi` (both verbs, and `POST /import/apply`):** the OpenAPI document this
+collection is bound to (issue #637).
+
+```json
+{"specId":"spec_3f2b1c9a-...","specHash":"<hex sha256>","syncedAt":1700000000000}
+```
+
+`{}` means bound to nothing, and is what an absent field on create and an
+explicit `null` on update both resolve to - so **unbinding is
+`{"openapi": null}`** rather than a verb of its own. A present value must be an
+object (`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is
+a binding and is validated further: `specId` must be a non-empty string that
+resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
+`specHash` a string, `syncedAt` a number.
+
+`specHash` records which *version* of the document the collection was last synced
+to; a scenario run of a bound collection stamps both values into its snapshot and
+report (see [GET /runs/:runId/report](#get-runsrunidreport)).
+
+Deleting the document is refused while a collection binds it - the binding is
+never cascaded away, see [DELETE /specs/:id](#delete-specsid).
 
 ### DELETE /collections/:id
 
@@ -853,8 +877,9 @@ the null-vs-absent rule.
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
                                       // from the "defaultHttpVersion" config entry
-  "stream": false                    // Optional, consume the response as an event stream.
+  "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
+  "specOperation": null              // Optional, which spec operation this request is - see below
 }
 ```
 
@@ -873,6 +898,23 @@ toggle persists here and a bulk import carries it. The engine never acts on the
 stored value by itself: `POST /execute` reads the flag off the payload it is
 given, and the by-id compose path deliberately does not add it, so an existing
 caller that composes by id keeps getting a buffered send.
+
+**`specOperation` names which operation of the collection's
+[bound spec](#post-collections) this request is** (issue #637):
+
+```json
+{"operationId": "listPets", "method": "GET", "path": "/pets/{petId}"}
+```
+
+`method` and `path` are required inside the object and `operationId` is optional,
+because an OpenAPI operation may declare none. `path` is the **templated** path
+from the document, never a concrete URL - it is the identity a re-fetched spec is
+diffed against - so a `path` that does not start with `/` is a `400`, as is a
+missing or empty `method` / `path`, a non-object value, or a non-string
+`operationId`. `null` (or absent on create) means the request declares no
+operation, and both request serializers emit `specOperation: null` for it - the
+key is always present, so a client never has to tell "no operation" from "not
+serialized". Two requests may name the same operation.
 
 **Response:** The created request object, carrying the engine-generated `id`.
 
@@ -903,8 +945,8 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`stream` leaves the stored values untouched; sending `null` resets them to
-`true` / `10` / `false`. A non-boolean
+`stream` / `specOperation` leaves the stored values untouched; sending `null`
+resets them to `true` / `10` / `false` / "no operation". A non-boolean
 `followRedirects` or `stream`, or a non-integer `maxRedirects`, is ignored rather
 than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -922,8 +964,8 @@ request re-seeds it.
 **Errors:** `404` if the request does not exist; `400` on a `null`
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
-malformed `params` / `headers` entry, or an `httpVersion` that is not
-`"auto"` / `"http1.1"` / `"http2"`.
+malformed `params` / `headers` entry, a malformed `specOperation`, or an
+`httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`.
 
 ### DELETE /requests/:id
 
@@ -1042,6 +1084,96 @@ is a `400`).
   "id": "exa_1234567890"
 }
 ```
+
+## Specs
+
+OpenAPI documents, stored once and bound to collections by
+[`collections.openapi`](#post-collections) (issue #637). A spec is not owned by a
+collection: several may bind the same document, and unbinding one must leave it
+there for the others - so it is a top-level resource with no cascade reaching it,
+and the rule that keeps that safe is the delete refusal below.
+
+The document is stored **verbatim** and its `hash` is computed engine-side on
+every write, never taken from the caller. A scenario run of a bound collection
+stamps `specId` + `specHash` into its snapshot and report, and that stamp only
+means anything because both sides of a later comparison were computed by the same
+code on the same bytes.
+
+There is deliberately **no `PUT /specs/:id`**: a document that changed is a
+different document, and rewriting one in place would invalidate the hash every
+run of every bound collection was stamped with. A re-fetch stores a new document
+and moves the binding.
+
+### POST /specs
+
+Store one OpenAPI document. **Create only**, and the engine owns the id - see
+[Resource writes](#resource-writes-create-vs-update).
+
+**Request:**
+```json
+{
+  "content": "{\"openapi\":\"3.1.0\", ...}",  // Required, non-empty, at most maxSpecDocumentBytes
+  "sourceUrl": "https://api.example.com/openapi.json"  // Optional; null when pasted or uploaded
+}
+```
+
+**Response:**
+```json
+{
+  "id": "spec_3f2b1c9a-...",
+  "content": "{\"openapi\":\"3.1.0\", ...}",
+  "sourceUrl": "https://api.example.com/openapi.json",
+  "fetchedAt": 1730000000000,
+  "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+}
+```
+
+`sourceUrl` is `null` rather than `""` when the document did not come from a URL,
+so a client can offer a re-fetch for exactly the documents that have somewhere to
+re-fetch from.
+
+**Errors:** `400` if the body carries `id`, `hash` or `fetchedAt` (all
+engine-computed), if `content` is missing, `null` or empty, if `sourceUrl` is
+present and not a string or `null`, or if the document is larger than the live
+`maxSpecDocumentBytes` [config entry](#get-config) - default **10 MiB**, aligned
+with the engine's JSON field cap. The size rejection names the byte count, the
+cap and the setting, and is checked on `POST /import/apply` too, through the same
+helper; the document is never stored truncated.
+
+### GET /specs/:id
+
+**Response:** the whole stored document, `content` included - rendering and
+validating it is what every reader wants it for. `404` (message `Spec not found`)
+when it does not exist.
+
+### DELETE /specs/:id
+
+Delete a stored document.
+
+**Response:**
+```json
+{
+  "message": "Spec deleted successfully",
+  "id": "spec_3f2b1c9a-..."
+}
+```
+
+**Errors:** `404` when it does not exist. `409` while any collection still binds
+it, with a message naming the first binder (and a count of the rest) so the
+caller knows what to unbind without a second round trip:
+
+```json
+{
+  "error": {
+    "code": "conflict",
+    "message": "Spec 'spec_3f2b...' is bound by collection 'Pets API' (col_9a1f...); unbind it before deleting the document"
+  }
+}
+```
+
+The refusal is deliberate rather than a cascade to unbound: the caller asked to
+delete a document, not to edit collections it never mentioned. Unbind with
+`PUT /collections/:id` and `{"openapi": null}`, then delete.
 
 ## Reorder
 
@@ -1170,8 +1302,8 @@ never turn into a `500`.
 
 ### POST /import/apply
 
-Persist an entire parsed import - collections, their requests, and environments -
-in **one atomic call**. Items reference each other by opaque **temp ids** the
+Persist an entire parsed import - collections, their requests, environments, and
+the OpenAPI documents they bind - in **one atomic call**. Items reference each other by opaque **temp ids** the
 client invents; the engine generates every real id via `generate_id` and returns
 the translation in `idMap`.
 
@@ -1183,9 +1315,14 @@ accepted a client-supplied `id` - which they no longer do (see
 **Request:**
 ```json
 {
+  "specs": [
+    { "tempId": "s1", "content": "{\"openapi\":\"3.1.0\", ...}",
+      "sourceUrl": "https://api.example.com/openapi.json" }
+  ],
   "collections": [
     { "tempId": "c1", "parentTempId": null, "name": "My API", "order": 0,
       "variables": {}, "auth": {"mode":"none"},
+      "openapi": {"specTempId": "s1"},
       "preRequestScript": "", "postRequestScript": "" },
     { "tempId": "c2", "parentTempId": "c1", "name": "Users", "order": 0 }
   ],
@@ -1205,10 +1342,10 @@ accepted a client-supplied `id` - which they no longer do (see
 }
 ```
 
-- All three sections are optional; absent or `null` means "none of that kind"
+- All four sections are optional; absent or `null` means "none of that kind"
   (the [null-vs-absent rule](#the-null-vs-absent-rule)). An empty payload is a
   `200` with an empty `idMap`.
-- Every item needs a non-empty string `tempId`, **unique across all three
+- Every item needs a non-empty string `tempId`, **unique across all four
   sections** (they share one namespace, because `idMap` is one flat map). Temp ids
   are never stored.
 - A collection's `parentTempId` and a request's `collectionTempId` must name a
@@ -1238,12 +1375,23 @@ accepted a client-supplied `id` - which they no longer do (see
   `tempId`. `origin` is among those fields and an importer leaves it at its
   `"import"` default, which is what these rows are. An entry with no `order` takes its payload position, so the stored
   order is the order the source file listed the responses in.
-- Up to **10,000 items** per call (collections + requests + environments +
-  nested examples - they are rows this call allocates and writes, so they count).
+- A **`specs`** item carries `content` (required, non-empty) and an optional
+  `sourceUrl`; its `hash` and `fetchedAt` are engine-computed and a per-item
+  `400` if sent, and the size cap is the same live `maxSpecDocumentBytes` that
+  [`POST /specs`](#post-specs) enforces, through the same helper. Spec rows are
+  written **before** the collections that bind them, in the same transaction.
+- A collection binds a spec through **`openapi.specTempId`** (a spec in this
+  payload, resolved through the temp-id map exactly as `collectionTempId` is) or
+  **`openapi.specId`** (one already stored). Sending both is a per-item `400`,
+  and so is either one that resolves to nothing. The resolved value is stored as
+  `openapi.specId`; `specTempId` is never persisted.
+- Up to **10,000 items** per call (collections + requests + environments + specs
+  + nested examples - they are rows this call allocates and writes, so they
+  count).
 
 **Response:** `200`
 ```json
-{ "idMap": { "c1": "col_<uuid>", "c2": "col_<uuid>", "r1": "req_<uuid>", "e1": "env_<uuid>" } }
+{ "idMap": { "c1": "col_<uuid>", "c2": "col_<uuid>", "r1": "req_<uuid>", "e1": "env_<uuid>", "s1": "spec_<uuid>" } }
 ```
 
 Every `tempId` sent appears in `idMap`. Nested examples do not - they carry no
@@ -1265,13 +1413,16 @@ Messages, by case:
 - `400` `Invalid JSON body` - the body did not parse.
 - `400` `Body must be a JSON object`.
 - `400` `Invalid 'collections': must be an array` - a section was
-  present but not an array (same for `requests` / `environments`).
+  present but not an array (same for `requests` / `environments` / `specs`).
 - `400` `Invalid collection at index 2: 'tempId' must be a non-empty string`.
 - `400` `Invalid collection at index 0: 'id' is not accepted - the engine assigns ids; reference items by 'tempId'`.
 - `400` `Duplicate tempId 'c1'`, with `item: "c1"`.
 - `400` `Unknown parentTempId 'c9'`, with `item: "c2"`, and the same for
   `collectionTempId` - including a `collectionTempId` that names an environment
   rather than a collection.
+- `400` `Unknown openapi.specTempId 's9'`, with `item: "c1"`, and
+  `400` `Spec 'spec_...' does not exist` for an `openapi.specId` that resolves to
+  no stored document.
 - `400` `Cycle in parentTempId references at 'c1'`, with `item: "c2"` -
   a cycle (including a self-parent) in the payload's own parent graph. The
   stored-tree walk that guards `POST /collections` cannot see this one, because
@@ -2127,7 +2278,8 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "transient": false,                  // Optional, default false - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
-  "maxStreamEvents": 100000            // Optional, streaming only - see below
+  "maxStreamEvents": 100000,           // Optional, streaming only - see below
+  "data": { "id": "7" }                // Optional, one data row - see below
 }
 ```
 
@@ -2219,6 +2371,39 @@ The one caller today is the app's GraphQL schema introspection
 `run_request` deliberately does **not** set it: an agent's runs belong in
 History like anyone else's, and the tool builds its payload from named
 arguments, so an agent cannot supply the flag either.
+
+**`data` binds one row to this send** (issue #601). It is the single-send half
+of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names
+and values, the body and both halves of every form field is substituted against
+it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0`
+and `pm.info.iterationCount` `1` - the send *is* row 0 of 1. Without the field
+nothing changes: `{{data.*}}` goes out written as it stands and
+`pm.iterationData` is `undefined`.
+
+An **object** of name/value pairs, never the array a run sends - one row. The
+row is bounded by `maxScenarioDataBytes` (the same setting a run's whole set is
+measured against) and composes freely with `transient` and `stream`: a streaming
+send binds the row before the transfer opens, so the URL and headers it opens
+with are the bound ones.
+
+Refused with a **400**, before any run row exists and with nothing sent:
+
+| What | Message |
+|------|---------|
+| `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
+| over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
+| a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
+| a `null` cell, a header collision, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
+| `auth` carries a `{{data.*}}` token | `Auth credentials carry {{data.user}}, and a single send cannot bind them: ...` |
+
+That last one is the one asymmetry with a collection run, and it is a refusal
+rather than a silent wrong send. Auth is applied when the request is built -
+basic credentials are already collapsed into one base64 `Authorization` value -
+so a credential token would go out as base64 of the literal token text. A run
+resolves its plan once and can afford to keep the credentials typed and bind
+them per iteration (issue #591); a single send has no plan to hang that off, so
+it names the token and points at the alternatives (move it into the URL, a
+header or the body, or run the collection with a data file).
 
 **`requestName` is script identity, not an HTTP field** - it never reaches the
 wire. The scripts read it as `pm.info.requestName` (with `requestId` as
@@ -3855,6 +4040,13 @@ rows for the timing breakdown and the `results[]` array. A run with no summary n
 terminal status - the engine died mid-run - and its report is built from those sampled `results`
 alone rather than erroring. **The response shape is the same either way.**
 
+**`metadata.openapi`** appears only for a run whose collection was
+[bound to a spec](#post-collections) when the run was planned (issue #637). It is
+echoed from the run's snapshot rather than re-read from the collection: a report
+has to say what the run was measured against, and the binding is free to have
+moved since. An unbound run carries **no `openapi` key at all** - absent rather
+than an empty object, so "not measured against a spec" has one spelling.
+
 **Response:**
 ```json
 {
@@ -3873,6 +4065,10 @@ alone rather than erroring. **The response shape is the same either way.**
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto"
+    },
+    "openapi": {
+      "specId": "spec_3f2b1c9a-...",
+      "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     }
   },
   "summary": {

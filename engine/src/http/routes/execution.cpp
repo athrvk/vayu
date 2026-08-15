@@ -23,6 +23,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/monitor.hpp"
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -329,6 +330,61 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
     }
 
     return flag;
+}
+
+/**
+ * @brief Read `POST /execute`'s `data` row (issue #601).
+ *
+ * Non-static: send_with_row_test.cpp drives it directly, the suite having no
+ * in-process HTTP route harness. See routes.hpp for what the field means.
+ */
+DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
+    DataRow row;
+    const auto field = json.find ("data");
+    if (field == json.end () || field->is_null ()) {
+        return row;
+    }
+    if (!field->is_object ()) {
+        row.ok = false;
+        // Named as an object of name/value pairs rather than "an object",
+        // because the near miss is an *array* - the shape `scenario.data` takes
+        // - and a caller that sent one has to hear that a single send binds one
+        // row, not a set.
+        row.error = "'data' must be an object of name/value pairs (got " +
+        std::string (field->type_name ()) +
+        "). A single send binds one row; a set of rows is a collection run.";
+        return row;
+    }
+
+    // The same bound a run's whole data set is measured against, applied to the
+    // one row this endpoint takes. Measured before the row is kept, so an
+    // oversized payload is refused rather than held.
+    const size_t bytes = field->dump ().size ();
+    if (bytes > max_bytes) {
+        row.ok    = false;
+        row.error = "'data' is " + std::to_string (bytes) +
+        " bytes, over the limit of " + std::to_string (max_bytes) +
+        " (raise the 'maxScenarioDataBytes' setting to allow more)";
+        return row;
+    }
+
+    row.value = *field;
+    return row;
+}
+
+/**
+ * @brief The first `{{data.column}}` in a `POST /execute` payload's `auth`
+ *        block (issue #601).
+ *
+ * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for why
+ * the endpoint refuses rather than binds.
+ */
+std::optional<std::string> first_auth_data_token (const nlohmann::json& json) {
+    const auto auth = json.find ("auth");
+    if (auth == json.end () || auth->is_null ()) {
+        return std::nullopt;
+    }
+    return vayu::core::first_data_token_in (*auth);
 }
 
 namespace {
@@ -754,6 +810,19 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
+        // The row this send binds, if the caller named one (issue #601). Read
+        // here with the other pre-row validation for the reason the bind below
+        // is also placed before the run record: a request whose tokens could
+        // not bind must leave no trace of an execution that never happened.
+        const auto data_row = read_data_row (json,
+        static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
+        static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
+        if (!data_row.ok) {
+            vayu::utils::log_warning ("POST /execute - " + data_row.error);
+            send_error (res, 400, data_row.error);
+            return;
+        }
+
         // Build the request once: deserialize + timeout + auth. A malformed
         // payload fails here (before any run record is created); an auth
         // failure is surfaced after the run exists (below).
@@ -765,6 +834,34 @@ void register_execution_routes (RouteContext& ctx) {
             vayu::utils::log_warning ("POST /execute - Invalid request format");
             send_error (res, 400, built.error_message);
             return;
+        }
+
+        // Bind the row into what composition left written, before anything is
+        // recorded or sent. A failure here is a `400` with the binder's own
+        // message - it names the token, the row and the row's columns, which is
+        // what lets the request be fixed without opening the file - and the
+        // partially bound request is discarded rather than sent
+        // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
+        // refusal precedes the run row exactly as the flag checks above do.
+        if (data_row.value) {
+            if (auto token = first_auth_data_token (json)) {
+                const std::string error = "Auth credentials carry " + *token +
+                ", and a single send cannot bind them: the credentials are "
+                "applied when the request is built, before the row is read. "
+                "Move the token into the URL, a header or the body, or run the "
+                "collection with a data file - a collection run binds "
+                "credentials per iteration (issue #591).";
+                vayu::utils::log_warning ("POST /execute - " + error);
+                send_error (res, 400, error);
+                return;
+            }
+            if (auto bound =
+                vayu::core::bind_data_row (built.request, *data_row.value, 0);
+                !bound.ok) {
+                vayu::utils::log_warning ("POST /execute - " + bound.error);
+                send_error (res, 400, bound.error);
+                return;
+            }
         }
 
         // Extract scripts
@@ -912,7 +1009,15 @@ void register_execution_routes (RouteContext& ctx) {
                 cookie_scope, &pre_cookie_writes);
                 pre_ctx.request_id   = run.request_id;
                 pre_ctx.request_name = script_request_name;
-                pre_script_result    = execute_script (
+                // The same row the transfer below carries, on the same terms
+                // as the buffered path: a stream is still one send, and one
+                // send with a row is iteration 0 of 1.
+                if (data_row.value) {
+                    pre_ctx.iteration_data  = &*data_row.value;
+                    pre_ctx.iteration       = 0;
+                    pre_ctx.iteration_count = 1;
+                }
+                pre_script_result = execute_script (
                 script_engine, pre_request_script, pre_ctx, "Pre-request");
             }
 
@@ -931,9 +1036,14 @@ void register_execution_routes (RouteContext& ctx) {
             // Persistence stays the route's decision even though it happens on
             // the worker thread - `ctx.db` outlives the manager, which is why
             // the manager is declared before `server_` (see server.hpp).
+            // Copied into the callback rather than borrowed: the post-request
+            // script runs on the worker thread once the stream has terminated,
+            // long after this handler's frame - and its row must be the one the
+            // pre-request script and the transfer used.
             spec.on_complete = [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id,
                                cookie_scope, run, script_config, post_request_script,
                                request_name = script_request_name, scopes,
+                               iteration_data = data_row.value,
                                pre_script_result] (const vayu::Request& sent,
                                const vayu::Response& response,
                                const vayu::http::SseStreamContext& context) mutable {
@@ -964,6 +1074,11 @@ void register_execution_routes (RouteContext& ctx) {
                             cookie_scope, &post_cookie_writes);
                             post_ctx.request_id   = run.request_id;
                             post_ctx.request_name = request_name;
+                            if (iteration_data) {
+                                post_ctx.iteration_data  = &*iteration_data;
+                                post_ctx.iteration       = 0;
+                                post_ctx.iteration_count = 1;
+                            }
                             // The node the trace is about to store, not a copy
                             // of it: `pm.response.eventsTruncated` and the
                             // stored marker are then the same value by
@@ -1024,15 +1139,25 @@ void register_execution_routes (RouteContext& ctx) {
 
         // Pre-request script, send, test script - the sequence a scenario step
         // performs too, which is why it lives in request_exchange.cpp rather
-        // than here (issue #353). `iteration` is left unset: a single Send has
-        // no iteration index, and a binding that cannot fail is worse than a
-        // missing one (issue #300).
+        // than here (issue #353). `iteration` is left unset for a send carrying
+        // no row: it has no iteration index, and a binding that cannot fail is
+        // worse than a missing one (issue #300).
         ExchangeInputs inputs;
         inputs.request      = std::move (request);
         inputs.pre_script   = pre_request_script;
         inputs.post_script  = post_request_script;
         inputs.request_id   = run.request_id;
         inputs.request_name = script_request_name;
+        if (data_row.value) {
+            inputs.iteration_data = &*data_row.value;
+            // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
+            // is the row it bound. This is the exception the comment above
+            // describes - an ordinary Send still leaves both unset, because it
+            // has no row and an invented index would be the binding that cannot
+            // fail (issue #300).
+            inputs.iteration       = 0;
+            inputs.iteration_count = 1;
+        }
         auto exchange       = execute_exchange (script_engine, ctx.cookie_jar,
         cookie_scope, scopes, std::move (inputs), ctx.verbose);
 
@@ -1185,8 +1310,8 @@ void register_execution_routes (RouteContext& ctx) {
                 return;
             }
 
-            scenario_manifest =
-            vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
+            scenario_manifest = vayu::core::build_scenario_manifest (
+            resolved.request, resolved.plan, resolved.spec);
 
             auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
             execution->request = std::move (resolved.request);

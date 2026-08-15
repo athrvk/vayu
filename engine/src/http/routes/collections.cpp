@@ -168,6 +168,46 @@ validate_data_schema (const nlohmann::json& schema) {
 }
 
 /**
+ * Contents-validation for the `openapi` binding (issue #637), run after
+ * `apply_json_field` has settled the shape - the same split `validate_data_schema`
+ * above draws, and for the same reason.
+ *
+ * An empty object is the *unbound* state and is always legal. A non-empty one is
+ * a binding, and a binding without a `specId` names nothing: it would serialize
+ * as a collection that claims a spec and read back as one nobody can fetch, so
+ * it is a 400 rather than a stored half-edge.
+ *
+ * Whether that `specId` resolves is deliberately **not** checked here. This
+ * applier also runs under `POST /import/apply`, against a payload whose spec
+ * rows are not written yet - the same reason `reject_missing_collection` sits in
+ * the request route cores rather than in `apply_request_fields`. Resolution is
+ * `reject_unbindable_spec`'s, called by each write path with whatever it knows
+ * is about to exist.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+validate_openapi_binding (const nlohmann::json& binding) {
+    if (binding.empty ()) {
+        return std::nullopt; // Unbound; nothing to check.
+    }
+    if (!binding.contains ("specId") || !binding["specId"].is_string () ||
+    binding["specId"].get<std::string> ().empty ()) {
+        return std::make_pair (400,
+        error_body (400,
+        "Invalid 'openapi.specId': a binding must name a stored spec "
+        "(send openapi: {} or null to unbind)"));
+    }
+    if (binding.contains ("specHash") && !binding["specHash"].is_string ()) {
+        return std::make_pair (
+        400, error_body (400, "Invalid 'openapi.specHash': must be a string"));
+    }
+    if (binding.contains ("syncedAt") && !binding["syncedAt"].is_number ()) {
+        return std::make_pair (
+        400, error_body (400, "Invalid 'openapi.syncedAt': must be a number"));
+    }
+    return std::nullopt;
+}
+
+/**
  * Applies the request body onto `c` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means - the only thing that differs
@@ -238,6 +278,18 @@ bool is_create) {
         }
     }
 
+    // The OpenAPI binding (issue #637). `{}` is "bound to nothing", which both
+    // an absent field on create and an explicit null on update mean - so
+    // unbinding is `{"openapi": null}` and needs no verb of its own.
+    if (auto err = apply_json_field (json, "openapi", c.openapi, "{}", is_create)) {
+        return err;
+    }
+    if (json.contains ("openapi") && json["openapi"].is_object ()) {
+        if (auto err = validate_openapi_binding (json["openapi"])) {
+            return err;
+        }
+    }
+
     // Reject writes that would put a cycle in the collection tree (self-parent,
     // or reparent into a descendant) before they reach the DB - a cycle makes
     // cascade delete loop forever under the global mutex. Cycle/self checks
@@ -285,8 +337,24 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
         return *err;
     }
 
-    db.create_collection (c);
-    return { 200, vayu::json::serialize (c) };
+    // The spec check and the write are one composite, so they are one lock
+    // scope (issue #386's rule): the check proves a spec exists, and between
+    // that read and this write a concurrent `DELETE /specs/:id` would otherwise
+    // see no binder, delete the document, and leave this collection bound to
+    // nothing - the one state the check exists to prevent. The delete side
+    // holds the lock across its own check-and-remove for the same reason.
+    // `reject_unbindable_spec` is here rather than in the shared applier because
+    // bulk import binds specs it is about to write - see its declaration.
+    std::pair<int, nlohmann::json> result;
+    db.with_lock ([&] {
+        if (auto err = reject_unbindable_spec (db, c.openapi, {})) {
+            result = *err;
+            return;
+        }
+        db.create_collection (c);
+        result = { 200, vayu::json::serialize (c) };
+    });
+    return result;
 }
 
 /**
@@ -316,8 +384,24 @@ const nlohmann::json& json) {
     }
     c.updated_at = now_ms ();
 
-    db.create_collection (c);
-    return { 200, vayu::json::serialize (c) };
+    // One lock scope over check-then-write, exactly as the create core does -
+    // see there for why the two cannot be separate acquisitions. The check runs
+    // only when the write states a binding: a collection bound to a spec that
+    // has since been deleted out of band must stay editable by a PUT that says
+    // nothing about `openapi`, rather than becoming unwritable - the same
+    // reading `reject_missing_collection` gets on a request move.
+    std::pair<int, nlohmann::json> result;
+    db.with_lock ([&] {
+        if (json.contains ("openapi")) {
+            if (auto err = reject_unbindable_spec (db, c.openapi, {})) {
+                result = *err;
+                return;
+            }
+        }
+        db.create_collection (c);
+        result = { 200, vayu::json::serialize (c) };
+    });
+    return result;
 }
 
 void register_collection_routes (RouteContext& ctx) {

@@ -667,6 +667,19 @@ constexpr const char* ORIGIN_USER   = "user";
 } // namespace request_example
 
 /**
+ * @brief OpenAPI document bounds (issue #637).
+ */
+namespace spec_document {
+/// Bytes one stored OpenAPI document may hold (config key
+/// `maxSpecDocumentBytes`). Aligned with `json::MAX_FIELD_SIZE`, because every
+/// later phase parses the stored text back as JSON and that is the ceiling the
+/// parse path already carries. Engine-authored so an oversized document is
+/// refused with a message naming the count and the cap, the way `MAX_DATA_BYTES`
+/// is - cpp-httplib's own body cap would drop the connection instead.
+constexpr size_t MAX_BYTES = 10 * 1024 * 1024;
+} // namespace spec_document
+
+/**
  * @brief Local mock server bounds (issue #481 phase 2)
  *
  * Rails rather than preferences, the same split the inbox and the issuer draw:

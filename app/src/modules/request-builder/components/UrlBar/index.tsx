@@ -46,13 +46,17 @@
  * live run is the one thing here that a static colour cannot say.
  */
 
+import { useState } from "react";
+
 import { useRequestBuilderContext } from "../../context";
+import { useSendWithRow } from "../../hooks/useSendWithRow";
 import { useDashboardStore, useTabsStore } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { formatChord, type Chord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { cn } from "@/lib/utils";
 import MethodSelector from "./MethodSelector";
+import SendWithRowMenu from "./SendWithRowMenu";
 import UrlInput from "./UrlInput";
 
 /**
@@ -97,9 +101,23 @@ export default function UrlBar() {
 		executeRequest,
 		startLoadTest,
 		canStartLoadTest,
+		dataColumns,
 	} = useRequestBuilderContext();
 	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
 	const openTab = useTabsStore((s) => s.openTab);
+
+	/*
+	 * Send-with-row (issue #601): the rows this request could bind, and the one
+	 * it was last sent with.
+	 *
+	 * The index lives here, in plain state, because it is a property of *this
+	 * editing session* - "the row I am iterating on" - and not of the request.
+	 * Persisting it would point a saved number at a file whose rows are
+	 * deliberately not saved, so a later session would bind a different row
+	 * under the same index.
+	 */
+	const rows = useSendWithRow(dataColumns);
+	const [lastRowIndex, setLastRowIndex] = useState<number | null>(null);
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });
@@ -112,8 +130,13 @@ export default function UrlBar() {
 	 * member keeps a squared-off right edge looks broken rather than deliberate.
 	 * This is the state most likely to be missed, which is why the existing
 	 * guard in UrlBar.test.tsx covers it.
+	 *
+	 * The row caret is a third possible member and takes the right corner off
+	 * Send when it is present, so the rule is "Send is alone" rather than "there
+	 * is no Load Test".
 	 */
-	const sendAlone = !canStartLoadTest;
+	const showRowCaret = rows.available && !isStreaming;
+	const sendAlone = !canStartLoadTest && !showRowCaret;
 
 	return (
 		<div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-panel shrink-0">
@@ -193,7 +216,7 @@ export default function UrlBar() {
 				) : (
 					<Hint chord={SEND_CHORD} label="Send request">
 						<button
-							onClick={executeRequest}
+							onClick={() => void executeRequest()}
 							disabled={!canExecute}
 							className={cn(
 								"h-8 px-4 inline-flex items-center gap-1.5 shrink-0",
@@ -222,6 +245,21 @@ export default function UrlBar() {
 							)}
 						</button>
 					</Hint>
+				)}
+
+				{/* Send's caret: the same verb, bound to one row of the collection's
+				    data file. Absent unless a contract and a declared file are both
+				    in scope, and never while a stream is open - Send is Stop there,
+				    and a caret on Stop would offer to start what it is ending. */}
+				{showRowCaret && (
+					<SendWithRowMenu
+						rows={rows}
+						onSend={(row) => void executeRequest(row)}
+						disabled={!canExecute}
+						lastInGroup={!canStartLoadTest}
+						lastRowIndex={lastRowIndex}
+						onRowIndexChange={setLastRowIndex}
+					/>
 				)}
 
 				{/* Hidden entirely when the builder cannot load test - a detached copy

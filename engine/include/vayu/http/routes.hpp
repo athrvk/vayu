@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -486,6 +487,35 @@ std::optional<std::pair<int, nlohmann::json>>
 apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json& json, bool is_create);
 
 /**
+ * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what
+ * `spec_documents.hash` stores and what a run's snapshot is stamped with.
+ * Defined in specs.cpp.
+ */
+std::string spec_content_hash (const std::string& content);
+
+/**
+ * The live `maxSpecDocumentBytes` cap, read fresh per write. Shared by
+ * `POST /specs` and `POST /import/apply` so the two cannot enforce different
+ * limits. Defined in specs.cpp.
+ */
+size_t spec_size_cap (vayu::db::Database& db);
+
+/**
+ * Rejects a collection write whose `openapi` binding names a spec that will not
+ * exist once the write lands (issue #637).
+ *
+ * Outside `apply_collection_fields` for the same reason `reject_missing_collection`
+ * is outside `apply_request_fields`: `POST /import/apply` runs the applier over
+ * rows whose spec section is still unwritten, so an existence check inside it
+ * would refuse a legal bulk import. @p pending names what the caller is about to
+ * write in the same transaction; every path but import passes an empty set.
+ * Defined in specs.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>> reject_unbindable_spec (vayu::db::Database& db,
+const std::string& openapi,
+const std::unordered_set<std::string>& pending);
+
+/**
  * The outcome of resolving `pm.info.requestName` for a `POST /execute` payload.
  *
  * `name` absent is a normal answer, not a failure: an ad-hoc request has no
@@ -571,6 +601,60 @@ struct StreamFlag {
  * matching the suite's other route-core tests.
  */
 StreamFlag read_stream_flag (const nlohmann::json& json);
+
+/**
+ * The outcome of reading `POST /execute`'s `data` row (issue #601).
+ *
+ * `value` is the row itself when the payload carried one, and `nullopt` when it
+ * did not - which is the ordinary send and must stay distinguishable from a row
+ * that happens to be empty, since `pm.iterationData` reads `undefined` for one
+ * and an empty scope for the other.
+ *
+ * `ok == false` carries the 400 the route answers with, and every rejection is
+ * loud for the reason the whole `{{data.column}}` namespace exists: a token says
+ * the value came from the file, so a row the engine could not read must never
+ * become a send with the token still written in it.
+ */
+struct DataRow {
+    bool ok = true;
+    std::string error;
+    std::optional<nlohmann::json> value;
+};
+
+/**
+ * Read the `data` row off a `POST /execute` payload, bounded by @p max_bytes
+ * (the `maxScenarioDataBytes` setting - one row here, where a run's whole set is
+ * measured against it).
+ *
+ * The row must be a JSON object of name/value pairs, exactly as a
+ * `scenario.data` row must be (`parse_scenario_request`): anything else has no
+ * column a `{{data.column}}` token or `pm.iterationData.get` could name.
+ *
+ * Extracted from the handler (execution.cpp) so send_with_row_test.cpp can drive
+ * it directly, matching the suite's other route-core tests.
+ */
+DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
+
+/**
+ * The first `{{data.column}}` token in @p json's `auth` block, or `nullopt`.
+ *
+ * A send-with-row binds what composition left written - the URL, header names
+ * and values, the body, both halves of every form field - and `build_request`
+ * has already collapsed the credentials into an `Authorization` header by the
+ * time the row is in hand. A `{{data.user}}` there would go out as base64 of the
+ * literal token text, silently, which is exactly the defect issue #591 removed
+ * from the load path (there by binding the *typed* credentials before
+ * `apply_auth` sees them, which a plan can afford because it is resolved once).
+ *
+ * A single send has no plan to hang a credential template off, so this endpoint
+ * refuses by name instead - the same shape the scenario planner uses for an
+ * OAuth 2.0 config, whose token is likewise acquired before any row exists.
+ * Refusing is the half that matters: nothing wrong reaches the wire, and the
+ * message names the token and the alternative. Binding them here is issue #642.
+ * Only consulted when the payload carries a row - without one, a `data.*` token anywhere is today's
+ * goes-out-literal behaviour and is not this endpoint's to reopen.
+ */
+std::optional<std::string> first_auth_data_token (const nlohmann::json& json);
 
 /**
  * What a design execution's two scripts produced, as the four keys every
@@ -675,6 +759,7 @@ void register_config_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
 void register_request_example_routes (RouteContext& ctx);
+void register_spec_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);
