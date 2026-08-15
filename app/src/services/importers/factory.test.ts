@@ -143,13 +143,45 @@ describe("parseImport joins enabled params into the request URL", () => {
 		expect(parseImport(doc, opts).collections[0].requests[0].url).toBe("https://x/y?a=1&b=2");
 	});
 
-	it("OpenAPI: a declared query parameter reaches the URL as a valueless key", () => {
-		// The stub parsers carry no values (`docs/app/import-collections/openapi-v3.md`),
-		// so a declared parameter joins as a bare key - the same thing the Params
-		// table writes for a keyed row the user has not filled in yet.
+	it("OpenAPI: an optional value-less parameter stays off the URL", () => {
+		// The declared `verbose` is optional and carries no value, so it imports
+		// disabled (#622) and the join leaves the URL alone - the row is still in
+		// the Params table, one click from being sent.
 		const root = parseImport(fx("openapi-v3.json"), opts).collections[0];
 		const all = [...root.requests, ...root.children.flatMap((c) => c.requests)];
-		const pets = all.find((r) => r.url.includes("/pets/{{petId}}"));
-		expect(pets?.url).toBe("{{baseUrl}}/pets/{{petId}}?verbose");
+		const pets = all.find((r) => r.url.includes("/pets/{{petId}}"))!;
+		expect(pets.url).toBe("{{baseUrl}}/pets/{{petId}}");
+		expect(pets.params).toEqual([{ key: "verbose", value: "", enabled: false }]);
+	});
+
+	it("OpenAPI: a required parameter joins as a bare key, a defaulted one with its value", () => {
+		// The other side of #622: what the spec says to send still reaches the URL,
+		// which is what the join (#590) exists for.
+		const spec = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Params API" },
+			paths: {
+				"/items": {
+					get: {
+						summary: "List items",
+						parameters: [
+							{
+								name: "tenant",
+								in: "query",
+								required: true,
+								schema: { type: "string" },
+							},
+							{
+								name: "limit",
+								in: "query",
+								schema: { type: "integer", default: 25 },
+							},
+						],
+					},
+				},
+			},
+		});
+		const req = parseImport(spec, opts).collections[0].requests[0];
+		expect(req.url).toBe("{{baseUrl}}/items?tenant&limit=25");
 	});
 });

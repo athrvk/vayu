@@ -37,7 +37,9 @@ describe("OpenApiV2Parser", () => {
 			.parse(parsed, raw, opts)
 			.collections[0].children.find((c) => c.name === "orders")!;
 		const get = tag.requests.find((r) => r.name === "List orders")!;
-		expect(get.params).toEqual([{ key: "status", value: "", enabled: true }]);
+		// Optional with no `default` - one disabled row, and `collectionFormat` still
+		// unread (#622 does not change that; an array `default` is not sendable either).
+		expect(get.params).toEqual([{ key: "status", value: "", enabled: false }]);
 	});
 
 	it("maps basic and oauth2 schemes via swaggerSchemeToAuth", () => {
@@ -79,7 +81,7 @@ describe("OpenApiV2Parser", () => {
 		const get = p
 			.parse(spec, JSON.stringify(spec), opts)
 			.collections[0].requests.find((r) => r.name === "List items")!;
-		expect(get.params).toContainEqual({ key: "status", value: "", enabled: true });
+		expect(get.params).toContainEqual({ key: "status", value: "", enabled: false });
 	});
 
 	it("dedupes path-item params against op override (op wins)", () => {
@@ -100,7 +102,7 @@ describe("OpenApiV2Parser", () => {
 			.parse(spec, JSON.stringify(spec), opts)
 			.collections[0].requests.find((r) => r.name === "List items")!;
 		expect(get.params).toEqual([
-			{ key: "q", value: "", enabled: true, description: "op-level" },
+			{ key: "q", value: "", enabled: false, description: "op-level" },
 		]);
 	});
 
@@ -196,7 +198,7 @@ describe("OpenApiV2Parser", () => {
 			[]
 		);
 		expect(result.collections[0].requests.find((r) => r.name === "Other")!.params).toEqual([
-			{ key: "ok", value: "", enabled: true },
+			{ key: "ok", value: "", enabled: false },
 		]);
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
 	});
@@ -277,5 +279,59 @@ describe("OpenApiV2Parser", () => {
 			.parse(spec, JSON.stringify(spec), opts)
 			.collections[0].requests.find((r) => r.name === "Create item")!;
 		expect(post.body.mode).toBe("json");
+	});
+
+	/**
+	 * Issue #622, the Swagger half. Same rule as v3, read off `default` - Swagger
+	 * 2.0 has no `example` keyword for a non-body parameter.
+	 */
+	describe("query parameter enabled state", () => {
+		const paramsOf = (parameters: unknown[]) => {
+			const spec = {
+				swagger: "2.0",
+				info: { title: "Params API" },
+				paths: { "/items": { get: { summary: "List items", parameters } } },
+			};
+			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].params;
+		};
+
+		it("imports an optional value-less parameter disabled and a required one enabled", () => {
+			expect(
+				paramsOf([
+					{ name: "verbose", in: "query", type: "boolean" },
+					{ name: "tenant", in: "query", type: "string", required: true },
+				])
+			).toEqual([
+				{ key: "verbose", value: "", enabled: false },
+				{ key: "tenant", value: "", enabled: true },
+			]);
+		});
+
+		it("carries a scalar default as the row's value, enabled", () => {
+			expect(
+				paramsOf([
+					{ name: "limit", in: "query", type: "integer", default: 25 },
+					{ name: "dry", in: "query", type: "boolean", default: false },
+				])
+			).toEqual([
+				{ key: "limit", value: "25", enabled: true },
+				{ key: "dry", value: "false", enabled: true },
+			]);
+		});
+
+		it("leaves an array default value-less - collectionFormat is still unread", () => {
+			expect(
+				paramsOf([
+					{
+						name: "status",
+						in: "query",
+						type: "array",
+						collectionFormat: "csv",
+						items: { type: "string" },
+						default: ["available", "pending"],
+					},
+				])
+			).toEqual([{ key: "status", value: "", enabled: false }]);
+		});
 	});
 });
