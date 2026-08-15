@@ -524,12 +524,25 @@ jobs:
           # one item. Sorting one item is a no-op: `-Descending` never applies
           # and the list stays in komac's own ascending order, so slicing the
           # tail takes the newest. Upstream knows - issue #323 - and fixed it in
-          # 19e706d on 2025-05-29 by re-enumerating with `$(...)`. That fix has
-          # never been released: `v2` is the repository's only tag, it is a
-          # lightweight tag last moved 2024-11-27, and it therefore still points
-          # six months behind the fix. Anyone pinning `@v2` with a non-zero cap
-          # is silently deleting their own newest releases; at the time of
-          # writing two other packages in winget-pkgs are doing it too.
+          # 19e706d on 2025-05-29 by re-enumerating with `$(...)`; the author's
+          # own comment there describes exactly this ("versions weren't getting
+          # sorted properly due to which it was picking up most recent versions
+          # instead of the oldest versions").
+          #
+          # **Do not read that issue as "resolved, safe to re-enable."** It is
+          # closed as completed, which is the trap: the fix landed on `main` and
+          # was never released. `v2` is the repository's only tag, it is
+          # lightweight, and it still points at 4ffc788 ("docs(funding): remove
+          # ko-fi", 2024-11-27) - six months *older* than the fix. Verified, not
+          # assumed:
+          #
+          #   git merge-base --is-ancestor 19e706d v2   # non-zero: not in v2
+          #
+          # So anyone pinning `@v2` with a non-zero cap is silently deleting
+          # their own newest releases, 14 months after the bug was "fixed"; at
+          # the time of writing two other packages in winget-pkgs are doing it
+          # too. That command, against whatever ref this job pins, is the check
+          # to run before trusting the cap again.
           #
           # Options considered: pin the action to the fixed commit and keep the
           # cap, or turn the cap off. Turning it off wins for now - pinning
