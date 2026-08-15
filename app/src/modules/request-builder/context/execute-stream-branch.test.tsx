@@ -163,13 +163,15 @@ describe("the streaming send branch", () => {
 	});
 
 	it("renders a refusal as a response under the request that ran", async () => {
-		// The engine refuses a stream carrying scripts with a 400 the user has
-		// to read, so the failure travels as the response it should render.
+		// A stream can still be refused with a 400 the user has to read - the
+		// engine's own wording, here the transient/stream conflict - so the
+		// failure travels as the response it should render. (Scripts are no
+		// longer one of those refusals: #612 shipped them, #620 swept the claim.)
 		const refused: ResponseState = {
 			status: 0,
 			statusText: "Error",
 			headers: {},
-			body: "scripts cannot run on a streaming request yet",
+			body: "'stream' and 'transient' cannot be combined",
 			bodyType: "text",
 			size: 0,
 			time: 0,
@@ -181,7 +183,7 @@ describe("the streaming send branch", () => {
 			await ctx().executeRequest();
 		});
 
-		expect(ctx().response?.body).toContain("scripts cannot run");
+		expect(ctx().response?.body).toContain("cannot be combined");
 		expect(ctx().isStreaming).toBe(false);
 		expect(useResponseStore.getState().getResponse("A")?.status).toBe(0);
 	});

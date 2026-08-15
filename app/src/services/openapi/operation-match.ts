@@ -53,16 +53,32 @@ const SPEC_PLACEHOLDER = /\{[^{}]*\}/g;
 const ORIGIN = /^[a-zA-Z][\w+.-]*:\/\/[^/?#]*/;
 
 /**
- * The path portion of a request URL, or `undefined` when there is nothing that
- * can be compared to a spec path.
+ * A request URL split into the part that says *where* it goes and the part that
+ * says *what* it addresses.
  *
- * `undefined` and not `"/"`: a request whose URL is only a variable
- * (`{{baseUrl}}`) states no path, and defaulting it to the root would match it
- * against the spec's root operation - a match nobody asked for.
+ * One decomposition, two readers: matching flattens the path to compare it to a
+ * spec path, and export (#630) keeps both halves - the origin becomes a
+ * `servers[]` entry and the path becomes a `paths` key. A second copy of this
+ * would be the hand-rolled-copy defect in the one function that decides what
+ * counts as an origin.
  */
-export function requestPathShape(url: string): string | undefined {
+export interface RequestUrlParts {
+	/**
+	 * The `{{baseUrl}}` token, or the `scheme://host[:port]`, the URL starts
+	 * with - absent when it states neither.
+	 */
+	origin?: string;
+	/**
+	 * The path, with its template placeholders exactly as the URL wrote them
+	 * (`/pets/{{petId}}`), or `undefined` when the URL states no path at all.
+	 */
+	path?: string;
+}
+
+export function splitRequestUrl(url: string): RequestUrlParts {
 	let rest = url.trim();
-	if (!rest) return undefined;
+	if (!rest) return {};
+	let origin: string | undefined;
 
 	// Query and fragment first: an origin regex must not have to skip them, and
 	// a `?` inside a path is not a thing.
@@ -75,20 +91,36 @@ export function requestPathShape(url: string): string | undefined {
 	const firstSlash = rest.indexOf("/");
 	const head = firstSlash === -1 ? rest : rest.slice(0, firstSlash);
 	if (isVariableToken(head)) {
+		origin = head;
 		rest = rest.slice(head.length);
 	} else if (ORIGIN.test(rest)) {
+		origin = ORIGIN.exec(rest)?.[0];
 		rest = rest.replace(ORIGIN, "");
 	} else if (!rest.startsWith("/")) {
 		// A schemeless URL (`api.example.com/pets`): the first segment is a host
 		// when it looks like one, and a path when it does not.
 		if (head.includes(".") || head.includes(":")) {
+			origin = head;
 			rest = firstSlash === -1 ? "" : rest.slice(firstSlash);
 		}
 	}
 
-	if (!rest) return undefined;
+	if (!rest) return { ...(origin ? { origin } : {}) };
 	if (!rest.startsWith("/")) rest = `/${rest}`;
-	return normalizePathShape(rest);
+	return { ...(origin ? { origin } : {}), path: rest };
+}
+
+/**
+ * The path portion of a request URL, reduced to a shape, or `undefined` when
+ * there is nothing that can be compared to a spec path.
+ *
+ * `undefined` and not `"/"`: a request whose URL is only a variable
+ * (`{{baseUrl}}`) states no path, and defaulting it to the root would match it
+ * against the spec's root operation - a match nobody asked for.
+ */
+export function requestPathShape(url: string): string | undefined {
+	const { path } = splitRequestUrl(url);
+	return path === undefined ? undefined : normalizePathShape(path);
 }
 
 /**

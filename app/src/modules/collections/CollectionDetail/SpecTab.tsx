@@ -33,7 +33,7 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
+import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
 import { Button, Input } from "@/components/ui";
 import { Callout } from "@/components/shared";
@@ -48,6 +48,7 @@ import { useSpecFileStore } from "@/stores";
 import { matchOperations } from "@/services/openapi/operation-match";
 import { readSpecOperations } from "@/services/openapi/spec-operations";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
+import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
 import { formatRelative } from "./format";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
@@ -103,6 +104,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const [picked, setPicked] = useState<PickedSpec | null>(null);
 	const [pickError, setPickError] = useState<string | null>(null);
 	const [url, setUrl] = useState("");
+	const [exporting, setExporting] = useState(false);
 	const [fetching, setFetching] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -332,6 +334,21 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 			{bound && (
 				<div>
+					<SectionLabel>Export</SectionLabel>
+					<Button variant="outline" onClick={() => setExporting(true)}>
+						<Download className="mr-2 h-4 w-4" />
+						Export as OpenAPI
+					</Button>
+					<p className="mt-1 text-[11px] text-muted-foreground">
+						Writes this collection's own document back out, updated: operations it no
+						longer has removed, stored examples written in, and everything Vayu does not
+						model left exactly as it is.
+					</p>
+				</div>
+			)}
+
+			{bound && (
+				<div>
 					<Button
 						variant="outline"
 						onClick={handleUnbind}
@@ -345,6 +362,16 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						are, and leaves the stored document for anything else bound to it.
 					</p>
 				</div>
+			)}
+
+			{/* Mounted only while open, the way the tree mounts it: the same dialog
+			    the collection's ⋯ menu opens, so there is one export flow and not
+			    two that can disagree. */}
+			{exporting && (
+				<ExportSpecDialog
+					collection={collection}
+					onOpenChange={(open) => !open && setExporting(false)}
+				/>
 			)}
 		</div>
 	);
