@@ -648,6 +648,22 @@ constexpr size_t MAX_BODY_BYTES = 1024 * 1024;
 /// Examples one request may hold. Bounds the list read and the per-request
 /// slice of a bulk import.
 constexpr size_t MAX_PER_REQUEST = 100;
+
+/**
+ * Who wrote the row (issue #588, consumed by the spec sync of #627).
+ *
+ * Two values and no more: `import` is every row an importer or a spec sync
+ * produced, `user` is one a person saved from a live response. Sync may replace
+ * the first kind wholesale and must never touch the second, so this is a stored
+ * discriminator rather than something a later read could infer - nothing else
+ * about the row says where it came from.
+ *
+ * `import` is the default because it is honest for every row that existed
+ * before the column did: until the app could save one, import was the only
+ * writer.
+ */
+constexpr const char* ORIGIN_IMPORT = "import";
+constexpr const char* ORIGIN_USER   = "user";
 } // namespace request_example
 
 /**

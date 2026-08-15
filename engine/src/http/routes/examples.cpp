@@ -90,6 +90,43 @@ bool order_is_defaulted (const nlohmann::json& json) {
     return !json.contains ("order") || json["order"].is_null ();
 }
 
+/**
+ * The null-vs-absent rule for `origin`, with the value checked against the two
+ * the column accepts (issue #588).
+ *
+ * A rejected value is a 400 rather than a silent fall back to the default, on
+ * the `apply_http_version_field` reasoning: an unrecognised origin stored as
+ * `import` would hand a user-saved example to the next spec sync to overwrite,
+ * and a typo is a payload bug worth naming rather than absorbing.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create) {
+    namespace example_bounds = vayu::core::constants::request_example;
+    const std::string default_origin{ example_bounds::ORIGIN_IMPORT };
+
+    if (!json.contains ("origin")) {
+        if (is_create) {
+            out = default_origin;
+        }
+        return std::nullopt;
+    }
+    if (json["origin"].is_null ()) {
+        out = default_origin;
+        return std::nullopt;
+    }
+    if (json["origin"].is_string ()) {
+        const std::string candidate = json["origin"].get<std::string> ();
+        if (candidate == example_bounds::ORIGIN_IMPORT || candidate == example_bounds::ORIGIN_USER) {
+            out = candidate;
+            return std::nullopt;
+        }
+    }
+    return std::make_pair (400,
+    error_body (400,
+    std::string ("Invalid 'origin': must be '") + example_bounds::ORIGIN_IMPORT + "' or '" +
+    example_bounds::ORIGIN_USER + "'"));
+}
+
 } // namespace
 
 /**
@@ -101,6 +138,9 @@ bool order_is_defaulted (const nlohmann::json& json) {
  * rather than clamped: a stored 0 or 700 would be re-served verbatim by a mock
  * server, and a status nobody can send is a payload bug worth naming. The body
  * cap is a 400 for the same reason - see `request_example::MAX_BODY_BYTES`.
+ * `origin` is validated against its two values by `apply_origin_field` above,
+ * and defaults to `import` on create - the honest answer for every caller that
+ * does not claim otherwise, since import wrote every row until #588.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields
  * to every example nested in a bulk payload.
@@ -133,7 +173,7 @@ apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json&
 
     apply_string_field (json, "contentType", x.content_type, "", is_create);
     apply_int_field (json, "order", x.order, 0, is_create);
-    return std::nullopt;
+    return apply_origin_field (json, x.origin, is_create);
 }
 
 /**
@@ -285,7 +325,8 @@ void register_request_example_routes (RouteContext& ctx) {
      * id collision or the per-request cap.
      * Body params: name (required), status (default 200, must be 100-599),
      * headers (array of KeyValueEntry), body, contentType, order (absent or
-     * null appends after the request's current examples).
+     * null appends after the request's current examples), origin ("import" |
+     * "user", default "import" - the app's save-as-example sends "user").
      * Returns: the created example, 404 if the request does not exist, 400 on a
      * rejected field, or 409 at the cap.
      */

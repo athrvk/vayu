@@ -257,6 +257,12 @@ inline auto make_storage (const std::string& path) {
     make_column ("body", &RequestExample::body),
     make_column ("content_type", &RequestExample::content_type),
     make_column ("order", &RequestExample::order),
+    // Who wrote the row (issue #588). NOT NULL + default_value so sync_schema
+    // ALTERs it onto an existing table, and every pre-existing row backfills to
+    // "import" - which is what all of them are, since import was the only
+    // writer before the app could save a response as an example.
+    make_column ("origin", &RequestExample::origin,
+    default_value (std::string (vayu::core::constants::request_example::ORIGIN_IMPORT))),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 

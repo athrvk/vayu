@@ -197,6 +197,68 @@ TEST_F (ExamplesRouteTest, CreateRejectsBodyOverTheCap) {
 }
 
 // ---------------------------------------------------------------------------
+// Origin (issue #588)
+// ---------------------------------------------------------------------------
+
+// The discriminator a spec sync (#627) reads to know which rows it may
+// replace. Both halves matter: a create that claims nothing is an import row -
+// the honest answer for every writer that predates the column - and a create
+// that claims `user` keeps it, because that claim is the whole reason the
+// column exists.
+TEST_F (ExamplesRouteTest, CreateDefaultsOriginToImportAndKeepsAClaimedUser) {
+    auto [status, body] =
+    routes::create_request_example_response (*db_, "req_1", json{ { "name", "Bare" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["origin"], "import");
+    EXPECT_EQ (db_->get_request_example (body["id"])->origin, "import");
+
+    auto [saved_status, saved] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "Saved from a response" }, { "origin", "user" } });
+    ASSERT_EQ (saved_status, 200) << saved.dump ();
+    EXPECT_EQ (saved["origin"], "user");
+    EXPECT_EQ (db_->get_request_example (saved["id"])->origin, "user");
+}
+
+// A 400, not a silent fall back to `import`: an absorbed typo would hand a
+// user-saved example to the next sync to overwrite, which is the one outcome
+// the column exists to prevent.
+TEST_F (ExamplesRouteTest, CreateRejectsAnUnknownOrigin) {
+    auto [status, body] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "x" }, { "origin", "spec" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["message"], "Invalid 'origin': must be 'import' or 'user'");
+    EXPECT_EQ (db_->count_request_examples ("req_1"), 0);
+
+    auto [type_status, type_body] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "x" }, { "origin", 7 } });
+    EXPECT_EQ (type_status, 400);
+    EXPECT_EQ (db_->count_request_examples ("req_1"), 0);
+}
+
+TEST_F (ExamplesRouteTest, UpdateOriginFollowsTheNullVsAbsentRule) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "Saved" }, { "origin", "user" } });
+
+    // Absent keeps it - a rename must not quietly re-file a user's example as
+    // an import row that the next sync would then replace.
+    auto [renamed_status, renamed] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (renamed_status, 200) << renamed.dump ();
+    EXPECT_EQ (renamed["origin"], "user");
+
+    // Null resets to the default, like every other field with one.
+    auto [reset_status, reset_body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "origin", nullptr } });
+    ASSERT_EQ (reset_status, 200);
+    EXPECT_EQ (reset_body["origin"], "import");
+
+    auto [bad_status, bad_body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "origin", "elsewhere" } });
+    EXPECT_EQ (bad_status, 400);
+    EXPECT_EQ (db_->get_request_example (id)->origin, "import");
+}
+
+// ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
 
@@ -372,6 +434,11 @@ TEST_F (ExamplesRouteTest, ImportApplyWritesNestedExamples) {
     EXPECT_EQ (stored[0].name, "200 OK");
     EXPECT_EQ (stored[0].body, R"({"ok":true})");
     EXPECT_EQ (stored[1].status, 404);
+    // Bulk import claims no origin, so both rows are import rows - which is
+    // what they are. The single route and this one share the applier, so this
+    // is the assertion that keeps the two paths from disagreeing about it.
+    EXPECT_EQ (stored[0].origin, "import");
+    EXPECT_EQ (stored[1].origin, "import");
 }
 
 TEST_F (ExamplesRouteTest, ImportApplyRejectsABadExampleAndWritesNothing) {

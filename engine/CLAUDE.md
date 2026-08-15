@@ -88,7 +88,12 @@ Three things worth knowing before you design around them:
   choice - the list comes back by `order` (then `created_at`, then `id`) and a
   mock server will answer with the first one. `POST /import/apply` writes them
   nested on the request item, through the same `apply_request_example_fields`
-  applier the single-item route uses, so the two paths cannot drift.
+  applier the single-item route uses, so the two paths cannot drift. Every row
+  records an **`origin`** (#588): `import` for what an importer or a spec sync
+  wrote, `user` for what the app saved from a live response - defaulting to
+  `import`, and a `400` on anything else. It is stored so the OpenAPI spec sync
+  (#627) can replace the first kind without touching the second; nothing else
+  about a row says where it came from.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request

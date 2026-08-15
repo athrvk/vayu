@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { RequestBuilderContextValue, RequestState } from "../../types";
@@ -33,10 +33,13 @@ import type { RequestExample } from "@/types";
 import RequestTabs from "./index";
 
 const listRequestExamples = vi.fn();
+const deleteRequestExample = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
 		listRequestExamples: (id: string) => listRequestExamples(id),
+		deleteRequestExample: (requestId: string, exampleId: string) =>
+			deleteRequestExample(requestId, exampleId),
 	},
 }));
 
@@ -82,6 +85,8 @@ describe("Examples tab", () => {
 	 */
 	beforeEach(() => {
 		listRequestExamples.mockClear();
+		deleteRequestExample.mockReset();
+		deleteRequestExample.mockResolvedValue(undefined);
 	});
 
 	it("is a member of the tab strip, so it joins arrow-key navigation", () => {
@@ -112,8 +117,9 @@ describe("Examples tab", () => {
 		listRequestExamples.mockResolvedValue([example()]);
 		renderExamplesTab({ id: "req_1" });
 
-		const row = await screen.findByRole("button", { name: /200 OK/ });
-		expect(row.getAttribute("aria-expanded")).toBe("false");
+		// By the expander's own state, not by its name: the delete button beside
+		// it names the same example, so a name query matches two buttons.
+		const row = await screen.findByRole("button", { expanded: false });
 		expect(screen.queryByText("Content-Type")).toBeNull();
 
 		row.click();
@@ -140,5 +146,47 @@ describe("Examples tab", () => {
 		listRequestExamples.mockRejectedValue(new Error("engine unreachable"));
 		renderExamplesTab({ id: "req_1" });
 		expect(await screen.findByText(/Could not load example responses/i)).toBeTruthy();
+	});
+
+	/*
+	 * Delete (issue #588). It landed with save-as-example because an example you
+	 * can create and never remove is the #553 zombie shape at a smaller scale -
+	 * and because a row a mock server answers with is not one to remove on a
+	 * single stray click.
+	 */
+	describe("removing an example", () => {
+		it("confirms first, then deletes through the owning request's path", async () => {
+			listRequestExamples.mockResolvedValue([example()]);
+			renderExamplesTab({ id: "req_1" });
+
+			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
+			expect(deleteRequestExample).not.toHaveBeenCalled();
+
+			// The confirm says what a running mock does about it, since removing a
+			// row can change what the next restart serves.
+			expect(screen.getByText(/restarted/i)).toBeTruthy();
+			fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+			await waitFor(() =>
+				expect(deleteRequestExample).toHaveBeenCalledWith("req_1", "exa_1")
+			);
+		});
+
+		it("keeps the row and names the refusal when the engine says no", async () => {
+			listRequestExamples.mockResolvedValue([example()]);
+			deleteRequestExample.mockRejectedValue(new Error("Example not found"));
+			renderExamplesTab({ id: "req_1" });
+
+			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
+			fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+			// A failed delete that closed the dialog would look like a delete that
+			// worked until the list refreshed under it.
+			expect(await screen.findByText(/Could not delete it/i)).toBeTruthy();
+			// The row is still listed behind the dialog. By label rather than by
+			// role: an open Radix dialog marks the page behind it aria-hidden, so a
+			// role query cannot see a row that is plainly still there.
+			expect(screen.getByLabelText(/delete example 200 OK/i)).toBeTruthy();
+		});
 	});
 });

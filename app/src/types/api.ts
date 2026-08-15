@@ -222,6 +222,31 @@ export interface ReorderRequest {
 	normalize: ReorderNormalize[];
 }
 
+/**
+ * One saved example, written from a live response (issue #588).
+ *
+ * `order` is deliberately not sendable: the engine appends when it is absent,
+ * and appending is the contract this surface needs - a mock server answers with
+ * the *first* example of a matched route, so a save must never change what a
+ * restarted mock would serve.
+ *
+ * `origin` is a write-only field from the app's point of view. It is the
+ * discriminator a spec sync reads (#627) to know which rows it may replace, so
+ * everything saved here says `user` and nothing else in the app reads it back -
+ * `RequestExample` does not claim it for that reason.
+ */
+export interface CreateRequestExampleRequest {
+	/** Engine-assigned - see CreateCollectionRequest.id. */
+	id?: never;
+	name: string;
+	status: number;
+	headers: KeyValueEntry[];
+	body: string;
+	/** `""` when the response stated no media type - not a guess. */
+	contentType: string;
+	origin: "user";
+}
+
 /** The rows as written - one drop is one transaction, so this is all of them. */
 export interface ReorderResponse {
 	collections: Collection[];

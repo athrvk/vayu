@@ -143,21 +143,37 @@ The engine keeps one cookie jar per environment for design-mode requests
 
 ```typescript
 apiService.listRequestExamples(requestId): Promise<RequestExample[]>
+apiService.createRequestExample(requestId, example): Promise<RequestExample>
+apiService.deleteRequestExample(requestId, exampleId): Promise<void>
 ```
 
 Saved example responses stored against a request (issue #481) - what an import
-found next to it, and what a mock server will serve. **Read-only from the app**:
-examples arrive by import, so the engine's `POST` / `PUT` / `DELETE` under
-`/requests/:id/examples` have no caller here yet and no endpoint constant beyond
-the list path - a constant with no reader is the defect this repo keeps finding.
-`useRequestExamplesQuery` (`queries/request-examples.ts`) is the one consumer,
-behind the request builder's **Examples** tab.
+found next to it, and what a mock server will serve. **Not read-only any more**
+(issue #588): the response viewer's *Save as example* keeps the response on
+screen as one, and the Examples tab removes one. `PUT` still has no caller and
+so no endpoint constant - the panel is a viewer, and editing a stored example is
+its own change. The three consumers are in `queries/request-examples.ts`
+(`useRequestExamplesQuery`, `useCreateRequestExampleMutation`,
+`useDeleteRequestExampleMutation`); both writes settle by invalidating the one
+list key rather than splicing a row in, since the engine decides the id, the
+`order` an append lands on and the stored shape of the row.
+
+A saved example is written with **`origin: "user"`**, and an imported one keeps
+the engine's `"import"` default. That field is write-only from here - nothing in
+the app reads it back and `RequestExample` does not claim it - because its
+reader is the OpenAPI spec sync (#627), which may replace the examples a
+document produced and must never touch one a person saved. The rest of the
+payload is the importers' own mapping, `contentType` included (the response's
+Content-Type header verbatim, `""` when it stated none), so an app-saved example
+and an imported one are served identically. No `order` is ever sent: the engine
+appends, which is what keeps a restarted mock answering with the same first
+example.
 
 No transformer, unlike a request row: an example carries no timestamp the app
 renders and no column that predates a schema change, so the wire shape *is* the
-domain shape - minus the `order` and timestamps the `RequestExample` type
-deliberately does not claim, since the list arrives already ordered and nothing
-displays either. The stored order is the contract, not a suggestion: a mock
+domain shape - minus the `order`, `origin` and timestamps the `RequestExample`
+type deliberately does not claim, since the list arrives already ordered and no
+surface displays any of them. The stored order is the contract, not a suggestion: a mock
 server answers with the first example of a matched request, so the panel renders
 the list as received rather than re-sorting it.
 

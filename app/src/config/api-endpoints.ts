@@ -38,11 +38,15 @@ export const API_ENDPOINTS = {
 
 	// Saved example responses, nested under their request (issue #481). Nested
 	// rather than a top-level `/examples?requestId=` because an example is owned
-	// by exactly one request - the engine checks the owner before the example.
-	// Only the list path: examples arrive by import in this phase, so the
-	// engine's per-example POST/PUT/DELETE have no caller here yet and a
-	// constant with no reader is the defect this repo keeps finding.
+	// by exactly one request - the engine checks the owner before the example,
+	// so the owning id is part of every path including the per-example ones.
+	//
+	// The list path is also the create path (issue #588: save a live response as
+	// an example). `PUT` still has no caller - the panel is a viewer, and
+	// editing a stored example is its own change - so no constant for it.
 	REQUEST_EXAMPLES: (requestId: string) => `/requests/${requestId}/examples`,
+	REQUEST_EXAMPLE_BY_ID: (requestId: string, exampleId: string) =>
+		`/requests/${requestId}/examples/${exampleId}`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.
