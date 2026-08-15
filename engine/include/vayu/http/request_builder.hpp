@@ -10,10 +10,30 @@
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
 
 namespace vayu::http {
+
+/**
+ * @brief Whether `build_request` resolves the config's `auth`, or leaves it.
+ *
+ * `Apply` is what every ordinary caller wants and is the default: the
+ * credentials become an `Authorization` header (or a query parameter) as part
+ * of building the request.
+ *
+ * `Defer` exists for the one caller shape that must touch the credentials
+ * *before* they are encoded: a `{{data.column}}` token inside a credential has
+ * to carry its row's value before `apply_auth` base64-encodes a username and
+ * password into one header, because after that it is unreadable and would go
+ * out as base64 of the literal token text (issue #591). Such a caller parses
+ * the auth itself, joins it against the row and applies it afterwards -
+ * `vayu::core::bind_auth_row` is that step, and it is the only correct way to
+ * finish a deferred build. A `Defer` whose auth is never applied sends an
+ * unauthenticated request.
+ */
+enum class AuthResolution : std::uint8_t { Apply, Defer };
 
 /**
  * @brief Result of constructing a Request from a run config.
@@ -41,8 +61,10 @@ struct RequestBuild {
  * @param config     The run config JSON (HTTP fields at the root, plus `auth`).
  * @param db         Database handle for token lookup (reserved for oauth2; may be null).
  * @param timeout_ms The already-resolved request timeout to apply.
+ * @param auth       Whether to resolve `auth` here (default) or leave it to the
+ *                   caller - see @ref AuthResolution.
  */
 RequestBuild build_request (const nlohmann::json& config, vayu::db::Database* db,
-int timeout_ms);
+int timeout_ms, AuthResolution auth = AuthResolution::Apply);
 
 } // namespace vayu::http

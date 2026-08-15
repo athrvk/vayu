@@ -16,7 +16,7 @@
  * that: one row, bound into the request the same binder a run uses, and read by
  * both scripts as `pm.iterationData`.
  *
- * Three things are pinned here, and they are the three the route composes:
+ * Four things are pinned here, and they are the four the route composes:
  *
  * 1. `read_data_row` - the payload says what the row is, and says so in a way
  *    that fails loudly when it is malformed. A row the engine could not read
@@ -28,6 +28,12 @@
  * 3. `iteration_data` on the exchange's contexts, so `pm.iterationData.get`
  *    answers in a pre-request script and in a test script - and is `undefined`
  *    on a send that named no row, which is the fact a script branches on.
+ * 4. The **credentials** binding too (issue #642). This endpoint used to refuse
+ *    a `{{data.*}}` in an auth field, because `build_request` had already
+ *    collapsed basic credentials into one base64 header by the time the row was
+ *    in hand. `plan_send_row_auth` decides that before the build instead, the
+ *    build defers, and `bind_auth_row` - the same join-then-apply a scenario
+ *    step drives per iteration - applies them once the row has reached them.
  *
  * What is NOT covered here: that the route rejects before `create_run`. The
  * suite has no in-process HTTP route harness (see run_route_test.cpp), so that
@@ -48,16 +54,19 @@
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/encoding.hpp"
 
 namespace {
 
 using nlohmann::json;
+using vayu::core::bind_auth_row;
 using vayu::core::bind_data_row;
-using vayu::http::routes::first_auth_data_token;
+using vayu::http::routes::plan_send_row_auth;
 using vayu::http::routes::read_data_row;
 using vayu::http::routes::read_stream_flag;
 using vayu::http::routes::read_transient_flag;
@@ -143,36 +152,103 @@ TEST (ReadDataRow, ComposesWithTransientAndStream) {
     EXPECT_TRUE (read_data_row (stream_payload, kDataBytes).value.has_value ());
 }
 
-// --- the auth refusal --------------------------------------------------------
+// --- how the credentials resolve (issue #642) --------------------------------
 
-TEST (SendWithRowAuth, PlainCredentialsCarryNoToken) {
+/// Every credential static: the build resolves auth exactly as it always did,
+/// and nothing is deferred. This is the ordinary authenticated send, and it is
+/// the case that must not change shape now that another one exists.
+TEST (SendWithRowAuth, StaticCredentialsResolveInTheBuild) {
     const json payload{ { "auth",
-    { { "mode", "basic" }, { "basic", { { "username", "ada" }, { "password", "s3cret" } } } } } };
-    EXPECT_FALSE (first_auth_data_token (payload).has_value ());
+    { { "mode", "basic" }, { "username", "ada" }, { "password", "s3cret" } } } };
+
+    const auto plan = plan_send_row_auth (payload, true);
+    EXPECT_TRUE (plan.ok);
+    EXPECT_TRUE (plan.credentials.empty ());
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
 
-TEST (SendWithRowAuth, AbsentAuthCarriesNoToken) {
-    EXPECT_FALSE (first_auth_data_token (json{ { "url", "http://x/" } }).has_value ());
-    EXPECT_FALSE (first_auth_data_token (json{ { "auth", nullptr } }).has_value ());
+TEST (SendWithRowAuth, AbsentAuthResolvesInTheBuild) {
+    for (const auto& payload :
+    { json{ { "url", "http://x/" } }, json{ { "auth", nullptr } } }) {
+        const auto plan = plan_send_row_auth (payload, true);
+        EXPECT_TRUE (plan.ok);
+        EXPECT_TRUE (plan.credentials.empty ());
+        EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
+    }
 }
 
-/// The token is named back, because "your auth has a data token in it" without
-/// saying which one is unactionable in a block with four credential fields.
-TEST (SendWithRowAuth, CredentialTokenIsNamed) {
+/// A credential carrying a row value defers, which is the whole feature: the
+/// build leaves the credentials alone so the row can reach them before
+/// `apply_auth` collapses them into one base64 header.
+TEST (SendWithRowAuth, CredentialTokenDefersTheAuth) {
     const json payload{ { "auth",
-    { { "mode", "basic" },
-    { "basic", { { "username", "{{data.user}}" }, { "password", "s3cret" } } } } } };
-    const auto token = first_auth_data_token (payload);
-    ASSERT_TRUE (token.has_value ());
-    EXPECT_EQ (*token, "{{data.user}}");
+    { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "s3cret" } } } };
+
+    const auto plan = plan_send_row_auth (payload, true);
+    ASSERT_TRUE (plan.ok);
+    EXPECT_FALSE (plan.credentials.empty ());
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
+    EXPECT_EQ (plan.credentials.first_token ().value_or (""), "{{data.user}}");
+}
+
+/// Without a row there is nothing to bind against, so the token keeps the
+/// behaviour it has always had here rather than becoming a refusal or a
+/// deferral that never applies - a deferred build whose auth is never applied
+/// would send the request unauthenticated.
+TEST (SendWithRowAuth, NoRowNeverDefers) {
+    const json payload{ { "auth",
+    { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "s3cret" } } } };
+
+    const auto plan = plan_send_row_auth (payload, false);
+    EXPECT_TRUE (plan.ok);
+    EXPECT_TRUE (plan.credentials.empty ());
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
 
 /// An ordinary `{{user}}` is not a data token - it is a variable composition
-/// already resolved, and refusing it would refuse every authenticated send.
+/// already resolved, and deferring it would defer every authenticated send.
 TEST (SendWithRowAuth, OrdinaryVariableIsNotADataToken) {
+    const json payload{ { "auth", { { "mode", "bearer" }, { "token", "{{apiToken}}" } } } };
+
+    const auto plan = plan_send_row_auth (payload, true);
+    EXPECT_TRUE (plan.ok);
+    EXPECT_TRUE (plan.credentials.empty ());
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
+}
+
+/// OAuth 2.0 is the one mode no deferral can serve, and it stays refused by
+/// name: the token is acquired against the token endpoint, not written into the
+/// request, so there is no later moment at which a row could reach it.
+TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
     const json payload{ { "auth",
-    { { "mode", "bearer" }, { "bearer", { { "token", "{{apiToken}}" } } } } } };
-    EXPECT_FALSE (first_auth_data_token (payload).has_value ());
+    { { "mode", "oauth2" },
+    { "config",
+    { { "grantType", "client_credentials" },
+    { "clientId", "{{data.client}}" },
+    { "tokenUrl", "https://issuer.example/token" } } } } } };
+
+    const auto plan = plan_send_row_auth (payload, true);
+    ASSERT_FALSE (plan.ok);
+    EXPECT_NE (plan.error.find ("{{data.client}}"), std::string::npos);
+    EXPECT_NE (plan.error.find ("OAuth 2.0"), std::string::npos);
+    // The message has to say *why* no row can serve it, or "not supported" is
+    // the only thing a reader takes from it.
+    EXPECT_NE (plan.error.find ("token endpoint"), std::string::npos);
+}
+
+/// The refusal is scoped to the mode, not to the endpoint: an oauth2 config
+/// with no data token in it is an ordinary send that happens to carry a row.
+TEST (SendWithRowAuth, Oauth2WithoutADataTokenIsNotRefused) {
+    const json payload{ { "auth",
+    { { "mode", "oauth2" },
+    { "config",
+    { { "grantType", "client_credentials" },
+    { "clientId", "static-client" },
+    { "tokenUrl", "https://issuer.example/token" } } } } } };
+
+    const auto plan = plan_send_row_auth (payload, true);
+    EXPECT_TRUE (plan.ok);
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
 
 // --- the bind, end to end ----------------------------------------------------
@@ -206,6 +282,43 @@ class SendWithRowTest : public ::testing::Test {
             inputs.iteration_count = 1;
         }
         return execute_exchange (engine, jar, "", scopes, std::move (inputs), false);
+    }
+
+    /// What the route's pre-send sequence produced for a payload carrying a
+    /// row: either the request it would send, or the message it would answer
+    /// `400` with.
+    struct RowSend {
+        bool ok = true;
+        std::string error;
+        vayu::Request request;
+    };
+
+    /// The route's sequence over a payload that carries a row - plan the
+    /// credentials, build, bind the request, bind the credentials - in the
+    /// order execution.cpp runs it. Driven here rather than hand-ordered per
+    /// test because the *order* is what these tests are about: a credential
+    /// bound after `apply_auth` is a credential bound too late.
+    static RowSend build_with_row (const json& payload, const json& row) {
+        RowSend out;
+
+        const auto plan = plan_send_row_auth (payload, true);
+        if (!plan.ok) {
+            return RowSend{ false, plan.error, {} };
+        }
+
+        auto built = vayu::http::build_request (payload, nullptr, 10000, plan.resolution);
+        if (built.parse_failed || !built.ok) {
+            return RowSend{ false, built.error_message, {} };
+        }
+        out.request = std::move (built.request);
+
+        auto bound = bind_data_row (out.request, row, 0);
+        if (bound.ok) {
+            bound = bind_auth_row (out.request, plan.auth, plan.credentials, row, 0);
+        }
+        out.ok    = bound.ok;
+        out.error = bound.error;
+        return out;
     }
 
     /// `pm.test` around one assertion, so a failed assertion reports its own
@@ -256,6 +369,132 @@ TEST_F (SendWithRowTest, MissingColumnFailsTheBindByName) {
     EXPECT_FALSE (bound.ok);
     EXPECT_NE (bound.error.find ("data.id"), std::string::npos);
     EXPECT_NE (bound.error.find ("email"), std::string::npos);
+}
+
+// --- credentials on the wire (issue #642) ------------------------------------
+//
+// Every one of these asserts against what the echo server *received*. A bind
+// that reached the `Auth` struct but not the transfer is the exact defect this
+// endpoint used to refuse rather than risk, so asserting the struct would
+// assert the wrong half. Mutation check: move the `apply_auth` back into the
+// build (`AuthResolution::Apply` in `plan_send_row_auth`) and the three binding
+// tests go red together - the header arrives as base64 of `{{data.user}}:...`.
+
+/// Basic auth, the canonical credentials-file case: both halves come from the
+/// row, and the header the server receives decodes to the row's values rather
+/// than to the tokens' text.
+TEST_F (SendWithRowTest, BasicCredentialsBindBeforeTheyAreEncoded) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () },
+        { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" },
+        { "password", "{{data.pass}}" } } } };
+    const json row{ { "user", "ada" }, { "pass", "s3cr3t:7" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+
+    const std::string header = server_->header ("Authorization");
+    ASSERT_EQ (header.rfind ("Basic ", 0), 0u) << header;
+    const auto decoded = vayu::utils::base64_decode (header.substr (6));
+    ASSERT_TRUE (decoded.has_value ()) << header;
+    // A colon in the password is why this decodes rather than string-matches:
+    // the base64 is of `user:pass` joined, and the row is allowed to contain
+    // the separator.
+    EXPECT_EQ (*decoded, "ada:s3cr3t:7");
+}
+
+TEST_F (SendWithRowTest, BearerCredentialBindsToTheRow) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () },
+        { "auth", { { "mode", "bearer" }, { "token", "{{data.token}}" } } } };
+    const json row{ { "token", "t-7" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer t-7");
+}
+
+TEST_F (SendWithRowTest, ApiKeyHeaderBindsBothHalves) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () },
+        { "auth", { { "mode", "apikey" }, { "key", "X-{{data.header}}" },
+        { "value", "{{data.key}}" } } } };
+    const json row{ { "header", "Tenant-Key" }, { "key", "k-7" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->header ("X-Tenant-Key"), "k-7");
+}
+
+/// An api key in the query is the case that proves the *ordering* rather than
+/// just the substitution: percent-encoding is `apply_auth`'s to add after the
+/// bind, so a row value containing a reserved character arrives encoded - which
+/// binding after the auth had been applied could not produce.
+TEST_F (SendWithRowTest, ApiKeyInQueryIsEncodedAfterTheBind) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () },
+        { "auth", { { "mode", "apikey" }, { "key", "token" },
+        { "value", "{{data.key}}" }, { "in", "query" } } } };
+    const json row{ { "key", "a b&c" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_NE (server_->target ().find ("token=a%20b%26c"), std::string::npos)
+    << server_->target ();
+}
+
+/// A credential naming a column the row lacks fails the same way a URL token
+/// does, and the route turns it into the same 400 - nothing is sent.
+TEST_F (SendWithRowTest, MissingCredentialColumnFailsTheBind) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () },
+        { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" },
+        { "password", "static" } } } };
+
+    const auto prepared = build_with_row (payload, json{ { "tenant", "acme" } });
+    EXPECT_FALSE (prepared.ok);
+    EXPECT_NE (prepared.error.find ("data.user"), std::string::npos);
+    EXPECT_NE (prepared.error.find ("tenant"), std::string::npos);
+    // Nothing reached the server: the failure is decided before any transfer.
+    EXPECT_TRUE (server_->path ().empty ());
+}
+
+/// The request's own tokens and its credentials bind from one row, in one send.
+TEST_F (SendWithRowTest, RequestAndCredentialsBindFromTheSameRow) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () + "/users/{{data.id}}" },
+        { "auth", { { "mode", "bearer" }, { "token", "{{data.token}}" } } } };
+    const json row{ { "id", "7" }, { "token", "t-7" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->path (), "/echo/users/7");
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer t-7");
+}
+
+/// A static credential still resolves inside the build on a send that carries a
+/// row - the deferral is per-payload, not per-endpoint.
+TEST_F (SendWithRowTest, StaticCredentialsStillResolveInTheBuild) {
+    const json payload{ { "method", "GET" }, { "url", server_->url () + "/users/{{data.id}}" },
+        { "auth", { { "mode", "bearer" }, { "token", "static-token" } } } };
+    const json row{ { "id", "7" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->path (), "/echo/users/7");
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer static-token");
 }
 
 /// The motivating gap, closed: a pre-request script reads the row on a single
