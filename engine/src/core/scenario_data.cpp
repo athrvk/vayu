@@ -7,6 +7,7 @@
 
 #include "vayu/core/scenario_data.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,28 +46,31 @@ enum class FieldContext : std::uint8_t {
     /// A body whose text is a JSON document, so a token may land inside a
     /// string literal and has to be escaped when it does.
     JsonDocument,
+    /// A body whose text is an XML document, so how a token is written depends
+    /// on which part of the document it landed in.
+    XmlDocument,
 };
 
 /**
- * Whether this request's body text is a JSON document.
+ * What kind of document this request's body text is.
  *
- * `Json` and `JsonRpc` always are. A `graphql` body is either shape - the JSON
- * envelope or a bare GraphQL document - so it is asked, through the same
+ * `Json` and `JsonRpc` always are JSON. A `graphql` body is either shape - the
+ * JSON envelope or a bare GraphQL document - so it is asked, through the same
  * classifier the envelope itself uses; a bare document is *not* a JSON document
  * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
  * escaping first would double every quote.
  *
- * Every other mode is plain text as far as a bind is concerned - the `Xml` mode
- * #580 added included, deliberately: a bound value lands in the document
- * verbatim, so one holding `&` or `<` produces XML the server will reject. XML
- * needs an encoding of its own rather than JSON's (its rules differ between
- * text content and an attribute value, so the position of the token decides it,
- * which is more than this classifier can say) - tracked as #618.
+ * `Xml` (the mode #580 added) is a document too, with quoting rules of its own
+ * rather than JSON's - see `advance_xml_state` for what a bound value is
+ * written as, and why it depends on the token's position.
+ *
+ * Every other mode is plain text as far as a bind is concerned.
  */
 FieldContext body_context (const vayu::Body& body) {
     switch (body.mode) {
     case vayu::BodyMode::Json:
     case vayu::BodyMode::JsonRpc: return FieldContext::JsonDocument;
+    case vayu::BodyMode::Xml: return FieldContext::XmlDocument;
     case vayu::BodyMode::GraphQL:
         return vayu::http::graphql_body_is_enveloped (body.content) ?
         FieldContext::JsonDocument :
@@ -193,6 +197,199 @@ bool advance_json_string_state (std::string_view literal, bool in_string) {
 }
 
 /**
+ * Where in an XML document the text scanned so far has left us.
+ *
+ * JSON's question is one bit - inside a string literal or not - because a JSON
+ * string has one quoting rule. XML has several, and which one applies is the
+ * only thing that decides how a value may be written, so the scan has to say
+ * which part of the document the next token sits in rather than whether it is
+ * "in" something.
+ */
+enum class XmlPosition : std::uint8_t {
+    /// Character data, between tags.
+    Text,
+    /// Inside a tag but not inside an attribute value: a tag name, an attribute
+    /// name, the whitespace between them.
+    Markup,
+    /// Inside a `"`-delimited attribute value.
+    AttributeDouble,
+    /// Inside a `'`-delimited attribute value.
+    AttributeSingle,
+    /// Inside `<![CDATA[` … `]]>`.
+    Cdata,
+    /// Inside `<!--` … `-->`.
+    Comment,
+    /// Inside `<?` … `?>`.
+    ProcessingInstruction,
+};
+
+/** How far into a delimiter the scan is, carried across literal chunks. */
+struct XmlScanState {
+    XmlPosition position = XmlPosition::Text;
+    /// The characters of a delimiter matched so far and not yet resolved - the
+    /// `<![CDATA[` a chunk stopped halfway through, or the `]]` waiting for the
+    /// `>` that would end one. A token can sit anywhere, including between the
+    /// two halves of a delimiter, so this cannot live inside one chunk's scan.
+    std::string pending;
+};
+
+/// The delimiter that ends @p position, or empty for the positions that end at
+/// a single character the scan handles inline.
+std::string_view xml_closing_delimiter (XmlPosition position) {
+    switch (position) {
+    case XmlPosition::Cdata: return "]]>";
+    case XmlPosition::Comment: return "-->";
+    case XmlPosition::ProcessingInstruction: return "?>";
+    default: return {};
+    }
+}
+
+/// The longest suffix of @p candidate that is a *proper* prefix of @p pattern -
+/// how much of a delimiter is still in hand once it has failed to complete.
+std::string longest_partial_match (std::string_view candidate, std::string_view pattern) {
+    const size_t longest = std::min (candidate.size (), pattern.size () - 1);
+    for (size_t length = longest; length > 0; --length) {
+        if (candidate.substr (candidate.size () - length) == pattern.substr (0, length)) {
+            return std::string (candidate.substr (candidate.size () - length));
+        }
+    }
+    return {};
+}
+
+/** A delimiter a `<` in character data can open, and what it opens. */
+struct XmlOpener {
+    std::string_view text;
+    XmlPosition opens;
+};
+
+/// The three things a `<` in character data can open. Anything else it opens is
+/// a tag, and every tag is @ref XmlPosition::Markup - a `<!DOCTYPE` included,
+/// which ends at its `>` like a tag and carries nothing a row would bind into.
+constexpr XmlOpener XML_OPENERS[] = {
+    { "<!--", XmlPosition::Comment },
+    { "<![CDATA[", XmlPosition::Cdata },
+    { "<?", XmlPosition::ProcessingInstruction },
+};
+
+/// Where @p c leaves a scan that is inside a tag but not inside an attribute
+/// value. Asked twice - once per ordinary character, once for the character
+/// that revealed the tag - and it is the same question both times.
+XmlPosition xml_position_after_markup_char (char c) {
+    if (c == '"') {
+        return XmlPosition::AttributeDouble;
+    }
+    if (c == '\'') {
+        return XmlPosition::AttributeSingle;
+    }
+    if (c == '>') {
+        return XmlPosition::Text;
+    }
+    return XmlPosition::Markup;
+}
+
+/**
+ * Advance @p state over one literal chunk of an XML body.
+ *
+ * Only the literal chunks are scanned, never a bound value, and - as with
+ * `advance_json_string_state` - that is sound because of the encodings this
+ * decides. A value bound in character data has its `&` and `<` escaped, so it
+ * cannot open markup; one bound in an attribute value has that attribute's
+ * delimiter escaped, so it cannot close it; one bound in a CDATA section has
+ * its `]]>` split across a reopened section, so it cannot end it and leaves the
+ * scan inside CDATA either way; and one bound in a comment or a processing
+ * instruction is refused outright, so nothing is written there at all. The
+ * state after a token is therefore the state before it.
+ *
+ * @ref XmlPosition::Markup is the one exception, and it is the position where
+ * no escape could help: a token there is a tag or attribute *name*, and a name
+ * that legally contains `>` or a quote does not exist - so the value is written
+ * verbatim, as it was before this rule, and the scan trusts it to contribute no
+ * delimiter. That trust is the author's to keep; a name is not content, and a
+ * data file is not where one comes from.
+ */
+void advance_xml_state (std::string_view literal, XmlScanState& state) {
+    for (const char c : literal) {
+        const std::string_view closer = xml_closing_delimiter (state.position);
+        if (!closer.empty ()) {
+            const std::string candidate = state.pending + c;
+            if (candidate == closer) {
+                state.position = XmlPosition::Text;
+                state.pending.clear ();
+            } else {
+                state.pending = longest_partial_match (candidate, closer);
+            }
+            continue;
+        }
+
+        switch (state.position) {
+        case XmlPosition::AttributeDouble:
+            if (c == '"') {
+                state.position = XmlPosition::Markup;
+            }
+            continue;
+        case XmlPosition::AttributeSingle:
+            if (c == '\'') {
+                state.position = XmlPosition::Markup;
+            }
+            continue;
+        case XmlPosition::Markup:
+            state.position = xml_position_after_markup_char (c);
+            continue;
+        default: break;
+        }
+
+        // Character data. A `<` is held until enough of what follows it has
+        // arrived to say which construct it opened - which may be after the
+        // token that sits in the middle of it, hence `pending`.
+        if (state.pending.empty ()) {
+            if (c == '<') {
+                state.pending = "<";
+            }
+            continue;
+        }
+        state.pending += c;
+        bool opened  = false;
+        bool partial = false;
+        for (const XmlOpener& opener : XML_OPENERS) {
+            if (state.pending == opener.text) {
+                state.position = opener.opens;
+                state.pending.clear ();
+                opened = true;
+                break;
+            }
+            partial = partial ||
+            opener.text.substr (0, state.pending.size ()) == state.pending;
+        }
+        if (opened || partial) {
+            continue;
+        }
+        // It opened a tag after all. The character that settled that is part of
+        // the tag, so it is re-read in the position it actually sits in - `<>`
+        // would otherwise leave the scan inside markup that already closed.
+        state.pending.clear ();
+        state.position = xml_position_after_markup_char (c);
+    }
+}
+
+/// How a token sitting at @p position is written - or, for the two positions
+/// that have no right answer, that it is not written at all.
+DataValueEncoding xml_encoding_at (XmlPosition position) {
+    switch (position) {
+    case XmlPosition::Text: return DataValueEncoding::XmlText;
+    case XmlPosition::AttributeDouble:
+        return DataValueEncoding::XmlAttributeDouble;
+    case XmlPosition::AttributeSingle:
+        return DataValueEncoding::XmlAttributeSingle;
+    case XmlPosition::Cdata: return DataValueEncoding::XmlCdata;
+    case XmlPosition::Comment: return DataValueEncoding::XmlInComment;
+    case XmlPosition::ProcessingInstruction:
+        return DataValueEncoding::XmlInProcessingInstruction;
+    case XmlPosition::Markup: break;
+    }
+    return DataValueEncoding::Verbatim;
+}
+
+/**
  * Split each visited field around its `{{data.*}}` tokens, keeping only the
  * fields that carry one.
  */
@@ -215,14 +412,20 @@ class FieldSplitter {
         entry.columns.reserve (split.names.size ());
         entry.encodings.reserve (split.names.size ());
         bool in_string = false;
+        XmlScanState xml_state;
         for (size_t i = 0; i < split.names.size (); ++i) {
             entry.columns.push_back (
             split.names[i].substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()));
+            DataValueEncoding encoding = DataValueEncoding::Verbatim;
             if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
+                encoding = in_string ? DataValueEncoding::JsonString :
+                                       DataValueEncoding::Verbatim;
+            } else if (context == FieldContext::XmlDocument) {
+                advance_xml_state (entry.literals[i], xml_state);
+                encoding = xml_encoding_at (xml_state.position);
             }
-            entry.encodings.push_back (in_string ? DataValueEncoding::JsonString :
-                                                   DataValueEncoding::Verbatim);
+            entry.encodings.push_back (encoding);
         }
         template_.fields.push_back (std::move (entry));
     }
@@ -271,13 +474,111 @@ std::string escape_json_string_content (const std::string& text) {
     return out;
 }
 
+/**
+ * @p text as XML content, with @p attribute_quote - the delimiter of the
+ * attribute the token sits in, or `'\0'` in character data - escaped too.
+ *
+ * `&` and `<` are the two characters XML forbids raw in both positions. `>` is
+ * only forbidden as part of `]]>`, but escaping it always is conventional and
+ * cannot change what the document says, so it is not worth tracking the one
+ * sequence that needs it. A quote is legal in character data and inside the
+ * attribute the *other* quote delimits, so only the delimiter actually in force
+ * is rewritten - `it's` stays readable in a double-quoted attribute.
+ */
+std::string escape_xml_content (const std::string& text, char attribute_quote) {
+    std::string out;
+    out.reserve (text.size ());
+    for (const char c : text) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += (attribute_quote == '"') ? "&quot;" : "\""; break;
+        case '\'': out += (attribute_quote == '\'') ? "&apos;" : "'"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
+/**
+ * @p text inside a `<![CDATA[…]]>` section: byte for byte, which is what the
+ * section means and what an author picked it for, except for the one sequence
+ * that would end it early.
+ *
+ * A `]]>` in the value is written `]]]]><![CDATA[>` - the section closes after
+ * the `]]`, a new one opens, and the `>` sits inside it. A parser reads one
+ * uninterrupted run of character data across the seam, so the value arrives
+ * exactly as the cell wrote it and the document keeps the shape the author did.
+ */
+std::string escape_xml_cdata (const std::string& text) {
+    constexpr std::string_view CLOSER = "]]>";
+    constexpr std::string_view SPLIT  = "]]]]><![CDATA[>";
+    std::string out;
+    out.reserve (text.size ());
+    size_t cursor = 0;
+    for (size_t found = text.find (CLOSER); found != std::string::npos;
+         found        = text.find (CLOSER, cursor)) {
+        out.append (text, cursor, found - cursor);
+        out += SPLIT;
+        cursor = found + CLOSER.size ();
+    }
+    out.append (text, cursor, std::string::npos);
+    return out;
+}
+
 /// The rendered cell as it is written into the text around it.
 std::string encode_data_value (const nlohmann::json& value, DataValueEncoding encoding) {
     std::string rendered = render_data_value (value);
-    if (encoding == DataValueEncoding::JsonString) {
+    switch (encoding) {
+    case DataValueEncoding::JsonString:
         return escape_json_string_content (rendered);
+    case DataValueEncoding::XmlText: return escape_xml_content (rendered, '\0');
+    case DataValueEncoding::XmlAttributeDouble:
+        return escape_xml_content (rendered, '"');
+    case DataValueEncoding::XmlAttributeSingle:
+        return escape_xml_content (rendered, '\'');
+    case DataValueEncoding::XmlCdata: return escape_xml_cdata (rendered);
+    // The two unwritable placements never reach this: the join refuses the row
+    // before it renders a value for them.
+    case DataValueEncoding::XmlInComment:
+    case DataValueEncoding::XmlInProcessingInstruction:
+    case DataValueEncoding::Verbatim: break;
     }
     return rendered;
+}
+
+/**
+ * The refusal a token placed where an XML body has no encoding for it reads as,
+ * or `nullopt` for the placements that do have one.
+ *
+ * Both are markup addressed to something other than the server reading the
+ * body: a comment is not sent as content at all, and a processing instruction
+ * is an instruction to the parser. A value bound into either would either
+ * vanish or, carrying `-->` or `?>`, end the construct and change the document
+ * into one the author did not write - so the row is refused, in the same shape
+ * as the missing-column and null-cell errors: the token's own text first.
+ */
+std::optional<std::string> describe_unwritable_placement (const std::string& column,
+DataValueEncoding encoding) {
+    if (encoding == DataValueEncoding::XmlInComment) {
+        return token_for (column) +
+        " sits inside an XML comment, where a bound value is not sent at all - "
+        "and one "
+        "carrying \"-->\" would end the comment and change the document "
+        "instead, so the "
+        "row is refused rather than bound somewhere it cannot be read";
+    }
+    if (encoding == DataValueEncoding::XmlInProcessingInstruction) {
+        return token_for (column) +
+        " sits inside an XML processing instruction, which is markup addressed "
+        "to the "
+        "parser rather than content - a bound value carrying \"?>\" would end "
+        "it and "
+        "change the document, so the row is refused rather than bound into "
+        "markup";
+    }
+    return std::nullopt;
 }
 
 /**
@@ -308,6 +609,16 @@ class TemplateJoiner {
 
         std::string out = entry.literals[0];
         for (size_t i = 0; i < entry.columns.size (); ++i) {
+            // Checked before the row is consulted: a placement no encoding fits
+            // is the template's fault and fails identically for every row, so
+            // naming a missing column instead would send the reader after the
+            // file when the request is what needs moving.
+            if (auto refusal = describe_unwritable_placement (
+                entry.columns[i], entry.encodings[i])) {
+                result_.ok    = false;
+                result_.error = std::move (*refusal);
+                return;
+            }
             const auto cell = row_.find (entry.columns[i]);
             if (cell == row_.end ()) {
                 result_.ok    = false;

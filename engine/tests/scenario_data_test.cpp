@@ -454,6 +454,213 @@ TEST (ScenarioDataJsonBodyTest, ANullCellIsRefusedWhereverItIsPlaced) {
 }
 
 // ---------------------------------------------------------------------------
+// An XML body is a document too, with its own rules (issue #618)
+//
+// Asserted as exact text rather than through a parser: the engine links no XML
+// parser, and the text is the stronger claim anyway - "parses" would pass for a
+// document whose shape the bind changed.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A request whose body is the `xml` mode #580 added, carrying @p content.
+vayu::Request xml_request (const std::string& content) {
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Xml;
+    request.body.content = content;
+    return request;
+}
+
+} // namespace
+
+TEST (ScenarioDataXmlBodyTest, AMetacharacterBearingCellCannotBreakTheDocument) {
+    // The bug: `Ben & Jerry's` went out byte for byte and the server rejected
+    // the body as malformed. Revert the escaping and `&` / `<` come back raw.
+    auto request =
+    xml_request ("<order><customer>{{data.name}}</customer></order>");
+
+    const auto result =
+    bind_data_row (request, json{ { "name", "Ben & Jerry's <boss>" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    // The apostrophe is left alone: it is legal in character data, and
+    // rewriting it would make a name unreadable to protect nothing.
+    EXPECT_EQ (request.body.content,
+    "<order><customer>Ben &amp; Jerry's &lt;boss&gt;</customer></order>");
+}
+
+TEST (ScenarioDataXmlBodyTest, ACellCannotChangeTheShapeOfTheDocument) {
+    // The worse half of the same bug: a cell closing the element it sits in
+    // sends a document with a different shape, not merely a broken one.
+    auto request =
+    xml_request ("<order><customer>{{data.name}}</customer></order>");
+
+    const auto result = bind_data_row (
+    request, json{ { "name", "</customer><injected/><customer>" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<order><customer>&lt;/customer&gt;&lt;injected/&gt;&lt;customer&gt;</customer></order>");
+}
+
+TEST (ScenarioDataXmlBodyTest, AnAttributeValueEscapesTheDelimiterInForce) {
+    // Which quote has to be escaped is the author's choice, not a constant, so
+    // the scan carries the delimiter rather than escaping both - `it's` stays
+    // readable in a double-quoted attribute.
+    auto request = xml_request (R"(<o a="{{data.v}}" b='{{data.v}}'/>)");
+
+    const auto result = bind_data_row (request, json{ { "v", R"(x"y'z&)" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, R"(<o a="x&quot;y'z&amp;" b='x"y&apos;z&amp;'/>)");
+}
+
+TEST (ScenarioDataXmlBodyTest, TheScanFollowsTheDocumentBackOutOfATag) {
+    // One field, two tokens, three positions between them: attribute value,
+    // then markup, then character data. Get the walk out of the tag wrong and
+    // the second token is escaped as an attribute of a tag that already closed.
+    auto request = xml_request (R"(<o a="{{data.a}}">{{data.b}}</o>)");
+
+    const auto result =
+    bind_data_row (request, json{ { "a", R"("q")" }, { "b", R"("q")" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, R"(<o a="&quot;q&quot;">"q"</o>)");
+}
+
+TEST (ScenarioDataXmlBodyTest, ACdataSectionTakesTheValueByteForByte) {
+    // CDATA means "this is not markup", so escaping inside one would corrupt
+    // the value the author chose the section to protect.
+    auto request = xml_request ("<o><![CDATA[{{data.v}}]]></o>");
+
+    const auto result = bind_data_row (request, json{ { "v", "a & b < c" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<o><![CDATA[a & b < c]]></o>");
+}
+
+TEST (ScenarioDataXmlBodyTest, ACdataSectionSurvivesAValueThatWouldEndIt) {
+    // The one sequence a CDATA section cannot carry. Splitting the section and
+    // reopening it keeps the character data uninterrupted - what a parser reads
+    // back is the cell, and the element still closes where the author put it.
+    auto request = xml_request ("<o><![CDATA[{{data.v}}]]></o>");
+
+    const auto result = bind_data_row (request, json{ { "v", "a]]>b" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<o><![CDATA[a]]]]><![CDATA[>b]]></o>");
+}
+
+TEST (ScenarioDataXmlBodyTest, ATokenAfterACdataSectionIsCharacterDataAgain) {
+    // The section's end has to be seen, or everything after it binds unescaped.
+    auto request = xml_request ("<o><![CDATA[x]]>{{data.v}}</o>");
+
+    const auto result = bind_data_row (request, json{ { "v", "a&b" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<o><![CDATA[x]]>a&amp;b</o>");
+}
+
+TEST (ScenarioDataXmlBodyTest, ADeclarationIsSteppedOverRatherThanBoundInto) {
+    // `<?xml …?>` opens nearly every XML body there is. Read it as a tag and
+    // the document's first element is judged to be markup for the rest of the
+    // body, and nothing after it is ever escaped.
+    auto request = xml_request (R"(<?xml version="1.0"?><o>{{data.v}}</o>)");
+
+    const auto result = bind_data_row (request, json{ { "v", "a<b" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, R"(<?xml version="1.0"?><o>a&lt;b</o>)");
+}
+
+TEST (ScenarioDataXmlBodyTest, ATokenInsideACommentIsRefusedRatherThanEncoded) {
+    // No encoding is right: the value is not sent at all, and one carrying
+    // `-->` would end the comment and change the document. The row is refused
+    // for every row alike - it is where the token is written that is wrong.
+    auto request = xml_request ("<o><!-- {{data.v}} --><n>1</n></o>");
+
+    const auto result = bind_data_row (request, json{ { "v", "x" } }, 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.v}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("comment"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataXmlBodyTest, ATokenInsideAProcessingInstructionIsRefusedToo) {
+    auto request = xml_request (R"(<?render style="{{data.v}}"?><o>1</o>)");
+
+    const auto result = bind_data_row (request, json{ { "v", "x" } }, 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.v}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("processing instruction"), std::string::npos)
+    << result.error;
+}
+
+TEST (ScenarioDataXmlBodyTest, TheRefusedPlacementIsNamedBeforeTheRowIsBlamed) {
+    // A placement no encoding fits fails identically for every row, so naming
+    // the missing column instead would send the reader to the file when the
+    // request is what has to move.
+    auto request = xml_request ("<o><!-- {{data.v}} --></o>");
+
+    const auto result = bind_data_row (request, json{ { "other", "x" } }, 3);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_EQ (result.error.find ("does not have"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("comment"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataXmlBodyTest, ATagNameStillBindsVerbatim) {
+    // The one position no escape could serve: a name cannot legally contain the
+    // characters escaping would produce, so a bound name is written as it is -
+    // which is what it did before this rule, and what an author templating an
+    // element name relies on.
+    auto request = xml_request ("<{{data.tag}}>x</{{data.tag}}>");
+
+    const auto result = bind_data_row (request, json{ { "tag", "item" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<item>x</item>");
+}
+
+TEST (ScenarioDataXmlBodyTest, AnOrdinaryValueIsByteIdenticalToBeforeTheRule) {
+    // The rule must not churn the rows that were always fine.
+    auto request = xml_request ("<o><n>{{data.v}}</n></o>");
+
+    const auto result = bind_data_row (request, json{ { "v", "plain-42" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<o><n>plain-42</n></o>");
+}
+
+TEST (ScenarioDataXmlBodyTest, TheUrlAndHeadersAreNeverEscapedForAnXmlBody) {
+    // Per field, not per request - the same rule the JSON context follows.
+    auto request = request_with_url ("https://api.test/?q={{data.q}}");
+    request.headers["X-Note"] = "{{data.q}}";
+    request.body.mode         = vayu::BodyMode::Xml;
+    request.body.content      = "<o>{{data.q}}</o>";
+
+    const auto result = bind_data_row (request, json{ { "q", "a&b" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/?q=a&b");
+    EXPECT_EQ (request.headers.at ("X-Note"), "a&b");
+    EXPECT_EQ (request.body.content, "<o>a&amp;b</o>");
+}
+
+TEST (ScenarioDataXmlBodyTest, TheModeDecidesTheRuleAndNotTheContent) {
+    // A `text` body that happens to hold XML is still text: the mode is what
+    // the author declared, and escaping on a guess would corrupt the value.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Text;
+    request.body.content = "<o>{{data.v}}</o>";
+
+    const auto result = bind_data_row (request, json{ { "v", "a&b" } }, 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, "<o>a&b</o>");
+}
+
+// ---------------------------------------------------------------------------
 // The pre-run scan: a token nothing can bind (issue #415)
 //
 // Driven through the step template, which is what plan resolution builds and
