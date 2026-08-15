@@ -92,12 +92,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Matched as a whole `key:` line, anchored. Two traps this avoids:
-          # a token pattern like `vcpkg-[^ ]*` stops at the first space, so it
-          # would compare only `vcpkg-${{ runner.os }}-${{` and pass happily
-          # while the rest of the key diverged; and an unanchored pattern
-          # matches this step's own text in this very file, so the guard would
-          # end up grading its own source instead of the workflow.
+          # Matched as a whole `key:` line, anchored. Two traps this avoids: a
+          # token pattern such as "vcpkg-" followed by a non-space class stops
+          # at the first space, so it would compare only the runner-os prefix
+          # and pass happily while the rest of the key diverged; and an
+          # unanchored pattern matches this step's own text in this very file,
+          # so the guard would end up grading its own source instead of the
+          # workflows.
+          #
+          # Note also that nothing in this script may spell an opening GitHub
+          # expression delimiter in prose. This is a `run:` block, so Actions
+          # scans it for expressions and rejects the whole *file* if one is
+          # left unclosed - which is exactly how the first version of this
+          # comment took the workflow down before any job could start.
           #
           # codeql.yml hardcodes `Linux` where the others interpolate
           # `runner.os`; it only ever runs on ubuntu, so those are the same
