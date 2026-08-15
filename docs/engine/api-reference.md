@@ -2159,12 +2159,25 @@ Refused with a **400** rather than silently reinterpreted:
 - `"stream": true` with `"transient": true` - a stream **is** its run row: the
   row is what `eventsUrl` names, what carries the status, and what a stop
   finds, and a transient execution creates none;
-- `"stream": true` with a pre- or post-request script - a post-request script
-  asserts on a response that does not exist until the stream closes. Streams
-  reach scripts as a buffered `pm.response.events` in a later release; until
-  then this is refused rather than silently skipped;
 - `stream` on `POST /runs` (`errorCode: "invalid_run_config"`) - a load run's
   completion accounting has no place for a response that never ends.
+
+**Scripts run on a streaming request** (issue #575), and were refused until they
+did. The pre-request script runs before the transfer starts, exactly as on a
+buffered send, so its `pm.request` edits reach the wire. The post-request script
+runs **once, after the stream has terminated**, and reads the bounded stored
+list as `pm.response.events` with `pm.response.totalEvents` and
+`pm.response.eventsTruncated` beside it - the sandbox is synchronous with no
+event loop, so a live per-event callback is not a feature that was skipped but
+one the runtime cannot have. See
+[Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
+
+Because the route has already answered `202`, a streaming run's script output
+has nowhere to be *returned*: it is stored on the run's trace under `scripts`,
+with the same four keys the buffered response body uses (`testResults`,
+`consoleLogs`, `preScriptError`, `postScriptError`). One engine builder fills
+both, so a live pane and a restored one cannot disagree. A run whose scripts
+said nothing stores no node at all.
 
 Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
 `sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see
@@ -2715,6 +2728,22 @@ body**, **both halves of every form field** (`x-www-form-urlencoded` and
 and **value**. Script text is never interpolated at all (a script reads its row
 through `pm.iterationData`).
 
+The pass runs over the **composed** text, not the text as it was authored, so a
+token that arrived as a *variable's value* binds like any other: a variable
+`endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after
+composition (resolution is one pass and never rescans a substituted value), and
+the data pass then binds it. That is usable, and it is also why the
+no-data refusal below says "or from the variable value it was written into" -
+the token it names may not appear anywhere in the request as you wrote it.
+
+**Only scenario runs bind at all.** `POST /execute` and a non-scenario
+`POST /runs` have no rows and perform no data pass, so a `{{data.*}}` token in
+either reaches the wire as the literal text `{{data.id}}` - no substitution, and
+no warning, since composition leaves the reserved namespace written as it stands
+by design. The refusal below exists for scenario runs only. A raw API or MCP
+caller putting `{{data.*}}` into a single request is asking for the literal
+braces and gets them.
+
 > **Credentials bind before they are encoded.** A credentials file behind basic
 > auth is the canonical data-driven run, so a step whose credentials carry a
 > `{{data.*}}` keeps them unresolved in the plan and applies its auth *per
@@ -2779,6 +2808,14 @@ anything is sent**, with a message naming the token, the row index and the
 columns the row does have. Substituting an empty string would send a request
 quietly pointing somewhere else, which is the failure this namespace exists to
 remove.
+
+**Two headers that bind to one name** error the same way. `X-{{data.h}}`
+resolving to `authorization` beside a literal `Authorization`, or two templated
+names resolving alike, would leave the request carrying one of the two - so the
+row is refused instead, naming the header as it is written, the name it
+produced and the row. Note this is deliberately *not* composition's duplicate
+rule, which is last-wins: a duplicate there is two headers the author typed and
+can see, while this one exists only for the rows that produce it.
 
 A cell that is present but **`null`** errors the same way, naming the token and
 the row. It is the same failure one type down - the token says the value comes
@@ -2900,9 +2937,13 @@ knob.
   `testValidation` section still reports the aggregate - it says *something*
   failed, and the per-step `tests` say where.
 - **Data rows are claimed from one shared cursor**, one per virtual-user
-  iteration, wrapping when they run out - so two virtual users never hold the
-  same row at once, which is what a credentials file is for. Every step of an
-  iteration binds that iteration's row. `scenario.iterations` still has no
+  iteration, wrapping when they run out - so two virtual users never *start*
+  with the same row while unclaimed rows remain, which is what a credentials
+  file is for. Once every row has been claimed the cursor wraps and rows are
+  reused, concurrently: a 10-row file under 50 virtual users, or any
+  duration-mode run past the row count, has several users on one row at a time.
+  Size the file to the concurrency if the rows must stay exclusive. Every step
+  of an iteration binds that iteration's row. `scenario.iterations` still has no
   meaning here: the run repeats until its duration is up, and the row count does
   not bound it.
 
@@ -2910,7 +2951,8 @@ knob.
   step**: nothing is sent, the step's `errors` count in the breakdown moves, and
   the run's error list carries an entry with `error_type: "data_binding_failed"`
   naming the token, the row and the row's columns. It is never substituted with
-  an empty string.
+  an empty string. A `null` cell and two headers binding to one name fail the
+  same step the same way.
 
   Every retained result carries **`dataRowIndex`** on its `trace`, which is how
   a failure is attributed to a row when no per-step `results` rows exist. Absent

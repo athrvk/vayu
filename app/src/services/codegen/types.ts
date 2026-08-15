@@ -42,6 +42,16 @@ export interface SnippetRequest {
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
+	/**
+	 * Consume the response as a `text/event-stream` (issue #575).
+	 *
+	 * An execution setting rather than a transfer option, so it changes what a
+	 * snippet has to *say* rather than a flag it passes along: curl and HTTPie
+	 * have a first-class unbuffered mode and emit it, and the targets whose
+	 * stock idiom buffers the whole body say so in a note instead of emitting a
+	 * command that would hang on an endless stream.
+	 */
+	stream?: boolean;
 }
 
 export interface CodegenOptions {

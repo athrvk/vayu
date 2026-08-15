@@ -142,8 +142,10 @@ struct ScenarioExecution {
 struct ScenarioLimits {
     size_t max_steps     = 0;
     size_t max_data_rows = 0;
-    /// Serialized size of the whole `data` array. Bounds what the row count
-    /// cannot: a single row is free to carry a megabyte in one cell.
+    /// Sum of the serialized rows - the array's brackets and separators are not
+    /// counted, because the check accumulates row by row to refuse an oversized
+    /// set without dumping the whole array. Bounds what the row count cannot: a
+    /// single row is free to carry a megabyte in one cell.
     size_t max_data_bytes = 0;
 };
 

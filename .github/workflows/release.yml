@@ -116,17 +116,36 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
-      - name: Build and run engine tests (arm64)
+      # ctest deliberately does NOT run through `lukka/run-cmake`'s `testPreset`
+      # here, and every engine-test step in this file is split build-then-ctest
+      # for the same reason. The action spawns ctest with an unwritten pipe as
+      # stdin, while pr-tests.yml runs it from a plain shell step - so a test
+      # that reads or probes stdin behaves differently in the two places and
+      # fails *only* at release time, on a tag, with the release half-published.
+      # v0.16.0 shipped exactly that failure (fixed engine-side in #582: a
+      # bodyless POST now declares CURLOPT_POSTFIELDSIZE 0 rather than letting
+      # curl read a body from stdin). The engine is correct under any stdin now,
+      # but the environment divergence that hid it until release is what these
+      # split steps close: `< /dev/null` on both sides of CI, so the suite sees
+      # one stdin everywhere and the next stdin-touching path fails in the pull
+      # request that introduces it. See #589. Do not fold these back into the
+      # action's testPreset.
+      - name: Build engine (arm64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
           buildPreset: macos-prod-arm64
-          testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      - name: Build and run engine tests (x64)
+      - name: Run engine tests (arm64)
+        if: runner.os == 'macOS'
+        working-directory: engine
+        shell: bash
+        run: ctest --preset macos-prod-arm64 --output-on-failure < /dev/null
+
+      - name: Build engine (x64)
         # Both architectures run ctest now that RateLimiterTest hits an
         # in-process mock instead of httpbin.org (issue #30). x64 still goes
         # through Rosetta on M-series runners, but the remaining tests don't
@@ -137,8 +156,13 @@ jobs:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
-          testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests (x64)
+        if: runner.os == 'macOS'
+        working-directory: engine
+        shell: bash
+        run: ctest --preset macos-prod-x64 --output-on-failure < /dev/null
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -153,15 +177,23 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
-      - name: Build and run engine tests (Non-macOS)
+      - name: Build engine (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
-          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      # `shell: bash` on Windows too, matching pr-tests.yml - the redirect has
+      # to be the same shell's, or the two paths differ again by the thing this
+      # split exists to make identical.
+      - name: Run engine tests (Non-macOS)
+        if: runner.os != 'macOS'
+        working-directory: engine
+        shell: bash
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure < /dev/null
 
       - name: Install frontend dependencies
         working-directory: app

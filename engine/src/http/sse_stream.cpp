@@ -441,7 +441,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
     vayu::http::to_curl_http_version (request.request.http_version));
     if (request.cookie_jar) {
-        detail::apply_jar_cookies (curl, *request.cookie_jar, request.cookie_scope, {});
+        detail::apply_jar_cookies (
+        curl, *request.cookie_jar, request.cookie_scope, request.cookie_writes);
     }
 
     const auto submitted_at = std::chrono::steady_clock::now ();

@@ -105,8 +105,11 @@ Three things worth knowing before you design around them:
   a rule that can name itself** - server close, `POST /runs/:id/stop`,
   `maxStreamEvents`, `maxStreamDurationMs`, or the idle timeout - never a
   whole-transfer deadline, which is deliberately not set on this path. `stream`
-  with `transient`, with a script, or on `POST /runs` is a **400** rather than a
-  silent reinterpretation.
+  with `transient`, or on `POST /runs`, is a **400** rather than a silent
+  reinterpretation. **Scripts run** (#575): the pre-request one before the
+  transfer, the post-request one after the stream ends, reading the bounded list
+  as `pm.response.events`; because the route already answered `202`, their
+  output is stored on the trace's `scripts` node rather than returned.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

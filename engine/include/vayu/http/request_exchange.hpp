@@ -124,6 +124,31 @@ vayu::runtime::ScriptContext& ctx,
 const std::string& script_type);
 
 /**
+ * Point @p ctx's variable scopes and cookie surfaces at this run's.
+ *
+ * The rules here are not obvious and each one is load-bearing: the leaf
+ * collection scope is writable while its ancestors are not (issue #234), and
+ * every script of a run shares one jar so `pm.cookies` and the transfer cannot
+ * disagree about which session they are looking at (issue #301). A second copy
+ * of the block would be a copy that stops receiving those fixes, so the
+ * streaming path (execution.cpp), which brackets a transfer this function's
+ * usual caller does not own, binds through here too.
+ *
+ * Identity - `request_id`, `request_name`, the iteration fields - stays with
+ * the caller: only it knows what this script is running as.
+ *
+ * @param writes Where `pm.cookies.jar()` stages this script's writes, or null
+ *               to refuse them. Never shared between two scripts: each set is
+ *               applied exactly once, by the transfer that follows it or by the
+ *               caller when none does.
+ */
+void bind_script_scopes (vayu::runtime::ScriptContext& ctx,
+ScriptVariableScopes& scopes,
+vayu::http::CookieJar& jar,
+const std::string& cookie_scope,
+std::vector<vayu::http::CookieWrite>* writes);
+
+/**
  * One exchange's inputs: a composed, auth-resolved request and the scripts
  * that bracket it.
  *

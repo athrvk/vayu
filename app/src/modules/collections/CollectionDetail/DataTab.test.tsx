@@ -45,6 +45,15 @@ vi.mock("@/queries", () => ({
 	// The picker reads the two engine caps through `useDataFileLimits`; empty
 	// entries leave it on the seeds, which no case here goes near.
 	useConfigQuery: () => ({ data: { entries: [] } }),
+	// The referenced-columns panel (issue #600) reads both of these. It has its
+	// own suite - `ColumnAudit.test.tsx` - so here it only has to render: no
+	// collections means no subtree to audit, and no requests means every
+	// declared column reports as unreferenced.
+	useCollectionsQuery: () => ({ data: [] }),
+	useMultipleCollectionRequests: () => ({
+		requestsByCollection: new Map(),
+		isLoading: false,
+	}),
 }));
 
 const { default: DataTab } = await import("./DataTab");
@@ -154,8 +163,10 @@ describe("an existing contract", () => {
 			<DataTab collection={collection({ columns: ["id", "email"], fileName: "u.csv" })} />
 		);
 
-		expect(screen.getByText("id")).toBeTruthy();
-		expect(screen.getByText("email")).toBeTruthy();
+		// `getAllByText`: the referenced-columns panel below lists the same names
+		// again, bucketed by whether a request uses them (issue #600).
+		expect(screen.getAllByText("id").length).toBeGreaterThan(0);
+		expect(screen.getAllByText("email").length).toBeGreaterThan(0);
 		expect(screen.getByText(/Declared from u\.csv/)).toBeTruthy();
 		expect(screen.getByRole("button", { name: /re-declare/i })).toBeTruthy();
 	});

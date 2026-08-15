@@ -254,6 +254,13 @@ struct SseStreamRequest {
     /// stored cookie and keep none - the same opt-in `ClientConfig` makes.
     CookieJar* cookie_jar = nullptr;
     std::string cookie_scope{ NO_ENVIRONMENT_SCOPE };
+    /// What the pre-request script's `pm.cookies.jar()` staged, applied on top
+    /// of the stored lines for this transfer alone. Carried here rather than
+    /// written into the jar for the reason cookie_jar.hpp gives: the transfer
+    /// applies them and its capture persists them, so they happen exactly once
+    /// and in the order the send decides - the same route the non-streaming
+    /// client's `ClientConfig::cookie_writes` takes.
+    std::vector<CookieWrite> cookie_writes;
     std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
     /**
      * Called on the worker thread once the stream has terminated, with the

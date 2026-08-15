@@ -540,6 +540,83 @@ async function composeViaEngine(
 }
 
 /**
+ * Start a streaming execute and read its events under the caller's bounds
+ * (issue #575).
+ *
+ * `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and
+ * hands the transfer to an engine worker, so there is no exchange to return.
+ * What an agent gets instead is this: the run it can follow up on, the events
+ * that arrived within the bounds it named, and - in band, beside them - which
+ * bound the read stopped at.
+ *
+ * The three stopping conditions are reported separately rather than collapsed
+ * into "partial", because the follow-up differs: `completed` means the stream
+ * is over and `get_run_report` has the whole story; `capReached` means raise
+ * `maxStreamEvents`; `budgetExhausted` means the stream is still running and
+ * `stop_run` ends it.
+ */
+async function runStreamingRequest(
+	args: Record<string, unknown>,
+	payload: Record<string, unknown>,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<ToolResult> {
+	const maxEvents = optionalPositiveInt(args, "maxStreamEvents", DEFAULT_STREAM_MAX_EVENTS);
+	const budgetMs = optionalPositiveInt(args, "streamBudgetMs", DEFAULT_STREAM_BUDGET_MS);
+	if (budgetMs > MAX_STREAM_BUDGET_MS) {
+		return errorResult(
+			`"streamBudgetMs" must be ${MAX_STREAM_BUDGET_MS} or less - a tool call cannot hold the session longer. Start the stream, then follow it with get_run_report.`
+		);
+	}
+
+	let started: Record<string, unknown>;
+	try {
+		const accepted = await ctx.client.executeRequest(payload, signal);
+		if (!accepted || typeof accepted !== "object" || Array.isArray(accepted)) {
+			return errorResult("Engine returned an unusable answer for a streaming request.");
+		}
+		started = accepted as Record<string, unknown>;
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+
+	const runId = typeof started.runId === "string" ? started.runId : "";
+	if (!runId) {
+		// A payload the engine refused *after* the flag was read, or a buffered
+		// answer to a request we asked to stream. Either way, hand back what it
+		// said rather than reading events for a run that does not exist.
+		return jsonResult(started);
+	}
+
+	let consumed;
+	try {
+		consumed = await ctx.client.consumeStreamEvents(runId, maxEvents, budgetMs, signal);
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+
+	const budgetExhausted = !consumed.completed && !consumed.capReached;
+	return structuredResult({
+		runId,
+		eventsUrl: started.eventsUrl,
+		// The bounds this read ran under, beside what it produced - not in a
+		// note the agent may or may not reach.
+		maxStreamEvents: maxEvents,
+		streamBudgetMs: budgetMs,
+		completed: consumed.completed,
+		capReached: consumed.capReached,
+		budgetExhausted,
+		...(consumed.endReason !== undefined && { endReason: consumed.endReason }),
+		...(consumed.totalEvents !== undefined && { totalEvents: consumed.totalEvents }),
+		eventCount: consumed.events.length,
+		events: consumed.events,
+		nextStep: consumed.completed
+			? "The stream has ended. get_run_report has the stored events and any test results."
+			: "The run is still streaming engine-side. Read more with get_run_report, or end it with stop_run.",
+	});
+}
+
+/**
  * The post-response validation script an agent supplied, under either name.
  *
  * One concept, historically two engine keys: `POST /execute` grew up calling it
@@ -701,6 +778,48 @@ const validationScriptAliasInput = z
 	.optional()
 	.describe(
 		"Alias for `postRequestScript` (the engine's own name for it on a load run). Pass one or the other, not both."
+	);
+
+/**
+ * How many events one budgeted read collects, and how long it may wait
+ * (issue #575).
+ *
+ * Both bounds are the agent's to choose and both are reported back with the
+ * result, because a list an agent believes is the whole stream and a list that
+ * is the first `maxStreamEvents` of it lead to opposite conclusions. The
+ * descriptions name the bound *before* the payload for the same reason the
+ * budget-carrying tools already do: a caveat read after the data has been
+ * believed is a caveat that arrived too late.
+ */
+const DEFAULT_STREAM_MAX_EVENTS = 50;
+const DEFAULT_STREAM_BUDGET_MS = 5_000;
+/** A ceiling on the ceiling: `tools/call` is request/response, and a caller
+ *  that asked to wait five minutes would hold the whole MCP session. */
+const MAX_STREAM_BUDGET_MS = 60_000;
+
+const streamInput = z
+	.boolean()
+	.optional()
+	.describe(
+		`Consume the response as a text/event-stream instead of buffering it (default false). BOUNDED, ALWAYS: this tool does not stream to you - it reads the run's events for at most \`streamBudgetMs\` milliseconds (default ${DEFAULT_STREAM_BUDGET_MS}) and returns at most \`maxStreamEvents\` of them (default ${DEFAULT_STREAM_MAX_EVENTS}). The result says which bound it stopped at (\`completed\`, \`capReached\`, \`budgetExhausted\`) and carries \`totalEvents\` where the engine knows it, so a partial read is never mistaken for the whole stream. The run keeps going engine-side after this returns; read it later with get_run_report, or end it with stop_run.`
+	);
+
+const maxStreamEventsInput = z
+	.number()
+	.int()
+	.positive()
+	.optional()
+	.describe(
+		`Streaming only: how many events to return before stopping the read (default ${DEFAULT_STREAM_MAX_EVENTS}). Reaching it sets \`capReached\` - the stream itself is not stopped.`
+	);
+
+const streamBudgetMsInput = z
+	.number()
+	.int()
+	.positive()
+	.optional()
+	.describe(
+		`Streaming only: how long to read events for, in milliseconds (default ${DEFAULT_STREAM_BUDGET_MS}, maximum ${MAX_STREAM_BUDGET_MS}). Reaching it sets \`budgetExhausted\`.`
 	);
 
 /**
@@ -1202,6 +1321,9 @@ export const TOOLS: McpTool[] = [
 				),
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
+			stream: streamInput,
+			maxStreamEvents: maxStreamEventsInput,
+			streamBudgetMs: streamBudgetMsInput,
 		},
 		handler: async (args, ctx, signal) => {
 			const request: Record<string, unknown> = {
@@ -1242,7 +1364,18 @@ export const TOOLS: McpTool[] = [
 			// instead of the arguments the agent actually gave.
 			const linkId = str(args, "requestId");
 			if (linkId !== undefined) payload.requestId = linkId;
-			return callEngine(() => ctx.client.executeRequest(payload, signal));
+
+			// Stated on every call, never elided: the two answers have different
+			// *shapes* - `202 {runId, eventsUrl}` against the exchange - so a
+			// caller that let composition or an engine default decide would not
+			// know which one it was about to parse. The same rule both app
+			// clients follow for `followRedirects`.
+			const streaming = args.stream === true;
+			payload.stream = streaming;
+			if (!streaming) {
+				return callEngine(() => ctx.client.executeRequest(payload, signal));
+			}
+			return runStreamingRequest(args, payload, ctx, signal);
 		},
 	},
 	{

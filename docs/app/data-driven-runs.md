@@ -149,8 +149,10 @@ about to happen, because a 500-row file running once is the surprise this
 preview exists to remove.
 
 **A load run** binds rows differently: every virtual user claims rows from one
-shared cursor, so no two hold the same row at once, and the rows repeat for as
-long as the duration lasts. The row count says nothing about how long the run is.
+shared cursor, so no two start on the same row while unclaimed rows remain, and
+the rows then repeat for as long as the duration lasts. Once they wrap, users do
+share rows - size the file to the concurrency if that matters. The row count
+says nothing about how long the run is.
 
 ## Declaring the contract: the Data tab
 
@@ -186,6 +188,26 @@ run:
   with a contract declared, that message lists the columns the collection
   expects, so it says which file to run with rather than only that one is
   missing.
+
+- **The builder checks your tokens.** With a contract in scope, a
+  `{{data.email}}` that names a declared column reads as one, and a
+  `{{data.emial}}` that names nothing declared is painted amber with the
+  declared list in its tooltip - so a typo shows while you are typing it rather
+  than at iteration 1. It is advice, not a refusal: an undeclared column still
+  binds if the file you run with carries it.
+- **The columns are offered while you type.** `{{data.` completes them in the
+  URL, params, headers and body, and `pm.iterationData.get("` completes them in
+  the script editors.
+- **The Data tab audits the collection.** A **Referenced columns** panel splits
+  the declared columns into the ones your requests use, the ones your requests
+  name but the contract does not declare, and the ones nothing references -
+  across this collection and every sub-collection that does not declare a
+  contract of its own. Scripts are scanned for literal
+  `pm.iterationData.get("column")` arguments only, and the panel says so: a
+  column name a script computes at run time cannot be seen from here.
+
+A sub-collection with no contract of its own uses the nearest ancestor's, the
+same way a variable defined on a parent collection is in scope below it.
 
 **Re-declare from this file** replaces the columns when your file changes shape;
 **Clear** removes the contract and forgets the remembered path.

@@ -137,6 +137,41 @@ nlohmann::json get_script_completions () {
     "reason errorCode is - a response that arrived did not fail." },
     { "sortText", "1_pm_response_errorMessage" } });
 
+    completions.push_back ({ { "label", "pm.response.events" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.events" }, { "detail", "object[] | undefined" },
+    { "documentation",
+    "The events a streaming request received, as { event, id, data } entries "
+    "(id absent when the origin sent none; dataTruncated when one event hit "
+    "the per-event byte cap). Buffered, not live: the sandbox is synchronous "
+    "with no event loop, so a post-request script runs once, after the stream "
+    "has terminated, over this list.\n\nAbsent - not empty - for an ordinary "
+    "response, so typeof separates 'not a stream' from 'a stream with no "
+    "events'. The list is bounded by sseMaxStoredEvents; check "
+    "eventsTruncated before asserting over it as a whole.\n\nExample:\nconst "
+    "events = pm.response.events || [];\npm.test('got the done event', "
+    "function () { pm.expect(events.some(function (e) { return e.event === "
+    "'done'; })).to.be.true; });" },
+    { "sortText", "1_pm_response_events" } });
+
+    completions.push_back ({ { "label", "pm.response.totalEvents" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.totalEvents" }, { "detail", "number | undefined" },
+    { "documentation",
+    "How many events the stream received in total, including those beyond the "
+    "stored list. Mirrors the run trace's totalEvents. Absent for a "
+    "non-streaming response, like pm.response.events." },
+    { "sortText", "1_pm_response_totalEvents" } });
+
+    completions.push_back ({ { "label", "pm.response.eventsTruncated" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.response.eventsTruncated" },
+    { "detail", "boolean | undefined" },
+    { "documentation",
+    "True when pm.response.events is a prefix of what the stream sent - "
+    "totalEvents exceeded sseMaxStoredEvents. Guard a whole-stream assertion "
+    "with it rather than asserting over a partial list.\n\nExample:\nif "
+    "(!pm.response.eventsTruncated) { pm.test('exactly three events', function "
+    "() { pm.expect(pm.response.events.length).to.equal(3); }); }" },
+    { "sortText", "1_pm_response_eventsTruncated" } });
+
     completions.push_back ({ { "label", "pm.response.headers" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",

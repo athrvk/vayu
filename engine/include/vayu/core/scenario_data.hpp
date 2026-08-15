@@ -40,6 +40,15 @@
  * says the value comes from the file and the file says there is none, so the
  * bind errors rather than writing nothing where a value belonged (issue #593).
  *
+ * Two header names that **bind to the same name** are the same failure once
+ * more, one field over: `X-{{data.h}}` resolving to `authorization` beside a
+ * literal `Authorization` would leave a map with one of them in it, so the bind
+ * errors rather than dropping a header (issue #595). Composition's duplicate
+ * rule is last-wins, and this deliberately is not: a duplicate there is two
+ * headers the user typed and can see, while this one exists only for the rows
+ * that produce it - a file whose row 3 collides sends two good requests and
+ * then one quietly missing its auth.
+ *
  * ## A value is written for the document it lands in
  *
  * Substitution is textual, so a value carrying a `"` used to end the JSON
@@ -171,6 +180,9 @@ struct StepDataTemplate {
  * @p tmpl must have been built from a request of the same shape (in practice:
  * from the plan step @p request was copied from), because a field is addressed
  * by its position in the walk.
+ *
+ * Fails for a column @p row does not carry, a column whose cell is `null`, and
+ * for two header names that bound to one name.
  *
  * On failure @p request is left partially bound and must not be sent - the
  * caller ends the step. Repairing it would mean a second copy of the composed

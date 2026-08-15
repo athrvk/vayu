@@ -368,15 +368,10 @@ struct InboxManager::Inbox {
     /// Resolved once at start and const thereafter, so every capture in one
     /// inbox was truncated and retained by the same rules.
     InboxLimits limits;
-    /// One live SSE stream per inbox; see InboxManager::try_claim_live. Both
-    /// fields are guarded by InboxManager::mutex_ - every accessor locks it -
-    /// and `live_claim == 0` means unclaimed.
-    LiveClaim live_claim = 0;
-    /// When the holder last wrote to its socket successfully. A holder writes
-    /// at least a keep-alive every poll interval, so a long gap here is the
-    /// only evidence available that its socket is gone: cpp-httplib reports
-    /// that only through the next failing write.
-    std::chrono::steady_clock::time_point live_last_write{};
+    /// One live SSE stream per inbox; see InboxManager::try_claim_live. Guarded
+    /// by InboxManager::mutex_ - every accessor locks it - which is the
+    /// externally-locked-by-its-owner contract LiveClaimSlot is written to.
+    LiveClaimSlot live_claim;
 
     /// Guards `response` only. The capture handler takes this and never the
     /// manager's lock, so a teardown holding the manager lock can always join.
@@ -621,34 +616,22 @@ std::optional<LiveClaim> InboxManager::try_claim_live (const std::string& inbox_
         return std::nullopt;
     }
     Inbox& inbox = *it->second;
-    if (inbox.live_claim != 0) {
-        const auto since = std::chrono::steady_clock::now () - inbox.live_last_write;
-        if (since < live_claim_stale_after (inbox.limits)) {
-            return std::nullopt;
-        }
-        // Held by a stream that is not writing. Take it over rather than refuse:
-        // the refusal is what strands a reconnecting client (issue #506).
-    }
-    inbox.live_claim      = next_live_claim_++;
-    inbox.live_last_write = std::chrono::steady_clock::now ();
-    return inbox.live_claim;
+    return inbox.live_claim.try_claim (live_claim_stale_after (inbox.limits));
 }
 
 bool InboxManager::note_live_write (const std::string& inbox_id, LiveClaim claim) {
     std::lock_guard<std::mutex> lock (mutex_);
     auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end () || it->second->live_claim != claim) {
+    if (it == inboxes_.end ()) {
         return false;
     }
-    it->second->live_last_write = std::chrono::steady_clock::now ();
-    return true;
+    return it->second->live_claim.note_write (claim);
 }
 
 void InboxManager::release_live (const std::string& inbox_id, LiveClaim claim) {
     std::lock_guard<std::mutex> lock (mutex_);
-    if (auto it = inboxes_.find (inbox_id);
-        it != inboxes_.end () && it->second->live_claim == claim) {
-        it->second->live_claim = 0;
+    if (auto it = inboxes_.find (inbox_id); it != inboxes_.end ()) {
+        it->second->live_claim.release (claim);
     }
 }
 

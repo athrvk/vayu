@@ -55,6 +55,31 @@ describe("scriptVariableCompletionContext", () => {
 		}
 	});
 
+	it("reads pm.iterationData as the column source it is, not as a variable scope", () => {
+		// The row is bound from the collection's data file, so the names that
+		// belong in this argument are declared columns (issue #600). Both
+		// spellings, because a script that guards - which the surface's own docs
+		// tell it to do, since `pm.iterationData` is undefined outside a
+		// data-driven run - is the common one, and a list that vanished the
+		// moment the user guarded would teach the opposite.
+		expect(scriptVariableCompletionContext('pm.iterationData.get("')?.scope).toBe("data");
+		expect(scriptVariableCompletionContext("pm.iterationData.has('")?.scope).toBe("data");
+		expect(scriptVariableCompletionContext('pm.iterationData?.get("')?.scope).toBe("data");
+		expect(scriptVariableCompletionContext('pm.iterationData?.get("em')).toMatchObject({
+			scope: "data",
+			mode: "name",
+			query: "em",
+		});
+	});
+
+	it("offers nothing for the row's argument-less and refusing members", () => {
+		// `toObject()` takes no argument, and `set`/`unset` throw on a read-only
+		// row - a name offered inside a call that always throws teaches the wrong
+		// thing, which is the same rule `pm.variables.set` follows.
+		expect(scriptVariableCompletionContext('pm.iterationData.toObject("')).toBeNull();
+		expect(scriptVariableCompletionContext('pm.iterationData.set("')).toBeNull();
+	});
+
 	it("reports what has been typed, and where replacing it starts", () => {
 		const context = scriptVariableCompletionContext('pm.environment.get("ba');
 		expect(context).toMatchObject({ scope: "environment", mode: "name", query: "ba" });

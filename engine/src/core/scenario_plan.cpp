@@ -393,7 +393,8 @@ const ScenarioResolveOptions& options) {
                 ", but this run has no 'scenario.data' set. A data token has "
                 "no row to bind to and would reach the wire written as it "
                 "stands - run the collection with a data file, or remove the "
-                "token from the request." + declared_columns_hint (*collection));
+                "token from the request (or from the variable value it was "
+                "written into)." + declared_columns_hint (*collection));
             }
         }
 

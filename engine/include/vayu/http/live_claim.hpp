@@ -45,9 +45,9 @@ using LiveClaim = std::uint64_t;
  *
  * **Not** internally synchronized: every method must be called under the lock
  * that guards the owning record, which is also the lock its other fields are
- * read under. That is why `InboxManager` (which predates this type and still
- * carries the equivalent fields inline) can adopt it without changing its
- * locking - see issue #583.
+ * read under. That is what lets an owner adopt it without changing its locking
+ * - `InboxManager` holds one per inbox under its own `mutex_`,
+ * `SseStreamContext` one under a mutex of its own.
  */
 class LiveClaimSlot {
     public:

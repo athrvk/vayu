@@ -29,6 +29,8 @@ import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
+import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
+import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import { tokenize } from "./tokenize";
 
 /** The subset of RequestState a curl/wget command can populate. */
@@ -43,6 +45,7 @@ export type ParsedRequest = Pick<
 	| "formData"
 	| "urlEncoded"
 	| "auth"
+	| "stream"
 >;
 
 type CommandKind = "curl" | "wget";
@@ -93,6 +96,7 @@ interface Builder {
 	uploadFile: boolean; // curl -T (implies PUT)
 	basic: { username: string; password: string } | null;
 	bearer: string | null; // curl --oauth2-bearer
+	stream: boolean; // -N / --no-buffer
 }
 
 function newBuilder(): Builder {
@@ -108,6 +112,7 @@ function newBuilder(): Builder {
 		uploadFile: false,
 		basic: null,
 		bearer: null,
+		stream: false,
 	};
 }
 
@@ -241,6 +246,19 @@ function resolve(b: Builder): ParsedRequest {
 			headers.push({ key: "Content-Type", value: "application/json" });
 		if (!findHeader(b, "accept")) headers.push({ key: "Accept", value: "application/json" });
 	}
+	// The same header the Event stream toggle arms, through the same rule: a
+	// command that already declares an Accept keeps what it wrote, because a
+	// silent override would send a request the pasted command never described.
+	// `autoHeaderToAdd` rather than a fourth copy of that check - a hand-rolled
+	// copy of a primitive does not receive the primitive's fixes.
+	if (b.stream) {
+		const accept = autoHeaderToAdd(
+			ACCEPT_HEADER,
+			SSE_ACCEPT,
+			headers.map((h) => ({ ...h, enabled: true }))
+		);
+		if (accept) headers.push({ key: ACCEPT_HEADER, value: accept });
+	}
 
 	// Bearer (curl --oauth2-bearer) wins over basic if both are somehow present,
 	// mirroring curl sending the last-set Authorization scheme.
@@ -297,6 +315,7 @@ function resolve(b: Builder): ParsedRequest {
 		formData,
 		urlEncoded,
 		auth,
+		stream: b.stream,
 	};
 }
 
@@ -356,8 +375,6 @@ const CURL_NOARG = new Set([
 	"--remote-name",
 	"-j",
 	"--junk-session-cookies",
-	"-N",
-	"--no-buffer",
 ]);
 
 /** curl flags that take a value we ignore. */
@@ -475,6 +492,14 @@ function parseCurl(args: string[]): ParsedRequest {
 				// implies a PUT - record the intent and discard the path.
 				value();
 				b.uploadFile = true;
+				break;
+			case "-N":
+			case "--no-buffer":
+				// curl's unbuffered flag is how a streaming endpoint is consumed
+				// from a terminal, so it is the request's stream setting rather
+				// than an output nicety to skip (issue #575). Round-trips: the
+				// curl generator emits it back for a stream-flagged request.
+				b.stream = true;
 				break;
 			case "--url":
 				b.url = value();

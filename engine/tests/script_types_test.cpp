@@ -346,6 +346,18 @@ TEST (ScriptTypesTest, TheChainDeclaresWhatTheDocsClaimAndTheRuntimeAnswers) {
     EXPECT_TRUE (contains (dts, "oneOf(values: any[]): VayuExpectation;"));
 }
 
+// A `T[]` detail declares an array of T, not `void`. Without the suffix rule a
+// list member falls through to the prose branch, and every `for (const e of
+// pm.response.events)` in a correct script becomes an editor error - the same
+// class of silent mis-declaration `number | undefined` fixed for
+// `pm.info.iteration`.
+TEST (ScriptTypesTest, AListFieldDeclaresAnArrayOfItsElementType) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "events: { [key: string]: any }[] | undefined;"))
+    << "pm.response.events is `object[] | undefined` in the table; a member "
+       "typed `void` here would make every use of it an error in the editor";
+}
+
 /**
  * The generated declarations, checked in so a test with a TypeScript compiler
  * can read them without a running engine.

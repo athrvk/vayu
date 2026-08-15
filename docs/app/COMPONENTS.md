@@ -314,7 +314,7 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
-| Data | `DataTab.tsx` | The declared **data contract** (issue #599): pick a file, preview it, **Declare** its columns onto `collection.dataSchema`, **Clear** to reset. Declared-column count badge. Saves explicitly per action, so it holds no draft and is absent from `TABS_HOLDING_DRAFTS` |
+| Data | `DataTab.tsx` | The declared **data contract** (issue #599): pick a file, preview it, **Declare** its columns onto `collection.dataSchema`, **Clear** to reset, plus the **referenced-columns audit** (`ColumnAudit.tsx`, issue #600). Declared-column count badge. Saves explicitly per action, so it holds no draft and is absent from `TABS_HOLDING_DRAFTS` |
 
 `MockServerControl.tsx` is the header's right-hand control and the only surface that can **start** a
 mock server (issue #481 phase 2), because it is the only one holding a collection. With none running
@@ -430,9 +430,23 @@ The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a 
 
 `CollectionDetail/DataTab.tsx` is the authoring-time half of the same file (issue #599, phase 1 of #598). It reuses the picker in `mode="declare"` - same parser, same refusals, no iteration arithmetic - and turns the previewed file's columns into `collection.dataSchema` through `useUpdateCollectionMutation`. **Clear** sends `dataSchema: null`, not `{}`: the engine reads absent as "keep", so a cleared contract is only expressible as a null that survives to the wire. What is stored splits by what it is true of: the **columns** are the same on every machine and ride the engine row; the file's **path** is true of one filesystem and lives in `stores/data-file-store.ts`; the **rows** are true of nobody and are stored nowhere at all. When both a contract and a file are in hand, `services/data-files/schema-diff.ts` renders the mismatch in both directions into the picker's warnings slot - shared with the run dialog, so the tab and the runner cannot describe the same file differently.
 
+`CollectionDetail/ColumnAudit.tsx` is phase 2's half of the tab (issue #600):
+the contract against the **requests** rather than against a file, so it needs no
+file at all. It buckets the declared columns into referenced, referenced-but-
+undeclared (amber, and the typo case this exists to catch) and
+declared-but-unreferenced, scanning the fields the engine's binder walks - URL,
+params, header names and values, body text, form field names and values
+(`services/data-files/column-audit.ts`). **Which requests**: everything the
+contract binds - this collection and every descendant down to one that declares
+its own (`collectionsUnderContract`) - because auditing the leaf alone would
+call a column unreferenced while a request one level down references it.
+Scripts are scanned for literal `pm.iterationData.get("column")` arguments only
+and the line says so: a computed argument is unanswerable at authoring time, and
+the engine remains the run-time authority.
+
 `RunCollectionDialog` **pre-fills from that declaration** as part of mount, which is what keeps the dialog's mount-is-reset contract intact: if `data-file-store` holds a path for this collection it re-reads it over the `dataFile:read` IPC (`electron/data-file.ts` - extension allowlist plus the engine's fetched `maxScenarioDataBytes`, the one channel on which the renderer names a path), decodes and parses it with the same modules the picker uses, and diffs it against the declared columns. A file that has moved leaves the picker empty and a sentence saying so - a warning, never a blocker, because a run without a file is a legal run and re-picking is the whole remedy.
 
-The picker is told **which run it is for** (`loadTest`), because a row means something different in each and describing one of the two is being wrong about the other (issue #449). In design mode a row is an iteration and the file's length is the run's length. In load mode the rows are claimed from a cursor every virtual user shares, wrapping for as long as the duration lasts - so the row count says nothing about how long the run is, only that no two virtual users hold the same row at once, and the resolved-iteration sentence is replaced rather than shown against a pass count a load run does not have.
+The picker is told **which run it is for** (`loadTest`), because a row means something different in each and describing one of the two is being wrong about the other (issue #449). In design mode a row is an iteration and the file's length is the run's length. In load mode the rows are claimed from a cursor every virtual user shares, wrapping for as long as the duration lasts - so the row count says nothing about how long the run is, only that no two virtual users start on the same row while unclaimed rows remain (past the wrap they do share rows), and the resolved-iteration sentence is replaced rather than shown against a pass count a load run does not have.
 
 `services/data-files/` is the parser: `tabular.ts` (a hand-rolled RFC 4180 tokenizer - quoted delimiters, embedded newlines, doubled quotes, CRLF - shared by CSV and TSV, which differ only in the delimiter) and `index.ts` (format detection by extension with a content sniff fallback, the header rules, the JSON/JSONL paths). CSV and TSV values are **strings, always**, so `007` survives; JSON and JSONL keep native types, and the preview states the asymmetry. The header row *is* the mapping - column names become `{{data.column}}` tokens and `pm.iterationData` keys - so an empty or duplicated header cell is a parse error rather than a column nobody can address.
 
@@ -457,6 +471,8 @@ A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is 
 
 - **Sidebar (`sidebar/VariablesCategoryTree.tsx`)** - tree of variable scopes (globals, collections, environments); receives `collections` + `environments` from the Sidebar.
 - **Main (`main/`)** - `VariablesMain.tsx` (screen `"variables"`) hosts `VariableTableEditor.tsx`, the table editor for the selected scope, including the active-environment selector.
+
+**`VariableTableEditor` does not mount the [shared key/value table](#shared-keyvalue-editor-componentssharedkeyvalueeditor), and that exclusion is permanent** (decided in #564, re-examined and confirmed in #587). It is not a copy of that table - it is a different one: a per-row type select and secret toggle, a masked value cell, text committed on blur while toggles save immediately, and rows ordered by a `createdAt` stamp rather than by a trailing-blank rule. Mounting the primitive here would mean giving it a dynamic column model, a commit model, and variables-domain fields on `KeyValueItem`, redesigning a primitive for one consumer at the expense of its three others. What the "a hand-rolled copy of a primitive does not receive the primitive's fixes" rule *does* bind is the reveal control: `ui/secret-input` was extracted from this cell and then received fixes (the `tabIndex={-1}` removal, `aria-pressed`) the leftover copy never got, so the value cell mounts `SecretInput`. `main/key-value-parity.test.tsx` pins what the two tables must keep in common - control height, checkbox clearance and sizing, the shared `rowActionDestructive` variant, and that reveal control - each read off the primitive rather than off copied literals, so a fix to either side that skips the other fails.
 
 ## Settings (`modules/settings/`)
 
@@ -1105,6 +1121,8 @@ it picks a file, shows the path, and marks one an import brought in and this app
 never chose. `lib/file-path.ts` holds the basename rule it shares with the
 importers.
 
+The **variables table is deliberately not a consumer.** `modules/variables/main/VariableTableEditor.tsx` keeps its own rows for the reasons recorded in [Variables](#variables-modulesvariables); the parity it must hold with this table anyway is guarded by `key-value-parity.test.tsx`, not by hand.
+
 `key-value.ts` is the table's **row model**: `toKeyValueItems` /
 `toKeyValueEntries` convert between the domain `FormFieldEntry[]` and the
 UI-layer `KeyValueItem[]` (which adds the ephemeral `id` React keys need), and
@@ -1130,9 +1148,25 @@ generator table:
 
 | Token | Painted by | Looks like |
 |-------|-----------|------------|
-| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted, "Bound by the run's data file / per iteration", no popover |
+| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted or amber, depending on the declared contract - see below |
 | `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click edits or creates |
 | `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
+
+**A `data.*` token has three states of its own** (issue #600), decided by
+`describeDataToken` against `VariableSupport.dataColumns` - the contract the
+collection chain declares, resolved leaf-to-root by `resolveDataContract`:
+
+| In scope | Paint | Tooltip |
+|----------|-------|---------|
+| the column is declared | muted | "Data column - bound per iteration", naming the declaring collection |
+| a contract exists, the column is not in it | **amber** (`text-warning-text`) | "Not a declared column of X", listing what is declared |
+| no contract anywhere in the chain | muted | "Bound by the run's data file / per iteration" |
+
+Amber rather than the destructive red an unknown variable gets: an undeclared
+column still binds if the run's file carries it, so this is "check this", not
+"nothing can ever answer this". None of the three offers to create a variable.
+The `{{` autocomplete offers declared columns as a **Data columns** group beside
+Variables and Dynamic.
 
 `EditableVariable` takes the scope as a **required** prop, because a token only
 renders where there is one. `RuntimeToken` serves both run-time cases - a value
@@ -1155,7 +1189,11 @@ module for its cell input is the same inversion one level down (issue #567).
 
 `VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
 context - `resolveString`, `getAllVariables`, `getVariableOrigins`,
-`updateVariable`, `writableScopes` - as a plain object a caller hands in.
+`updateVariable`, `writableScopes` - as a plain object a caller hands in, plus
+the optional `dataColumns` (the declared data contract in scope, issue #600).
+`dataColumns` is optional *within* a scope rather than with it: absent means the
+chain declares no contract, which is every workspace that has not opened the
+Data tab.
 
 It exists because reaching for the context instead made two primitives
 unmountable anywhere but the request builder: `useRequestBuilderContext()`
@@ -1175,7 +1213,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 The `cva` definitions for `badge`, `button` and `toast` live in sibling
 `*-variants.ts` modules and are re-exported from `components/ui/index.ts`. A

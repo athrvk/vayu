@@ -18,20 +18,32 @@
  * - UI colors and icons
  * - Header content
  * - Additional actions (e.g., delete for environments)
+ *
+ * **This table does not mount `components/shared/KeyValueEditor`, and that is a
+ * settled decision rather than an omission** (#564, reconsidered and confirmed
+ * in #587). The repo's standing rule is that a hand-rolled copy of a primitive
+ * never receives the primitive's fixes, so the exclusion needs a reason that
+ * survives re-reading: this is not a copy of that table, it is a different
+ * table. The shared primitive is a fixed grid of key, value and a row action,
+ * committing on every change; this one adds a per-row type select and a secret
+ * toggle, masks the value cell, commits text on blur and toggles immediately,
+ * and orders rows by a `createdAt` stamp instead of by a trailing-blank rule.
+ * Folding it in means giving the shared table a dynamic column model, a commit
+ * model, and variables-domain fields on `KeyValueItem` - a redesign of the
+ * primitive to serve one consumer, paid for by its three existing ones.
+ *
+ * What the rule does bind here is the *reveal* control, which was extracted out
+ * of this file into `ui/secret-input` and then went on receiving fixes this
+ * table never got (the `tabIndex={-1}` removal, `aria-pressed`). The value cell
+ * mounts `SecretInput` for exactly that reason. `key-value-parity.test.tsx`
+ * pins what the two tables must keep in common - control height, checkbox
+ * clearance and sizing, the shared destructive row-action variant, and this
+ * reveal control - so the next fix to either side fails loudly instead of
+ * drifting.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import {
-	Globe,
-	Cloud,
-	Folder,
-	Trash2,
-	AlertCircle,
-	LucideIcon,
-	Eye,
-	EyeOff,
-	KeyRound,
-} from "lucide-react";
+import { Globe, Cloud, Folder, Trash2, AlertCircle, LucideIcon, KeyRound } from "lucide-react";
 import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
@@ -53,6 +65,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	SecretInput,
 	TooltipIconButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -197,7 +210,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const [variables, setVariables] = useState<VariableRow[]>([]);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
-	const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(new Set());
 	const variablesRef = useRef<VariableRow[]>([]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 	// The dirty flag, readable from an effect without being one of its
@@ -671,9 +683,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					</thead>
 					<tbody>
 						{variables.map((variable, index) => {
-							const isSecretRevealed = revealedSecrets.has(index);
-							const shouldMask =
-								variable.secret && !isSecretRevealed && !variable.isNew;
+							/*
+							 * A row is a secret field once it is persisted: an
+							 * unsaved blank row masks nothing, because there is
+							 * no stored secret to protect and typing into a
+							 * password field you just created only hides your
+							 * own keystrokes.
+							 */
+							const isSecretField = variable.secret && !variable.isNew;
 
 							return (
 								<tr key={index} className="group">
@@ -724,9 +741,33 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 										/>
 									</td>
 									<td className="py-1 px-2">
-										<div className="relative">
+										{/*
+										 * `SecretInput` rather than a masked `Input`
+										 * and an eye of our own: that primitive was
+										 * extracted from this very cell so every
+										 * secret field in the app would share one
+										 * implementation, and the copy left behind
+										 * here missed the fixes it since received.
+										 * Reveal state belongs to the primitive -
+										 * unmounting on un-secret is what clears it,
+										 * which is what the editor's own revealed-set
+										 * used to do by hand.
+										 */}
+										{isSecretField ? (
+											<SecretInput
+												value={variable.value}
+												onChange={(v) => updateVariable(index, "value", v)}
+												onBlur={handleBlur}
+												placeholder="value"
+												className={cn(
+													"h-8",
+													!variable.enabled &&
+														"text-muted-foreground bg-muted"
+												)}
+											/>
+										) : (
 											<Input
-												type={shouldMask ? "password" : "text"}
+												type="text"
 												value={variable.value}
 												onChange={(e) =>
 													updateVariable(index, "value", e.target.value)
@@ -734,42 +775,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												onBlur={handleBlur}
 												placeholder="value"
 												className={cn(
-													"h-8 pr-8",
+													"h-8",
 													!variable.enabled &&
 														!variable.isNew &&
 														"text-muted-foreground bg-muted",
 													variable.secret && "font-mono"
 												)}
 											/>
-											{variable.secret && !variable.isNew && (
-												<TooltipIconButton
-													label={
-														isSecretRevealed
-															? "Hide value"
-															: "Reveal value"
-													}
-													icon={
-														isSecretRevealed ? (
-															<EyeOff className="w-3.5 h-3.5" />
-														) : (
-															<Eye className="w-3.5 h-3.5" />
-														)
-													}
-													onClick={() => {
-														setRevealedSecrets((prev) => {
-															const newSet = new Set(prev);
-															if (newSet.has(index)) {
-																newSet.delete(index);
-															} else {
-																newSet.add(index);
-															}
-															return newSet;
-														});
-													}}
-													className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-												/>
-											)}
-										</div>
+										)}
 									</td>
 									<td className="py-1 px-2">
 										<Select
@@ -816,19 +829,16 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												}
 												icon={<KeyRound className="w-4 h-4" />}
 												onClick={() => {
+													// Un-securing a row swaps `SecretInput`
+													// out for a plain field, and its reveal
+													// state goes with it - so re-securing
+													// starts masked, without this handler
+													// tracking anything.
 													updateVariable(
 														index,
 														"secret",
 														!variable.secret
 													);
-													// Clear revealed state when toggling secret off
-													if (variable.secret) {
-														setRevealedSecrets((prev) => {
-															const newSet = new Set(prev);
-															newSet.delete(index);
-															return newSet;
-														});
-													}
 													performSaveRef.current();
 												}}
 												/*

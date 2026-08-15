@@ -52,6 +52,8 @@ export interface PreparedRequest {
 	 */
 	basicAuth: { username: string; password: string } | null;
 	body: PreparedBody | undefined;
+	/** Whether the response is a stream - see `SnippetRequest.stream`. */
+	stream: boolean;
 	notes: string[];
 	masked: boolean;
 }
@@ -265,6 +267,7 @@ export function prepareRequest(
 		headers: withContentType.map(([k, v]): [string, string] => [k, masker.apply(v)]),
 		basicAuth: maskedBasic,
 		body: body ? maskedBody(body, masker.apply) : undefined,
+		stream: request.stream === true,
 		notes,
 		masked: masker.wasUsed(),
 	};

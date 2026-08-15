@@ -27,8 +27,16 @@
 
 import { variableCompletionContext } from "./variable-completion";
 
-/** Which names belong in the list. `all` is the merged read - `pm.variables`. */
-export type ScriptVariableScope = "environment" | "collection" | "global" | "all";
+/**
+ * Which names belong in the list. `all` is the merged read - `pm.variables`.
+ *
+ * `data` is the odd one and deliberately named for what it selects rather than
+ * for a scope: `pm.iterationData` reads the run's data row, so the list is the
+ * *declared columns* of the collection's contract (issue #600), not variables
+ * at all. A caller that treats it as a variable scope finds no names, because
+ * no variable ever carries one - the namespace is disjoint from the tiers.
+ */
+export type ScriptVariableScope = "environment" | "collection" | "global" | "all" | "data";
 
 export interface ScriptVariableCompletionContext {
 	scope: ScriptVariableScope;
@@ -91,6 +99,7 @@ const SCOPE_BY_ACCESSOR: Record<string, ScriptVariableScope> = {
 	globals: "global",
 	collectionVariables: "collection",
 	variables: "all",
+	iterationData: "data",
 };
 
 /**
@@ -106,14 +115,23 @@ const NAME_METHODS: Record<string, readonly string[]> = {
 	globals: ["get", "set", "has", "unset"],
 	collectionVariables: ["get", "set", "has", "unset"],
 	variables: ["get", "has"],
+	// The row is read-only - set, unset and clear throw - and `toObject` takes
+	// no argument, so `get` and `has` are the whole of it.
+	iterationData: ["get", "has"],
 };
 
 /**
  * `pm.<accessor>.<method>(` immediately before the caret's string, allowing the
  * whitespace a formatter might leave. Anchored to the end so only the *first*
  * argument matches - `set`'s second argument is a value, not a name.
+ *
+ * Optional chaining counts as the dot it is. `pm.iterationData` is `undefined`
+ * outside a data-driven run and its own documentation says to guard before
+ * calling, so `pm.iterationData?.get("` is how the call is actually written -
+ * and a completion list that vanished when the user guarded would be teaching
+ * the opposite of what the surface asks for.
  */
-const ACCESSOR_CALL = /pm\s*\.\s*(\w+)\s*\.\s*(\w+)\s*\(\s*$/;
+const ACCESSOR_CALL = /pm\s*\??\.\s*(\w+)\s*\??\.\s*(\w+)\s*\(\s*$/;
 
 /**
  * Returns null when the caret is not inside a `pm.*` variable name argument.

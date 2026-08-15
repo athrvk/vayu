@@ -19,7 +19,8 @@ import { useMemo } from "react";
 import { Command, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./command";
 import { VariableScopeBadge } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
-import type { ResolvedVariable } from "@/types";
+import type { DataContractScope, ResolvedVariable } from "@/types";
+import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
@@ -34,6 +35,12 @@ export interface VariableAutocompleteProps {
 	onSelect: (variableName: string) => void;
 	/** Optional className for the container */
 	className?: string;
+	/**
+	 * The data contract in scope, when the collection chain declares one
+	 * (issue #600). Its columns are offered as `data.<column>` names, which is
+	 * how a request field addresses them - the same string the token carries.
+	 */
+	dataColumns?: DataContractScope;
 }
 
 export function VariableAutocomplete({
@@ -41,6 +48,7 @@ export function VariableAutocomplete({
 	searchQuery = "",
 	onSelect,
 	className,
+	dataColumns,
 }: VariableAutocompleteProps) {
 	// Filter variables based on search query
 	const filteredVariables = useMemo(() => {
@@ -64,7 +72,26 @@ export function VariableAutocomplete({
 		);
 	}, [variables, searchQuery]);
 
-	if (filteredVariables.length === 0 && filteredDynamic.length === 0) {
+	/*
+	 * Columns are their own group for the same reason generators are: they are
+	 * not variables, and interleaving them would put a name no scope defines
+	 * among the ones the user created. They are offered from the contract rather
+	 * than from `variables` because the namespace is disjoint from the scopes -
+	 * a stored variable named `data.email` cannot shadow the column, so there is
+	 * no shadowing check to make here.
+	 */
+	const filteredColumns = useMemo(() => {
+		const lowerQuery = searchQuery.toLowerCase();
+		return (dataColumns?.columns ?? [])
+			.map((column) => `${DATA_NAMESPACE_PREFIX}${column}`)
+			.filter((name) => name.toLowerCase().includes(lowerQuery));
+	}, [dataColumns, searchQuery]);
+
+	if (
+		filteredVariables.length === 0 &&
+		filteredDynamic.length === 0 &&
+		filteredColumns.length === 0
+	) {
 		return null;
 	}
 
@@ -84,6 +111,23 @@ export function VariableAutocomplete({
 								>
 									<span className="font-mono text-sm">{name}</span>
 									<VariableScopeBadge scope={varInfo.scope} variant="compact" />
+								</CommandItem>
+							))}
+						</CommandGroup>
+					)}
+					{filteredColumns.length > 0 && (
+						<CommandGroup heading="Data columns">
+							{filteredColumns.map((name) => (
+								<CommandItem
+									key={name}
+									value={name}
+									onSelect={() => onSelect(name)}
+									className="flex items-center justify-between cursor-pointer"
+								>
+									<span className="font-mono text-sm">{name}</span>
+									<span className="ml-2 truncate text-[11px] text-muted-foreground">
+										{dataColumns?.collectionName}
+									</span>
 								</CommandItem>
 							))}
 						</CommandGroup>
