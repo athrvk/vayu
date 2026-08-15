@@ -59,6 +59,13 @@ describe("which modes share a body", () => {
 		expect(draftKey("jsonrpc")).toBe("raw");
 	});
 
+	// Same reasoning again for xml: the pane holds one document this side never
+	// parses (the engine sends it byte for byte), so it is the raw string every
+	// other text mode edits, differing only in highlighting.
+	it("puts xml in the raw bucket for the same reason", () => {
+		expect(draftKey("xml")).toBe("raw");
+	});
+
 	it.each(["none", "form-data", "x-www-form-urlencoded"] as const)(
 		"gives %s none, since it does not use request.body",
 		(mode) => {
@@ -120,6 +127,25 @@ describe("json to jsonrpc", () => {
 	it("does not hand the GraphQL envelope to the JSON-RPC editor", () => {
 		const out = inA("graphql", "jsonrpc", GQL_BODY);
 		expect(out.body).toBe("");
+	});
+});
+
+describe("text to xml", () => {
+	const SOAP = "<soap:Envelope><soap:Body><Ping/></soap:Body></soap:Envelope>";
+
+	// The shared bucket from the user's side: a document pasted into the Text
+	// pane before the mode was picked is still there after picking XML. Mutation
+	// check: give xml a bucket of its own in `draftKey` and both assertions
+	// redden with an empty editor.
+	it("carries the document over and back", () => {
+		expect(inA("text", "xml", SOAP).body).toBe(SOAP);
+
+		const toXml = inA("text", "xml", SOAP);
+		expect(inA("xml", "text", SOAP, toXml.drafts).body).toBe(SOAP);
+	});
+
+	it("does not hand the GraphQL envelope to the XML editor", () => {
+		expect(inA("graphql", "xml", GQL_BODY).body).toBe("");
 	});
 });
 

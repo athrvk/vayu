@@ -134,6 +134,13 @@ Json serialize (const Request& request) {
             body_json["mode"]    = "jsonrpc";
             body_json["content"] = request.body.content;
             break;
+        // Verbatim, like every other text mode: an XML body reaches the wire as
+        // the bytes the user wrote (`wire_body_bytes` has no case for it), so
+        // storage must not reformat what sending will not.
+        case BodyMode::Xml:
+            body_json["mode"]    = "xml";
+            body_json["content"] = request.body.content;
+            break;
         default: break;
         }
 
@@ -655,6 +662,8 @@ Result<Request> deserialize_request (const Json& json) {
                     request.body.mode = BodyMode::GraphQL;
                 } else if (mode == "jsonrpc") {
                     request.body.mode = BodyMode::JsonRpc;
+                } else if (mode == "xml") {
+                    request.body.mode = BodyMode::Xml;
                 }
             }
 

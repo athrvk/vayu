@@ -24,6 +24,7 @@ export type BodyMode =
 	| "text"
 	| "graphql"
 	| "jsonrpc"
+	| "xml"
 	| "form-data"
 	| "x-www-form-urlencoded";
 
@@ -93,7 +94,7 @@ export interface FormFieldEntry extends KeyValueEntry {
  */
 export type RequestBody =
 	| { mode: "none" }
-	| { mode: "json" | "text" | "graphql" | "jsonrpc"; content: string }
+	| { mode: "json" | "text" | "graphql" | "jsonrpc" | "xml"; content: string }
 	| { mode: "form-data"; fields: FormFieldEntry[] }
 	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] };
 

@@ -58,15 +58,31 @@ describe("when a mode needs a Content-Type", () => {
 		expect(contentTypeToAdd("jsonrpc", [])).toBe("application/json");
 	});
 
+	// Not an envelope like the two above - the document is sent byte for byte -
+	// but the header carries the same weight: a SOAP endpoint reads the body as
+	// XML only when the request says it is one, and without this the document
+	// goes out under libcurl's `x-www-form-urlencoded` default.
+	it("asks for one on XML, which is a document the server must be told about", () => {
+		expect(contentTypeToAdd("xml", [])).toBe("application/xml");
+	});
+
 	it.each(["none", "json", "text", "form-data", "x-www-form-urlencoded"] as const)(
 		"asks for nothing on %s",
 		(mode) => {
-			// Only the two envelope modes write a header the user did not type.
-			// The others declare a content type, but the engine sets it from the
-			// mode.
+			// Only the three modes above write a header the user did not type. The
+			// others declare a content type, but the engine sets it from the mode.
 			expect(contentTypeToAdd(mode, [])).toBeNull();
 		}
 	);
+
+	// The user-wins rule, on the mode where it is load-bearing rather than
+	// theoretical: SOAP 1.2 requires `application/soap+xml`, so an XML body whose
+	// author typed that must keep it.
+	it("leaves a hand-typed application/soap+xml alone on an XML body", () => {
+		expect(
+			contentTypeToAdd("xml", [header(CONTENT_TYPE, "application/soap+xml; charset=utf-8")])
+		).toBeNull();
+	});
 
 	it("leaves an existing Content-Type alone", () => {
 		expect(contentTypeToAdd("graphql", [header(CONTENT_TYPE, "application/json")])).toBeNull();

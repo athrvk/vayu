@@ -121,7 +121,7 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
  * Both carry their content as `Body::fields`, never as `Body::content` - see
  * `vayu/http/form_body.hpp` for the wire encoding of each.
  */
-enum class BodyMode { None, Json, Text, Form, FormData, Binary, GraphQL, JsonRpc };
+enum class BodyMode { None, Json, Text, Form, FormData, Binary, GraphQL, JsonRpc, Xml };
 
 /**
  * @brief What a `form-data` part carries: typed text, or a file from disk.

@@ -149,7 +149,9 @@ export default function RequestBuilder() {
 								? "graphql"
 								: body.mode === "jsonrpc"
 									? "jsonrpc"
-									: "none";
+									: body.mode === "xml"
+										? "xml"
+										: "none";
 
 		const rawBody = "content" in body ? body.content : "";
 		const formFields = "fields" in body && body.mode === "form-data" ? body.fields : [];
@@ -426,7 +428,7 @@ export default function RequestBuilder() {
 				};
 			} else if (request.bodyMode !== "none" && request.body) {
 				bodyPayload = {
-					mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc",
+					mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
 					content: request.body,
 				};
 			} else {

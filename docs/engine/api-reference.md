@@ -249,6 +249,7 @@ so a body that round-trips through storage sends the same bytes.
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
+| `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
 
@@ -261,13 +262,17 @@ but never sent, so switching one back on needs no re-compose; `{{variables}}`
 resolve inside `key`, `value`, and a file part's `src` / `fileName` /
 `contentType` during composition.
 
-Three Content-Type rules follow from the encoding:
+Four Content-Type rules follow from the encoding:
 
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
 - `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
   rule - a Content-Type the caller wrote wins.
+- `xml` sets `Content-Type: application/xml`, again only when the caller
+  declared none. It has no envelope and nothing is done to `content`; the header
+  is the whole of what the mode adds over `text`, which is why an endpoint
+  expecting `application/soap+xml` keeps the header it was given.
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
@@ -2790,6 +2795,13 @@ not escaped, which is what keeps typed placement working. Nowhere else is
 anything escaped: a URL, a header, a form field and a `text` body take the
 rendered value byte for byte, and a bare (un-enveloped) GraphQL document is
 escaped once, later, when the engine wraps it.
+
+An `xml` body is **not** escaped either: its quoting rules are not JSON's, so a
+token in one is substituted verbatim today, and a cell carrying `&` or `<` will
+produce a document the server rejects. Escaping it needs a rule that knows
+whether the token sits in element text, an attribute value or a CDATA section -
+tracked as [#618](https://github.com/athrvk/vayu/issues/618). Until then, bind
+into XML from data you control.
 
 A token naming a column the bound row does not carry **errors the step before
 anything is sent**, with a message naming the token, the row index and the

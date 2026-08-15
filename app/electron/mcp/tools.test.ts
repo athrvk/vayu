@@ -1434,6 +1434,31 @@ describe("dispatchTool", () => {
 	 * `graphql` fall into `FORM_BODY_MODES` and arrive as `fields`, and the
 	 * body assertion reddens.
 	 */
+	/**
+	 * The xml mode has no envelope and no completer anywhere in the stack - the
+	 * engine sends `body.content` byte for byte - so what this layer owes is the
+	 * document unchanged under `mode: "xml"`. Mutation check: let `xml` fall into
+	 * `FORM_BODY_MODES` and it arrives split into `fields`, which is issue #381's
+	 * empty-body failure wearing a new mode.
+	 */
+	test("run_request sends an xml document to the engine as written", async () => {
+		const envelope = "<soap:Envelope><soap:Body><Ping/></soap:Body></soap:Envelope>";
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{
+				url: "https://api.example.com/soap",
+				method: "POST",
+				body: envelope,
+				bodyType: "xml",
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.body).toEqual({ mode: "xml", content: envelope });
+	});
+
 	test("run_request sends a bare graphql document to the engine as stored", async () => {
 		const query = "query Hero { hero { name } }";
 		const client = fakeClient();

@@ -154,7 +154,13 @@ Postman path-segment variables, host arrays, and port are not separately consume
 |------------------------|--------|
 | `"json"` | `{ mode: "json", content }` |
 | `"text"` | `{ mode: "text", content }` |
+| `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `withRequiredContentType` rule GraphQL uses (below) |
 | absent / other | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` |
+
+An unlabelled body is never sniffed into `xml`: without Postman's language, a
+`<`-shaped document is as likely to be HTML, and guessing would hand the request
+a Content-Type the server may disagree with. `"xml"` is the only new mapping -
+`"html"`, `"javascript"` and the rest still fall through to the sniff.
 
 **Dropped:** binary/file bodies (mode `file`) and per-field file uploads inside `formdata`. Both are counted into `ctx.skippedFileBody` and surface as a single `{ kind: "file_body", count }` `SkippedItem`.
 

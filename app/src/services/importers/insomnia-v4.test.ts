@@ -161,19 +161,21 @@ describe("InsomniaV4Parser", () => {
 		expect(result.meta.nonExecutableAuth).toBe(2);
 	});
 
-	it("keeps an unlisted text body (XML) instead of emptying it", () => {
+	it("keeps an unlisted text body (YAML) instead of emptying it", () => {
+		// XML used to be the example here; it has its own mode now (see below),
+		// so the fallback is pinned on a mime that is still genuinely unlisted.
 		const req = firstRequest(
 			doc({
 				_id: "r",
 				_type: "request",
 				parentId: "w",
-				name: "Soap",
+				name: "Config",
 				method: "post",
 				url: "https://x",
-				body: { mimeType: "application/xml", text: "<a>{{ _.id }}</a>" },
+				body: { mimeType: "text/yaml", text: "id: {{ _.id }}" },
 			})
 		);
-		expect(req.body).toEqual({ mode: "text", content: "<a>{{id}}</a>" });
+		expect(req.body).toEqual({ mode: "text", content: "id: {{id}}" });
 	});
 
 	it("drops a binary body but counts it as file_body", () => {
@@ -400,6 +402,68 @@ describe("InsomniaV4Parser", () => {
 			expect(req.headers).toEqual([
 				{ key: "Content-Type", value: "application/graphql", enabled: true },
 			]);
+		});
+	});
+
+	/*
+	 * The same chain for XML. Both mimes fell through to `unlistedBody`, which
+	 * keeps the text under `text` - readable in the editor, and a mode that
+	 * requires no Content-Type, so an imported SOAP request sent its envelope as
+	 * `x-www-form-urlencoded`. Mutation check: remove either case from
+	 * `insomniaBody` and that mime's mode assertion reddens along with its
+	 * header.
+	 */
+	describe("XML bodies", () => {
+		const SOAP = "<soap:Envelope><soap:Body/></soap:Envelope>";
+		const xmlRequest = (mimeType: string, headers: unknown[] = []) => ({
+			_id: "r",
+			_type: "request",
+			parentId: "w",
+			name: "R",
+			method: "post",
+			url: "https://x/soap",
+			headers,
+			body: { mimeType, text: SOAP },
+		});
+
+		it.each(["application/xml", "text/xml"])("maps %s to the xml mode", (mime) => {
+			const req = firstRequest(xmlRequest(mime));
+			expect(req.body.mode).toBe("xml");
+			expect((req.body as { content: string }).content).toBe(SOAP);
+		});
+
+		it("adds the Content-Type the wire needs", () => {
+			expect(firstRequest(xmlRequest("application/xml")).headers).toEqual([
+				{ key: "Content-Type", value: "application/xml", enabled: true },
+			]);
+		});
+
+		it("keeps a declared application/soap+xml", () => {
+			// SOAP 1.2's required type, which is exactly the case an importer that
+			// overwrote the declared header would break.
+			const req = firstRequest(
+				xmlRequest("text/xml", [{ name: "Content-Type", value: "application/soap+xml" }])
+			);
+			expect(req.headers).toEqual([
+				{ key: "Content-Type", value: "application/soap+xml", enabled: true },
+			]);
+		});
+
+		it("normalizes Insomnia's variable syntax inside the document", () => {
+			// The behaviour the old unlisted-body case covered for XML, kept where
+			// XML lives now: `{{ _.id }}` is Insomnia's spelling of `{{id}}`, and a
+			// mode that skipped the normalizer would import a token nothing resolves.
+			const req = firstRequest({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "R",
+				method: "post",
+				url: "https://x/soap",
+				headers: [],
+				body: { mimeType: "application/xml", text: "<a>{{ _.id }}</a>" },
+			});
+			expect(req.body).toEqual({ mode: "xml", content: "<a>{{id}}</a>" });
 		});
 	});
 

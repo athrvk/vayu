@@ -146,6 +146,41 @@ describe("the JSON-RPC mode", () => {
 	});
 });
 
+/**
+ * XML is the plain pane too, and for a simpler reason than JSON-RPC's: there is
+ * no envelope at all. The engine sends the document byte for byte, so what the
+ * mode owns is XML highlighting and the `application/xml` a SOAP endpoint needs
+ * to be told.
+ */
+describe("the XML mode", () => {
+	it("uses the plain code editor, not the GraphQL pair", () => {
+		renderPanel({ bodyMode: "xml" });
+		expect(screen.getByTestId("code-editor")).toBeInTheDocument();
+		expect(screen.queryByTestId("graphql-body")).not.toBeInTheDocument();
+	});
+
+	// Mutation check: drop the `xml` arm of the editor's language ternary and
+	// this reddens with `plaintext` - an XML pane with no highlighting, which is
+	// most of what the mode buys an author.
+	it("highlights it as XML", () => {
+		renderPanel({ bodyMode: "xml" });
+		expect(screen.getByTestId("code-editor")).toHaveAttribute("data-language", "xml");
+	});
+
+	it("shows the type the document is sent as", () => {
+		renderPanel({ bodyMode: "xml" });
+		expect(screen.getByText("application/xml")).toBeInTheDocument();
+	});
+
+	// A templated id or account number inside an envelope is the everyday case,
+	// so the mode has to reach the Source/Resolved swap that only code modes get.
+	it("offers the resolved preview, because it is a code mode", () => {
+		renderPanel({ bodyMode: "xml", body: "<order><id>{{orderId}}</id></order>" });
+		fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
+		expect(screen.getByText(/resolved-orderId/)).toBeInTheDocument();
+	});
+});
+
 describe("the resolved preview swaps rather than splits", () => {
 	const withVariable = { bodyMode: "json" as const, body: '{"id":"{{merchantId}}"}' };
 

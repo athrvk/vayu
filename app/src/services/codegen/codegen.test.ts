@@ -893,3 +893,77 @@ describe("a streaming request", () => {
 		}
 	});
 });
+
+/**
+ * The Content-Type a body mode implies (issue #580, the rider #585 deferred here).
+ *
+ * Every content mode fell through `normalizeBody` as raw content with **no**
+ * header, so a copied curl of a GraphQL or JSON-RPC request went out under
+ * libcurl's `x-www-form-urlencoded` default and most servers answered 400 - the
+ * snippet not doing what the app had just done, which is the one thing it is
+ * for. The table mirrors the engine's `implied_content_type`.
+ *
+ * Asserted across every target rather than on curl alone: the rule lives in
+ * `prepare.ts`, so a target that stopped emitting prepared headers would be the
+ * failure this catches.
+ */
+describe("the Content-Type a body mode implies", () => {
+	const withBody = (mode: string, content: string): SnippetRequest => ({
+		...GET,
+		method: "POST",
+		body: { mode, content },
+	});
+
+	const CASES = [
+		["graphql", '{"query":"{ hero { name } }"}', "application/json"],
+		["jsonrpc", '{"method":"eth_blockNumber","params":[]}', "application/json"],
+		["xml", "<soap:Envelope><soap:Body/></soap:Envelope>", "application/xml"],
+	] as const;
+
+	for (const [mode, content, expected] of CASES) {
+		it(`sends a ${mode} body as ${expected} in every target`, () => {
+			for (const target of CODE_TARGETS) {
+				const { code } = target.generate(withBody(mode, content));
+				expect(code, `${target.id} lost the header`).toContain(expected);
+			}
+		});
+	}
+
+	// The user-wins rule, the same one the engine (`body_content_type_header`)
+	// and the request builder (`body/content-type.ts`) apply. SOAP 1.2 requires
+	// `application/soap+xml`, so overwriting it would break the audience the xml
+	// mode exists for.
+	it("keeps a declared Content-Type instead of replacing it", () => {
+		const { code } = generateCurl({
+			...withBody("xml", "<a/>"),
+			headers: { "Content-Type": "application/soap+xml" },
+		});
+		expect(code).toContain("application/soap+xml");
+		expect(code).not.toContain("application/xml");
+	});
+
+	it("recognises a declared header whatever its casing", () => {
+		const { code } = generateCurl({
+			...withBody("xml", "<a/>"),
+			headers: { "content-type": "text/xml" },
+		});
+		expect(code).toContain("text/xml");
+		expect(code).not.toContain("application/xml");
+	});
+
+	// `json` and `text` are the modes a user writes the header for themselves,
+	// and the engine derives nothing for them either. Emitting one here would be
+	// the app inventing a request the user did not describe.
+	it.each(["json", "text"])("adds nothing for a %s body", (mode) => {
+		const { code } = generateCurl(withBody(mode, '{"a":1}'));
+		expect(code).not.toContain("Content-Type");
+	});
+
+	// An empty body is not a body: `has_wire_body` is false engine-side, so no
+	// header is sent, and a snippet that declared one would describe a request
+	// nothing makes.
+	it("adds nothing when the mode carries no content", () => {
+		const { code } = generateCurl(withBody("xml", ""));
+		expect(code).not.toContain("application/xml");
+	});
+});

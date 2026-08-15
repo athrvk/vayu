@@ -9,8 +9,14 @@
  * BodyPanel Component
  *
  * Mode selection, and whichever editor that mode needs: a code editor for JSON,
- * JSON-RPC and text, the key/value table for form-data and urlencoded, and
+ * JSON-RPC, XML and text, the key/value table for form-data and urlencoded, and
  * `GraphQLBody` for GraphQL.
+ *
+ * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
+ * plus an XML document the user writes whole, so the mode buys highlighting
+ * (Monaco's `xml` basic language ships in the bundle already, for the response
+ * viewer) and an auto-`Content-Type: application/xml` - not an editor. The
+ * engine sends its content byte for byte, with no envelope of any kind.
  *
  * **JSON-RPC is a plain JSON pane, deliberately.** Its call is one JSON text -
  * the envelope around it (`"jsonrpc":"2.0"`, and an `id` when the call names
@@ -75,6 +81,7 @@ const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }
 	{ value: "text", label: "Text", contentType: "text/plain" },
 	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
 	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
+	{ value: "xml", label: "XML", contentType: "application/xml" },
 	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
 	{
 		value: "x-www-form-urlencoded",
@@ -315,7 +322,8 @@ export default function BodyPanel() {
 	const isCodeMode =
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||
-		request.bodyMode === "jsonrpc";
+		request.bodyMode === "jsonrpc" ||
+		request.bodyMode === "xml";
 	const isTable =
 		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
 	const tableItems = request.bodyMode === "form-data" ? request.formData : request.urlEncoded;
@@ -408,7 +416,9 @@ export default function BodyPanel() {
 								language={
 									request.bodyMode === "json" || request.bodyMode === "jsonrpc"
 										? "json"
-										: "plaintext"
+										: request.bodyMode === "xml"
+											? "xml"
+											: "plaintext"
 								}
 								value={request.body || ""}
 								onChange={(v) => updateField("body", v ?? "")}
