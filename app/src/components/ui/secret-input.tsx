@@ -25,6 +25,12 @@ interface SecretInputProps {
 	placeholder?: string;
 	className?: string;
 	disabled?: boolean;
+	/**
+	 * Blur passthrough, for a host that commits on focus-out rather than on
+	 * every keystroke - the variables table saves there, so without this the
+	 * only field it cannot mount this primitive in would be the secret one.
+	 */
+	onBlur?: React.FocusEventHandler<HTMLInputElement>;
 }
 
 export function SecretInput({
@@ -33,6 +39,7 @@ export function SecretInput({
 	placeholder,
 	className,
 	disabled,
+	onBlur,
 }: SecretInputProps) {
 	const [revealed, setRevealed] = useState(false);
 	return (
@@ -41,6 +48,7 @@ export function SecretInput({
 				type={revealed ? "text" : "password"}
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
+				onBlur={onBlur}
 				placeholder={placeholder}
 				disabled={disabled}
 				className={cn("pr-9 font-mono text-sm", className)}

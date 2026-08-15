@@ -1057,10 +1057,12 @@ padding and sat against a `p-0` scroll container, so the ring lost its left side
 on Collection Detail but not on the Variables screen, where the container
 carries `p-4`. The fix is `px-1` on that cell - the same 4px - **not**
 `.panel-clip` on the container, which would have tucked this instance's ring
-inward and made the two checkboxes disagree. `focus-ring-clipping.test.tsx`
+inward and made the two checkboxes disagree. `key-value-parity.test.tsx`
 guards both halves: the two checkboxes must declare equal clearance, and neither
 may sit under a `.panel-clip`. The clearance assertion alone would pass a change
-that re-broke the match.
+that re-broke the match. That file grew into the wider parity contract between
+the two tables (#587) - control height, checkbox sizing and accent, the
+destructive row-action variant, and the shared secret-reveal control.
 
 **Composite rows - `.focus-row`.** The baseline attaches the ring to whatever is
 *focusable*, which is only right when the focusable element is also what the user

@@ -458,6 +458,8 @@ A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is 
 - **Sidebar (`sidebar/VariablesCategoryTree.tsx`)** - tree of variable scopes (globals, collections, environments); receives `collections` + `environments` from the Sidebar.
 - **Main (`main/`)** - `VariablesMain.tsx` (screen `"variables"`) hosts `VariableTableEditor.tsx`, the table editor for the selected scope, including the active-environment selector.
 
+**`VariableTableEditor` does not mount the [shared key/value table](#shared-keyvalue-editor-componentssharedkeyvalueeditor), and that exclusion is permanent** (decided in #564, re-examined and confirmed in #587). It is not a copy of that table - it is a different one: a per-row type select and secret toggle, a masked value cell, text committed on blur while toggles save immediately, and rows ordered by a `createdAt` stamp rather than by a trailing-blank rule. Mounting the primitive here would mean giving it a dynamic column model, a commit model, and variables-domain fields on `KeyValueItem`, redesigning a primitive for one consumer at the expense of its three others. What the "a hand-rolled copy of a primitive does not receive the primitive's fixes" rule *does* bind is the reveal control: `ui/secret-input` was extracted from this cell and then received fixes (the `tabIndex={-1}` removal, `aria-pressed`) the leftover copy never got, so the value cell mounts `SecretInput`. `main/key-value-parity.test.tsx` pins what the two tables must keep in common - control height, checkbox clearance and sizing, the shared `rowActionDestructive` variant, and that reveal control - each read off the primitive rather than off copied literals, so a fix to either side that skips the other fails.
+
 ## Settings (`modules/settings/`)
 
 Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
@@ -1105,6 +1107,8 @@ it picks a file, shows the path, and marks one an import brought in and this app
 never chose. `lib/file-path.ts` holds the basename rule it shares with the
 importers.
 
+The **variables table is deliberately not a consumer.** `modules/variables/main/VariableTableEditor.tsx` keeps its own rows for the reasons recorded in [Variables](#variables-modulesvariables); the parity it must hold with this table anyway is guarded by `key-value-parity.test.tsx`, not by hand.
+
 `key-value.ts` is the table's **row model**: `toKeyValueItems` /
 `toKeyValueEntries` convert between the domain `FormFieldEntry[]` and the
 UI-layer `KeyValueItem[]` (which adds the ephemeral `id` React keys need), and
@@ -1175,7 +1179,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 The `cva` definitions for `badge`, `button` and `toast` live in sibling
 `*-variants.ts` modules and are re-exported from `components/ui/index.ts`. A
