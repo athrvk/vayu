@@ -20,9 +20,9 @@ import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
+	declaredParamRow,
 	deref,
 	exampleBodyText,
-	queryParamRow,
 	resolvePathItem,
 	responseExample,
 	SkipTally,
@@ -202,12 +202,15 @@ function buildSwaggerOp(
 			case "query":
 				// Swagger 2.0 states a non-body parameter's value inline as `default`;
 				// it has no `example` keyword (that arrived with v3's Example Object).
-				params.push(queryParamRow(name, param.default, param.required, description));
+				params.push(declaredParamRow(name, param.default, param.required, description));
 				break;
 			case "header": {
 				const lower = name.toLowerCase();
+				// Same value/enabled rule as a query row (#658). No description: the
+				// Headers table has no column for one, so carrying it would be a field
+				// nothing reads.
 				if (lower !== "authorization" && lower !== "content-type")
-					headers.push({ key: name, value: "", enabled: true });
+					headers.push(declaredParamRow(name, param.default, param.required));
 				break;
 			}
 			case "body": {

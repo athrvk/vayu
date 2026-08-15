@@ -210,8 +210,8 @@ export function exampleBodyText(value: unknown): string {
 }
 
 /**
- * A value a spec declares for a query parameter, as the text a Params row holds -
- * or `undefined` when there is nothing Vayu can put on the wire.
+ * A value a spec declares for a query or header parameter, as the text its row
+ * holds - or `undefined` when there is nothing Vayu can put on the wire.
  *
  * Only scalars convert. An array or object value is serialized by the parameter's
  * `style`/`explode` (v3) or `collectionFormat` (v2), neither of which this importer
@@ -227,24 +227,26 @@ export function paramValueText(declared: unknown): string | undefined {
 }
 
 /**
- * One `in: "query"` parameter as a Params row (issue #622).
+ * One declared `in: "query"` or `in: "header"` parameter as a table row
+ * (issues #622, #658).
  *
  * A spec's parameter list declares what the endpoint *accepts*, not what every
  * request should *send*. An optional parameter with no declared value has nothing
- * to send, so it imports **disabled**: the row stays in the Params table, one click
- * from use, while the `url` - which since #590 carries every enabled row - does not
- * gain a bare `?verbose` nobody chose. Some APIs read that bare key as `verbose=true`,
- * so importing it enabled changed the wire for imported collections.
+ * to send, so it imports **disabled**: the row stays in its table, one click from
+ * use, and off the wire. Enabled it was a choice nobody made - for a query row the
+ * `url`, which since #590 carries every enabled row, gained a bare `?verbose` that
+ * some APIs read as `verbose=true`; for a header row the request claimed to send
+ * `X-Request-Id` with an empty value, which is not a header any spec asked for.
  *
  * Two things override that, and only these two:
  *
  * - `required: true` - a spec saying the parameter must be sent is an instruction,
- *   not documentation. The row imports enabled even with no value, and the bare key
- *   is the user's cue to fill it in.
+ *   not documentation. The row imports enabled even with no value, and the empty
+ *   value is the user's cue to fill it in.
  * - a declared value - a row carrying `?status=available` sends what the spec said,
  *   which is the case enabling was ever right for.
  */
-export function queryParamRow(
+export function declaredParamRow(
 	name: string,
 	declared: unknown,
 	required: unknown,

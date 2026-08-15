@@ -30,6 +30,9 @@ describe("OpenApiV3Parser", () => {
 		// Optional, and the spec declares no value for it - documentation, not intent
 		// (#622), so the row imports disabled and stays off the URL.
 		expect(get.params).toEqual([{ key: "verbose", value: "", enabled: false }]);
+		// Same rule for the declared header (#658): optional and value-less, so the
+		// row is listed but off the wire rather than sent with an empty value.
+		expect(get.headers).toEqual([{ key: "X-Request-Id", value: "", enabled: false }]);
 		expect(get.auth).toEqual({ mode: "inherit" });
 	});
 
@@ -442,6 +445,86 @@ describe("OpenApiV3Parser", () => {
 			).toEqual([
 				{ key: "verbose", value: "", enabled: false, description: "Expand the payload" },
 			]);
+		});
+	});
+
+	/**
+	 * Issue #658, the header half of the same rule. An enabled header row with an
+	 * empty value is a header nobody chose: the request claims to send
+	 * `X-Request-Id` with nothing in it, which is more likely to trip server
+	 * validation than an absent query key is.
+	 */
+	describe("header parameter enabled state", () => {
+		const headersOf = (parameters: unknown[]) => {
+			const spec = {
+				openapi: "3.0.0",
+				info: { title: "Header API" },
+				components: { schemas: { Tenant: { type: "string", default: "acme" } } },
+				paths: { "/items": { get: { summary: "List items", parameters } } },
+			};
+			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].headers;
+		};
+
+		it("imports an optional value-less header disabled and a required one enabled", () => {
+			expect(
+				headersOf([
+					{ name: "X-Request-Id", in: "header", schema: { type: "string" } },
+					{
+						name: "X-Tenant",
+						in: "header",
+						required: true,
+						schema: { type: "string" },
+					},
+				])
+			).toEqual([
+				{ key: "X-Request-Id", value: "", enabled: false },
+				{ key: "X-Tenant", value: "", enabled: true },
+			]);
+		});
+
+		it("carries a declared value, by the same precedence a query row uses", () => {
+			expect(
+				headersOf([
+					{
+						name: "X-Api-Version",
+						in: "header",
+						example: "2026-08-01",
+						schema: { type: "string", default: "2024-01-01" },
+					},
+					{
+						name: "X-Tenant",
+						in: "header",
+						schema: { $ref: "#/components/schemas/Tenant" },
+					},
+				])
+			).toEqual([
+				{ key: "X-Api-Version", value: "2026-08-01", enabled: true },
+				{ key: "X-Tenant", value: "acme", enabled: true },
+			]);
+		});
+
+		it("leaves a non-scalar declared value value-less and disabled", () => {
+			expect(
+				headersOf([
+					{ name: "X-Tags", in: "header", schema: { type: "array", default: ["a"] } },
+				])
+			).toEqual([{ key: "X-Tags", value: "", enabled: false }]);
+		});
+
+		it("carries no description, since the Headers table has no column for one", () => {
+			expect(
+				headersOf([{ name: "X-Request-Id", in: "header", description: "Correlation id" }])
+			).toEqual([{ key: "X-Request-Id", value: "", enabled: false }]);
+		});
+
+		it("still drops the headers Vayu manages, required or not", () => {
+			expect(
+				headersOf([
+					{ name: "Authorization", in: "header", required: true },
+					{ name: "content-type", in: "header", example: "application/json" },
+					{ name: "X-Keep", in: "header", required: true },
+				])
+			).toEqual([{ key: "X-Keep", value: "", enabled: true }]);
 		});
 	});
 });
