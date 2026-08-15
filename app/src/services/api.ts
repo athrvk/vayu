@@ -62,6 +62,8 @@ import type {
 	ImportApplyRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
+	SpecSyncRequest,
+	SpecSyncResponse,
 	SpecDocument,
 	OAuth2TokenRequest,
 	OAuth2TokenResponse,
@@ -247,6 +249,18 @@ export const apiService = {
 	 */
 	async getSpec(id: string): Promise<SpecDocument> {
 		return await httpClient.get<SpecDocument>(API_ENDPOINTS.SPEC_BY_ID(id));
+	},
+
+	/**
+	 * Apply a re-fetched document to the collection bound to it (issue #655).
+	 *
+	 * One call because it has to be one transaction: the document, the binding
+	 * that moves to it and every row the diff selected land together or not at
+	 * all. Expressed as N writes it could stop halfway and leave a collection
+	 * bound to a document its requests do not reflect.
+	 */
+	async syncSpec(payload: SpecSyncRequest): Promise<SpecSyncResponse> {
+		return await httpClient.post<SpecSyncResponse>(API_ENDPOINTS.SPEC_SYNC, payload);
 	},
 
 	/**

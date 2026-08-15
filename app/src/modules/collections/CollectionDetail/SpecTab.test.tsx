@@ -45,6 +45,13 @@ const bindSpec = {
 	data: undefined as { failedStamps: string[] } | undefined,
 };
 
+const syncSpec = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+
 const specQuery = {
 	data: undefined as { sourceUrl: string | null; fetchedAt: number } | undefined,
 	isLoading: false,
@@ -65,6 +72,10 @@ vi.mock("@/queries/collections", () => ({
 vi.mock("@/queries/specs", () => ({
 	useSpecQuery: () => specQuery,
 	useBindSpecMutation: () => bindSpec,
+	// The Sync section's apply half (issue #655). Stubbed like the two above:
+	// this file renders the tab without a QueryClient, and what a sync writes is
+	// asserted in SpecSync.test.tsx.
+	useSyncSpecMutation: () => syncSpec,
 }));
 
 const importFetch = vi.fn();
@@ -159,6 +170,9 @@ beforeEach(() => {
 	bindSpec.isPending = false;
 	bindSpec.isError = false;
 	bindSpec.data = undefined;
+	syncSpec.mutate.mockClear();
+	syncSpec.isPending = false;
+	syncSpec.isError = false;
 	specQuery.data = undefined;
 	specQuery.isError = false;
 	importFetch.mockReset();

@@ -16,6 +16,7 @@ import type {
 	ImportApplySpec,
 } from "@/types";
 import type { CollectionDraft, ImportOptions, ImportResult } from "./types";
+import { requestFieldsFromDraft } from "./request-payload";
 
 /** The subset of the API the orchestrator needs. Injected so it is easy to fake in tests. */
 export interface ImportApi {
@@ -182,34 +183,9 @@ function flatten(
 		requests.push({
 			tempId: requireTempId(r.tempId, "request"),
 			collectionTempId: tempId,
-			name: r.name,
-			description: r.description,
-			method: r.method,
-			url: r.url,
-			params: r.params,
-			headers: r.headers,
-			body: r.body,
-			bodyType: r.body.mode, // engine never derives this
-			auth: r.auth,
-			preRequestScript: r.preRequestScript,
-			postRequestScript: r.postRequestScript,
-			// Spread rather than assigned so the payload object holds the key only
-			// when the source stated it. `JSON.stringify` would drop an `undefined`
-			// property anyway, but the payload is also compared structurally in
-			// tests, and "absent" is the state the engine's field appliers read.
-			...(r.followRedirects !== undefined ? { followRedirects: r.followRedirects } : {}),
-			...(r.maxRedirects !== undefined ? { maxRedirects: r.maxRedirects } : {}),
-			// Saved example responses ride nested on their request rather than as a
-			// fourth top-level section: nothing references them, so they need no
-			// temp id, and the engine writes them in the same transaction. Spread
-			// for the same reason as the two fields above - a parser that has no
-			// examples must not send `examples: []`, which reads as "this request
-			// documents no responses" rather than "this format has none".
-			...(r.examples !== undefined ? { examples: r.examples } : {}),
-			// Spread for the same reason as the fields above: a format with no
-			// concept of a spec operation must not send `specOperation: null`,
-			// which the engine reads as "clear it" rather than "never had one".
-			...(r.specOperation !== undefined ? { specOperation: r.specOperation } : {}),
+			// Every field that comes from the draft, shared with the OpenAPI sync
+			// so a field added for one write path cannot go missing on the other.
+			...requestFieldsFromDraft(r),
 			order: i,
 		});
 	}

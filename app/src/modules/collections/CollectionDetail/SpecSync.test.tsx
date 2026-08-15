@@ -9,18 +9,26 @@
  */
 
 /**
- * The Spec tab's Sync section (issue #654).
+ * The Spec tab's Sync section (issues #654 and #655).
  *
- * What this has to prove is mostly what it does *not* do: checking a document
- * writes nothing, so the write half (#655) inherits a diff that was safe to
- * compute. Beyond that - the up-to-date short-circuit is byte equality against
- * the stored document, every count is stated including the zeros, and a binding
+ * The read half has to prove mostly what it does *not* do: checking a document
+ * writes nothing, the up-to-date short-circuit is byte equality against the
+ * stored document, every count is stated including the zeros, and a binding
  * with no origin says what to do about it instead of failing quietly.
+ *
+ * The write half (#655) adds the two rules a user has to be able to rely on:
+ * applying sends **one** call - so it is one transaction - and what it sends is
+ * exactly what was ticked. The defaults are pinned here rather than only in
+ * `spec-apply.test.ts` because the default *is* the interface: a removal that
+ * arrived pre-ticked, or an edited field that did, would be a silent
+ * destruction nobody had to agree to.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import type { Request, SpecDocument } from "@/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import type { Collection, Request, SpecDocument, SpecSyncRequest } from "@/types";
 
 const importFetch = vi.fn();
 const updateRequest = vi.fn();
@@ -28,6 +36,7 @@ const updateCollection = vi.fn();
 const createRequest = vi.fn();
 const deleteRequest = vi.fn();
 const createSpec = vi.fn();
+const syncSpec = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
@@ -37,6 +46,7 @@ vi.mock("@/services/api", () => ({
 		createRequest,
 		deleteRequest,
 		createSpec,
+		syncSpec: (payload: SpecSyncRequest) => syncSpec(payload),
 	},
 }));
 
@@ -93,16 +103,61 @@ const request = (overrides: Partial<Request> = {}): Request =>
 		...overrides,
 	}) as Request;
 
+const collection = (id = "col_1"): Collection =>
+	({
+		id,
+		name: "Pets API",
+		order: 0,
+		openapi: { specId: "spec_1", specHash: "abc123" },
+	}) as Collection;
+
+/**
+ * Renders inside a real query client - the apply path is a mutation, and a
+ * stubbed one could not prove that a failed sync leaves the selection alone.
+ */
+function renderSync(props: {
+	spec?: SpecDocument;
+	requests?: Request[];
+	collections?: Collection[];
+}) {
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+	});
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	return render(
+		<SpecSync
+			collection={collection()}
+			collections={props.collections ?? [collection()]}
+			spec={props.spec}
+			specFile={undefined}
+			requests={props.requests ?? [request()]}
+		/>,
+		{ wrapper }
+	);
+}
+
 const check = () => fireEvent.click(screen.getByRole("button", { name: /check for changes/i }));
+const apply = () => fireEvent.click(screen.getByRole("button", { name: /apply selected/i }));
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	syncSpec.mockResolvedValue({
+		idMap: {},
+		specId: "spec_2",
+		specHash: "def456",
+		syncedAt: 1_700_000_100_000,
+		created: 0,
+		updated: 1,
+		deleted: 0,
+	});
 });
 
 describe("SpecSync", () => {
 	it("reports up to date when the document comes back byte for byte", async () => {
 		importFetch.mockResolvedValue({ content: BOUND });
-		render(<SpecSync spec={spec(BOUND)} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: spec(BOUND) });
 
 		check();
 
@@ -112,7 +167,7 @@ describe("SpecSync", () => {
 
 	it("states every count, zeros included, when the document has changed", async () => {
 		importFetch.mockResolvedValue({ content: doc("List all the pets") });
-		render(<SpecSync spec={spec(BOUND)} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: spec(BOUND) });
 
 		check();
 
@@ -131,13 +186,7 @@ describe("SpecSync", () => {
 				parameters: [{ name: "limit", in: "query", required: true, example: "50" }],
 			}),
 		});
-		render(
-			<SpecSync
-				spec={spec(BOUND)}
-				specFile={undefined}
-				requests={[request({ name: "My pets call" })]}
-			/>
-		);
+		renderSync({ spec: spec(BOUND), requests: [request({ name: "My pets call" })] });
 
 		check();
 
@@ -151,7 +200,7 @@ describe("SpecSync", () => {
 
 	it("writes nothing at all while checking", async () => {
 		importFetch.mockResolvedValue({ content: doc("List all the pets") });
-		render(<SpecSync spec={spec(BOUND)} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: spec(BOUND) });
 
 		check();
 
@@ -162,14 +211,14 @@ describe("SpecSync", () => {
 			createRequest,
 			deleteRequest,
 			createSpec,
+			syncSpec,
 		]) {
 			expect(write).not.toHaveBeenCalled();
 		}
-		expect(screen.getByText(/nothing has been changed/i)).toBeTruthy();
 	});
 
 	it("says what to do when the binding records no origin to read from", async () => {
-		render(<SpecSync spec={spec(BOUND, null)} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: spec(BOUND, null) });
 
 		check();
 
@@ -179,7 +228,7 @@ describe("SpecSync", () => {
 
 	it("surfaces the engine's message when the re-fetch fails", async () => {
 		importFetch.mockRejectedValue(new Error("Fetch failed: 404 Not Found"));
-		render(<SpecSync spec={spec(BOUND)} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: spec(BOUND) });
 
 		check();
 
@@ -192,9 +241,7 @@ describe("SpecSync", () => {
 		// is invisible in dark. Rendered rather than scanned, and the count is
 		// asserted so this cannot pass by finding nothing.
 		importFetch.mockResolvedValue({ content: doc("List all the pets") });
-		const { container } = render(
-			<SpecSync spec={spec(BOUND)} specFile={undefined} requests={[request()]} />
-		);
+		const { container } = renderSync({ spec: spec(BOUND) });
 
 		check();
 		await screen.findByText(/the document has changed/i);
@@ -207,12 +254,120 @@ describe("SpecSync", () => {
 	});
 
 	it("cannot be checked until the stored document has loaded", async () => {
-		render(<SpecSync spec={undefined} specFile={undefined} requests={[request()]} />);
+		renderSync({ spec: undefined });
 
 		const button = screen.getByRole("button", { name: /check for changes/i });
 		expect(button.hasAttribute("disabled")).toBe(true);
 		await waitFor(() => {
 			expect(screen.getByText(/has to load before it can be compared/i)).toBeTruthy();
 		});
+	});
+	it("applies the whole selection in one call, and stores the bytes it diffed", async () => {
+		const next = doc("List all the pets");
+		importFetch.mockResolvedValue({ content: next });
+		renderSync({ spec: spec(BOUND) });
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		const payload = syncSpec.mock.calls[0][0] as SpecSyncRequest;
+		expect(payload.collectionId).toBe("col_1");
+		// The document that was compared, not a second re-fetch: a sync that
+		// stored different bytes from the ones it diffed would apply a diff
+		// nobody computed.
+		expect(payload.spec.content).toBe(next);
+		expect(payload.update).toHaveLength(1);
+		expect(payload.update[0].id).toBe("req_1");
+		expect(payload.update[0].name).toBe("List all the pets");
+		expect(payload.delete).toEqual([]);
+		expect(await screen.findByText(/applied - 0 requests created, 1 updated/i)).toBeTruthy();
+	});
+
+	it("leaves a field the user edited out of the payload until it is ticked", async () => {
+		// The document moved `summary` and the user renamed the request, so the
+		// name is theirs: nothing about this request is ticked for them, and even
+		// applying the request writes every field except that one. Mutation check:
+		// drop the `userTouched` filter in `defaultSelection` and both halves
+		// redden - the first because the name arrives pre-ticked, the second
+		// because it is then in the payload before anybody agreed.
+		importFetch.mockResolvedValue({ content: doc("List all the pets") });
+		renderSync({ spec: spec(BOUND), requests: [request({ name: "My pets call" })] });
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		expect(
+			screen.getByRole("button", { name: /apply selected/i }).hasAttribute("disabled")
+		).toBe(true);
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /apply changes to my pets call/i }));
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		expect((syncSpec.mock.calls[0][0] as SpecSyncRequest).update[0].name).toBeUndefined();
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		fireEvent.click(screen.getByRole("checkbox", { name: /apply changes to my pets call/i }));
+		fireEvent.click(screen.getByRole("checkbox", { name: /apply name to my pets call/i }));
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));
+		expect((syncSpec.mock.calls[1][0] as SpecSyncRequest).update[0].name).toBe(
+			"List all the pets"
+		);
+	});
+
+	it("never deletes without a confirm that names the count", async () => {
+		// The new document declares a different operation, so the bound request's
+		// operation is gone and a second one is added.
+		importFetch.mockResolvedValue({
+			content: JSON.stringify({
+				openapi: "3.0.0",
+				info: { title: "Pets API" },
+				servers: [{ url: "https://api.example.com" }],
+				paths: {
+					"/owners": { get: { operationId: "listOwners", summary: "List owners" } },
+				},
+			}),
+		});
+		renderSync({ spec: spec(BOUND) });
+
+		check();
+		await screen.findByText(/the document has changed/i);
+
+		// Unticked by default - applying now must not name the request at all.
+		apply();
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		expect((syncSpec.mock.calls[0][0] as SpecSyncRequest).delete).toEqual([]);
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		fireEvent.click(screen.getByRole("checkbox", { name: /list pets \(GET \/pets\)/i }));
+		apply();
+
+		// The confirm stands between the tick and the call.
+		expect(syncSpec).toHaveBeenCalledTimes(1);
+		expect(await screen.findByText(/1 request will be deleted/i)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: /apply and delete/i }));
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));
+		expect((syncSpec.mock.calls[1][0] as SpecSyncRequest).delete).toEqual(["req_1"]);
+	});
+
+	it("surfaces a failed apply and keeps the selection", async () => {
+		importFetch.mockResolvedValue({ content: doc("List all the pets") });
+		syncSpec.mockRejectedValue(new Error("Request 'req_1' no longer exists"));
+		renderSync({ spec: spec(BOUND) });
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		apply();
+
+		expect(await screen.findByText(/no longer exists/i)).toBeTruthy();
+		// Still the diff, still ticked: nothing was written, so there is nothing
+		// to re-check before trying again.
+		expect(screen.getByRole("button", { name: /apply selected/i })).toBeTruthy();
 	});
 });

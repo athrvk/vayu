@@ -24,12 +24,12 @@
  *   `spec-file-store` and never reaches the engine. A URL-sourced spec keeps its
  *   origin portably instead, in `spec_documents.source_url`.
  *
- * What this tab deliberately does not do: create, delete or edit requests.
- * Binding an existing collection matches what is already there and stamps
- * identity on the matches - the operations with no request, and the requests
- * with no operation, are *reported* and left alone. The Sync section (#654)
- * holds to the same line: it re-reads the document and says what moved, and
- * acting on that difference is #655.
+ * **Binding** deliberately creates, deletes and edits nothing: it matches what
+ * is already there and stamps identity on the matches - the operations with no
+ * request, and the requests with no operation, are *reported* and left alone.
+ * The one place this tab writes requests is the Sync section, and only for the
+ * items the user ticks: it re-reads the document and says what moved (#654),
+ * and applies the selection in one engine transaction (#655).
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -319,7 +319,15 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				</div>
 			)}
 
-			{bound && <SpecSync spec={spec} specFile={specFile} requests={requests} />}
+			{bound && (
+				<SpecSync
+					collection={collection}
+					collections={collections}
+					spec={spec}
+					specFile={specFile}
+					requests={requests}
+				/>
+			)}
 
 			<SaveFailed mutation={bindSpec} what="the spec binding" />
 			<SaveFailed mutation={updateCollection} what="the spec binding" />

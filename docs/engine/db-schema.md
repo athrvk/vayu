@@ -269,10 +269,13 @@ rather than being a fresh table's column, so `sync_schema` ALTERs it onto an
 existing `request_examples` and every pre-existing row backfills to `import` -
 which is what all of them are, since import was the only writer until the app
 could save a live response as an example. It exists because the OpenAPI spec
-sync (#627) replaces the examples a document produced and must leave the ones a
-person saved alone, and nothing else about a row says which it is. The write
-paths validate it against those two values and `400` on anything else; no read
-path in the app displays it.
+sync replaces the examples a document produced and must leave the ones a person
+saved alone, and nothing else about a row says which it is - `POST /specs/sync`
+(issue #655) is the reader: applying a change to a request deletes that
+request's `import` rows and writes the document's in their place, and an
+explicit `origin` in that payload is a `400` so a sync cannot manufacture rows
+it would then refuse to replace. The write paths validate it against those two
+values and `400` on anything else; no read path in the app displays it.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each

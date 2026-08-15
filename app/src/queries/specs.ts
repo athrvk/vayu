@@ -8,14 +8,14 @@
 /**
  * Spec Queries
  *
- * Reading a bound OpenAPI document, and binding one to a collection that
- * already exists (issues #637, #638).
+ * Reading a bound OpenAPI document, binding one to a collection that already
+ * exists, and applying a re-fetched one (issues #637, #638, #655).
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import type { SpecDocument, SpecOperation } from "@/types";
+import type { SpecDocument, SpecOperation, SpecSyncRequest, SpecSyncResponse } from "@/types";
 
 /**
  * The document a collection is bound to, or nothing while it is bound to none.
@@ -118,6 +118,34 @@ export function useBindSpecMutation() {
 		// per collection - a spec's operations land across every tag
 		// sub-collection, so the affected set is the subtree, not one list.
 		onSettled: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+		},
+	});
+}
+
+/**
+ * Apply a re-fetched document to the collection bound to it (issue #655).
+ *
+ * One mutation for one engine call, unlike `useBindSpecMutation`'s three writes:
+ * a sync creates, updates and deletes at once, and half of it landing would
+ * leave the collection bound to a document its requests do not reflect. The
+ * engine refuses that structurally (`POST /specs/sync` is one transaction), so
+ * there is nothing here to sequence or to roll back.
+ *
+ * On success, not settled: a failed sync wrote nothing, so nothing it touched
+ * needs refetching. The request lists go as a family - a document's operations
+ * land across every tag sub-collection, so the affected set is the subtree - and
+ * that also drops the examples a sync refreshed, which are cached under their
+ * own request's key.
+ */
+export function useSyncSpecMutation() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (payload: SpecSyncRequest): Promise<SpecSyncResponse> =>
+			apiService.syncSpec(payload),
+		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 		},

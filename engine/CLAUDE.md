@@ -45,6 +45,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it |
+| POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -93,8 +94,8 @@ Three things worth knowing before you design around them:
   records an **`origin`** (#588): `import` for what an importer or a spec sync
   wrote, `user` for what the app saved from a live response - defaulting to
   `import`, and a `400` on anything else. It is stored so the OpenAPI spec sync
-  (#627) can replace the first kind without touching the second; nothing else
-  about a row says where it came from.
+  (`POST /specs/sync`, #655) can replace the first kind without touching the
+  second; nothing else about a row says where it came from.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request
@@ -150,7 +151,14 @@ Three things worth knowing before you design around them:
   every run of every bound collection was stamped with. A scenario run of a
   bound collection stamps `specId` + `specHash` into `config_snapshot` and
   `GET /runs/:id/report` echoes it under `metadata.openapi`; an unbound run
-  carries no key at all.
+  carries no key at all. **Applying a re-fetched document is `POST /specs/sync`**
+  (#655), not a sequence of writes: it is the one route that creates, updates
+  *and* deletes, which is why it is deliberately outside `/import/apply` (that
+  one only creates, which is what lets it own every id with nothing stored behind
+  it). It refuses to touch a request outside the synced collection's subtree and
+  replaces only `origin="import"` examples. `Database::spec_sync_apply` is its
+  transaction, a sibling of `import_apply` and `apply_reorder` for the same
+  reason those two are separate.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

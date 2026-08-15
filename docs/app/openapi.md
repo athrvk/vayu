@@ -127,7 +127,7 @@ difference is what applying a sync will do.
 ## Checking a bound spec for changes
 
 A contract moves. The **Sync** section of the Spec tab re-reads the bound
-document and tells you what moved - and, for now, only tells you: **checking
+document, tells you what moved, and applies the parts you tick. **Checking
 writes nothing at all**, so it costs nothing to ask.
 
 Where it re-reads from is what the binding recorded:
@@ -183,9 +183,68 @@ quietly reverting your work. When the bound document itself cannot be read, the
 section says so for that request instead of guessing which side a difference came
 from.
 
-**Saved response examples are not compared yet.** Which of them a sync may
-replace - the ones an import created, never the ones you saved - is decided
-where a sync applies changes, so they are compared there.
+**Saved response examples are not compared.** Comparing them costs a query per
+request, and what happens to them is a rule rather than a difference to weigh -
+see [What applying does to examples](#what-applying-does-to-examples).
+
+## Applying what the check found
+
+Every item is a checkbox, and applying is deliberately partial: take the four
+new operations and keep the one request whose operation was removed, if that is
+what you want. What arrives ticked is what applying can only restore, never
+destroy:
+
+| Item | Ticked by default? |
+|---|---|
+| A new operation | Yes - it creates a request that was not there |
+| A changed field the document moved | Yes |
+| A changed field marked **edited here** | **No** - your value is only overwritten if you tick it |
+| Every field of a request whose bound document could not be read | **No** - see below |
+| A request whose operation the document no longer declares | **No** - it would be deleted |
+
+When the bound document cannot be read at all, nothing about that request is
+ticked for you: "you edited this" is a three-way judgement, and with one side
+missing it is not a judgement anything can make.
+
+**Applying is one call and one engine transaction.** The re-fetched document is
+stored, the collection's binding moves to it, and every created, updated and
+deleted request lands with it - or none of it does and the collection stays
+bound to the document it was bound to before. There is no half-applied sync to
+find and repair.
+
+Deleting is behind a confirmation that names the count, and the deletions ride
+in the same apply as everything else you ticked.
+
+### Where a new operation lands
+
+In the sub-collection named after its first tag, exactly where an import would
+have filed it - matched by name against the folders the bound collection
+already has, and created once per tag when there is none. An operation with no
+tag lands on the bound collection itself.
+
+### What applying does to examples
+
+Applying a change to a request also **refreshes that request's response examples
+from the document**: the examples a previous import or sync wrote are replaced
+by what the document now documents.
+
+- Examples you saved from a live response are **never** replaced. The engine
+  records who wrote each one (`origin`), and only the imported ones are in
+  scope.
+- The order is preserved where it can be: your saved examples never move, and a
+  refreshed example never jumps ahead of one that was already in front of it.
+  This matters because a mock server answers with the *first* example.
+
+### What a sync will never touch
+
+Nothing outside the collection being synced. The engine checks that every
+request an apply updates or deletes lives beneath that collection, so a sync is
+an operation on one contract's collection and cannot reach anything else -
+including a second collection bound to the same document.
+
+Auth and scripts are not spec-derived and are never written by a sync: an import
+sets auth to `inherit` and the scripts to empty for every operation, so anything
+there is yours.
 
 ## Export - back out to a document
 
@@ -268,6 +327,5 @@ recorded (the response is written, the body is not). Nothing is dropped quietly.
 
 ## What is not here yet
 
-Applying what a check found, validating responses against their declared
-schemas, and contract coverage on a run report. Each is its own phase; this page
-grows with them.
+Validating responses against their declared schemas, and contract coverage on a
+run report. Each is its own phase; this page grows with them.
