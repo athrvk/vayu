@@ -66,11 +66,28 @@ struct ResponseSample {
      */
     std::optional<size_t> iteration;
     std::optional<size_t> data_row_index;
+    /**
+     * Events this transfer delivered, when it was a bounded stream
+     * (`Response::stream_events`); absent otherwise.
+     *
+     * The events themselves are not copied: `body` already holds the
+     * `text/event-stream` bytes they were parsed from, and the deferred replay
+     * parses them back with `buffered_stream_events_node` at the end of the run
+     * rather than on the completion path. What cannot be recovered from the
+     * body is this count - the wire tally, which stays truthful even when the
+     * body was cut - so it is the one thing carried here (issue #657).
+     *
+     * Absent, not zero, for a non-stream response: that is what lets the
+     * replayed script read `pm.response.events` as `undefined` rather than as
+     * an empty list, which is the same distinction the live path keeps.
+     */
+    std::optional<size_t> stream_events;
 
     ResponseSample () = default;
     ResponseSample (const Response& resp, int64_t ts)
     : status_code (resp.status_code), status_text (resp.status_text), body (resp.body),
-      headers (resp.headers), latency_ms (resp.timing.total_ms), timestamp (ts) {
+      headers (resp.headers), latency_ms (resp.timing.total_ms), timestamp (ts),
+      stream_events (resp.stream_events) {
     }
 };
 
@@ -93,6 +110,10 @@ struct CapturedExchange {
     bool truncated     = false;
     /// The run's byte budget was already spent, so only headers were kept.
     bool body_dropped = false;
+    /// Events the transfer delivered, when it streamed; absent otherwise. Two
+    /// scalars' worth of hot-path cost, and the one thing a reader of the
+    /// stored body cannot recover from it - see `ResultBody::stream_events`.
+    std::optional<int64_t> stream_events;
 };
 
 /**

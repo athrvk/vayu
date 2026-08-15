@@ -41,11 +41,11 @@ import {
 	ResponseStatusBar,
 	ResponseActions,
 	ResponseHeadersPanel,
+	ResponseEvents,
 	formatSize,
 } from "@/components/shared/response-viewer";
 import { Callout, EmptyState } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
-import ResponseEvents from "./ResponseEvents";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";

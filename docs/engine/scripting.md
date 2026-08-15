@@ -268,6 +268,24 @@ if (typeof pm.response.events === 'undefined') {
 }
 ```
 
+**A load run's deferred script reads the same list** (0.17.2). `POST /runs` with
+`"stream": true` samples its streaming responses like any other, and the
+deferred `tests` script replays against those samples - so
+`pm.response.events`, `pm.response.totalEvents` and `pm.response.eventsTruncated`
+mean there exactly what they mean in design mode, and a script written for one
+behaves the same in the other. Two differences follow from what a load sample
+is, and both are visible to the script rather than assumed:
+
+- The list is parsed back out of the sample's stored body, bounded by the same
+  `sseMaxStoredEvents`. `totalEvents` is the count taken on the wire, so it
+  stays truthful even where the body was cut.
+- There is no `endReason` on this path. Under load a stream ends by server close
+  or by one of the two caps, and nothing per sample records which - the run
+  report's `stream.capped` carries that fact for the run as a whole.
+
+A sample that did not stream still reads `undefined`, so the `typeof` check
+above is the one guard on both paths.
+
 A streaming send is answered `202` before its script has run, so the results go
 to the run's trace rather than into a response body - the app's Tests and
 Console panes show them when the stream finishes, and

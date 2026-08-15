@@ -17,6 +17,12 @@
  * the two it is holding - this component renders whichever list it is given and
  * says which one that is.
  *
+ * **A third source, same list** (issue #657): a load run's captured sample. Its
+ * events are parsed back out of the stored `text/event-stream` body by the
+ * engine and arrive on `GET /runs/:id/samples`, so the sampled-capture viewers
+ * render them here rather than growing their own row - which is why this now
+ * lives in `components/shared` and not under the request builder.
+ *
  * **The tab always renders**, on every response, per the constant-tab-set rule
  * the strip has followed since #59. A normal response gets an honest empty
  * state rather than a missing tab, which is also what makes "was this a

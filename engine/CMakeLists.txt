@@ -453,6 +453,7 @@ if(VAYU_BUILD_TESTS)
         tests/sse_parser_test.cpp
         tests/sse_frame_counter_test.cpp
         tests/sse_load_stream_test.cpp
+        tests/load_stream_events_test.cpp
         tests/sse_stream_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp

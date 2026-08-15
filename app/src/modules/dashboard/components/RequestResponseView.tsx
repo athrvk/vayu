@@ -22,6 +22,7 @@ import {
 	CompactHeadersViewer,
 	CapturedResponseNotice,
 	ResponseBody,
+	ResponseEvents,
 	SampledExchange,
 	hasPhaseAverages,
 	phasesFromAverages,
@@ -431,6 +432,37 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	}
 																	height="100%"
 																	compact
+																/>
+															</div>
+														</div>
+													)}
+													{/* A sampled stream's events, parsed back
+													    out of that body by the engine (issue
+													    #657). Beside the body rather than
+													    instead of it: the raw bytes are still
+													    the honest record, and the list is what
+													    makes them readable. Absent for every
+													    sample that did not stream. */}
+													{captured.response.events && (
+														<div className="space-y-1">
+															<p className="text-xs font-medium text-muted-foreground">
+																Events
+															</p>
+															<div className="h-48 overflow-hidden rounded-md border border-rule">
+																<ResponseEvents
+																	events={
+																		captured.response.events
+																			.items
+																	}
+																	totalEvents={
+																		captured.response.events
+																			.totalEvents
+																	}
+																	eventsTruncated={
+																		captured.response.events
+																			.eventsTruncated
+																	}
+																	isStream
 																/>
 															</div>
 														</div>

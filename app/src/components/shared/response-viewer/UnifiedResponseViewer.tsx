@@ -22,19 +22,21 @@
  */
 
 import { useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Radio } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
+import ResponseEvents from "./ResponseEvents";
 import { CompactHeadersViewer } from "./HeadersViewer";
 import type { UnifiedResponseViewerProps } from "./types";
 
-type ResponseTab = "body" | "headers";
+type ResponseTab = "body" | "headers" | "events";
 
 export default function UnifiedResponseViewer({
 	response,
 	request,
+	events,
 	className,
 }: UnifiedResponseViewerProps) {
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
@@ -44,7 +46,7 @@ export default function UnifiedResponseViewer({
 	// real headers and no body, and calling that "no response captured" would
 	// hide the only thing the run did keep.
 	const hasHeaders = !!response?.headers && Object.keys(response.headers).length > 0;
-	if (!response?.body && !hasHeaders && !request) {
+	if (!response?.body && !hasHeaders && !request && !events) {
 		return (
 			<div className={cn("flex-1 flex surface-card", className)}>
 				<EmptyState
@@ -84,6 +86,18 @@ export default function UnifiedResponseViewer({
 					<TabsTrigger value="headers">
 						<TabLabel>Headers</TabLabel>
 					</TabsTrigger>
+					{/* Only for a sample that streamed. The constant-tab-set rule
+					    belongs to the request builder's strip, which always knows
+					    whether a send was a stream; this viewer renders stored
+					    samples of every shape, and a permanent "Events" tab over
+					    "not an event stream" would be a tab that is empty for
+					    almost every row it shows. */}
+					{events && (
+						<TabsTrigger value="events">
+							<Radio className="w-3 h-3" />
+							<TabLabel>Events</TabLabel>
+						</TabsTrigger>
+					)}
 				</TabsList>
 
 				<TabsContent value="body" className="h-[500px] overflow-auto">
@@ -122,6 +136,20 @@ export default function UnifiedResponseViewer({
 							)}
 					</div>
 				</TabsContent>
+				{events && (
+					<TabsContent value="events" className="h-[500px] overflow-auto">
+						{/* `isStream` is what the presence of the node already
+						    means, and the stream has ended by the time a sample is
+						    stored - so neither is a question this caller has to
+						    answer twice. */}
+						<ResponseEvents
+							events={events.items}
+							totalEvents={events.totalEvents}
+							eventsTruncated={events.eventsTruncated}
+							isStream
+						/>
+					</TabsContent>
+				)}
 			</Tabs>
 		</div>
 	);

@@ -44,6 +44,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -238,6 +239,51 @@ class SseStreamContext {
 /// always tell a stored slice from the whole stream - `cap_trace_bodies` does
 /// not reach new nodes, so the cap is applied here, at build time.
 [[nodiscard]] nlohmann::json stream_trace_node (const SseStreamContext& context);
+
+/// One parsed event in the shape every stored `items` array uses - `event`,
+/// `data`, `sourceId` when the origin sent an id, and the in-band
+/// `dataTruncated` / `dataBytes` pair when the per-event cap cut it.
+///
+/// No `receivedAt`: only a live consumer knows when an event arrived, and the
+/// design path stamps it on top of this. A node built from buffered bytes has
+/// no arrival to report and says nothing rather than inventing one.
+[[nodiscard]] nlohmann::json sse_event_node (const SseEvent& event);
+
+/**
+ * @brief The `events` node for a stream whose bytes were *buffered* rather than
+ *        consumed live - the load path (issue #657).
+ *
+ * The design path records events as they arrive; a load transfer buffers the
+ * whole `text/event-stream` body and counts frames with `SseFrameCounter`. The
+ * body is therefore the event list, and this parses it back with the same
+ * `SseParser` the live path feeds, so "what is an event" has one definition
+ * rather than two that can drift.
+ *
+ * @param body            The buffered response body, which may itself be a
+ *                        prefix - see @p body_complete.
+ * @param limits          `max_event_bytes` bounds one event's data,
+ *                        `max_stored_events` bounds the list.
+ * @param total_events    Events the transfer actually delivered
+ *                        (`Response::stream_events`), counted on the wire and
+ *                        so truthful even when the body was cut.
+ * @param body_complete   False when the stored bytes are a prefix of the
+ *                        response (a truncated capture): the list is then a
+ *                        prefix whatever the counts say.
+ *
+ * `eventsTruncated` is the union of the two ways a reader can be looking at
+ * less than the whole stream - the stored-events cap and a cut body - because
+ * both mean the same thing to whoever reads the list, and neither may be left
+ * to be inferred from a row count.
+ *
+ * No `endReason`: a load stream ends by server close or by one of two caps
+ * (`Request::stream_bounds`), and `Response::stream_capped` does not say which
+ * of the two fired. The run report's `stream.capped` carries that fact for the
+ * run; naming a reason here would mean inventing one per sample.
+ */
+[[nodiscard]] nlohmann::json buffered_stream_events_node (std::string_view body,
+const SseLimits& limits,
+int64_t total_events,
+bool body_complete);
 
 /** Everything a stream needs to start. */
 struct SseStreamRequest {

@@ -117,23 +117,8 @@ void SseStreamContext::append_locked (std::string payload) {
 }
 
 void SseStreamContext::record_event (const SseEvent& event) {
-    nlohmann::json payload;
-    payload["event"] = event.event;
-    payload["data"]  = event.data;
-    if (!event.id.empty ()) {
-        // The upstream id, kept apart from the relay's own frame id: a client
-        // resuming *our* stream sends the frame offset, while this is what the
-        // origin would want back. Conflating them would make one of the two
-        // resumes silently wrong.
-        payload["sourceId"] = event.id;
-    }
-    payload["receivedAt"] = now_ms ();
-    if (event.truncated) {
-        // In band, always: a reader must never have to infer that what it is
-        // looking at is a prefix. Same shape as `bodyTruncated`/`bodyBytes`.
-        payload["dataTruncated"] = true;
-        payload["dataBytes"]     = event.data_bytes;
-    }
+    nlohmann::json payload = sse_event_node (event);
+    payload["receivedAt"]  = now_ms ();
 
     total_events_.fetch_add (1, std::memory_order_acq_rel);
     {
@@ -210,6 +195,59 @@ nlohmann::json stream_completion_json (const SseStreamContext& context) {
     out["reason"]      = to_string (context.end_reason ());
     out["totalEvents"] = context.total_events ();
     return out;
+}
+
+nlohmann::json sse_event_node (const SseEvent& event) {
+    nlohmann::json payload;
+    payload["event"] = event.event;
+    payload["data"]  = event.data;
+    if (!event.id.empty ()) {
+        // The upstream id, kept apart from the relay's own frame id: a client
+        // resuming *our* stream sends the frame offset, while this is what the
+        // origin would want back. Conflating them would make one of the two
+        // resumes silently wrong.
+        payload["sourceId"] = event.id;
+    }
+    if (event.truncated) {
+        // In band, always: a reader must never have to infer that what it is
+        // looking at is a prefix. Same shape as `bodyTruncated`/`bodyBytes`.
+        payload["dataTruncated"] = true;
+        payload["dataBytes"]     = event.data_bytes;
+    }
+    return payload;
+}
+
+nlohmann::json buffered_stream_events_node (std::string_view body,
+const SseLimits& limits,
+int64_t total_events,
+bool body_complete) {
+    nlohmann::json items = nlohmann::json::array ();
+
+    // Fed in one call and finished, because the whole body is already here -
+    // the incremental path exists for a socket, not for a string. `finish()`
+    // still matters: a capture cut mid-frame, or a server that closed without
+    // the terminating blank line, leaves a dispatchable event behind.
+    SseParser parser (limits.max_event_bytes);
+    const auto append = [&items, &limits] (const std::vector<SseEvent>& parsed) {
+        for (const auto& event : parsed) {
+            if (items.size () >= limits.max_stored_events) {
+                return;
+            }
+            items.push_back (sse_event_node (event));
+        }
+    };
+    append (parser.feed (body));
+    append (parser.finish ());
+
+    nlohmann::json node;
+    node["items"] = std::move (items);
+    // The wire count, not the parsed one: a body cut by the capture budget
+    // still delivered every event the counter saw, and reporting the shorter
+    // number would make a truncated capture read as a shorter stream.
+    node["totalEvents"] = total_events;
+    node["eventsTruncated"] =
+    !body_complete || total_events > static_cast<int64_t> (node["items"].size ());
+    return node;
 }
 
 nlohmann::json stream_trace_node (const SseStreamContext& context) {

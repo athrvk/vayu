@@ -554,6 +554,13 @@ Two surfaces consume it - the dashboard's Sampled Requests
 credential-shaped). Both notices live in `components/shared`, so the wording
 exists once rather than twice.
 
+A sample whose transfer was a **stream** also carries `response.events` (issue
+#657) - `{items, totalEvents, eventsTruncated}`, parsed engine-side out of the
+stored `text/event-stream` body. Both surfaces render it through the shared
+`ResponseEvents`, the component the request builder's Events tab uses, so a
+sampled stream reads the same way a sent one does. Absent - not an empty node -
+for every sample that did not stream, which is what gates the tab.
+
 #### Scripting
 
 ```typescript
