@@ -149,8 +149,10 @@ about to happen, because a 500-row file running once is the surprise this
 preview exists to remove.
 
 **A load run** binds rows differently: every virtual user claims rows from one
-shared cursor, so no two hold the same row at once, and the rows repeat for as
-long as the duration lasts. The row count says nothing about how long the run is.
+shared cursor, so no two start on the same row while unclaimed rows remain, and
+the rows then repeat for as long as the duration lasts. Once they wrap, users do
+share rows - size the file to the concurrency if that matters. The row count
+says nothing about how long the run is.
 
 ## Declaring the contract: the Data tab
 

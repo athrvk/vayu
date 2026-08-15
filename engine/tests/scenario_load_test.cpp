@@ -815,6 +815,35 @@ TEST_F (ScenarioLoadTest, ConcurrentVirtualUsersBindDifferentRows) {
        "rather than shared across the run";
 }
 
+// The other side of the claim, and the one the api-reference sentence used to
+// deny: with fewer rows than concurrent virtual users the cursor wraps while
+// both are live, so they bind the *same* row at the same time. Exclusivity
+// holds only while unclaimed rows remain.
+TEST_F (ScenarioLoadTest, FewerRowsThanVirtualUsersMeansConcurrentUsersShareARow) {
+    // Same rendezvous as the test above, for the same reason: it holds both VUs
+    // inside step 0 at once, so "at the same time" is asserted rather than
+    // hoped for.
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution =
+    plan_over ({ server.url ("/login"), server.url ("/row/{{data.id}}") });
+    with_data (execution, { json{ { "id", "0" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    std::vector<std::string> rows;
+    for (const auto& hit : server.hits ()) {
+        if (hit.path.rfind ("/row/", 0) == 0) {
+            rows.push_back (hit.path);
+        }
+    }
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (rows, (std::vector<std::string>{ "/row/0", "/row/0" }))
+    << "the single row was not reused - a wrapping cursor is what makes a run "
+       "longer than its data set possible at all";
+}
+
 // Every step of one iteration binds the same row: a checkout that used a
 // different row than its login is not a user.
 TEST_F (ScenarioLoadTest, EveryStepOfAnIterationBindsTheSameRow) {

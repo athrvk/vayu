@@ -49,6 +49,26 @@ TEST (ScenarioDataNamespaceTest, ComposingLeavesADataTokenWrittenAsItStands) {
     "https://api.test/u/{{data.id}}");
 }
 
+TEST (ScenarioDataNamespaceTest, ADataTokenWrittenIntoAVariableValueStillBinds) {
+    // The data pass scans the *composed* text, not the authored text, so a
+    // token that arrived as a variable's value is bound like any other. It
+    // follows from two rules that are each pinned elsewhere - composition is
+    // one pass, so `{{host}}`'s value is never rescanned for variables, and the
+    // data pass runs afterwards over what composition produced - but the
+    // combination is what a user relies on and nothing asserted it (issue #595,
+    // item 3).
+    vayu::http::VariableValues vars{ { "endpoint", "/u/{{data.id}}" } };
+    const auto composed =
+    vayu::http::resolve_template ("https://api.test{{endpoint}}", vars);
+    ASSERT_EQ (composed, "https://api.test/u/{{data.id}}");
+
+    auto request = request_with_url (composed);
+    const auto result = bind_data_row (request, json::parse (R"({"id":"42"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/u/42");
+}
+
 TEST (ScenarioDataNamespaceTest, AVariableNamedLikeAColumnDoesNotAnswerForIt) {
     // The namespace is disjoint from the tiers rather than above them: a
     // variable someone happens to name `data.id` is a different name from the
@@ -117,6 +137,78 @@ TEST (ScenarioDataBindTest, HeaderNamesAndValuesBothBind) {
     ASSERT_EQ (request.headers.size (), 1u);
     EXPECT_EQ (request.headers.begin ()->first, "X-Tenant");
     EXPECT_EQ (request.headers.begin ()->second, "Bearer t-1");
+}
+
+// ---------------------------------------------------------------------------
+// Two header names that bind to one name (issue #595, item 2)
+// ---------------------------------------------------------------------------
+
+TEST (ScenarioDataHeaderCollisionTest, ABoundNameCollidingWithALiteralHeaderRefusesTheRow) {
+    // The failure the refusal exists for: the collision belongs to the *row*,
+    // so a first-wins insert sends good requests until the file reaches a row
+    // that binds `authorization`, and then one request without its auth. Revert
+    // the rebuild to a plain `emplace` and this reads `ok`, with the request
+    // carrying one header instead of two.
+    // The collision is case-insensitive because `vayu::Headers` is: the bound
+    // `authorization` and the literal `Authorization` are one header name.
+    auto request                     = request_with_url ("https://api.test/");
+    request.headers["Authorization"] = "Bearer real";
+    request.headers["{{data.h}}"]    = "bound";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"h":"authorization"})"), 3);
+
+    EXPECT_FALSE (result.ok);
+    // Enough to fix the request without opening the file: the header as it is
+    // written, the name it produced, and the row that produced it.
+    EXPECT_NE (result.error.find ("{{data.h}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("Authorization"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 3"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataHeaderCollisionTest, TwoTemplatedNamesBindingToOneNameRefuseTheRow) {
+    // Neither header is literal here, so the collision exists only in the bound
+    // result - there is no spelling of the request that shows it.
+    auto request                    = request_with_url ("https://api.test/");
+    request.headers["X-{{data.a}}"] = "first";
+    request.headers["X-{{data.b}}"] = "second";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"a":"Tenant","b":"Tenant"})"), 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("X-Tenant"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataHeaderCollisionTest, AMissingColumnIsReportedRatherThanTheCollisionItCauses) {
+    // The joiner stops rewriting at its first fault, so the half-bound walk can
+    // leave two names equal by accident. The missing column is the real fault
+    // and the one the message must name.
+    auto request                    = request_with_url ("https://api.test/");
+    request.headers["X-{{data.a}}"] = "first";
+    request.headers["X-{{data.b}}"] = "second";
+
+    const auto result = bind_data_row (request, json::parse (R"({"a":"Tenant"})"), 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.b}}"), std::string::npos) << result.error;
+    EXPECT_EQ (result.error.find ("already resolves to"), std::string::npos)
+    << result.error;
+}
+
+TEST (ScenarioDataHeaderCollisionTest, HeadersThatStayDistinctStillBind) {
+    // The refusal must not fire on the ordinary bind - including one where a
+    // bound name merely differs in case from a *different* header.
+    auto request                    = request_with_url ("https://api.test/");
+    request.headers["X-Tenant"]     = "acme";
+    request.headers["X-{{data.h}}"] = "bound";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":"Region"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.headers.size (), 2u);
+    EXPECT_EQ (request.headers.at ("X-Tenant"), "acme");
+    EXPECT_EQ (request.headers.at ("X-Region"), "bound");
 }
 
 TEST (ScenarioDataBindTest, TheRawBodyAndEveryFormFieldBind) {

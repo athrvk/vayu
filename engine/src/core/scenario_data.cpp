@@ -72,6 +72,17 @@ FieldContext body_context (const vayu::Body& body) {
     }
 }
 
+/** Two header names that became one when a row was bound into them. */
+struct HeaderCollision {
+    /// The name as the request carries it, before the bind - the text the user
+    /// has to go and fix, so the error names this rather than the result.
+    std::string original;
+    /// The name already taken, equal (ignoring case) to what @ref original
+    /// became. It is the *other* header's bound name, which is the one that
+    /// survives a first-wins insert.
+    std::string taken;
+};
+
 /**
  * The one list of strings a data row binds: URL, header names and values, raw
  * body, and both halves of every form field.
@@ -88,9 +99,16 @@ FieldContext body_context (const vayu::Body& body) {
  *
  * Each field is visited with the context it sits in, so the splitter can decide
  * a token's encoding from the same walk that hands out its position.
+ *
+ * Returns the first header collision the rebuild produced, for the caller to
+ * refuse the bind over; `nullopt` for the ordinary walk. Only a *bind* can
+ * produce one - `request.headers` is already a case-insensitive map, so its own
+ * keys are unique - which is why a split never reports one.
  */
 template <typename Visit>
-void walk_bindable_fields (vayu::Request& request, Visit&& visit) {
+std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Visit&& visit) {
+    std::optional<HeaderCollision> collision;
+
     visit (request.url, FieldContext::Plain);
 
     if (!request.headers.empty ()) {
@@ -100,7 +118,25 @@ void walk_bindable_fields (vayu::Request& request, Visit&& visit) {
             std::string bound_value = value;
             visit (bound_name, FieldContext::Plain);
             visit (bound_value, FieldContext::Plain);
+            // A plain `emplace` is first-wins and silent, and a dropped header
+            // is exactly the quiet wrong request this namespace exists to
+            // remove - worse than most, because the collision belongs to the
+            // *row*: a file whose row 3 binds `authorization` beside a literal
+            // `Authorization` sends two good requests and then one missing its
+            // auth, with nothing said. Recorded and refused by the caller.
+            //
+            // The walk still finishes: the field positions the joiner addresses
+            // are counted by it, so an early return would make the contract
+            // above ("neither can address a field the other does not") depend
+            // on a row's contents.
+            auto [existing, inserted] =
             rebound.emplace (std::move (bound_name), std::move (bound_value));
+            if (!inserted && !collision) {
+                // `bound_name` was consumed by the failed emplace; the key that
+                // won says what it collided with, and says it in the spelling
+                // that survives.
+                collision = HeaderCollision{ name, existing->first };
+            }
         }
         request.headers = std::move (rebound);
     }
@@ -113,6 +149,18 @@ void walk_bindable_fields (vayu::Request& request, Visit&& visit) {
         visit (field.key, FieldContext::Plain);
         visit (field.value, FieldContext::Plain);
     }
+
+    return collision;
+}
+
+/// The refusal a header collision reads as, in the same shape as the missing-
+/// column and null-cell errors above: the token's own text, then the row.
+std::string describe_header_collision (const HeaderCollision& collision, size_t row_index) {
+    return "binding header \"" + collision.original + "\" against data row " +
+    std::to_string (row_index) + " produced \"" + collision.taken +
+    "\", which another header of this request already resolves to - one of the "
+    "two would be dropped, so the row is refused rather than sent with a "
+    "header missing";
 }
 
 /**
@@ -322,7 +370,10 @@ StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
     // trade.
     vayu::Request scratch = request;
     FieldSplitter splitter;
-    walk_bindable_fields (scratch, [&splitter] (const std::string& field, FieldContext context) {
+    // The collision the walk can report is a bind-time fault only: a split
+    // rewrites nothing, so the header map is rebuilt from its own unique keys.
+    (void)walk_bindable_fields (
+    scratch, [&splitter] (const std::string& field, FieldContext context) {
         splitter (field, context);
     });
     return splitter.take ();
@@ -376,10 +427,22 @@ size_t row_index) {
         return DataBindResult{ true, {} };
     }
     TemplateJoiner joiner (tmpl, row, row_index);
-    walk_bindable_fields (request, [&joiner] (std::string& field, FieldContext context) {
+    auto collision = walk_bindable_fields (
+    request, [&joiner] (std::string& field, FieldContext context) {
         joiner (field, context);
     });
-    return joiner.result ();
+    DataBindResult result = joiner.result ();
+    // A join failure is checked first because it is the earlier and more
+    // specific fault: the joiner stops rewriting once it records one, so a
+    // collision seen after it is an artefact of a half-bound walk rather than
+    // anything the request actually says.
+    if (!result.ok) {
+        return result;
+    }
+    if (collision) {
+        return DataBindResult{ false, describe_header_collision (*collision, row_index) };
+    }
+    return result;
 }
 
 DataBindResult bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index) {
