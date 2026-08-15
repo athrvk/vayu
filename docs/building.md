@@ -326,9 +326,10 @@ The project uses GitHub Actions for automated builds:
   - Uses CMakePresets and lukka actions for optimal caching
 
 - **Warm build cache**: `.github/workflows/cache-warm.yml`
-  - Runs on `master` when `engine/vcpkg.json` changes, weekly, or on demand
-  - Resolves the vcpkg dependencies for all three platforms so the archives
-    exist in the **default-branch cache scope**
+  - Runs on `master` when `engine/vcpkg.json` or `app/pnpm-lock.yaml` changes,
+    weekly, or on demand
+  - Resolves the vcpkg dependencies and populates the pnpm store for all three
+    platforms, so both exist in the **default-branch cache scope**
 
 These workflows use the same CMakePresets as local development for consistency.
 
@@ -347,9 +348,19 @@ put the vcpkg archives in that scope for every platform.
 
 All four caching workflows must key the cache identically or the warmed entry
 is unreachable from the build that needs it; `cache-warm.yml` has a guard job
-that fails if they drift. For the same reason `engine/vcpkg.json` carries no
-`version` field - the key hashes that file, so bumping it per release minted a
-new key every time and guaranteed a cold cache exactly at release.
+that fails if they drift - separately for the vcpkg key and for the
+`cache-dependency-path` that `actions/setup-node` hashes into the pnpm store
+key. For the same reason `engine/vcpkg.json` carries no `version` field - the
+key hashes that file, so bumping it per release minted a new key every time and
+guaranteed a cold cache exactly at release.
+
+**sccache is deliberately not warmed here.** Its entries would be just as
+unreachable, but warming them means compiling the engine on every triggering
+push, and a release commit cannot use the result anyway: `version.hpp` reaches
+nearly every translation unit through `core/constants.hpp`, so a version bump
+changes the preprocessed text sccache keys on. Narrowing that include is the
+prerequisite; until then a warmed sccache would only help the first run of a
+pull request, at a recurring cost measured in tens of runner-minutes per merge.
 
 ## Resources
 

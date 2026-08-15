@@ -48,6 +48,7 @@ on:
     branches: [master]
     paths:
       - 'engine/vcpkg.json'
+      - 'app/pnpm-lock.yaml'
       - '.github/workflows/cache-warm.yml'
   # The guard below is cheap and catches the regressions that would quietly
   # switch this workflow off, so it runs before they can merge.
@@ -130,6 +131,38 @@ jobs:
           for i in "${!files[@]}"; do
             if [ "${keys[$i]}" != "${keys[0]}" ] || [ "${commits[$i]}" != "${commits[0]}" ]; then
               echo "::error::${files[$i]} disagrees with ${files[0]} on the vcpkg cache key or baseline. They must match exactly, or the warmed cache is unreachable from the build that needs it." >&2
+              exit 1
+            fi
+          done
+          echo "All ${#files[@]} workflows agree."
+
+      - name: Assert every workflow resolves the same pnpm store key
+        shell: bash
+        run: |
+          set -euo pipefail
+          # setup-node builds its own key from the runner OS, the arch, the
+          # package manager and a hash of `cache-dependency-path`. Only the last
+          # is ours to get wrong, so that is what is asserted. Anchored to the
+          # start of a YAML line for the same reason as the vcpkg check above:
+          # unanchored, the pattern would match this step's own text in this
+          # file and the guard would grade itself.
+          files=(release.yml pr-tests.yml cache-warm.yml)
+          deps=()
+          for f in "${files[@]}"; do
+            p=".github/workflows/$f"
+            dep=$(grep -E "^[[:space:]]*cache: 'pnpm'" -A1 "$p" \
+                  | grep -oE "^[[:space:]]*cache-dependency-path: .*" | head -1 \
+                  | sed -E 's/^[[:space:]]*cache-dependency-path: //')
+            if [ -z "$dep" ]; then
+              echo "::error::$p declares no pnpm cache-dependency-path - this guard just stopped guarding it." >&2
+              exit 1
+            fi
+            deps+=("$dep")
+            echo "  $f  $dep"
+          done
+          for i in "${!files[@]}"; do
+            if [ "${deps[$i]}" != "${deps[0]}" ]; then
+              echo "::error::${files[$i]} hashes a different lockfile than ${files[0]} for its pnpm cache, so the warmed store is unreachable from the build that needs it." >&2
               exit 1
             fi
           done
@@ -267,3 +300,74 @@ jobs:
             echo "::error::No vcpkg archives were produced - nothing was warmed." >&2
             exit 1
           fi
+
+  # The same scope problem, one layer up. `actions/setup-node` caches the pnpm
+  # store under a key it derives itself - `node-cache-<os>-<arch>-pnpm-<hash of
+  # the lockfile>` - and the two workflows that use it write only to scopes a
+  # release cannot read: pr-tests.yml to `refs/pull/N/merge`, release.yml to its
+  # own throwaway tag scope. So every release re-resolved and re-downloaded the
+  # whole dependency tree and then spent ~99 MB uploading a store nothing would
+  # ever read back. v0.17.1 did exactly that on both Linux and Windows
+  # ("Cache saved with the key: node-cache-...", i.e. no hit).
+  #
+  # Separate job rather than more steps on `warm` above: the two caches are
+  # invalidated by different files, and folding them together would mean a
+  # lockfile bump paying for a cmake configure and a dependency bump paying for
+  # a pnpm install. Both are cheap on a hit, so both jobs still run on either
+  # trigger - but the split keeps each job's name honest about what it did.
+  warm-node:
+    name: Warm pnpm store on ${{ matrix.os }}
+    # Not because the guard checks anything about pnpm - it does not - but a
+    # workflow that cannot agree with itself about a cache key should not be
+    # spending runner minutes on any cache at all.
+    needs: guard
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm first, then setup-node: setup-node shells out to pnpm to locate the
+      # store it is going to cache, so the order is load-bearing. This mirrors
+      # release.yml and pr-tests.yml exactly, which is the point - setup-node
+      # derives the cache key from the runner OS, the arch, the package manager
+      # and the hash of `cache-dependency-path`, so matching those inputs is
+      # what makes the entry this job writes the same one they read. The guard
+      # job asserts the dependency path has not drifted apart.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # setup-node's post step saves the store, but only if the store has
+      # anything in it - restoring an empty one would be worse than useless, so
+      # the install has to actually run.
+      - name: Populate the pnpm store
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Report what the store now holds
+        shell: bash
+        run: |
+          store=$(pnpm store path 2>/dev/null || true)
+          if [ -z "$store" ] || [ ! -d "$store" ]; then
+            echo "::error::pnpm reported no store path - nothing was warmed." >&2
+            exit 1
+          fi
+          size=$(du -sh "$store" 2>/dev/null | cut -f1)
+          echo "### Warmed \`${{ runner.os }}\` pnpm store" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Store path: \`$store\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Store size: \`${size:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
