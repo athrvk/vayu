@@ -6,8 +6,11 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
 # Releasing Vayu
 
 1. `python build.py --bump-version patch` - updates VERSION, CMakeLists.txt,
-   vcpkg.json, package.json. (`patch` | `minor` | `major` | `x.y.z`; add
-   `--dry-run` to preview.)
+   version.hpp, package.json. (`patch` | `minor` | `major` | `x.y.z`; add
+   `--dry-run` to preview.) It deliberately does **not** touch
+   `engine/vcpkg.json`, and refuses to run if that file has grown a `version`
+   field back: CI keys the vcpkg binary cache on the manifest's hash, so a
+   version there made every release rebuild every C++ dependency from source.
 2. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 3. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes

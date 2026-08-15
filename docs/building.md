@@ -325,7 +325,31 @@ The project uses GitHub Actions for automated builds:
   - Builds and publishes installers for all platforms
   - Uses CMakePresets and lukka actions for optimal caching
 
-Both workflows use the same CMakePresets as local development for consistency.
+- **Warm build cache**: `.github/workflows/cache-warm.yml`
+  - Runs on `master` when `engine/vcpkg.json` changes, weekly, or on demand
+  - Resolves the vcpkg dependencies for all three platforms so the archives
+    exist in the **default-branch cache scope**
+
+These workflows use the same CMakePresets as local development for consistency.
+
+### Why a separate cache-warming workflow
+
+GitHub Actions caches are scoped to the ref that created them. A run can
+restore caches from its own ref and from the default branch, but never from a
+different tag, and never from a pull request - a `pull_request` run writes to
+`refs/pull/N/merge`, which only re-runs of that same pull request can read.
+
+So the caches `pr-tests.yml` writes are unreachable from anywhere else, and a
+tagged release build can only inherit from `master`. Nothing was building on
+`master` except CodeQL, which is Linux-only, so the macOS and Windows release
+legs had never had a warm dependency cache at all. `cache-warm.yml` exists to
+put the vcpkg archives in that scope for every platform.
+
+All four caching workflows must key the cache identically or the warmed entry
+is unreachable from the build that needs it; `cache-warm.yml` has a guard job
+that fails if they drift. For the same reason `engine/vcpkg.json` carries no
+`version` field - the key hashes that file, so bumping it per release minted a
+new key every time and guaranteed a cold cache exactly at release.
 
 ## Resources
 
