@@ -79,6 +79,38 @@ drift on them. See
 [api-reference.md](../engine/api-reference.md#scenario-runs) for what the
 engine does with the token once a row exists.
 
+### Which contract answers for a request: nearest declared ancestor
+
+A collection can **declare** the columns its data files carry (the Data tab,
+issue #599). Which declaration applies to a given request is a chain answer, and
+the rule is the variable chain's own read backwards: **the nearest declared
+ancestor, leaf to root** (`resolveDataContract` in `lib/data-contract.ts`). A
+request in a sub-collection run recursively under a parent binds the parent's
+data, so when the sub-collection declares nothing the walk finds the parent's
+contract - and when it declares its own, its own wins, exactly as a leaf
+variable shadows an ancestor's.
+
+A collection that declared a contract and then cleared it holds `{}`, which is
+how "no contract" is spelled, so the walk treats it as transparent rather than
+as a contract of zero columns - an empty declaration cannot shadow a working one
+above it.
+
+This is what makes the token states possible: with a contract in scope,
+`{{data.email}}` is *checkable*. A declared column paints informationally, a
+column no contract in scope declares paints **amber** with the declared list in
+its tooltip, and a chain that declares nothing keeps the neutral token above. It
+is authoring-time advice in every case - the run's file is the authority, and a
+run with a mismatched file is still the user's to start. Declared columns are
+also completed: `{{data.` offers them in the request fields and the body editors,
+and `pm.iterationData.get("` offers them in the script editors (see below).
+
+The **audit** in the Data tab is the same comparison in the other direction -
+the declared columns against the tokens the collection's requests actually
+carry. See
+[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+for the paint and
+[Data-Driven Runs](data-driven-runs.md) for the file itself.
+
 ---
 
 ## Layers
@@ -409,6 +441,15 @@ Three rules make the offered set match what the call can actually read:
   name the call can read. This list narrowed to the immediate collection while
   the engine did; the rule underneath is unchanged, which is that the list
   offers exactly what the call resolves.
+- **`pm.iterationData` completes columns, not variables.** The row it reads is
+  bound from the collection's data file, so the names offered inside
+  `pm.iterationData.get("…")` and `.has("…")` are the declared columns of the
+  contract in scope (issue #600) - the same list the `{{data.*}}` tokens are
+  painted against, so an editor and the builder cannot disagree. Optional
+  chaining counts as the dot it is (`pm.iterationData?.get("`), because the
+  surface is `undefined` outside a data-driven run and its own documentation
+  tells scripts to guard before calling. Nothing is offered when the chain
+  declares no contract.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no

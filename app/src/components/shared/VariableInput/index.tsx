@@ -38,6 +38,7 @@ import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 import { isDataVariableName } from "@/lib/variable-resolution";
+import { describeDataToken } from "@/lib/data-contract";
 
 interface VariableInputProps {
 	value: string;
@@ -349,12 +350,20 @@ export default function VariableInput({
 				 * it had. Only a collection run's iteration binds one.
 				 */
 				if (isDataVariableName(seg.varName)) {
+					/*
+					 * Three states now rather than one (issue #600): a declared
+					 * column, a column no contract in scope declares, and - when
+					 * nothing in the chain declares anything - phase 1's neutral
+					 * token, unchanged. `describeDataToken` owns which is which.
+					 */
+					const data = describeDataToken(seg.varName, variables?.dataColumns);
 					return (
 						<span key={`${i}-${seg.varName}`} data-variable-token>
 							<RuntimeToken
 								name={seg.varName}
-								description="Bound by the run's data file"
-								note="per iteration"
+								description={data.description}
+								note={data.note}
+								tone={data.tone}
 							/>
 						</span>
 					);
@@ -470,6 +479,7 @@ export default function VariableInput({
 						variables={variablesForAutocomplete}
 						searchQuery={searchQuery}
 						onSelect={handleSelectVariable}
+						dataColumns={variables?.dataColumns}
 					/>
 				</div>
 			)}

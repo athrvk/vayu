@@ -34,6 +34,12 @@
  * the two move together, or one of them offers names the other cannot read.
  * See docs/app/variable-resolution.md.
  *
+ * **`pm.iterationData` completes columns, not variables** (issue #600). The row
+ * it reads is bound from the collection's data file, so the names are the
+ * declared columns of the contract in scope - the same list the `{{data.*}}`
+ * tokens are validated against, so what an editor offers and what the builder
+ * paints green cannot disagree.
+ *
  * Call once (in App). A completion provider is global per language, so a single
  * registration covers every script editor instance. The same shape as
  * `useScriptCompletionProvider` and `useVariableCompletionProvider` beside it.
@@ -44,6 +50,7 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
 import { useActiveCollectionId } from "./useActiveCollectionId";
+import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
@@ -68,6 +75,12 @@ export function useScriptVariableCompletionProvider() {
 	 */
 	const collectionId = useActiveCollectionId();
 	const { getAllVariables } = useVariableResolver({ collectionId });
+	/*
+	 * `pm.iterationData.get("` completes columns, not variables (issue #600) -
+	 * the row is bound from the collection's data file, so the names come from
+	 * the contract in scope and from nowhere else.
+	 */
+	const dataColumns = useDataContract(collectionId);
 
 	useEffect(() => {
 		if (!monaco) return;
@@ -90,6 +103,27 @@ export function useScriptVariableCompletionProvider() {
 					startColumn: context.startIndex + 1,
 					endColumn: position.column,
 				};
+
+				/*
+				 * A column list and a variable list share no rules: no scope filter
+				 * applies, generators do not exist there, and the declaring
+				 * collection is the useful detail rather than a resolved value. So
+				 * it answers here rather than threading a third case through the
+				 * mapping below.
+				 */
+				if (context.scope === "data") {
+					return {
+						suggestions: (dataColumns?.columns ?? []).map((column) => ({
+							label: column,
+							kind: monaco.languages.CompletionItemKind.Field,
+							insertText: column,
+							detail: `Data column - ${dataColumns?.collectionName}`,
+							documentation: "Bound per iteration by a collection run's data file",
+							filterText: column,
+							range,
+						})),
+					};
+				}
 
 				const template = context.mode === "template";
 
@@ -145,5 +179,5 @@ export function useScriptVariableCompletionProvider() {
 		});
 
 		return () => disposable.dispose();
-	}, [monaco, getAllVariables, collectionId]);
+	}, [monaco, getAllVariables, collectionId, dataColumns]);
 }

@@ -23,6 +23,7 @@ import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
+	DataContractScope,
 	HttpMethod,
 	HttpVersion,
 	KeyValueItem,
@@ -422,6 +423,17 @@ export interface RequestBuilderContextValue {
 	 * hand the user a Create button that does nothing.
 	 */
 	writableScopes: VariableScope[];
+	/**
+	 * The data contract in scope for this request's collection, or undefined
+	 * when nothing in its chain declares one (issue #600).
+	 *
+	 * Resolved here rather than by the inputs that paint against it: the
+	 * provider already holds the collections, and a token painter reaching for
+	 * the query cache itself would make `VariableInput` unrenderable without a
+	 * `QueryClientProvider` - the same coupling the `VariableSupport` prop
+	 * removed for the variable slice (#564).
+	 */
+	dataColumns?: DataContractScope;
 
 	// Actions
 	executeRequest: () => Promise<void>;

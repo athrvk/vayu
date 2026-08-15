@@ -210,6 +210,32 @@ export function hasDataContract(schema: CollectionDataSchema | undefined): boole
 	return !!schema?.columns && schema.columns.length > 0;
 }
 
+/**
+ * The contract that answers for a request, and which collection declared it
+ * (issue #600).
+ *
+ * A contract is declared on one collection but binds every request beneath it,
+ * so "which columns are in scope here" is a *chain* answer, not a row read -
+ * see `lib/data-contract.ts` for the walk and `docs/app/variable-resolution.md`
+ * for the rule. The declaring collection travels with the columns because every
+ * surface that shows them has to say where they came from: a token painted
+ * amber in a sub-collection is only actionable if the tooltip names the
+ * collection whose Data tab would fix it.
+ */
+export interface DataContractScope {
+	/**
+	 * The name of the collection that declared it - an ancestor, or the leaf.
+	 *
+	 * The name and not the id, because every consumer *shows* this: the token
+	 * tooltip, the two completion lists. An id nothing navigates by would be a
+	 * field written and never read, which is this codebase's most repeated
+	 * defect - add it back the day something links to that collection's Data tab.
+	 */
+	collectionName: string;
+	/** Declared column names, in the order the contract lists them. */
+	columns: string[];
+}
+
 /** A row the sidebar places in a tree - a {@link Collection} or a {@link Request}. */
 export interface OrderedTreeRow {
 	order?: number;

@@ -57,6 +57,13 @@ vi.mock("./useVariableResolver", () => ({
 /** The providers scope themselves to the active tab; scoping is covered by `variable-completion-scope.test.tsx`. */
 vi.mock("./useActiveCollectionId", () => ({ useActiveCollectionId: () => undefined }));
 
+/**
+ * Declared data columns are a second source in both lists (issue #600) and have
+ * their own suite - `data-column-completion.test.tsx`. Stubbed to "no contract"
+ * here, which is the state these cases were written in.
+ */
+vi.mock("./useDataContract", () => ({ useDataContract: () => undefined }));
+
 import { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 
 /** Completions offered for a line whose caret sits inside an open `{{`. */

@@ -69,6 +69,48 @@ export function isDescendant(
 }
 
 /**
+ * Every id in `rootId`'s subtree, the root first and included.
+ *
+ * `descend` is asked about each *child* before it is taken: a false answer
+ * drops that child and everything under it, which is what "this subtree answers
+ * for itself now" looks like from above (a sub-collection declaring its own
+ * data contract - see `lib/data-contract.ts`). The root is never asked; it is
+ * the subtree being described.
+ *
+ * Guarded like every walk in this module: a `parentId` cycle is reachable in
+ * stored data, and an unguarded descent is a hung window rather than a wrong
+ * answer.
+ */
+export function collectSubtreeIds<T extends TreeNode>(
+	rootId: string,
+	nodes: readonly T[],
+	descend: (node: T) => boolean = () => true
+): string[] {
+	const childrenOf = new Map<string, T[]>();
+	for (const node of nodes) {
+		if (!node.parentId) continue;
+		const siblings = childrenOf.get(node.parentId);
+		if (siblings) siblings.push(node);
+		else childrenOf.set(node.parentId, [node]);
+	}
+
+	const ids: string[] = [rootId];
+	const visited = new Set<string>([rootId]);
+	const queue = [rootId];
+	while (queue.length > 0) {
+		const current = queue.shift()!;
+		for (const child of childrenOf.get(current) ?? []) {
+			if (visited.has(child.id)) continue;
+			visited.add(child.id);
+			if (!descend(child)) continue;
+			ids.push(child.id);
+			queue.push(child.id);
+		}
+	}
+	return ids;
+}
+
+/**
  * Every entity id a cascade delete of `rootId` reaches: the collection itself,
  * its descendant folders, and the requests all of them hold.
  *

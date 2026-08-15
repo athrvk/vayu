@@ -31,6 +31,8 @@
  */
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import type { DataTokenTone } from "@/lib/data-contract";
 
 export interface RuntimeTokenProps {
 	/** Name as written inside the braces, e.g. `"$guid"` or `"data.email"`. */
@@ -39,14 +41,33 @@ export interface RuntimeTokenProps {
 	description: string;
 	/** When it is produced, e.g. "generated per use". */
 	note: string;
+	/**
+	 * `warning` for a token that will read correctly only if the run's file
+	 * disagrees with the contract - a `{{data.x}}` naming a column no contract
+	 * in scope declares (issue #600). Never `destructive`: that paint means "no
+	 * value can ever answer this name", and an undeclared column can still bind
+	 * from a file the contract has drifted from.
+	 */
+	tone?: DataTokenTone;
 }
 
-export default function RuntimeToken({ name, description, note }: RuntimeTokenProps) {
+/** The one place a tone becomes a colour, so the two states cannot drift apart. */
+const TONE_CLASS: Record<DataTokenTone, string> = {
+	muted: "text-muted-foreground",
+	warning: "text-warning-text",
+};
+
+export default function RuntimeToken({
+	name,
+	description,
+	note,
+	tone = "muted",
+}: RuntimeTokenProps) {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
-					className="inline rounded-md font-[inherit] text-muted-foreground"
+					className={cn("inline rounded-md font-[inherit]", TONE_CLASS[tone])}
 					contentEditable={false}
 					suppressContentEditableWarning
 				>

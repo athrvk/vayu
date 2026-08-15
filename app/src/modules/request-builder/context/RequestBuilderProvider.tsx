@@ -20,6 +20,7 @@ import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } fro
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
+import { resolveDataContract } from "@/lib/data-contract";
 import {
 	useCollectionAncestors,
 	useGlobalsQuery,
@@ -582,6 +583,20 @@ export default function RequestBuilderProvider({
 	 * guard changes above, this list is the next thing in the file to change.
 	 * A caller that offers a scope not in here gets a silent no-op.
 	 */
+	/**
+	 * The data contract in scope (issue #600) - the nearest declared ancestor of
+	 * this request's collection, from the collections already loaded above.
+	 *
+	 * Resolved once here and carried on the context, so `VariableInput` and the
+	 * key/value rows can paint a `{{data.*}}` token against it without reaching
+	 * for the query cache themselves. Undefined is the ordinary state: most
+	 * collections declare nothing.
+	 */
+	const dataColumns = useMemo(
+		() => resolveDataContract(collectionId, collections) ?? undefined,
+		[collectionId, collections]
+	);
+
 	const writableScopes = useMemo((): VariableScope[] => {
 		const scopes: VariableScope[] = [];
 		if (globalsData?.variables) scopes.push("global");
@@ -806,6 +821,7 @@ export default function RequestBuilderProvider({
 			getVariableOrigins,
 			updateVariable,
 			writableScopes,
+			dataColumns,
 			executeRequest,
 			saveRequest,
 			startLoadTest,
@@ -844,6 +860,7 @@ export default function RequestBuilderProvider({
 			getVariableOrigins,
 			updateVariable,
 			writableScopes,
+			dataColumns,
 			executeRequest,
 			saveRequest,
 			startLoadTest,

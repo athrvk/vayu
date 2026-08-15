@@ -108,6 +108,18 @@ export function isDataVariableName(name: string): boolean {
 }
 
 /**
+ * The column a `data.*` name addresses, or null for a name outside the
+ * namespace.
+ *
+ * One place strips the prefix, rather than a `slice(5)` in the painter, another
+ * in the audit and a third in the completion providers - each of which would
+ * have to re-derive the boundary `isDataVariableName` already draws.
+ */
+export function dataColumnName(name: string): string | null {
+	return isDataVariableName(name) ? name.slice(DATA_NAMESPACE_PREFIX.length) : null;
+}
+
+/**
  * Substitute `{{name}}` occurrences in one pass: the reserved `data.*`
  * namespace first (kept verbatim), then scopes, then the dynamic-variable
  * table. A defined name (even one spelled `$guid`) wins over a generator; an

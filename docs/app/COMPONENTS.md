@@ -314,7 +314,7 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
-| Data | `DataTab.tsx` | The declared **data contract** (issue #599): pick a file, preview it, **Declare** its columns onto `collection.dataSchema`, **Clear** to reset. Declared-column count badge. Saves explicitly per action, so it holds no draft and is absent from `TABS_HOLDING_DRAFTS` |
+| Data | `DataTab.tsx` | The declared **data contract** (issue #599): pick a file, preview it, **Declare** its columns onto `collection.dataSchema`, **Clear** to reset, plus the **referenced-columns audit** (`ColumnAudit.tsx`, issue #600). Declared-column count badge. Saves explicitly per action, so it holds no draft and is absent from `TABS_HOLDING_DRAFTS` |
 
 `MockServerControl.tsx` is the header's right-hand control and the only surface that can **start** a
 mock server (issue #481 phase 2), because it is the only one holding a collection. With none running
@@ -429,6 +429,20 @@ The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a 
 `modules/collections/DataFilePicker.tsx` is the data-file half (issue #402). It reads a CSV/TSV/JSON/JSONL file through a hidden `<input type="file">` + `FileReader` - the `ImportModal` precedent, deliberately no Electron dialog IPC - decodes its **bytes** (`decodeDataFile`, so a non-UTF-8 export is named rather than parsed into question marks), parses it with `services/data-files/`, and previews the first ten rows in the `ui/table.tsx` grid. Two things it exists to say **before** the run rather than after: everything the engine would reject (a ragged row, a duplicated column, a non-object, a line that will not parse, a set over `maxScenarioDataRows` or `maxScenarioDataBytes`) is refused here with the row, line or setting named - the two caps read live through `useDataFileLimits` rather than restated, so raising one engine-side is enough, and the **resolved iteration count** is stated, because an explicit `iterations` wins over the row count - a 500-row file with Iterations left at 1 runs once. Picking a file blanks a **pristine** `1` so the field shows what will happen - pristine and not merely equal to `1`, because a deliberately typed `1` reads the same and clearing it would turn one pass into a full pass per row, and `iterations` is then omitted from the payload entirely: the engine owns "absent means one pass per row", and a client computing the row count itself would be a second copy of that rule. The previewed rows and the sent rows are one array; the parent holds the single `ParsedDataFile`. Rows are held for the run request and no longer - nothing persists them, here or engine-side. The user-facing file contract lives in [Data-Driven Runs](data-driven-runs.md).
 
 `CollectionDetail/DataTab.tsx` is the authoring-time half of the same file (issue #599, phase 1 of #598). It reuses the picker in `mode="declare"` - same parser, same refusals, no iteration arithmetic - and turns the previewed file's columns into `collection.dataSchema` through `useUpdateCollectionMutation`. **Clear** sends `dataSchema: null`, not `{}`: the engine reads absent as "keep", so a cleared contract is only expressible as a null that survives to the wire. What is stored splits by what it is true of: the **columns** are the same on every machine and ride the engine row; the file's **path** is true of one filesystem and lives in `stores/data-file-store.ts`; the **rows** are true of nobody and are stored nowhere at all. When both a contract and a file are in hand, `services/data-files/schema-diff.ts` renders the mismatch in both directions into the picker's warnings slot - shared with the run dialog, so the tab and the runner cannot describe the same file differently.
+
+`CollectionDetail/ColumnAudit.tsx` is phase 2's half of the tab (issue #600):
+the contract against the **requests** rather than against a file, so it needs no
+file at all. It buckets the declared columns into referenced, referenced-but-
+undeclared (amber, and the typo case this exists to catch) and
+declared-but-unreferenced, scanning the fields the engine's binder walks - URL,
+params, header names and values, body text, form field names and values
+(`services/data-files/column-audit.ts`). **Which requests**: everything the
+contract binds - this collection and every descendant down to one that declares
+its own (`collectionsUnderContract`) - because auditing the leaf alone would
+call a column unreferenced while a request one level down references it.
+Scripts are scanned for literal `pm.iterationData.get("column")` arguments only
+and the line says so: a computed argument is unanswerable at authoring time, and
+the engine remains the run-time authority.
 
 `RunCollectionDialog` **pre-fills from that declaration** as part of mount, which is what keeps the dialog's mount-is-reset contract intact: if `data-file-store` holds a path for this collection it re-reads it over the `dataFile:read` IPC (`electron/data-file.ts` - extension allowlist plus the engine's fetched `maxScenarioDataBytes`, the one channel on which the renderer names a path), decodes and parses it with the same modules the picker uses, and diffs it against the declared columns. A file that has moved leaves the picker empty and a sentence saying so - a warning, never a blocker, because a run without a file is a legal run and re-picking is the whole remedy.
 
@@ -1130,9 +1144,25 @@ generator table:
 
 | Token | Painted by | Looks like |
 |-------|-----------|------------|
-| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted, "Bound by the run's data file / per iteration", no popover |
+| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted or amber, depending on the declared contract - see below |
 | `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click edits or creates |
 | `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
+
+**A `data.*` token has three states of its own** (issue #600), decided by
+`describeDataToken` against `VariableSupport.dataColumns` - the contract the
+collection chain declares, resolved leaf-to-root by `resolveDataContract`:
+
+| In scope | Paint | Tooltip |
+|----------|-------|---------|
+| the column is declared | muted | "Data column - bound per iteration", naming the declaring collection |
+| a contract exists, the column is not in it | **amber** (`text-warning-text`) | "Not a declared column of X", listing what is declared |
+| no contract anywhere in the chain | muted | "Bound by the run's data file / per iteration" |
+
+Amber rather than the destructive red an unknown variable gets: an undeclared
+column still binds if the run's file carries it, so this is "check this", not
+"nothing can ever answer this". None of the three offers to create a variable.
+The `{{` autocomplete offers declared columns as a **Data columns** group beside
+Variables and Dynamic.
 
 `EditableVariable` takes the scope as a **required** prop, because a token only
 renders where there is one. `RuntimeToken` serves both run-time cases - a value
@@ -1155,7 +1185,11 @@ module for its cell input is the same inversion one level down (issue #567).
 
 `VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
 context - `resolveString`, `getAllVariables`, `getVariableOrigins`,
-`updateVariable`, `writableScopes` - as a plain object a caller hands in.
+`updateVariable`, `writableScopes` - as a plain object a caller hands in, plus
+the optional `dataColumns` (the declared data contract in scope, issue #600).
+`dataColumns` is optional *within* a scope rather than with it: absent means the
+chain declares no contract, which is every workspace that has not opened the
+Data tab.
 
 It exists because reaching for the context instead made two primitives
 unmountable anywhere but the request builder: `useRequestBuilderContext()`

@@ -82,6 +82,13 @@ vi.mock("./useActiveCollectionId", () => ({
 	useActiveCollectionId: () => activeCollectionId.current,
 }));
 
+/**
+ * Declared data columns are a second source in both lists (issue #600) and have
+ * their own suite - `data-column-completion.test.tsx`. Stubbed to "no contract"
+ * here, which is the state these cases were written in.
+ */
+vi.mock("./useDataContract", () => ({ useDataContract: () => undefined }));
+
 import { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 import { useScriptVariableCompletionProvider } from "./useScriptVariableCompletionProvider";
 

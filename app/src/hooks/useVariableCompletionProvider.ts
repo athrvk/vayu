@@ -29,6 +29,12 @@
  * list is globals + the whole ancestor chain + the active environment, which is
  * exactly the set `{{name}}` resolves against at compose time.
  *
+ * **Declared data columns are offered too** (issue #600). `{{data.email}}` is
+ * not a variable - the namespace is disjoint from the scopes - so the columns
+ * come from the contract the collection chain declares rather than from the
+ * resolver's map, and they are a group of their own between the variables and
+ * the generators.
+ *
  * Called once, in App - a completion provider is global per language, so one
  * registration covers every editor instance. The same shape as
  * `useScriptCompletionProvider` beside it.
@@ -39,8 +45,10 @@ import { useMonaco } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
 import { useActiveCollectionId } from "./useActiveCollectionId";
+import { useDataContract } from "./useDataContract";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 const CLOSE_BRACES = "}}";
 
@@ -57,12 +65,27 @@ export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
 
+/**
+ * Between the scopes and the generators: a declared column is workspace data
+ * like a variable, so it outranks the table that exists everywhere, but it is
+ * not a variable and must not push one down the list.
+ */
+const DATA_SORT_GROUP = 7;
+
 /** Sorts after every scope above, so a generator never outranks a real variable. */
 const DYNAMIC_SORT_GROUP = 8;
 
 export function useVariableCompletionProvider() {
 	const monaco = useMonaco();
-	const { getAllVariables } = useVariableResolver({ collectionId: useActiveCollectionId() });
+	const collectionId = useActiveCollectionId();
+	const { getAllVariables } = useVariableResolver({ collectionId });
+	/*
+	 * The declared columns of whichever collection in the chain declares them
+	 * (issue #600). Offered from the contract rather than from the variable map
+	 * because the namespace is disjoint from the scopes - `{{data.email}}` is
+	 * never a variable, so nothing in `getAllVariables` can carry it.
+	 */
+	const dataColumns = useDataContract(collectionId);
 
 	useEffect(() => {
 		if (!monaco) return;
@@ -136,6 +159,28 @@ export function useVariableCompletionProvider() {
 					});
 				}
 
+				/*
+				 * Declared columns, from the contract in scope (issue #600). They
+				 * come from the contract rather than from `variables` because the
+				 * namespace is disjoint from the scopes - no variable can carry one.
+				 */
+				for (const column of dataColumns?.columns ?? []) {
+					const name = `${DATA_NAMESPACE_PREFIX}${column}`;
+					suggestions.push({
+						label: name,
+						// `Field`, not `Variable`: the icon is the only thing in the
+						// list saying this is a column of a run's row rather than a
+						// name some scope defines.
+						kind: monaco.languages.CompletionItemKind.Field,
+						insertText: `{{${name}${closing}`,
+						detail: `Data column - ${dataColumns?.collectionName}`,
+						documentation: "Bound per iteration by a collection run's data file",
+						sortText: `${DATA_SORT_GROUP}${name}`,
+						filterText: `{{${name}`,
+						range,
+					});
+				}
+
 				return { suggestions };
 			},
 		};
@@ -144,5 +189,5 @@ export function useVariableCompletionProvider() {
 			monaco.languages.registerCompletionItemProvider(language, provider)
 		);
 		return () => disposables.forEach((d) => d.dispose());
-	}, [monaco, getAllVariables]);
+	}, [monaco, getAllVariables, dataColumns]);
 }
