@@ -784,6 +784,14 @@ come back as a `400` the user has to read, so they are rendered as the response
 streaming send (issue #575), the pre-request half before the transfer and the
 post-request half once the stream has terminated.
 
+**The payload carries `allowScriptRequests` here for the same reason the
+buffered one does** (issue #653): the asker is a user at the request editor
+pressing Send, and the **Event stream** setting describes the shape of the
+answer, not what that user's scripts may do. The engine reads the flag before it
+branches on `stream`, so a `pm.sendRequest` behaves identically with the toggle
+on and off. While only the buffered call sent it, the same button allowed a
+script-issued request one way and refused it the other.
+
 The renderer sends the **inline** compose shape (`{ request, collectionId,
 environmentId }`) rather than compose-by-id, because Send executes the *editor
 state* - possibly unsaved, or a detached History replay copy that has no saved

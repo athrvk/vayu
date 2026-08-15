@@ -512,18 +512,19 @@ export const apiService = {
 	 * (`maxStreamDurationMs`, `maxStreamEvents`, the idle timeout), not by a
 	 * client deadline.
 	 *
-	 * `allowScriptRequests` is not sent here, unlike `executeRequest` above.
-	 * That flag was pointless while the engine refused a stream carrying
-	 * scripts; #612 shipped those scripts, so today it means a `pm.sendRequest`
-	 * is refused on a streaming send and allowed on a buffered one - the same
-	 * button, two answers. Left as it stands rather than swept in with the
-	 * wording fix, because sending it is a behaviour change with its own
-	 * verification: see issue #620's follow-up.
+	 * `allowScriptRequests` is sent here for the same reason `executeRequest`
+	 * sends it, and it is the same reason both times: the asker is a user at
+	 * the request editor pressing Send, and `stream` describes the shape of the
+	 * response, not what that user's scripts may do. The engine reads the flag
+	 * before it branches on `stream` (`execution.cpp`), so it governs a
+	 * streaming send's pre- and post-request scripts exactly as it governs a
+	 * buffered one's (issue #653).
 	 */
 	async executeStreamRequest(data: ExecuteRequestRequest): Promise<ExecuteStreamResponse> {
 		const answer = await httpClient.post<ExecuteStreamResponse>(API_ENDPOINTS.EXECUTE_REQUEST, {
 			...data,
 			stream: true,
+			allowScriptRequests: true,
 		});
 		// Loud rather than a stream that silently never opens: without both
 		// fields there is no run to stop and no URL to tail, and the response

@@ -106,6 +106,16 @@ class StreamServer {
             });
         });
 
+        // A plain, non-streaming endpoint, for the one thing a stream's
+        // pre-request script does that the stream itself cannot: send a
+        // request of its own. Counted apart from `note_request`, whose record
+        // belongs to the transfer - an aside must not overwrite the headers a
+        // test reads back off `/scripted`.
+        svr_.Get ("/aside", [this] (const httplib::Request&, httplib::Response& res) {
+            aside_count_.fetch_add (1);
+            res.set_content (R"({"ok":true})", "application/json");
+        });
+
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Fixture", "silent");
             res.set_chunked_content_provider (
@@ -155,6 +165,12 @@ class StreamServer {
         return received_count_.load ();
     }
 
+    /// Requests a script sent to `/aside` of its own accord. Zero is the only
+    /// proof that a refusal was a refusal rather than a swallowed answer.
+    int aside_requests () const {
+        return aside_count_.load ();
+    }
+
     private:
     void note_request (const httplib::Request& req) {
         std::lock_guard<std::mutex> lock (received_mutex_);
@@ -174,6 +190,7 @@ class StreamServer {
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
     std::atomic<int> received_count_{ 0 };
+    std::atomic<int> aside_count_{ 0 };
 };
 
 vayu::Request get_request (const std::string& url) {
@@ -943,6 +960,24 @@ class StreamExecuteTest : public ::testing::Test {
         return json::parse (response->body).value ("runId", std::string ());
     }
 
+    /// Send @p payload as an ordinary buffered execute and return the answer
+    /// body. The same fields the streaming path stores in its trace's `scripts`
+    /// node arrive here inline, which is what lets one test hold both
+    /// transports to the same rule.
+    json send_buffered (json payload) {
+        payload["method"] = "GET";
+        payload["url"]    = origin_->url ("/scripted");
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/execute", payload.dump (), "application/json");
+        EXPECT_TRUE (response);
+        if (!response) {
+            return json::object ();
+        }
+        EXPECT_EQ (response->status, 200) << response->body;
+        return json::parse (response->body);
+    }
+
     /// The stored trace, once the run has reached a terminal status. Polled off
     /// the row rather than the manager: the trace is written by the worker's
     /// completion callback, and the row's status is what says it has run.
@@ -1059,6 +1094,72 @@ TEST_F (StreamExecuteTest, ThePreRequestScriptsEditReachesTheWire) {
     const auto trace = trace_for (run_id);
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ());
     EXPECT_EQ (origin_->received_header ("X-From-Script"), "yes");
+}
+
+// ---------------------------------------------------------------------------
+// `pm.sendRequest` on a stream (issue #653)
+//
+// Whether a script may send is a property of who asked for the execution, not
+// of the shape the response comes back in - `allow_send_request` is read from
+// the payload before the route branches on `stream`. Both transports are held
+// to the rule in one test each, because the defect these replace was precisely
+// the two disagreeing while each looked right on its own: the flag reached the
+// engine from a buffered Send and not from a streaming one, so the same button
+// allowed a `pm.sendRequest` with the toggle off and refused it with the toggle
+// on.
+// ---------------------------------------------------------------------------
+
+TEST_F (StreamExecuteTest, AStreamsScriptMaySendWhenTheCallerAskedForIt) {
+    serve (1);
+    // What the callback saw, written onto the request that goes on the wire -
+    // the origin's own record, so this cannot pass on a callback that never
+    // ran. `pm.sendRequest` is blocking, so the header is set before the
+    // transfer starts.
+    const std::string script = "pm.sendRequest('" + origin_->url ("/aside") +
+    "', function (err, res) { "
+    "  var seen = err ? 'error' : String(res.json().ok); "
+    "  pm.request.headers.add({ key: 'X-Aside', value: seen }); "
+    "});";
+    const json payload = { { "preRequestScript", script }, { "allowScriptRequests", true } };
+
+    const auto buffered = send_buffered (payload);
+    EXPECT_FALSE (buffered.contains ("preScriptError")) << buffered.dump (2);
+    EXPECT_EQ (origin_->aside_requests (), 1);
+    EXPECT_EQ (origin_->received_header ("X-Aside"), "true");
+
+    const auto run_id = start (payload);
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+    EXPECT_FALSE (trace.contains ("scripts") && trace["scripts"].contains ("preScriptError"))
+    << trace.dump (2);
+    EXPECT_EQ (origin_->aside_requests (), 2)
+    << "the streaming send's script never reached the network";
+    EXPECT_EQ (origin_->received_header ("X-Aside"), "true");
+}
+
+TEST_F (StreamExecuteTest, AStreamsScriptIsRefusedWhenTheCallerDidNotAsk) {
+    serve (1);
+    const std::string script =
+    "pm.sendRequest('" + origin_->url ("/aside") + "', function () {});";
+    const json payload = { { "preRequestScript", script } };
+
+    const auto buffered = send_buffered (payload);
+    ASSERT_TRUE (buffered.contains ("preScriptError")) << buffered.dump (2);
+    EXPECT_NE (buffered["preScriptError"].get<std::string> ().find (
+               "pm.sendRequest is not available"),
+    std::string::npos)
+    << buffered["preScriptError"];
+
+    const auto run_id = start (payload);
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    ASSERT_TRUE (trace["scripts"].contains ("preScriptError")) << trace.dump (2);
+    // The same message, not merely a refusal: a stream that refused for its own
+    // reason would be the divergence this test exists to forbid.
+    EXPECT_EQ (trace["scripts"]["preScriptError"], buffered["preScriptError"]);
+    EXPECT_EQ (origin_->aside_requests (), 0)
+    << "a denied script still reached the network";
 }
 
 // Absent, not empty. A stream that produced nothing has an empty list; a

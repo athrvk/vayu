@@ -22,8 +22,13 @@
  * is the only layer that can catch it.
  *
  * Set inside the service rather than at each call site, so this also pins that
- * a caller does not have to know about it: the two callers below pass no such
+ * a caller does not have to know about it: the callers below pass no such
  * field.
+ *
+ * The streaming send is asserted beside the buffered one because the two are
+ * the same button (issue #653). While they disagreed, a `pm.sendRequest` was
+ * allowed with the stream toggle off and refused with it on - and nothing but
+ * the payload can see that, which is what makes them one test file.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -57,6 +62,18 @@ describe("the renderer opts its own executions into pm.sendRequest", () => {
 			url: "https://example.com",
 			allowScriptRequests: true,
 		});
+	});
+
+	it("sends allowScriptRequests on a streaming send too - one Send, one answer", async () => {
+		// The engine reads the flag before it branches on `stream`, so this is
+		// the only layer that decides whether a stream's scripts may send.
+		post.mockResolvedValue({ runId: "run_1", eventsUrl: "/runs/run_1/events" } as never);
+
+		await apiService.executeStreamRequest({ method: "GET", url: "https://example.com" });
+
+		expect(post).toHaveBeenCalledTimes(1);
+		const [, body] = post.mock.calls[0];
+		expect(body).toMatchObject({ stream: true, allowScriptRequests: true });
 	});
 
 	it("sends allowScriptRequests on a load run - one Tests script, one behaviour", async () => {
