@@ -262,7 +262,10 @@ export default function RequestBuilder() {
 
 	// Execute request callback
 	const handleExecute = useCallback(
-		async (request: RequestState): Promise<ResponseState | null> => {
+		async (
+			request: RequestState,
+			dataRow?: Record<string, unknown>
+		): Promise<ResponseState | null> => {
 			if (!fetchedRequest) return null;
 
 			try {
@@ -277,7 +280,17 @@ export default function RequestBuilder() {
 					// this endpoint can give are different *shapes*, so which one
 					// is coming back is not a decision to hand to an engine-side
 					// default. See `ExecuteRequestRequest.stream`.
-					{ ...composed, requestId: fetchedRequest.id, stream: false },
+					{
+						...composed,
+						requestId: fetchedRequest.id,
+						stream: false,
+						// A Send-with-row's row, or nothing at all (issue #601).
+						// It rides *beside* the composed payload rather than
+						// through composition: `{{data.*}}` survives compose by
+						// design, so the tokens are still written when the
+						// engine binds them here.
+						...(dataRow ? { data: dataRow } : {}),
+					},
 					activeEnvironmentId || undefined
 				);
 
@@ -364,7 +377,10 @@ export default function RequestBuilder() {
 	 * screen.
 	 */
 	const handleExecuteStream = useCallback(
-		async (request: RequestState): Promise<StreamStartResult | null> => {
+		async (
+			request: RequestState,
+			dataRow?: Record<string, unknown>
+		): Promise<StreamStartResult | null> => {
 			if (!fetchedRequest) return null;
 
 			try {
@@ -378,6 +394,10 @@ export default function RequestBuilder() {
 					...composed,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
+					// A stream binds a row exactly as a buffered send does - the
+					// engine reads it before the transfer starts, so the URL and
+					// headers it opens with are the bound ones (issue #601).
+					...(dataRow ? { data: dataRow } : {}),
 				});
 
 				// A stream is a design run like any other, so the context bar's

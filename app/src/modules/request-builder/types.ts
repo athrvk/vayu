@@ -436,7 +436,12 @@ export interface RequestBuilderContextValue {
 	dataColumns?: DataContractScope;
 
 	// Actions
-	executeRequest: () => Promise<void>;
+	/**
+	 * Send the request. With `dataRow`, this is a Send-with-row (issue #601):
+	 * the row binds every `{{data.column}}` in the request and both scripts read
+	 * it as `pm.iterationData`, without a collection run existing.
+	 */
+	executeRequest: (dataRow?: Record<string, unknown>) => Promise<void>;
 	saveRequest: () => Promise<void>;
 	startLoadTest: () => void;
 	/**

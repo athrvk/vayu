@@ -228,11 +228,19 @@ export interface DataContractScope {
 	 * The name of the collection that declared it - an ancestor, or the leaf.
 	 *
 	 * The name and not the id, because every consumer *shows* this: the token
-	 * tooltip, the two completion lists. An id nothing navigates by would be a
-	 * field written and never read, which is this codebase's most repeated
-	 * defect - add it back the day something links to that collection's Data tab.
+	 * tooltip, the two completion lists.
 	 */
 	collectionName: string;
+	/**
+	 * The id of that collection (issue #601).
+	 *
+	 * Added the day something needed to reach the declaring collection rather
+	 * than name it: Send-with-row looks up the data file `data-file-store`
+	 * remembers, and that entry is keyed by the collection whose Data tab
+	 * declared the contract - which under the chain rule is an ancestor as often
+	 * as it is the request's own parent.
+	 */
+	collectionId: string;
 	/** Declared column names, in the order the contract lists them. */
 	columns: string[];
 }

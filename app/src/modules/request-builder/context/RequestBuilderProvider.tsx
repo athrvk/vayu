@@ -79,7 +79,17 @@ interface RequestBuilderProviderProps {
 	legacyPreScript?: string;
 	legacyPostScript?: string;
 	collectionId?: string | null;
-	onExecute?: (request: RequestState) => Promise<ResponseState | null>;
+	/**
+	 * Send the request and return the exchange.
+	 *
+	 * `dataRow` is the one row a Send-with-row binds (issue #601) - the URL,
+	 * headers and body substitute against it and both scripts read it as
+	 * `pm.iterationData`. Undefined is the ordinary Send.
+	 */
+	onExecute?: (
+		request: RequestState,
+		dataRow?: Record<string, unknown>
+	) => Promise<ResponseState | null>;
 	/**
 	 * Send a stream-flagged request (issue #574). Separate from `onExecute`
 	 * because the two answers are different things, not two shapes of one: a
@@ -88,7 +98,10 @@ interface RequestBuilderProviderProps {
 	 * stream - the History run view's detached copy is one - and Send falls back
 	 * to the buffered path rather than doing nothing.
 	 */
-	onExecuteStream?: (request: RequestState) => Promise<StreamStartResult | null>;
+	onExecuteStream?: (
+		request: RequestState,
+		dataRow?: Record<string, unknown>
+	) => Promise<StreamStartResult | null>;
 	onSave?: (request: RequestState) => Promise<void>;
 	onStartLoadTest?: (request: RequestState) => void;
 }
@@ -694,88 +707,99 @@ export default function RequestBuilderProvider({
 		}
 	}, [streamRunId]);
 
-	// Execute request
-	const executeRequest = useCallback(async () => {
-		// Snapshot the request as it is at Send. If the user switches to another
-		// request before this resolves, the result must land on the request that
-		// actually ran - not on whatever is on screen when it finishes.
-		const executingRequest = request;
-		const executingId = executingRequest.id;
+	/**
+	 * Execute the request.
+	 *
+	 * `dataRow` is Send-with-row's chosen row (issue #601). It travels to both
+	 * handlers rather than only the buffered one: a stream-flagged request in a
+	 * data-driven collection binds a row exactly as a buffered one does
+	 * engine-side, and a row silently dropped on that path would be the
+	 * written-but-never-read defect in its plainest form.
+	 */
+	const executeRequest = useCallback(
+		async (dataRow?: Record<string, unknown>) => {
+			// Snapshot the request as it is at Send. If the user switches to another
+			// request before this resolves, the result must land on the request that
+			// actually ran - not on whatever is on screen when it finishes.
+			const executingRequest = request;
+			const executingId = executingRequest.id;
 
-		/*
-		 * A stream-flagged request takes the other endpoint answer (issue #574):
-		 * `202 {runId, eventsUrl}` and no exchange. The buffered path is still
-		 * the fallback when this builder was given no stream handler, because a
-		 * Send that silently did nothing is worse than one that buffers.
-		 */
-		if (executingRequest.stream && onExecuteStream) {
+			/*
+			 * A stream-flagged request takes the other endpoint answer (issue #574):
+			 * `202 {runId, eventsUrl}` and no exchange. The buffered path is still
+			 * the fallback when this builder was given no stream handler, because a
+			 * Send that silently did nothing is worse than one that buffers.
+			 */
+			if (executingRequest.stream && onExecuteStream) {
+				setIsExecuting(true);
+				setLocalResponse(null);
+				// The previous stream's rows belong to the send that is being
+				// replaced. Cleared here rather than on arrival of the first event,
+				// so a stream that never opens does not leave the last one on screen.
+				useExecutionEventsStore.getState().clear();
+				try {
+					const started = await onExecuteStream(executingRequest, dataRow);
+					if (!started) return;
+					if (!started.ok) {
+						if (executingId) storeSetResponse(executingId, started.response);
+						if (currentRequestIdRef.current === executingId) {
+							setLocalResponse(started.response);
+						}
+						return;
+					}
+					useExecutionEventsStore.getState().startStream({
+						requestId: executingId,
+						runId: started.runId,
+						eventsUrl: started.eventsUrl,
+					});
+				} catch (error) {
+					console.error("Request execution failed:", error);
+				} finally {
+					/*
+					 * Cleared even though the stream has only just begun. The request
+					 * is no longer in flight - the engine has the transfer and has
+					 * answered - and leaving the spinner up would hide the Events tab
+					 * behind "Sending…" for the whole life of the stream. `isStreaming`
+					 * is what reports the rest.
+					 */
+					if (currentRequestIdRef.current === executingId) {
+						setIsExecuting(false);
+					}
+				}
+				return;
+			}
+
+			if (!onExecute) return;
+
 			setIsExecuting(true);
 			setLocalResponse(null);
-			// The previous stream's rows belong to the send that is being
-			// replaced. Cleared here rather than on arrival of the first event,
-			// so a stream that never opens does not leave the last one on screen.
-			useExecutionEventsStore.getState().clear();
+
 			try {
-				const started = await onExecuteStream(executingRequest);
-				if (!started) return;
-				if (!started.ok) {
-					if (executingId) storeSetResponse(executingId, started.response);
+				const result = await onExecute(executingRequest, dataRow);
+				if (result) {
+					// Persist under the request that ran, so returning to it shows its
+					// own response. `storeSetResponse` is keyed by id and is safe even
+					// if this provider has since moved on to another request.
+					if (executingId) storeSetResponse(executingId, result);
+					// Only touch the shared live view if that request is still on
+					// screen. The ref reflects the current request, unlike this
+					// closure's frozen `executingId`.
 					if (currentRequestIdRef.current === executingId) {
-						setLocalResponse(started.response);
+						setLocalResponse(result);
 					}
-					return;
 				}
-				useExecutionEventsStore.getState().startStream({
-					requestId: executingId,
-					runId: started.runId,
-					eventsUrl: started.eventsUrl,
-				});
 			} catch (error) {
 				console.error("Request execution failed:", error);
 			} finally {
-				/*
-				 * Cleared even though the stream has only just begun. The request
-				 * is no longer in flight - the engine has the transfer and has
-				 * answered - and leaving the spinner up would hide the Events tab
-				 * behind "Sending…" for the whole life of the stream. `isStreaming`
-				 * is what reports the rest.
-				 */
+				// Same guard: a stale finish must not clear the spinner of a different
+				// request the user has since started.
 				if (currentRequestIdRef.current === executingId) {
 					setIsExecuting(false);
 				}
 			}
-			return;
-		}
-
-		if (!onExecute) return;
-
-		setIsExecuting(true);
-		setLocalResponse(null);
-
-		try {
-			const result = await onExecute(executingRequest);
-			if (result) {
-				// Persist under the request that ran, so returning to it shows its
-				// own response. `storeSetResponse` is keyed by id and is safe even
-				// if this provider has since moved on to another request.
-				if (executingId) storeSetResponse(executingId, result);
-				// Only touch the shared live view if that request is still on
-				// screen. The ref reflects the current request, unlike this
-				// closure's frozen `executingId`.
-				if (currentRequestIdRef.current === executingId) {
-					setLocalResponse(result);
-				}
-			}
-		} catch (error) {
-			console.error("Request execution failed:", error);
-		} finally {
-			// Same guard: a stale finish must not clear the spinner of a different
-			// request the user has since started.
-			if (currentRequestIdRef.current === executingId) {
-				setIsExecuting(false);
-			}
-		}
-	}, [request, onExecute, onExecuteStream, storeSetResponse]);
+		},
+		[request, onExecute, onExecuteStream, storeSetResponse]
+	);
 
 	// Start load test
 	const startLoadTest = useCallback(() => {

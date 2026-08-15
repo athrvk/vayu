@@ -32,14 +32,51 @@ function parseHostname(candidate: string): string | null {
 }
 
 /**
+ * Whether `url` still carries a `{{template}}` in the part that decides the
+ * host - the authority: everything between the scheme and the first `/`, `?`
+ * or `#`, which is where a userinfo, a hostname and a port live.
+ *
+ * The distinction is load-bearing since `run_request` gained a data row (issue
+ * #601). A `{{data.id}}` in the *path* is not an unresolved variable waiting on
+ * a client - it survives `POST /compose` deliberately, so the engine can bind
+ * the row against it - and refusing the whole URL for one would make the row
+ * unusable in the position it is most often written. What the allowlist decides
+ * is the **host**, and a template after the authority cannot change it: no value
+ * substituted into a path, query or fragment moves the request to another
+ * server.
+ *
+ * A template *inside* the authority is refused exactly as before, which is the
+ * case that matters: `https://{{host}}/x` names a target nothing here can know,
+ * and a gate that guessed would be a gate.
+ */
+function authorityHasTemplate(url: string): boolean {
+	const schemeEnd = url.indexOf("://");
+	const authorityStart = schemeEnd === -1 ? 0 : schemeEnd + 3;
+	// The first delimiter after the authority. `Infinity` for a URL that is all
+	// authority ("example.com:8080"), which is then scanned whole.
+	const authorityEnd = Math.min(
+		...["/", "?", "#"]
+			.map((delimiter) => url.indexOf(delimiter, authorityStart))
+			.map((index) => (index === -1 ? Infinity : index))
+	);
+	const authority = url.slice(
+		authorityStart,
+		authorityEnd === Infinity ? undefined : authorityEnd
+	);
+	return authority.includes("{{") || authority.includes("}}");
+}
+
+/**
  * Extract the lowercased hostname from a request URL. Returns null when the URL
- * cannot be parsed - which notably includes URLs still containing unresolved
- * `{{variable}}` templates, so those are treated as "unknown host" and denied.
+ * cannot be parsed - which includes a URL whose *authority* still carries an
+ * unresolved `{{variable}}` template, so those are treated as "unknown host"
+ * and denied. See {@link authorityHasTemplate} for why a template further along
+ * the URL is not one of those.
  */
 export function extractHost(url: string): string | null {
 	if (typeof url !== "string" || url.trim() === "") return null;
-	// Unresolved template variables cannot be safety-checked.
-	if (url.includes("{{") || url.includes("}}")) return null;
+	// An unresolved template in the authority cannot be safety-checked.
+	if (authorityHasTemplate(url)) return null;
 	const parsed = parseHostname(url);
 	if (parsed) return parsed;
 	// A scheme-less "localhost:3000/api" does not throw: "localhost" is a legal

@@ -441,6 +441,15 @@ composed `url` / `headers` / `auth`, and executes that - which is how an
 endpoint whose credentials live in the Auth panel gets introspected at all. It
 sends the composed request's auth but neither its body nor its script parts.
 
+**A Send-with-row carries one extra field** (issue #601): `data`, the row the
+UrlBar's caret picked, added *beside* the composed payload rather than passed
+through `POST /compose`. `{{data.*}}` survives composition by design, so the
+tokens are still written when `/execute` binds them against the row; composing
+the row in would be composing twice. Both send handlers take it - buffered and
+streaming - because the engine binds a row on either path, and a row silently
+dropped on one of them is the written-but-never-read defect. An ordinary Send
+passes no argument at all, so its payload is byte-identical to what it was.
+
 It is the **only** send site that sets `transient: true` (issue #382), because
 it is the only one the user did not initiate. The engine then runs it in full
 and records nothing: no History entry, no result trace holding the credentials

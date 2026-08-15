@@ -152,10 +152,11 @@ std::vector<vayu::http::CookieWrite>* writes);
  * One exchange's inputs: a composed, auth-resolved request and the scripts
  * that bracket it.
  *
- * `iteration` / `iteration_count` / `iteration_data` are the scenario runner's
- * alone - every other caller leaves them unset so `pm.info.iteration` and
- * `pm.iterationData` read `undefined` (issues #300 and #356, and see
- * ScriptContext).
+ * `iteration` / `iteration_count` / `iteration_data` belong to a caller that
+ * binds a row: the scenario runner, per iteration, and `POST /execute` when the
+ * payload names a `data` row (issue #601, where the send is row 0 of 1). Every
+ * other caller leaves them unset so `pm.info.iteration` and `pm.iterationData`
+ * read `undefined` (issues #300 and #356, and see ScriptContext).
  */
 struct ExchangeInputs {
     vayu::Request request;

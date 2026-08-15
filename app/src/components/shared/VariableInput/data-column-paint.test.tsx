@@ -32,6 +32,7 @@ import type { DataContractScope } from "@/types";
 import VariableInput from "./index";
 
 const contract: DataContractScope = {
+	collectionId: "col-checkout",
 	collectionName: "Checkout flow",
 	columns: ["id", "email"],
 };

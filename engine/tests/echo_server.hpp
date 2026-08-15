@@ -23,8 +23,13 @@
 
 namespace vayu::tests {
 
-/// Records what the last request actually carried: its Content-Type, its raw
-/// body, and - for a multipart request - the parts httplib parsed out of it.
+/// Records what the last request actually carried: its path, its headers, its
+/// Content-Type, its raw body, and - for a multipart request - the parts
+/// httplib parsed out of it.
+///
+/// The path and headers are recorded for the same reason the body is: a
+/// substitution that reaches the request struct but not the wire has to be
+/// visible here (issue #601 binds a data row into all three).
 ///
 /// Multipart is asserted through those parsed parts rather than by matching
 /// the envelope byte for byte, because httplib parses a multipart body itself
@@ -47,6 +52,8 @@ class EchoServer {
         auto record = [this] (const httplib::Request& req, httplib::Response& res) {
             {
                 std::lock_guard<std::mutex> lock (mutex_);
+                path_         = req.path;
+                headers_      = req.headers;
                 body_         = req.body;
                 content_type_ = req.get_header_value ("Content-Type");
                 parts_.clear ();
@@ -64,8 +71,12 @@ class EchoServer {
             }
             res.set_content ("{}", "application/json");
         };
-        svr_.Post ("/echo", record);
-        svr_.Put ("/echo", record);
+        // `/echo` and anything under it. The suffix form is what lets a test
+        // send to a path built by substitution (`/echo/users/{{data.id}}`) and
+        // read back the path the server was actually asked for.
+        svr_.Get ("/echo.*", record);
+        svr_.Post ("/echo.*", record);
+        svr_.Put ("/echo.*", record);
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -88,6 +99,21 @@ class EchoServer {
         return body_;
     }
 
+    /// The path the server was asked for, including anything appended to
+    /// {@link url}.
+    std::string path () const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return path_;
+    }
+
+    /// One request header as received, or `""` when it was not sent. Header
+    /// names are matched case-insensitively, as httplib stores them.
+    std::string header (const std::string& name) const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        const auto found = headers_.find (name);
+        return found == headers_.end () ? std::string () : found->second;
+    }
+
     std::string content_type () const {
         std::lock_guard<std::mutex> lock (mutex_);
         return content_type_;
@@ -104,6 +130,8 @@ class EchoServer {
     std::thread thread_;
     int port_ = 0;
     mutable std::mutex mutex_;
+    std::string path_;
+    httplib::Headers headers_;
     std::string body_;
     std::string content_type_;
     std::map<std::string, Part> parts_;

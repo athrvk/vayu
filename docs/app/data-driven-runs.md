@@ -217,6 +217,12 @@ run:
 - **The columns are offered while you type.** `{{data.` completes them in the
   URL, params, headers and body, and `pm.iterationData.get("` completes them in
   the script editors.
+- **You can send one request against one row.** A caret appears beside **Send**
+  in the request builder whenever a contract and a declared file are both in
+  scope; it lists the file's first rows, and picking one sends *that* request
+  bound to *that* row - the tokens substituted, and `pm.iterationData` readable
+  in both scripts. This is how you iterate on a script that reads a row without
+  starting a whole run each time. See [Send with a row](#send-with-a-row).
 - **The Data tab audits the collection.** A **Referenced columns** panel splits
   the declared columns into the ones your requests use, the ones your requests
   name but the contract does not declare, and the ones nothing references -
@@ -234,6 +240,39 @@ same way a variable defined on a parent collection is in scope below it.
 Vayu only ever re-opens a file whose extension is one of the formats above, and
 only up to the same `maxScenarioDataBytes` a run may carry - the remembered path
 is not a general licence to read your disk.
+
+## Send with a row
+
+Everything above is about a *run*. One thing is worth doing without one: a
+pre-request script that reads `pm.iterationData`, or a URL carrying
+`{{data.id}}`, used to be testable only by starting a collection run and digging
+the step out of the result - a run per line of script.
+
+With a contract declared and its file still in place, the request builder grows
+a **caret beside Send**. It lists the first rows of the file; pick one and the
+request is sent bound to it:
+
+- every `{{data.column}}` in the URL, headers and body is substituted from that
+  row, exactly as a run's iteration would substitute it;
+- both scripts read the row as `pm.iterationData`, with `pm.info.iteration` `0`
+  and `pm.info.iterationCount` `1` - the send *is* row 0 of 1;
+- the response lands in the response pane like any other Send, and the send
+  appears in History like any other design run.
+
+The caret is **absent**, not greyed out, when there is nothing to bind - no
+contract in the collection chain, or no remembered file for the collection that
+declared it. A file that has moved says so when you open the list, and picking
+it again in the Data tab is the fix.
+
+One thing a single send cannot bind is **auth credentials**. Auth is applied
+when the request is built, before the row is read, so a `{{data.user}}` in a
+username would go out as part of an already-encoded header. Vayu refuses that by
+name rather than sending it wrong: move the token into the URL, a header or the
+body, or run the collection with the data file, which binds credentials per
+iteration.
+
+The rows read for the picker are held for that send and nothing more - the same
+rule the rest of this page describes.
 
 ## Nothing is stored
 

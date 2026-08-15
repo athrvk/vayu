@@ -39,7 +39,9 @@ import VariableInput from "./index";
 function renderInput(value: string, columns?: string[]) {
 	const scope = variableSupportStub(
 		{ merchantId: { value: "m_1", scope: "global" } },
-		columns ? { dataColumns: { collectionName: "Orders", columns } } : {}
+		columns
+			? { dataColumns: { collectionId: "col-orders", collectionName: "Orders", columns } }
+			: {}
 	);
 	const utils = render(
 		<TooltipProvider delayDuration={0}>

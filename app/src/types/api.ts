@@ -334,6 +334,26 @@ export interface ExecuteRequestRequest {
 	 * the post-request script ran.
 	 */
 	stream?: boolean;
+	/**
+	 * One data row to bind before the request goes out (issue #601).
+	 *
+	 * The single-send half of `scenario.data`: `{{data.column}}` tokens in the
+	 * URL, headers, body and form fields are substituted against it, and both
+	 * scripts read it as `pm.iterationData` (`pm.info.iteration` is 0 - the send
+	 * *is* row 0 of 1). Absent is the ordinary send, where those tokens go out
+	 * written as they stand and `pm.iterationData` is `undefined`.
+	 *
+	 * An object of name/value pairs, never the array a run sends: one row. A
+	 * column the row does not carry is a `400` naming the token and the row's
+	 * own columns, and nothing is sent - the same refusal a run makes per
+	 * iteration, moved to before the run row exists.
+	 *
+	 * Credentials are the one place a token cannot bind here: auth is applied
+	 * when the request is built, before the row is read, so an `auth` block
+	 * carrying `{{data.*}}` is a `400` rather than a silent base64 of the token
+	 * text. A collection run binds those per iteration (issue #591).
+	 */
+	data?: Record<string, unknown>;
 }
 
 export type ExecuteRequestResponse = SanityResult;

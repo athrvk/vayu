@@ -72,6 +72,7 @@ const { useScriptVariableCompletionProvider } =
 	await import("./useScriptVariableCompletionProvider");
 
 const declared: DataContractScope = {
+	collectionId: "col-checkout",
 	collectionName: "Checkout flow",
 	columns: ["id", "email"],
 };

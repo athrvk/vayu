@@ -404,6 +404,20 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   tool decides which one it is about to parse rather than a default deciding for
   it. The allowlist gate is unchanged: it runs on the composed URL before
   anything is sent.
+- **Data rows** - `run_request` takes an optional `data` object: one row, which
+  binds every `{{data.column}}` in the URL, headers and body and which both
+  scripts read as `pm.iterationData` (`pm.info.iteration` is `0`, issue #601).
+  It rides *beside* the composed payload rather than through `/compose`, because
+  `{{data.*}}` survives composition by design - that is what leaves the tokens
+  for the engine to bind. A column the row does not carry is an error naming the
+  token and the row's columns, and **nothing is sent**. Auth credentials are the
+  one place a token cannot bind on a single send (they are applied before the
+  row is read) and are refused by name rather than sent as base64 of the token
+  text. The allowlist gate reads the composed URL as always - a `{{data.*}}` in
+  the *path* leaves the host knowable and is judged on that host, while a
+  template in the authority is still "unknown host" and denied.
+  `run_collection_smoke` stays out of it: it has no scenario path at all, so
+  there is no row for it to bind.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`
