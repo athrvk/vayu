@@ -24,16 +24,20 @@ import type { CollectionDraft, ImportResult } from "./types";
  * Mutates the result in place (and returns it).
  */
 export function assignTempIds(result: ImportResult): ImportResult {
-	const next = { collection: 0, request: 0, environment: 0 };
+	const next = { collection: 0, request: 0, environment: 0, spec: 0 };
 	for (const c of result.collections) assignCollection(c, next);
 	for (const e of result.environments) e.tempId = `e${++next.environment}`;
 	return result;
 }
 
-type Counters = { collection: number; request: number; environment: number };
+type Counters = { collection: number; request: number; environment: number; spec: number };
 
 function assignCollection(c: CollectionDraft, next: Counters): void {
 	c.tempId = `c${++next.collection}`;
+	// A spec belongs to the root that carries it, so its id is minted in the same
+	// walk: the collection item references it by temp id, and the two must be
+	// assigned together or the reference names nothing.
+	if (c.spec) c.spec.tempId = `s${++next.spec}`;
 	for (const r of c.requests) r.tempId = `r${++next.request}`;
 	for (const child of c.children) assignCollection(child, next);
 }

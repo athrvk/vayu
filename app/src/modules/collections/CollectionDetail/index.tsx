@@ -23,9 +23,10 @@ import DataTab from "./DataTab";
 import InfoTab from "./InfoTab";
 import MockServerControl from "./MockServerControl";
 import ScriptTab from "./ScriptTab";
+import SpecTab from "./SpecTab";
 import VariablesTab from "./VariablesTab";
 
-type CollectionTab = "info" | "auth" | "pre-script" | "post-script" | "variables" | "data";
+type CollectionTab = "info" | "auth" | "pre-script" | "post-script" | "variables" | "data" | "spec";
 
 const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "info", label: "Info" },
@@ -34,6 +35,7 @@ const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "post-script", label: "Post-request" },
 	{ id: "variables", label: "Variables" },
 	{ id: "data", label: "Data" },
+	{ id: "spec", label: "Spec" },
 ];
 
 /**
@@ -55,6 +57,9 @@ const TABS: { id: CollectionTab; label: string }[] = [
  * the only thing it holds between actions is a parsed file - which is user data
  * of unknown sensitivity, so letting it outlive a look at another tab is a cost
  * with nothing bought.
+ *
+ * `spec` is absent for the same reason as `data`: binding is an explicit action,
+ * and what it holds between actions is a whole OpenAPI document read from disk.
  */
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set([
 	"info",
@@ -226,6 +231,7 @@ export default function CollectionDetail() {
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
 						{t.id === "data" && <DataTab collection={collection} />}
+						{t.id === "spec" && <SpecTab collection={collection} />}
 					</TabsContent>
 				))}
 			</Tabs>

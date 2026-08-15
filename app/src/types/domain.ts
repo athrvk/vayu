@@ -181,6 +181,44 @@ export interface CollectionDataSchema {
 	fileName?: string;
 }
 
+/**
+ * The OpenAPI document a collection is bound to (issue #637, phase 1 of #625).
+ *
+ * The document itself is a top-level engine resource (`/specs`) rather than a
+ * column here: several collections may bind the same spec, so the binding names
+ * it by id and nothing about the document travels on the collection row.
+ *
+ * `specHash` records which *version* the collection was last synced to, which is
+ * what makes drift detectable at all - a re-fetch that hashes the same is "up to
+ * date", and a run of a bound collection is stamped with both values.
+ *
+ * `{}` - every field absent - is how "bound to nothing" is spelled, which is
+ * also what the engine stores by default.
+ */
+export interface CollectionOpenApiBinding {
+	/** The stored spec document's engine id. */
+	specId?: string;
+	/** Hex sha256 of the document the binding was last made against. */
+	specHash?: string;
+	/** When the binding was last made or re-synced, epoch ms. */
+	syncedAt?: number;
+}
+
+/**
+ * Which operation of a collection's bound spec a request *is* (issue #637).
+ *
+ * `path` is the **templated** path as the document writes it (`/pets/{petId}`),
+ * never the concrete URL the request sends: it is the identity a re-fetched spec
+ * is diffed against, and a URL carrying resolved variables would stop matching
+ * the moment an environment changed. `operationId` is optional because an
+ * OpenAPI operation may declare none.
+ */
+export interface SpecOperation {
+	operationId?: string;
+	method: string;
+	path: string;
+}
+
 export interface Collection {
 	id: string;
 	name: string;
@@ -202,6 +240,13 @@ export interface Collection {
 	 * care, not a claim that the field can go missing in flight.
 	 */
 	dataSchema?: CollectionDataSchema;
+	/**
+	 * Optional for the same reason `dataSchema` is: most collections are bound to
+	 * no spec, and absent and `{}` are the same state to every reader. Use
+	 * {@link hasSpecBinding} rather than hand-rolling the check - a collection
+	 * that was bound and then unbound holds `{}`, not `undefined`.
+	 */
+	openapi?: CollectionOpenApiBinding;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -209,6 +254,16 @@ export interface Collection {
 /** Whether a collection declares a data contract at all. */
 export function hasDataContract(schema: CollectionDataSchema | undefined): boolean {
 	return !!schema?.columns && schema.columns.length > 0;
+}
+
+/**
+ * Whether a collection is bound to a spec document.
+ *
+ * `specId` and not the object: unbinding stores `{}`, and a `syncedAt` with no
+ * document to go with it is a half-written binding nothing can read.
+ */
+export function hasSpecBinding(binding: CollectionOpenApiBinding | undefined): boolean {
+	return !!binding?.specId;
 }
 
 /**
@@ -344,6 +399,14 @@ export interface Request {
 	 * existed reads back `false`, which is what it was.
 	 */
 	stream: boolean;
+	/**
+	 * Which operation of the collection's bound spec this request is (issue
+	 * #637). Optional rather than always-present, unlike `stream`: the engine
+	 * serializes `null` for a request that names none, and `undefined` is how
+	 * every reader here spells that - `hasSpecBinding`'s counterpart at the
+	 * request level is a plain presence check.
+	 */
+	specOperation?: SpecOperation;
 	order: number;
 	createdAt: string;
 	updatedAt: string;

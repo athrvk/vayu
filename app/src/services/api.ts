@@ -61,6 +61,8 @@ import type {
 	ImportFetchResponse,
 	ImportApplyRequest,
 	ImportApplyResponse,
+	CreateSpecRequest,
+	SpecDocument,
 	OAuth2TokenRequest,
 	OAuth2TokenResponse,
 	OAuth2TokenStatusResponse,
@@ -222,6 +224,29 @@ export const apiService = {
 	 */
 	async listRequestExamples(requestId: string): Promise<RequestExample[]> {
 		return await httpClient.get<RequestExample[]>(API_ENDPOINTS.REQUEST_EXAMPLES(requestId));
+	},
+
+	// Specs (issue #637)
+
+	/**
+	 * Store one OpenAPI document and get back its engine id and hash.
+	 *
+	 * The hash is computed engine-side on the bytes it stored, never here: the
+	 * binding it goes into is compared against a hash a *run* was stamped with,
+	 * and two implementations of sha256 agreeing is a thing to rely on only when
+	 * one of them did both.
+	 */
+	async createSpec(data: CreateSpecRequest): Promise<SpecDocument> {
+		return await httpClient.post<SpecDocument>(API_ENDPOINTS.SPECS, withoutId(data));
+	},
+
+	/**
+	 * One stored document, `content` included - the engine has no metadata-only
+	 * read, and the Spec tab needs `sourceUrl` and `fetchedAt`, which live on the
+	 * document rather than on the collection's binding.
+	 */
+	async getSpec(id: string): Promise<SpecDocument> {
+		return await httpClient.get<SpecDocument>(API_ENDPOINTS.SPEC_BY_ID(id));
 	},
 
 	/**

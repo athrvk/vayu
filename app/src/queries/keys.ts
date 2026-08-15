@@ -135,6 +135,13 @@ export const queryKeys = {
 		allRequests: () => [...queryKeys.prefetch.all, "all-requests"] as const,
 	},
 
+	// Stored OpenAPI documents (issue #637). Only a by-id read: the engine has no
+	// list route, and a spec is reached through the collection that binds it.
+	specs: {
+		all: ["specs"] as const,
+		detail: (id: string) => [...queryKeys.specs.all, "detail", id] as const,
+	},
+
 	// Environments
 	environments: {
 		all: ["environments"] as const,

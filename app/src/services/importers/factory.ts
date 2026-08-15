@@ -63,15 +63,41 @@ function joinParamsIntoUrls(result: ImportResult): void {
 }
 
 /**
+ * Where the raw text came from, for the two facts a parser cannot know.
+ *
+ * `fileName` is display only (the preview names the file). `sourceUrl` is
+ * persisted: it becomes `spec_documents.source_url`, which is what makes a
+ * re-fetch possible at all - before this it lived in the import dialog's local
+ * state and was discarded when the dialog closed (issue #638).
+ */
+export interface ImportSource {
+	fileName?: string;
+	sourceUrl?: string;
+}
+
+/**
  * Parse a raw import string. Parses once (JSON then YAML fallback), then runs detectors in order.
  * @throws UnrecognisedFormatError if no parser claims the input.
  */
-export function parseImport(raw: string, opts: ImportOptions, fileName?: string): ImportResult {
+export function parseImport(
+	raw: string,
+	opts: ImportOptions,
+	source: ImportSource = {}
+): ImportResult {
 	const parsed = parseRaw(raw);
 	for (const parser of PARSERS) {
 		if (parser.detect(parsed, raw)) {
 			const result = parser.parse(parsed, raw, opts);
-			if (fileName) result.meta.fileName = fileName;
+			if (source.fileName) result.meta.fileName = source.fileName;
+			// Stamped here rather than passed into `parse`, for the same reason
+			// `fileName` is: where the bytes came from is the caller's knowledge,
+			// and only a format that produced a spec document has anywhere to put
+			// it. A non-OpenAPI import carries no `spec`, so this is a no-op.
+			if (source.sourceUrl) {
+				for (const collection of result.collections) {
+					if (collection.spec) collection.spec.sourceUrl = source.sourceUrl;
+				}
+			}
 			joinParamsIntoUrls(result);
 			return result;
 		}

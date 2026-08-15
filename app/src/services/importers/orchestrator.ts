@@ -13,6 +13,7 @@ import type {
 	ImportApplyRequest,
 	ImportApplyRequestItem,
 	ImportApplyResponse,
+	ImportApplySpec,
 } from "@/types";
 import type { CollectionDraft, ImportOptions, ImportResult } from "./types";
 
@@ -42,10 +43,18 @@ export interface ImportApi {
 export class ImportOrchestrator {
 	constructor(private readonly api: ImportApi) {}
 
-	/** Drafts must already carry temp ids (see assignTempIds). */
-	async run(result: ImportResult, opts: ImportOptions): Promise<void> {
+	/**
+	 * Drafts must already carry temp ids (see assignTempIds).
+	 *
+	 * Returns the engine's temp-id -> real-id map. It used to be checked and
+	 * dropped; a spec-bound import needs it, because the collection the spec's
+	 * file path is remembered under does not have an id until this call answers
+	 * (issue #638).
+	 */
+	async run(result: ImportResult, opts: ImportOptions): Promise<Record<string, string>> {
 		const collections: ImportApplyCollection[] = [];
 		const requests: ImportApplyRequestItem[] = [];
+		const specs: ImportApplySpec[] = [];
 
 		// Note: opts.importScripts is applied at PARSE time by the parsers (they emit empty scripts
 		// when false). The orchestrator only needs importEnvironments.
@@ -60,7 +69,7 @@ export class ImportOrchestrator {
 		 * are new in this payload, so there is nothing to collide with.
 		 */
 		for (const root of result.collections) {
-			flatten(root, null, undefined, collections, requests);
+			flatten(root, null, undefined, collections, requests, specs);
 		}
 
 		const environments: ImportApplyEnvironment[] = opts.importEnvironments
@@ -72,14 +81,19 @@ export class ImportOrchestrator {
 				}))
 			: [];
 
-		const { idMap } = await this.api.applyImport({ collections, requests, environments });
+		const { idMap } = await this.api.applyImport({
+			collections,
+			requests,
+			environments,
+			specs,
+		});
 
 		// The id-map is the endpoint's contract, so check it rather than assume it:
 		// an item the engine silently skipped would otherwise look like a clean
-		// import until the user noticed something missing. Nothing else consumes
-		// the real ids today - the mutation invalidates the collection, request and
-		// environment queries, which refetch them.
-		const missing = [...collections, ...requests, ...environments]
+		// import until the user noticed something missing. The caller reads the map
+		// for the spec-bound roots; everything else is refetched by the mutation's
+		// invalidations.
+		const missing = [...collections, ...requests, ...environments, ...specs]
 			.map((item) => item.tempId)
 			.filter((tempId) => !idMap[tempId]);
 		if (missing.length > 0) {
@@ -96,6 +110,8 @@ export class ImportOrchestrator {
 		// means nothing can fail behind it, so a failed import never leaves the
 		// user's globals half-rewritten. Do not reorder.
 		await this.applyGlobals(result, opts);
+
+		return idMap;
 	}
 
 	/**
@@ -131,9 +147,23 @@ function flatten(
 	parentTempId: string | null,
 	order: number | undefined,
 	collections: ImportApplyCollection[],
-	requests: ImportApplyRequestItem[]
+	requests: ImportApplyRequestItem[],
+	specs: ImportApplySpec[]
 ): void {
 	const tempId = requireTempId(c.tempId, "collection");
+	// The spec document, when this collection was parsed from one, as its own
+	// payload section - it is a resource several collections may bind, not a
+	// field of this one, so it gets a temp id the binding references (issue
+	// #637). The binding is `specTempId`: the document has no engine id until
+	// this same call mints one.
+	const specTempId = c.spec ? requireTempId(c.spec.tempId, "spec") : undefined;
+	if (c.spec && specTempId) {
+		specs.push({
+			tempId: specTempId,
+			content: c.spec.content,
+			...(c.spec.sourceUrl !== undefined ? { sourceUrl: c.spec.sourceUrl } : {}),
+		});
+	}
 	collections.push({
 		tempId,
 		parentTempId,
@@ -144,6 +174,7 @@ function flatten(
 		auth: c.auth,
 		preRequestScript: c.preRequestScript,
 		postRequestScript: c.postRequestScript,
+		...(specTempId ? { openapi: { specTempId } } : {}),
 	});
 
 	for (let i = 0; i < c.requests.length; i++) {
@@ -175,12 +206,16 @@ function flatten(
 			// examples must not send `examples: []`, which reads as "this request
 			// documents no responses" rather than "this format has none".
 			...(r.examples !== undefined ? { examples: r.examples } : {}),
+			// Spread for the same reason as the fields above: a format with no
+			// concept of a spec operation must not send `specOperation: null`,
+			// which the engine reads as "clear it" rather than "never had one".
+			...(r.specOperation !== undefined ? { specOperation: r.specOperation } : {}),
 			order: i,
 		});
 	}
 
 	for (let i = 0; i < c.children.length; i++) {
-		flatten(c.children[i], tempId, i, collections, requests);
+		flatten(c.children[i], tempId, i, collections, requests, specs);
 	}
 }
 

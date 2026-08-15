@@ -27,6 +27,7 @@ import {
 	resolvePathItem,
 	responseExample,
 	SkipTally,
+	specOperationOf,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
 
@@ -67,7 +68,7 @@ export class OpenApiV3Parser implements ImportParser {
 		return !!v && v.startsWith("3.");
 	}
 
-	parse(parsed: unknown, _raw: string, _opts: ImportOptions): ImportResult {
+	parse(parsed: unknown, raw: string, _opts: ImportOptions): ImportResult {
 		const spec = asRecord(parsed) ?? {};
 		const resolveRef = (ref: string): unknown => {
 			const path = ref
@@ -123,6 +124,11 @@ export class OpenApiV3Parser implements ImportParser {
 			postRequestScript: "",
 			children: [...tagCollections.values()],
 			requests: rootRequests,
+			// The document itself, so the import can store it and bind this
+			// collection to it in the same atomic call (issue #637). `raw` and not
+			// a re-serialization: the engine hashes the bytes it stores, and a
+			// sync compares against that hash.
+			spec: { content: raw },
 		};
 
 		return {
@@ -202,6 +208,7 @@ function buildOperation(
 		}
 	}
 	const examples = buildExamples(op.responses, resolveRef, tally);
+	const specOperation = specOperationOf(method, path, op.operationId);
 	return {
 		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
 		description: asStr(op.description) ?? "",
@@ -214,6 +221,7 @@ function buildOperation(
 		preRequestScript: "",
 		postRequestScript: "",
 		...(examples.length > 0 ? { examples } : {}),
+		...(specOperation ? { specOperation } : {}),
 	};
 }
 

@@ -19,6 +19,7 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
+	SpecOperation,
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
 import {
@@ -66,6 +67,25 @@ function coerceHttpVersion(raw: unknown): HttpVersion {
 	return isHttpVersion(raw) ? raw : DEFAULT_HTTP_VERSION;
 }
 
+/**
+ * The spec operation this request names, or `undefined`.
+ *
+ * The engine serializes `null` for a request that names none, so the common
+ * case arrives as a non-object and leaves here as absent. `method` and `path`
+ * are required inside the object engine-side; a half-written one (a row from a
+ * future column, a hand-edited database) is dropped rather than passed on as an
+ * identity with no path - the mapping counter and every later diff key off both.
+ */
+function toSpecOperation(raw: unknown): SpecOperation | undefined {
+	const record = asRecord(raw);
+	if (!record) return undefined;
+	const method = asStr(record.method);
+	const path = asStr(record.path);
+	if (!method || !path) return undefined;
+	const operationId = asStr(record.operationId);
+	return { ...(operationId ? { operationId } : {}), method, path };
+}
+
 export class RequestTransformer {
 	static toFrontend(raw: RawRequest): Request {
 		const id = asStr(raw.id);
@@ -90,6 +110,8 @@ export class RequestTransformer {
 		let auth: RequestAuth = { mode: "inherit" };
 		const rawAuth = asRecord(raw.auth);
 		if (rawAuth?.mode) auth = rawAuth as RequestAuth;
+
+		const specOperation = toSpecOperation(raw.specOperation);
 
 		return {
 			id,
@@ -120,6 +142,11 @@ export class RequestTransformer {
 			// Event stream: same rule as the redirect policy - a row stored
 			// before this column existed reads as `false`, which is what it was.
 			stream: typeof raw.stream === "boolean" ? raw.stream : DEFAULT_STREAM,
+			// Spread rather than assigned: `Request.specOperation` is optional
+			// because "names no operation" is spelled as an absent key, and an
+			// explicit `undefined` would show up in the structural comparisons
+			// the request-builder's dirty check makes.
+			...(specOperation ? { specOperation } : {}),
 			order: typeof raw.order === "number" ? raw.order : 0,
 			createdAt: new Date(raw.createdAt as string | number).toISOString(),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),

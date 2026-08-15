@@ -24,7 +24,7 @@ import {
 import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
-import { parseImport } from "@/services/importers/factory";
+import { parseImport, type ImportSource } from "@/services/importers/factory";
 import {
 	UnrecognisedFormatError,
 	type ImportResult,
@@ -59,6 +59,13 @@ export function ImportModal() {
 	const [url, setUrl] = useState("");
 	const [importEnvironments, setImportEnvironments] = useState(true);
 	const [importScripts, setImportScripts] = useState(true);
+	// Where the parsed bytes came from. Both are persisted when the file turns
+	// out to be an OpenAPI document (issue #638): the URL as
+	// `spec_documents.source_url`, which is what makes a re-fetch possible, and
+	// the path in `spec-file-store`, which is machine-local and never leaves.
+	// They used to live only long enough to render the preview.
+	const [specFilePath, setSpecFilePath] = useState("");
+	const [sourceUrl, setSourceUrl] = useState("");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const reset = () => {
@@ -68,6 +75,8 @@ export function ImportModal() {
 		setLastRaw("");
 		setPasteText("");
 		setUrl("");
+		setSpecFilePath("");
+		setSourceUrl("");
 	};
 
 	const handleClose = () => {
@@ -79,10 +88,10 @@ export function ImportModal() {
 	const detect = (
 		raw: string,
 		opts: { importEnvironments: boolean; importScripts: boolean },
-		fileName?: string
+		source: ImportSource = {}
 	) => {
 		try {
-			const parsed = parseImport(raw, opts, fileName);
+			const parsed = parseImport(raw, opts, source);
 			setResult(parsed);
 			setLastRaw(raw);
 			setPhase("preview");
@@ -95,19 +104,36 @@ export function ImportModal() {
 		}
 	};
 
-	const runDetect = (raw: string, fileName?: string) => {
+	const runDetect = (raw: string, source: ImportSource = {}) => {
 		setPhase("detecting");
-		detect(raw, { importEnvironments, importScripts }, fileName);
+		detect(raw, { importEnvironments, importScripts }, source);
 	};
 
 	// Re-parse the already-loaded source when an option toggle changes in preview.
+	// The source travels with it: a re-parse that dropped the fetched URL would
+	// store a spec with nothing to re-fetch from, and the toggles say nothing
+	// about where the bytes came from.
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
-		if (phase === "preview" && lastRaw) detect(lastRaw, next, result?.meta.fileName);
+		if (phase === "preview" && lastRaw) {
+			detect(lastRaw, next, {
+				fileName: result?.meta.fileName,
+				...(sourceUrl ? { sourceUrl } : {}),
+			});
+		}
 	};
 
 	const handleFile = (file: File) => {
 		const reader = new FileReader();
-		reader.onload = () => runDetect(String(reader.result), file.name);
+		reader.onload = () => {
+			// The path at pick time, while there is still a `File` to take it
+			// from - `getFilePath` is a preload-local read of the object, not a
+			// channel the renderer can name a path on. Empty outside Electron and
+			// for a drag-and-drop of remote content, which is the state "no
+			// remembered file" already means.
+			setSpecFilePath(window.electronAPI?.getFilePath(file) ?? "");
+			setSourceUrl("");
+			runDetect(String(reader.result), { fileName: file.name });
+		};
 		reader.onerror = () => {
 			setError("Could not read file");
 			setPhase("error");
@@ -127,7 +153,9 @@ export function ImportModal() {
 		setPhase("detecting");
 		try {
 			const { content } = await apiService.importFetch(url);
-			detect(content, { importEnvironments, importScripts });
+			setSpecFilePath("");
+			setSourceUrl(url);
+			detect(content, { importEnvironments, importScripts }, { sourceUrl: url });
 		} catch (e) {
 			setError((e as Error).message);
 			setPhase("error");
@@ -140,6 +168,11 @@ export function ImportModal() {
 			await importMutation.mutateAsync({
 				result,
 				opts: { importEnvironments, importScripts },
+				// Only meaningful for a spec import; the mutation ignores it when
+				// the parsed tree carries no spec document.
+				...(specFilePath && result.meta.fileName
+					? { specFile: { path: specFilePath, fileName: result.meta.fileName } }
+					: {}),
 			});
 			handleClose();
 		} catch (e) {

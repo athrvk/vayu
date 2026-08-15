@@ -92,3 +92,45 @@ describe("RequestTransformer httpVersion coercion", () => {
 		expect(req.httpVersion).toBe(DEFAULT_HTTP_VERSION);
 	});
 });
+
+/**
+ * `specOperation` is the request half of the binding (issue #637). The engine
+ * serializes `null` for a request that names none - the key is always present -
+ * so the common case is a non-object arriving here, and it has to leave as an
+ * absent key rather than as `null`, which no reader here checks for.
+ */
+describe("RequestTransformer spec operation", () => {
+	it("carries an identity through, operationId and all", () => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			specOperation: { operationId: "getPet", method: "GET", path: "/pets/{petId}" },
+		});
+		expect(req.specOperation).toEqual({
+			operationId: "getPet",
+			method: "GET",
+			path: "/pets/{petId}",
+		});
+	});
+
+	it("keeps an identity that declares no operationId", () => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			specOperation: { method: "POST", path: "/pets" },
+		});
+		expect(req.specOperation).toEqual({ method: "POST", path: "/pets" });
+	});
+
+	it("reads the engine's null as no operation, with the key absent", () => {
+		const req = RequestTransformer.toFrontend({ ...base, specOperation: null });
+		expect("specOperation" in req).toBe(false);
+	});
+
+	it("drops a half-written identity rather than passing one with no path", () => {
+		// Every later diff keys off method *and* path; an identity missing one is
+		// not an identity, and matching on it would name the wrong operation.
+		for (const bad of [{ method: "GET" }, { path: "/pets" }, { method: "", path: "/pets" }]) {
+			const req = RequestTransformer.toFrontend({ ...base, specOperation: bad });
+			expect(req.specOperation).toBeUndefined();
+		}
+	});
+});
