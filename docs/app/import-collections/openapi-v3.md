@@ -2,6 +2,13 @@
 
 Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, header params with empty values, query params carrying whatever value the spec declares for them (usually none - see [Query parameter values & enabled state](#query-parameter-values--enabled-state)), and a body sampled from the request schema. Users fill in real values after import.
 
+The document is not thrown away once it has been read. The collection it
+produces is **bound** to it: the spec is stored verbatim (with the URL it was
+fetched from, when there was one), and every request records which operation it
+is - `operationId`, method, and the templated path. See
+[OpenAPI Collections](../openapi.md) for what the binding is for and what the
+collection's Spec tab does with it.
+
 - **Source:** `app/src/services/importers/openapi-v3.ts`
 - **Exports:**
 

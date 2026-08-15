@@ -41,4 +41,10 @@ export const STORAGE_KEYS = {
 	 * nowhere (see `data-file-store.ts`).
 	 */
 	DATA_FILE_STORE: "vayu.data-files",
+	/**
+	 * Zustand persist name for each collection's bound spec document **location**
+	 * on this machine. Paths and file names only - a spec's content is engine
+	 * state and is persisted nowhere here (see `spec-file-store.ts`).
+	 */
+	SPEC_FILE_STORE: "vayu.spec-files",
 } as const;

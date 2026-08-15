@@ -37,6 +37,15 @@ export { RequestNotFoundError } from "./collections";
 // Saved example responses (issue #481)
 export { useRequestExamplesQuery } from "./request-examples";
 
+// Bound OpenAPI documents (issues #637, #638)
+export {
+	useSpecQuery,
+	useBindSpecMutation,
+	type BindSpecInput,
+	type BindSpecResult,
+	type SpecOperationStamp,
+} from "./specs";
+
 // Runs (History)
 export {
 	useRunsQuery,

@@ -272,6 +272,42 @@ strings would otherwise reach the read IPC *as a path*. A bad entry is dropped
 rather than repaired - there is nothing to repair a path to, and the picker is
 one click away.
 
+#### `spec-file-store.ts` - Where Each Collection's Spec File Lives
+
+Remembers **where** a collection's bound OpenAPI document is on this machine, for
+the specs that were picked as files rather than fetched from a URL (issue #638).
+
+**State:**
+```typescript
+{
+  locations: Record<string, { path: string; fileName: string }>  // keyed by collection id
+}
+```
+
+**Key Methods:**
+```typescript
+const { setSpecFile, clearSpecFile } = useSpecFileStore();
+setSpecFile(collectionId, { path, fileName });
+```
+
+**Persistence:** `vayu.spec-files` (v1)
+
+The same two-halves law as `data-file-store` above, one contract over: the
+**document** is engine state (`spec_documents.content`, hashed there, bound by
+`collection.openapi.specId`) because it is the same on every machine and travels
+through import; a *path* is true of one filesystem only and stays here. A
+URL-sourced spec has no entry at all - its origin is `spec_documents.source_url`,
+which is portable and is what a re-fetch will use. And it never holds spec
+**content**: a second copy in localStorage could not be hashed and could not be
+told apart from the bound one, which `spec-file-store.test.ts` asserts against
+the persisted payload rather than against the store's surface.
+
+The path is written when an OpenAPI file is imported (`queries/import.ts`, after
+the apply, because the collection has no id until then) or when the Spec tab
+binds a picked file, obtained through the preload's existing `getFilePath`
+bridge, and dropped on unbind. It is normalized through **both** `migrate` and
+`merge`, for the reason spelled out for `data-file-store` above.
+
 #### `engine-store.ts` - Engine Connection & Restart State
 
 Merged store managing engine connection status and restart-required notifications (for config changes that need an engine restart).

@@ -32,7 +32,7 @@ const opts: ImportOptions = { importEnvironments: true, importScripts: true };
 
 function loadFixture(name: string): ImportResult {
 	const raw = readFileSync(join(__dirname, "__fixtures__", name), "utf8");
-	return parseImport(raw, opts, name);
+	return parseImport(raw, opts, { fileName: name });
 }
 
 /** What the pre-#96 orchestrator would have POSTed, item by item, in order. */
@@ -61,6 +61,11 @@ function legacyCreates(result: ImportResult, options: ImportOptions) {
 			auth: c.auth,
 			preRequestScript: c.preRequestScript,
 			postRequestScript: c.postRequestScript,
+			// The spec binding rides the collection on both paths (issue #637):
+			// the single `POST /collections` takes an `openapi` object too, so it
+			// is part of the tree this walk is comparing rather than an artifact
+			// of the bulk call.
+			...(c.spec ? { openapi: { specTempId: c.spec.tempId } } : {}),
 		});
 		for (let i = 0; i < c.requests.length; i++) {
 			const r = c.requests[i];
@@ -78,6 +83,7 @@ function legacyCreates(result: ImportResult, options: ImportOptions) {
 				auth: r.auth,
 				preRequestScript: r.preRequestScript,
 				postRequestScript: r.postRequestScript,
+				...(r.specOperation ? { specOperation: r.specOperation } : {}),
 				order: i,
 			});
 		}
@@ -98,7 +104,15 @@ function legacyCreates(result: ImportResult, options: ImportOptions) {
 	return { collections, requests, environments };
 }
 
-/** Rename the payload's temp-id fields to the legacy id fields so the two are comparable. */
+/**
+ * Rename the payload's temp-id fields to the legacy id fields so the two are
+ * comparable.
+ *
+ * `specs` is dropped rather than compared: a spec document is its own resource
+ * with its own route (`POST /specs`), so the per-item path has no counterpart to
+ * be at parity *with*. What it becomes - the section, and the binding that
+ * references it - is asserted in `orchestrator.test.ts`.
+ */
 function asLegacyShape(payload: ImportApplyRequest) {
 	return {
 		collections: payload.collections.map(({ tempId, parentTempId, ...rest }) => ({
@@ -121,7 +135,7 @@ async function capturePayload(result: ImportResult): Promise<ImportApplyRequest>
 		applyImport: vi.fn(async (payload: ImportApplyRequest) => {
 			captured = payload;
 			const idMap: Record<string, string> = {};
-			for (const kind of ["collections", "requests", "environments"] as const) {
+			for (const kind of ["collections", "requests", "environments", "specs"] as const) {
 				for (const item of payload[kind]) idMap[item.tempId] = `real_${item.tempId}`;
 			}
 			return { idMap };

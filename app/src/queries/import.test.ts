@@ -18,6 +18,7 @@ import { apiService } from "@/services/api";
 import { QUERY_CACHE } from "@/config/cache";
 import { createImportApi, useImportMutation } from "./import";
 import { queryKeys } from "./keys";
+import { useSpecFileStore } from "@/stores/spec-file-store";
 import type { ImportResult } from "@/services/importers/types";
 
 describe("createImportApi", () => {
@@ -28,6 +29,7 @@ describe("createImportApi", () => {
 			collections: [{ tempId: "c1", parentTempId: null, name: "c" }],
 			requests: [],
 			environments: [],
+			specs: [],
 		};
 		await expect(api.applyImport(payload)).resolves.toEqual({ idMap: { c1: "col_1" } });
 		expect(apiService.applyImport).toHaveBeenCalledWith(payload);
@@ -82,6 +84,19 @@ const COLLECTION_ONLY: ImportResult = {
 		unattachedFileParts: 0,
 	},
 };
+
+/** A one-collection OpenAPI import: the tree plus the document it came from. */
+function specImport(): ImportResult {
+	return {
+		...structuredClone(COLLECTION_ONLY),
+		collections: [
+			{
+				...structuredClone(COLLECTION_ONLY.collections[0]),
+				spec: { content: '{"openapi":"3.0.0"}' },
+			},
+		],
+	};
+}
 
 describe("useImportMutation", () => {
 	// clearAllMocks wipes calls but keeps implementations, so the per-test
@@ -154,6 +169,54 @@ describe("useImportMutation", () => {
 		).rejects.toThrow("Request timed out");
 
 		expect(apiService.applyImport).toHaveBeenCalledTimes(1);
+	});
+
+	/**
+	 * A spec import is the one case where the import needs the id-map for
+	 * something other than a completeness check: the file's path is remembered
+	 * per collection, and the collection has no id until the apply answers
+	 * (issue #638).
+	 */
+	it("remembers the picked file under the collection the spec landed on", async () => {
+		useSpecFileStore.setState({ locations: {} });
+		vi.mocked(apiService.applyImport).mockResolvedValue({
+			idMap: { c1: "col_9", s1: "spec_9" },
+		});
+
+		const qc = appDefaultsClient();
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: qc }, children);
+		const { result } = renderHook(() => useImportMutation(), { wrapper });
+
+		await result.current.mutateAsync({
+			result: specImport(),
+			opts: { importEnvironments: true, importScripts: true },
+			specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
+		});
+
+		expect(useSpecFileStore.getState().locations.col_9).toEqual({
+			path: "/home/u/petstore.json",
+			fileName: "petstore.json",
+		});
+	});
+
+	it("remembers nothing for an import that carried no spec", async () => {
+		useSpecFileStore.setState({ locations: {} });
+
+		const qc = appDefaultsClient();
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: qc }, children);
+		const { result } = renderHook(() => useImportMutation(), { wrapper });
+
+		// A Postman export is a picked file too - remembering its path would
+		// claim a spec binding that does not exist.
+		await result.current.mutateAsync({
+			result: structuredClone(COLLECTION_ONLY),
+			opts: { importEnvironments: true, importScripts: true },
+			specFile: { path: "/home/u/team.postman.json", fileName: "team.postman.json" },
+		});
+
+		expect(useSpecFileStore.getState().locations).toEqual({});
 	});
 
 	/**

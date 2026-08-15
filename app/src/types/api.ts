@@ -10,6 +10,8 @@
 import type {
 	Collection,
 	CollectionDataSchema,
+	CollectionOpenApiBinding,
+	SpecOperation,
 	Request,
 	Environment,
 	Run,
@@ -107,6 +109,8 @@ export interface CreateCollectionRequest {
 	preRequestScript?: string;
 	postRequestScript?: string;
 	dataSchema?: CollectionDataSchema;
+	/** The spec document to bind at create time - see {@link Collection.openapi}. */
+	openapi?: CollectionOpenApiBinding;
 }
 
 export interface UpdateCollectionRequest {
@@ -131,6 +135,13 @@ export interface UpdateCollectionRequest {
 	 * the wire - the same rule `parentId` above rides.
 	 */
 	dataSchema?: CollectionDataSchema | null;
+	/**
+	 * `CollectionOpenApiBinding | null`, for the same reason `dataSchema` above
+	 * is: the engine reads absent as "keep the binding" and an explicit JSON
+	 * `null` as "reset to unbound", so **Unbind** is only expressible as a null
+	 * that survives to the wire. There is no unbind verb of its own.
+	 */
+	openapi?: CollectionOpenApiBinding | null;
 }
 
 // Requests API
@@ -162,6 +173,8 @@ export interface CreateRequestRequest {
 	httpVersion?: HttpVersion;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/** Which spec operation this request is - see {@link Request.specOperation}. */
+	specOperation?: SpecOperation;
 	order?: number;
 }
 
@@ -189,6 +202,12 @@ export interface UpdateRequestRequest {
 	httpVersion?: HttpVersion;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/**
+	 * `SpecOperation | null`, like the collection binding above: absent keeps the
+	 * stored operation and an explicit `null` clears it, so stamping and
+	 * un-stamping are the same verb.
+	 */
+	specOperation?: SpecOperation | null;
 	order?: number;
 }
 
@@ -890,6 +909,29 @@ export interface ImportApplyCollection {
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/**
+	 * The spec document this collection binds, named by the payload's own temp id
+	 * (issue #637). `specTempId` and not `specId`: the document is created by the
+	 * same call, so its engine id does not exist yet - the engine resolves the
+	 * temp id and stores the real one, and `specTempId` is never persisted.
+	 */
+	openapi?: { specTempId: string };
+}
+
+/**
+ * An OpenAPI document riding along with the import that produced the tree
+ * (issue #637).
+ *
+ * A fourth top-level section rather than a field on the collection, because a
+ * spec is a resource of its own that several collections may bind - it gets a
+ * temp id, appears in the `idMap`, and is referenced by
+ * {@link ImportApplyCollection.openapi}.
+ */
+export interface ImportApplySpec {
+	tempId: string;
+	content: string;
+	/** Absent when the document did not come from a URL (a file or a paste). */
+	sourceUrl?: string;
 }
 
 /**
@@ -927,6 +969,8 @@ export interface ImportApplyRequestItem {
 	order?: number;
 	/** Omitted unless the source file carried saved responses for this request. */
 	examples?: ImportApplyExample[];
+	/** Omitted unless the source was a spec that named this request's operation. */
+	specOperation?: SpecOperation;
 }
 
 export interface ImportApplyEnvironment {
@@ -940,9 +984,37 @@ export interface ImportApplyRequest {
 	collections: ImportApplyCollection[];
 	requests: ImportApplyRequestItem[];
 	environments: ImportApplyEnvironment[];
+	/**
+	 * Spec documents this payload creates. Always sent, `[]` included: the engine
+	 * reads an absent section as "none", and stating it keeps the payload one
+	 * shape for every format rather than one the OpenAPI parsers grow a key on.
+	 */
+	specs: ImportApplySpec[];
 }
 
 export interface ImportApplyResponse {
 	/** Every `tempId` sent, mapped to the engine-generated id it became. */
 	idMap: Record<string, string>;
+}
+
+// Specs API (issue #637). Create-only and read-by-id: a document that changed
+// is a different document, so there is no PUT - a re-fetch stores a new one and
+// moves the binding.
+
+/** A stored OpenAPI document as the engine hands it back. */
+export interface SpecDocument {
+	id: string;
+	content: string;
+	/** `null` - not `""` - when the document did not come from a URL. */
+	sourceUrl: string | null;
+	fetchedAt: number;
+	/** Hex sha256, computed engine-side on every write. */
+	hash: string;
+}
+
+export interface CreateSpecRequest {
+	/** Engine-assigned - see CreateCollectionRequest.id. */
+	id?: never;
+	content: string;
+	sourceUrl?: string | null;
 }

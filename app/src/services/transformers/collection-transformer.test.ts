@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 import { CollectionTransformer } from "./collection-transformer";
-import { hasDataContract } from "@/types";
+import { hasDataContract, hasSpecBinding } from "@/types";
 
 const row = (extra: Record<string, unknown> = {}) => ({
 	id: "col_1",
@@ -72,5 +72,46 @@ describe("CollectionTransformer data contract", () => {
 	it("reads an empty column list as no contract, which is what clearing leaves", () => {
 		const collection = CollectionTransformer.toFrontend(row({ dataSchema: { columns: [] } }));
 		expect(hasDataContract(collection.dataSchema)).toBe(false);
+	});
+});
+
+/**
+ * The spec binding is the same story one column later (issue #637): every reader
+ * keys off `specId` - the tab's `GET /specs/:id`, the mapping counter - and a
+ * row that predates the column, or one whose blob got in another way, has to
+ * arrive as `{}` rather than as an id a fetch is built from.
+ */
+describe("CollectionTransformer spec binding", () => {
+	it("carries a binding through", () => {
+		const collection = CollectionTransformer.toFrontend(
+			row({ openapi: { specId: "spec_1", specHash: "abc123", syncedAt: 1700000000000 } })
+		);
+		expect(collection.openapi).toEqual({
+			specId: "spec_1",
+			specHash: "abc123",
+			syncedAt: 1700000000000,
+		});
+		expect(hasSpecBinding(collection.openapi)).toBe(true);
+	});
+
+	it("reads an unbound collection as {} - which is what the engine stores", () => {
+		expect(CollectionTransformer.toFrontend(row({ openapi: {} })).openapi).toEqual({});
+		expect(hasSpecBinding(CollectionTransformer.toFrontend(row()).openapi)).toBe(false);
+	});
+
+	it("drops fields that are not what the binding claims", () => {
+		const collection = CollectionTransformer.toFrontend(
+			row({ openapi: { specId: 7, specHash: "abc123", syncedAt: "yesterday" } })
+		);
+		expect(collection.openapi).toEqual({ specHash: "abc123" });
+		// No id, so nothing reads it as bound - a `GET /specs/7` is never built.
+		expect(hasSpecBinding(collection.openapi)).toBe(false);
+	});
+
+	it("treats a non-object openapi as unbound", () => {
+		for (const bad of [null, 42, "spec_1", ["spec_1"]]) {
+			const collection = CollectionTransformer.toFrontend(row({ openapi: bad }));
+			expect(hasSpecBinding(collection.openapi)).toBe(false);
+		}
 	});
 });

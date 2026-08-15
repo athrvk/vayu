@@ -44,6 +44,14 @@ export const API_ENDPOINTS = {
 	// constant with no reader is the defect this repo keeps finding.
 	REQUEST_EXAMPLES: (requestId: string) => `/requests/${requestId}/examples`,
 
+	// OpenAPI documents (issue #637). Create and read-by-id only: a spec is
+	// immutable once stored - a re-fetch is a new document and a moved binding -
+	// and deleting one is a route with no caller here, because unbinding is a
+	// `PUT /collections/:id` with `{"openapi": null}` and the document stays for
+	// whoever else binds it.
+	SPECS: `/specs`,
+	SPEC_BY_ID: (id: string) => `/specs/${id}`,
+
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.
 	REORDER: `/reorder`,

@@ -300,6 +300,28 @@ expressible as a null that survives to the wire. The rows behind the schema are
 never sent by these calls at all - they ride only the `POST /runs` payload, and
 are persisted by neither side.
 
+A collection also carries **`openapi`** - the spec document it is bound to
+(issue #637): `{specId?, specHash?, syncedAt?}`, where `{}` means bound to
+nothing. It is normalized field by field for the same reason `dataSchema` is,
+and `hasSpecBinding(binding)` is the check to use - a collection that was bound
+and then unbound holds `{}`. On `updateCollection` the field is
+`CollectionOpenApiBinding | null`, and the Spec tab's **Unbind** is that null.
+
+#### Specs
+
+```typescript
+apiService.createSpec(data): Promise<SpecDocument>       // POST /specs
+apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
+```
+
+Create and read-by-id only. A document is immutable - a changed spec is a new
+document and a moved binding, which is what keeps a run's `specHash` stamp
+meaningful - and the **hash is computed engine-side** on the bytes it stored,
+never here. There is no delete call: unbinding is a `PUT /collections/:id`, and
+the document stays for whatever else binds it. `getSpec` returns `content` too
+(the engine has no metadata-only read), so `useSpecQuery` caches it with
+`staleTime: Infinity` rather than refetching a whole document to redraw a tab.
+
 #### Requests
 
 ```typescript
@@ -309,6 +331,13 @@ apiService.createRequest(data): Promise<Request>         // POST /requests
 apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id
 apiService.deleteRequest(id): Promise<void>
 ```
+
+A request carries **`specOperation`** - which operation of the bound spec it is
+(issue #637): `{operationId?, method, path}`, where `path` is the document's
+**templated** path and not the URL the request sends. The engine serializes
+`null` for a request that names none, and `RequestTransformer` turns that into an
+absent key; on `updateRequest` the field is `SpecOperation | null`, so stamping
+and clearing an identity are the same verb.
 
 #### Reorder
 
@@ -356,10 +385,15 @@ apiService.importFetch(url): Promise<ImportFetchResponse>          // POST /impo
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
 ```
 
-`applyImport` sends a whole parsed import - collections, requests, environments -
-in one atomic call. Items reference each other by opaque `tempId`s and the engine
+`applyImport` sends a whole parsed import - collections, requests, environments
+and **spec documents** - in one atomic call. Items reference each other by
+opaque `tempId`s and the engine
 returns the temp-id -> real-id `idMap`; a rejected payload persisted nothing, so
-there is nothing to roll back. Imported **globals** are not in this payload: they
+there is nothing to roll back. An OpenAPI import puts the document in the
+`specs` section and binds its root collection with `openapi.specTempId`, so the
+spec, the binding and every request's `specOperation` land in the same
+transaction - `specs: []` is sent for every other format rather than omitted, so
+the payload is one shape. Imported **globals** are not in this payload: they
 are a singleton written through `updateGlobals` after the apply succeeds. See
 [import-collections/README.md](./import-collections/README.md#3-persist---orchestratorts)
 for the pipeline and

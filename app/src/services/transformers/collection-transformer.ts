@@ -12,7 +12,13 @@
  * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Collection, CollectionDataSchema, RequestAuth, VariableValue } from "@/types";
+import type {
+	Collection,
+	CollectionDataSchema,
+	CollectionOpenApiBinding,
+	RequestAuth,
+	VariableValue,
+} from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
 
 /**
@@ -35,6 +41,26 @@ function toDataSchema(raw: unknown): CollectionDataSchema {
 	if (typeof record.declaredAt === "number") schema.declaredAt = record.declaredAt;
 	if (typeof record.fileName === "string") schema.fileName = record.fileName;
 	return schema;
+}
+
+/**
+ * The bound spec document, or `{}` when the row predates the column, is
+ * unbound, or holds something that is not a binding.
+ *
+ * Field by field for the same reason `toDataSchema` is: `specId` is what every
+ * reader keys the binding off (`hasSpecBinding`), and a non-string that got in
+ * another way must not become the id a `GET /specs/:id` is built from.
+ */
+function toOpenApiBinding(raw: unknown): CollectionOpenApiBinding {
+	const record = asRecord(raw);
+	if (!record) return {};
+	const binding: CollectionOpenApiBinding = {};
+	const specId = asStr(record.specId);
+	if (specId) binding.specId = specId;
+	const specHash = asStr(record.specHash);
+	if (specHash) binding.specHash = specHash;
+	if (typeof record.syncedAt === "number") binding.syncedAt = record.syncedAt;
+	return binding;
 }
 
 /**
@@ -66,6 +92,7 @@ export class CollectionTransformer {
 			preRequestScript: asStr(raw.preRequestScript) ?? "",
 			postRequestScript: asStr(raw.postRequestScript) ?? "",
 			dataSchema: toDataSchema(raw.dataSchema),
+			openapi: toOpenApiBinding(raw.openapi),
 			auth,
 			createdAt: new Date(raw.createdAt as string | number).toISOString(),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),

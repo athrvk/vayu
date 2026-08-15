@@ -5,7 +5,14 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HttpMethod, KeyValueEntry, RequestBody, RequestAuth, VariableValue } from "@/types";
+import type {
+	HttpMethod,
+	KeyValueEntry,
+	RequestBody,
+	RequestAuth,
+	SpecOperation,
+	VariableValue,
+} from "@/types";
 
 export interface ImportOptions {
 	importEnvironments: boolean;
@@ -126,6 +133,29 @@ export interface RequestDraft {
 	 * examples must not look like one that found none.
 	 */
 	examples?: ExampleDraft[];
+	/**
+	 * Which operation of the source spec this request is (issue #637). Only the
+	 * OpenAPI parsers set it - every other format describes requests, not a
+	 * contract, and a `specOperation` invented for a Postman item would be an
+	 * identity a re-fetch could never match.
+	 */
+	specOperation?: SpecOperation;
+}
+
+/**
+ * The spec document an import was parsed from, carried on the root collection so
+ * it can be stored and bound in the same `POST /import/apply` (issue #637).
+ *
+ * The **document**, verbatim, not a re-serialization of the parse: the engine
+ * hashes what it stores and a re-fetch is diffed against those bytes, so a
+ * round-trip through `JSON.parse` would make every YAML spec drift on its first
+ * sync.
+ */
+export interface SpecDraft {
+	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored
+	content: string;
+	/** Set only for a URL-sourced import - a file or a paste has no URL to re-fetch. */
+	sourceUrl?: string;
 }
 
 export interface CollectionDraft {
@@ -138,6 +168,12 @@ export interface CollectionDraft {
 	postRequestScript: string;
 	children: CollectionDraft[];
 	requests: RequestDraft[];
+	/**
+	 * The spec this collection was imported from, on the root only (issue #637).
+	 * A tag sub-collection is part of the same document, not a document of its
+	 * own, so binding it too would store the spec once per tag.
+	 */
+	spec?: SpecDraft;
 }
 
 export interface EnvironmentDraft {

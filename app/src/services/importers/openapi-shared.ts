@@ -5,11 +5,37 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { KeyValueEntry } from "@/types";
+import type { KeyValueEntry, SpecOperation } from "@/types";
 import type { ExampleDraft, SkippedItem } from "./types";
 import { asRecord, asStr, prop } from "@/lib/json-node";
 
 export type RefResolver = (ref: string) => unknown;
+
+/**
+ * The identity of one operation: its method, the **templated** path as the
+ * document writes it, and its `operationId` when it declares one (issue #637).
+ *
+ * The path is the document's own key (`/pets/{petId}`), deliberately *not* the
+ * `{{petId}}` rewrite that goes into the request's URL: this is what a re-fetched
+ * spec is diffed against, and diffing against Vayu's variable syntax would
+ * compare a URL to a document that never contained one.
+ *
+ * `undefined` for a path that does not start with `/`, which the engine refuses
+ * (`400`, `specOperation.path`). A `paths` map is keyed by path templates and
+ * every real one starts with a slash, so this is a malformed document - and one
+ * bad key must not turn the whole import into a rejected payload. The request
+ * still imports; it simply names no operation, which is exactly the state of a
+ * request the spec never described.
+ */
+export function specOperationOf(
+	method: string,
+	path: string,
+	operationId: unknown
+): SpecOperation | undefined {
+	if (!path.startsWith("/")) return undefined;
+	const id = asStr(operationId);
+	return { ...(id ? { operationId: id } : {}), method: method.toUpperCase(), path };
+}
 
 /**
  * Helpers shared by the two OpenAPI/Swagger parsers. They are structural clones of
