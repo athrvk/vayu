@@ -43,5 +43,9 @@ export function templatedRequest(
 		headers: flatHeaders(request.headers),
 		body: request.body,
 		auth: resolveAuthForSend(request.auth, ancestors),
+		// An execution setting, so it comes off the row in both modes - see
+		// `CodeSection` for why the resolved mode cannot read it from the
+		// composed payload.
+		stream: request.stream,
 	};
 }

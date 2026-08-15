@@ -717,6 +717,23 @@ declare const pm: {
 		 */
 		errorMessage: string | undefined;
 		/**
+		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: the sandbox is synchronous with no event loop, so a post-request script runs once, after the stream has terminated, over this list.
+		 * 
+		 * Absent - not empty - for an ordinary response, so typeof separates 'not a stream' from 'a stream with no events'. The list is bounded by sseMaxStoredEvents; check eventsTruncated before asserting over it as a whole.
+		 * 
+		 * Example:
+		 * const events = pm.response.events || [];
+		 * pm.test('got the done event', function () { pm.expect(events.some(function (e) { return e.event === 'done'; })).to.be.true; });
+		 */
+		events: { [key: string]: any }[] | undefined;
+		/**
+		 * True when pm.response.events is a prefix of what the stream sent - totalEvents exceeded sseMaxStoredEvents. Guard a whole-stream assertion with it rather than asserting over a partial list.
+		 * 
+		 * Example:
+		 * if (!pm.response.eventsTruncated) { pm.test('exactly three events', function () { pm.expect(pm.response.events.length).to.equal(3); }); }
+		 */
+		eventsTruncated: boolean | undefined;
+		/**
 		 * Response headers as key-value pairs, keyed by the lower-cased name the HTTP client parsed. Index it (pm.response.headers['content-type']) or use the case-insensitive get()/has() over it.
 		 */
 		headers: {
@@ -929,6 +946,10 @@ declare const pm: {
 				status(code: number): void;
 			};
 		};
+		/**
+		 * How many events the stream received in total, including those beyond the stored list. Mirrors the run trace's totalEvents. Absent for a non-streaming response, like pm.response.events.
+		 */
+		totalEvents: number | undefined;
 	};
 	/**
 	 * Send an auxiliary request - fetching a token in a pre-request script is what it is for.

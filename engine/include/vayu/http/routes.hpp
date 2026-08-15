@@ -557,20 +557,39 @@ struct StreamFlag {
  * `POST /execute` payload, and refuse the combinations that cannot mean
  * anything.
  *
- * Two are refused, both because a stream **is** its run row:
+ * One combination is refused, because a stream **is** its run row:
+ * `transient: true` asks for no row at all - there would be nothing for
+ * `eventsUrl` to name, nothing to carry the status, and nothing for
+ * `POST /runs/:id/stop` to find.
  *
- * - `transient: true`, which asks for no row at all - there would be nothing
- *   for `eventsUrl` to name, nothing to carry the status, and nothing for
- *   `POST /runs/:id/stop` to find.
- * - a post-request script, which needs a response that does not exist until the
- *   stream closes. Streams reach scripts in phase 3 (issue #575) as a buffered
- *   `pm.response.events`; until then, asking is a 400 rather than a script that
- *   silently never runs.
+ * Scripts were refused here too until phase 3 (issue #575). They now run: the
+ * pre-request script before the transfer starts, exactly as on a buffered send,
+ * and the post-request script once the stream has terminated, reading the
+ * bounded event list as `pm.response.events`.
  *
  * Extracted from the handler so sse_stream_test.cpp can drive it directly,
  * matching the suite's other route-core tests.
  */
 StreamFlag read_stream_flag (const nlohmann::json& json);
+
+/**
+ * What a design execution's two scripts produced, as the four keys every
+ * client already reads: `testResults`, `consoleLogs`, `preScriptError` and
+ * `postScriptError`.
+ *
+ * One builder for two homes. A buffered send merges it into the `/execute`
+ * response body; a streaming send has already answered `202`, so it stores the
+ * same object in its trace (`StreamRecord::scripts`) and the app reads it back
+ * from there. Building it twice is how the live pane and the restored one would
+ * come to disagree about what a failed assertion looks like.
+ *
+ * Each key is present only when it has something to say, so a request with no
+ * scripts contributes an empty object and stores nothing.
+ *
+ * Non-static: execution_trace_test.cpp drives it directly.
+ */
+[[nodiscard]] nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
+const vayu::ScriptResult& post_script_result);
 
 /**
  * The stream-only half of a recorded design result (issue #573).
@@ -583,6 +602,17 @@ StreamFlag read_stream_flag (const nlohmann::json& json);
 struct StreamRecord {
     /// The bounded `events` node, from `stream_trace_node`.
     nlohmann::json events;
+    /**
+     * What the run's scripts produced, from `build_script_result_node`, or null
+     * when the request carried none (issue #575).
+     *
+     * Stored rather than returned, because there is nobody left to return it
+     * to: the route answered `202` the moment the stream started, so a
+     * streaming run's test results reach the app the same way its events do -
+     * through the trace. `restore-response.ts` maps this node onto the response
+     * pane's existing Tests and Console panes.
+     */
+    nlohmann::json scripts;
     /// The run's terminal status. A stream that was stopped is `Stopped`, which
     /// is neither the `Completed` nor the `Failed` the response alone implies.
     vayu::RunStatus status = vayu::RunStatus::Completed;

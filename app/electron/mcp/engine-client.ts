@@ -90,6 +90,27 @@ const CONFIG_PROBE_TIMEOUT_MS = 2_000;
 export type MetricsTick = Record<string, unknown>;
 
 /**
+ * What one budgeted read of a streaming run's events produced (issue #575).
+ *
+ * `completed` and `capReached` are the two ways a read can stop short, and they
+ * are kept apart because they mean different things to an agent: one says the
+ * stream is over, the other says this read is. Neither is inferable from
+ * `events.length`, which is why both are carried rather than derived.
+ */
+export interface StreamConsumeResult {
+	events: Array<Record<string, unknown>>;
+	/** The relay's `event: complete` arrived - the stream itself has ended. */
+	completed: boolean;
+	/** The read stopped at `maxEvents`, not at the end of the stream. */
+	capReached: boolean;
+	/** Why the stream ended, from the completion frame. Absent if it has not. */
+	endReason?: string;
+	/** Every event the run received, which exceeds `events.length` when this
+	 *  read was capped or budgeted out. */
+	totalEvents?: number;
+}
+
+/**
  * Minimal engine client. One method per endpoint the MCP tools need. Every
  * method returns parsed JSON (or throws {@link EngineRequestError}).
  */
@@ -445,6 +466,113 @@ export class EngineClient {
 			clearTimeout(timer);
 		}
 		return ticks.slice(-limit);
+	}
+
+	/**
+	 * Consume a streaming request's events into a list, under a hard budget
+	 * (issue #575).
+	 *
+	 * The same shape as {@link getLiveMetricsSnapshot} and for the same reason:
+	 * `tools/call` is request/response, so an agent cannot be handed a stream -
+	 * it is handed what the stream produced within a stated bound. Both bounds
+	 * are real and both are disclosed by the caller: `maxEvents` caps the list
+	 * and `budgetMs` caps the wait, so a stream that never ends still answers.
+	 *
+	 * `?lastEventId=` is deliberately not used. This connects once, from offset
+	 * zero, and takes what the ring replays plus what arrives while it waits;
+	 * resuming belongs to a live consumer that means to stay, which this is the
+	 * opposite of.
+	 *
+	 * @returns the events it collected and how the read ended. `completed` is
+	 *   the relay's own `event: complete`, so a partial read is never reported
+	 *   as a finished stream - the distinction the disclosure rests on.
+	 */
+	async consumeStreamEvents(
+		runId: string,
+		maxEvents = 50,
+		budgetMs = 5_000,
+		signal?: AbortSignal
+	): Promise<StreamConsumeResult> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), budgetMs);
+		const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+		const out: StreamConsumeResult = { events: [], completed: false, capReached: false };
+		try {
+			const res = await this.fetchImpl(
+				`${this.baseUrl}/runs/${encodeURIComponent(runId)}/events`,
+				{
+					method: "GET",
+					headers: { Accept: "text/event-stream" },
+					signal: combined,
+				}
+			);
+			if (!res.ok) {
+				const text = await res.text().catch(() => "");
+				throw new EngineRequestError(
+					`Engine responded ${res.status} for GET /runs/${runId}/events`,
+					res.status,
+					text
+				);
+			}
+			if (!res.body) return out;
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+			let done = false;
+			while (!done) {
+				const chunk = await reader.read();
+				if (chunk.done) break;
+				buffer += decoder.decode(chunk.value, { stream: true });
+				const frames = buffer.split("\n\n");
+				buffer = frames.pop() ?? "";
+				for (const frame of frames) {
+					const parsed = parseSseEvent(frame);
+					if (!parsed) continue;
+					if (parsed.event === "complete") {
+						out.completed = true;
+						if (parsed.data) {
+							try {
+								const payload = JSON.parse(parsed.data) as Record<string, unknown>;
+								if (typeof payload.reason === "string")
+									out.endReason = payload.reason;
+								if (typeof payload.totalEvents === "number")
+									out.totalEvents = payload.totalEvents;
+							} catch {
+								// A completion frame we cannot read still ends the
+								// stream; what it said is simply not reported.
+							}
+						}
+						done = true;
+						break;
+					}
+					// `open` carries the initial status line, not an event - it is
+					// the response, which the caller already has from the 202 path.
+					if (parsed.event !== "message" || !parsed.data) continue;
+					if (out.events.length >= maxEvents) {
+						// Stop reading rather than collecting and slicing: the point
+						// of the cap is to bound the work, and a stream that is
+						// still talking would otherwise be read to its budget.
+						out.capReached = true;
+						done = true;
+						break;
+					}
+					try {
+						out.events.push(JSON.parse(parsed.data) as Record<string, unknown>);
+					} catch {
+						// Ignore malformed frames, as the metrics reader does.
+					}
+				}
+			}
+			await reader.cancel().catch(() => {});
+		} catch (err) {
+			// A budget abort is the expected end of a stream that outlasts it -
+			// return what was collected. Genuine engine errors still throw.
+			if (err instanceof EngineRequestError) throw err;
+			if (!(err instanceof Error) || err.name !== "AbortError") throw err;
+		} finally {
+			clearTimeout(timer);
+		}
+		return out;
 	}
 
 	// --- Local services: the OAuth 2.0 mock issuer ---------------------------

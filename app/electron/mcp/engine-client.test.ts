@@ -212,3 +212,130 @@ describe("EngineClient /execute abort budget", () => {
 		await expect(pending).rejects.toThrow(/abort/i);
 	});
 });
+
+/**
+ * The budgeted stream read (issue #575). `tools/call` is request/response, so
+ * what matters is not that events arrive but that a read which stopped short
+ * says which bound stopped it - the disclosure the tool's result rests on.
+ */
+describe("EngineClient.consumeStreamEvents", () => {
+	/** A fetch answering one SSE body, delivered as the given chunks. */
+	function streamingFetch(chunks: string[], status = 200): typeof fetch {
+		return vi.fn(() =>
+			Promise.resolve(
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							const encoder = new TextEncoder();
+							for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+							controller.close();
+						},
+					}),
+					{ status, headers: { "content-type": "text/event-stream" } }
+				)
+			)
+		) as unknown as typeof fetch;
+	}
+
+	const frame = (event: string, data: string, id: number) =>
+		`id: ${id}\nevent: ${event}\ndata: ${data}\n\n`;
+
+	function client(fetchImpl: typeof fetch) {
+		return new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+	}
+
+	it("collects message frames and reports the stream's own ending", async () => {
+		const result = await client(
+			streamingFetch([
+				frame("open", '{"statusCode":200}', 0),
+				frame("message", '{"event":"tick","data":"1"}', 1),
+				frame("message", '{"event":"tick","data":"2"}', 2),
+				frame("complete", '{"reason":"completed","totalEvents":2}', 3),
+			])
+		).consumeStreamEvents("run_s");
+
+		// `open` is the response, not an event - the caller already has it.
+		expect(result.events).toEqual([
+			{ event: "tick", data: "1" },
+			{ event: "tick", data: "2" },
+		]);
+		expect(result.completed).toBe(true);
+		expect(result.capReached).toBe(false);
+		expect(result.endReason).toBe("completed");
+		expect(result.totalEvents).toBe(2);
+	});
+
+	it("stops at the event cap and says the stream did not end", async () => {
+		const result = await client(
+			streamingFetch([
+				frame("message", '{"n":1}', 0),
+				frame("message", '{"n":2}', 1),
+				frame("message", '{"n":3}', 2),
+				frame("complete", '{"reason":"completed","totalEvents":3}', 3),
+			])
+		).consumeStreamEvents("run_s", 2);
+
+		expect(result.events).toHaveLength(2);
+		expect(result.capReached).toBe(true);
+		// The distinction the whole disclosure rests on: this read ended, the
+		// stream did not, and `totalEvents` was never reached to be reported.
+		expect(result.completed).toBe(false);
+		expect(result.totalEvents).toBeUndefined();
+	});
+
+	it("assembles a frame split across chunks", async () => {
+		const result = await client(
+			streamingFetch(['id: 0\nevent: message\ndata: {"ev', 'ent":"tick"}\n\n'])
+		).consumeStreamEvents("run_s");
+		expect(result.events).toEqual([{ event: "tick" }]);
+	});
+
+	it("drops a malformed frame rather than failing the read", async () => {
+		const result = await client(
+			streamingFetch([
+				frame("message", "not json", 0),
+				frame("message", '{"event":"tick"}', 1),
+				frame("complete", '{"reason":"completed"}', 2),
+			])
+		).consumeStreamEvents("run_s");
+		expect(result.events).toEqual([{ event: "tick" }]);
+		expect(result.completed).toBe(true);
+	});
+
+	it("returns what it read when the budget expires mid-stream", async () => {
+		// A body that delivers one event and then never ends, so only the budget
+		// can stop the read. The signal errors the stream the way a real fetch
+		// does - without that, an aborted read simply hangs and this test would
+		// be measuring the runner's timeout rather than the budget.
+		const fetchImpl = vi.fn((_url: string | URL | Request, opts?: RequestInit) =>
+			Promise.resolve(
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(frame("message", '{"n":1}', 0))
+							);
+							opts?.signal?.addEventListener("abort", () =>
+								controller.error(
+									new DOMException("The operation was aborted.", "AbortError")
+								)
+							);
+						},
+					}),
+					{ status: 200 }
+				)
+			)
+		) as unknown as typeof fetch;
+
+		const result = await client(fetchImpl).consumeStreamEvents("run_s", 50, 60);
+		expect(result.events).toEqual([{ n: 1 }]);
+		expect(result.completed).toBe(false);
+		expect(result.capReached).toBe(false);
+	});
+
+	it("throws an engine error rather than reporting an empty stream", async () => {
+		await expect(
+			client(streamingFetch(["nope"], 404)).consumeStreamEvents("run_gone")
+		).rejects.toThrow(/404/);
+	});
+});

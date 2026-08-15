@@ -61,6 +61,9 @@ export function generateHttpie(
 
 	const isFormData = prepared.body?.kind === "form-data";
 	if (isFormData) args.push("--multipart");
+	// HTTPie has a first-class unbuffered mode, so a stream-flagged request has
+	// an idiomatic form rather than a caveat.
+	if (prepared.stream) args.push("--stream");
 
 	for (const [name, value] of prepared.headers) {
 		// HTTPie sets the multipart Content-Type, boundary included; one that

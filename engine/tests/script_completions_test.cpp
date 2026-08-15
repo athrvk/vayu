@@ -632,6 +632,13 @@ struct FullyBoundContext {
     vayu::Environment globals;
     vayu::Environment collection_variables;
     nlohmann::json row = nlohmann::json{ { "username", "ada" }, { "id", 7 } };
+    /// A streamed run's stored `events` node, which binds pm.response.events
+    /// and its two markers - conditional exactly as the data row is (#575).
+    nlohmann::json events =
+    nlohmann::json{ { "items",
+                    nlohmann::json::array ({ nlohmann::json{ { "event", "tick" },
+                    { "data", "1" }, { "sourceId", "e0" } } }) },
+        { "totalEvents", 3 }, { "eventsTruncated", true }, { "endReason", "completed" } };
     vayu::runtime::ScriptContext ctx;
 
     FullyBoundContext () {
@@ -655,6 +662,7 @@ struct FullyBoundContext {
         ctx.iteration           = 0;
         ctx.iteration_count     = 4;
         ctx.iteration_data      = &row;
+        ctx.response_events     = &events;
         ctx.in_scenario         = true;
     }
 };
@@ -722,7 +730,8 @@ std::vector<std::string> split_commas (const std::string& joined) {
 constexpr const char* ENUMERATE_PM = R"JS(
     var names = [];
     var data = [];
-    var DATA_MAPS = ['pm.request.headers', 'pm.response.headers', 'pm.response.cookies'];
+    var DATA_MAPS = ['pm.request.headers', 'pm.response.headers', 'pm.response.cookies',
+                     'pm.response.events'];
 
     function descend(path, value) {
         var isDataMap = DATA_MAPS.indexOf(path) !== -1;
@@ -855,7 +864,11 @@ TEST (ScriptCompletions, TheWalkSeparatesDepthThreeAccessorsFromWireEntries) {
     // these on the wire, so a walk that stopped classifying would fail here.
     for (const char* entry : { "pm.request.headers.Authorization",
          "pm.response.headers.content-type", "pm.response.headers.set-cookie",
-         "pm.response.cookies.0", "pm.response.cookies.length" }) {
+         "pm.response.cookies.0", "pm.response.cookies.length",
+         // A stream's events are data for the same reason a header is: the
+         // origin names them, so demanding a completion per entry would make
+         // every event the origin ever sent a false positive.
+         "pm.response.events.0", "pm.response.events.length" }) {
         EXPECT_TRUE (is_wire (entry))
         << entry << " is a wire entry but the walk did not classify it as one";
         EXPECT_FALSE (is_required (entry))

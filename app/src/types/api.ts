@@ -327,9 +327,11 @@ export interface ExecuteRequestRequest {
 	 * was about to parse.
 	 *
 	 * The engine refuses `stream` combined with `transient` (a stream is its run
-	 * row) or with a pre-/post-request script (a script asserts on a response
-	 * that does not exist until the stream closes), with a `400` naming which.
-	 * Streams reach scripts as `pm.response.events` in a later release.
+	 * row) with a `400` naming why. Scripts are not refused: the pre-request one
+	 * runs before the transfer and the post-request one after the stream ends,
+	 * reading its events as `pm.response.events` (issue #575). Their output is
+	 * stored on the run's trace, since the endpoint answered `202` long before
+	 * the post-request script ran.
 	 */
 	stream?: boolean;
 }

@@ -2154,12 +2154,25 @@ Refused with a **400** rather than silently reinterpreted:
 - `"stream": true` with `"transient": true` - a stream **is** its run row: the
   row is what `eventsUrl` names, what carries the status, and what a stop
   finds, and a transient execution creates none;
-- `"stream": true` with a pre- or post-request script - a post-request script
-  asserts on a response that does not exist until the stream closes. Streams
-  reach scripts as a buffered `pm.response.events` in a later release; until
-  then this is refused rather than silently skipped;
 - `stream` on `POST /runs` (`errorCode: "invalid_run_config"`) - a load run's
   completion accounting has no place for a response that never ends.
+
+**Scripts run on a streaming request** (issue #575), and were refused until they
+did. The pre-request script runs before the transfer starts, exactly as on a
+buffered send, so its `pm.request` edits reach the wire. The post-request script
+runs **once, after the stream has terminated**, and reads the bounded stored
+list as `pm.response.events` with `pm.response.totalEvents` and
+`pm.response.eventsTruncated` beside it - the sandbox is synchronous with no
+event loop, so a live per-event callback is not a feature that was skipped but
+one the runtime cannot have. See
+[Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
+
+Because the route has already answered `202`, a streaming run's script output
+has nowhere to be *returned*: it is stored on the run's trace under `scripts`,
+with the same four keys the buffered response body uses (`testResults`,
+`consoleLogs`, `preScriptError`, `postScriptError`). One engine builder fills
+both, so a live pane and a restored one cannot disagree. A run whose scripts
+said nothing stores no node at all.
 
 Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
 `sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see

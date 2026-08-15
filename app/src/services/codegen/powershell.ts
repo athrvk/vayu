@@ -34,6 +34,14 @@ export function generatePowerShell(
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
 	const notes = [...prepared.notes];
+	// Said rather than emitted: this target's stock idiom buffers the whole
+	// body, so a snippet that looked like the request would simply hang on an
+	// endless stream. A stated limit is better than a command that stalls.
+	if (prepared.stream) {
+		notes.push(
+			"The response is an event stream. Invoke-RestMethod buffers it and does not return until the stream ends - use a System.Net.Http.HttpClient with HttpCompletionOption.ResponseHeadersRead to consume events as they arrive."
+		);
+	}
 	const lines: string[] = [];
 
 	const headers: Array<{ name: string; expression: string }> = [];

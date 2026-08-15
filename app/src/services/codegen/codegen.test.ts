@@ -30,6 +30,7 @@ import {
 	generateSnippet,
 	type SnippetRequest,
 } from "./index";
+import { parseCommand } from "@/services/curl/parseCurl";
 
 const GET: SnippetRequest = { method: "get", url: "https://api.example.com/v1/users" };
 
@@ -825,6 +826,70 @@ describe("the target registry", () => {
 		expect(new Set(ids).size).toBe(ids.length);
 		for (const target of CODE_TARGETS) {
 			expect(target.label.length).toBeGreaterThan(0);
+		}
+	});
+});
+
+/**
+ * A stream-flagged request (issue #575). Two targets have a first-class
+ * unbuffered mode and emit it; the three whose stock idiom buffers the whole
+ * body say so, because a snippet that looked like the request would hang on an
+ * endless stream and a reader would blame the endpoint.
+ */
+describe("a streaming request", () => {
+	const STREAM: SnippetRequest = {
+		method: "GET",
+		url: "https://api.example.com/events",
+		headers: { Accept: "text/event-stream" },
+		stream: true,
+	};
+
+	it("curl emits -N, and parseCurl reads it back as the same setting", () => {
+		const { code } = generateCurl(STREAM);
+		expect(code).toContain(" -N");
+		// The round trip issue #575 asks for, asserted through the real parser
+		// rather than by eye: a flag the generator emits and the importer skips
+		// would pass a one-sided test.
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.stream).toBe(true);
+	});
+
+	it("curl does not duplicate an Accept the request already declares", () => {
+		const { code } = generateCurl(STREAM);
+		expect(code.match(/Accept: text\/event-stream/g)).toHaveLength(1);
+	});
+
+	it("curl adds the implied Accept when the request declares none", () => {
+		const { code } = generateCurl({ ...STREAM, headers: {} });
+		expect(code).toContain("Accept: text/event-stream");
+	});
+
+	it("curl leaves a differently-declared Accept alone", () => {
+		const { code } = generateCurl({
+			...STREAM,
+			headers: { Accept: "application/stream+json" },
+		});
+		expect(code).toContain("application/stream+json");
+		expect(code).not.toContain("Accept: text/event-stream");
+	});
+
+	it("HTTPie emits its own --stream", () => {
+		expect(generateHttpie(STREAM).code).toContain("--stream");
+	});
+
+	it("the buffering targets say they buffer, rather than emitting a command that hangs", () => {
+		for (const generate of [generateFetch, generatePython, generatePowerShell]) {
+			const { notes } = generate(STREAM);
+			expect(notes.some((n) => n.includes("event stream"))).toBe(true);
+		}
+	});
+
+	it("nothing changes for a request that is not a stream", () => {
+		const plain: SnippetRequest = { ...STREAM, stream: false };
+		expect(generateCurl(plain).code).not.toContain(" -N");
+		expect(generateHttpie(plain).code).not.toContain("--stream");
+		for (const generate of [generateFetch, generatePython, generatePowerShell]) {
+			expect(generate(plain).notes.some((n) => n.includes("event stream"))).toBe(false);
 		}
 	});
 });

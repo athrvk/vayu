@@ -328,17 +328,6 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         return flag;
     }
 
-    if (!vayu::http::read_post_request_script (json).empty () ||
-    !vayu::http::read_pre_request_script (json).empty ()) {
-        flag.ok    = false;
-        flag.error = "scripts cannot run on a streaming request yet: a "
-                     "post-request script asserts on a response that does not "
-                     "exist until the stream closes. Refused rather than "
-                     "silently skipped; streams reach scripts as "
-                     "'pm.response.events' in a later release";
-        return flag;
-    }
-
     return flag;
 }
 
@@ -349,53 +338,12 @@ nlohmann::json build_response_json (const vayu::Response& response,
 const vayu::ScriptResult& pre_script_result,
 const vayu::ScriptResult& post_script_result) {
     nlohmann::json response_json = vayu::json::serialize (response);
-
-    // Add test results from post-request script
-    if (!post_script_result.tests.empty ()) {
-        nlohmann::json test_results = nlohmann::json::array ();
-        for (const auto& test : post_script_result.tests) {
-            nlohmann::json test_json;
-            test_json["name"]   = test.name;
-            test_json["passed"] = test.passed;
-            if (!test.error_message.empty ()) {
-                test_json["error"] = test.error_message;
-            }
-            test_results.push_back (test_json);
-        }
-        response_json["testResults"] = test_results;
-    }
-
-    /*
-     * Combine console output from both scripts.
-     *
-     * `source` is a field rather than the `"[pre] "` text prefix this used to
-     * carry: the prefix was indistinguishable from a script that logged a line
-     * beginning with those six characters, and adding a second prefix for the
-     * level would have doubled that ambiguity instead of removing it.
-     */
-    nlohmann::json all_console_output = nlohmann::json::array ();
-    const auto append = [&all_console_output] (const char* source,
-                        const std::vector<vayu::ConsoleEntry>& entries) {
-        for (const auto& entry : entries) {
-            all_console_output.push_back ({ { "source", source },
-            { "level", vayu::to_string (entry.level) },
-            { "message", entry.message } });
-        }
-    };
-    append ("pre", pre_script_result.console_output);
-    append ("test", post_script_result.console_output);
-    if (!all_console_output.empty ()) {
-        response_json["consoleLogs"] = all_console_output;
-    }
-
-    // Add script errors if any
-    if (!pre_script_result.success && !pre_script_result.error_message.empty ()) {
-        response_json["preScriptError"] = pre_script_result.error_message;
-    }
-    if (!post_script_result.success && !post_script_result.error_message.empty ()) {
-        response_json["postScriptError"] = post_script_result.error_message;
-    }
-
+    // Merged in at the top level, which is where every client has read these
+    // four keys since before there was a second placement for them. The
+    // streaming path stores the same object under the trace's `scripts` node -
+    // one builder, two homes, so a key can never mean one thing live and
+    // another restored.
+    response_json.update (build_script_result_node (pre_script_result, post_script_result));
     return response_json;
 }
 
@@ -478,6 +426,63 @@ std::optional<std::string> check_duration_field (const nlohmann::json& config, c
 } // namespace
 
 /**
+ * @brief Build the four script-result keys - see routes.hpp for why one builder
+ *        serves both the live response body and the stored trace.
+ */
+nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
+const vayu::ScriptResult& post_script_result) {
+    nlohmann::json node = nlohmann::json::object ();
+
+    // Test results come from the post-request script alone: a pre-request
+    // script runs before there is anything to assert about.
+    if (!post_script_result.tests.empty ()) {
+        nlohmann::json test_results = nlohmann::json::array ();
+        for (const auto& test : post_script_result.tests) {
+            nlohmann::json test_json;
+            test_json["name"]   = test.name;
+            test_json["passed"] = test.passed;
+            if (!test.error_message.empty ()) {
+                test_json["error"] = test.error_message;
+            }
+            test_results.push_back (test_json);
+        }
+        node["testResults"] = test_results;
+    }
+
+    /*
+     * Combine console output from both scripts.
+     *
+     * `source` is a field rather than the `"[pre] "` text prefix this used to
+     * carry: the prefix was indistinguishable from a script that logged a line
+     * beginning with those six characters, and adding a second prefix for the
+     * level would have doubled that ambiguity instead of removing it.
+     */
+    nlohmann::json all_console_output = nlohmann::json::array ();
+    const auto append = [&all_console_output] (const char* source,
+                        const std::vector<vayu::ConsoleEntry>& entries) {
+        for (const auto& entry : entries) {
+            all_console_output.push_back ({ { "source", source },
+            { "level", vayu::to_string (entry.level) }, { "message", entry.message } });
+        }
+    };
+    append ("pre", pre_script_result.console_output);
+    append ("test", post_script_result.console_output);
+    if (!all_console_output.empty ()) {
+        node["consoleLogs"] = all_console_output;
+    }
+
+    // Add script errors if any
+    if (!pre_script_result.success && !pre_script_result.error_message.empty ()) {
+        node["preScriptError"] = pre_script_result.error_message;
+    }
+    if (!post_script_result.success && !post_script_result.error_message.empty ()) {
+        node["postScriptError"] = post_script_result.error_message;
+    }
+
+    return node;
+}
+
+/**
  * @brief Record a finished design execution against its run row.
  *
  * Declared in routes.hpp. Every `POST /execute` call site - the auth-failure
@@ -523,6 +528,11 @@ const StreamRecord* stream) {
         // impossible to misread as covered.
         if (stream) {
             trace["events"] = stream->events;
+            // Only when the run had scripts at all: an empty node would put a
+            // Tests pane's worth of nothing on every stored stream.
+            if (stream->scripts.is_object () && !stream->scripts.empty ()) {
+                trace["scripts"] = stream->scripts;
+            }
         }
 
         // A capped body may split a UTF-8 sequence, and the raw response body can
@@ -852,12 +862,60 @@ void register_execution_routes (RouteContext& ctx) {
         const std::string cookie_scope =
         run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
+        // What both scripts run under. Read here rather than inside each branch
+        // because it is three config lookups; the QuickJS runtime itself - the
+        // part that is not free - is still built only where a script exists.
+        vayu::runtime::ScriptConfig script_config;
+        script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
+        "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
+        script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
+        "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
+        script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
+        "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
+        script_config.enable_console = ctx.db.get_config_bool (
+        "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+        // Payload-level, not config-level: whether a script may send is a
+        // property of *who asked for this execution*, not of the installation.
+        // Absent means no - see ScriptConfig::allow_send_request.
+        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
+
         // A streaming request diverges here: there is no synchronous exchange to
         // run. The transfer moves to a managed consumer worker and the route
         // answers at once with the run and the URL its events arrive on
         // (issue #573). `stream` and `transient` are mutually exclusive, so
         // `run_id` is always set on this path.
         if (stream.value) {
+            // The same script/send/script ordering a buffered send performs,
+            // pulled apart by the transfer that sits between the two halves
+            // (issue #575). The pre-request script runs here, before anything
+            // is on the wire, so its `pm.request` write-back reaches the
+            // stream; the post-request script runs on the worker thread once
+            // the stream has terminated, because only then is there a response
+            // - and an event list - to assert over.
+            //
+            // The scopes both halves read are loaded once and travel with the
+            // completion callback, so a `pm.environment.set` in the
+            // pre-request script is visible to the post-request script exactly
+            // as it is on the buffered path.
+            ScriptVariableScopes scopes;
+            vayu::ScriptResult pre_script_result;
+            std::vector<vayu::http::CookieWrite> pre_cookie_writes;
+            const bool has_scripts =
+            !pre_request_script.empty () || !post_request_script.empty ();
+            if (has_scripts) {
+                scopes = load_script_variable_scopes (ctx.db, run);
+            }
+            if (!pre_request_script.empty ()) {
+                vayu::runtime::ScriptEngine script_engine (script_config);
+                auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
+                bind_script_scopes (pre_ctx, scopes, ctx.cookie_jar,
+                cookie_scope, &pre_cookie_writes);
+                pre_ctx.request_id   = run.request_id;
+                pre_ctx.request_name = script_request_name;
+                pre_script_result    = execute_script (
+                script_engine, pre_request_script, pre_ctx, "Pre-request");
+            }
+
             vayu::http::SseStreamRequest spec;
             spec.run_id          = *run_id;
             spec.request         = std::move (request);
@@ -866,12 +924,19 @@ void register_execution_routes (RouteContext& ctx) {
             spec.max_events      = stream.max_events;
             spec.cookie_jar      = &ctx.cookie_jar;
             spec.cookie_scope    = cookie_scope;
+            // The pre-request script's jar writes ride this transfer, which is
+            // what makes them happen exactly once - the same route
+            // `ClientConfig::cookie_writes` gives them on the buffered path.
+            spec.cookie_writes = std::move (pre_cookie_writes);
             // Persistence stays the route's decision even though it happens on
             // the worker thread - `ctx.db` outlives the manager, which is why
             // the manager is declared before `server_` (see server.hpp).
-            spec.on_complete = [&db = ctx.db, id = *run_id] (const vayu::Request& sent,
+            spec.on_complete = [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id,
+                               cookie_scope, run, script_config, post_request_script,
+                               request_name = script_request_name, scopes,
+                               pre_script_result] (const vayu::Request& sent,
                                const vayu::Response& response,
-                               const vayu::http::SseStreamContext& context) {
+                               const vayu::http::SseStreamContext& context) mutable {
                 StreamRecord record;
                 record.events = vayu::http::stream_trace_node (context);
                 record.status =
@@ -879,6 +944,49 @@ void register_execution_routes (RouteContext& ctx) {
                 vayu::RunStatus::Stopped :
                 (response.has_error () ? vayu::RunStatus::Failed :
                                          vayu::RunStatus::Completed);
+
+                const bool has_scripts = !post_request_script.empty () ||
+                !pre_script_result.tests.empty () ||
+                !pre_script_result.console_output.empty () || !pre_script_result.success;
+                if (has_scripts) {
+                    // Guarded as a whole: a script surface that threw where
+                    // `execute_script` does not catch - building the runtime,
+                    // applying a cookie write - must not cost the run its
+                    // result row, which is the only record the stream leaves.
+                    try {
+                        vayu::ScriptResult post_script_result;
+                        if (!post_request_script.empty ()) {
+                            vayu::runtime::ScriptEngine script_engine (script_config);
+                            std::vector<vayu::http::CookieWrite> post_cookie_writes;
+                            auto post_ctx =
+                            vayu::runtime::ScriptContext::for_test (sent, response);
+                            bind_script_scopes (post_ctx, scopes, jar,
+                            cookie_scope, &post_cookie_writes);
+                            post_ctx.request_id   = run.request_id;
+                            post_ctx.request_name = request_name;
+                            // The node the trace is about to store, not a copy
+                            // of it: `pm.response.eventsTruncated` and the
+                            // stored marker are then the same value by
+                            // construction rather than by agreement.
+                            post_ctx.response_events = &record.events;
+                            post_script_result = execute_script (script_engine,
+                            post_request_script, post_ctx, "Post-request");
+                            // Nothing left to carry them - the transfer has
+                            // already captured, exactly as on the buffered path.
+                            jar.apply (cookie_scope, post_cookie_writes);
+                        }
+                        record.scripts = build_script_result_node (
+                        pre_script_result, post_script_result);
+                    } catch (const std::exception& e) {
+                        vayu::utils::log_error (
+                        "Stream post-request script failed: " + std::string (e.what ()));
+                    }
+                    // Best-effort and after both scripts, so one `set()` per
+                    // run reaches disk rather than one per half.
+                    persist_script_variables (db, run, scopes.environment,
+                    scopes.globals, scopes.collection);
+                }
+
                 record_design_result (db, id, sent, response, &record);
             };
 
@@ -907,24 +1015,6 @@ void register_execution_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
             return;
         }
-
-        // Initialize script engine. Built here rather than above the stream
-        // branch because a QuickJS runtime is not free and a streaming request
-        // has no script to run on it - `read_stream_flag` refuses a payload
-        // carrying one rather than building an engine nothing would use.
-        vayu::runtime::ScriptConfig script_config;
-        script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
-        "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-        script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-        script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-        script_config.enable_console = ctx.db.get_config_bool (
-        "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
-        // Payload-level, not config-level: whether a script may send is a
-        // property of *who asked for this execution*, not of the installation.
-        // Absent means no - see ScriptConfig::allow_send_request.
-        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
         vayu::runtime::ScriptEngine script_engine (script_config);
 

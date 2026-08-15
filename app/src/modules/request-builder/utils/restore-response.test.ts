@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest";
 import {
 	eventsFromTrace,
 	responseFromRunResult,
+	scriptsFromTrace,
 	timingFromTrace,
 	type RunResultSample,
 } from "./restore-response";
@@ -470,5 +471,72 @@ describe("eventsFromTrace", () => {
 		expect(restored?.status).toBe(0);
 		expect(restored?.events).toHaveLength(1);
 		expect(restored?.streamEndReason).toBe("error");
+	});
+});
+
+/**
+ * The `scripts` node a streaming run stores (issue #575).
+ *
+ * This is the *only* route a streaming send's test results ever take: that send
+ * was answered `202` before its post-request script had run, so nothing came
+ * back in a response body to put in the pane. Dropping this mapping is the
+ * "written but never read" shape - the engine would store results no surface
+ * shows - which is what the last case here pins.
+ */
+describe("scriptsFromTrace", () => {
+	it("gives nothing at all for a trace with no scripts node", () => {
+		expect(scriptsFromTrace({})).toEqual({});
+		expect(responseFromRunResult(sample())).not.toHaveProperty("testResults");
+	});
+
+	it("restores test results, console lines and both script errors", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					...sample().trace,
+					scripts: {
+						testResults: [
+							{ name: "got the done event", passed: false, error: "expected 3" },
+						],
+						consoleLogs: [{ source: "test", level: "log", message: "seen 2" }],
+						preScriptError: "pre blew up",
+						postScriptError: "post blew up",
+					},
+				},
+			})
+		);
+		expect(restored?.testResults).toEqual([
+			{ name: "got the done event", passed: false, error: "expected 3" },
+		]);
+		expect(restored?.consoleLogs).toEqual([
+			{ source: "test", level: "log", message: "seen 2" },
+		]);
+		expect(restored?.preScriptError).toBe("pre blew up");
+		expect(restored?.postScriptError).toBe("post blew up");
+	});
+
+	it("restores them on the failure path too, where a stream that errored still ran its script", () => {
+		const restored = responseFromRunResult(
+			sample({
+				statusCode: 0,
+				trace: {
+					request: sample().trace!.request,
+					error_type: "CONNECTION_FAILED",
+					error_message: "refused",
+					scripts: { testResults: [{ name: "never reached", passed: false }] },
+				},
+			})
+		);
+		expect(restored?.testResults).toHaveLength(1);
+	});
+
+	it("keeps the engine's own key names rather than renaming on the way through", () => {
+		// A rename here would be the one place the live pane and the restored
+		// pane could drift, since both read `ResponseState` under these names.
+		const node = {
+			testResults: [{ name: "t", passed: true }],
+			consoleLogs: [{ source: "pre" as const, level: "warn" as const, message: "m" }],
+		};
+		expect(scriptsFromTrace({ scripts: node })).toEqual(node);
 	});
 });
