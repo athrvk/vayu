@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, Trash2, Edit2, FolderPlus, Play } from "lucide-react";
+import { Plus, Trash2, Edit2, FileJson, FolderPlus, Play } from "lucide-react";
 import { useTabsStore, useSaveStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
@@ -57,6 +57,12 @@ export interface TreeCrudPanel {
 	 */
 	runTarget: Collection | null;
 	dismissRunDialog: () => void;
+	/**
+	 * The collection the OpenAPI export dialog is pointed at, or null when it is
+	 * closed - the whole object for the same reason `runTarget` is (issue #630).
+	 */
+	exportTarget: Collection | null;
+	dismissExportDialog: () => void;
 }
 
 export interface DeleteConfirmTarget {
@@ -107,6 +113,7 @@ export function useTreeCrud({
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmTarget | null>(null);
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
+	const [exportTarget, setExportTarget] = useState<Collection | null>(null);
 
 	// Memoised because the callbacks below list them as dependencies: redefined
 	// each render, they would rebuild every handler that opens a tab.
@@ -480,6 +487,7 @@ export function useTreeCrud({
 
 	const dismissDeleteConfirm = useCallback(() => setDeleteConfirm(null), []);
 	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
+	const dismissExportDialog = useCallback(() => setExportTarget(null), []);
 
 	/**
 	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
@@ -515,6 +523,15 @@ export function useTreeCrud({
 					expandCollection(collection.id);
 					setCreatingSubfolder(collection.id);
 				},
+			},
+			{
+				// Below the edit actions and above Delete: it reads the folder
+				// rather than changing it, and it is offered for every collection
+				// - a bound one exports its own document, a free-form one a
+				// skeleton (issue #630).
+				label: "Export as OpenAPI",
+				icon: FileJson,
+				onSelect: () => setExportTarget(collection),
 			},
 			{
 				label: "Delete",
@@ -554,6 +571,8 @@ export function useTreeCrud({
 				(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm.id),
 			runTarget,
 			dismissRunDialog,
+			exportTarget,
+			dismissExportDialog,
 		}),
 		[
 			creatingCollection,
@@ -571,6 +590,8 @@ export function useTreeCrud({
 			deletingRequestId,
 			runTarget,
 			dismissRunDialog,
+			exportTarget,
+			dismissExportDialog,
 		]
 	);
 
