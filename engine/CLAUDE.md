@@ -23,6 +23,11 @@ engine/
 - Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
 - vcpkg manages all C++ dependencies - do not add one without updating
   `engine/vcpkg.json`
+- A new `tests/*_test.cpp` must be listed in `add_executable(vayu_tests ...)`
+  in `engine/CMakeLists.txt` - the source list is explicit, never a glob. A
+  guard beside it fails configure naming any unregistered file, because an
+  unbuilt test file reports nothing at all (#668: a 16-test suite sat unbuilt
+  for ~140 commits).
 - A fixture that opens a scratch `Database` cleans up with
   `vayu::tests::remove_database_files` (`engine/tests/temp_database.hpp`) - never
   a hand-written suffix list. An opened database writes six files, not the four
