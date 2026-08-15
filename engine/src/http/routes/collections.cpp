@@ -97,6 +97,77 @@ const std::string& self_id) {
 }
 
 /**
+ * Bounds on a declared data contract, stated here rather than left implicit.
+ *
+ * A column name is a `{{data.<name>}}` token's identifier and a header cell of a
+ * CSV, so 256 characters is far past anything a real file carries; 1024 columns
+ * likewise. They exist so a malformed or hostile payload cannot store a blob
+ * that every later reader has to walk - the schema is read on every plan
+ * resolution that refuses a data token.
+ */
+constexpr size_t MAX_DATA_SCHEMA_COLUMNS      = 1024;
+constexpr size_t MAX_DATA_SCHEMA_COLUMN_CHARS = 256;
+
+/**
+ * Contents-validation for `dataSchema`, run after `apply_json_field` has settled
+ * the *shape* (object or null; anything else is its 400).
+ *
+ * A schema that stored garbage would not fail here - it would fail much later,
+ * as a refusal message naming columns that are not column names, or as a diff in
+ * the Data tab that no file can ever satisfy. So `columns` must be an array of
+ * unique, non-empty strings and `declaredAt` a number if it is present at all.
+ *
+ * Deliberately independent of every other row: `POST /import/apply` validates
+ * with `is_create=true` while the payload's parents are still unwritten, so a
+ * check that reached for another record would refuse a legal bulk import.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+validate_data_schema (const nlohmann::json& schema) {
+    if (schema.contains ("columns")) {
+        const auto& columns = schema["columns"];
+        if (!columns.is_array ()) {
+            return std::make_pair (
+            400, error_body (400, "Invalid 'dataSchema.columns': must be an array of strings"));
+        }
+        if (columns.size () > MAX_DATA_SCHEMA_COLUMNS) {
+            return std::make_pair (400,
+            error_body (400, "Invalid 'dataSchema.columns': " + std::to_string (columns.size ()) +
+            " columns, over the limit of " + std::to_string (MAX_DATA_SCHEMA_COLUMNS)));
+        }
+        std::unordered_set<std::string> seen;
+        for (const auto& column : columns) {
+            if (!column.is_string ()) {
+                return std::make_pair (400,
+                error_body (400, "Invalid 'dataSchema.columns': every column must be a string"));
+            }
+            const auto name = column.get<std::string> ();
+            if (name.empty ()) {
+                return std::make_pair (400,
+                error_body (400, "Invalid 'dataSchema.columns': a column name cannot be empty"));
+            }
+            if (name.size () > MAX_DATA_SCHEMA_COLUMN_CHARS) {
+                return std::make_pair (400,
+                error_body (400, "Invalid 'dataSchema.columns': a column name is longer than " +
+                std::to_string (MAX_DATA_SCHEMA_COLUMN_CHARS) + " characters"));
+            }
+            if (!seen.insert (name).second) {
+                return std::make_pair (400,
+                error_body (400, "Invalid 'dataSchema.columns': duplicate column '" + name + "'"));
+            }
+        }
+    }
+    if (schema.contains ("declaredAt") && !schema["declaredAt"].is_number ()) {
+        return std::make_pair (
+        400, error_body (400, "Invalid 'dataSchema.declaredAt': must be a number"));
+    }
+    if (schema.contains ("fileName") && !schema["fileName"].is_string ()) {
+        return std::make_pair (
+        400, error_body (400, "Invalid 'dataSchema.fileName': must be a string"));
+    }
+    return std::nullopt;
+}
+
+/**
  * Applies the request body onto `c` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means - the only thing that differs
@@ -152,6 +223,20 @@ bool is_create) {
     }
     apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
+
+    // The declared data contract (issue #599). `{}` is "no contract", which is
+    // what both an absent field on create and an explicit null on update mean.
+    if (auto err = apply_json_field (json, "dataSchema", c.data_schema, "{}", is_create)) {
+        return err;
+    }
+    // Shape is `apply_json_field`'s; contents are this one's. Only a value the
+    // caller actually sent is checked - a stored schema is left alone, so an
+    // update that says nothing about it cannot be refused by it.
+    if (json.contains ("dataSchema") && json["dataSchema"].is_object ()) {
+        if (auto err = validate_data_schema (json["dataSchema"])) {
+            return err;
+        }
+    }
 
     // Reject writes that would put a cycle in the collection tree (self-parent,
     // or reparent into a descendant) before they reach the DB - a cycle makes

@@ -41,6 +41,7 @@
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
@@ -58,6 +59,10 @@ struct SeenRequest {
     std::string cookie;
     std::string marker; // the X-Marker header, which the tests' scripts set
     std::string body;   // the request body as received; "" for a GET
+    /// The `Authorization` as received; "" when absent. Credentials bound from
+    /// a data row are only correct once encoded, and the encoding is what used
+    /// to hide the bug (issue #591), so they are asserted off the wire.
+    std::string authorization;
 };
 
 /**
@@ -72,8 +77,9 @@ class ScenarioMockServer {
 
         const auto record = [this] (const httplib::Request& req) {
             std::lock_guard<std::mutex> lock (mtx);
-            seen.push_back ({ req.path, req.target, req.get_header_value ("Cookie"),
-            req.get_header_value ("X-Marker"), req.body });
+            seen.push_back ({ req.path, req.target,
+            req.get_header_value ("Cookie"), req.get_header_value ("X-Marker"),
+            req.body, req.get_header_value ("Authorization") });
         };
 
         svr.Get ("/ok", [record] (const httplib::Request& req, httplib::Response& res) {
@@ -197,10 +203,12 @@ class ScenarioRunnerTest : public ::testing::Test {
     const std::string& absolute_url = "",
     const std::string& name         = "",
     const std::string& headers      = "",
-    const std::string& body         = "") {
+    const std::string& body         = "",
+    const std::string& auth         = "") {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = "col_1";
+        r.auth          = auth;
         r.name          = name.empty () ? "Step " + id : name;
         // A body is what a POST is for, so the two travel together rather than
         // leaving a caller to remember the method.
@@ -1107,6 +1115,27 @@ TEST_F (ScenarioRunnerTest, ATokenNamingAnAbsentColumnErrorsTheStepWithoutSendin
     EXPECT_FALSE (trace.contains ("response"));
     EXPECT_NE (
     trace["request"]["url"].get<std::string> ().find ("{{data.absent}}"), std::string::npos);
+}
+
+// A credentials file behind basic auth, end to end. The plan deliberately does
+// not resolve this step's auth: `apply_auth` would base64 the *token text* into
+// one `Authorization` value, which is unreadable by the time anything scans the
+// built request - so every iteration used to send the same wrong credential and
+// report it as an ordinary 401 (issue #591).
+TEST_F (ScenarioRunnerTest, ACredentialsFileBindsPerIterationOnTheWire) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", "", "", "", "", "",
+    R"({"mode":"basic","username":"{{data.user}}","password":"{{data.pass}}"})");
+
+    const auto run_id =
+    start_with_data (json::array ({ { { "user", "ada" }, { "pass", "pw0" } },
+    { { "user", "grace" }, { "pass", "pw1" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].authorization, "Basic " + vayu::utils::base64_encode ("ada:pw0"));
+    EXPECT_EQ (seen[1].authorization, "Basic " + vayu::utils::base64_encode ("grace:pw1"));
 }
 
 // A cell carrying a quote used to end the JSON string it was dropped into and

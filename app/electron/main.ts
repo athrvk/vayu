@@ -10,6 +10,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
+import { readDataFile } from "./data-file.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
@@ -806,6 +807,14 @@ function setupIpcHandlers() {
 	// Get app paths (app dir, logs path, db path). Derived in app-paths.ts so
 	// this handler cannot drift from the sidecar's own data directory.
 	ipcMain.handle("app:getPaths", () => resolveAppPaths());
+
+	// Re-open a collection's declared data file (issue #599). The one channel on
+	// which the renderer names a path of its own, gated by an extension
+	// allowlist and the engine's fetched byte cap - the rationale, and the
+	// alternative that was rejected, are in data-file.ts.
+	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
+		return await readDataFile(String(filePath ?? ""));
+	});
 }
 
 /**

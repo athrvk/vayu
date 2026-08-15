@@ -13,8 +13,10 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -49,6 +51,41 @@ std::string compose_error_message (const nlohmann::json& body) {
 std::string describe_step (size_t index, const vayu::db::Request& row) {
     return "step " + std::to_string (index) + " (request '" + row.name +
     "', id '" + row.id + "')";
+}
+
+/**
+ * The tail the no-data refusal carries when the collection declares a data
+ * contract (issue #599): ` (declared columns: id, email)`, or empty when it
+ * declares none.
+ *
+ * The refusal already says "run the collection with a data file"; a user whose
+ * collection has declared its columns can be told *which* file, which is the
+ * difference between re-reading the request and picking one. Anything the
+ * schema cannot be trusted to hold - it is a stored blob, and an older or
+ * hand-edited row may hold anything - degrades to no tail rather than to a
+ * message about column names that are not strings.
+ */
+std::string declared_columns_hint (const vayu::db::Collection& collection) {
+    nlohmann::json schema;
+    try {
+        schema = nlohmann::json::parse (collection.data_schema);
+    } catch (const std::exception&) {
+        return {};
+    }
+    if (!schema.is_object () || !schema.contains ("columns") || !schema["columns"].is_array ()) {
+        return {};
+    }
+    std::string names;
+    for (const auto& column : schema["columns"]) {
+        if (!column.is_string ()) {
+            continue;
+        }
+        if (!names.empty ()) {
+            names += ", ";
+        }
+        names += column.get<std::string> ();
+    }
+    return names.empty () ? std::string{} : " (declared columns: " + names + ")";
 }
 
 /**
@@ -248,7 +285,11 @@ const ScenarioResolveOptions& options) {
     }
     const ScenarioRequest& request = resolution.request;
 
-    if (!db.get_collection (request.collection_id)) {
+    // Captured, not just probed: the collection carries the declared data
+    // contract, and the no-data refusal below is the reader that makes storing
+    // one worth anything.
+    const auto collection = db.get_collection (request.collection_id);
+    if (!collection) {
         return invalid ("No collection with id '" + request.collection_id + "'");
     }
 
@@ -285,7 +326,40 @@ const ScenarioResolveOptions& options) {
         }
 
         // Auth is resolved into headers/url here, which is what makes the plan
-        // credential-grade and the snapshot manifest necessary.
+        // credential-grade and the snapshot manifest necessary - unless the
+        // credentials themselves come from the data file. `apply_auth`
+        // collapses basic auth into one base64 `Authorization` value, so a
+        // `{{data.user}}` resolved into the plan is unreadable by the time
+        // anything scans the built request: it used to go out as base64 of the
+        // literal token text, silently, and the refusal below could not see it
+        // either (issue #591). Such a step keeps its credentials typed and
+        // unbound and applies its auth per iteration instead - one base64 per
+        // iteration, and only for the steps that need it.
+        const vayu::http::Auth parsed_auth =
+        vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
+        StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth);
+
+        // OAuth 2.0 is the one mode deferral cannot serve: its token is
+        // acquired right here, once, against the token endpoint, so there is no
+        // per-iteration acquisition for a row to reach - and adding one would
+        // mean a network round trip per virtual user per iteration. Refused by
+        // name in both directions, with or without a data set, rather than sent
+        // to the token endpoint as the literal token text.
+        if (const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&parsed_auth)) {
+            if (auto token = first_data_token_in (oauth2->config)) {
+                return invalid (describe_step (index, row) + " carries " + *token +
+                " in its OAuth 2.0 configuration. That token is acquired once, "
+                "when the run is planned, so a data column can never reach it "
+                "- "
+                "use a static credential there, or move the data token into "
+                "the "
+                "request itself.");
+            }
+        }
+
+        if (!auth_template.empty ()) {
+            payload.erase ("auth");
+        }
         auto built = vayu::http::build_request (payload, &db, options.timeout_ms);
         if (!built.ok || built.parse_failed) {
             return invalid ("Cannot compose " + describe_step (index, row) +
@@ -306,12 +380,20 @@ const ScenarioResolveOptions& options) {
         // exists, rather than rediscovered per step per iteration once it has
         // started (issue #415).
         if (!has_data) {
-            if (auto token = data_template.first_token ()) {
+            auto token = data_template.first_token ();
+            if (!token) {
+                // The credentials are scanned too, and for the same reason: a
+                // data token in a basic-auth field is exactly as unbindable as
+                // one in the URL, and until it was kept out of the base64 above
+                // this refusal could not see it at all.
+                token = auth_template.first_token ();
+            }
+            if (token) {
                 return invalid (describe_step (index, row) + " carries " + *token +
                 ", but this run has no 'scenario.data' set. A data token has "
                 "no row to bind to and would reach the wire written as it "
                 "stands - run the collection with a data file, or remove the "
-                "token from the request.");
+                "token from the request." + declared_columns_hint (*collection));
             }
         }
 
@@ -324,11 +406,43 @@ const ScenarioResolveOptions& options) {
         step.post_script   = vayu::http::read_post_request_script (payload);
         step.stored_url    = row.url;
         step.data_template = std::move (data_template);
+        // Only ever reached with rows behind it: the refusal above returns for
+        // a credential token in a run that has no data set, so a deferred step
+        // cannot arrive at an executor with no row to bind.
+        if (!auth_template.empty ()) {
+            step.auth          = parsed_auth;
+            step.auth_template = std::move (auth_template);
+        }
         resolution.plan.steps.push_back (std::move (step));
     }
 
     resolution.ok = true;
     return resolution;
+}
+
+DataBindResult bind_step_auth (vayu::Request& request,
+const ScenarioStep& step,
+const nlohmann::json& row,
+size_t row_index) {
+    if (step.auth_template.empty ()) {
+        return DataBindResult{ true, {} };
+    }
+
+    // Copied because the plan is immutable and shared by every virtual user of
+    // the run, and the join rewrites the credentials in place.
+    vayu::http::Auth auth = step.auth;
+    if (auto bound = apply_auth_data_template (auth, step.auth_template, row, row_index);
+        !bound.ok) {
+        return bound;
+    }
+
+    // No database handle: oauth2 is the only mode `apply_auth` needs one for,
+    // and an oauth2 config carrying a data token is refused when the plan
+    // resolves - deferral never reaches here with one.
+    if (auto applied = vayu::http::apply_auth (request, auth, nullptr); !applied.ok) {
+        return DataBindResult{ false, applied.message };
+    }
+    return DataBindResult{ true, {} };
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

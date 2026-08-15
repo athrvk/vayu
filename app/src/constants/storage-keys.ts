@@ -35,4 +35,10 @@ export const STORAGE_KEYS = {
 	TABS_STORE: "vayu.tabs",
 	/** Zustand persist name for shell layout (drawer, context bar, split ratio). */
 	LAYOUT_STORE: "vayu.layout",
+	/**
+	 * Zustand persist name for each collection's data-file **location** on this
+	 * machine. Paths and file names only - a data file's rows are persisted
+	 * nowhere (see `data-file-store.ts`).
+	 */
+	DATA_FILE_STORE: "vayu.data-files",
 } as const;

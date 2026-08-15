@@ -158,6 +158,28 @@ export type RequestAuth =
 	| { mode: "oauth2"; config: OAuth2Config }
 	| { mode: "digest" | "aws" | "ntlm"; config: Record<string, unknown> };
 
+/**
+ * The data contract a collection declares (issue #599): which columns a run's
+ * data file is expected to carry, so `{{data.*}}` and `pm.iterationData` have
+ * something to be checked against at authoring time.
+ *
+ * The *schema* is collection state and rides the engine row. The file itself is
+ * machine state and lives in `data-file-store`; its **rows** are persisted
+ * nowhere at all - they are user data of unknown sensitivity, and that rule is
+ * older than this field.
+ *
+ * `{}` - every field absent - is how "declares no contract" is spelled, which
+ * is also what the engine stores by default.
+ */
+export interface CollectionDataSchema {
+	/** Declared column names, in the order the file listed them. */
+	columns?: string[];
+	/** When the contract was declared, epoch ms. */
+	declaredAt?: number;
+	/** The file the columns were read from, for the "is this still it?" case. */
+	fileName?: string;
+}
+
 export interface Collection {
 	id: string;
 	name: string;
@@ -168,8 +190,24 @@ export interface Collection {
 	auth: Exclude<RequestAuth, { mode: "inherit" }>; // Collections are auth sources, never inherit
 	preRequestScript: string;
 	postRequestScript: string;
+	/**
+	 * Optional the way `parentId` is: most collections declare no contract, and
+	 * absent and `{}` are the same state to every reader. Use
+	 * {@link hasDataContract} rather than hand-rolling the check - a collection
+	 * that declared and then cleared one holds `{}`, not `undefined`.
+	 *
+	 * The transformer always produces a value, so a `Collection` off the wire
+	 * carries one; the optionality is for the fixtures and partials that do not
+	 * care, not a claim that the field can go missing in flight.
+	 */
+	dataSchema?: CollectionDataSchema;
 	createdAt: string;
 	updatedAt: string;
+}
+
+/** Whether a collection declares a data contract at all. */
+export function hasDataContract(schema: CollectionDataSchema | undefined): boolean {
+	return !!schema?.columns && schema.columns.length > 0;
 }
 
 /** A row the sidebar places in a tree - a {@link Collection} or a {@link Request}. */

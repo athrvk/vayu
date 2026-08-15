@@ -414,6 +414,33 @@ TEST_F (ImportApplyRouteTest, RejectsAnObjectFieldGivenANonObject) {
     }
 }
 
+TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplier) {
+    // The field list *is* the applier (issue #96), so a field added for
+    // POST/PUT reaches bulk import for free - and "for free" is worth pinning,
+    // because the alternative is a per-route copy that drifts. Validation is
+    // the same one too: a bad contract is a 400 that writes nothing, with the
+    // parents of this payload still unwritten when the check runs.
+    json good      = collection_item ("c1", "root");
+    good["dataSchema"] = json{ { "columns", json::array ({ "id", "email" }) },
+        { "declaredAt", 1700000000000 } };
+
+    auto [status, response] =
+    import_apply_response (*db_, json{ { "collections", json::array ({ good }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+    auto stored = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_TRUE (stored.has_value ());
+    EXPECT_EQ (json::parse (stored->data_schema)["columns"], json::array ({ "id", "email" }));
+
+    json bad          = collection_item ("c2", "also root");
+    bad["dataSchema"] = json{ { "columns", json::array ({ "id", "id" }) } };
+    auto [bad_status, bad_response] =
+    import_apply_response (*db_, json{ { "collections", json::array ({ bad }) } });
+    EXPECT_EQ (bad_status, 400) << bad_response.dump ();
+    EXPECT_NE (bad_response["error"]["message"].get<std::string> ().find ("dataSchema.columns"),
+    std::string::npos)
+    << bad_response.dump ();
+}
+
 TEST_F (ImportApplyRouteTest, PerItemCreateStillWorksForThirdPartyClients) {
     // The bulk endpoint replaces the app's usage of POST /collections, not the
     // public create API - removing that is #97.

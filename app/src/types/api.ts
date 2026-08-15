@@ -9,6 +9,7 @@
 
 import type {
 	Collection,
+	CollectionDataSchema,
 	Request,
 	Environment,
 	Run,
@@ -105,6 +106,7 @@ export interface CreateCollectionRequest {
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	dataSchema?: CollectionDataSchema;
 }
 
 export interface UpdateCollectionRequest {
@@ -122,6 +124,13 @@ export interface UpdateCollectionRequest {
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/**
+	 * `CollectionDataSchema | null`, not just the object: the engine reads absent
+	 * as "keep the declared contract" and an explicit JSON `null` as "reset to
+	 * no contract", so **Clear** is only expressible as a null that survives to
+	 * the wire - the same rule `parentId` above rides.
+	 */
+	dataSchema?: CollectionDataSchema | null;
 }
 
 // Requests API

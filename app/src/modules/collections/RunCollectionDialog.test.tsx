@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
-import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
+import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
 import type { Collection } from "@/types";
 
 const mutate = vi.fn();
@@ -449,5 +449,132 @@ describe("running the sequence as a load test", () => {
 
 		fireEvent.click(run);
 		expect(mutate).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * Pre-filling from the collection's declared data file (issue #599).
+ *
+ * The file is picked once and forgotten today, so a data-driven collection asks
+ * for the same file on every run. What is pinned here is that the remembered
+ * path is re-read *as part of mount* - the dialog's reset contract is what makes
+ * the options predictable, and pre-fill has to live inside it rather than beside
+ * it - and that a file which cannot be re-read leaves a usable dialog and a
+ * sentence saying so, never an error toast and an empty picker.
+ */
+describe("pre-filling from the declared data file", () => {
+	const withContract = (columns: string[]) =>
+		({ ...COLLECTION, dataSchema: { columns } }) as unknown as Collection;
+
+	const remember = (path: string, fileName: string) =>
+		useDataFileStore.setState({ locations: { col_1: { path, fileName } } });
+
+	/**
+	 * The preload bridge, which exists only inside Electron. `getFilePath` rides
+	 * along because the picker asks for it on every hand-picked file - a stub
+	 * missing it would be a bridge this app never actually meets.
+	 */
+	const stubReadDataFile = (impl: (path: string) => Promise<unknown>) =>
+		vi.stubGlobal("electronAPI", { readDataFile: impl, getFilePath: () => "" });
+
+	const bytesOf = (text: string) => new TextEncoder().encode(text);
+
+	beforeEach(() => {
+		useDataFileStore.setState({ locations: {} });
+		vi.unstubAllGlobals();
+	});
+
+	it("re-reads the remembered file and sends its rows", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user,id\nada,1\ngrace,2"),
+			fileName: "users.csv",
+		}));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		await waitFor(() => expect(screen.getByText("users.csv")).toBeTruthy());
+		expect(screen.getByText("ada")).toBeTruthy();
+		// Same rule as a hand-picked file: the pristine 1 becomes one pass per row.
+		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([
+			{ user: "ada", id: "1" },
+			{ user: "grace", id: "2" },
+		]);
+	});
+
+	it("warns when the pre-filled file does not match the declared columns", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user,nickname\nada,addy"),
+			fileName: "users.csv",
+		}));
+
+		render(
+			<RunCollectionDialog
+				collection={withContract(["user", "email"])}
+				onOpenChange={vi.fn()}
+			/>
+		);
+
+		await waitFor(() =>
+			expect(screen.getByText(/missing a declared column: email/i)).toBeTruthy()
+		);
+		expect(screen.getByText(/does not declare: nickname/i)).toBeTruthy();
+		// A mismatch is a warning, never a blocker - the run is still the user's.
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
+	});
+
+	it("says the file has moved and leaves the picker usable", async () => {
+		remember("/home/u/gone.csv", "gone.csv");
+		stubReadDataFile(async () => {
+			throw new Error("The file is no longer at /home/u/gone.csv - pick it again.");
+		});
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		await waitFor(() => expect(screen.getByText(/no longer at/i)).toBeTruthy());
+		// Not a blocking refusal: a run without a file is a legal run.
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
+		expect(screen.getByText(/choose file/i)).toBeTruthy();
+	});
+
+	it("does nothing when the collection has no remembered file", async () => {
+		const read = vi.fn();
+		stubReadDataFile(read);
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		expect(read).not.toHaveBeenCalled();
+		expect(screen.getByText(/choose file/i)).toBeTruthy();
+	});
+
+	it("stands unchanged outside Electron, where there is no path to re-read", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		vi.stubGlobal("electronAPI", undefined);
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		expect(screen.getByText(/choose file/i)).toBeTruthy();
+		expect(screen.queryByText("users.csv")).toBeNull();
+	});
+
+	it("keeps a file the user picks over the one that was remembered", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => {
+			throw new Error("The file is no longer at /home/u/users.csv - pick it again.");
+		});
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		await waitFor(() => expect(screen.getByText(/no longer at/i)).toBeTruthy());
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File(["user\nada"], "fresh.csv")] } });
+
+		await waitFor(() => expect(screen.getByText("fresh.csv")).toBeTruthy());
+		// The note was about a file that is no longer the one in play.
+		expect(screen.queryByText(/no longer at/i)).toBeNull();
 	});
 });

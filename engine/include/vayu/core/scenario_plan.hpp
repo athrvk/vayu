@@ -43,6 +43,7 @@
 
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -69,6 +70,18 @@ struct ScenarioStep {
     /// to re-scan the step per iteration. Empty for a step that carries none,
     /// which is what both executors test before doing any join work at all.
     StepDataTemplate data_template;
+    /// The step's parsed auth, kept **only** when its credentials carry a
+    /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
+    /// resolved into `request` above.
+    vayu::http::Auth auth;
+    /// `auth`'s tokens, split once here like `data_template`.
+    ///
+    /// **Non-empty means this step's auth was deferred**: `request` carries no
+    /// credential yet, and an executor must call `bind_step_auth` before
+    /// sending or the request goes out unauthenticated. Deferral only ever
+    /// happens in a run that has rows - a data token with no data set is
+    /// refused when the plan resolves - so an executor always has a row for it.
+    StepDataTemplate auth_template;
 };
 
 /** An ordered, immutable sequence of composed steps. */
@@ -181,11 +194,34 @@ struct ScenarioResolution {
  * `limits.max_data_rows` or `limits.max_data_bytes`, and any `source` other
  * than `"collection"`. A step carrying a `{{data.*}}` token in a run sent
  * *without* `data` joins that list (issue #415): nothing would bind it, so it
- * would be sent as the literal token.
+ * would be sent as the literal token - and a step's *credentials* are scanned
+ * for one as well as its request, because a data token in a basic-auth field is
+ * exactly as unbindable and used to be base64-encoded where nothing could see
+ * it (issue #591). A `{{data.*}}` in an **OAuth 2.0** config is refused
+ * outright, with or without a data set: that token is acquired here, once, so
+ * there is no iteration for a row to reach.
  */
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
 const ScenarioResolveOptions& options);
+
+/**
+ * Bind @p row into @p step's deferred credentials and apply them to @p request.
+ *
+ * A no-op returning success for the ordinary step, whose auth was resolved into
+ * the plan and whose `auth_template` is therefore empty - both executors call
+ * it beside `apply_data_template` rather than testing first, because the two
+ * halves of one iteration's bind belong together and one binder for both modes
+ * is what keeps a step from binding differently depending on which one ran it.
+ *
+ * Call it **after** the request's own data pass and before the send: the
+ * credentials must be bound before `apply_auth` encodes them, which is the
+ * ordering the deferral exists to fix.
+ */
+[[nodiscard]] DataBindResult bind_step_auth (vayu::Request& request,
+const ScenarioStep& step,
+const nlohmann::json& row,
+size_t row_index);
 
 /**
  * The `scenario` object a scenario run stores in `runs.config_snapshot`: the

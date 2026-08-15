@@ -414,6 +414,15 @@ RunManager& manager) {
                     // it.
                     auto bound = apply_data_template (inputs.request,
                     step.data_template, data_rows[*data_row_index], *data_row_index);
+                    if (bound.ok) {
+                        // Then the credentials, for a step whose auth the plan
+                        // deliberately left unresolved: they have to carry the
+                        // row's values *before* `apply_auth` base64-encodes
+                        // them onto the request (issue #591). A no-op for every
+                        // other step.
+                        bound = bind_step_auth (inputs.request, step,
+                        data_rows[*data_row_index], *data_row_index);
+                    }
                     if (!bound.ok) {
                         data_bind_error = std::move (bound.error);
                     }

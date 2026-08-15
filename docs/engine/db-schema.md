@@ -39,9 +39,33 @@ Stores folder/group hierarchy for requests.
 | `auth`               | TEXT    | JSON: `RequestAuth` (never `inherit`)        |
 | `pre_request_script` | TEXT    | Default `""`                                 |
 | `post_request_script`| TEXT    | Default `""`                                 |
+| `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `order`              | INTEGER | Sort order within parent; default 0          |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
+
+**data_schema** - which columns this collection's data files are expected to
+carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run
+(issue #599):
+
+```json
+{"columns":["id","email"],"declaredAt":1700000000000,"fileName":"users.csv"}
+```
+
+`{}` - the default, and what an explicit `null` on `PUT` resets to - means the
+collection declares no contract. `columns` must be an array of unique, non-empty
+strings (at most 1024 of them, each at most 256 characters); `declaredAt` is
+epoch ms and `fileName` is a display label, both optional. Validation lives in
+`apply_collection_fields`, so `POST`, `PUT` and `POST /import/apply` all enforce
+it. NOT NULL with a `default_value`, which is what lets `sync_schema`
+`ALTER TABLE ADD COLUMN` it onto an existing collections table - pre-existing
+rows backfill to `{}` (the same migration shape as `config_entries.keywords`).
+
+The **schema** is stored; the **rows** never are. A data file's contents are
+user data of unknown sensitivity and are persisted nowhere - not here, not in a
+run snapshot (which records `dataRowCount` only). The file's path is likewise
+not stored engine-side: it is true of one machine, so the app keeps it in a
+local store. See [Data-driven runs](../app/data-driven-runs.md).
 
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
 `{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |

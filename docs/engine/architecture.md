@@ -350,7 +350,12 @@ applied to the outgoing request rather than being left to the UI. This lives in
 - **`auth_resolver`** (`apply_auth` / `preflight_auth` / `plan_auth_refresh`) - a
   typed `Auth` variant with an exhaustive per-mode handler: bearer/basic/api-key
   are injected inline; `oauth2` delegates to the token client. A user-supplied
-  `Authorization` header always wins. `plan_auth_refresh` decides afterwards
+  `Authorization` header always wins. A scenario step whose credentials carry a
+  `{{data.*}}` token is the one case auth is *not* resolved into the plan: the
+  row has to be bound before the credential is encoded, so the step keeps its
+  typed `Auth` and applies it per iteration
+  (`bind_step_auth`, see [Scenario runs](api-reference.md#scenario-runs)).
+  `plan_auth_refresh` decides afterwards
   whether the credential a *load* run just resolved can be kept current past its
   expiry - see the run lifecycle below.
 - **`oauth_client`** (`acquire_token`) - grant handling (client_credentials,

@@ -19,12 +19,13 @@ import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
+import DataTab from "./DataTab";
 import InfoTab from "./InfoTab";
 import MockServerControl from "./MockServerControl";
 import ScriptTab from "./ScriptTab";
 import VariablesTab from "./VariablesTab";
 
-type CollectionTab = "info" | "auth" | "pre-script" | "post-script" | "variables";
+type CollectionTab = "info" | "auth" | "pre-script" | "post-script" | "variables" | "data";
 
 const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "info", label: "Info" },
@@ -32,6 +33,7 @@ const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "pre-script", label: "Pre-request" },
 	{ id: "post-script", label: "Post-request" },
 	{ id: "variables", label: "Variables" },
+	{ id: "data", label: "Data" },
 ];
 
 /**
@@ -48,6 +50,11 @@ const TABS: { id: CollectionTab; label: string }[] = [
  * `variables` is absent deliberately: it autosaves and registers its own save
  * context on mount, so keeping it alive behind another tab would leave the
  * variables editor claiming Ctrl/Cmd+S while something else is on screen.
+ *
+ * `data` is absent for the opposite reason: it saves explicitly, per action, and
+ * the only thing it holds between actions is a parsed file - which is user data
+ * of unknown sensitivity, so letting it outlive a look at another tab is a cost
+ * with nothing bought.
  */
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set([
 	"info",
@@ -119,6 +126,10 @@ export default function CollectionDetail() {
 	}
 
 	const variableCount = Object.keys(collection.variables ?? {}).length;
+	// Same affordance as the variables count, for the same reason: whether a
+	// collection declares a data contract is worth knowing without opening the
+	// tab to find out.
+	const declaredColumnCount = collection.dataSchema?.columns?.length ?? 0;
 
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
@@ -153,11 +164,16 @@ export default function CollectionDetail() {
 				    longer can. */}
 				<TabsList className="bg-panel px-4 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 					{TABS.map((t) => {
-						const showBadge = t.id === "variables" && variableCount > 0;
+						const count =
+							t.id === "variables"
+								? variableCount
+								: t.id === "data"
+									? declaredColumnCount
+									: 0;
 						return (
 							<TabsTrigger key={t.id} value={t.id}>
 								<TabLabel>{t.label}</TabLabel>
-								{showBadge && <TabCount value={variableCount} />}
+								{count > 0 && <TabCount value={count} />}
 							</TabsTrigger>
 						);
 					})}
@@ -209,6 +225,7 @@ export default function CollectionDetail() {
 							/>
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
+						{t.id === "data" && <DataTab collection={collection} />}
 					</TabsContent>
 				))}
 			</Tabs>

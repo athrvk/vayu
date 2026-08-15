@@ -147,7 +147,9 @@ bool advance_json_string_state (std::string_view literal, bool in_string) {
  */
 class FieldSplitter {
     public:
-    void operator() (std::string& field, FieldContext context) {
+    /// Takes its field by const reference: a split rewrites nothing, and the
+    /// credential walk visits strings it has no copy of.
+    void operator() (const std::string& field, FieldContext context) {
         const size_t position = next_field_++;
         if (field.empty ()) {
             return;
@@ -320,10 +322,50 @@ StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
     // trade.
     vayu::Request scratch = request;
     FieldSplitter splitter;
-    walk_bindable_fields (scratch, [&splitter] (std::string& field, FieldContext context) {
+    walk_bindable_fields (scratch, [&splitter] (const std::string& field, FieldContext context) {
         splitter (field, context);
     });
     return splitter.take ();
+}
+
+StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth) {
+    FieldSplitter splitter;
+    vayu::http::walk_auth_credentials (auth, [&splitter] (const std::string& field) {
+        splitter (field, FieldContext::Plain);
+    });
+    return splitter.take ();
+}
+
+DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
+const StepDataTemplate& tmpl,
+const nlohmann::json& row,
+size_t row_index) {
+    if (tmpl.empty ()) {
+        return DataBindResult{ true, {} };
+    }
+    TemplateJoiner joiner (tmpl, row, row_index);
+    vayu::http::walk_auth_credentials (auth,
+    [&joiner] (std::string& field) { joiner (field, FieldContext::Plain); });
+    return joiner.result ();
+}
+
+std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
+    if (value.is_string ()) {
+        const auto split = vayu::http::split_tokens (
+        value.get<std::string> (), vayu::http::is_data_variable_name);
+        if (split.names.empty ()) {
+            return std::nullopt;
+        }
+        return "{{" + split.names.front () + "}}";
+    }
+    if (value.is_object () || value.is_array ()) {
+        for (const auto& child : value) {
+            if (auto found = first_data_token_in (child)) {
+                return found;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 DataBindResult apply_data_template (vayu::Request& request,

@@ -14,6 +14,7 @@ export { useScenarioRunStore } from "./scenario-run-store";
 export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";
 export { useSessionStore } from "./session-store";
+export { useDataFileStore, type DataFileLocation } from "./data-file-store";
 export { useSaveStore, type SaveStatus } from "./save-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
 export { useTabsStore, type Tab, type TabType } from "./tabs-store";

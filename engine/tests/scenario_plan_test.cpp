@@ -44,6 +44,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/utils/encoding.hpp"
 
 using nlohmann::json;
 
@@ -89,7 +90,8 @@ class ScenarioPlanTest : public ::testing::Test {
     int order                     = 0,
     const std::string& auth       = "",
     const std::string& pre_script = "",
-    int64_t created_at            = 1) {
+    int64_t created_at            = 1,
+    const std::string& data_schema = "{}") {
         vayu::db::Collection col;
         col.id = id;
         if (!parent_id.empty ()) {
@@ -98,6 +100,7 @@ class ScenarioPlanTest : public ::testing::Test {
         col.name               = "Collection " + id;
         col.auth               = auth;
         col.pre_request_script = pre_script;
+        col.data_schema        = data_schema;
         col.order              = order;
         col.created_at         = created_at;
         col.updated_at         = created_at;
@@ -704,6 +707,41 @@ TEST_F (ScenarioPlanTest, ADataTokenOutsideTheUrlIsRefusedToo) {
     R"({"mode":"form-data","fields":[{"key":"id","value":"{{data.id}}","enabled":true}]})");
 }
 
+TEST_F (ScenarioPlanTest, TheNoDataRefusalCitesTheCollectionsDeclaredColumns) {
+    // The reader that makes storing a contract worth anything (issue #599).
+    // `resolve_scenario` already loaded this collection and threw it away;
+    // capturing it is what lets the refusal say which file to run with rather
+    // than only that one is missing. Revert the capture and this reddens.
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"", /*created_at=*/1,
+    R"({"columns":["id","email"],"declaredAt":1700000000000})");
+    seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("declared columns: id, email"), std::string::npos)
+    << resolved.error;
+}
+
+TEST_F (ScenarioPlanTest, TheNoDataRefusalStaysUnchangedWithoutAContract) {
+    // The other half: a collection that declares nothing must not grow an empty
+    // parenthetical, and a schema that is not one degrades to no tail at all
+    // rather than to a message about columns that are not column names.
+    for (const char* schema : { "{}", "", "not json", R"({"columns":"id"})",
+             R"({"columns":[7]})" }) {
+        reset_database ();
+        seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"",
+        /*created_at=*/1, schema);
+        seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
+
+        const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+        EXPECT_FALSE (resolved.ok) << schema;
+        EXPECT_EQ (resolved.error.find ("declared columns"), std::string::npos)
+        << schema << " -> " << resolved.error;
+    }
+}
+
 TEST_F (ScenarioPlanTest, ThePrefixAloneDoesNotBlockARunWithoutData) {
     // `{{data.}}` names no column, so composition resolves it to "" like any
     // other unknown name and nothing survives for the scan to find. Refusing it
@@ -715,6 +753,244 @@ TEST_F (ScenarioPlanTest, ThePrefixAloneDoesNotBlockARunWithoutData) {
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (resolved.plan.steps[0].request.url, "https://example.test/u/");
+}
+
+// --- Data tokens in the credentials (issue #591) ------------------------------
+
+namespace {
+
+/// The `Authorization` a step is carrying, or "" when it carries none.
+std::string authorization_of (const vayu::Request& request) {
+    const auto header = request.headers.find ("Authorization");
+    return header == request.headers.end () ? std::string{} : header->second;
+}
+
+} // namespace
+
+TEST_F (ScenarioPlanTest, BasicAuthCredentialsBindPerIterationRatherThanEncodingTheToken) {
+    // The canonical data-driven run: a credentials file behind basic auth. Bind
+    // the credentials after `apply_auth` and every iteration sends
+    // `base64("{{data.user}}:{{data.pass}}")` - the literal token text - as an
+    // ordinary-looking 401. Nothing in the plan can see it once it is encoded,
+    // which is why the plan must not encode it.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"{{data.user}}","password":"{{data.pass}}"})");
+
+    json scenario = block ("col");
+    scenario["data"] =
+    json::array ({ json{ { "user", "alice" }, { "pass", "s3cret" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    const auto& step = resolved.plan.steps[0];
+
+    // Deferred: the plan carries no credential at all for this step, so there
+    // is nothing on it for the token text to have been baked into.
+    EXPECT_FALSE (step.auth_template.empty ())
+    << "the step's credentials carry a data token, so its auth must be "
+       "deferred";
+    EXPECT_EQ (authorization_of (step.request), "")
+    << "auth was applied at plan time, which is what hid the token";
+
+    vayu::Request request = step.request;
+    const auto bound      = vayu::core::bind_step_auth (
+    request, step, resolved.data_rows[0], /*row_index=*/0);
+    ASSERT_TRUE (bound.ok) << bound.error;
+    EXPECT_EQ (authorization_of (request),
+    "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
+}
+
+TEST_F (ScenarioPlanTest, EachRowGetsItsOwnCredentialsFromTheSamePlan) {
+    // The plan is resolved once and shared by every iteration and virtual user,
+    // so a bind that leaked into it would give every row the first row's
+    // credentials. Two rows through one step is what shows it does not.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"{{data.user}}","password":"pw"})");
+
+    json scenario = block ("col");
+    scenario["data"] =
+    json::array ({ json{ { "user", "alice" } }, json{ { "user", "bob" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps[0];
+
+    std::vector<std::string> sent;
+    for (size_t row = 0; row < resolved.data_rows.size (); ++row) {
+        vayu::Request request = step.request;
+        const auto bound =
+        vayu::core::bind_step_auth (request, step, resolved.data_rows[row], row);
+        ASSERT_TRUE (bound.ok) << bound.error;
+        sent.push_back (authorization_of (request));
+    }
+
+    EXPECT_EQ (sent[0], "Basic " + vayu::utils::base64_encode ("alice:pw"));
+    EXPECT_EQ (sent[1], "Basic " + vayu::utils::base64_encode ("bob:pw"));
+}
+
+TEST_F (ScenarioPlanTest, BearerAndApiKeyCredentialsBindByContract) {
+    // These two passed before this existed, but only by accident: their values
+    // land verbatim in header text, so the request-side binder happened to walk
+    // them. An api key in the *query* did not even manage that - `apply_auth`
+    // percent-encoded the token's braces before the binder ever saw it. Pinned
+    // so the accident cannot regress and the query placement stays fixed.
+    const auto bound_request = [&] (const std::string& auth,
+                               const std::string& url, const json& row) {
+        reset_database ();
+        seed_collection ("col", "");
+        seed_request ("req", "col", /*order=*/0, url, auth);
+
+        json scenario    = block ("col");
+        scenario["data"] = json::array ({ row });
+
+        const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+        EXPECT_TRUE (resolved.ok) << resolved.error;
+        vayu::Request request = resolved.plan.steps[0].request;
+        const auto result     = vayu::core::bind_step_auth (
+        request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+        EXPECT_TRUE (result.ok) << result.error;
+        return request;
+    };
+
+    EXPECT_EQ (authorization_of (bound_request (R"({"mode":"bearer","token":"{{data.token}}"})",
+               "https://example.test/x", json{ { "token", "t0ken" } })),
+    "Bearer t0ken");
+
+    const auto api_key_header =
+    bound_request (R"({"mode":"apikey","key":"X-Key","value":"{{data.key}}"})",
+    "https://example.test/x", json{ { "key", "k3y" } });
+    ASSERT_EQ (api_key_header.headers.count ("X-Key"), 1u);
+    EXPECT_EQ (api_key_header.headers.at ("X-Key"), "k3y");
+
+    // The value is percent-encoded *after* the bind, so a cell with a space is
+    // one query parameter rather than two.
+    const auto api_key_query = bound_request (
+    R"({"mode":"apikey","key":"token","value":"{{data.key}}","in":"query"})",
+    "https://example.test/x", json{ { "key", "k 3y" } });
+    EXPECT_EQ (api_key_query.url, "https://example.test/x?token=k%203y");
+}
+
+TEST_F (ScenarioPlanTest, AMissingColumnInACredentialEndsTheStepByName) {
+    // The failure path: a credential naming a column the row does not carry is
+    // the same loud error as one in the URL, not a request sent with a blank
+    // password.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"{{data.user}}","password":"{{data.missing}}"})");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+
+    vayu::Request request = resolved.plan.steps[0].request;
+    const auto bound      = vayu::core::bind_step_auth (
+    request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+    EXPECT_FALSE (bound.ok);
+    EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
+    << bound.error;
+    EXPECT_EQ (authorization_of (request), "")
+    << "a failed credential bind must send nothing, not a half-built header";
+}
+
+TEST_F (ScenarioPlanTest, ADataTokenInTheCredentialsWithNoDataSetIsRefused) {
+    // The #415 guard, reached through the auth block. Before the credentials
+    // were kept out of the base64 this run started and sent
+    // `base64("{{data.user}}:")` on every request.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"{{data.user}}","password":"pw"})");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("{{data.user}}"), std::string::npos)
+    << resolved.error;
+    EXPECT_NE (resolved.error.find ("scenario.data"), std::string::npos)
+    << resolved.error;
+    EXPECT_TRUE (resolved.plan.steps.empty ());
+}
+
+TEST_F (ScenarioPlanTest, ADataTokenInAnOAuth2ConfigIsRefusedWithOrWithoutData) {
+    // The one mode deferral cannot serve: the token is acquired here, once, so
+    // no iteration exists for a row to reach. Refused by name rather than sent
+    // to the token endpoint as the literal text.
+    const auto refused = [&] (const json& scenario) {
+        const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+        EXPECT_FALSE (resolved.ok);
+        EXPECT_NE (resolved.error.find ("{{data.secret}}"), std::string::npos)
+        << resolved.error;
+        EXPECT_NE (resolved.error.find ("OAuth 2.0"), std::string::npos)
+        << resolved.error;
+        EXPECT_NE (resolved.error.find ("Request oauth_req"), std::string::npos)
+        << resolved.error;
+    };
+
+    seed_collection ("col", "");
+    seed_request ("oauth_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"oauth2","config":{"tokenUrl":"https://auth.test/token",
+        "clientId":"c","clientSecret":"{{data.secret}}"}})");
+
+    refused (block ("col"));
+
+    json with_rows    = block ("col");
+    with_rows["data"] = json::array ({ json{ { "secret", "s" } } });
+    refused (with_rows);
+}
+
+TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePlan) {
+    // Deferral must not widen: the ordinary step still pays its auth once, at
+    // plan time, and carries an executable credential without any per-iteration
+    // work. Drop the `auth_template.empty()` test in `resolve_scenario` and
+    // this step arrives at the wire with no `Authorization` at all.
+    seed_collection ("col", "");
+    seed_request ("static_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"basic","username":"alice","password":"s3cret"})");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "unused" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps[0];
+
+    EXPECT_TRUE (step.auth_template.empty ());
+    EXPECT_EQ (authorization_of (step.request),
+    "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
+
+    // And `bind_step_auth` is the no-op the executors call unconditionally.
+    vayu::Request request = step.request;
+    const auto bound      = vayu::core::bind_step_auth (
+    request, step, resolved.data_rows[0], /*row_index=*/0);
+    EXPECT_TRUE (bound.ok) << bound.error;
+    EXPECT_EQ (authorization_of (request), authorization_of (step.request));
+}
+
+TEST_F (ScenarioPlanTest, AUserSuppliedAuthorizationHeaderStillWinsOverBoundCredentials) {
+    // `apply_auth`'s precedence rule is the deferred path's too, because it is
+    // the same `apply_auth` - a header the user wrote is never overwritten,
+    // whichever iteration the credentials came from.
+    seed_collection ("col", "");
+    seed_request ("req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"basic","username":"{{data.user}}","password":"pw"})",
+    /*post_script=*/"", /*created_at=*/1,
+    R"([{"key":"Authorization","value":"Bearer mine","enabled":true}])");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+
+    vayu::Request request = resolved.plan.steps[0].request;
+    const auto bound      = vayu::core::bind_step_auth (
+    request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+    ASSERT_TRUE (bound.ok) << bound.error;
+    EXPECT_EQ (authorization_of (request), "Bearer mine");
 }
 
 TEST_F (ScenarioPlanTest, AnUnknownSourceDoesNotFallThroughToTheCollectionPath) {
