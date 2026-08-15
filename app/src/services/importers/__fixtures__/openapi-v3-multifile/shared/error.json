@@ -1,0 +1,10 @@
+{
+	"Error": {
+		"type": "object",
+		"required": ["message"],
+		"properties": {
+			"code": { "type": "integer", "example": 400 },
+			"message": { "type": "string", "example": "pet already exists" }
+		}
+	}
+}

@@ -199,6 +199,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string }> =>
 		ipcRenderer.invoke("dataFile:read", path),
 
+	// Read a file an imported OpenAPI document references (issue #649). Two
+	// arguments and not a composed path: the renderer holds the picked
+	// document's path and the ref's text, and the main process resolves one
+	// against the other, so this channel reads files a *document* named rather
+	// than paths the web layer built. Gated there (extension allowlist + the
+	// engine's fetched `maxSpecDocumentBytes`); bytes, not text, for the same
+	// reason `readDataFile` returns bytes.
+	readSpecFile: (
+		specPath: string,
+		refPath: string
+	): Promise<{ bytes: Uint8Array; fileName: string }> =>
+		ipcRenderer.invoke("specFile:read", specPath, refPath),
+
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.
 	onBeforeQuit: (callback: () => void | Promise<void>) => {

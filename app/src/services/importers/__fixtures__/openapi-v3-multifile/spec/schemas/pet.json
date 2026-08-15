@@ -1,0 +1,15 @@
+{
+	"Pet": {
+		"type": "object",
+		"required": ["id", "name"],
+		"properties": {
+			"id": { "type": "integer", "example": 7 },
+			"name": { "type": "string", "example": "Rex" },
+			"tag": { "$ref": "#/Tag" }
+		}
+	},
+	"Tag": {
+		"type": "object",
+		"properties": { "label": { "type": "string", "example": "good-boy" } }
+	}
+}

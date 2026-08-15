@@ -219,7 +219,8 @@ import complete-but-empty and the user picks the file. Every parser gets it from
 than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
-"malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status", count }`.
+"malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
+"external_ref", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -230,7 +231,11 @@ counted via `SkipTally` in `openapi-shared.ts`, shared by both OpenAPI parsers: 
 structural clones, and a second copy would drift. `example_no_status` is a fourth
 non-representability case: an OpenAPI response keyed `default` or `2XX` documents a real
 response, but an example is served under one status line and there is no honest value to
-pick, so it is counted rather than guessed at.
+pick, so it is counted rather than guessed at. `external_ref` is the fifth, and the only
+kind no parser produces: a `$ref` naming another file that the bundling pass could not
+read (`ref-bundler.ts`, issue #649) is counted **before** parse and stamped into
+`meta.skipped` by `parseImport`, one per reference - because each one is an operation that
+imported without the schema it declared.
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`

@@ -51,7 +51,15 @@ else     rootRequests.push(req);
 
 **`trace` operations:** OpenAPI 3's Path Item Object also defines `trace`, which is **not** in `HTTP_METHODS` because `HttpMethod` (`types/domain.ts`) has no `"TRACE"` - Vayu cannot execute one. A `trace` operation is therefore not built, is **not** counted in `requestCount`, and is counted as an `unsupported_method` `SkippedItem` so the preview says so. `UNSUPPORTED_METHODS` in `openapi-v3.ts` is the list; `trace` is its only member, since a path item defines exactly the eight methods.
 
-Key internal functions: `buildOperation` (per-operation `RequestDraft`), `makeTagCollection` (per-tag `CollectionDraft`), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and a closed-over `resolveRef` for `$ref` resolution.
+Key internal functions: `buildOperation` (per-operation `RequestDraft`), `makeTagCollection` (per-tag `CollectionDraft`), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and `createRefResolver` (`openapi-shared.ts`) for `$ref` resolution - shared with the v2 parser, which built the identical closure by hand until issue #649.
+
+## External `$ref`s
+
+The resolver above walks `#/`-rooted pointers **inside the document it was given**, and nothing else. A reference naming another file (`./schemas/pet.yaml#/Pet`, `https://acme.dev/common.yaml#/Error`) is not such a pointer, so it used to resolve to `undefined` - which every caller reads as *the spec documented nothing here*: an empty body stub, a missing parameter, an example that never imported, and no entry in `meta.skipped` to say so.
+
+Those references are now resolved **before** the parser runs, by `ref-bundler.ts` (issue #649): each referenced document is fetched (through the engine's `/import/fetch`) or read from beside the picked file (through the gated `specFile:read` IPC), inlined under a root `x-vayu-bundled` key, and every reference into it rewritten to an in-document pointer. What reaches `parse` is therefore always self-contained, and the parser needs no notion of files.
+
+What could **not** be reached is counted as an `external_ref` `SkippedItem` - one per reference - and its `$ref` is left exactly as the document wrote it. See [OpenAPI Collections](../openapi.md#specs-written-across-several-files) for the user-facing rules, including which intake applies to a fetched, picked or pasted document, and why a multi-file spec is stored as the bundle.
 
 ## Field mapping
 
@@ -255,7 +263,8 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from a request `schema` (bounded, ref-resolving) |
 | `schemaFormFields` | `schema-sampler.ts` | field names for an urlencoded / multipart body, resolved through the sampler, each flagged text or file |
 | `importedFilePart`, `unattachedFileParts` | `shared.ts` | build a file form row; count the rows that still need a file, for `meta` |
-| `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `createRefResolver`, `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve an in-document `$ref` and a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `bundleExternalRefs` | `ref-bundler.ts` | resolve references to *other files* before parse, and count what it could not reach |
 | `queryParamRow`, `paramValueText` | `openapi-shared.ts` | one `in: "query"` parameter as a Params row - the value/enabled rule both OpenAPI parsers apply |
 | `responseExample`, `findJsonMediaType`, `firstNamedExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft; the halves the two OpenAPI parsers share |
 | `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |

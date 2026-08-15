@@ -1,0 +1,39 @@
+{
+	"openapi": "3.0.3",
+	"info": { "title": "Multi-file Pets", "version": "1.0.0" },
+	"servers": [{ "url": "https://api.pets.com/v1" }],
+	"paths": {
+		"/pets": {
+			"post": {
+				"operationId": "createPet",
+				"summary": "Create pet",
+				"tags": ["pets"],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "./schemas/pet.json#/Pet" }
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Created",
+						"content": {
+							"application/json": {
+								"schema": { "$ref": "./schemas/pet.json#/Pet" }
+							}
+						}
+					},
+					"400": {
+						"description": "Bad request",
+						"content": {
+							"application/json": {
+								"schema": { "$ref": "../shared/error.json#/Error" }
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

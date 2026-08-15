@@ -40,7 +40,9 @@ creates is bound automatically:
 
 - The document is stored **verbatim**, exactly the bytes that were read. A
   YAML spec stays YAML; nothing is re-serialized, because the hash is taken of
-  what was stored and a later re-fetch is compared against it.
+  what was stored and a later re-fetch is compared against it. A spec written
+  across several files is the one exception - see
+  [Specs written across several files](#specs-written-across-several-files).
 - A **fetched URL is kept**, so the document knows where it came from.
 - Every request created from an operation records that operation's
   `operationId` (when the document declares one), its method, and its
@@ -48,6 +50,47 @@ creates is bound automatically:
 
 Other formats are unaffected. A Postman or Insomnia import binds nothing and
 records no operation identity: those files describe requests, not a contract.
+
+## Specs written across several files
+
+A large document is usually not one document: schemas live in their own files,
+shared errors in another, and the entry point names them with references like
+`./schemas/pet.yaml#/Pet`. Vayu **follows those references before it parses**,
+inlines what they name, and imports the result as one document.
+
+Where a referenced file is read from depends on where the spec came from:
+
+| The spec was… | A relative reference is read… | An absolute `https://` reference |
+|---|---|---|
+| Fetched from a URL | From that URL's directory | Fetched |
+| Picked as a file | From beside the file, on this machine | Fetched |
+| Pasted as text | Not at all - there is no directory to read from | Fetched |
+
+References are followed through the files they lead to, so a file that refers to
+a third is resolved too, and a cycle stops rather than looping. Each file is read
+once however many references name it.
+
+**What cannot be read is said, never silently dropped.** A file that is missing,
+unreachable, or not valid JSON or YAML leaves its reference exactly as the
+document wrote it, and the import preview counts it - one per reference, because
+each one is an operation that imported without the schema it declared. Before
+this, such a reference simply produced an empty body stub and no message at all.
+
+Reading a file beside a picked spec is the only part of this that touches the
+disk. It goes through the same kind of gate the [data
+contract](data-driven-runs.md) uses for its files: only `.json`, `.yaml` and
+`.yml`, only paths resolved in the desktop process from the document you picked,
+and nothing larger than the engine's `maxSpecDocumentBytes`.
+
+**A multi-file spec is stored as the bundle** - the entry document with the
+others inlined - and not as the entry file alone. There is no single verbatim
+text for a spec that is several files, and storing only the entry would store a
+document naming files nothing else can reach. The bundling is deterministic, so
+the same spec always produces the same bytes and the same hash. A single-file
+spec is untouched.
+
+If the whole bundle would exceed `maxSpecDocumentBytes`, the import stops and
+says so rather than storing a truncated contract.
 
 ## The Spec tab
 

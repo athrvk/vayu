@@ -82,6 +82,15 @@ export const ENGINE_PORT_RELEASE_DELAY_MS = 500;
  * port is: the main process cannot import renderer modules.
  */
 export const DATA_FILE_MAX_BYTES_SEED = 16 * 1024 * 1024;
+/**
+ * Seed for the engine's `maxSpecDocumentBytes`, used by the spec sibling-read
+ * channel only while the engine cannot answer `GET /config` (see spec-file.ts).
+ *
+ * Same posture as the data-file seed above: not the rule, and mirroring
+ * `SPEC_DOCUMENT_MAX_BYTES` in src/constants/spec-documents.ts because the main
+ * process cannot import renderer modules.
+ */
+export const SPEC_DOCUMENT_MAX_BYTES_SEED = 10 * 1024 * 1024;
 
 // Window
 export const WINDOW_DEFAULT_WIDTH = 1400;

@@ -12,6 +12,35 @@ import { asRecord, asStr, prop } from "@/lib/json-node";
 export type RefResolver = (ref: string) => unknown;
 
 /**
+ * The in-document `$ref` resolver, once (issue #649).
+ *
+ * Both parsers built this by hand, identically - the repo's hand-rolled-copy
+ * defect, in the one helper every other helper here takes as an argument. The
+ * two escapes are the JSON Pointer ones (`~1` is `/`, `~0` is `~`), and the walk
+ * is `prop()` per segment so a pointer into a non-object yields `undefined`
+ * rather than throwing.
+ *
+ * **In-document only, and that is now a guarantee rather than a gap.** A ref
+ * naming another file (`./pets.yaml#/Pet`) has no `#/` prefix to strip, so every
+ * segment names a key no document has and the walk lands on `undefined` - which
+ * a caller cannot tell from "the spec documented nothing here". External refs
+ * are therefore resolved *before* parse by `ref-bundler.ts`, which inlines what
+ * it can reach and counts what it cannot into the skip tally. Anything still
+ * external by the time this runs is a ref the user has already been told about.
+ */
+export function createRefResolver(document: unknown): RefResolver {
+	return (ref: string): unknown => {
+		const path = ref
+			.replace(/^#\//, "")
+			.split("/")
+			.map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
+		let cur: unknown = document;
+		for (const seg of path) cur = prop(cur, seg);
+		return cur;
+	};
+}
+
+/**
  * The identity of one operation: its method, the **templated** path as the
  * document writes it, and its `operationId` when it declares one (issue #637).
  *

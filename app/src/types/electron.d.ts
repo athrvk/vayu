@@ -138,6 +138,22 @@ interface ElectronAPI {
 	 */
 	readDataFile: (path: string) => Promise<{ bytes: Uint8Array; fileName: string }>;
 
+	/**
+	 * Read a file an imported OpenAPI document references (issue #649), given the
+	 * picked document's path and the `$ref` target as the document wrote it - the
+	 * main process resolves the second against the first's directory. Rejects
+	 * with a message the import dialog can show as-is when the reference is
+	 * absolute, names an extension Vayu does not open, is not there, or is over
+	 * the engine's `maxSpecDocumentBytes`.
+	 *
+	 * Bytes rather than text, matching `readDataFile`. Absent outside Electron,
+	 * where a multi-file spec simply reports its refs as unresolved.
+	 */
+	readSpecFile: (
+		specPath: string,
+		refPath: string
+	) => Promise<{ bytes: Uint8Array; fileName: string }>;
+
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }
