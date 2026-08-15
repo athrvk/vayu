@@ -567,6 +567,11 @@ run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t
     const int64_t total = db.count_result_bodies (run_id);
     auto rows           = db.get_result_bodies_paginated (run_id, limit, offset);
 
+    // Read once for the page, not once per streamed row: the caps are what the
+    // reader's own settings say now, and a page whose rows were bounded by two
+    // different rules would be a page nobody could describe.
+    const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
+
     // Bodies are deduplicated in storage, so a page of 50 samples of the same
     // response points at one blob. Read it once rather than 50 times.
     std::map<int, std::string> blob_cache;
@@ -604,6 +609,16 @@ run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t
                 // Same convention design-mode traces use (cap_trace_bodies), so
                 // a reader has one rule for "this is a slice".
                 response["bodyTruncated"] = true;
+            }
+            // A streamed sample's events, parsed back from the body it stored
+            // (issue #657). Absent unless the row recorded a wire event count,
+            // so a non-stream sample - and every row written before the column
+            // existed - carries no `events` node at all rather than an empty
+            // one. Derived here rather than stored a second time: the body is
+            // the event list, and two copies of one fact drift.
+            if (row.stream_events) {
+                response["events"] = vayu::http::buffered_stream_events_node (
+                cached->second, sse_limits, *row.stream_events, !row.truncated);
             }
             // No blob and not binary means the run's capture budget was spent
             // before this sample: headers were kept, the body was not. Said

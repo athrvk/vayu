@@ -236,6 +236,9 @@ CapturedExchange MetricsCollector::capture_exchange (const Response& response) {
     CapturedExchange captured;
     captured.headers    = response.headers;
     captured.body_bytes = static_cast<int64_t> (response.body.size ());
+    if (response.stream_events) {
+        captured.stream_events = static_cast<int64_t> (*response.stream_events);
+    }
 
     // Headers compares case-insensitively, so one lookup covers every spelling
     // an origin might send.
@@ -774,9 +777,10 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         pending.result_index = batch.size () - 1;
         pending.headers = nlohmann::json (exchange.headers)
                           .dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
-        pending.body_bytes   = exchange.body_bytes;
-        pending.truncated    = exchange.truncated;
-        pending.content_type = exchange.content_type;
+        pending.body_bytes    = exchange.body_bytes;
+        pending.truncated     = exchange.truncated;
+        pending.content_type  = exchange.content_type;
+        pending.stream_events = exchange.stream_events;
 
         if (!exchange.body_dropped && !exchange.body.empty ()) {
             // A binary body is stored as its size and content type, never as

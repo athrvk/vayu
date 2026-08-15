@@ -18,6 +18,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -67,6 +68,11 @@ struct ScriptReplay {
     /// Prefixed to every failure message so a scenario's failures name their
     /// step. Empty for a single-request run, whose failures need no qualifier.
     std::string failure_prefix;
+    /// The caps a streamed sample's events are parsed back under (issue #657).
+    /// Read once for the run, like `SseStreamRequest::limits` is read once for
+    /// a stream: every sample in one run is then bounded by one rule rather
+    /// than by whatever the settings said when each replay reached it.
+    vayu::http::SseLimits sse_limits;
 };
 
 /**
@@ -116,6 +122,26 @@ std::vector<std::string>& failure_messages) {
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
+            }
+            // `pm.response.events` for a sampled stream (issue #657). Parsed
+            // here, at the end of the run, rather than copied on the completion
+            // path: the body already is the event list, and the deferred pass
+            // is where the expensive half of sampling belongs. A sample that
+            // did not stream sets nothing, so the script reads `undefined` -
+            // the same absent-not-empty rule the live path keeps.
+            //
+            // Declared in the loop so the node outlives the execute it is bound
+            // to and no longer.
+            nlohmann::json stream_events;
+            if (sample.stream_events) {
+                stream_events = vayu::http::buffered_stream_events_node (sample.body,
+                replay.sse_limits, static_cast<int64_t> (*sample.stream_events),
+                // A load sample keeps the whole body it captured: the reservoir
+                // copies `Response::body`, which the byte cap has already ended
+                // the transfer over if it was ever exceeded. `CapturedExchange`
+                // is the path that truncates, and it is not this one.
+                true);
+                script_ctx.response_events = &stream_events;
             }
             auto result = engine.execute (*replay.script, script_ctx);
 
@@ -193,6 +219,8 @@ bool verbose) {
 
     vayu::runtime::ScriptEngine engine (script_config);
     vayu::Environment env;
+    // One read for the whole pass, shared by every replay it drives.
+    const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
 
     // The run-level request and identity, for the single-request shape. A
     // scenario takes both off the plan step it is replaying instead, so it does
@@ -279,6 +307,7 @@ bool verbose) {
             replay.failure_prefix = step.name.empty () ?
             "step " + std::to_string (i + 1) + ": " :
             step.name + ": ";
+            replay.sse_limits = sse_limits;
 
             const auto totals = run_replay (engine, env, replay, failure_messages);
             validation.steps[i] = totals;
@@ -304,6 +333,7 @@ bool verbose) {
         replay.samples      = &samples;
         replay.request_id   = script_request_id;
         replay.request_name = script_request_name;
+        replay.sse_limits   = sse_limits;
 
         const auto totals = run_replay (engine, env, replay, failure_messages);
         sampled           = totals.sampled;

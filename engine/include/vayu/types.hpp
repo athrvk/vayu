@@ -1152,6 +1152,18 @@ struct ResultBody {
     bool truncated;        // stored bytes are a prefix of `body_bytes`
     bool is_binary;        // stored as a descriptor; `blob_id` is 0
     std::string content_type;
+    /**
+     * Events the transfer delivered, when it was a bounded stream
+     * (`Response::stream_events`); NULL otherwise, which is also what every row
+     * written before issue #657 reads as (absent, not zero).
+     *
+     * Stored rather than derived from the body for the reason `body_bytes` is:
+     * the body may be a prefix, and a count taken from a prefix would report a
+     * cut stream as a short one. The events themselves are not stored - the
+     * body *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`
+     * parses them back with the same parser the live path feeds.
+     */
+    std::optional<int64_t> stream_events;
 };
 
 /**
@@ -1171,6 +1183,9 @@ struct PendingResultBody {
     bool truncated     = false;
     bool binary        = false;
     std::string content_type;
+    /// See `ResultBody::stream_events` - absent for everything that did not
+    /// stream.
+    std::optional<int64_t> stream_events;
 };
 
 /**

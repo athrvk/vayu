@@ -11,6 +11,8 @@
  * Common types for response display components used across the application.
  */
 
+import type { RunResultStreamEvents } from "@/types/domain";
+
 // Extended body type to support more response formats
 export type BodyType =
 	| "json"
@@ -67,5 +69,15 @@ export interface HeadersViewerProps {
 export interface UnifiedResponseViewerProps {
 	response?: ResponseData | null;
 	request?: RequestData | null;
+	/**
+	 * The stream this exchange received, when it was one (issue #657). Present
+	 * turns on the Events tab; absent leaves the viewer with the two tabs it has
+	 * always had, because a non-streaming sample has no timeline and an empty
+	 * "Events" tab would suggest it did.
+	 *
+	 * Shaped as the engine serves it on `GET /runs/:id/samples` - a load sample
+	 * carries no `endReason`, so this asks for none.
+	 */
+	events?: Omit<RunResultStreamEvents, "endReason"> | null;
 	className?: string;
 }

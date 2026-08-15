@@ -358,7 +358,12 @@ inline auto make_storage (const std::string& path) {
     make_column ("body_bytes", &ResultBody::body_bytes),
     make_column ("truncated", &ResultBody::truncated),
     make_column ("is_binary", &ResultBody::is_binary),
-    make_column ("content_type", &ResultBody::content_type)),
+    make_column ("content_type", &ResultBody::content_type),
+    // Nullable, so sync_schema can ALTER TABLE ADD COLUMN it onto an existing
+    // result_bodies table without a backfill value - and so a row written
+    // before issue #657 reads as "this was not a stream" rather than as a
+    // stream that delivered nothing.
+    make_column ("stream_events", &ResultBody::stream_events)),
 
     // Inbox requests: what a webhook inbox listener captured (issue #480).
     // Not owned by a run, so nothing in the run cascade touches it - the rows
@@ -1677,8 +1682,9 @@ const std::vector<PendingResultBody>& bodies) {
                 row.blob_id      = blob_id;
                 row.body_bytes   = pending.body_bytes;
                 row.truncated    = pending.truncated;
-                row.is_binary    = pending.binary;
-                row.content_type = pending.content_type;
+                row.is_binary     = pending.binary;
+                row.content_type  = pending.content_type;
+                row.stream_events = pending.stream_events;
                 impl_->storage.replace (row);
             }
             return true; // Commit

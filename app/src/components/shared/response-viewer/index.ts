@@ -26,6 +26,13 @@ export type { ResponseHeadersPanelProps } from "./HeadersViewer";
 // budget, or binary. Rendered by both surfaces that show captured samples.
 export { CapturedResponseNotice } from "./CapturedResponseNotice";
 export type { CapturedResponseNoticeProps } from "./CapturedResponseNotice";
+// The Events timeline. Shared because two surfaces show the same list from two
+// sources: the request builder's live/restored stream, and a load run's
+// captured sample, whose events the engine parses back out of the stored body
+// (issue #657). A second copy here would be a second set of truncation
+// disclosures to keep honest.
+export { default as ResponseEvents } from "./ResponseEvents";
+export type { ResponseEventsProps } from "./ResponseEvents";
 export { StatusCodeBadge } from "./StatusCodeBadge";
 export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 

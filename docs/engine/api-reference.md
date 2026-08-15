@@ -4500,6 +4500,27 @@ something the bytes alone cannot say:
 | `bodyDropped`   | `true` only  | The run's `maxSampleBytes` budget was spent before this sample: headers kept, body not. **Distinct from an empty response body** |
 | `binary`        | `true` only  | Stored as a descriptor - `bodyBytes` and `contentType`, no bytes. See [`result_bodies`](db-schema.md#result_bodies) for why a binary body is never stored as text |
 | `contentType`   | Non-empty    | The response's `Content-Type`                                           |
+| `events`        | Streams only | What the stream delivered, in the trace's `events` shape (see below). Absent for every sample that did not stream |
+
+**A streamed sample carries its events** (0.17.2). `events` is
+`{items, totalEvents, eventsTruncated}` - the same node a streaming design run
+stores on its trace, minus `endReason`: under load a stream ends by server close
+or by one of two caps (`maxStreamEvents` / `maxStreamDurationMs`) and nothing
+per sample records which, so no reason is named rather than one invented. The
+list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`,
+and `totalEvents` is the count taken **on the wire** - so a capture the
+`maxSampleBodyBytes` cap cut still reports the whole stream's length, with
+`eventsTruncated` covering both that cut and the stored-events cap. See
+[`result_bodies`](db-schema.md#result_bodies) for why the count is stored and
+the list is not.
+
+```json
+"events": {
+  "items": [ { "event": "token", "data": "hello", "sourceId": "42" } ],
+  "totalEvents": 4000,
+  "eventsTruncated": true
+}
+```
 
 **Captured data is stored verbatim** - no redaction, consistently with
 design-mode traces, which already store request headers as sent. A response

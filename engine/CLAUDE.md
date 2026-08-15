@@ -126,7 +126,14 @@ Three things worth knowing before you design around them:
   whole-transfer timeout becomes a backstop past the duration cap. The report
   gains a `stream` section (per-completion event distribution, totals,
   `capped`, derived `eventsPerSecond`), absent for every run that did not
-  stream. **Scripts run** (#575): the pre-request one before the
+  stream. **A load stream's events are parsed back, never stored twice**
+  (#657): the sample's body already *is* the `text/event-stream` bytes, so the
+  deferred script replay and `GET /runs/:id/samples` both rebuild the list with
+  `buffered_stream_events_node` - one `SseParser`, one definition of an event -
+  bounded by `sseMaxStoredEvents`. The one thing stored beside the body is the
+  wire count (`result_bodies.stream_events`, NULL = not a stream), because a cut
+  body cannot report the length of the stream it is a prefix of.
+  **Scripts run** (#575): the pre-request one before the
   transfer, the post-request one after the stream ends, reading the bounded list
   as `pm.response.events`; because the route already answered `202`, their
   output is stored on the trace's `scripts` node rather than returned. **A

@@ -94,6 +94,9 @@ export default function SampleRequestCard({
 							headers: captured.response.headers,
 							status: sample.statusCode,
 						}}
+						// Present only when this sample streamed, which is what
+						// gates the Events tab (issue #657).
+						events={captured.response.events}
 						className="max-h-[400px]"
 					/>
 				</div>

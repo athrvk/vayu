@@ -1686,6 +1686,21 @@ export interface RunSample {
 		/** Stored as a descriptor: size and content type, no bytes. */
 		binary?: boolean;
 		contentType?: string;
+		/**
+		 * What this sample's stream delivered, when the sampled transfer was a
+		 * stream (issue #657). The engine parses it back out of the stored body
+		 * with the same parser the live path feeds, so the list means exactly
+		 * what the design-mode Events tab's list means.
+		 *
+		 * Absent - not an empty node - for every sample that did not stream, and
+		 * for rows stored before the engine recorded a wire event count.
+		 * `totalEvents` is that wire count, so it stays truthful when
+		 * `bodyTruncated` cut the bytes the items were parsed from;
+		 * `eventsTruncated` covers both that cut and the `sseMaxStoredEvents`
+		 * cap. No `endReason`: under load a stream ends by server close or by
+		 * one of two caps, and nothing per sample says which.
+		 */
+		events?: Omit<RunResultStreamEvents, "endReason">;
 	};
 }
 
