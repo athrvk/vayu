@@ -104,6 +104,11 @@ run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
 and `pm.iterationData.get("` offers them in the script editors (see below).
 
+The script panel's **"Referenced:" chips** read the same three states (issue
+#604). They used to paint a name red whenever no scope defined it, which for a
+`data.*` name is always - the reading that made a working column look broken in
+a row whose whole job is to say whether a name resolves.
+
 The **audit** in the Data tab is the same comparison in the other direction -
 the declared columns against the tokens the collection's requests actually
 carry. See

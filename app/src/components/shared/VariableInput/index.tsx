@@ -326,10 +326,51 @@ export default function VariableInput({
 		variables?.updateVariable(name, newValue, scope);
 	};
 
+	/**
+	 * Put the caret at the near edge of a token that took the click.
+	 *
+	 * A run-time token has to receive pointer events for its tooltip to open at
+	 * all (issue #604), which means the click no longer reaches the transparent
+	 * input underneath and the browser cannot place the caret from it. The token
+	 * carries the offsets of its own text in `value`, so the near edge is
+	 * recoverable: the half of the token that was clicked decides which side of
+	 * it the caret lands on.
+	 *
+	 * The edges rather than an offset *within* the token, because there is no
+	 * position inside `{{data.email}}` that means anything - it is one atom to
+	 * everything that reads it, and dropping the caret between its braces is how
+	 * a keystroke corrupts the name.
+	 */
+	const placeCaretAtTokenEdge = (token: HTMLElement, clientX: number) => {
+		const input = inputRef.current;
+		const start = Number(token.dataset.tokenStart);
+		const end = Number(token.dataset.tokenEnd);
+		if (!input || !Number.isFinite(start) || !Number.isFinite(end)) return;
+
+		const rect = token.getBoundingClientRect();
+		const caret = clientX < rect.left + rect.width / 2 ? start : end;
+		input.focus();
+		input.setSelectionRange(caret, caret);
+		setCursorPosition(caret);
+	};
+
 	// Focus the hidden input when clicking on the container (but not on variable tokens)
 	const handleContainerClick = (e: React.MouseEvent) => {
-		// Don't focus if clicking on a variable token (it has its own click handling)
 		const target = e.target as HTMLElement;
+		/*
+		 * A run-time token has no popover - a tooltip is the whole of it - so it
+		 * must not swallow the click the way an editable token does. Before
+		 * issue #604 it did neither: the overlay's `pointer-events: none` meant
+		 * the token never saw a pointer event, so the tooltip could not open,
+		 * and the early return below meant that once events were enabled the
+		 * click would land nowhere. The fix is the pair.
+		 */
+		const runtime = target.closest<HTMLElement>("[data-runtime-token]");
+		if (runtime) {
+			placeCaretAtTokenEdge(runtime, e.clientX);
+			return;
+		}
+		// Don't focus if clicking on a variable token (it has its own click handling)
 		if (target.closest("[data-variable-token]")) {
 			return;
 		}
@@ -340,7 +381,19 @@ export default function VariableInput({
 	const renderOverlayContent = () => {
 		if (!value) return null;
 
+		/*
+		 * Where each segment's text starts in `value`. The segments tile the
+		 * whole string (matches plus the slices between them), so a running
+		 * count is exact - and it is what lets a click on a run-time token put
+		 * the caret back on the right side of it, see `placeCaretAtTokenEdge`.
+		 */
+		let offset = 0;
+
 		return segments.map((seg, i) => {
+			const start = offset;
+			offset += seg.content.length;
+			const tokenBounds = { "data-token-start": start, "data-token-end": offset };
+
 			if (seg.type === "variable" && seg.varName) {
 				/*
 				 * The reserved namespace is read *before* the scopes, exactly as
@@ -358,7 +411,16 @@ export default function VariableInput({
 					 */
 					const data = describeDataToken(seg.varName, variables?.dataColumns);
 					return (
-						<span key={`${i}-${seg.varName}`} data-variable-token>
+						<span
+							key={`${i}-${seg.varName}`}
+							data-variable-token
+							data-runtime-token
+							{...tokenBounds}
+							// The tooltip is this token's entire content, and a
+							// tooltip opens on a pointer event the overlay's
+							// `pointer-events: none` never delivered (issue #604).
+							style={{ pointerEvents: "auto" }}
+						>
 							<RuntimeToken
 								name={seg.varName}
 								description={data.description}
@@ -375,7 +437,13 @@ export default function VariableInput({
 				const dynamic = varInfo ? undefined : DYNAMIC_BY_NAME.get(seg.varName);
 				if (dynamic) {
 					return (
-						<span key={`${i}-${seg.varName}`} data-variable-token>
+						<span
+							key={`${i}-${seg.varName}`}
+							data-variable-token
+							data-runtime-token
+							{...tokenBounds}
+							style={{ pointerEvents: "auto" }} // See the data.* token above.
+						>
 							<RuntimeToken
 								name={dynamic.name}
 								description={dynamic.description}

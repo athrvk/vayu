@@ -26,6 +26,10 @@ import InheritedScriptsNotice from "../InheritedScriptsNotice";
 import LegacyScriptNotice from "../LegacyScriptNotice";
 import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
 import { referencedVariables } from "@/lib/referenced-variables";
+import { describeDataToken } from "@/lib/data-contract";
+import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
+import { isDataVariableName } from "@/lib/variable-resolution";
+import { cn } from "@/lib/utils";
 
 /** How many referenced names get a chip before the rest become a count. */
 const CHIP_LIMIT = 5;
@@ -81,15 +85,46 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 			{hasReferencedVars && (
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="text-xs text-muted-foreground">Referenced:</span>
-					{usedVars.slice(0, CHIP_LIMIT).map((varName) => (
-						<Badge
-							key={varName}
-							variant={allVariables[varName] ? "secondary" : "destructive"}
-							className="font-mono text-xs"
-						>
-							{varName}
-						</Badge>
-					))}
+					{usedVars.slice(0, CHIP_LIMIT).map((varName) => {
+						/*
+						 * A `data.*` name is not a variable and never becomes one
+						 * (issue #604): the namespace is disjoint from the scopes,
+						 * so `allVariables` cannot hold it and the red chip below
+						 * was reporting "not defined" about a name for which that
+						 * is not a defect - the same paint #592 removed from the
+						 * builder, left behind here.
+						 *
+						 * It reads the contract in scope through `describeDataToken`
+						 * rather than inventing a fourth state, so a column this
+						 * chip calls declared is the one the token in the URL bar
+						 * calls declared. Muted or amber, never destructive.
+						 */
+						if (isDataVariableName(varName)) {
+							const data = describeDataToken(varName, context.dataColumns);
+							return (
+								<Badge
+									key={varName}
+									variant="chip"
+									className={cn(
+										"font-mono text-xs bg-muted",
+										DATA_TOKEN_TONE_CLASS[data.tone]
+									)}
+									title={`${data.description} - ${data.note}`}
+								>
+									{varName}
+								</Badge>
+							);
+						}
+						return (
+							<Badge
+								key={varName}
+								variant={allVariables[varName] ? "secondary" : "destructive"}
+								className="font-mono text-xs"
+							>
+								{varName}
+							</Badge>
+						);
+					})}
 					{usedVars.length > CHIP_LIMIT && (
 						<span className="text-xs text-muted-foreground">
 							+{usedVars.length - CHIP_LIMIT} more
