@@ -33,7 +33,8 @@
 						"type": "array",
 						"collectionFormat": "multi",
 						"items": { "type": "string" }
-					}
+					},
+					{ "name": "X-Request-Id", "in": "header", "type": "string" }
 				]
 			}
 		}

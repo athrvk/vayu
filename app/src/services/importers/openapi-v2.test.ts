@@ -40,6 +40,8 @@ describe("OpenApiV2Parser", () => {
 		// Optional with no `default` - one disabled row, and `collectionFormat` still
 		// unread (#622 does not change that; an array `default` is not sendable either).
 		expect(get.params).toEqual([{ key: "status", value: "", enabled: false }]);
+		// The declared header follows the same rule (#658) - listed, not sent.
+		expect(get.headers).toEqual([{ key: "X-Request-Id", value: "", enabled: false }]);
 	});
 
 	it("maps basic and oauth2 schemes via swaggerSchemeToAuth", () => {
@@ -332,6 +334,64 @@ describe("OpenApiV2Parser", () => {
 					},
 				])
 			).toEqual([{ key: "status", value: "", enabled: false }]);
+		});
+	});
+
+	/**
+	 * Issue #658, the header half. Same rule and the same `default`, so a Swagger
+	 * operation no longer imports a declared header as an enabled empty value.
+	 */
+	describe("header parameter enabled state", () => {
+		const headersOf = (parameters: unknown[]) => {
+			const spec = {
+				swagger: "2.0",
+				info: { title: "Header API" },
+				paths: { "/items": { get: { summary: "List items", parameters } } },
+			};
+			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].headers;
+		};
+
+		it("imports an optional value-less header disabled and a required one enabled", () => {
+			expect(
+				headersOf([
+					{ name: "X-Request-Id", in: "header", type: "string" },
+					{ name: "X-Tenant", in: "header", type: "string", required: true },
+				])
+			).toEqual([
+				{ key: "X-Request-Id", value: "", enabled: false },
+				{ key: "X-Tenant", value: "", enabled: true },
+			]);
+		});
+
+		it("carries a scalar default as the row's value, enabled", () => {
+			expect(
+				headersOf([
+					{ name: "X-Api-Version", in: "header", type: "string", default: "2026-08-01" },
+				])
+			).toEqual([{ key: "X-Api-Version", value: "2026-08-01", enabled: true }]);
+		});
+
+		it("carries no description, since the Headers table has no column for one", () => {
+			expect(
+				headersOf([
+					{
+						name: "X-Request-Id",
+						in: "header",
+						type: "string",
+						description: "Correlation id",
+					},
+				])
+			).toEqual([{ key: "X-Request-Id", value: "", enabled: false }]);
+		});
+
+		it("still drops the headers Vayu manages, required or not", () => {
+			expect(
+				headersOf([
+					{ name: "Authorization", in: "header", type: "string", required: true },
+					{ name: "content-type", in: "header", type: "string", default: "text/plain" },
+					{ name: "X-Keep", in: "header", type: "string", required: true },
+				])
+			).toEqual([{ key: "X-Keep", value: "", enabled: true }]);
 		});
 	});
 });

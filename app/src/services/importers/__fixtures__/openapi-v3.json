@@ -26,7 +26,12 @@
 						"required": true,
 						"schema": { "type": "string" }
 					},
-					{ "name": "verbose", "in": "query", "schema": { "type": "boolean" } }
+					{ "name": "verbose", "in": "query", "schema": { "type": "boolean" } },
+					{
+						"name": "X-Request-Id",
+						"in": "header",
+						"schema": { "type": "string" }
+					}
 				]
 			}
 		},

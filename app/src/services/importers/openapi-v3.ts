@@ -20,11 +20,11 @@ import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
+	declaredParamRow,
 	deref,
 	exampleBodyText,
 	findJsonMediaType,
 	firstNamedExample,
-	queryParamRow,
 	resolvePathItem,
 	responseExample,
 	SkipTally,
@@ -187,7 +187,7 @@ function buildOperation(
 		const description = asStr(resolved.description);
 		if (resolved.in === "query") {
 			params.push(
-				queryParamRow(
+				declaredParamRow(
 					name,
 					declaredParamValue(resolved, resolveRef),
 					resolved.required,
@@ -197,7 +197,12 @@ function buildOperation(
 		} else if (resolved.in === "header") {
 			const lower = name.toLowerCase();
 			if (lower === "authorization" || lower === "content-type") continue;
-			headers.push({ key: name, value: "", enabled: true });
+			// Same value/enabled rule as a query row (#658). No description: the
+			// Headers table has no column for one, so carrying it would be a field
+			// nothing reads.
+			headers.push(
+				declaredParamRow(name, declaredParamValue(resolved, resolveRef), resolved.required)
+			);
 		}
 	}
 	const examples = buildExamples(op.responses, resolveRef, tally);

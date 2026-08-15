@@ -1,6 +1,6 @@
 # OpenAPI 3.0
 
-Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, header params with empty values, query params carrying whatever value the spec declares for them (usually none - see [Query parameter values & enabled state](#query-parameter-values--enabled-state)), and a body sampled from the request schema. Users fill in real values after import.
+Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, query and header params carrying whatever value the spec declares for them (usually none, in which case the row imports disabled - see [Parameter values & enabled state](#parameter-values--enabled-state)), and a body sampled from the request schema. Users fill in real values after import.
 
 The document is not thrown away once it has been read. The collection it
 produces is **bound** to it: the spec is stored verbatim (with the URL it was
@@ -122,28 +122,28 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
 | `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
-| parameters with `in: "query"` | `params` | `{ key: name, value, enabled, description? }` via `queryParamRow` - `description` included only when present; `value` and `enabled` follow [Query parameter values & enabled state](#query-parameter-values--enabled-state). Only the enabled rows are joined onto the `url` by `parseImport` - see [The url/params invariant](./README.md#the-urlparams-invariant) |
-| parameters with `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
+| parameters with `in: "query"` | `params` | `{ key: name, value, enabled, description? }` via `declaredParamRow` - `description` included only when present; `value` and `enabled` follow [Parameter values & enabled state](#parameter-values--enabled-state). Only the enabled rows are joined onto the `url` by `parseImport` - see [The url/params invariant](./README.md#the-urlparams-invariant) |
+| parameters with `in: "header"` | `headers` | `{ key: name, value, enabled }` via the same `declaredParamRow` - **no description carried** (the Headers table has no column for one); `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameters with `in: "path"` / `in: "cookie"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars`. Cookie params are dropped. |
 | `op.requestBody` | `body` | via `buildBody` (see [Request body](#request-body-generation)) |
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 
-### Query parameter values & enabled state
+### Parameter values & enabled state
 
-A spec's `parameters` list declares what an operation **accepts**, not what every request should **send** - and since the [url/params join](./README.md#the-urlparams-invariant) every enabled row reaches the wire. `queryParamRow` (`openapi-shared.ts`, shared with the [Swagger parser](./openapi-v2.md)) decides both fields from the parameter alone:
+A spec's `parameters` list declares what an operation **accepts**, not what every request should **send** - and an enabled row reaches the wire either way: a query row through the [url/params join](./README.md#the-urlparams-invariant), a header row as a header the request claims to send. `declaredParamRow` (`openapi-shared.ts`, shared with the [Swagger parser](./openapi-v2.md) and applied to `in: "query"` and `in: "header"` alike) decides both fields from the parameter alone:
 
 | Parameter declares | `value` | `enabled` |
 |--------------------|---------|-----------|
 | a scalar `example` / `examples` / `schema.example` / `schema.default` | that value as text | `true` |
-| `required: true`, no value | `""` | `true` - joins as a bare key (`?tenant`), the cue to fill it in |
+| `required: true`, no value | `""` | `true` - a query row joins as a bare key (`?tenant`), a header row is listed with an empty value; either is the cue to fill it in |
 | nothing, and not required | `""` | **`false`** |
 
 Value precedence is the parameter's own `example`, then the first entry of its `examples` map (unwrapped by `firstNamedExample`), then the schema's `example`, then the schema's `default` - the same "concrete example beats generated stub" order [`buildBody`](#request-body-generation) uses, and a `default` only describes what the server assumes when the parameter is **absent**, so it ranks last. The `schema` is followed one `$ref` hop (`deref`).
 
 Only scalars become a value. An array or object is serialized by the parameter's `style`/`explode`, which this parser does not read, and one row holds one string - so such a parameter imports value-less, like one declaring nothing. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
 
-Why optional value-less parameters import **disabled** (issue #622): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, it joined the stored URL as `?verbose`, which some APIs read as `verbose=true` - a wire change nobody chose. Disabled, the row is still listed in the Params table one click from use.
+Why optional value-less parameters import **disabled** (issues #622, #658): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, a query row joined the stored URL as `?verbose`, which some APIs read as `verbose=true`, and a header row claimed an `X-Request-Id:` with nothing in it - both a wire change nobody chose. Disabled, the row is still listed in its table one click from use.
 
 ## URL & path parameters
 
@@ -228,7 +228,7 @@ Auth is applied **only at the root collection**; every request is `{ mode: "inhe
 
 ## Options & lossy behavior
 
-This parser is **stub-only**: it materializes the shape of each request, and the only values it carries are the ones the spec states outright - a query parameter's `example`/`default` ([above](#query-parameter-values--enabled-state)) and a response example. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** - the parameter is `_opts` and is never read.
+This parser is **stub-only**: it materializes the shape of each request, and the only values it carries are the ones the spec states outright - a query or header parameter's `example`/`default` ([above](#parameter-values--enabled-state)) and a response example. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** - the parameter is `_opts` and is never read.
 
 Dropped / not represented:
 
@@ -265,7 +265,7 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 | `importedFilePart`, `unattachedFileParts` | `shared.ts` | build a file form row; count the rows that still need a file, for `meta` |
 | `createRefResolver`, `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve an in-document `$ref` and a `$ref`'d path item; guard `parameters` and tally what was dropped |
 | `bundleExternalRefs` | `ref-bundler.ts` | resolve references to *other files* before parse, and count what it could not reach |
-| `queryParamRow`, `paramValueText` | `openapi-shared.ts` | one `in: "query"` parameter as a Params row - the value/enabled rule both OpenAPI parsers apply |
+| `declaredParamRow`, `paramValueText` | `openapi-shared.ts` | one `in: "query"` or `in: "header"` parameter as a table row - the value/enabled rule both OpenAPI parsers apply |
 | `responseExample`, `findJsonMediaType`, `firstNamedExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft; the halves the two OpenAPI parsers share |
 | `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |
 

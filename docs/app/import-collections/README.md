@@ -77,8 +77,9 @@ Two consequences worth expecting:
   what the Params table writes for the same row. The OpenAPI parsers import an
   optional value-less parameter **disabled** so this does not happen for a
   parameter the spec merely documents - only a `required` one, or one carrying a
-  declared value, reaches the URL (see
-  [Query parameter values & enabled state](./openapi-v3.md#query-parameter-values--enabled-state)).
+  declared value, reaches the URL. Declared **header** parameters follow the same
+  rule (see
+  [Parameter values & enabled state](./openapi-v3.md#parameter-values--enabled-state)).
 
 ### 2. Assign temp IDs - `assign-ids.ts`
 
