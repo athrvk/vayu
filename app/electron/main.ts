@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
+import { readSpecFile } from "./spec-file.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
@@ -814,6 +815,14 @@ function setupIpcHandlers() {
 	// alternative that was rejected, are in data-file.ts.
 	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
 		return await readDataFile(String(filePath ?? ""));
+	});
+
+	// Read a file an imported OpenAPI document references (issue #649). The
+	// renderer passes the picked document's path and the ref's own text; this
+	// process resolves one against the other, so the web layer still names no
+	// directory of its own. Gates and the rejected alternative are in spec-file.ts.
+	ipcMain.handle("specFile:read", async (_event, specPath: unknown, refPath: unknown) => {
+		return await readSpecFile(String(specPath ?? ""), String(refPath ?? ""));
 	});
 }
 

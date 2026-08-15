@@ -48,7 +48,9 @@ else     rootRequests.push(req);
 
 **Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder). An operation with no `tags` (or `tags: []`) becomes a root request.
 
-Unlike v3 (which has dedicated `makeTagCollection` / `buildBody` helpers), v2 builds the root and tag collections inline in `parse` and delegates only the per-operation draft to `buildSwaggerOp`. A closed-over `resolveRef` handles `$ref` resolution.
+Unlike v3 (which has dedicated `makeTagCollection` / `buildBody` helpers), v2 builds the root and tag collections inline in `parse` and delegates only the per-operation draft to `buildSwaggerOp`. `$ref` resolution comes from `createRefResolver` (`openapi-shared.ts`), the same one the v3 parser uses - both had built it by hand, identically, until issue #649.
+
+References naming **other files** (`./definitions/pet.yaml#/Pet`) are resolved before this parser runs, by `ref-bundler.ts`; what could not be reached is counted as an `external_ref` `SkippedItem`. The rules are the same for both OpenAPI parsers and are written out in [OpenAPI 3.0](./openapi-v3.md#external-refs) and [OpenAPI Collections](../openapi.md#specs-written-across-several-files).
 
 ## Field mapping
 
@@ -324,7 +326,8 @@ Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeV
 |--------|--------|--------------------|
 | [`normalizeVars`](./README.md#normalizevars) | `var-normalize.ts` | convert Swagger `{param}` path templates → Vayu `{{param}}` in request URLs |
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from an `in: "body"` parameter `schema` (bounded, ref-resolving) |
-| `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `createRefResolver`, `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve an in-document `$ref` and a `$ref`'d path item; guard `parameters` and tally what was dropped |
+| `bundleExternalRefs` | `ref-bundler.ts` | resolve references to *other files* before parse, and count what it could not reach |
 | `responseExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft - the half shared with the v3 parser |
 | `queryParamRow`, `paramValueText` | `openapi-shared.ts` | one `in: "query"` parameter as a Params row - the value/enabled rule both OpenAPI parsers apply |
 | `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |

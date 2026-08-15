@@ -305,7 +305,11 @@ the persisted payload rather than against the store's surface.
 The path is written when an OpenAPI file is imported (`queries/import.ts`, after
 the apply, because the collection has no id until then) or when the Spec tab
 binds a picked file, obtained through the preload's existing `getFilePath`
-bridge, and dropped on unbind. It is normalized through **both** `migrate` and
+bridge, and dropped on unbind. Reading the files a picked document *references*
+needs the gated `specFile:read` IPC (`electron/spec-file.ts`), which takes the
+document's path plus the reference and resolves one against the other in the
+main process - the renderer names no directory of its own, the same posture
+`dataFile:read` holds. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above.
 
 #### `engine-store.ts` - Engine Connection & Restart State

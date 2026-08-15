@@ -174,7 +174,15 @@ describe("import payload parity with the per-item path", () => {
 	it("checks every fixture in the fixtures directory", () => {
 		// Derived from the directory, not hardcoded: a new format's fixture has to
 		// be added to FIXTURES rather than silently skipping this parity check.
-		const onDisk = readdirSync(join(__dirname, "__fixtures__")).sort();
+		//
+		// Files only. A *multi-file* spec fixture is a directory of documents with
+		// one entry point (issue #649) - there is no single file to hand a parser,
+		// and its parity is exercised by `ref-bundler.test.ts`, which bundles it
+		// first and then parses the result like any other single document.
+		const onDisk = readdirSync(join(__dirname, "__fixtures__"), { withFileTypes: true })
+			.filter((entry) => entry.isFile())
+			.map((entry) => entry.name)
+			.sort();
 		expect(onDisk.length).toBeGreaterThan(0);
 		expect([...FIXTURES].sort()).toEqual(onDisk);
 	});

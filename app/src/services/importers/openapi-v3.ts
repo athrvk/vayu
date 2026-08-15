@@ -19,6 +19,7 @@ import { sampleSchema, schemaFormFields } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 import {
+	createRefResolver,
 	deref,
 	exampleBodyText,
 	findJsonMediaType,
@@ -70,15 +71,7 @@ export class OpenApiV3Parser implements ImportParser {
 
 	parse(parsed: unknown, raw: string, _opts: ImportOptions): ImportResult {
 		const spec = asRecord(parsed) ?? {};
-		const resolveRef = (ref: string): unknown => {
-			const path = ref
-				.replace(/^#\//, "")
-				.split("/")
-				.map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
-			let cur: unknown = spec;
-			for (const seg of path) cur = prop(cur, seg);
-			return cur;
-		};
+		const resolveRef = createRefResolver(spec);
 
 		const baseUrl = asStr(prop(asArray(spec.servers)[0], "url")) ?? "";
 		const primaryScheme = pickPrimaryScheme(spec);

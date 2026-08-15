@@ -31,6 +31,8 @@ import {
 	type SkippedItem,
 } from "@/services/importers/types";
 import { importFailureMessage } from "@/services/importers/failure-message";
+import { bundleExternalRefs } from "@/services/importers/ref-bundler";
+import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { MethodBadge } from "@/components/shared";
 
 type Tab = "file" | "url" | "paste";
@@ -66,7 +68,13 @@ export function ImportModal() {
 	// They used to live only long enough to render the preview.
 	const [specFilePath, setSpecFilePath] = useState("");
 	const [sourceUrl, setSourceUrl] = useState("");
+	// External `$ref`s the bundling pass below could not reach (issue #649).
+	// Held in state because a toggle re-parses the already-bundled text, and the
+	// count belongs to the document rather than to the parse - a re-detect that
+	// dropped it would quietly un-report a loss the user was already told about.
+	const [unresolvedRefs, setUnresolvedRefs] = useState(0);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
 
 	const reset = () => {
 		setPhase("idle");
@@ -77,6 +85,7 @@ export function ImportModal() {
 		setUrl("");
 		setSpecFilePath("");
 		setSourceUrl("");
+		setUnresolvedRefs(0);
 	};
 
 	const handleClose = () => {
@@ -104,9 +113,64 @@ export function ImportModal() {
 		}
 	};
 
-	const runDetect = (raw: string, source: ImportSource = {}) => {
+	/**
+	 * Resolve what the document references, then detect it (issue #649).
+	 *
+	 * A multi-file OpenAPI spec is only itself once its `$ref`s are followed:
+	 * before this, every one of them parsed to `undefined` and the operation
+	 * imported without the body or parameters it declared, silently. Bundling is
+	 * async and parsing is not, so it happens here rather than inside
+	 * `parseImport`, and what the parser (and the engine) then sees is one
+	 * self-contained document. A spec with nothing external is passed through
+	 * byte for byte.
+	 *
+	 * Both intakes are handed over, and the bundler uses whichever a given ref
+	 * needs: absolute URLs go through the engine proxy for a file-picked spec
+	 * too, and a relative ref in a pasted document has neither, which is the one
+	 * case that can only be reported.
+	 */
+	const runDetect = async (
+		raw: string,
+		source: ImportSource & { specPath?: string } = {}
+	): Promise<void> => {
 		setPhase("detecting");
-		detect(raw, { importEnvironments, importScripts }, source);
+		const { specPath, ...rest } = source;
+		const readSpecFile = window.electronAPI?.readSpecFile;
+		try {
+			const bundle = await bundleExternalRefs(raw, {
+				maxBytes: specMaxBytes,
+				...(rest.sourceUrl ? { sourceUrl: rest.sourceUrl } : {}),
+				fetchUrl: async (target) => (await apiService.importFetch(target)).content,
+				...(specPath && readSpecFile
+					? {
+							readSibling: async (relativePath) => {
+								const { bytes } = await readSpecFile(specPath, relativePath);
+								// UTF-8, exactly as `FileReader.readAsText` decoded the
+								// document these bytes sit beside. A sibling that is not
+								// UTF-8 fails to parse and is reported as an unresolved
+								// ref, which is what it is.
+								return new TextDecoder("utf-8").decode(bytes);
+							},
+						}
+					: {}),
+			});
+			setUnresolvedRefs(bundle.unresolvedRefs);
+			detect(
+				bundle.text,
+				{ importEnvironments, importScripts },
+				{
+					...rest,
+					...(bundle.unresolvedRefs ? { unresolvedRefs: bundle.unresolvedRefs } : {}),
+				}
+			);
+		} catch (e) {
+			// Only the size cap throws - an unreachable reference is counted, not
+			// fatal. A bundle over the cap is fatal because the engine would refuse
+			// to store it, leaving a collection bound to nothing.
+			setResult(null);
+			setError((e as Error).message);
+			setPhase("error");
+		}
 	};
 
 	// Re-parse the already-loaded source when an option toggle changes in preview.
@@ -118,6 +182,10 @@ export function ImportModal() {
 			detect(lastRaw, next, {
 				fileName: result?.meta.fileName,
 				...(sourceUrl ? { sourceUrl } : {}),
+				// `lastRaw` is the bundled text, so nothing is re-fetched - but the
+				// refs that stayed unresolved are still unresolved, and the count has
+				// to be restated or the preview stops mentioning them.
+				...(unresolvedRefs ? { unresolvedRefs } : {}),
 			});
 		}
 	};
@@ -125,14 +193,17 @@ export function ImportModal() {
 	const handleFile = (file: File) => {
 		const reader = new FileReader();
 		reader.onload = () => {
+			const path = window.electronAPI?.getFilePath(file) ?? "";
 			// The path at pick time, while there is still a `File` to take it
 			// from - `getFilePath` is a preload-local read of the object, not a
 			// channel the renderer can name a path on. Empty outside Electron and
 			// for a drag-and-drop of remote content, which is the state "no
 			// remembered file" already means.
-			setSpecFilePath(window.electronAPI?.getFilePath(file) ?? "");
+			setSpecFilePath(path);
 			setSourceUrl("");
-			runDetect(String(reader.result), { fileName: file.name });
+			// The path is also what a `$ref` to a sibling file is resolved against,
+			// in the main process - see `readSpecFile`.
+			void runDetect(String(reader.result), { fileName: file.name, specPath: path });
 		};
 		reader.onerror = () => {
 			setError("Could not read file");
@@ -155,7 +226,7 @@ export function ImportModal() {
 			const { content } = await apiService.importFetch(url);
 			setSpecFilePath("");
 			setSourceUrl(url);
-			detect(content, { importEnvironments, importScripts }, { sourceUrl: url });
+			await runDetect(content, { sourceUrl: url });
 		} catch (e) {
 			setError((e as Error).message);
 			setPhase("error");
@@ -311,7 +382,7 @@ export function ImportModal() {
 								className="h-40 w-full font-mono text-xs"
 							/>
 							<Button
-								onClick={() => runDetect(pasteText)}
+								onClick={() => void runDetect(pasteText)}
 								disabled={!pasteText.trim()}
 								className="mt-2"
 							>
@@ -609,6 +680,13 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 	example_no_status: [
 		"example response with no numeric status",
 		"example responses with no numeric status",
+	],
+	// Not "external ref": the count is what the user lost, and what they lost is
+	// a schema the spec pointed at in another file (issue #649). The wording says
+	// which half failed - Vayu found the reference and could not read the file.
+	external_ref: [
+		"reference to a file Vayu could not read",
+		"references to files Vayu could not read",
 	],
 };
 

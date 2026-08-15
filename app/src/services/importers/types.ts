@@ -44,7 +44,17 @@ export interface SkippedItem {
 		 * served under one status line and there is no honest value to pick, so it
 		 * is dropped and counted rather than guessed at (issue #481).
 		 */
-		| "example_no_status";
+		| "example_no_status"
+		/**
+		 * A `$ref` naming a file the import could not reach - unfetchable,
+		 * unparseable, or relative in a pasted document that has no directory and
+		 * no URL to be relative to (issue #649). Counted per ref, because each one
+		 * is an operation that imported without the schema it declared. Not
+		 * produced by a parser: bundling runs before parse and hands its count to
+		 * the factory, which is also why it is the one kind that says nothing about
+		 * Vayu's own representability.
+		 */
+		| "external_ref";
 	count: number;
 }
 
@@ -150,6 +160,13 @@ export interface RequestDraft {
  * hashes what it stores and a re-fetch is diffed against those bytes, so a
  * round-trip through `JSON.parse` would make every YAML spec drift on its first
  * sync.
+ *
+ * One exception, and only one: a document that referenced other files carries
+ * the **bundle** those were inlined into (issue #649). There is no verbatim text
+ * for a spec that is several files, and storing the entry file alone would store
+ * a document naming files nothing downstream can reach. Bundling is
+ * deterministic, so the hash is still stable across re-fetches; a single-file
+ * spec is untouched.
  */
 export interface SpecDraft {
 	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored

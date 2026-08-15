@@ -5,9 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import yaml from "js-yaml";
 import type { CollectionDraft, ImportOptions, ImportParser, ImportResult } from "./types";
 import { UnrecognisedFormatError } from "./types";
+import { parseRaw } from "./parse-raw";
 import { appendParamsToUrl } from "@/modules/request-builder/utils/url";
 import { PostmanV21Parser, PostmanV20Parser } from "./postman";
 import { PostmanEnvironmentParser } from "./postman-environment";
@@ -26,15 +26,6 @@ const PARSERS: ImportParser[] = [
 	new OpenApiV3Parser(),
 	new OpenApiV2Parser(),
 ];
-
-function parseRaw(raw: string): unknown {
-	try {
-		return JSON.parse(raw);
-	} catch {
-		// Throws on malformed YAML - let it propagate as a parse error.
-		return yaml.load(raw);
-	}
-}
 
 /**
  * Restore the app's url/params invariant on every request a parser produced.
@@ -73,6 +64,13 @@ function joinParamsIntoUrls(result: ImportResult): void {
 export interface ImportSource {
 	fileName?: string;
 	sourceUrl?: string;
+	/**
+	 * External `$ref`s the bundling pass could not reach (issue #649). Stamped
+	 * into `meta.skipped` here for the same reason the two above are stamped
+	 * here: bundling happens before parse, so no parser can know the count, and a
+	 * loss the preview never names is the defect bundling exists to fix.
+	 */
+	unresolvedRefs?: number;
 }
 
 /**
@@ -97,6 +95,12 @@ export function parseImport(
 				for (const collection of result.collections) {
 					if (collection.spec) collection.spec.sourceUrl = source.sourceUrl;
 				}
+			}
+			if (source.unresolvedRefs && source.unresolvedRefs > 0) {
+				result.meta.skipped.push({
+					kind: "external_ref",
+					count: source.unresolvedRefs,
+				});
 			}
 			joinParamsIntoUrls(result);
 			return result;

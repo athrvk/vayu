@@ -19,6 +19,7 @@ import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
 import { mapSwaggerOAuth2 } from "./oauth2-import";
 import {
+	createRefResolver,
 	deref,
 	exampleBodyText,
 	queryParamRow,
@@ -67,15 +68,7 @@ export class OpenApiV2Parser implements ImportParser {
 
 	parse(parsed: unknown, raw: string, _opts: ImportOptions): ImportResult {
 		const spec = asRecord(parsed) ?? {};
-		const resolveRef = (ref: string): unknown => {
-			const path = ref
-				.replace(/^#\//, "")
-				.split("/")
-				.map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
-			let cur: unknown = spec;
-			for (const seg of path) cur = prop(cur, seg);
-			return cur;
-		};
+		const resolveRef = createRefResolver(spec);
 
 		const scheme = asStr(asArray(spec.schemes)[0]) ?? "https";
 		const basePathValue = asStr(spec.basePath);
