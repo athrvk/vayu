@@ -72,6 +72,14 @@ vi.mock("@/services/api", () => ({
 	apiService: { importFetch: (url: string) => importFetch(url) },
 }));
 
+// The bound half of the tab renders the Sync section (issue #654), which reads
+// the engine's document cap. Stubbed here for the same reason the queries above
+// are: this file renders the tab without a QueryClient, and the cap is asserted
+// where it is used (`SpecSync.test.tsx`).
+vi.mock("@/hooks/useSpecDocumentLimit", () => ({
+	useSpecDocumentLimit: () => ({ maxBytes: 10 * 1024 * 1024 }),
+}));
+
 const { default: SpecTab } = await import("./SpecTab");
 
 const OPENAPI = JSON.stringify({
