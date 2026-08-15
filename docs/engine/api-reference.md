@@ -2429,7 +2429,9 @@ from inside a script never passes that gate. Denying unless a caller asks means
 a client that forgets gets a script that cannot send rather than unchecked
 egress. The app's Send and load runs send `true`; the MCP server never does.
 `POST /runs` reads the same field for its deferred `tests` validation, so one
-script behaves the same on both. See
+script behaves the same on both. Read **before** the `stream` branch, so a
+streaming send's scripts are governed by it exactly as a buffered send's are -
+the app sends it on both halves of Send (issue #653). See
 [scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Script parts.** `preRequestScript` / `postRequestScript` above are the legacy

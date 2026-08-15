@@ -773,6 +773,12 @@ requests unless the caller explicitly asks for them (`allowScriptRequests` on
 server never does. Calling it from an agent-started run throws a message saying
 so. See [MCP](mcp.md#the-script-sandbox-surface).
 
+The flag is a property of **who asked for the execution**, not of the shape its
+answer comes back in: `POST /execute` reads it before it branches on `stream`,
+so a streaming send's pre- and post-request scripts are governed by exactly the
+bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
+setting on and off gives `pm.sendRequest` the same answer.
+
 **No `{{variable}}` resolution.** A script-supplied URL is sent as written.
 Interpolation happens strictly before the pre-request script and a payload is
 resolved exactly once; a second pass here would break that invariant. Use

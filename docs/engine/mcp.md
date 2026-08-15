@@ -568,10 +568,12 @@ Three ways to close that were available, and this is which one and why:
   moment anyone flips it for an unrelated reason.
 - **Refuse script-issued requests unless the caller explicitly asks.** Chosen.
   The engine denies `pm.sendRequest` unless the execute/run payload carries
-  `allowScriptRequests: true`. The app's own Send and load runs ask for it, in
-  one place each (`apiService.executeRequest` / `startLoadTest`); this server
-  never does. The allowlist stays exactly where the user configured it, and the
-  engine gains a capability bit rather than a policy copy.
+  `allowScriptRequests: true`. The app's own Send and load runs ask for it, each
+  in the one service method that owns that call (`apiService.executeRequest` and
+  `executeStreamRequest` - Send's two halves - plus `startLoadTest` /
+  `startScenarioRun`); this server never does. The allowlist stays exactly where
+  the user configured it, and the engine gains a capability bit rather than a
+  policy copy.
 
 Denying by **default** is the load-bearing half: a new tool here, or any future
 engine client, gets a script that cannot send rather than unchecked egress.
