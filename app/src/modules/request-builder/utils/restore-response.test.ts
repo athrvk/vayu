@@ -150,8 +150,8 @@ describe("responseFromRunResult", () => {
 		);
 
 		expect(restored?.rawRequest).toBe(wire);
-		// The composed map is still what the Headers tab shows - it is the
-		// engine's own sent record, and the two panes are not the same view.
+		// A row with no `sentHeaders` still falls back to the composed map, so
+		// the raw preference and the header preference are independent.
 		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });
 	});
 
@@ -180,6 +180,77 @@ describe("responseFromRunResult", () => {
 				"Accept: application/json\r\n" +
 				"\r\n"
 		);
+	});
+
+	/**
+	 * The gap issue #664 closed, one field over from #348. The panel this feeds
+	 * is labelled as what was sent, and `trace.request.headers` is the
+	 * *composed* request: it names an empty-valued header libcurl dropped and a
+	 * `form-data` `Content-Type` libcurl rewrote with its boundary, and it is
+	 * missing the body-implied `Content-Type` and the default `User-Agent` the
+	 * engine derives at send time - which the live panel showed. The engine now
+	 * stores the sent record it already had.
+	 *
+	 * Mutation-check: drop the `request.sentHeaders ||` preference in `sentSide`
+	 * and every assertion in this test fails.
+	 */
+	it("prefers the stored sent record over the composed map for the sent panel", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "POST",
+						url: "https://api.example.test/upload",
+						headers: {
+							"Content-Type": "multipart/form-data",
+							"X-Blank": "",
+							accept: "application/json",
+						},
+						sentHeaders: {
+							accept: "application/json",
+							"Content-Type": "multipart/form-data; boundary=------abc123",
+							"User-Agent": "vayu/0.17.0",
+						},
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		// Exhaustive, so all three drifts fail here at once: the derived
+		// `User-Agent` the composed map lacks, the boundary libcurl added to the
+		// multipart `Content-Type`, and the value-less `X-Blank` that never
+		// reached the wire.
+		expect(restored?.requestHeaders).toEqual({
+			accept: "application/json",
+			"Content-Type": "multipart/form-data; boundary=------abc123",
+			"User-Agent": "vayu/0.17.0",
+		});
+	});
+
+	/**
+	 * Absent-not-empty, the same contract `rawRequest` has: a run recorded
+	 * before #664 - and a step that sent nothing, whose response carries no sent
+	 * record either - restores exactly as it does today.
+	 */
+	it("falls back to the composed map when the row predates the stored sent record", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "GET",
+						url: "https://api.example.test/users",
+						headers: { Accept: "application/json", "X-Trace": "abc" },
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		expect(restored?.requestHeaders).toEqual({
+			Accept: "application/json",
+			"X-Trace": "abc",
+		});
 	});
 
 	/**

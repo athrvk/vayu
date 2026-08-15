@@ -47,6 +47,33 @@ const vayu::Response& response) {
         trace["request"]["body"] = request.body.content;
     }
 
+    // The *sent* record, beside the composed map (issue #664). `headers` above
+    // is what the request was composed with; `response.request_headers` is what
+    // `build_request_header_list` appended - that set minus the suppressed
+    // (a `form-data` Content-Type libcurl writes itself) and the value-less
+    // (issue #662), plus the two the engine derives at send time, the
+    // body-implied `Content-Type` and the default `User-Agent`. The response
+    // pane's "request headers sent" disclosure means the second, and rebuilding
+    // it from the first named headers the wire never carried and hid the two it
+    // did - so the same exchange read differently live and after a reload.
+    //
+    // Both maps are stored because both are read: `design-run-seed.ts` reseeds
+    // a request tab from the composed one, and reseeding from the sent record
+    // would write the engine's derived headers back into the user's request as
+    // if a person had typed them.
+    //
+    // Omitted rather than stored empty when nothing was recorded, on the same
+    // reasoning as `rawRequest` below: the reader prefers this key when it is
+    // there, so an empty object would suppress the composed-map fallback that
+    // is the right answer for a step that sent nothing and for every row
+    // written before this field. The load path records no sent headers at all -
+    // `build_request_header_list` takes nullptr there, to keep an allocation
+    // off the hot path - so a sampled capture keeps replaying from the composed
+    // map, unchanged by this.
+    if (!response.request_headers.empty ()) {
+        trace["request"]["sentHeaders"] = response.request_headers;
+    }
+
     // What the wire carried, so a restored raw-request view says the same thing
     // the live one did (issue #348). `headers` above is the *composed* map and
     // has no `Cookie` line - libcurl attaches those itself from the jar - so

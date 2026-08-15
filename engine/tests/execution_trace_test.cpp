@@ -167,9 +167,82 @@ TEST (ExecutionTrace, StoresTheWireRequestBesideTheComposedHeaders) {
                "Cookie: session=abc123"),
     std::string::npos);
 
-    // The composed map is unchanged - it is the *sent record*, not the wire,
-    // and the two are deliberately different views (api-reference.md).
+    // The composed map is unchanged - it is neither the wire nor the sent
+    // record, and the three are deliberately different views
+    // (api-reference.md).
     EXPECT_FALSE (trace["request"]["headers"].contains ("Cookie"));
+}
+
+// The sent record, stored beside the composed map (issue #664). Before it, the
+// restored response pane rebuilt its "headers sent" disclosure from the
+// composed map and so disagreed with the live pane about the same exchange:
+// the live one reads `Response::request_headers`, which is what
+// `build_request_header_list` appended.
+vayu::Request make_multipart_request () {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::POST;
+    request.url    = "http://127.0.0.1/upload";
+    // Composed, but not sent: libcurl writes the multipart Content-Type itself
+    // with the boundary, and a value-less header is libcurl's spelling for
+    // "remove this one" (issue #662).
+    request.headers["Content-Type"] = "multipart/form-data";
+    request.headers["X-Blank"]      = "";
+    request.headers["accept"]       = "application/json";
+    return request;
+}
+
+// What build_request_header_list would have recorded for that request: the
+// survivors, plus the two the engine derives at send time.
+vayu::Response make_response_with_sent_headers () {
+    auto response                      = make_response ();
+    response.request_headers["accept"] = "application/json";
+    response.request_headers["Content-Type"] =
+    "multipart/form-data; boundary=------abc123";
+    response.request_headers["User-Agent"] = "vayu/0.17.0";
+    return response;
+}
+
+TEST (ExecutionTrace, StoresTheSentHeadersBesideTheComposedMap) {
+    auto trace = build_result_trace (
+    make_multipart_request (), make_response_with_sent_headers ());
+
+    ASSERT_TRUE (trace["request"].contains ("sentHeaders"));
+    const auto& sent = trace["request"]["sentHeaders"];
+
+    // The two the composed map structurally cannot answer for.
+    EXPECT_EQ (sent["User-Agent"], "vayu/0.17.0");
+    EXPECT_EQ (sent["Content-Type"], "multipart/form-data; boundary=------abc123");
+    // The one the wire dropped is not reported as sent.
+    EXPECT_FALSE (sent.contains ("X-Blank"));
+
+    // And the composed map is still stored, unchanged: design-run-seed.ts
+    // reseeds a request tab from it, and seeding it from the sent record would
+    // write the engine's derived headers back as if a person had typed them.
+    EXPECT_EQ (trace["request"]["headers"]["X-Blank"], "");
+    EXPECT_EQ (trace["request"]["headers"]["Content-Type"], "multipart/form-data");
+}
+
+// Same invariant style as the timing and rawRequest tests above: what
+// serialize(Response) puts on the live /execute wire is what the stored trace
+// carries, so the live and restored Headers tabs cannot drift apart again.
+TEST (ExecutionTrace, StoredSentHeadersMatchTheLiveWireKey) {
+    auto response = make_response_with_sent_headers ();
+
+    auto trace = build_result_trace (make_multipart_request (), response);
+    auto live  = vayu::json::serialize (response);
+
+    EXPECT_EQ (trace["request"]["sentHeaders"], live["requestHeaders"]);
+}
+
+// Omitted, not stored empty - for the reason the rawRequest omission has: the
+// reader prefers this key when present, so an empty object would suppress the
+// composed-map fallback that is the right answer both for a step that sent
+// nothing and for every row written before the field. A load run's deferred
+// replay is the same shape: it records no sent headers at all.
+TEST (ExecutionTrace, OmitsSentHeadersWhenNothingWasRecorded) {
+    auto trace = build_result_trace (make_multipart_request (), make_response ());
+
+    EXPECT_FALSE (trace["request"].contains ("sentHeaders"));
 }
 
 // The same invariant style as the timing and httpVersion tests above: what

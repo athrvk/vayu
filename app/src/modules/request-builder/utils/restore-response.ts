@@ -154,13 +154,27 @@ function detectBodyType(body: string): ResponseState["bodyType"] {
  * path, see execution.cpp) - so a run that never reached a server has nothing
  * here, and `buildRawRequest` falls back to its own HTTP/1.1 default, the same
  * as a pre-migration stored row.
+ *
+ * `trace.request.sentHeaders` is the same preference one field over, for the
+ * structured map (issue #664). The panel this fills is labelled as what was
+ * sent, and `headers` is the *composed* request: it names a value-less header
+ * libcurl dropped and a `form-data` `Content-Type` it wrote itself, and it is
+ * missing the body-implied `Content-Type` and default `User-Agent` the engine
+ * derives - so the live and restored panels disagreed about one exchange. The
+ * composed map stays as the fallback for the rows written before the field, and
+ * stays in the trace because `design-run-seed.ts` reseeds a request tab from
+ * it, which is a different question with a different right answer.
+ *
+ * `buildRawRequest` below is still handed `headers`, not the sent record: it
+ * synthesizes a wire message for a row that stored none, and every such row
+ * predates both fields.
  */
 function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 	const request = trace.request;
 	if (!request) return { requestHeaders: {}, rawRequest: undefined };
 
 	return {
-		requestHeaders: request.headers || {},
+		requestHeaders: request.sentHeaders || request.headers || {},
 		rawRequest:
 			request.rawRequest ||
 			buildRawRequest(

@@ -2634,6 +2634,19 @@ does not carry libcurl's own additions or the jar's `Cookie` line; those are
 (see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion
 about what went out and the response pane's Headers tab cannot disagree.
 
+**The stored trace keeps this map too**, as `trace_data.request.sentHeaders`
+beside the composed `request.headers` (issue #664) - so a restored response
+pane's sent-headers disclosure shows the set the live one showed, derived
+`User-Agent` and body-implied `Content-Type` included, rather than the composed
+map's different answer. Both maps are stored because they answer different
+questions: the composed one is what a *pre-request* script saw and what reseeds
+a request tab from a run. The key is **absent** on a step that sent nothing and
+on every row written before the field, so a reader falls back to
+`request.headers` - `restore-response.ts`'s `sentSide` is that reader. A load
+run's sampled capture records no sent headers at all and is unaffected: its
+deferred replay keeps reading the composed map, as
+[scripting.md](scripting.md#request-object-pmrequest) documents.
+
 Values in `rawRequest` are not redacted:
 this field exists to say exactly what went out. On a followed redirect it is the
 final hop, matching the response beside it. A transfer that failed before
