@@ -1185,8 +1185,8 @@ void register_execution_routes (RouteContext& ctx) {
                 return;
             }
 
-            scenario_manifest =
-            vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
+            scenario_manifest = vayu::core::build_scenario_manifest (
+            resolved.request, resolved.plan, resolved.spec);
 
             auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
             execution->request = std::move (resolved.request);

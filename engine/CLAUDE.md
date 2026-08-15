@@ -44,6 +44,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/health` | Health check |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
+| POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -110,6 +111,19 @@ Three things worth knowing before you design around them:
   transfer, the post-request one after the stream ends, reading the bounded list
   as `pm.response.events`; because the route already answered `202`, their
   output is stored on the trace's `scripts` node rather than returned.
+- **An OpenAPI document is stored once and *bound* by collections, never owned
+  by one** (#637). `spec_documents` holds the text verbatim plus an
+  engine-computed `hash`; `collections.openapi`
+  (`{specId, specHash, syncedAt}`, `{}` = unbound) is the edge, and
+  `requests.spec_operation` (`{operationId?, method, path}`, NULL = none) says
+  which operation a request *is*. Several collections may bind one document, so
+  nothing cascades to it: `DELETE /specs/:id` is a **409 naming the binder**
+  while any collection holds it, and there is no `PUT /specs/:id` - a changed
+  document is a new one, because rewriting in place would invalidate the hash
+  every run of every bound collection was stamped with. A scenario run of a
+  bound collection stamps `specId` + `specHash` into `config_snapshot` and
+  `GET /runs/:id/report` echoes it under `metadata.openapi`; an unbound run
+  carries no key at all.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

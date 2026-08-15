@@ -110,6 +110,26 @@ class Database {
     int64_t count_request_examples (const std::string& request_id);
     void delete_request_example (const std::string& id);
 
+    // OpenAPI documents (issue #637). Bound by collections rather than owned by
+    // one, so nothing here cascades: `delete_spec_document` is only ever reached
+    // once the route has proven no collection still names the id.
+
+    void save_spec_document (const SpecDocument& s);
+    std::optional<SpecDocument> get_spec_document (const std::string& id);
+    /**
+     * @brief The collections whose `openapi` binding names @p spec_id.
+     *
+     * A scan rather than an index: the binding lives inside a JSON blob, so
+     * there is no column to index, and the collections table is the small,
+     * sidebar-sized one. Its callers are the delete refusal and nothing on a
+     * request's hot path.
+     *
+     * Empty means the spec is bound by nobody, which is the only state
+     * `delete_spec_document` may be called in.
+     */
+    std::vector<Collection> get_collections_bound_to_spec (const std::string& spec_id);
+    void delete_spec_document (const std::string& id);
+
     /**
      * @brief Persist a whole import in one transaction (issue #96).
      *
@@ -125,7 +145,8 @@ class Database {
     void import_apply (const std::vector<Collection>& collections,
     const std::vector<Request>& requests,
     const std::vector<Environment>& environments,
-    const std::vector<RequestExample>& examples = {});
+    const std::vector<RequestExample>& examples = {},
+    const std::vector<SpecDocument>& specs = {});
 
     /**
      * @brief Persist a whole batch reorder in one transaction (issue #365).

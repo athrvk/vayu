@@ -209,6 +209,11 @@ inline auto make_storage (const std::string& path) {
     // backfills to `{}`, which is what "declares no contract" is spelled as.
     make_column ("data_schema", &Collection::data_schema,
     default_value (std::string ("{}"))),
+    // The OpenAPI binding (issue #637). Same NOT NULL + default_value shape as
+    // `data_schema` directly above, and for the same reason: sync_schema ALTERs
+    // it onto an existing, non-empty collections table and every pre-existing
+    // row backfills to `{}`, which is how "bound to no spec" is spelled.
+    make_column ("openapi", &Collection::openapi, default_value (std::string ("{}"))),
     make_column ("order", &Collection::order),
     make_column ("created_at", &Collection::created_at),
     make_column ("updated_at", &Collection::updated_at)),
@@ -242,6 +247,11 @@ inline auto make_storage (const std::string& path) {
     // existing requests table and every pre-existing row backfills to "not a
     // stream", which is what they all were.
     make_column ("stream", &Request::stream, default_value (false)),
+    // Which operation of the bound spec this request is (issue #637). Nullable
+    // rather than NOT NULL with a default, on the `config_entries.unit`
+    // precedent below: a nullable column is ALTER-friendly without one, and
+    // NULL is the only spelling of "declares no operation".
+    make_column ("spec_operation", &Request::spec_operation),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 
@@ -259,6 +269,15 @@ inline auto make_storage (const std::string& path) {
     make_column ("order", &RequestExample::order),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
+
+    // Spec documents: OpenAPI documents, stored once and bound to collections
+    // (issue #637). A new table, so sync_schema() creates it outright and there
+    // is no migration - the `request_examples` precedent above.
+    make_table ("spec_documents", make_column ("id", &SpecDocument::id, primary_key ()),
+    make_column ("content", &SpecDocument::content),
+    make_column ("source_url", &SpecDocument::source_url), // NULL = not fetched from a URL
+    make_column ("fetched_at", &SpecDocument::fetched_at),
+    make_column ("hash", &SpecDocument::hash)), // hex sha256 of `content`
 
     // Environments: Named variable sets (dev, staging, prod)
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
@@ -868,6 +887,52 @@ void Database::delete_request_example (const std::string& id) {
 }
 
 // ============================================================================
+// Spec documents (issue #637)
+// ============================================================================
+
+void Database::save_spec_document (const SpecDocument& s) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Saving spec document: id=" + s.id + ", hash=" + s.hash);
+    impl_->storage.replace (s);
+}
+
+std::optional<SpecDocument> Database::get_spec_document (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<SpecDocument> (where (c (&SpecDocument::id) == id));
+    if (rows.empty ())
+        return std::nullopt;
+    return rows.front ();
+}
+
+std::vector<Collection> Database::get_collections_bound_to_spec (const std::string& spec_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    std::vector<Collection> bound;
+    if (spec_id.empty ()) {
+        return bound;
+    }
+    // The binding is a JSON blob, so the match is made here rather than in SQL.
+    // An unparseable blob binds nothing - the same reading every serializer
+    // gives it - and must not make the spec undeletable.
+    for (auto& col : impl_->storage.get_all<Collection> ()) {
+        try {
+            const auto parsed = nlohmann::json::parse (col.openapi);
+            if (parsed.is_object () && parsed.value ("specId", std::string ()) == spec_id) {
+                bound.push_back (std::move (col));
+            }
+        } catch (const std::exception&) {
+            continue;
+        }
+    }
+    return bound;
+}
+
+void Database::delete_spec_document (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Deleting spec document: id=" + id);
+    impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
+}
+
+// ============================================================================
 // Bulk import - collections + requests + environments in one transaction
 // ============================================================================
 
@@ -877,19 +942,26 @@ void Database::delete_request_example (const std::string& id) {
 void Database::import_apply (const std::vector<Collection>& collections,
 const std::vector<Request>& requests,
 const std::vector<Environment>& environments,
-const std::vector<RequestExample>& examples) {
+const std::vector<RequestExample>& examples,
+const std::vector<SpecDocument>& specs) {
     if (collections.empty () && requests.empty () && environments.empty () &&
-    examples.empty ()) {
+    examples.empty () && specs.empty ()) {
         return;
     }
 
     vayu::utils::log_debug ("Applying import: " + std::to_string (collections.size ()) +
     " collections, " + std::to_string (requests.size ()) + " requests, " +
     std::to_string (environments.size ()) + " environments, " +
-    std::to_string (examples.size ()) + " examples");
+    std::to_string (examples.size ()) + " examples, " +
+    std::to_string (specs.size ()) + " specs");
 
     retry_on_busy ("apply import", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
+            // Ahead of the collections, which may bind them - the same
+            // owner-before-referrer order the rest of this transaction keeps.
+            for (const auto& s : specs) {
+                impl_->storage.replace (s);
+            }
             for (const auto& c : collections) {
                 impl_->storage.replace (c);
             }
@@ -1939,6 +2011,17 @@ void Database::seed_default_config () {
     "with a message naming this setting.",
     "general_engine", std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES),
     "1024", "104857600", std::nullopt, now }));
+
+    upsert_config (unit ("bytes") (keywords ({ "swagger" }) (
+    ConfigEntry{ "maxSpecDocumentBytes",
+    std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "integer",
+    "Max OpenAPI Document Size",
+    "Largest OpenAPI document one collection may bind. The document is stored "
+    "verbatim and parsed back by every feature that reads it, so this bounds "
+    "both the row and that parse. A larger document is rejected with a message "
+    "naming this setting, never stored truncated.",
+    "general_engine", std::to_string (vayu::core::constants::spec_document::MAX_BYTES),
+    "1024", "104857600", std::nullopt, now })));
 
     upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS), "integer",
