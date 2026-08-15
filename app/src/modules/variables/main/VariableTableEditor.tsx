@@ -79,6 +79,21 @@ const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
 ];
 
 interface VariableRow {
+	/**
+	 * Editor-local row identity, never persisted (`performSave` builds its
+	 * payload field by field, so this cannot leak into a scope's variables).
+	 *
+	 * A variable has no stable identity of its own: `key` is editable, so
+	 * keying by it moves state on rename, and `createdAt` is absent on rows
+	 * written before the field existed. Rows were therefore reconciled by array
+	 * position, which is the one thing that *changes* on a delete - reveal a
+	 * secret, delete that row, and the row shifting up into its position
+	 * inherited the mounted `SecretInput`, values and all, so a secret the user
+	 * never revealed was displayed (#621). The id gives the row an identity for
+	 * as long as the editor is mounted; React's `key` and therefore every piece
+	 * of per-row UI state follow the row rather than its index.
+	 */
+	id: string;
 	key: string;
 	value: string;
 	enabled: boolean;
@@ -86,6 +101,25 @@ interface VariableRow {
 	type?: VariableType;
 	createdAt?: number;
 	isNew?: boolean;
+}
+
+/**
+ * Monotonic within the session, which is all "stable" has to mean here: ids
+ * live and die with the mounted editor and are never compared against anything
+ * outside it.
+ */
+let lastRowId = 0;
+function nextRowId(): string {
+	lastRowId += 1;
+	return `vrow-${lastRowId}`;
+}
+
+/**
+ * The trailing "type here to add one" row. Takes an id so a reseed can hand it
+ * the one the current blank row already has.
+ */
+function blankRow(id: string = nextRowId()): VariableRow {
+	return { id, key: "", value: "", enabled: true, secret: false, type: "string", isNew: true };
 }
 
 type VariableEditorType = "globals" | "environment" | "collection";
@@ -99,6 +133,11 @@ type VariableEditorType = "globals" | "environment" | "collection";
  * identity on purpose: a reseed that happens to produce identical rows must
  * count as unchanged, and identity would call it a change and leave the editor
  * dirty forever.
+ *
+ * `id` is deliberately not part of the comparison: it is UI identity, not user
+ * data, so a row that only changed id has nothing for a save to write, and
+ * counting it as a change would be the same "dirty forever" bug in a new
+ * disguise.
  */
 function sameRows(a: VariableRow[], b: VariableRow[]): boolean {
 	if (a.length !== b.length) return false;
@@ -460,9 +499,27 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		// a refetch or an echo of our own write waits for the editor to be clean.
 		if (!isNewDataSource && hasPendingChangesRef.current) return;
 
+		// A reseed of the *same* scope keeps the ids the rows already have,
+		// matched by the name the variable is stored under. Most reseeds are the
+		// cache echo of a save this editor just made, and minting fresh ids
+		// there would remount every row - masking a secret the user had revealed
+		// and dropping focus out of whatever field they were in - for a redraw
+		// of the same data. A rename is safe: the row keeps its id through the
+		// edit, so the current rows already carry the new name by the time the
+		// echo arrives. A *different* scope gets fresh ids, because its rows are
+		// different rows that happen to share names.
+		const carriedIds = new Map<string, string>();
+		let carriedBlankId: string | undefined;
+		if (!isNewDataSource) {
+			variablesRef.current.forEach((row) => {
+				if (row.isNew) carriedBlankId = row.id;
+				else if (row.key) carriedIds.set(row.key, row.id);
+			});
+		}
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
 			const entries = sortByCreatedAt(Object.entries(dataVariables));
 			const rows: VariableRow[] = entries.map(([key, val]) => ({
+				id: carriedIds.get(key) ?? nextRowId(),
 				key,
 				value: val.value,
 				enabled: val.enabled,
@@ -470,20 +527,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				type: val.type ?? "string",
 				createdAt: val.createdAt,
 			}));
-			rows.push({
-				key: "",
-				value: "",
-				enabled: true,
-				secret: false,
-				type: "string",
-				isNew: true,
-			});
+			rows.push(blankRow(carriedBlankId));
 			// eslint-disable-next-line react-hooks/set-state-in-effect -- see the guard note above
 			setVariables(rows);
 		} else {
-			setVariables([
-				{ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true },
-			]);
+			setVariables([blankRow(carriedBlankId)]);
 		}
 	}, [contextId, dataVariables, sortByCreatedAt]);
 
@@ -498,7 +546,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			// eslint-disable-next-line react-hooks/purity
 			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
 			newVariables[index].type = newVariables[index].type ?? "string";
-			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
+			newVariables.push(blankRow());
 		}
 
 		setVariables(newVariables);
@@ -514,7 +562,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const removeVariable = (index: number) => {
 		const newVariables = variables.filter((_, i) => i !== index);
 		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
-			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
+			newVariables.push(blankRow());
 		}
 		setVariables(newVariables);
 		variablesRef.current = newVariables;
@@ -693,7 +741,15 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							const isSecretField = variable.secret && !variable.isNew;
 
 							return (
-								<tr key={index} className="group">
+								/*
+								 * Keyed by row id, not by index. With an index key a
+								 * delete reuses the mounted row one position down -
+								 * `SecretInput` included, reveal state and all - so
+								 * deleting a revealed secret displayed its successor
+								 * unmasked (#621). The id follows the row, so a
+								 * deleted row's state is unmounted with it.
+								 */
+								<tr key={variable.id} className="group">
 									{/*
 									 * `px-1` is clearance for the focus ring, not decoration.
 									 * The baseline draws it 1px wide at `outline-offset: 2px`,
