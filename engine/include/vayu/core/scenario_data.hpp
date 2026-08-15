@@ -58,6 +58,16 @@
  * readable. A token placed *outside* a string literal - `{"n":{{data.n}}}` -
  * still binds verbatim, which is what makes typed placement work.
  *
+ * An `xml` body is a document with a quoting rule too, and not JSON's (issue
+ * #618): a cell holding `Ben & Jerry's` used to go out byte for byte and make
+ * the document malformed, and one holding `</customer><injected/>` used to
+ * change its shape. The rule depends on *where* the token sits, which is more
+ * than a single bit can say - character data and an attribute value escape
+ * different sets, a CDATA section escapes nothing, and a comment or a
+ * processing instruction has no right answer at all and is refused. The
+ * position is scanned at split time, from the same literals the JSON scan
+ * reads.
+ *
  * Nothing else is escaped: a URL, a header, a form field and a text body take
  * the rendered value byte for byte, because none of them is a document with a
  * quoting rule of its own.
@@ -112,11 +122,31 @@ struct DataBindResult {
  * for every iteration of every virtual user.
  */
 enum class DataValueEncoding : std::uint8_t {
-    /// The rendered text, byte for byte. Every field but a JSON document.
+    /// The rendered text, byte for byte. Every field that is not a document
+    /// with a quoting rule - and, inside an XML body, a token sitting in markup
+    /// rather than in content (see @ref XmlText).
     Verbatim,
     /// Escaped as JSON string content (`"`, `\` and the control characters),
     /// for a token sitting inside a string literal of a JSON body.
     JsonString,
+    /// Escaped as XML character data (`&`, `<`, `>`), for a token sitting
+    /// between tags of an `xml` body.
+    XmlText,
+    /// @ref XmlText plus the `"` that would end the attribute value the token
+    /// sits in.
+    XmlAttributeDouble,
+    /// @ref XmlText plus the `'` that would end the attribute value the token
+    /// sits in.
+    XmlAttributeSingle,
+    /// Verbatim inside a `<![CDATA[…]]>` section - which is what the section
+    /// means - except for a `]]>` in the value, which would end it early.
+    XmlCdata,
+    /// Not writable: the token sits inside an XML comment. The join refuses the
+    /// row rather than guessing, because every candidate encoding is wrong -
+    /// see `advance_xml_state`.
+    XmlInComment,
+    /// Not writable: the token sits inside an XML processing instruction.
+    XmlInProcessingInstruction,
 };
 
 /** One bindable field, split once around the `{{data.column}}` it carries. */
@@ -168,9 +198,9 @@ struct StepDataTemplate {
  * plan already bounded by `maxScenarioSteps`.
  *
  * The body's **mode** is read here as well as its text: it is what decides
- * whether the body is a JSON document, and so whether a token inside a string
- * literal binds escaped. A template is therefore only valid for a request whose
- * body mode is the one it was split from.
+ * whether the body is a JSON or an XML document, and so how each of its tokens
+ * binds. A template is therefore only valid for a request whose body mode is
+ * the one it was split from.
  */
 [[nodiscard]] StepDataTemplate tokenize_data_fields (const vayu::Request& request);
 
@@ -181,8 +211,12 @@ struct StepDataTemplate {
  * from the plan step @p request was copied from), because a field is addressed
  * by its position in the walk.
  *
- * Fails for a column @p row does not carry, a column whose cell is `null`, and
- * for two header names that bound to one name.
+ * Fails for a column @p row does not carry, a column whose cell is `null`, two
+ * header names that bound to one name, and a token placed where an `xml` body
+ * has no encoding that would keep the document meaning what it says - inside a
+ * comment or a processing instruction. That last one fails for every row alike,
+ * because it is the template's fault rather than the row's, and is reported
+ * before the row is even consulted.
  *
  * On failure @p request is left partially bound and must not be sent - the
  * caller ends the step. Repairing it would mean a second copy of the composed

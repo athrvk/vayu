@@ -134,8 +134,27 @@ A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as
 that text inside valid JSON rather than ending the string. A token written
 *outside* a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
-a JSON file's number arrives as a number. Nothing else is escaped: a URL, a
-header, a form field and a plain-text body take the cell byte for byte.
+a JSON file's number arrives as a number.
+
+A cell is **safe in an XML body** too, and by a rule that reads the token's
+position rather than one that escapes everything:
+
+| Where the token sits | What the cell arrives as |
+|----------------------|--------------------------|
+| Element text | `&`, `<` and `>` escaped - `Ben & Jerry's` arrives intact |
+| An attribute value | the above, plus whichever quote delimits *that* attribute |
+| A `<![CDATA[…]]>` section | byte for byte, which is what the section is for; a `]]>` in the cell splits and reopens the section rather than ending it |
+| A tag or attribute **name** - `<{{data.tag}}>` | byte for byte: no escape is legal in a name |
+| An XML **comment** or **processing instruction** | nothing - the row is **refused**, naming the token |
+
+The comment and processing-instruction refusals are deliberate: neither is
+content the server reads, and a cell carrying `-->` or `?>` would end the
+construct and change the document into one you did not write. Move the token
+into the element or attribute it belongs to.
+
+Nothing else is escaped: a URL, a header, a form field and a plain-text body
+take the cell byte for byte - including a `text` body that happens to hold XML,
+because the mode you picked is what decides the rule.
 
 ## How many iterations, and which row
 

@@ -2796,12 +2796,26 @@ anything escaped: a URL, a header, a form field and a `text` body take the
 rendered value byte for byte, and a bare (un-enveloped) GraphQL document is
 escaped once, later, when the engine wraps it.
 
-An `xml` body is **not** escaped either: its quoting rules are not JSON's, so a
-token in one is substituted verbatim today, and a cell carrying `&` or `<` will
-produce a document the server rejects. Escaping it needs a rule that knows
-whether the token sits in element text, an attribute value or a CDATA section -
-tracked as [#618](https://github.com/athrvk/vayu/issues/618). Until then, bind
-into XML from data you control.
+An `xml` body has quoting rules of its own rather than JSON's, so it gets its
+own encoding - decided per token from where in the document that token sits,
+because XML has no single escape set the way a JSON string literal does:
+
+| Position | Encoding |
+|----------|----------|
+| Element text | `&`, `<`, `>` escaped as entities |
+| Attribute value | the above, plus the quote delimiting *that* attribute (`"` or `'`, whichever the author wrote) |
+| `<![CDATA[…]]>` | verbatim - a `]]>` in the value is written `]]]]><![CDATA[>`, which reopens the section instead of ending it |
+| A tag or attribute name (`<{{data.tag}}>`) | verbatim - no escape is legal in a name |
+| Inside `<!--…-->` or `<?…?>` | **none - the bind is refused**, naming the token |
+
+The last row is a refusal rather than an encoding because every candidate is
+wrong there: a comment is not sent as content at all, a processing instruction
+is markup addressed to the parser, and a value carrying `-->` or `?>` would end
+the construct and send a document the author did not write. It errors the step
+like a missing column does, for every row alike.
+
+The **mode** decides this, not the content: a `text` body holding XML still
+takes the cell byte for byte.
 
 A token naming a column the bound row does not carry **errors the step before
 anything is sent**, with a message naming the token, the row index and the
