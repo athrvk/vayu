@@ -106,6 +106,47 @@ function appendQueryParam(url: string, key: string, value: string): string {
 	return `${base}${base.includes("?") ? "&" : "?"}${encoded}${fragment}`;
 }
 
+/**
+ * The Content-Type a body mode is sent under when the request declares none.
+ *
+ * The engine's `implied_content_type` (`engine/src/http/form_body.cpp`) is what
+ * reaches the wire, and this is the same table for the snippet: a mode whose
+ * meaning includes its media type - GraphQL's and JSON-RPC's JSON envelopes,
+ * XML's document - carries it, and `json`/`text` do not, because the user writes
+ * that header themselves.
+ *
+ * Without this, every snippet fell through as raw content with **no** header,
+ * so a copied curl of a GraphQL request went out as libcurl's default
+ * `application/x-www-form-urlencoded` and most servers answered 400 - a snippet
+ * that does not do what the app just did. The form modes are absent on purpose:
+ * their generators express the body as `-F` / `--data-urlencode` and the client
+ * writes the header itself, boundary included.
+ */
+const IMPLIED_CONTENT_TYPE: Record<string, string> = {
+	graphql: "application/json",
+	jsonrpc: "application/json",
+	xml: "application/xml",
+};
+
+/**
+ * The header rows plus the one this body implies, if it is not already declared.
+ *
+ * A declared Content-Type wins, case-insensitively and whatever its value - the
+ * same rule the engine applies (`body_content_type_header`) and the request
+ * builder applies (`body/content-type.ts`): someone who typed
+ * `application/soap+xml` means it.
+ */
+function withImpliedContentType(
+	headers: Array<[string, string]>,
+	body: unknown
+): Array<[string, string]> {
+	const mode = typeof body === "object" && body !== null ? (body as SnippetBody).mode : "";
+	const implied = IMPLIED_CONTENT_TYPE[mode ?? ""];
+	if (!implied) return headers;
+	if (headers.some(([key]) => key.toLowerCase() === "content-type")) return headers;
+	return [...headers, ["Content-Type", implied]];
+}
+
 function normalizeBody(body: unknown): PreparedBody | undefined {
 	if (body === undefined || body === null) return undefined;
 	// A body sent as a bare string (nothing in the app does today, but the
@@ -206,6 +247,12 @@ export function prepareRequest(
 
 	const body = normalizeBody(request.body);
 
+	// After auth, so a header the request carries under any name still counts as
+	// declared; and only when there is a body, because a mode with nothing in it
+	// sends none - the engine's `has_wire_body` gate, which `normalizeBody`
+	// already applied by returning undefined.
+	const withContentType = body ? withImpliedContentType(headers, request.body) : headers;
+
 	// Mask last, over everything at once, so a credential and a secret variable
 	// that happen to hold the same value are hidden by the same pass.
 	const maskedBasic = basicAuth
@@ -215,7 +262,7 @@ export function prepareRequest(
 	return {
 		method: (request.method || "GET").toUpperCase(),
 		url: masker.apply(url),
-		headers: headers.map(([k, v]): [string, string] => [k, masker.apply(v)]),
+		headers: withContentType.map(([k, v]): [string, string] => [k, masker.apply(v)]),
 		basicAuth: maskedBasic,
 		body: body ? maskedBody(body, masker.apply) : undefined,
 		notes,

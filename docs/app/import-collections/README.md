@@ -233,7 +233,7 @@ Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
   rows are preserved.
 - `VariableValue`: `{ value: string, enabled: boolean, secret? }` - all values are strings.
-- `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql", content}` |
+- `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql"|"jsonrpc"|"xml", content}` |
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
 - `RequestAuth`: `{mode:"none"}` | `{mode:"noauth"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
   `{mode:"basic", username, password}` | `{mode:"apikey", key, value, in}` |
@@ -312,8 +312,9 @@ Grant/field normalization is shared here so the parsers agree. Only `digest`/`aw
 remain non-executable and are counted in `meta.nonExecutableAuth`.
 
 ### rawBody
-`rawBody(content, language)` - Postman raw body → `RequestBody`. `json`/`text` map directly;
-with no explicit language it sniffs via `JSON.parse` (success → `json`, else `text`).
+`rawBody(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
+directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
+`text`) and never guesses `xml`.
 (`shared.ts`)
 
 ### joinExec

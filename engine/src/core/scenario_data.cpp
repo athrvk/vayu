@@ -56,9 +56,12 @@ enum class FieldContext : std::uint8_t {
  * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
  * escaping first would double every quote.
  *
- * Every other mode is plain text as far as a bind is concerned. The XML body
- * mode #580 would add is the one to revisit: its quoting rules are not JSON's,
- * so it needs its own encoding rather than this one.
+ * Every other mode is plain text as far as a bind is concerned - the `Xml` mode
+ * #580 added included, deliberately: a bound value lands in the document
+ * verbatim, so one holding `&` or `<` produces XML the server will reject. XML
+ * needs an encoding of its own rather than JSON's (its rules differ between
+ * text content and an attribute value, so the position of the token decides it,
+ * which is more than this classifier can say) - tracked as #618.
  */
 FieldContext body_context (const vayu::Body& body) {
     switch (body.mode) {

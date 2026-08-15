@@ -209,6 +209,12 @@ export function mapPostmanAuth(auth: unknown): RequestAuth {
 export function rawBody(content: string, language: string | undefined): RequestBody {
 	if (language === "json") return { mode: "json", content };
 	if (language === "text") return { mode: "text", content };
+	// Postman's raw-body language for an XML document. Landing it on the `xml`
+	// mode is what gets the imported request its `application/xml`:
+	// `withRequiredContentType` asks the mode, and `text` requires nothing - so
+	// before this, an imported SOAP request went out as libcurl's
+	// `x-www-form-urlencoded`, the same failure imported GraphQL had.
+	if (language === "xml") return { mode: "xml", content };
 	// No explicit language: sniff JSON.
 	try {
 		JSON.parse(content);

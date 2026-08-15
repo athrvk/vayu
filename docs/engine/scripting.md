@@ -317,7 +317,8 @@ pre-request script sees the **composed** headers - the set it is there to edit,
 and the set the write-back applies back onto the request. A test script sees the
 **sent record**: those same headers as the transfer actually issued them, which
 means the ones the engine derives at send time are there too - the body-implied
-`Content-Type` (`graphql` -> `application/json`, `x-www-form-urlencoded` ->
+`Content-Type` (`graphql` and `jsonrpc` -> `application/json`, `xml` ->
+`application/xml`, `x-www-form-urlencoded` ->
 `application/x-www-form-urlencoded`) and the default `User-Agent`. So a test
 asserting on the Content-Type a GraphQL request sent reads the header the engine
 supplied, rather than the `undefined` it read before (#483).

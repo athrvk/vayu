@@ -9,6 +9,7 @@ import {
 	mapKeyValues,
 	importedFilePart,
 	unattachedFileParts,
+	withRequiredContentType,
 } from "./shared";
 
 describe("toVarRecord", () => {
@@ -124,6 +125,30 @@ describe("rawBody", () => {
 	});
 	it("no language, non-JSON → text", () => {
 		expect(rawBody("hello", undefined)).toEqual({ mode: "text", content: "hello" });
+	});
+	/*
+	 * Postman's raw-body language for a SOAP or legacy-enterprise request. It
+	 * landed on `text` before the xml mode existed, and `text` requires no
+	 * Content-Type - so `withRequiredContentType` added none and the imported
+	 * request sent its envelope as libcurl's `x-www-form-urlencoded`, the same
+	 * failure imported GraphQL had. Mutation check: drop the xml arm of
+	 * `rawBody` and both assertions redden.
+	 */
+	it("xml language → xml mode", () => {
+		const soap = "<soap:Envelope><soap:Body/></soap:Envelope>";
+		expect(rawBody(soap, "xml")).toEqual({ mode: "xml", content: soap });
+	});
+	it("carries the mode far enough to earn the header", () => {
+		const body = rawBody("<a/>", "xml");
+		expect(withRequiredContentType([], body)).toEqual([
+			{ key: "Content-Type", value: "application/xml", enabled: true },
+		]);
+	});
+	it("does not sniff an unlabelled document into xml", () => {
+		// Without Postman's language there is no reason to believe a `<`-shaped
+		// body is XML rather than HTML, and guessing would hand it a header the
+		// server may disagree with.
+		expect(rawBody("<a/>", undefined)).toEqual({ mode: "text", content: "<a/>" });
 	});
 });
 

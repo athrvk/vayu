@@ -9,6 +9,7 @@
  * Utility functions for response body type detection and formatting
  */
 
+import { formatXml } from "@/lib/xml-format";
 import type { BodyType } from "./types";
 
 /**
@@ -125,6 +126,14 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 
 /**
  * Format body for display (pretty print JSON, etc.)
+ *
+ * XML is pretty-printed too (`lib/xml-format.ts`). It was detected here and
+ * highlighted by Monaco, but never indented, so Pretty and Raw were byte-for-byte
+ * identical for every XML response - which reads as the toggle being broken.
+ *
+ * Only `bodyType === "xml"` reaches the indenter, never the `undefined` fallback
+ * the JSON branch also serves: without a declared type, "starts with a tag" is
+ * also true of HTML, whose whitespace rules are not XML's.
  */
 export function formatBody(body: unknown, bodyType?: BodyType): string {
 	if (!body) return "";
@@ -146,6 +155,12 @@ export function formatBody(body: unknown, bodyType?: BodyType): string {
 		} catch {
 			// Keep original if not valid JSON
 		}
+	}
+
+	if (typeof body === "string" && bodyType === "xml") {
+		// Returns its input unchanged when the document cannot be walked, so a
+		// malformed response still renders as what arrived.
+		return formatXml(body);
 	}
 
 	return String(body);

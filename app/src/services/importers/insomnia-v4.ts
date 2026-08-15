@@ -195,6 +195,15 @@ function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 				mode: "graphql",
 				content: toGraphQLEnvelope(normalizeVars(asString(node.text))),
 			};
+		/*
+		 * Both spellings a client sends XML under. They used to fall through to
+		 * `unlistedBody`, which keeps the text as `text` - readable, but a mode
+		 * that requires no Content-Type, so the imported request sent its SOAP
+		 * envelope as `x-www-form-urlencoded`.
+		 */
+		case "application/xml":
+		case "text/xml":
+			return { mode: "xml", content: normalizeVars(asString(node.text)) };
 		case "application/x-www-form-urlencoded":
 			return {
 				mode: "x-www-form-urlencoded",
@@ -210,7 +219,7 @@ function insomniaBody(body: unknown, ctx: Ctx): RequestBody {
 }
 
 /**
- * Any mime outside the five above. Insomnia's XML/YAML/CSV/"Other" bodies are
+ * Any mime outside the seven above. Insomnia's YAML/CSV/"Other" bodies are
  * plain text in `body.text`, so they import as `text` rather than being dropped
  * (the sibling Postman parser's `rawBody()` fallback does the same). A binary
  * body carries a `fileName` and no text - that one Vayu genuinely cannot store,

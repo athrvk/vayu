@@ -42,14 +42,29 @@ import {
 export const CONTENT_TYPE = "Content-Type";
 
 /**
- * Both entries are JSON envelopes the engine completes on the way to the wire:
+ * The first two are JSON envelopes the engine completes on the way to the wire:
  * GraphQL's `{ query, variables }`, and JSON-RPC's `"jsonrpc":"2.0"` frame. A
  * server that reads either out of a JSON object answers anything else with a
  * 400, so the header is not a nicety - it is part of what the mode means.
+ *
+ * `xml` has no envelope and is sent verbatim, but it earns the same rule for the
+ * same reason: a SOAP or legacy-enterprise endpoint reads the body as XML only
+ * when the request says it is, and without this the document goes out under
+ * libcurl's default `application/x-www-form-urlencoded`.
+ *
+ * `json` and `text` are deliberately absent. They are the modes a user reaches
+ * for when they are writing the header themselves, and adding one on their
+ * behalf would take a choice away rather than complete one.
+ *
+ * This table is the app-side half of the engine's `implied_content_type`
+ * (`engine/src/http/form_body.cpp`); the two must name the same type per mode.
+ * The engine's is what actually reaches the wire - this one drives the header
+ * row the panel writes, so the user can see and edit what will be sent.
  */
 const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
 	graphql: "application/json",
 	jsonrpc: "application/json",
+	xml: "application/xml",
 };
 
 /** The Content-Type a mode must be sent with, or null if it needs none. */

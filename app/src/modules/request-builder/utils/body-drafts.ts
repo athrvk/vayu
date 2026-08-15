@@ -17,19 +17,23 @@
  * `{"query":"{\"merchant\":\"mrc_8813\"}"}` and switching back showed *that* in
  * the JSON editor. The original payload was gone.
  *
- * **Two buckets, not seven.** `json`, `text` and `jsonrpc` are the same thing -
- * a raw string body, differing only in syntax highlighting - so carrying text
- * between them is what you want. `graphql` is a structured envelope, and
+ * **Two buckets, not eight.** `json`, `text`, `jsonrpc` and `xml` are the same
+ * thing - a raw string body, differing only in syntax highlighting - so carrying
+ * text between them is what you want. `graphql` is a structured envelope, and
  * carrying anything into or out of it is what caused the damage. `form-data`
  * and `x-www-form-urlencoded` do not use `body` at all; they have their own
  * arrays.
  *
- * `jsonrpc` shares the raw bucket rather than taking one of its own because
- * nothing on this side reads its text as a structure: its envelope is completed
- * engine-side at wire time, so the pane holds one plain JSON document that a
- * `json` pane can show unchanged. GraphQL got its own bucket for the opposite
- * reason - its editor state is structured, and the panes parse what they are
- * given.
+ * `jsonrpc` and `xml` share the raw bucket rather than taking one of their own
+ * because nothing on this side reads their text as a structure: JSON-RPC's
+ * envelope is completed engine-side at wire time and an XML body is sent byte
+ * for byte, so each pane holds one plain document that a `text` pane can show
+ * unchanged. GraphQL got its own bucket for the opposite reason - its editor
+ * state is structured, and the panes parse what they are given.
+ *
+ * Sharing the bucket does mean XML and JSON overwrite each other's text, which
+ * is the intended trade: they are the same field, and a user switching between
+ * them is reformatting one payload rather than keeping two.
  *
  * These drafts are deliberately *not* persisted: a request has one body, and
  * storing payloads it will never send would put them in exports and in the
@@ -58,7 +62,7 @@ import type { BodyMode } from "../types";
 export type DraftKey = "raw" | "graphql";
 
 export function draftKey(mode: BodyMode): DraftKey | null {
-	if (mode === "json" || mode === "text" || mode === "jsonrpc") return "raw";
+	if (mode === "json" || mode === "text" || mode === "jsonrpc" || mode === "xml") return "raw";
 	if (mode === "graphql") return "graphql";
 	// `none` sends nothing; the two form modes keep arrays, not a body string.
 	return null;

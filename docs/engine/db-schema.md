@@ -127,7 +127,7 @@ Duplicate keys are allowed.
 **body** - discriminated union:
 ```json
 {"mode":"none"}
-{"mode":"json"|"text"|"graphql","content":"..."}
+{"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 ```
 
