@@ -492,14 +492,69 @@ jobs:
           installers-regex: 'Vayu-x64\.exe$'
           release-tag: ${{ github.ref_name }}
           token: ${{ env.WINGET_TOKEN }}
-          # Keep the five newest versions in winget-pkgs and drop older ones as
-          # part of each submission. Unbounded, every version Vayu has ever
-          # released stays installable forever at an explicit `--version`, which
-          # matters here because the two oldest are not merely stale: 0.10.0
-          # ships an engine that cannot start without the Visual C++
-          # redistributable. Five keeps a real rollback window - well past the
-          # release cadence that put three versions on winget in three days -
-          # without leaving known-broken builds on offer indefinitely. The
-          # GitHub Releases page is unaffected; this prunes the winget index
-          # only.
-          max-versions-to-keep: 5
+          # `max-versions-to-keep` is deliberately UNSET (the action's default
+          # is 0 = keep everything, and its cleanup step is guarded by
+          # `if: fromJSON(inputs.max-versions-to-keep) > 0`, so unset means the
+          # pruning code never runs at all).
+          #
+          # It used to be 5, to keep a rollback window without leaving known
+          # broken builds on offer - 0.10.0 ships an engine that cannot start
+          # without the Visual C++ redistributable. That intent was fine. The
+          # implementation is not: **the action deletes the NEWEST versions
+          # instead of the oldest.**
+          #
+          # The v0.17.0 release proved it, and the damage was real rather than
+          # theoretical. With 0.10.0, 0.12.0, 0.13.0, 0.14.0, 0.15.0 and 0.16.0
+          # live, the cleanup step logged "Versions to delete: 0.15.0, 0.16.0"
+          # and filed microsoft/winget-pkgs#417718 and #417719 to remove the two
+          # most recent releases, while leaving the broken 0.10.0 exactly where
+          # it was - the precise opposite of why the cap was set. #417718 was
+          # approved and merged, so 0.15.0 is gone from winget. #417719 was
+          # stopped only because a moderator noticed it was deleting the highest
+          # version in the index and asked why.
+          #
+          # The cause is upstream and is not ours to patch. The step does:
+          #
+          #   $Versions = komac list-versions ... | ConvertFrom-Json -NoEnumerate |
+          #               Sort-Object $ToNatural -Descending
+          #   $VersionsToDelete = $Versions[(5 - 1)..($Versions.Count - 1)]
+          #
+          # `-NoEnumerate` (added in a3ac67b for issue #307) writes the array to
+          # the pipeline as a single object, so `Sort-Object` receives exactly
+          # one item. Sorting one item is a no-op: `-Descending` never applies
+          # and the list stays in komac's own ascending order, so slicing the
+          # tail takes the newest. Upstream knows - issue #323 - and fixed it in
+          # 19e706d on 2025-05-29 by re-enumerating with `$(...)`; the author's
+          # own comment there describes exactly this ("versions weren't getting
+          # sorted properly due to which it was picking up most recent versions
+          # instead of the oldest versions").
+          #
+          # **Do not read that issue as "resolved, safe to re-enable."** It is
+          # closed as completed, which is the trap: the fix landed on `main` and
+          # was never released. `v2` is the repository's only tag, it is
+          # lightweight, and it still points at 4ffc788 ("docs(funding): remove
+          # ko-fi", 2024-11-27) - six months *older* than the fix. Verified, not
+          # assumed:
+          #
+          #   git merge-base --is-ancestor 19e706d v2   # non-zero: not in v2
+          #
+          # So anyone pinning `@v2` with a non-zero cap is silently deleting
+          # their own newest releases, 14 months after the bug was "fixed"; at
+          # the time of writing two other packages in winget-pkgs are doing it
+          # too. That command, against whatever ref this job pins, is the check
+          # to run before trusting the cap again.
+          #
+          # Options considered: pin the action to the fixed commit and keep the
+          # cap, or turn the cap off. Turning it off wins for now - pinning
+          # would put unreleased upstream `main` on the release path to buy a
+          # convenience, and a stale extra version on winget costs nothing next
+          # to a run that removes the version users are meant to install.
+          #
+          # Consequence, stated plainly rather than left to be discovered: the
+          # winget index now grows without bound, and 0.10.0 and 0.12.0 stay
+          # published until someone files a removal by hand - which is what the
+          # manual workflow in winget-publish.yml is for. Do not restore this
+          # input until upstream cuts a release containing 19e706d, or moves the
+          # `v2` tag onto it. Re-pointing this `uses:` at a newer commit is the
+          # other way, and it needs the same evidence: check that the cleanup
+          # step re-enumerates before `Sort-Object` again.

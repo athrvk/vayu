@@ -1424,6 +1424,18 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
     print(f'  {Style.CYAN}{current_version}{Style.RESET} {Style.ARROW} {Style.GREEN}{new_version}{Style.RESET}')
     print()
 
+    # Checked before the dry-run return, not after: `--dry-run` is what a
+    # release is previewed with, so it is the run that has to report this.
+    # If someone re-adds a `version` to the manifest, every release silently
+    # goes back to a cold vcpkg cache - a ~10-minute regression per platform
+    # that nothing else in CI would report as a failure.
+    if 'version' in json.loads(engine_vcpkg_json.read_text()):
+        print_error(
+            "engine/vcpkg.json has a 'version' field. Remove it: it is optional for a\n"
+            "  top-level manifest, nothing reads it, and it is hashed into the CI vcpkg\n"
+            "  cache key - so bumping it makes every release rebuild every dependency."
+        )
+
     if dry_run:
         print(f'  {Style.YELLOW}{Style.INFO} Dry run - no changes will be made{Style.RESET}')
         print()
@@ -1440,9 +1452,15 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
     hpp_content = re.sub(r'#define VAYU_VERSION_PATCH \d+', f'#define VAYU_VERSION_PATCH {new_patch}', hpp_content)
     hpp_content = re.sub(r'#define VAYU_VERSION_STRING ".*"', f'#define VAYU_VERSION_STRING "{new_version}"', hpp_content)
 
-    vcpkg_data = json.loads(engine_vcpkg_json.read_text())
-    vcpkg_data['version'] = new_version
-
+    # engine/vcpkg.json is deliberately NOT bumped, and must not grow a
+    # `version` field again. It is optional for a top-level (consuming)
+    # manifest, nothing reads it - the engine's version comes from VERSION,
+    # CMakeLists.txt and version.hpp - and vcpkg excludes it from the ABI hash
+    # that names every cached binary package. Its only effect was on CI:
+    # release.yml, pr-tests.yml and codeql.yml all key their vcpkg binary cache
+    # on `hashFiles('engine/vcpkg.json')`, so bumping it here minted a brand-new
+    # cache key on every single release and made every release build compile
+    # curl, openssl, libsodium and the rest from source. See cache-warm.yml.
     package_data = json.loads(app_package_json.read_text())
     package_data['version'] = new_version
 
@@ -1452,7 +1470,6 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
          re.sub(r'VERSION \d+\.\d+\.\d+', f'VERSION {new_version}', engine_cmake.read_text()),
          'engine/CMakeLists.txt'),
         (engine_version_hpp, hpp_content, 'engine/include/vayu/version.hpp'),
-        (engine_vcpkg_json, json.dumps(vcpkg_data, indent=2) + '\n', 'engine/vcpkg.json'),
         (app_package_json, json.dumps(package_data, indent='\t') + '\n', 'app/package.json'),
     ]
 

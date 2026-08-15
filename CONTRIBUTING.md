@@ -399,12 +399,19 @@ python build.py --bump-version 0.1.2
 python build.py --bump-version patch --dry-run
 ```
 
-This updates: `VERSION`, `engine/CMakeLists.txt`, `engine/include/vayu/version.hpp`, `engine/vcpkg.json`, `app/package.json`
+This updates: `VERSION`, `engine/CMakeLists.txt`, `engine/include/vayu/version.hpp`, `app/package.json`
+
+`engine/vcpkg.json` is deliberately **not** in that list and must not carry a
+`version` field. It is optional for a top-level manifest, nothing reads it, and
+vcpkg leaves it out of the ABI hash that names cached binary packages - but CI
+keys its vcpkg cache on `hashFiles('engine/vcpkg.json')`, so bumping it minted a
+fresh cache key on every release and made each one rebuild curl, OpenSSL and
+libsodium from source. `build.py` refuses to bump if the field reappears.
 
 2. Commit the version bump:
 
 ```bash
-git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
+git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt app/package.json
 git commit -m "chore(release): 0.1.2"
 ```
 
