@@ -361,8 +361,9 @@ Result<Response> Client::send (const Request& request) {
     Response response;
     std::string response_body;
 
-    // Store request headers for response
-    response.request_headers = request.headers;
+    // `request_headers` is the *sent* record and is filled by
+    // build_request_header_list below, from the very appends that build the
+    // slist - see its contract for why it is not snapshotted here.
 
     // Set error buffer
     curl_easy_setopt (curl, CURLOPT_ERRORBUFFER, impl_->error_buffer);
@@ -374,35 +375,9 @@ Result<Response> Client::send (const Request& request) {
     // disagree about what goes on the wire - see apply_method_and_body)
     curl_mime* mime = detail::apply_method_and_body (curl, request);
 
-    // Set headers
-    struct curl_slist* headers_list = nullptr;
-    for (const auto& [key, value] : request.headers) {
-        if (detail::suppresses_request_header (request, key)) {
-            // Not sent, so not reported as sent either - libcurl writes the
-            // multipart Content-Type, boundary and all.
-            response.request_headers.erase (key);
-            continue;
-        }
-        std::string header = key + ": " + value;
-        headers_list       = curl_slist_append (headers_list, header.c_str ());
-    }
-
-    // The Content-Type the body mode implies, when the request declares none.
-    if (std::string content_type = detail::body_content_type_header (request);
-        !content_type.empty ()) {
-        headers_list = curl_slist_append (headers_list, content_type.c_str ());
-        response.request_headers["Content-Type"] =
-        vayu::http::implied_content_type (request.body);
-    }
-
-    // Add User-Agent if not set
-    bool has_user_agent = request.headers.contains ("User-Agent") ||
-    request.headers.contains ("user-agent");
-    if (!has_user_agent) {
-        std::string ua = "User-Agent: " + impl_->config.user_agent;
-        headers_list   = curl_slist_append (headers_list, ua.c_str ());
-        response.request_headers["User-Agent"] = impl_->config.user_agent;
-    }
+    // Set headers, and record the same set as what was sent.
+    struct curl_slist* headers_list = detail::build_request_header_list (
+    request, impl_->config.user_agent, &response.request_headers);
 
     if (headers_list) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);

@@ -132,7 +132,7 @@ namespace vayu::http {
  * user who typed it.
  *
  * Only ever a *default*: a Content-Type the caller set wins in both cases
- * (`body_content_type_header`), which is how an explicit
+ * (`body_content_type_value`), which is how an explicit
  * `application/graphql` still reaches the server.
  */
 [[nodiscard]] std::string implied_content_type (const Body& body);

@@ -395,7 +395,7 @@ means the ones the engine derives at send time are there too - the body-implied
 asserting on the Content-Type a GraphQL request sent reads the header the engine
 supplied, rather than the `undefined` it read before (#483).
 
-Three consequences worth knowing:
+Four consequences worth knowing:
 
 - **An authored header is never overridden.** The engine only derives a
   Content-Type the request does not declare, so what a script reads back is what
@@ -404,6 +404,11 @@ Three consequences worth knowing:
   itself, boundary and all, so the engine suppresses an authored one and does
   not report as sent what it did not send. The script's view matches the
   response pane's Headers tab exactly.
+- **A header with an empty value is absent too.** A header line with nothing
+  after the colon is libcurl's spelling for *remove this header*, so an enabled
+  row whose value is empty (or only whitespace) never goes on the wire - and
+  the sent record does not claim it did. A pre-request script that sets a
+  header to `''` has removed it, not blanked it; give it a value to send one.
 - **`Cookie` is not here.** It is wire-only by design; `pm.cookies` is the
   cookie surface, and the response's raw view is the full wire frame (which also
   carries libcurl's own `Accept`, `Host` and `Content-Length`).

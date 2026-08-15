@@ -113,13 +113,14 @@ Response error_response (const Error& error);
 [[nodiscard]] curl_mime* apply_method_and_body (CURL* curl, const Request& request);
 
 /**
- * @brief The "Content-Type: ..." header line the body implies, or empty.
+ * @brief The Content-Type value the body implies, or empty.
  *
  * Empty when the request already declares a Content-Type (a header the user
- * typed always wins) and empty for every mode that implies none. Both clients
- * call this after their own header loop so the two cannot drift.
+ * typed always wins) and empty for every mode that implies none. Read only by
+ * `build_request_header_list`, which is where every driver gets its headers,
+ * so the rule cannot drift between them.
  */
-[[nodiscard]] std::string body_content_type_header (const Request& request);
+[[nodiscard]] std::string body_content_type_value (const Request& request);
 
 /**
  * @brief True when this request header must not be forwarded as written.
@@ -128,6 +129,49 @@ Response error_response (const Error& error);
  * `vayu::http::content_type_is_engine_owned`.
  */
 [[nodiscard]] bool suppresses_request_header (const Request& request, const std::string& key);
+
+/**
+ * @brief True when libcurl sends this header value rather than reading the
+ *        line as an instruction to remove the header.
+ *
+ * `CURLOPT_HTTPHEADER` overloads one string with two meanings: `Key: value`
+ * adds a header, and `Key:` with nothing after the colon *removes* one, which
+ * is how libcurl lets a caller drop a header it would otherwise add itself.
+ * The engine spells every header `key + ": " + value`, so an enabled request
+ * row with an empty value lands on the removal side and never reaches the wire
+ * - sending it deliberately would need the `Key;` spelling, which the engine
+ * does not emit (issue #662). libcurl skips the whitespace after the colon
+ * before deciding, so a value of spaces alone is dropped too.
+ */
+[[nodiscard]] bool header_value_reaches_wire (std::string_view value);
+
+/**
+ * @brief Build the `CURLOPT_HTTPHEADER` list for a request, and record what it
+ *        puts on the wire.
+ *
+ * The one place a driver's outbound header set is decided: the request's own
+ * headers minus the suppressed and the value-less, plus the two the engine
+ * derives (the body-implied Content-Type and a default User-Agent when the
+ * request names none). All three drivers - the single-request client, the load
+ * event loop and the SSE stream consumer - call this, so none of them can
+ * disagree about what goes out.
+ *
+ * @param sent When non-null, cleared and filled with exactly the headers
+ *        appended to the returned list. That is `Response::request_headers`,
+ *        the "sent record" the response pane's Headers tab and a test script's
+ *        `pm.request.headers` read - built from the same appends as the list
+ *        rather than snapshotted beside it, because a snapshot taken
+ *        separately reported headers libcurl had dropped. The load driver
+ *        passes nullptr: it records no sent headers, and building the map per
+ *        transfer would cost the hot path an allocation for nobody.
+ *
+ * @return The header list, which the caller **must** free with
+ *         `curl_slist_free_all` once the transfer has finished, or nullptr
+ *         when the request sends no headers at all.
+ */
+[[nodiscard]] curl_slist* build_request_header_list (const Request& request,
+const std::string& user_agent,
+Headers* sent);
 
 /**
  * @brief Record one "Key: Value" response header line into `headers`.

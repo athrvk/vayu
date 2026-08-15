@@ -295,7 +295,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
     return mime;
 }
 
-std::string body_content_type_header (const Request& request) {
+std::string body_content_type_value (const Request& request) {
     const std::string implied = vayu::http::implied_content_type (request.body);
     if (implied.empty ()) {
         return {};
@@ -305,12 +305,60 @@ std::string body_content_type_header (const Request& request) {
     if (request.headers.contains ("Content-Type")) {
         return {};
     }
-    return "Content-Type: " + implied;
+    return implied;
 }
 
 bool suppresses_request_header (const Request& request, const std::string& key) {
     return vayu::http::content_type_is_engine_owned (request.body) &&
     CaseInsensitiveLess::equal (key, "Content-Type");
+}
+
+bool header_value_reaches_wire (std::string_view value) {
+    return std::any_of (value.begin (), value.end (),
+    [] (char c) { return std::isspace (static_cast<unsigned char> (c)) == 0; });
+}
+
+curl_slist* build_request_header_list (const Request& request,
+const std::string& user_agent,
+Headers* sent) {
+    curl_slist* list = nullptr;
+    if (sent != nullptr) {
+        sent->clear ();
+    }
+
+    // Every header goes out through here, so the wire and the sent record are
+    // the same decision made once. A value libcurl would read as a removal is
+    // neither appended nor reported.
+    const auto append = [&] (const std::string& key, const std::string& value) {
+        if (!header_value_reaches_wire (value)) {
+            return;
+        }
+        const std::string line = key + ": " + value;
+        list                   = curl_slist_append (list, line.c_str ());
+        if (sent != nullptr) {
+            (*sent)[key] = value;
+        }
+    };
+
+    for (const auto& [key, value] : request.headers) {
+        if (suppresses_request_header (request, key)) {
+            // Not sent, so not reported as sent either - libcurl writes the
+            // multipart Content-Type, boundary and all.
+            continue;
+        }
+        append (key, value);
+    }
+
+    // The Content-Type the body mode implies, when the request declares none.
+    // Empty when neither holds - which `append` drops, as it drops any
+    // value-less header.
+    append ("Content-Type", body_content_type_value (request));
+
+    if (!request.headers.contains ("User-Agent")) {
+        append ("User-Agent", user_agent);
+    }
+
+    return list;
 }
 
 void ingest_header_line (std::string_view line, Headers& headers) {
@@ -473,29 +521,10 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         data->submitted_at + std::chrono::milliseconds (request.stream_bounds->max_duration_ms);
     }
 
-    // Set headers
-    for (const auto& [key, value] : request.headers) {
-        if (suppresses_request_header (request, key)) {
-            continue;
-        }
-        std::string header = key + ": " + value;
-        data->headers_list = curl_slist_append (data->headers_list, header.c_str ());
-    }
-
-    // The Content-Type the body mode implies, when the request declares none.
-    if (std::string content_type = body_content_type_header (request);
-        !content_type.empty ()) {
-        data->headers_list =
-        curl_slist_append (data->headers_list, content_type.c_str ());
-    }
-
-    // Add User-Agent if not set
-    bool has_user_agent = request.headers.contains ("User-Agent") ||
-    request.headers.contains ("user-agent");
-    if (!has_user_agent) {
-        std::string ua = "User-Agent: " + config.user_agent;
-        data->headers_list = curl_slist_append (data->headers_list, ua.c_str ());
-    }
+    // Set headers. No sent record is kept on this path - a load run's captures
+    // record none, and `script_request_header_view` reads the composed map
+    // instead - so the map is not built per transfer.
+    data->headers_list = build_request_header_list (request, config.user_agent, nullptr);
 
     if (data->headers_list) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, data->headers_list);

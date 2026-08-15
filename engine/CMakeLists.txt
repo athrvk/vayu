@@ -466,6 +466,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_info_test.cpp
         tests/script_send_request_test.cpp
         tests/script_sent_headers_test.cpp
+        tests/sent_headers_wire_test.cpp
         tests/set_cookie_test.cpp
         tests/cookie_jar_test.cpp
         tests/form_body_test.cpp

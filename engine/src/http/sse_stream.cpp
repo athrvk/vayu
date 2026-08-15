@@ -349,7 +349,6 @@ long idle_timeout_seconds (int64_t idle_timeout_ms) {
 
 vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamContext& context) {
     vayu::Response response;
-    response.request_headers = request.request.headers;
 
     // The same gate both other drivers apply: a request curl cannot send as
     // written is refused as a status-0 response rather than sent as something
@@ -387,27 +386,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     curl_easy_setopt (curl, CURLOPT_URL, request.request.url.c_str ());
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
-    struct curl_slist* headers_list = nullptr;
-    for (const auto& [key, value] : request.request.headers) {
-        if (detail::suppresses_request_header (request.request, key)) {
-            response.request_headers.erase (key);
-            continue;
-        }
-        const std::string header = key + ": " + value;
-        headers_list = curl_slist_append (headers_list, header.c_str ());
-    }
-    if (std::string content_type = detail::body_content_type_header (request.request);
-        !content_type.empty ()) {
-        headers_list = curl_slist_append (headers_list, content_type.c_str ());
-        response.request_headers["Content-Type"] =
-        vayu::http::implied_content_type (request.request.body);
-    }
-    if (!request.request.headers.contains ("User-Agent") &&
-    !request.request.headers.contains ("user-agent")) {
-        const std::string ua = "User-Agent: " + request.user_agent;
-        headers_list         = curl_slist_append (headers_list, ua.c_str ());
-        response.request_headers["User-Agent"] = request.user_agent;
-    }
+    struct curl_slist* headers_list = detail::build_request_header_list (
+    request.request, request.user_agent, &response.request_headers);
     if (headers_list) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
     }

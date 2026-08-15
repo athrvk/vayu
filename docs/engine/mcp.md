@@ -396,7 +396,9 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   composed is not the request that was sent, and asserting on the composed one
   is how a correct request gets reported as wrong. `requestHeaders` in the
   result is the sent record - composed plus those first two, minus a
-  `form-data` `Content-Type` libcurl writes itself - and `rawRequest` is the
+  `form-data` `Content-Type` libcurl writes itself and minus any header whose
+  value is empty, which libcurl reads as a removal rather than sending - and
+  `rawRequest` is the
   full wire frame including the `Cookie` line and libcurl's own `Accept` /
   `Content-Length`. Both are passed through verbatim; read them rather than the
   request the call sent. A `postRequestScript` reads the same set as
