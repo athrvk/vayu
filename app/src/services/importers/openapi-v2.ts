@@ -21,6 +21,7 @@ import { mapSwaggerOAuth2 } from "./oauth2-import";
 import {
 	deref,
 	exampleBodyText,
+	queryParamRow,
 	resolvePathItem,
 	responseExample,
 	SkipTally,
@@ -201,12 +202,9 @@ function buildSwaggerOp(
 		const description = asStr(param.description);
 		switch (asStr(param.in)) {
 			case "query":
-				params.push({
-					key: name,
-					value: "",
-					enabled: true,
-					...(description ? { description } : {}),
-				});
+				// Swagger 2.0 states a non-body parameter's value inline as `default`;
+				// it has no `example` keyword (that arrived with v3's Example Object).
+				params.push(queryParamRow(name, param.default, param.required, description));
 				break;
 			case "header": {
 				const lower = name.toLowerCase();

@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import type { KeyValueEntry } from "@/types";
 import type { ExampleDraft, SkippedItem } from "./types";
 import { asRecord, asStr, prop } from "@/lib/json-node";
 
@@ -151,6 +152,56 @@ export function firstNamedExample(examples: unknown): unknown {
 /** Serialize a sampled/declared example payload the way a JSON response body reads. */
 export function exampleBodyText(value: unknown): string {
 	return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+/**
+ * A value a spec declares for a query parameter, as the text a Params row holds -
+ * or `undefined` when there is nothing Vayu can put on the wire.
+ *
+ * Only scalars convert. An array or object value is serialized by the parameter's
+ * `style`/`explode` (v3) or `collectionFormat` (v2), neither of which this importer
+ * reads; a row holds one string, so picking a separator here would send a value the
+ * spec did not declare. An empty string is `undefined` too - the Params table writes
+ * a bare key for an empty value, so `?flag=` is not a shape a row can express, and a
+ * declared `""` is indistinguishable from no value at all.
+ */
+export function paramValueText(declared: unknown): string | undefined {
+	if (typeof declared === "string") return declared || undefined;
+	if (typeof declared === "number" || typeof declared === "boolean") return String(declared);
+	return undefined;
+}
+
+/**
+ * One `in: "query"` parameter as a Params row (issue #622).
+ *
+ * A spec's parameter list declares what the endpoint *accepts*, not what every
+ * request should *send*. An optional parameter with no declared value has nothing
+ * to send, so it imports **disabled**: the row stays in the Params table, one click
+ * from use, while the `url` - which since #590 carries every enabled row - does not
+ * gain a bare `?verbose` nobody chose. Some APIs read that bare key as `verbose=true`,
+ * so importing it enabled changed the wire for imported collections.
+ *
+ * Two things override that, and only these two:
+ *
+ * - `required: true` - a spec saying the parameter must be sent is an instruction,
+ *   not documentation. The row imports enabled even with no value, and the bare key
+ *   is the user's cue to fill it in.
+ * - a declared value - a row carrying `?status=available` sends what the spec said,
+ *   which is the case enabling was ever right for.
+ */
+export function queryParamRow(
+	name: string,
+	declared: unknown,
+	required: unknown,
+	description?: string
+): KeyValueEntry {
+	const value = paramValueText(declared) ?? "";
+	return {
+		key: name,
+		value,
+		enabled: required === true || value !== "",
+		...(description ? { description } : {}),
+	};
 }
 
 /** A `$ref`-following read of `prop(node, key)`, single-hop like the rest of these. */

@@ -23,6 +23,7 @@ import {
 	exampleBodyText,
 	findJsonMediaType,
 	firstNamedExample,
+	queryParamRow,
 	resolvePathItem,
 	responseExample,
 	SkipTally,
@@ -186,12 +187,14 @@ function buildOperation(
 		const name = String(resolved.name);
 		const description = asStr(resolved.description);
 		if (resolved.in === "query") {
-			params.push({
-				key: name,
-				value: "",
-				enabled: true,
-				...(description ? { description } : {}),
-			});
+			params.push(
+				queryParamRow(
+					name,
+					declaredParamValue(resolved, resolveRef),
+					resolved.required,
+					description
+				)
+			);
 		} else if (resolved.in === "header") {
 			const lower = name.toLowerCase();
 			if (lower === "authorization" || lower === "content-type") continue;
@@ -212,6 +215,21 @@ function buildOperation(
 		postRequestScript: "",
 		...(examples.length > 0 ? { examples } : {}),
 	};
+}
+
+/**
+ * The value an OpenAPI 3 parameter declares, by the same precedence `buildBody`
+ * reads a request body with: the concrete `example` first, then the first entry of
+ * `examples`, then what the schema says. An `example` is authored as "a realistic
+ * value for this parameter" - written for exactly this - while a `default` only
+ * describes what the server assumes when the parameter is absent, so it comes last.
+ */
+function declaredParamValue(param: JsonRecord, resolveRef: (r: string) => unknown): unknown {
+	if (param.example !== undefined) return param.example;
+	const named = firstNamedExample(param.examples);
+	if (named !== undefined) return named;
+	const schema = asRecord(deref(param.schema, resolveRef));
+	return schema?.example ?? schema?.default;
 }
 
 /**

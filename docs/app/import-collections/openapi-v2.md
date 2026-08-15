@@ -1,6 +1,6 @@
 # OpenAPI 2.0 (Swagger)
 
-Parses a Swagger 2.0 specification into the Vayu draft model. Swagger 2.0, like OpenAPI 3.0, is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` built from `schemes`/`host`/`basePath`, query/header params with empty values, and a body sampled from the `in: "body"` parameter schema. Users fill in real values after import.
+Parses a Swagger 2.0 specification into the Vayu draft model. Swagger 2.0, like OpenAPI 3.0, is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` built from `schemes`/`host`/`basePath`, header params with empty values, query params carrying a declared `default` when there is one (see [Query parameter values & enabled state](#query-parameter-values--enabled-state)), and a body sampled from the `in: "body"` parameter schema. Users fill in real values after import.
 
 - **Source:** `app/src/services/importers/openapi-v2.ts`
 - **Exports:**
@@ -82,7 +82,7 @@ Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
 | `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no `host` was defined (see [URL](#url--path-parameters)) |
-| parameter `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present. `parseImport` also joins them onto the `url` as **bare keys** (`?verbose`), since the stub carries no value - see [The url/params invariant](./README.md#the-urlparams-invariant) |
+| parameter `in: "query"` | `params` | `{ key: name, value, enabled, description? }` via `queryParamRow` - `description` included only when present; `value` and `enabled` follow [Query parameter values & enabled state](#query-parameter-values--enabled-state). Only the enabled rows are joined onto the `url` by `parseImport` - see [The url/params invariant](./README.md#the-urlparams-invariant) |
 | parameter `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameter `in: "body"` | `body` | sampled via `sampleSchema`; JSON vs text decided by `consumes` (see [Parameters & body](#parameters--body)) |
 | parameter `in: "formData"` | `body` | collected into form fields; the encoding (`x-www-form-urlencoded` vs `form-data`) comes from `consumes` (see [`consumes` → body mode](#consumes--body-mode)) |
@@ -146,13 +146,27 @@ Swagger 2.0 has **no `requestBody` object** (unlike v3). Request bodies are expr
 
 | `param.in` | Effect | Detail |
 |------------|--------|--------|
-| `query` | push to `params` | `{ key, value: "", enabled: true, description? }`; `description` only when present |
+| `query` | push to `params` | `queryParamRow(name, param.default, param.required, description)`; `description` only when present (see [Query parameter values & enabled state](#query-parameter-values--enabled-state)) |
 | `header` | push to `headers` | `{ key, value: "", enabled: true }`; skipped when `name.toLowerCase()` is `authorization` or `content-type` |
 | `body` | set `body` | `sample = param.schema ? sampleSchema(param.schema, resolveRef) : {}`; serialized with `JSON.stringify(sample, null, 2)`. Mode is JSON or text per `consumes` (below). |
 | `formData` | collect into `formFields` | `{ key: name, value: "", enabled: true }` per field; a `type: file` parameter becomes a **file part** instead (see [`type: file` fields](#type-file-fields)) |
 | (anything else) | ignored | no `default` case action |
 
 After the loop, **form data wins**: if any `formData` fields were collected, `body` is unconditionally replaced with `{ mode: formMode, fields: formFields }` - overriding any body set by an `in: "body"` parameter. (A spec mixing both would be unusual, but the code resolves it in favor of the form.) `formMode` comes from `consumes`, below.
+
+### Query parameter values & enabled state
+
+A spec's `parameters` list declares what an operation **accepts**, not what every request should **send** - and since the [url/params join](./README.md#the-urlparams-invariant) every enabled row reaches the wire. `queryParamRow` (`openapi-shared.ts`, shared with the [OpenAPI 3 parser](./openapi-v3.md#query-parameter-values--enabled-state)) decides both fields from the parameter alone:
+
+| Parameter declares | `value` | `enabled` |
+|--------------------|---------|-----------|
+| a scalar `default` | that value as text (`25`, `false`) | `true` |
+| `required: true`, no `default` | `""` | `true` - joins as a bare key (`?tenant`), the cue to fill it in |
+| nothing, and not required | `""` | **`false`** |
+
+`default` is the only value keyword read: Swagger 2.0 has no `example` for a non-body parameter (the Example Object arrived with v3), and `enum` lists what is allowed rather than what to send. Only scalars become a value - an array or object `default` is serialized by `collectionFormat`, which this parser does not read (below), so such a parameter imports value-less. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
+
+Why optional value-less parameters import **disabled** (issue #622): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, it joined the stored URL as `?verbose`, which some APIs read as `verbose=true` - a wire change nobody chose. Disabled, the row is still listed in the Params table one click from use.
 
 ### `consumes` → body mode
 
@@ -224,13 +238,13 @@ Body schemas are turned into stub values by `sampleSchema(schema, resolveRef)` (
 
 ## `collectionFormat` for array query params
 
-**Not implemented.** Swagger 2.0's `collectionFormat` (`csv` / `ssv` / `tsv` / `pipes` / `multi`) on array parameters is **not consulted anywhere** in the parser. A `query` parameter - array or scalar - produces exactly **one** `KeyValueEntry` with an empty value:
+**Not implemented.** Swagger 2.0's `collectionFormat` (`csv` / `ssv` / `tsv` / `pipes` / `multi`) on array parameters is **not consulted anywhere** in the parser. A `query` parameter - array or scalar - produces exactly **one** `KeyValueEntry`:
 
 ```ts
-params.push({ key: param.name, value: "", enabled: true, ...(description ? { description } : {}) });
+params.push(queryParamRow(name, param.default, param.required, description));
 ```
 
-There is no per-value expansion, no separator joining, and no `multi` handling. The parameter's `type`, `items`, and `collectionFormat` are ignored entirely (the parser produces empty-value stubs regardless of declared type). `multi` does **not** emit one entry per value - it emits the same single empty-value entry as any other query param.
+There is no per-value expansion, no separator joining, and no `multi` handling. The parameter's `type` and `items` are ignored entirely, and an **array `default` is not carried as a value** for the same reason: without `collectionFormat` there is no separator to join it with, and joining on a guess would send what the spec did not declare. `multi` does **not** emit one entry per value - it emits the same single entry as any other query param.
 
 ## Auth / security
 
@@ -260,7 +274,7 @@ const primaryScheme = (reqName && defs[reqName]) || Object.values(defs)[0];
 
 ## Options & lossy behavior
 
-This parser is **stub-only**: it materializes the shape of each request but no values. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** - the parameter is `_opts` and is never read (identical to v3).
+This parser is **stub-only**: it materializes the shape of each request, and the only values it carries are the ones the spec states outright - a query parameter's `default` ([above](#query-parameter-values--enabled-state)) and a response example. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** - the parameter is `_opts` and is never read (identical to v3).
 
 Dropped / not represented:
 
@@ -305,6 +319,7 @@ Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeV
 | `sampleSchema` | `schema-sampler.ts` | generate a sample JSON body from an `in: "body"` parameter `schema` (bounded, ref-resolving) |
 | `resolvePathItem`, `SkipTally` | `openapi-shared.ts` | resolve a `$ref`'d path item; guard `parameters` and tally what was dropped |
 | `responseExample`, `exampleBodyText`, `deref` | `openapi-shared.ts` | map one `responses` entry to an example draft - the half shared with the v3 parser |
+| `queryParamRow`, `paramValueText` | `openapi-shared.ts` | one `in: "query"` parameter as a Params row - the value/enabled rule both OpenAPI parsers apply |
 | `countExamples` | `shared.ts` | total the examples across the finished drafts, for `meta.exampleCount` |
 
 Beyond `countExamples`, this parser does **not** use the Postman/Insomnia helpers in `shared.ts` (`asString`, `toVarRecord`, `mapKeyValues`, `mapPostmanAuth`, `rawBody`, `joinExec`); it builds drafts directly. See the [index](./README.md#shared-helpers) for the full shared-helper reference.

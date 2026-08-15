@@ -74,8 +74,11 @@ Two consequences worth expecting:
 
 - A row disabled in the source stays in the table and out of the URL.
 - A row with a key and no value joins as a **bare key** (`?verbose`), which is
-  what the Params table writes for the same row. The OpenAPI parsers emit
-  value-less stubs, so their URLs now name the declared query parameters.
+  what the Params table writes for the same row. The OpenAPI parsers import an
+  optional value-less parameter **disabled** so this does not happen for a
+  parameter the spec merely documents - only a `required` one, or one carrying a
+  declared value, reaches the URL (see
+  [Query parameter values & enabled state](./openapi-v3.md#query-parameter-values--enabled-state)).
 
 ### 2. Assign temp IDs - `assign-ids.ts`
 

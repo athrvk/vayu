@@ -27,7 +27,9 @@ describe("OpenApiV3Parser", () => {
 		const get = tag.requests.find((r) => r.name === "Get pet")!;
 		expect(get.method).toBe("GET");
 		expect(get.url).toBe("{{baseUrl}}/pets/{{petId}}");
-		expect(get.params).toEqual([{ key: "verbose", value: "", enabled: true }]);
+		// Optional, and the spec declares no value for it - documentation, not intent
+		// (#622), so the row imports disabled and stays off the URL.
+		expect(get.params).toEqual([{ key: "verbose", value: "", enabled: false }]);
 		expect(get.auth).toEqual({ mode: "inherit" });
 	});
 
@@ -84,7 +86,7 @@ describe("OpenApiV3Parser", () => {
 		};
 		const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
 		const req = root.requests.find((r) => r.name === "List items")!;
-		expect(req.params).toContainEqual({ key: "shared", value: "", enabled: true });
+		expect(req.params).toContainEqual({ key: "shared", value: "", enabled: false });
 	});
 
 	it("records nothing skipped for a spec it can represent whole", () => {
@@ -111,7 +113,7 @@ describe("OpenApiV3Parser", () => {
 		expect(result.meta.requestCount).toBe(2);
 		// The referenced item's shared parameters come along with it.
 		const get = result.collections[0].requests[0];
-		expect(get.params).toEqual([{ key: "expand", value: "", enabled: true }]);
+		expect(get.params).toEqual([{ key: "expand", value: "", enabled: false }]);
 		expect(get.url).toBe("{{baseUrl}}/users/{{id}}");
 		expect(result.meta.skipped).toEqual([]);
 	});
@@ -305,7 +307,7 @@ describe("OpenApiV3Parser", () => {
 		expect(list.params).toEqual([]);
 		// Every other path still imports, params and all.
 		const other = result.collections[0].requests.find((r) => r.name === "Other")!;
-		expect(other.params).toEqual([{ key: "ok", value: "", enabled: true }]);
+		expect(other.params).toEqual([{ key: "ok", value: "", enabled: false }]);
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 2 }]);
 	});
 
@@ -341,6 +343,105 @@ describe("OpenApiV3Parser", () => {
 		expect(req.body).toEqual({
 			mode: "json",
 			content: JSON.stringify({ id: 0, name: "" }, null, 2),
+		});
+	});
+
+	/**
+	 * Issue #622. A declared parameter is documentation until the spec says
+	 * otherwise, and since #590 every enabled row joins the stored `url` - so the
+	 * enabled flag decides what an imported request sends.
+	 */
+	describe("query parameter enabled state", () => {
+		const paramsOf = (parameters: unknown[]) => {
+			const spec = {
+				openapi: "3.0.0",
+				info: { title: "Params API" },
+				components: { schemas: { Limit: { type: "integer", default: 25 } } },
+				paths: { "/items": { get: { summary: "List items", parameters } } },
+			};
+			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].params;
+		};
+
+		it("imports an optional value-less parameter disabled and a required one enabled", () => {
+			expect(
+				paramsOf([
+					{ name: "verbose", in: "query", schema: { type: "boolean" } },
+					{ name: "tenant", in: "query", required: true, schema: { type: "string" } },
+				])
+			).toEqual([
+				{ key: "verbose", value: "", enabled: false },
+				{ key: "tenant", value: "", enabled: true },
+			]);
+		});
+
+		it("carries a schema default as the row's value, enabled", () => {
+			expect(
+				paramsOf([{ name: "limit", in: "query", schema: { type: "integer", default: 25 } }])
+			).toEqual([{ key: "limit", value: "25", enabled: true }]);
+		});
+
+		it("prefers the parameter's example over the schema's default", () => {
+			expect(
+				paramsOf([
+					{
+						name: "status",
+						in: "query",
+						example: "available",
+						schema: { type: "string", default: "pending" },
+					},
+				])
+			).toEqual([{ key: "status", value: "available", enabled: true }]);
+		});
+
+		it("unwraps the first entry of an examples map", () => {
+			expect(
+				paramsOf([
+					{
+						name: "sort",
+						in: "query",
+						examples: { byName: { value: "name" }, byAge: { value: "age" } },
+					},
+				])
+			).toEqual([{ key: "sort", value: "name", enabled: true }]);
+		});
+
+		it("reads a default through a $ref'd schema", () => {
+			expect(
+				paramsOf([
+					{ name: "limit", in: "query", schema: { $ref: "#/components/schemas/Limit" } },
+				])
+			).toEqual([{ key: "limit", value: "25", enabled: true }]);
+		});
+
+		it("leaves a non-scalar default value-less, since one row cannot express its serialization", () => {
+			// `style`/`explode` decide how an array reaches the wire and this importer
+			// reads neither - a joined guess would send what the spec did not declare.
+			expect(
+				paramsOf([
+					{ name: "tags", in: "query", schema: { type: "array", default: ["a", "b"] } },
+					{ name: "filter", in: "query", schema: { type: "object", default: { a: 1 } } },
+				])
+			).toEqual([
+				{ key: "tags", value: "", enabled: false },
+				{ key: "filter", value: "", enabled: false },
+			]);
+		});
+
+		it("treats a declared empty-string default as no value at all", () => {
+			// A row with an empty value writes as a bare key, so `?q=` is not a shape
+			// the Params table can hold - the row would send `?q`, which is not what
+			// `default: ""` says.
+			expect(
+				paramsOf([{ name: "q", in: "query", schema: { type: "string", default: "" } }])
+			).toEqual([{ key: "q", value: "", enabled: false }]);
+		});
+
+		it("keeps the description on a disabled row", () => {
+			expect(
+				paramsOf([{ name: "verbose", in: "query", description: "Expand the payload" }])
+			).toEqual([
+				{ key: "verbose", value: "", enabled: false, description: "Expand the payload" },
+			]);
 		});
 	});
 });
