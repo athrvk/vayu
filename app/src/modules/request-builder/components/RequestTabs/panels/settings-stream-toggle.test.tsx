@@ -139,16 +139,20 @@ describe("the Event stream toggle", () => {
 		expect(h.accepts).toEqual([declared]);
 	});
 
-	it("warns that a streaming send cannot carry scripts, only while it is on", () => {
-		// The engine refuses it with a 400, and the scripts a send carries
-		// include the collection chain's - which this tab cannot show at all.
+	it("says when scripts run on a stream, only while the toggle is on", () => {
+		// Scripts are not refused any more (#612), so what the note carries is
+		// the timing: Send returns at 202 and the Tests half runs after the
+		// stream ends. The old refusal wording must not come back (#620).
 		const h = harness();
 		const ui = mount(h);
-		expect(screen.queryByText(/cannot run on a streaming request/i)).toBeNull();
+		expect(screen.queryByText(/Scripts run, split around the transfer/i)).toBeNull();
 
 		fireEvent.click(ui.toggle());
 		ui.rerender();
 
-		expect(screen.getByText(/cannot run on a streaming request/i)).toBeTruthy();
+		expect(screen.getByText(/Scripts run, split around the transfer/i)).toBeTruthy();
+		expect(screen.getByText(/Results appear when the stream finishes/i)).toBeTruthy();
+		expect(screen.queryByText(/cannot run on a streaming request/i)).toBeNull();
+		expect(screen.queryByText(/refuses the send/i)).toBeNull();
 	});
 });

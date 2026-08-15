@@ -510,8 +510,15 @@ export const apiService = {
 	 * No `proxiedRequestTimeoutMs()`: this call returns as soon as the run row
 	 * exists, and the stream it started is bounded by the engine's own caps
 	 * (`maxStreamDurationMs`, `maxStreamEvents`, the idle timeout), not by a
-	 * client deadline. `allowScriptRequests` is not sent because the engine
-	 * refuses a stream carrying scripts at all.
+	 * client deadline.
+	 *
+	 * `allowScriptRequests` is not sent here, unlike `executeRequest` above.
+	 * That flag was pointless while the engine refused a stream carrying
+	 * scripts; #612 shipped those scripts, so today it means a `pm.sendRequest`
+	 * is refused on a streaming send and allowed on a buffered one - the same
+	 * button, two answers. Left as it stands rather than swept in with the
+	 * wording fix, because sending it is a behaviour change with its own
+	 * verification: see issue #620's follow-up.
 	 */
 	async executeStreamRequest(data: ExecuteRequestRequest): Promise<ExecuteStreamResponse> {
 		const answer = await httpClient.post<ExecuteStreamResponse>(API_ENDPOINTS.EXECUTE_REQUEST, {

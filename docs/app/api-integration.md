@@ -778,9 +778,11 @@ tab, silently. Resume travels as `?lastEventId=`, which picks up at the frame
 
 An answer missing `runId` or `eventsUrl` is a malformed answer and throws,
 rather than leaving the pane on "streaming" with no run to stop. Refusals -
-`stream` with `transient`, or with a pre-/post-request script - come back as a
-`400` the user has to read, so they are rendered as the response *and* raised
-as a toast.
+`stream` with `transient`, or a stream cap on a payload that declares no stream -
+come back as a `400` the user has to read, so they are rendered as the response
+*and* raised as a toast. A script is no longer one of them: scripts run on a
+streaming send (issue #575), the pre-request half before the transfer and the
+post-request half once the stream has terminated.
 
 The renderer sends the **inline** compose shape (`{ request, collectionId,
 environmentId }`) rather than compose-by-id, because Send executes the *editor
