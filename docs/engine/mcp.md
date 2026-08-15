@@ -410,10 +410,11 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   It rides *beside* the composed payload rather than through `/compose`, because
   `{{data.*}}` survives composition by design - that is what leaves the tokens
   for the engine to bind. A column the row does not carry is an error naming the
-  token and the row's columns, and **nothing is sent**. Auth credentials are the
-  one place a token cannot bind on a single send (they are applied before the
-  row is read) and are refused by name rather than sent as base64 of the token
-  text. The allowlist gate reads the composed URL as always - a `{{data.*}}` in
+  token and the row's columns, and **nothing is sent**. Auth credentials bind as
+  well (issue #642) - before they are encoded, so basic auth base64s the row's
+  values - with OAuth 2.0 the one mode no row can reach, refused by name because
+  its token comes from the token endpoint rather than from the request. The
+  allowlist gate reads the composed URL as always - a `{{data.*}}` in
   the *path* leaves the host knowable and is judged on that host, while a
   template in the authority is still "unknown host" and denied.
   `run_collection_smoke` stays out of it: it has no scenario path at all, so

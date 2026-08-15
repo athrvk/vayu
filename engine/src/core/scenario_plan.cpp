@@ -362,22 +362,22 @@ const ScenarioResolveOptions& options) {
         // mean a network round trip per virtual user per iteration. Refused by
         // name in both directions, with or without a data set, rather than sent
         // to the token endpoint as the literal token text.
-        if (const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&parsed_auth)) {
-            if (auto token = first_data_token_in (oauth2->config)) {
-                return invalid (describe_step (index, row) + " carries " + *token +
-                " in its OAuth 2.0 configuration. That token is acquired once, "
-                "when the run is planned, so a data column can never reach it "
-                "- "
-                "use a static credential there, or move the data token into "
-                "the "
-                "request itself.");
-            }
+        if (auto token = first_oauth2_data_token (parsed_auth)) {
+            return invalid (describe_step (index, row) + " carries " + *token +
+            " in its OAuth 2.0 configuration. That token is acquired once, "
+            "when the run is planned, so a data column can never reach it - "
+            "use a static credential there, or move the data token into the "
+            "request itself.");
         }
 
-        if (!auth_template.empty ()) {
-            payload.erase ("auth");
-        }
-        auto built = vayu::http::build_request (payload, &db, options.timeout_ms);
+        // Deferred through the builder's own option rather than by hiding the
+        // `auth` key from it: one mechanism, named at the call site, shared
+        // with the single send that defers for the same reason (issue #642).
+        const auto auth_resolution = auth_template.empty () ?
+        vayu::http::AuthResolution::Apply :
+        vayu::http::AuthResolution::Defer;
+        auto built =
+        vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
         if (!built.ok || built.parse_failed) {
             return invalid ("Cannot compose " + describe_step (index, row) +
             ": " + built.error_message);
@@ -442,25 +442,11 @@ DataBindResult bind_step_auth (vayu::Request& request,
 const ScenarioStep& step,
 const nlohmann::json& row,
 size_t row_index) {
-    if (step.auth_template.empty ()) {
-        return DataBindResult{ true, {} };
-    }
-
-    // Copied because the plan is immutable and shared by every virtual user of
-    // the run, and the join rewrites the credentials in place.
-    vayu::http::Auth auth = step.auth;
-    if (auto bound = apply_auth_data_template (auth, step.auth_template, row, row_index);
-        !bound.ok) {
-        return bound;
-    }
-
-    // No database handle: oauth2 is the only mode `apply_auth` needs one for,
-    // and an oauth2 config carrying a data token is refused when the plan
-    // resolves - deferral never reaches here with one.
-    if (auto applied = vayu::http::apply_auth (request, auth, nullptr); !applied.ok) {
-        return DataBindResult{ false, applied.message };
-    }
-    return DataBindResult{ true, {} };
+    // The join-then-apply order lives in one place, shared with the single
+    // send that binds credentials once (issue #642); this is the per-iteration
+    // caller of it. The step's auth is copied by the callee, which is what a
+    // plan shared by every virtual user of the run requires.
+    return bind_auth_row (request, step.auth, step.auth_template, row, row_index);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

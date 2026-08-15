@@ -2394,16 +2394,22 @@ Refused with a **400**, before any run row exists and with nothing sent:
 | over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
 | a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
 | a `null` cell, a header collision, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
-| `auth` carries a `{{data.*}}` token | `Auth credentials carry {{data.user}}, and a single send cannot bind them: ...` |
+| an OAuth 2.0 config carries a `{{data.*}}` token | `Auth credentials carry {{data.client}} in an OAuth 2.0 configuration, and no row can reach it: ...` |
 
-That last one is the one asymmetry with a collection run, and it is a refusal
-rather than a silent wrong send. Auth is applied when the request is built -
-basic credentials are already collapsed into one base64 `Authorization` value -
-so a credential token would go out as base64 of the literal token text. A run
-resolves its plan once and can afford to keep the credentials typed and bind
-them per iteration (issue #591); a single send has no plan to hang that off, so
-it names the token and points at the alternatives (move it into the URL, a
-header or the body, or run the collection with a data file).
+**Credentials bind here too** (issue #642). A `{{data.user}}` in a basic-auth
+username, a bearer token or an api key is substituted from the row like any
+other field, and it is bound **before** the credentials are encoded - so basic
+auth base64s the row's values, and an api key in the query is percent-encoded
+after the substitution rather than before. This is the same deferral a
+collection run performs per iteration (issue #591): the credentials are parsed
+and kept typed, the request is built without resolving them, and the auth is
+applied once the row has reached it.
+
+**OAuth 2.0 is the one mode a row cannot reach**, and it is refused by name
+rather than sent wrong. Its token is acquired against the token endpoint instead
+of being written into the request, so there is no moment at which a bind could
+happen - exactly the reason a scenario run refuses the same config. Use a static
+credential there, or move the data token into the request itself.
 
 **`requestName` is script identity, not an HTTP field** - it never reaches the
 wire. The scripts read it as `pm.info.requestName` (with `requestId` as

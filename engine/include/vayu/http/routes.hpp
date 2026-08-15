@@ -19,8 +19,11 @@
 #include <vector>
 
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/request_builder.hpp"
 // The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - now
 // shared with the scenario runner and therefore declared where `vayu_core` can
 // see it. Included here so route TUs keep naming it through routes.hpp.
@@ -636,25 +639,47 @@ struct DataRow {
 DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
 
 /**
- * The first `{{data.column}}` token in @p json's `auth` block, or `nullopt`.
+ * How a send-with-row's credentials are resolved (issue #642).
  *
- * A send-with-row binds what composition left written - the URL, header names
- * and values, the body, both halves of every form field - and `build_request`
- * has already collapsed the credentials into an `Authorization` header by the
- * time the row is in hand. A `{{data.user}}` there would go out as base64 of the
- * literal token text, silently, which is exactly the defect issue #591 removed
- * from the load path (there by binding the *typed* credentials before
- * `apply_auth` sees them, which a plan can afford because it is resolved once).
+ * `resolution` is what `build_request` must be told, and it is `Defer` exactly
+ * when `credentials` is non-empty: a `{{data.column}}` inside a credential has
+ * to carry the row's value *before* `apply_auth` collapses a username and a
+ * password into one base64 `Authorization` value, since after that the token is
+ * unreadable and goes out as base64 of its own literal text (issue #591). The
+ * ordinary send - every credential static - keeps resolving auth inside the
+ * build, byte for byte as it did before this existed.
  *
- * A single send has no plan to hang a credential template off, so this endpoint
- * refuses by name instead - the same shape the scenario planner uses for an
- * OAuth 2.0 config, whose token is likewise acquired before any row exists.
- * Refusing is the half that matters: nothing wrong reaches the wire, and the
- * message names the token and the alternative. Binding them here is issue #642.
- * Only consulted when the payload carries a row - without one, a `data.*` token anywhere is today's
- * goes-out-literal behaviour and is not this endpoint's to reopen.
+ * `ok == false` carries the 400 the route answers with. There is one: an
+ * OAuth 2.0 config carrying a data token, which no deferral can serve.
  */
-std::optional<std::string> first_auth_data_token (const nlohmann::json& json);
+struct SendRowAuth {
+    bool ok = true;
+    std::string error;
+    /// The parsed, still-unbound auth - `bind_auth_row`'s input, not the
+    /// payload's, because the join addresses a credential by its position in
+    /// the walk over *this* value.
+    vayu::http::Auth auth;
+    /// The credentials split around their tokens; empty when none carries one.
+    vayu::core::StepDataTemplate credentials;
+    vayu::http::AuthResolution resolution = vayu::http::AuthResolution::Apply;
+};
+
+/**
+ * Decide how `POST /execute` resolves the credentials of a send carrying a row.
+ *
+ * The half of the sequence that must happen **before** the request is built;
+ * `vayu::core::bind_auth_row` is the half that happens after, and the two are
+ * split exactly there because `build_request` sits between them.
+ *
+ * @p has_row is false for an ordinary send, which returns `Apply` with an empty
+ * template and no refusal: without a row there is nothing to bind a token
+ * against, so a `{{data.*}}` in a credential keeps today's goes-out-literal
+ * behaviour rather than becoming a new refusal this endpoint never had.
+ *
+ * Extracted from the handler (execution.cpp) so send_with_row_test.cpp can
+ * drive it directly, matching the suite's other route-core tests.
+ */
+SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row);
 
 /**
  * What a design execution's two scripts produced, as the four keys every

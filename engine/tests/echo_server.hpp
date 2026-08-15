@@ -53,6 +53,7 @@ class EchoServer {
             {
                 std::lock_guard<std::mutex> lock (mutex_);
                 path_         = req.path;
+                target_       = req.target;
                 headers_      = req.headers;
                 body_         = req.body;
                 content_type_ = req.get_header_value ("Content-Type");
@@ -114,6 +115,14 @@ class EchoServer {
         return found == headers_.end () ? std::string () : found->second;
     }
 
+    /// The request target as received - {@link path} plus the query string,
+    /// still percent-encoded. What a test asserts against when the encoding
+    /// itself is the point (an api key placed in the query).
+    std::string target () const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return target_;
+    }
+
     std::string content_type () const {
         std::lock_guard<std::mutex> lock (mutex_);
         return content_type_;
@@ -131,6 +140,7 @@ class EchoServer {
     int port_ = 0;
     mutable std::mutex mutex_;
     std::string path_;
+    std::string target_;
     httplib::Headers headers_;
     std::string body_;
     std::string content_type_;

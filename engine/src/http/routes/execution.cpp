@@ -373,18 +373,38 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
 }
 
 /**
- * @brief The first `{{data.column}}` in a `POST /execute` payload's `auth`
- *        block (issue #601).
+ * @brief How a send-with-row resolves its credentials (issue #642).
  *
- * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for why
- * the endpoint refuses rather than binds.
+ * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for the
+ * contract and for why the ordinary send is untouched.
  */
-std::optional<std::string> first_auth_data_token (const nlohmann::json& json) {
-    const auto auth = json.find ("auth");
-    if (auth == json.end () || auth->is_null ()) {
-        return std::nullopt;
+SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
+    SendRowAuth out;
+    if (!has_row) {
+        // Not merely the same answer as an unbindable payload's - deliberately
+        // not parsing at all. `parse_auth` warns on an unresolved `inherit`,
+        // and on this path the build is about to parse the very same block; a
+        // second parse would double every such warning on the ordinary send.
+        return out;
     }
-    return vayu::core::first_data_token_in (*auth);
+    out.auth = vayu::http::parse_auth (json.value ("auth", nlohmann::json ()));
+
+    if (auto token = vayu::core::first_oauth2_data_token (out.auth)) {
+        out.ok    = false;
+        out.error = "Auth credentials carry " + *token +
+        " in an OAuth 2.0 configuration, and no row can reach it: the token is "
+        "acquired against the token endpoint before the request is sent, not "
+        "written into the request the way every other credential is. Use a "
+        "static credential there, or move the data token into the request "
+        "itself.";
+        return out;
+    }
+
+    out.credentials = vayu::core::tokenize_auth_fields (out.auth);
+    if (!out.credentials.empty ()) {
+        out.resolution = vayu::http::AuthResolution::Defer;
+    }
+    return out;
 }
 
 namespace {
@@ -823,13 +843,28 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
+        // How the credentials resolve, decided before the build because it is
+        // the build that would otherwise encode them out of reach (issue #642).
+        // The refusal it can carry - an oauth2 config with a data token - is a
+        // 400 here, beside the row's own, and for the same reason: nothing has
+        // been recorded or sent yet.
+        const auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
+        if (!row_auth.ok) {
+            vayu::utils::log_warning ("POST /execute - " + row_auth.error);
+            send_error (res, 400, row_auth.error);
+            return;
+        }
+
         // Build the request once: deserialize + timeout + auth. A malformed
         // payload fails here (before any run record is created); an auth
-        // failure is surfaced after the run exists (below).
+        // failure is surfaced after the run exists (below). Credentials
+        // carrying a `{{data.*}}` are the one case the build leaves alone - the
+        // bind below applies them once the row has reached them.
         const int request_timeout_ms = resolve_request_timeout_ms (
         json, ctx.db.get_config_int (
         "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-        auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms);
+        auto built = vayu::http::build_request (
+        json, &ctx.db, request_timeout_ms, row_auth.resolution);
         if (built.parse_failed) {
             vayu::utils::log_warning ("POST /execute - Invalid request format");
             send_error (res, 400, built.error_message);
@@ -844,20 +879,16 @@ void register_execution_routes (RouteContext& ctx) {
         // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
         // refusal precedes the run row exactly as the flag checks above do.
         if (data_row.value) {
-            if (auto token = first_auth_data_token (json)) {
-                const std::string error = "Auth credentials carry " + *token +
-                ", and a single send cannot bind them: the credentials are "
-                "applied when the request is built, before the row is read. "
-                "Move the token into the URL, a header or the body, or run the "
-                "collection with a data file - a collection run binds "
-                "credentials per iteration (issue #591).";
-                vayu::utils::log_warning ("POST /execute - " + error);
-                send_error (res, 400, error);
-                return;
+            auto bound = vayu::core::bind_data_row (built.request, *data_row.value, 0);
+            if (bound.ok) {
+                // Then the credentials the build deferred, in the order the
+                // scenario executors bind theirs: the row reaches them before
+                // `apply_auth` encodes them onto the request. A no-op for the
+                // ordinary send, whose auth the build already applied.
+                bound = vayu::core::bind_auth_row (
+                built.request, row_auth.auth, row_auth.credentials, *data_row.value, 0);
             }
-            if (auto bound =
-                vayu::core::bind_data_row (built.request, *data_row.value, 0);
-                !bound.ok) {
+            if (!bound.ok) {
                 vayu::utils::log_warning ("POST /execute - " + bound.error);
                 send_error (res, 400, bound.error);
                 return;
@@ -929,7 +960,8 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Take the request built above. Auth is already resolved into its
-        // headers/url, so pm.request reflects the real outgoing set - and
+        // headers/url - by the build, or by the bind above for credentials that
+        // carried the row - so pm.request reflects the real outgoing set - and
         // because the pre-request script runs after that and writes back into
         // this same object, a script-set Authorization header wins over the
         // engine-applied one.

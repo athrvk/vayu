@@ -259,6 +259,36 @@ const nlohmann::json& row,
 size_t row_index);
 
 /**
+ * Bind @p auth's credentials against @p row and apply the result to @p request.
+ *
+ * The whole deferred-credential sequence in one place - join, then apply - for
+ * every caller that built its request with `http::AuthResolution::Defer`. Both
+ * of them drive this: a scenario step binds it per iteration through
+ * `bind_step_auth`, and a single send binds it once
+ * (`POST /execute` with a `data` row, issue #642). A second copy of the order
+ * would be a copy that stops receiving this one's fixes, and the order is the
+ * entire point - the row has to reach the credentials before `apply_auth`
+ * base64-encodes them.
+ *
+ * @p auth is taken **by value**: the join rewrites credentials in place, and a
+ * plan's step auth is shared, immutable and re-bound by every virtual user.
+ *
+ * A no-op returning success for an empty @p tmpl, so a caller may call it
+ * unconditionally. Note that this makes an empty template mean "these
+ * credentials carry no row values" and *not* "apply this auth" - a caller that
+ * deferred a build must only have done so for a non-empty template.
+ *
+ * No database handle reaches `apply_auth`: oauth2 is the only mode that needs
+ * one, and an oauth2 config carrying a data token is refused before any build
+ * is deferred (@ref first_oauth2_data_token).
+ */
+[[nodiscard]] DataBindResult bind_auth_row (vayu::Request& request,
+vayu::http::Auth auth,
+const StepDataTemplate& tmpl,
+const nlohmann::json& row,
+size_t row_index);
+
+/**
  * The first `{{data.column}}` in any string of @p value, recursively, written
  * back with its braces - or `nullopt` when it carries none.
  *
@@ -268,6 +298,24 @@ size_t row_index);
  * belongs is not a placement anyone means.
  */
 [[nodiscard]] std::optional<std::string> first_data_token_in (const nlohmann::json& value);
+
+/**
+ * The first `{{data.column}}` in @p auth's OAuth 2.0 configuration, or
+ * `nullopt` - for any other mode as well as for an oauth2 config carrying none.
+ *
+ * **OAuth 2.0 is the one mode deferral cannot serve**, and this is the check
+ * that says so, for both callers that defer. Its token is acquired against the
+ * token endpoint once - when a plan is resolved, or before a single send leaves
+ * - so there is no later moment at which a row could reach the acquisition, the
+ * way binding a credential before `apply_auth` encodes it reaches every other
+ * mode. Refused by name rather than sent to the token endpoint as the literal
+ * token text.
+ *
+ * Every other mode's credentials are walked by `walk_auth_credentials` and
+ * bound; an oauth2 config is deliberately absent from that walk, which is why
+ * it needs this second, config-shaped scan.
+ */
+[[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.

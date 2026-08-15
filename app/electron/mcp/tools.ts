@@ -809,12 +809,17 @@ const MAX_STREAM_BUDGET_MS = 60_000;
  * a column the row does not carry is a `400` naming the token and the row's
  * columns, and *nothing is sent* - so an agent reading the error can fix the
  * request rather than wondering what went out.
+ *
+ * Credentials bind too (issue #642), and the description says which mode does
+ * not: an agent that is told "auth cannot bind" writes the token somewhere else
+ * for no reason, and one told nothing writes it into an oauth2 config and gets
+ * a 400 it cannot explain.
  */
 const dataRowInput = z
 	.record(z.unknown())
 	.optional()
 	.describe(
-		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers and body is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. Auth credentials cannot carry a {{data.*}} token on a single send - they are applied before the row is read - so move such a token into the URL, a header or the body. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
+		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers, body and auth credentials is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. A credential binds before it is encoded, so basic auth base64s the row\'s values; the exception is OAuth 2.0, whose token comes from the token endpoint rather than the request, so a {{data.*}} in an oauth2 config is refused by name. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
 	);
 
 const streamInput = z

@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -714,6 +715,27 @@ size_t row_index) {
     return joiner.result ();
 }
 
+DataBindResult bind_auth_row (vayu::Request& request,
+vayu::http::Auth auth,
+const StepDataTemplate& tmpl,
+const nlohmann::json& row,
+size_t row_index) {
+    if (tmpl.empty ()) {
+        return DataBindResult{ true, {} };
+    }
+
+    if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index); !bound.ok) {
+        return bound;
+    }
+
+    // No database handle: see the header - the one mode that would need it is
+    // refused before a build is ever deferred.
+    if (auto applied = vayu::http::apply_auth (request, auth, nullptr); !applied.ok) {
+        return DataBindResult{ false, applied.message };
+    }
+    return DataBindResult{ true, {} };
+}
+
 std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
     if (value.is_string ()) {
         const auto split = vayu::http::split_tokens (
@@ -731,6 +753,14 @@ std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth) {
+    const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
+    if (oauth2 == nullptr) {
+        return std::nullopt;
+    }
+    return first_data_token_in (oauth2->config);
 }
 
 DataBindResult apply_data_template (vayu::Request& request,

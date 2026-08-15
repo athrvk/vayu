@@ -264,12 +264,19 @@ contract in the collection chain, or no remembered file for the collection that
 declared it. A file that has moved says so when you open the list, and picking
 it again in the Data tab is the fix.
 
-One thing a single send cannot bind is **auth credentials**. Auth is applied
-when the request is built, before the row is read, so a `{{data.user}}` in a
-username would go out as part of an already-encoded header. Vayu refuses that by
-name rather than sending it wrong: move the token into the URL, a header or the
-body, or run the collection with the data file, which binds credentials per
-iteration.
+**Auth credentials bind on a single send too.** A `{{data.user}}` in a
+basic-auth username, a bearer token or an api key takes the row's value the same
+way the URL and the body do, and it does so *before* the credentials are encoded
+- so the header carries the row's values rather than base64 of the token text.
+This is the same thing a collection run does per iteration, which is what makes
+a credentials file work identically under Send-with-row and under Run
+collection.
+
+The exception is **OAuth 2.0**: its token is fetched from the token endpoint
+rather than written into the request, so no row can reach it, under either
+Send-with-row or a collection run. A `{{data.*}}` in an OAuth 2.0 config is
+refused by name rather than sent wrong - use a static credential there, or move
+the token into the request itself.
 
 The rows read for the picker are held for that send and nothing more - the same
 rule the rest of this page describes.
