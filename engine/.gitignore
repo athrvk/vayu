@@ -2,6 +2,7 @@
 build/
 build-test/
 build-release/
+build-asan/
 cmake-build-*/
 out/
 data/

@@ -844,11 +844,24 @@ row exists - and the executor is the only thing that differs.
   whole run.
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
+- **Stream Consumer Threads**: One per live streaming request (`POST /execute`
+  with `"stream": true`), owned by `SseStreamManager`.
+
 Shutdown unwinds that in a fixed order, because every one of these threads
-holds references to state `main` owns: HTTP server stopped → run workers
-signalled and joined (each joins its own metrics and monitor threads and stops
-its event loop first) → `curl_global_cleanup` → `Database` / `RunManager`
-destroyed at scope exit. Nothing is detached.
+holds references to state `main` owns: HTTP server stopped **and its stream
+consumers drained** (`Server::stop()` calls `SseStreamManager::shutdown()`,
+which signals every stream and joins its worker) → run workers signalled and
+joined (each joins its own metrics and monitor threads and stops its event loop
+first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at scope
+exit. Nothing is detached.
+
+The stream drain belongs to `stop()` rather than to `~Server` because
+`curl_global_cleanup` runs *between* the two: a consumer joined only by the
+member destructor would still be inside a curl transfer while curl's global
+state was torn down, and still writing its run row through a `Database` that is
+about to be destroyed - the #125 defect in the one worker `RunManager` does not
+own (#646). Any other owner of an `SseStreamManager` owes the same order: drain
+before the `Database` and `CookieJar` its workers reach through go away.
 
 ## Performance Characteristics
 

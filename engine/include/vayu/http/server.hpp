@@ -62,8 +62,13 @@ class Server {
     //
     // SseStreamManager owns curl transfers rather than listeners, and is here
     // for exactly the same reason: its workers write run rows through db_ and
-    // read cookie_jar_, and its destructor stops and joins every one of them.
+    // read cookie_jar_, and its shutdown stops and joins every one of them.
     // Declared after the jar so it is destroyed before it.
+    //
+    // The declaration order is the backstop, not the mechanism: `stop()` drains
+    // it explicitly, because `daemon.cpp` calls `curl_global_cleanup` between
+    // its `server.stop()` and this object's destruction, and a transfer still
+    // running then is the #125 defect (see sse_stream.hpp and #646).
     OAuth2AuthorizeManager oauth_authorize_manager_;
     CookieJar cookie_jar_;
     MockIssuerManager mock_issuer_manager_;

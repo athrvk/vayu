@@ -90,7 +90,8 @@ class StreamServer {
             });
         });
 
-        svr_.Get ("/endless", [this] (const httplib::Request&, httplib::Response& res) {
+        svr_.Get ("/endless", [this] (const httplib::Request& req, httplib::Response& res) {
+            note_request (req);
             res.set_chunked_content_provider (
             "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
                 while (!stopping_.load ()) {
@@ -147,6 +148,13 @@ class StreamServer {
         return found == received_headers_.end () ? std::string () : found->second;
     }
 
+    /// Requests this origin has answered. A test that must interrupt a stream
+    /// *in flight* needs to know the transfer actually started, and the run row
+    /// exists before the worker has connected.
+    int requests_received () const {
+        return received_count_.load ();
+    }
+
     private:
     void note_request (const httplib::Request& req) {
         std::lock_guard<std::mutex> lock (received_mutex_);
@@ -154,6 +162,7 @@ class StreamServer {
         for (const auto& [key, value] : req.headers) {
             received_headers_[key] = value;
         }
+        received_count_.fetch_add (1);
     }
 
     httplib::Server svr_;
@@ -164,6 +173,7 @@ class StreamServer {
     std::atomic<int> pace_ms_{ 0 };
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
+    std::atomic<int> received_count_{ 0 };
 };
 
 vayu::Request get_request (const std::string& url) {
@@ -622,6 +632,41 @@ TEST (SseStreamManagerTest, TearsDownWithAStreamStillRunning) {
     SUCCEED ();
 }
 
+// The ordering contract every owner runs on (#646): `shutdown()` does not
+// return until each worker has finished - callback included. `closed()` flips
+// at the end of the transfer, with the completion callback still to run, so a
+// drain that waited on the context rather than joining the thread would return
+// while the worker was still inside `on_complete`, writing through a `Database`
+// its owner is about to destroy. That is the intermittent segfault this test
+// exists to keep fixed.
+TEST (SseStreamManagerTest, ShutdownJoinsEveryWorkerAndIsTerminalAndIdempotent) {
+    StreamServer server;
+    SseStreamManager manager;
+    std::atomic<bool> completed{ false };
+
+    auto spec = spec_for (server.url ("/endless"), brisk_limits ());
+    spec.on_complete = [&completed] (const vayu::Request&, const vayu::Response&,
+                       const SseStreamContext&) { completed.store (true); };
+    auto context = manager.start (std::move (spec));
+    ASSERT_NE (context, nullptr);
+    while (context->total_events () < 1) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+    }
+
+    manager.shutdown ();
+    EXPECT_TRUE (completed.load ()) << "shutdown returned while the worker was "
+                                       "still in its completion callback";
+    EXPECT_EQ (manager.size (), 0u);
+    EXPECT_EQ (context->end_reason (), SseEndReason::Stopped);
+
+    // Terminal, like RunManager's: a drain happens because the state the
+    // workers write through is going away, so a stream started afterwards
+    // would have nothing to write to.
+    EXPECT_EQ (manager.start (spec_for (server.url ("/endless"), brisk_limits ())), nullptr);
+    manager.shutdown ();
+    EXPECT_EQ (manager.size (), 0u);
+}
+
 TEST (SseStreamManagerTest, SweepsOnlyFinishedStreamsPastTheirRetention) {
     StreamServer server ({ "data: a\n\n" });
     SseStreamManager manager;
@@ -656,10 +701,11 @@ class RelayTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
         db_->init ();
-        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        manager_ = std::make_unique<SseStreamManager> ();
+        ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
         vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
         nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, manager_ });
+        inbox_manager_, mock_server_manager_, *manager_ });
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -672,6 +718,13 @@ class RelayTest : public ::testing::Test {
         if (thread_.joinable ()) {
             thread_.join ();
         }
+        // Before `db_`, always (#646). A stream worker outlives the test body -
+        // `closed()` flips at the end of the transfer, with the completion
+        // callback still to run - and it writes through `*db_`, so resetting
+        // the database first is a use-after-free that only shows up as an
+        // intermittent segfault under load. Same order as InboxListenerTest,
+        // and the order `Server::stop()` holds in production.
+        manager_.reset ();
         ctx_.reset ();
         db_.reset ();
         vayu::tests::remove_database_files (DB_PATH);
@@ -686,7 +739,7 @@ class RelayTest : public ::testing::Test {
         }
         origin_ = std::make_unique<StreamServer> (std::move (chunks));
         auto context =
-        manager_.start (spec_for (origin_->url ("/scripted"), brisk_limits ()));
+        manager_->start (spec_for (origin_->url ("/scripted"), brisk_limits ()));
         const auto deadline =
         std::chrono::steady_clock::now () + std::chrono::seconds (10);
         while (context && !context->closed () && std::chrono::steady_clock::now () < deadline) {
@@ -718,7 +771,9 @@ class RelayTest : public ::testing::Test {
     vayu::http::MockIssuerManager mock_issuer_manager_;
     vayu::http::InboxManager inbox_manager_;
     vayu::http::MockServerManager mock_server_manager_;
-    SseStreamManager manager_;
+    /// Held by pointer so `TearDown` can join its workers *before* the
+    /// database they write through goes away - see the note there (#646).
+    std::unique_ptr<SseStreamManager> manager_;
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
     std::unique_ptr<StreamServer> origin_;
 };
@@ -807,7 +862,7 @@ TEST_F (RelayTest, AnExpiredStreamIsSweptAndReads404) {
     auto response = client ().Get ("/runs/run_test/events");
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 404);
-    EXPECT_EQ (manager_.size (), 0u);
+    EXPECT_EQ (manager_->size (), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -831,10 +886,11 @@ class StreamExecuteTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
         db_->init ();
-        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        manager_ = std::make_unique<SseStreamManager> ();
+        ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
         vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
         nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, manager_ });
+        inbox_manager_, mock_server_manager_, *manager_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
@@ -848,6 +904,12 @@ class StreamExecuteTest : public ::testing::Test {
         if (thread_.joinable ()) {
             thread_.join ();
         }
+        // Before `db_` and before `origin_`, always (#646). `trace_for` returns
+        // as soon as the result row lands, which the worker writes from inside
+        // its completion callback - so the test body finishes with that worker
+        // still on the stack of `*db_`. Joining here is what makes the reset
+        // below safe; it is the order `Server::stop()` holds in production.
+        manager_.reset ();
         ctx_.reset ();
         db_.reset ();
         vayu::tests::remove_database_files (DB_PATH);
@@ -915,7 +977,9 @@ class StreamExecuteTest : public ::testing::Test {
     vayu::http::MockIssuerManager mock_issuer_manager_;
     vayu::http::InboxManager inbox_manager_;
     vayu::http::MockServerManager mock_server_manager_;
-    SseStreamManager manager_;
+    /// Held by pointer so `TearDown` can join its workers *before* the
+    /// database they write through goes away - see the note there (#646).
+    std::unique_ptr<SseStreamManager> manager_;
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
     std::unique_ptr<StreamServer> origin_;
 };
@@ -1055,6 +1119,85 @@ TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
     << trace["scripts"]["testResults"][0].value ("error", "");
     EXPECT_EQ (trace["events"]["endReason"], "completed");
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown ordering (issue #646)
+//
+// The fixtures above hold the rule in their `TearDown`; this holds it where the
+// daemon does. `daemon.cpp` runs `curl_global_cleanup` between its
+// `server.stop()` and the point where `~Server` destroys its members, so a
+// stream joined only by the member destructor is a transfer running through
+// curl's global teardown - the #125 defect, in the one worker `RunManager` does
+// not own.
+// ---------------------------------------------------------------------------
+
+/// A port nothing is listening on. `vayu::http::Server` takes its port up
+/// front, so a test cannot ask it for an ephemeral one the way the fixtures
+/// above do; listening and stopping is what actually releases the socket
+/// (`bind_to_any_port` alone leaves it open until the process exits).
+int free_port () {
+    httplib::Server probe;
+    const int port = probe.bind_to_any_port ("127.0.0.1");
+    std::thread runner ([&probe] () { probe.listen_after_bind (); });
+    probe.wait_until_ready ();
+    probe.stop ();
+    runner.join ();
+    return port;
+}
+
+TEST (SseServerShutdownTest, StoppingTheServerDrainsALiveStream) {
+    static constexpr const char* DB_PATH = "test_sse_server_shutdown.db";
+    vayu::tests::remove_database_files (DB_PATH);
+    auto db = std::make_unique<vayu::db::Database> (DB_PATH);
+    db->init ();
+    vayu::core::RunManager run_manager;
+    StreamServer origin;
+
+    const int port = free_port ();
+    {
+        vayu::http::Server server (*db, run_manager, port, false);
+        server.start ();
+
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (20, 0);
+        const auto ready = std::chrono::steady_clock::now () + std::chrono::seconds (10);
+        while (!client.Get ("/health") && std::chrono::steady_clock::now () < ready) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        // `/endless` never stops talking, so the only thing that can end this
+        // stream inside the test is the drain itself.
+        const json payload = { { "method", "GET" },
+            { "url", origin.url ("/endless") }, { "stream", true } };
+        auto response = client.Post ("/execute", payload.dump (), "application/json");
+        ASSERT_TRUE (response);
+        ASSERT_EQ (response->status, 202) << response->body;
+        const auto run_id = json::parse (response->body).value ("runId", std::string ());
+        ASSERT_FALSE (run_id.empty ());
+
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (10);
+        while (origin.requests_received () == 0 &&
+        std::chrono::steady_clock::now () < deadline) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+        ASSERT_GT (origin.requests_received (), 0)
+        << "the stream never reached the origin";
+
+        server.stop ();
+
+        // The result row is written by the worker, from inside its completion
+        // callback. Present the instant `stop()` returns means the worker was
+        // joined rather than left running - and left running is what would put
+        // it inside curl while `curl_global_cleanup` ran, and inside `db`
+        // while the daemon destroyed it.
+        EXPECT_FALSE (db->get_results (run_id).empty ())
+        << "server.stop() returned with the stream's worker still running";
+    }
+
+    db.reset ();
+    vayu::tests::remove_database_files (DB_PATH);
 }
 
 } // namespace
