@@ -227,17 +227,20 @@ export default function SettingsPanel() {
 			</div>
 
 			{/*
-			 * Said here rather than left to a 400 at Send. The engine refuses a
-			 * streaming request that carries scripts - a test asserts on a response
-			 * that does not exist until the stream closes - and the scripts a send
-			 * carries include the ones inherited from the collection chain, which is
-			 * not visible from this tab at all.
+			 * Kept, but no longer a refusal: #612 shipped scripts on a streaming
+			 * send, so what is worth saying here is *when* they run (issue #620).
+			 * Send answers as soon as the stream opens, so the Tests script - and
+			 * its results in the Tests and Console panes - arrive only once the
+			 * stream has terminated, over the buffered event list rather than per
+			 * event. That timing is invisible from this tab otherwise, and it
+			 * applies to the scripts inherited from the collection chain too.
 			 */}
 			{request.stream && (
 				<p className="text-xs text-muted-foreground">
-					Pre-request and Tests scripts cannot run on a streaming request yet - the engine
-					refuses the send rather than skipping them silently. Streams reach scripts as{" "}
-					<code>pm.response.events</code> in a later release.
+					Scripts run, split around the transfer: Pre-request before the stream opens, and
+					Tests once after it ends, reading the whole stream as{" "}
+					<code>pm.response.events</code>. Results appear when the stream finishes, not
+					when Send returns.
 				</p>
 			)}
 		</div>
