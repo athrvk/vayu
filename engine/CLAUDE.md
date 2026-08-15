@@ -128,7 +128,16 @@ Three things worth knowing before you design around them:
   stream. **Scripts run** (#575): the pre-request one before the
   transfer, the post-request one after the stream ends, reading the bounded list
   as `pm.response.events`; because the route already answered `202`, their
-  output is stored on the trace's `scripts` node rather than returned.
+  output is stored on the trace's `scripts` node rather than returned. **A
+  consumer worker is drained by whoever owns the manager, before the state it
+  writes through goes away** (#646): `Server::stop()` calls
+  `SseStreamManager::shutdown()` - which signals every stream and *joins* its
+  worker - because `daemon.cpp` runs `curl_global_cleanup` between that call and
+  `~Server`. A test fixture holding a manager beside a `Database` it resets owes
+  the same order, and the two SSE fixtures hold it by keeping the manager in a
+  `unique_ptr` reset first. Waiting on `context->closed()` is *not* draining: it
+  flips at the end of the transfer, with the completion callback - which writes
+  the run row - still to run.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi`

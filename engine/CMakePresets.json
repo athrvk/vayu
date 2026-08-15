@@ -99,6 +99,23 @@
       }
     },
     {
+      "name": "linux-asan",
+      "displayName": "Linux Debug + AddressSanitizer",
+      "description": "Debug build with ASan, for diagnosing lifetime bugs the ordinary suite only shows as an intermittent crash (issue #646)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "VAYU_USE_ASAN": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "linux-prod",
       "displayName": "Linux Release",
       "description": "Production build for Linux (Release)",
@@ -201,6 +218,12 @@
       "jobs": 0
     },
     {
+      "name": "linux-asan",
+      "displayName": "Build Linux Debug + AddressSanitizer",
+      "configurePreset": "linux-asan",
+      "jobs": 0
+    },
+    {
       "name": "linux-prod",
       "displayName": "Build Linux Release",
       "configurePreset": "linux-prod",
@@ -252,6 +275,14 @@
       "name": "linux-dev",
       "displayName": "Test Linux Debug",
       "configurePreset": "linux-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-asan",
+      "displayName": "Test Linux Debug + AddressSanitizer",
+      "configurePreset": "linux-asan",
       "output": {
         "outputOnFailure": true
       }

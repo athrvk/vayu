@@ -526,6 +526,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 SseStreamManager::SseStreamManager () = default;
 
 SseStreamManager::~SseStreamManager () {
+    shutdown ();
+}
+
+void SseStreamManager::shutdown () {
     std::map<std::string, Stream> draining;
     {
         std::lock_guard<std::mutex> lock (mutex_);

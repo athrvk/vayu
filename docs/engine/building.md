@@ -57,7 +57,25 @@ cmake --build --preset linux-prod
 # Debug build
 cmake --preset linux-dev     # or macos-dev, windows-dev
 cmake --build --preset linux-dev
+
+# Debug build with AddressSanitizer, into its own build-asan/ tree
+cmake --preset linux-asan
+cmake --build --preset linux-asan
+ctest --preset linux-asan
 ```
+
+`linux-asan` is a separate tree rather than a flag on `linux-dev`, so an ASan
+run never invalidates the ordinary build's objects. It is the tool for a
+**lifetime** bug - a crash the ordinary suite only produces intermittently and
+without an assertion failure, which is what a use-after-free across threads
+looks like. Two things worth knowing when you reach for it:
+
+- Run the suspect tests **under load**, not alone. Issue #646 was a worker
+  thread writing through a `Database` its fixture had already destroyed; it
+  passed 5/5 in isolation and reproduced on every attempt with four copies of
+  the binary running concurrently (each from its own working directory, since
+  the fixtures write scratch `test_*.db` files into it).
+- `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
 
 ### Traditional CMake
 

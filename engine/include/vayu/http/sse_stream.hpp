@@ -277,10 +277,18 @@ struct SseStreamRequest {
 /**
  * Owns the engine's streaming consumers - one worker thread per live stream.
  *
- * Thread-safe. The destructor asks every worker to stop and joins it, so the
+ * Thread-safe. `shutdown()` asks every worker to stop and joins it, so the
  * `Database` and `CookieJar` a worker touches must outlive the manager: it is
  * declared before `server_` in server.hpp for that reason, alongside the
  * listener-owning managers.
+ *
+ * **Every owner must drain before the state its workers reach through is torn
+ * down** - which is not the same instant as "the manager is destroyed". A
+ * worker writes its run row through a `Database&` and runs curl to the last
+ * byte, so `Server::stop()` calls `shutdown()` while both are still standing,
+ * the way `RunManager::shutdown()` is called for the load workers (#125). A
+ * fixture that owns a manager beside a `Database` it resets in `TearDown` owes
+ * the same order (#646).
  */
 class SseStreamManager {
     public:
@@ -320,6 +328,18 @@ class SseStreamManager {
     /// How many streams are held, live or retained. For tests and teardown
     /// assertions - production reads `get`.
     [[nodiscard]] std::size_t size () const;
+
+    /**
+     * Stop every live stream and **join** its worker, then refuse to start
+     * another. Terminal and idempotent, exactly like `RunManager::shutdown()`:
+     * a manager that has drained cannot be reopened, because the caller drains
+     * only when the `Database` and `CookieJar` its workers hold are about to
+     * go away, and a stream started after that has nothing left to write to.
+     *
+     * Called by `Server::stop()` and by the destructor. Draining an idle
+     * manager returns immediately.
+     */
+    void shutdown ();
 
     private:
     struct Stream {

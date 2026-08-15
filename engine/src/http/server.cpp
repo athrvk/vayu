@@ -84,6 +84,16 @@ void Server::stop () {
         }
         is_running_ = false;
     }
+
+    // Outside the `is_running_` guard and after the listener is down, because
+    // "the server has stopped" must mean no engine work is still in flight
+    // (#646). A stream consumer is a worker like a run worker: it holds `db_`,
+    // reads `cookie_jar_` and is inside a curl transfer. `daemon.cpp` runs
+    // `curl_global_cleanup` between this call and `~Server`, so a stream joined
+    // only by the member destructor would still be transferring while curl's
+    // global state was torn down underneath it - the #125 defect, in the one
+    // worker RunManager does not own. Draining an idle manager is immediate.
+    sse_manager_.shutdown ();
 }
 
 bool Server::is_running () const {

@@ -541,6 +541,11 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/events.cpp
         src/http/routes/mock_server.cpp
         src/http/managed_listener.cpp
+        # The daemon's own Server, so its shutdown ordering is testable rather
+        # than only reachable by running the daemon (#646). It registers every
+        # route group, which is why health.cpp joins the list here too.
+        src/http/routes/health.cpp
+        src/http/server.cpp
     )
     
     # The cross-language conformance fixture lives in the source tree and is
