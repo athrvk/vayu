@@ -128,6 +128,21 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
         }
     }
 
+    // Event-count histogram for a streaming run. Allocated on the same
+    // "off is a null pointer" rule as the bank above; a failure to allocate
+    // costs the distribution and nothing else, since the totals behind
+    // events/sec are plain counters.
+    if (config_.stream_metrics) {
+        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_EVENTS,
+            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+            &stream_events_histogram_) != 0) {
+            stream_events_histogram_ = nullptr;
+            vayu::utils::log_warning ("Run " + run_id_ +
+            ": failed to initialize the stream event histogram; the report will "
+            "carry event totals only");
+        }
+    }
+
     // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
 
@@ -187,6 +202,10 @@ MetricsCollector::~MetricsCollector () {
             hdr_close (histogram);
             histogram = nullptr;
         }
+    }
+    if (stream_events_histogram_ != nullptr) {
+        hdr_close (stream_events_histogram_);
+        stream_events_histogram_ = nullptr;
     }
 }
 
@@ -620,6 +639,59 @@ MetricsCollector::phase_percentiles () const {
         result[i].p999  = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
     }
     return result;
+}
+
+void MetricsCollector::record_stream_completion (size_t events, bool capped) {
+    if (!config_.stream_metrics) {
+        // Off means the report has no `stream` section at all, not a section of
+        // zeros - so the counters behind it must not tick either. Checked here
+        // rather than at the call site because this is the one place that knows
+        // what the toggle governs.
+        return;
+    }
+    stream_completions_.fetch_add (1, std::memory_order_relaxed);
+    stream_events_total_.fetch_add (events, std::memory_order_relaxed);
+    if (capped) {
+        stream_capped_.fetch_add (1, std::memory_order_relaxed);
+    }
+    if (stream_events_histogram_ != nullptr) {
+        // A stream that delivered nothing records its 0 - `hdr` cannot hold one
+        // below its floor of 1, so it is clamped, and the completion is still
+        // counted above. That is why `completions` is a counter rather than
+        // read off the histogram: the two would disagree by exactly the number
+        // of empty streams, which is the population a report most needs to
+        // show.
+        hdr_record_value_atomic (stream_events_histogram_,
+        static_cast<int64_t> (std::max<size_t> (1, events)));
+    }
+}
+
+std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals () const {
+    const size_t completions = stream_completions_.load (std::memory_order_relaxed);
+    if (completions == 0) {
+        // Either `stream_metrics` was off, or no stream completed. Both are
+        // "nothing to report", which is what the absent section says.
+        return std::nullopt;
+    }
+
+    StreamTotals totals;
+    totals.completions  = completions;
+    totals.total_events = stream_events_total_.load (std::memory_order_relaxed);
+    totals.capped       = stream_capped_.load (std::memory_order_relaxed);
+
+    if (stream_events_histogram_ != nullptr && stream_events_histogram_->total_count > 0) {
+        auto* h = stream_events_histogram_;
+        totals.events.count = static_cast<size_t> (h->total_count);
+        totals.events.min   = static_cast<double> (hdr_min (h));
+        totals.events.max   = static_cast<double> (hdr_max (h));
+        totals.events.p50   = static_cast<double> (hdr_value_at_percentile (h, 50.0));
+        totals.events.p75   = static_cast<double> (hdr_value_at_percentile (h, 75.0));
+        totals.events.p90   = static_cast<double> (hdr_value_at_percentile (h, 90.0));
+        totals.events.p95   = static_cast<double> (hdr_value_at_percentile (h, 95.0));
+        totals.events.p99   = static_cast<double> (hdr_value_at_percentile (h, 99.0));
+        totals.events.p999  = static_cast<double> (hdr_value_at_percentile (h, 99.9));
+    }
+    return totals;
 }
 
 MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {

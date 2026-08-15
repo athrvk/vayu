@@ -85,6 +85,17 @@ const ResultAnnotations& annotations) {
         context->metrics_collector->record_http_version_downgrade ();
     }
 
+    // Counted here, before the success/error split, for the reason the
+    // downgrade above is: a stream the target killed after 30 events delivered
+    // 30 events, and a throughput figure computed only from the streams that
+    // ended cleanly would read highest on the runs that failed most. Only a
+    // transfer that actually streamed carries the count - see
+    // `Response::stream_events` for why it is optional rather than a zero.
+    if (result.value ().stream_events) {
+        context->metrics_collector->record_stream_completion (
+        *result.value ().stream_events, result.value ().stream_capped);
+    }
+
     if (result.value ().has_error ()) {
         // Response carrying a client-side error
         const auto& response = result.value ();

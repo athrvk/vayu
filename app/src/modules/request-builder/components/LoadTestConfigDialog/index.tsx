@@ -90,6 +90,15 @@ interface SavedLoadTestConfig {
 	slowThreshold: number;
 	saveTimingBreakdown: boolean;
 	/**
+	 * The stream caps (issue #576), memoed like every other field so a second
+	 * run of the same stream does not have to be re-bounded by hand. Stored
+	 * even for a non-streaming request: the memo is one object, and dropping
+	 * keys per request kind would make "what did I set last time" depend on
+	 * which request happened to run last.
+	 */
+	streamDuration: number;
+	streamMaxEvents: number;
+	/**
 	 * Budgets are memoed as typed, blanks included, so a cleared field stays
 	 * cleared. A restored draft is also what tells the p99 prefill it has
 	 * already had its turn - without it, declining the SLO budget once would be
@@ -208,6 +217,16 @@ export interface LoadTestConfigDialogProps {
 	hasDynamicVariables: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
+	/**
+	 * True when the pending request has its `stream` setting on (issue #576).
+	 *
+	 * It gates the two cap fields rather than being set here: whether a request
+	 * streams belongs to the request (its Settings tab), and only *how much of
+	 * each stream this run measures* belongs to the run. Showing the caps for a
+	 * request that does not stream would offer bounds on something that is not
+	 * happening.
+	 */
+	isStreamingRequest: boolean;
 }
 
 export default function LoadTestConfigDialog({
@@ -217,6 +236,7 @@ export default function LoadTestConfigDialog({
 	hasPreRequestScript,
 	hasDynamicVariables,
 	oauth2Config,
+	isStreamingRequest,
 }: LoadTestConfigDialogProps) {
 	const saved = loadSavedConfig();
 
@@ -251,6 +271,12 @@ export default function LoadTestConfigDialog({
 	);
 	const [stepDuration, setStepDuration] = useState(() =>
 		restore(saved.stepDuration, LOAD_TEST_DEFAULTS.STEP_DURATION_S, "STEP_DURATION_S")
+	);
+	const [streamDuration, setStreamDuration] = useState(() =>
+		restore(saved.streamDuration, LOAD_TEST_DEFAULTS.STREAM_DURATION_S, "STREAM_DURATION_S")
+	);
+	const [streamMaxEvents, setStreamMaxEvents] = useState(() =>
+		restore(saved.streamMaxEvents, LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS, "STREAM_MAX_EVENTS")
 	);
 	const [maxInFlight, setMaxInFlight] = useState<string>(
 		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
@@ -455,6 +481,8 @@ export default function LoadTestConfigDialog({
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
+			streamDuration,
+			streamMaxEvents,
 			budgets,
 			monitor,
 		});
@@ -478,6 +506,16 @@ export default function LoadTestConfigDialog({
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
 		// discards makes the stored run config claim something untrue about it.
 		if (usesDuration) config.duration_seconds = duration;
+
+		// Streaming requests only. Always sent when the request streams, never
+		// elided as "the engine has defaults": the engine's default is the
+		// user's `sseMaxStreamDurationMs` setting, which the dialog does not
+		// show, so eliding would mean the run is bounded by a number the user
+		// was never told about while the dialog displayed two others.
+		if (isStreamingRequest) {
+			config.stream_duration_seconds = streamDuration;
+			config.stream_max_events = streamMaxEvents;
+		}
 
 		if (mode === "constant_rps") {
 			config.rps = rps;
@@ -646,6 +684,39 @@ export default function LoadTestConfigDialog({
 								min={limits.RAMP_DURATION_S.MIN}
 								max={limits.RAMP_DURATION_S.MAX}
 							/>
+						)}
+
+						{/*
+						 * The stream caps sit with the other run parameters, not
+						 * under Advanced: for a streaming request they are what
+						 * decides when each transfer ends, which is the same kind
+						 * of decision Duration makes for the run. Reaching either
+						 * is a *completed* stream, so the hints say so - a user
+						 * who read them as timeouts would read the run's 0% error
+						 * rate as luck.
+						 */}
+						{isStreamingRequest && (
+							<>
+								<NumberField
+									id="lt-stream-duration"
+									label="Stop each stream after"
+									unit="sec"
+									value={streamDuration}
+									onChange={num(setStreamDuration)}
+									min={limits.STREAM_DURATION_S.MIN}
+									max={limits.STREAM_DURATION_S.MAX}
+									hint="A stream that reaches this counts as completed, not as a timeout."
+								/>
+								<NumberField
+									id="lt-stream-events"
+									label="or after this many events"
+									value={streamMaxEvents}
+									onChange={num(setStreamMaxEvents)}
+									min={limits.STREAM_MAX_EVENTS.MIN}
+									max={limits.STREAM_MAX_EVENTS.MAX}
+									hint="Whichever comes first ends the stream. Under load a stream is always bounded."
+								/>
+							</>
 						)}
 					</div>
 

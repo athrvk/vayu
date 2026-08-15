@@ -180,6 +180,18 @@ Notes:
   the 60s other modes fall back to), so a cap between those two values still
   injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+- **`start_load_run`'s `stream` flag** consumes each response as a
+  `text/event-stream` (issue #576), with `maxStreamDurationMs` and
+  `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the
+  `thresholds` precedent - their ranges are the engine's, and re-deriving them
+  here would be a second copy to keep in step - and the schema sends no `stream`
+  key at all when the agent named none, because the engine refuses a cap without
+  the flag and refuses the flag beside `transient`. Worth telling an agent
+  explicitly: **reaching either cap completes the stream successfully**, so a
+  streaming run's 0% error rate is not evidence the caps were never hit -
+  `get_run_report`'s `stream.capped` is what answers that. The report's `stream`
+  section also carries the per-completion event distribution and a derived
+  `eventsPerSecond`.
 - **`start_load_run`'s `monitor` block** scrapes the target's own metrics
   endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
   and the `series` names to read), so an agent asked why a target slowed down

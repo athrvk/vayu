@@ -31,7 +31,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { LOAD_TEST_CEILING_BOUNDS, LOAD_TEST_LIMITS } from "./load-test";
+import { LOAD_TEST_CEILING_BOUNDS, LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "./load-test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const constantsHpp = readFileSync(
@@ -114,5 +114,48 @@ describe("load-test limits parity with the engine", () => {
 		for (const key of ["CONCURRENCY", "START_CONCURRENCY"] as const) {
 			expect(LOAD_TEST_LIMITS[key].MAX).toBeLessThanOrEqual(guard);
 		}
+	});
+
+	// --- The stream caps (issue #576) --------------------------------------
+	//
+	// Both endpoints read these through one parser (`read_stream_flag`), so a
+	// value this dialog can reach and the engine refuses is a run that never
+	// starts, reported as an opaque 400. Exact rather than "inside", for the
+	// same reason maxInFlight is: the dialog is the only place a user sees
+	// these numbers, so its range has to be the engine's.
+
+	it("advertises exactly the engine's stream-duration range, in seconds", () => {
+		expect(LOAD_TEST_LIMITS.STREAM_DURATION_S.MIN * 1000).toBe(
+			engineConstant("MIN_STREAM_DURATION_MS")
+		);
+		expect(LOAD_TEST_LIMITS.STREAM_DURATION_S.MAX * 1000).toBe(
+			engineConstant("STREAM_DURATION_MS_CEILING")
+		);
+	});
+
+	it("advertises exactly the engine's stream-event range", () => {
+		expect(LOAD_TEST_LIMITS.STREAM_MAX_EVENTS.MIN).toBe(engineConstant("MIN_STREAM_EVENTS"));
+		expect(LOAD_TEST_LIMITS.STREAM_MAX_EVENTS.MAX).toBe(
+			engineConstant("STREAM_EVENTS_CEILING")
+		);
+	});
+
+	it("opens the dialog on the caps a run would get if it sent none", () => {
+		// The defaults seed the engine's `sseMaxStreamDurationMs` /
+		// `sseMaxStreamEvents` settings, so a dialog opening on different
+		// numbers would show bounds that are not the ones in force for a user
+		// who never touched the fields.
+		expect(LOAD_TEST_DEFAULTS.STREAM_DURATION_S * 1000).toBe(
+			engineConstant("MAX_STREAM_DURATION_MS")
+		);
+		expect(LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS).toBe(engineConstant("MAX_STREAM_EVENTS"));
+	});
+
+	it("reads the stream flag through the shared parser on POST /runs", () => {
+		// The constants agreeing is not the same as the route reading them: the
+		// refusal this replaced was a flat `return "'stream' is not valid on a
+		// run"`, and leaving that in place would make every assertion above
+		// describe a payload the endpoint still rejects.
+		expect(executionCpp).toMatch(/read_stream_flag\s*\(config\)/);
 	});
 });

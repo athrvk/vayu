@@ -2121,6 +2121,78 @@ describe("dispatchTool", () => {
 		expect(payload.duration).toBeUndefined();
 	});
 
+	test("start_load_run forwards the stream flag and both caps", async () => {
+		// Forwarded verbatim, bounded only by the engine's own ranges: the
+		// engine validates before the run row exists, so re-deriving the rule
+		// here would be a second copy to keep in step (issue #576).
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				targetRps: 10,
+				mode: "constant_rps",
+				duration: "30s",
+				confirmed: true,
+				stream: true,
+				maxStreamDurationMs: 20_000,
+				maxStreamEvents: 50,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.stream).toBe(true);
+		expect(payload.maxStreamDurationMs).toBe(20_000);
+		expect(payload.maxStreamEvents).toBe(50);
+	});
+
+	test("start_load_run sends no stream key when the agent named none", async () => {
+		// The engine refuses `stream` beside `transient` and refuses a cap
+		// without `stream`, so a defaulted `false` would turn "said nothing"
+		// into a claim the engine has to judge.
+		const client = fakeClient();
+		await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				concurrency: 10,
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).not.toHaveProperty("stream");
+		expect(payload).not.toHaveProperty("maxStreamEvents");
+	});
+
+	test("the stream cap schema accepts exactly the engine's ranges", () => {
+		// Same posture as the maxInFlight ceiling above: a value this schema
+		// accepts must be one POST /runs accepts, or the agent gets an opaque
+		// 400 instead of a named refusal.
+		for (const args of [
+			{ maxStreamDurationMs: 1000 },
+			{ maxStreamDurationMs: 86_400_000 },
+			{ maxStreamEvents: 1 },
+			{ maxStreamEvents: 10_000_000 },
+		]) {
+			expect(() =>
+				parseArgs("start_load_run", { url: "https://api.example.com", ...args })
+			).not.toThrow();
+		}
+		for (const args of [
+			{ maxStreamDurationMs: 999 },
+			{ maxStreamDurationMs: 86_400_001 },
+			{ maxStreamEvents: 0 },
+			{ maxStreamEvents: 10_000_001 },
+			{ maxStreamEvents: 2.5 },
+		]) {
+			expect(() =>
+				parseArgs("start_load_run", { url: "https://api.example.com", ...args })
+			).toThrow();
+		}
+	});
+
 	test("start_load_run forwards an agent-supplied httpVersion", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(

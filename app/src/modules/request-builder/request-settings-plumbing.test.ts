@@ -107,11 +107,24 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(source).toContain("stream: false");
 	});
 
-	it("never sends stream with a load test - the engine refuses it on a run", () => {
-		// `POST /runs` 400s a payload carrying `stream` (`invalid_run_config`):
-		// a load run's completion accounting has no place for a response that
-		// never ends.
-		expect(hops(source ?? "", "pendingLoadTestRequest", "stream")).toBe(0);
+	it("takes the load test's stream flag from the request, never from the dialog", () => {
+		// `POST /runs` refused `stream` outright until issue #576, when the load
+		// event loop learned to bound one. It is still read off the *request*
+		// and never off the load config: whether a request streams belongs to
+		// the request's Settings tab, and only the caps - how much of each
+		// stream this run measures - belong to the dialog. A `config.stream`
+		// here would mean a second control had crept in, exactly as
+		// `config.httpVersion` would below.
+		expect(hops(source ?? "", "pendingLoadTestRequest", "stream")).toBe(1);
+		expect(hops(source ?? "", "config", "stream")).toBe(0);
+	});
+
+	it("sends both stream caps from the dialog, in the engine's milliseconds", () => {
+		// The other half of that split, and the one a refactor could silently
+		// drop: without the caps the run is bounded by the engine's
+		// `sseMaxStreamDurationMs` setting, which the dialog never showed.
+		expect(source).toContain("maxStreamEvents: config.stream_max_events");
+		expect(source).toContain("config.stream_duration_seconds * 1000");
 	});
 
 	it("takes the load test's protocol from the request, never from the dialog's config", () => {

@@ -61,6 +61,15 @@ export const LOAD_TEST_DEFAULTS = {
 	 */
 	STEP_DURATION_S: 5,
 	SAVE_TIMING_BREAKDOWN: true,
+	/**
+	 * Streaming runs (issue #576): how long one stream may run, and how many
+	 * events it may deliver, before the engine ends it as a **completed**
+	 * stream. Both match the engine's `sseMaxStreamDurationMs` /
+	 * `sseMaxStreamEvents` seeds, so the dialog opens showing the bounds a run
+	 * would get if it sent nothing at all.
+	 */
+	STREAM_DURATION_S: 600,
+	STREAM_MAX_EVENTS: 100_000,
 } as const;
 
 export interface LimitRange {
@@ -79,7 +88,9 @@ export type LoadTestLimitKey =
 	| "SAMPLE_RATE_PCT"
 	| "SLOW_THRESHOLD_MS"
 	| "SLO_MS"
-	| "STEP_DURATION_S";
+	| "STEP_DURATION_S"
+	| "STREAM_DURATION_S"
+	| "STREAM_MAX_EVENTS";
 
 export type LoadTestLimits = Record<LoadTestLimitKey, LimitRange>;
 
@@ -120,6 +131,16 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	 * to judge and the search would stall waiting for a window it never fills.
 	 */
 	STEP_DURATION_S: { MIN: 1, MAX: 600 },
+	/**
+	 * The two stream caps, in the dialog's units. Both ranges are the engine's
+	 * own `constants::sse` bounds - `MIN_STREAM_DURATION_MS` /
+	 * `STREAM_DURATION_MS_CEILING` in seconds, and `MIN_STREAM_EVENTS` /
+	 * `STREAM_EVENTS_CEILING` - because the engine rejects anything outside
+	 * them with a 400, and a control that can reach a value the engine refuses
+	 * is a dialog that starts no run.
+	 */
+	STREAM_DURATION_S: { MIN: 1, MAX: 86_400 },
+	STREAM_MAX_EVENTS: { MIN: 1, MAX: 10_000_000 },
 };
 
 /**

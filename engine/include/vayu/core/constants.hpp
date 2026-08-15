@@ -467,6 +467,18 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// because the feed is five atomic histogram records on the completion path;
 /// see docs/engine/benchmarks.md for the measured cost.
 constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
+
+/// Whether a streaming load run feeds the per-completion event histogram
+/// (run config `stream_metrics`, issue #576). On by default: it is one atomic
+/// histogram record per completion, paid only by runs that stream, and it is
+/// the whole point of running a stream under load - events/sec is the number
+/// such a run exists to produce.
+constexpr bool DEFAULT_STREAM_METRICS = true;
+
+/// Ceiling on the event histogram's value range - events delivered by one
+/// stream. Above `sse::STREAM_EVENTS_CEILING`, which is what a per-request cap
+/// can be set to, so the histogram can hold any completion the caps allow.
+constexpr int64_t HISTOGRAM_MAX_EVENTS = 10000000;
 } // namespace metrics_collector
 
 /**
@@ -507,6 +519,15 @@ constexpr int64_t STREAM_DURATION_MS_CEILING = 86400000;
 constexpr int64_t MAX_STREAM_EVENTS     = 100000;
 constexpr int64_t MIN_STREAM_EVENTS     = 1;
 constexpr int64_t STREAM_EVENTS_CEILING = 10000000;
+
+/// Grace between a load stream's duration cap and the whole-transfer timeout
+/// that backstops it (issue #576). The cap is enforced from the progress
+/// callback, which libcurl runs at least once a second, so the backstop has to
+/// sit far enough past the cap that ordinary callback latency never beats it -
+/// otherwise a stream that ended exactly as asked is reported as a timeout.
+/// Reaching the backstop at all means the callback never ran, which is a real
+/// failure and is reported as one.
+constexpr int64_t LOAD_STREAM_TIMEOUT_GRACE_MS = 5000;
 
 /// How long a stream may deliver nothing before it is ended as idle, seeding
 /// `sseIdleTimeoutMs`. Enforced through `CURLOPT_LOW_SPEED_TIME`, whose

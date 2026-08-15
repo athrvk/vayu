@@ -531,6 +531,27 @@ export interface StartLoadTestRequest {
 	// Omitted entirely when no endpoint was given; the engine rejects a block
 	// with no `series` rather than starting a run that scrapes nothing.
 	monitor?: RunMonitorConfig;
+
+	/**
+	 * Consume each transfer as a `text/event-stream` (issue #576).
+	 *
+	 * The same flag and the same two cap names `POST /execute` takes, because
+	 * the engine reads both endpoints through one parser - a load run declares
+	 * a stream exactly as a Send does. Sent from the request's own `stream`
+	 * setting, never from the load dialog: whether a request streams is a
+	 * property of the request, and only the bounds below belong to the run.
+	 */
+	stream?: boolean;
+	/**
+	 * Wall-clock ceiling on one stream, in ms; omitted takes the engine's
+	 * `sseMaxStreamDurationMs`. Under load a stream is bounded by construction -
+	 * the load loop refills concurrency per completion, so a transfer that
+	 * never ends leaks its slot for the rest of the run - and reaching a cap is
+	 * a **successful** completion rather than a timeout.
+	 */
+	maxStreamDurationMs?: number;
+	/** Ceiling on events delivered by one stream; omitted takes `sseMaxStreamEvents`. */
+	maxStreamEvents?: number;
 }
 
 export interface StartLoadTestResponse {

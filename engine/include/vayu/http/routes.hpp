@@ -565,8 +565,8 @@ struct TransientFlag {
 TransientFlag read_transient_flag (const nlohmann::json& json);
 
 /**
- * The outcome of reading `POST /execute`'s `stream` flag and its caps
- * (issue #573).
+ * The outcome of reading a payload's `stream` flag and its caps (issue #573;
+ * `POST /runs` reads it through here too since #576).
  *
  * `ok == false` carries the 400 the route answers with. Every rejection here is
  * loud rather than a fallback, because the flag changes the *execution model* -
@@ -587,13 +587,22 @@ struct StreamFlag {
 
 /**
  * Read `stream`, `maxStreamDurationMs` and `maxStreamEvents` off a
- * `POST /execute` payload, and refuse the combinations that cannot mean
- * anything.
+ * `POST /execute` or `POST /runs` payload, and refuse the combinations that
+ * cannot mean anything.
+ *
+ * **Both endpoints read through this one function** (issue #576), so the two
+ * cannot drift on what a cap is called, what type it takes or what range it
+ * accepts - a load run declares a stream in exactly the spelling a send does.
+ * What differs is downstream and not here: `POST /execute` hands the transfer
+ * to `SseStreamManager` and relays its events live, while `POST /runs` turns
+ * the caps into `Request::stream_bounds` and lets the load event loop end the
+ * transfer by them.
  *
  * One combination is refused, because a stream **is** its run row:
  * `transient: true` asks for no row at all - there would be nothing for
  * `eventsUrl` to name, nothing to carry the status, and nothing for
- * `POST /runs/:id/stop` to find.
+ * `POST /runs/:id/stop` to find. (`POST /runs` never reaches that check: it
+ * rejects `transient` before this runs.)
  *
  * Scripts were refused here too until phase 3 (issue #575). They now run: the
  * pre-request script before the transfer starts, exactly as on a buffered send,

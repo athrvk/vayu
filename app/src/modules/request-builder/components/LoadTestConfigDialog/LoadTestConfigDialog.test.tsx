@@ -21,7 +21,11 @@ import LoadTestConfigDialog from "./index";
 import type { LoadTestConfig } from "@/types";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useClientSettingsStore } from "@/stores";
-import { DEFAULT_LOAD_TEST_CEILINGS, LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import {
+	DEFAULT_LOAD_TEST_CEILINGS,
+	LOAD_TEST_CEILING_BOUNDS,
+	LOAD_TEST_DEFAULTS,
+} from "@/constants/load-test";
 import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
 
 vi.mock("../OAuth2LoadTestGuard", () => ({
@@ -49,6 +53,7 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			isStarting={false}
 			hasPreRequestScript={false}
 			hasDynamicVariables={false}
+			isStreamingRequest={false}
 			{...props}
 		/>
 	);
@@ -178,6 +183,54 @@ describe("payload", () => {
 		expect(config.success_sample_period).toBeTypeOf("number");
 		expect(config.slow_threshold_ms).toBeTypeOf("number");
 		expect(config.save_timing_breakdown).toBeTypeOf("boolean");
+	});
+});
+
+describe("stream caps (issue #576)", () => {
+	it("shows neither cap for a request that does not stream", () => {
+		// Offering bounds on something that is not happening. The flag belongs
+		// to the request's Settings tab, and only what this run measures of
+		// each stream belongs here.
+		open();
+		expect(screen.queryByLabelText(/stop each stream after/i)).not.toBeInTheDocument();
+		expect(screen.queryByLabelText(/many events/i)).not.toBeInTheDocument();
+	});
+
+	it("shows both caps for a streaming request", () => {
+		open({ isStreamingRequest: true });
+		expect(screen.getByLabelText(/stop each stream after/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/many events/i)).toBeInTheDocument();
+	});
+
+	it("sends both caps for a streaming request", () => {
+		const { onStart } = open({ isStreamingRequest: true });
+		fireEvent.change(screen.getByLabelText(/stop each stream after/i), {
+			target: { value: "45" },
+		});
+		fireEvent.change(screen.getByLabelText(/many events/i), { target: { value: "250" } });
+		const config = started(onStart);
+		expect(config.stream_duration_seconds).toBe(45);
+		expect(config.stream_max_events).toBe(250);
+	});
+
+	it("sends the defaults rather than omitting them when the fields are untouched", () => {
+		// Omitting would leave the run bounded by the engine's
+		// `sseMaxStreamDurationMs`, which this dialog never showed - so the
+		// numbers on screen would not be the numbers in force.
+		const { onStart } = open({ isStreamingRequest: true });
+		const config = started(onStart);
+		expect(config.stream_duration_seconds).toBe(LOAD_TEST_DEFAULTS.STREAM_DURATION_S);
+		expect(config.stream_max_events).toBe(LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS);
+	});
+
+	it("sends no cap for a non-streaming request", () => {
+		// The engine refuses a cap without `stream`, which is what keeps an
+		// unbounded run from being mistaken for a capped one - so the dialog
+		// must not send one either.
+		const { onStart } = open();
+		const config = started(onStart);
+		expect(config.stream_duration_seconds).toBeUndefined();
+		expect(config.stream_max_events).toBeUndefined();
 	});
 });
 

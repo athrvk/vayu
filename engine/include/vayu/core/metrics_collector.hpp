@@ -182,6 +182,14 @@ struct MetricsCollectorConfig {
     /// nullopt - which is what keeps the report's `phases` section absent
     /// rather than showing five zeroed distributions.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
+
+    /// Whether the per-completion event-count histogram is allocated and fed
+    /// (issue #576). Same shape as `phase_histograms` above and for the same
+    /// reason: off allocates nothing, records nothing, and `stream_percentiles()`
+    /// answers nullopt, so the report's `stream` section is absent rather than
+    /// a zeroed distribution. Only a run whose request streams ever feeds it -
+    /// an ordinary run pays a null check per completion and nothing else.
+    bool stream_metrics = constants::metrics_collector::DEFAULT_STREAM_METRICS;
 };
 
 /**
@@ -587,6 +595,46 @@ class MetricsCollector {
     [[nodiscard]] std::optional<std::array<Percentiles, TIMING_PHASE_COUNT>> phase_percentiles () const;
 
     /**
+     * @brief What a streaming run's completions delivered (issue #576).
+     *
+     * `nullopt` for every run that streamed nothing - `stream_metrics` off, or
+     * no completion that carried an event count - which is what keeps the
+     * report's `stream` section absent for the ordinary load run rather than
+     * present and zeroed.
+     *
+     * `events` is the per-completion distribution: a run of 500 streams each
+     * delivering ~40 events has a p50 near 40, not near 20000. The per-second
+     * rate the report derives from `total_events` and the run's duration is the
+     * other question ("how fast did this target push"), and the two are
+     * deliberately both reported - one stream delivering 10k events and 250
+     * delivering 40 each are the same rate and a very different run.
+     */
+    struct StreamTotals {
+        /// Completions that carried an event count, i.e. streams that finished.
+        size_t completions = 0;
+        /// Events summed across them - the numerator of events/sec.
+        size_t total_events = 0;
+        /// How many of those completions a cap ended, rather than the server.
+        /// All of them is the honest signal that the caps, not the target, are
+        /// what the run measured.
+        size_t capped = 0;
+        /// Per-completion event-count distribution; counts, not milliseconds.
+        Percentiles events;
+    };
+
+    [[nodiscard]] std::optional<StreamTotals> stream_totals () const;
+
+    /**
+     * @brief Record one bounded stream's completion (issue #576).
+     *
+     * Called from `handle_result` for every completion whose response carried
+     * an event count, success or failure alike: a stream the target killed
+     * halfway still delivered what it delivered, and excluding it would report
+     * a run's throughput off the streams that happened to survive.
+     */
+    void record_stream_completion (size_t events, bool capped);
+
+    /**
      * @brief Sample the rolling (windowed) latency percentiles for the interval
      *        that has elapsed since the previous call, then reset the window.
      *
@@ -774,6 +822,16 @@ class MetricsCollector {
     // event-loop worker, so records go through hdr_record_value_atomic for the
     // same reason latency_histogram_'s do; read once after the drain.
     std::array<struct hdr_histogram*, TIMING_PHASE_COUNT> phase_histograms_{};
+
+    // Per-completion event counts for a streaming run (issue #576). Null when
+    // `stream_metrics` is off, exactly like the bank above, so the null check
+    // in record_stream_completion is the whole cost for a run that does not
+    // stream. Counts rather than microseconds - it shares nothing with the
+    // latency histograms but their precision.
+    struct hdr_histogram* stream_events_histogram_ = nullptr;
+    std::atomic<size_t> stream_completions_{ 0 };
+    std::atomic<size_t> stream_events_total_{ 0 };
+    std::atomic<size_t> stream_capped_{ 0 };
 
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;

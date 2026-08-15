@@ -253,7 +253,8 @@ TransientFlag read_transient_flag (const nlohmann::json& json) {
 }
 
 /**
- * @brief Read `POST /execute`'s `stream` flag and its caps (issue #573).
+ * @brief Read a payload's `stream` flag and its caps (issue #573), for both
+ *        `POST /execute` and - since #576 - `POST /runs`.
  *
  * Non-static: sse_stream_test.cpp drives it directly, the suite having no
  * in-process HTTP route harness. See routes.hpp for the refusal set.
@@ -678,16 +679,17 @@ const vayu::core::MonitorLimits& monitor_limits) {
                "only, because a run is identified by the row it creates";
     }
 
-    // `stream` belongs to `POST /execute` alone in this phase (issue #573).
-    // Refused rather than ignored, and for the same reason `transient` is: a
-    // caller that sends it believes this run will deliver events live, and it
-    // is about to buffer every response into a load test's metrics instead.
-    // Load-mode streaming arrives with the caps that keep the completion-driven
-    // refill loop's invariants (issue #576).
-    if (config.contains ("stream") && !config["stream"].is_null ()) {
-        return "'stream' is not valid on a run - it applies to POST /execute "
-               "only, because a load run's completion accounting has no place "
-               "for a response that never ends";
+    // `stream` and its caps are read through the *same* parser `POST /execute`
+    // uses (issue #576): one description of how a stream is declared, so the
+    // two endpoints cannot drift on the spelling, the types or the ranges. It
+    // was refused outright here through phase 3 (#573) because a load run's
+    // completion accounting has no place for a response that never ends - what
+    // changed is that a load stream now always ends, by a cap resolved below.
+    //
+    // The `transient` rule inside that parser is unreachable from here: a run
+    // carrying `transient` was already rejected above.
+    if (const auto stream = read_stream_flag (config); !stream.ok) {
+        return stream.error;
     }
 
     // The duration-shaped fields are the only non-numeric ones here, and the
@@ -756,7 +758,8 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // is here to prevent. Absent and `null` both mean "use the engine setting",
     // matching the null-vs-absent rule the resource routes follow.
     for (const char* key :
-    { "phase_histograms", "save_timing_breakdown", "capture_response_bodies" }) {
+    { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
+    "stream_metrics" }) {
         const auto it = config.find (key);
         if (it != config.end () && !it->is_null () && !it->is_boolean ()) {
             return "'" + std::string (key) + "' must be a boolean (got " +

@@ -197,6 +197,28 @@ that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
 off for anyone whose target proves otherwise; off leaves the bank unallocated,
 so the completion path pays one null check.
 
+### SSE frame counting: not yet measured (issue #576)
+
+Streaming under load puts a second thing on the write callback's hot path: an
+`SseFrameCounter` fed every byte of every streaming transfer. It is a per-byte
+loop over a nine-byte state machine with no allocation and no string building -
+a scan, not a parse - and it runs **only** for transfers carrying
+`stream_bounds`, so an ordinary load run pays one `std::optional` check per
+callback and nothing else.
+
+**There is no number here yet, and this section exists to say so rather than to
+imply one.** The measurement belongs with the other hot-path figures on this
+page, on a quiet host, against a streaming fixture rather than the buffered mock
+server every figure above uses - a stream's cost profile is nothing like a small
+JSON body's, so folding it into an existing sweep would compare two different
+workloads. It is tracked with the other parked benchmark work in
+[#197](https://github.com/athrvk/vayu/issues/197); the shape to measure is
+bytes/second through the counter versus the same transfer with counting
+disabled, at the chunk sizes libcurl actually delivers.
+
+What is already known without a run: the counter cannot change a *non*-streaming
+run's cost, because the branch that reaches it is not taken.
+
 ### The in-app proof run
 
 Started from the app's own Load Test panel (not the CLI, not MCP), 60 s,

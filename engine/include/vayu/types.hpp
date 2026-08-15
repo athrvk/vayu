@@ -229,6 +229,27 @@ inline const std::vector<HttpVersion>& all_http_versions () {
 constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
 
 /**
+ * @brief The caps that end a streaming transfer under load (issue #576).
+ *
+ * Present on a `Request` exactly when that request is a stream driven by the
+ * load event loop, and absent everywhere else - including on the design path,
+ * whose stream is managed by `SseStreamManager` and ends by rules of its own.
+ *
+ * Both caps are always set, never zero-for-unbounded: the load loop is
+ * completion-driven (`in_flight() = sent - completed`, refill per completion),
+ * so a transfer that never completes does not merely skew a number - it leaks
+ * its concurrency slot for the rest of the run. "Bounded by construction" is
+ * that invariant stated as a type: if a `Request` says it streams, it also says
+ * when it stops.
+ */
+struct StreamBounds {
+    /// Wall-clock ceiling on the transfer, from submission.
+    int64_t max_duration_ms = 0;
+    /// Ceiling on events delivered, counted by `SseFrameCounter`.
+    int64_t max_events = 0;
+};
+
+/**
  * @brief HTTP Request definition
  */
 struct Request {
@@ -268,6 +289,17 @@ struct Request {
      * does not receive its fixes. Read only when `track_cookies` is set.
      */
     std::vector<std::string> cookie_lines;
+
+    /**
+     * @brief Consume this transfer as a bounded `text/event-stream` (#576).
+     *
+     * Absent for every ordinary transfer, and for the design path's stream -
+     * see `StreamBounds`. Set, it changes three things about the transfer and
+     * nothing else: events are counted as they arrive, either cap ends it as a
+     * **success**, and the whole-transfer timeout becomes a backstop around the
+     * duration cap rather than the deadline itself.
+     */
+    std::optional<StreamBounds> stream_bounds;
 };
 
 /**
@@ -392,6 +424,31 @@ struct Response {
      * naming at all.
      */
     bool http_version_downgraded = false;
+
+    /**
+     * @brief Events this transfer delivered, when it was a bounded stream
+     *        (`Request::stream_bounds`); absent otherwise (issue #576).
+     *
+     * Optional rather than a zero, and for the reason the report's sections are
+     * omitted rather than zeroed: "this was not a stream" and "this stream
+     * delivered nothing" are different facts, and a run whose target closed
+     * every connection before the first event is exactly the one where telling
+     * them apart matters.
+     *
+     * Counted by `SseFrameCounter` on the write callback, which agrees with
+     * `SseParser` on what an event is - see that header.
+     */
+    std::optional<std::size_t> stream_events;
+
+    /**
+     * @brief True when a cap in `Request::stream_bounds` is what ended this
+     *        transfer, rather than the server closing the stream (issue #576).
+     *
+     * Both are successful completions - reaching the cap *is* a bounded
+     * stream's intended end under load - so the status code cannot tell them
+     * apart and this is what the report's `capped` tally counts.
+     */
+    bool stream_capped = false;
 
     /**
      * @brief The whole cookie jar the finishing handle held, when the request

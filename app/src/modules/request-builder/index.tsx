@@ -603,6 +603,21 @@ export default function RequestBuilder() {
 						? `${config.step_duration_seconds}s`
 						: undefined,
 					maxInFlight: config.max_in_flight,
+					// A load run of a streaming request streams (issue #576).
+					// Read off the request rather than the dialog, and sent as
+					// `false` rather than elided when it does not, for the same
+					// reason the execute payload spells it out: the engine's
+					// composed payload may carry a stale flag, and an omitted
+					// `false` would be read as "unset", not as "no".
+					stream: pendingLoadTestRequest.stream ?? false,
+					// The caps, in the engine's milliseconds. Present only for a
+					// streaming run - the engine rejects a cap without `stream`,
+					// which is what stops an unbounded run from being mistaken
+					// for a capped one.
+					maxStreamDurationMs: config.stream_duration_seconds
+						? config.stream_duration_seconds * 1000
+						: undefined,
+					maxStreamEvents: config.stream_max_events,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,
@@ -762,6 +777,7 @@ export default function RequestBuilder() {
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
 					hasDynamicVariables={requestUsesDynamicVariables(pendingLoadTestRequest)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
+					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 				/>
 			)}
 		</>

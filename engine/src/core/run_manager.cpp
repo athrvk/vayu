@@ -415,6 +415,25 @@ EngineDefaults engine_defaults)
     // can switch them off without changing the setting for every other run.
     mc_config.phase_histograms =
     config.value ("phase_histograms", engine_defaults.phase_histograms);
+    // The event histogram behind the report's `stream` section. Run-config
+    // only, with no engine-wide setting beside `phaseHistograms`: that one
+    // exists to switch off a cost *every* run pays, and this one is paid only
+    // by a run that opted into streaming in the first place (issue #576).
+    mc_config.stream_metrics =
+    config.value ("stream_metrics", constants::metrics_collector::DEFAULT_STREAM_METRICS);
+
+    // The caps a streaming run's transfers are bounded by. `stream` has already
+    // been validated by `read_stream_flag` in the route, so a value here is a
+    // boolean and each cap is an integer in range - this only has to choose
+    // between the caller's number and the engine setting's.
+    if (config.value ("stream", false)) {
+        vayu::StreamBounds bounds;
+        bounds.max_duration_ms = config.value ("maxStreamDurationMs",
+        static_cast<int64_t> (engine_defaults.stream_max_duration_ms));
+        bounds.max_events = config.value (
+        "maxStreamEvents", static_cast<int64_t> (engine_defaults.stream_max_events));
+        stream_bounds = bounds;
+    }
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
@@ -706,6 +725,12 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS);
         engine_defaults.max_sample_bytes = static_cast<size_t> (db.get_config_int ("maxSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
+        // The same two settings the design path's stream reads, so a user who
+        // tightened them once has tightened them for both (issue #576).
+        engine_defaults.stream_max_duration_ms = db.get_config_int ("sseMaxStreamDurationMs",
+        static_cast<int> (vayu::core::constants::sse::MAX_STREAM_DURATION_MS));
+        engine_defaults.stream_max_events = db.get_config_int ("sseMaxStreamEvents",
+        static_cast<int> (vayu::core::constants::sse::MAX_STREAM_EVENTS));
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
@@ -868,6 +893,14 @@ RunManager& manager) {
             }
             request = std::move (built.request);
 
+            // A streaming run's caps ride on the request itself, because the
+            // event loop is what enforces them and the request is all it sees.
+            // Attached after `build_request` rather than inside it: the caps
+            // are a property of *this* run's execution model, and the same
+            // builder serves `POST /execute`, whose stream is managed by
+            // `SseStreamManager` and must not acquire load bounds (issue #576).
+            request.stream_bounds = context->stream_bounds;
+
             // A run that outlives its OAuth 2.0 token used to become a 401
             // storm the report never explained. Armed here, while the token
             // this run just resolved is still the one in the cache, and inert
@@ -1006,6 +1039,7 @@ RunManager& manager) {
             inputs.latency         = percentiles;
             inputs.latency_avg_ms  = avg_latency;
             inputs.phases          = context->metrics_collector->phase_percentiles ();
+            inputs.stream          = context->metrics_collector->stream_totals ();
             inputs.http_version_downgraded =
             context->metrics_collector->http_version_downgraded ();
             inputs.tests     = validation.run;
@@ -1115,6 +1149,7 @@ RunManager& manager) {
             inputs.latency          = mc.calculate_percentiles ();
             inputs.latency_avg_ms   = mc.average_latency ();
             inputs.phases           = mc.phase_percentiles ();
+            inputs.stream           = mc.stream_totals ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
             if (context->auth_refresh) {
@@ -1277,6 +1312,28 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // watched and saw nothing.
     if (inputs.auth.has_value ()) {
         summary["auth"] = *inputs.auth;
+    }
+    // What a streaming run's completions delivered (issue #576). Omitted for
+    // every run that streamed nothing, so an absent section reads as "this run
+    // was not a stream" rather than as a stream that carried no events.
+    //
+    // `eventsPerSecond` is derived here rather than stored, from the same
+    // `test_duration` the report's `rps` uses - two rates a reader compares
+    // must come off one clock. A zero-length run reports 0 rather than an
+    // infinity the JSON could not hold.
+    if (inputs.stream.has_value ()) {
+        const auto& stream = *inputs.stream;
+        summary["stream"] = { { "completions", stream.completions },
+            { "totalEvents", stream.total_events }, { "capped", stream.capped },
+            { "eventsPerSecond",
+            inputs.test_duration_s > 0.0 ?
+            static_cast<double> (stream.total_events) / inputs.test_duration_s :
+            0.0 },
+            { "events",
+            { { "min", stream.events.min }, { "max", stream.events.max },
+            { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
+            { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
+            { "count", stream.events.count } } } };
     }
     return summary;
 }

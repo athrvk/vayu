@@ -2671,7 +2671,11 @@ Start a load test run (Vayu Mode).
   "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
-  "httpVersion": "auto"      // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
+  "httpVersion": "auto",     // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
+  "stream": false,           // Optional - consume each response as text/event-stream; see below
+  "maxStreamDurationMs": 600000,  // Optional, streaming only - see below
+  "maxStreamEvents": 100000,      // Optional, streaming only - see below
+  "stream_metrics": true     // Optional - feed the event histogram behind the report's `stream` section
 }
 ```
 
@@ -2685,6 +2689,47 @@ actually depends on this field to specify a protocol in the first place. An
 explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
+
+#### Streaming under load (`stream`)
+
+`POST /runs` reads `stream`, `maxStreamDurationMs` and `maxStreamEvents`
+through the **same parser** `POST /execute` uses, so the two endpoints agree on
+the spelling, the types and the ranges - a load run declares a stream exactly as
+a send does. It was a `400` here until this landed, because a load run's
+completion accounting has no place for a response that never ends. What changed
+is that a load stream always ends.
+
+**Under load a stream is bounded by construction.** Both caps are always in
+force - the payload's, or the `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
+settings when the payload names none - and neither can be set to
+zero-for-unbounded. That is not tidiness: the load loop is completion-driven
+(`in_flight() = sent - completed`, concurrency refilled per completion), so a
+transfer that never completes leaks its slot for the rest of the run.
+
+**Reaching a cap is a *successful* completion**, not a timeout and not an error:
+it is the stream's intended end under load, so it lands in the run's success
+counts, its latency histogram and its status-code distribution like any other
+200. Three other endings stay exactly what they were:
+
+| Ending | Reported as |
+|--------|-------------|
+| A cap in `maxStreamEvents` / `maxStreamDurationMs` | Success, `stream.capped` incremented |
+| The server closing the stream | Success, not counted in `stream.capped` |
+| `maxResponseBodyBytes` exceeded | **Error** - a refusal to buffer, unchanged. The event cap bounds how many events arrive, not how large one is |
+| The whole-transfer timeout | **Error** - it sits a grace period *past* the duration cap, so reaching it means the cap never fired |
+
+Events are counted on the write path by a frame counter that agrees with the
+design path's parser about what an event is: a frame carrying no `data` field
+is not one, so comment-only keep-alives do not inflate the tally.
+
+`stream` is refused beside `transient` (as on a send) and each cap is refused
+without `stream` - a cap on a non-streaming run reads as a bound the caller
+expects to apply, and ignoring it is how an unbounded run gets mistaken for a
+capped one.
+
+Streaming is **not** supported on a scenario run: `scenario` composes its steps
+at plan time and each step is its own request, so there is no single stream for
+the caps to bound.
 
 #### The `thresholds` block (pass/fail budgets)
 
@@ -3260,6 +3305,10 @@ default, and whose message names the offending field and why the bound exists:
 | `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
+| `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
+| `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
+| `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event histogram. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the SLO setting. |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of
@@ -4120,6 +4169,7 @@ than an empty object, so "not measured against a spec" has one spelling.
     }
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "stream": { "...": "streaming runs only - see below" },
   "sampling": {
     "errorsDropped": 0, "successTracesDropped": 29000,
     "slowTracesDropped": 0, "responseSamplesDropped": 998000,
@@ -4157,6 +4207,39 @@ A `tls.p50` of 0 beside a large `tls.p99` is a run re-handshaking under load -
 most requests reused a connection, a minority did not - which the average over
 both flattens into a number that looks merely mediocre. `count` is the number of
 completions behind each distribution and is identical across the five.
+
+**A streaming run adds a `stream` section** and no other run carries one:
+
+```json
+"stream": {
+  "completions": 480,
+  "totalEvents": 19200,
+  "capped": 480,
+  "eventsPerSecond": 320.0,
+  "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 }
+}
+```
+
+Absent for every run that did not stream, and for one started with
+`stream_metrics: false` - not zeroed, because "this run was not a stream" and
+"this stream delivered nothing" are different answers, and a run whose target
+closed every connection before the first event is where telling them apart
+matters.
+
+`events` is the **per-completion** distribution, not the run's total: 480
+streams of 40 events each have a p50 of 40, not of 19200. `eventsPerSecond` is
+the whole-run rate, derived from the same `testDuration` the report's `rps`
+uses so the two are comparable. Both are reported because one long stream and
+250 short ones can share a rate while being entirely different runs.
+
+`capped` counts the completions a cap ended rather than the server. In the
+example above every stream hit the event cap - the `events` percentiles all
+sitting exactly on it is the tell - so those counts measure the caps, not the
+target.
+
+**Time to first event needs no field of its own**: it *is*
+`timingBreakdown.phases.firstByte`, since a stream's first byte is its first
+event's first byte. A second copy would be a second number to keep true.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 

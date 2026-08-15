@@ -461,6 +461,18 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // until the daemon is OOM-killed.
     data->max_response_bytes = config.max_response_body_bytes;
 
+    // A bounded stream's caps (issue #576), copied onto the transfer so both
+    // callbacks read them without reaching back through the request. The
+    // deadline is computed once here rather than per callback: `submitted_at`
+    // is the run's own view of when this transfer began, and it is what
+    // `queue_wait_ms` is measured from, so the duration cap covers the same
+    // span the report attributes to the transfer.
+    if (request.stream_bounds) {
+        data->stream_bounds = request.stream_bounds;
+        data->stream_deadline =
+        data->submitted_at + std::chrono::milliseconds (request.stream_bounds->max_duration_ms);
+    }
+
     // Set headers
     for (const auto& [key, value] : request.headers) {
         if (suppresses_request_header (request, key)) {
@@ -516,15 +528,28 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt (curl, CURLOPT_HEADERDATA, data);
 
-    // Progress callback
-    if (data->progress) {
+    // Progress callback. A bounded stream needs it whether or not the caller
+    // asked for progress: it is where the duration cap is enforced, and a quiet
+    // stream produces no writes to enforce it from (issue #576).
+    if (data->progress || data->stream_bounds) {
         curl_easy_setopt (curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
         curl_easy_setopt (curl, CURLOPT_XFERINFODATA, data);
         curl_easy_setopt (curl, CURLOPT_NOPROGRESS, 0L);
     }
 
-    // Set timeout
-    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
+    // Set timeout. For a bounded stream the whole-transfer deadline is a
+    // *backstop* around the duration cap rather than the deadline itself: the
+    // cap is meant to end the stream successfully a grace period before this
+    // fires, so reaching this one means the progress callback never ran, which
+    // is a genuine failure and is reported as the timeout it is. Setting it to
+    // `timeout_ms` instead would kill a legitimately long stream as an error at
+    // the ordinary per-request timeout, which for a 10-minute cap and a 30s
+    // timeout is every stream.
+    const long transfer_timeout_ms = request.stream_bounds ?
+    static_cast<long> (request.stream_bounds->max_duration_ms +
+    vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS) :
+    static_cast<long> (request.timeout_ms);
+    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, transfer_timeout_ms);
 
     // Set redirect options
     if (request.follow_redirects) {
@@ -685,6 +710,36 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
             }
             curl_slist_free_all (held);
         }
+    }
+
+    // A bounded stream reports what it delivered, on every path below: a
+    // transfer the server killed mid-stream still delivered the events it
+    // delivered, and dropping the count on the error path would make a partial
+    // stream indistinguishable from one that carried nothing.
+    if (data->stream_bounds) {
+        data->stream_counter.finish ();
+        response.stream_events = data->stream_counter.events ();
+        response.stream_capped = data->stream_cap_reached;
+    }
+
+    // A cap ended this stream, which is what a bounded stream under load is
+    // *supposed* to do (issue #576), so it completes successfully rather than
+    // as the aborted write or aborted callback libcurl reports. Ahead of the
+    // error branch and deliberately not folded into it: the run's completion
+    // accounting treats this like any other success, which is what keeps
+    // `in_flight()` balanced and the refill loop untouched.
+    //
+    // `body_limit_exceeded` still wins - it is checked first below only because
+    // it cannot be set at the same time as this: write_callback returns at the
+    // byte cap without ever setting `stream_cap_reached`.
+    if (result != CURLE_OK && data->stream_cap_reached && !data->body_limit_exceeded) {
+        long stream_code = 0;
+        curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &stream_code);
+        response.status_code = static_cast<int> (stream_code);
+        if (response.status_text.empty ()) {
+            response.status_text = vayu::http::status_text (response.status_code);
+        }
+        return response;
     }
 
     if (result != CURLE_OK) {
