@@ -856,6 +856,20 @@ const std::string& run_id) {
         if (!config_obj.empty ()) {
             metadata["configuration"] = config_obj;
         }
+
+        // The spec this run was planned against (issue #637), echoed from the
+        // snapshot the scenario manifest stamped it into. Echoed rather than
+        // re-read from the collection: the binding is free to have moved since,
+        // and a report has to say what the run was measured against, not what
+        // the collection points at today. Absent for an unbound run, which is
+        // how the manifest stores it - #629's coverage block reads this.
+        if (auto scenario = config.find ("scenario");
+            scenario != config.end () && scenario->is_object ()) {
+            if (auto openapi = scenario->find ("openapi");
+                openapi != scenario->end () && openapi->is_object ()) {
+                metadata["openapi"] = *openapi;
+            }
+        }
     } catch (...) {
     }
 

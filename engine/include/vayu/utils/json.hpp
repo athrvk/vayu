@@ -52,6 +52,11 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::RequestExample& example);
 
 /**
+ * @brief Serialize a stored OpenAPI document to JSON (issue #637)
+ */
+[[nodiscard]] Json serialize (const vayu::db::SpecDocument& spec);
+
+/**
  * @brief Serialize an Environment to JSON
  */
 [[nodiscard]] Json serialize (const vayu::db::Environment& environment);

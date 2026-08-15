@@ -170,7 +170,13 @@ struct TempIds {
     std::vector<std::string> collections;              // in payload order
     std::vector<std::string> requests;
     std::vector<std::string> environments;
+    std::vector<std::string> specs;
     std::unordered_set<std::string> is_collection;
+    std::unordered_set<std::string> is_spec;
+    /// The engine ids the payload's own spec section claimed. A collection may
+    /// bind one of these even though no row exists yet, which is exactly what
+    /// `reject_unbindable_spec`'s `pending` argument is for.
+    std::unordered_set<std::string> pending_spec_ids;
     std::unordered_map<std::string, std::string> parent_of; // collection -> its parent
 };
 
@@ -191,10 +197,11 @@ std::vector<std::string>& claimed) {
     return std::nullopt;
 }
 
-/** Pass 1 - claim every tempId across the three sections, then note the collections. */
+/** Pass 1 - claim every tempId across the four sections, then note the owners. */
 std::optional<std::pair<int, nlohmann::json>> claim_all (const nlohmann::json& collections,
 const nlohmann::json& requests,
 const nlohmann::json& environments,
+const nlohmann::json& specs,
 TempIds& temps) {
     if (auto err = claim_section (collections, "collection", "col_", temps.real, temps.collections)) {
         return err;
@@ -205,8 +212,15 @@ TempIds& temps) {
     if (auto err = claim_section (environments, "environment", "env_", temps.real, temps.environments)) {
         return err;
     }
+    if (auto err = claim_section (specs, "spec", "spec_", temps.real, temps.specs)) {
+        return err;
+    }
     for (const auto& temp : temps.collections) {
         temps.is_collection.insert (temp);
+    }
+    for (const auto& temp : temps.specs) {
+        temps.is_spec.insert (temp);
+        temps.pending_spec_ids.insert (temps.real.at (temp));
     }
     return std::nullopt;
 }
@@ -291,6 +305,48 @@ apply_item_fields (Apply apply, const char* kind, const std::string& temp_id) {
     return std::nullopt;
 }
 
+/**
+ * Resolves one collection item's `openapi` binding into the shape the shared
+ * applier stores.
+ *
+ * A payload-local spec is named by `openapi.specTempId`, exactly as a request
+ * names its owner with `collectionTempId`, and is rewritten here into the
+ * `specId` the applier and every reader expect. `specId` is also accepted
+ * directly, for a collection binding a document that is *already* stored - an
+ * incremental import into an existing spec - and that id is checked against the
+ * store by `reject_unbindable_spec` alongside the payload's own.
+ *
+ * Both at once is a 400: they are two answers to one question, and picking one
+ * would leave the caller believing the other was honoured.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+resolve_spec_binding (nlohmann::json& fields, const TempIds& temps, const std::string& temp) {
+    auto binding = fields.find ("openapi");
+    if (binding == fields.end () || binding->is_null () || !binding->is_object ()) {
+        return std::nullopt; // Unbound, or a shape the applier will reject.
+    }
+    auto spec_temp = binding->find ("specTempId");
+    if (spec_temp == binding->end () || spec_temp->is_null ()) {
+        return std::nullopt;
+    }
+    if (!spec_temp->is_string ()) {
+        return item_error ("Invalid 'openapi.specTempId': must be a string", temp);
+    }
+    if (binding->contains ("specId")) {
+        return item_error (
+        "Invalid 'openapi': send either 'specTempId' (a spec in this payload) or "
+        "'specId' (one already stored), not both",
+        temp);
+    }
+    const std::string named = spec_temp->get<std::string> ();
+    if (!temps.is_spec.contains (named)) {
+        return item_error ("Unknown openapi.specTempId '" + named + "'", temp);
+    }
+    binding->erase ("specTempId");
+    (*binding)["specId"] = temps.real.at (named);
+    return std::nullopt;
+}
+
 /** Pass 3a - collection rows, through the same applier POST /collections uses. */
 std::optional<std::pair<int, nlohmann::json>> build_collection_rows (vayu::db::Database& db,
 const nlohmann::json& collections,
@@ -310,6 +366,10 @@ std::vector<vayu::db::Collection>& out) {
         fields["parentId"]    = parent == temps.parent_of.end () ?
         nlohmann::json (nullptr) :
         nlohmann::json (temps.real.at (parent->second));
+
+        if (auto err = resolve_spec_binding (fields, temps, temp)) {
+            return err;
+        }
 
         vayu::db::Collection c;
         c.id         = temps.real.at (temp);
@@ -446,7 +506,67 @@ std::vector<vayu::db::RequestExample>& examples_out) {
     return std::nullopt;
 }
 
-/** Pass 3c - environment rows; nothing to resolve, they reference nobody. */
+/**
+ * Pass 3c - spec rows (issue #637). They reference nobody; collections reference
+ * *them*, which is why they are claimed in pass 1 like everything else.
+ *
+ * Deliberately not through a shared applier, because there is no field applier
+ * to share: `POST /specs` is create-only with two settable fields, and the two
+ * decisions that matter - the hash is computed here, never taken from the
+ * caller, and the size cap is the live `maxSpecDocumentBytes` - are made by the
+ * same two helpers the route core uses, so the paths cannot drift on either.
+ */
+std::optional<std::pair<int, nlohmann::json>> build_spec_rows (vayu::db::Database& db,
+const nlohmann::json& specs,
+const TempIds& temps,
+int64_t now,
+std::vector<vayu::db::SpecDocument>& out) {
+    out.reserve (specs.size ());
+    const size_t cap = spec_size_cap (db);
+
+    for (size_t i = 0; i < specs.size (); ++i) {
+        const auto& item        = specs[i];
+        const std::string& temp = temps.specs[i];
+
+        if (!item.contains ("content") || !item["content"].is_string () ||
+        item["content"].get<std::string> ().empty ()) {
+            return item_error ("Invalid 'content': must be a non-empty string", temp);
+        }
+        for (const char* derived : { "hash", "fetchedAt" }) {
+            if (item.contains (derived)) {
+                return item_error (std::string ("Invalid '") + derived +
+                "': computed by the engine; omit it",
+                temp);
+            }
+        }
+
+        vayu::db::SpecDocument s;
+        s.id      = temps.real.at (temp);
+        s.content = item["content"].get<std::string> ();
+        if (s.content.size () > cap) {
+            return item_error ("Spec document is " + std::to_string (s.content.size ()) +
+            " bytes, over the limit of " + std::to_string (cap) +
+            " (raise the 'maxSpecDocumentBytes' setting to allow more)",
+            temp);
+        }
+        s.hash       = spec_content_hash (s.content);
+        s.fetched_at = now;
+
+        if (item.contains ("sourceUrl") && !item["sourceUrl"].is_null ()) {
+            if (!item["sourceUrl"].is_string ()) {
+                return item_error ("Invalid 'sourceUrl': must be a string or null", temp);
+            }
+            const auto url = item["sourceUrl"].get<std::string> ();
+            if (!url.empty ()) {
+                s.source_url = url;
+            }
+        }
+        out.push_back (std::move (s));
+    }
+    return std::nullopt;
+}
+
+/** Pass 3d - environment rows; nothing to resolve, they reference nobody. */
 std::optional<std::pair<int, nlohmann::json>>
 build_environment_rows (const nlohmann::json& environments,
 const TempIds& temps,
@@ -505,6 +625,7 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     const nlohmann::json* collections   = nullptr;
     const nlohmann::json* requests      = nullptr;
     const nlohmann::json* environments  = nullptr;
+    const nlohmann::json* specs         = nullptr;
     if (auto err = read_items (body, "collections", collections)) {
         return *err;
     }
@@ -512,6 +633,9 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return *err;
     }
     if (auto err = read_items (body, "environments", environments)) {
+        return *err;
+    }
+    if (auto err = read_items (body, "specs", specs)) {
         return *err;
     }
 
@@ -525,15 +649,15 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
             nested_examples += item["examples"].size ();
         }
     }
-    const size_t total =
-    collections->size () + requests->size () + environments->size () + nested_examples;
+    const size_t total = collections->size () + requests->size () +
+    environments->size () + nested_examples + specs->size ();
     if (total > MAX_IMPORT_ITEMS) {
         return body_error ("Import too large: " + std::to_string (total) +
         " items exceeds the limit of " + std::to_string (MAX_IMPORT_ITEMS) + " per call");
     }
 
     TempIds temps;
-    if (auto err = claim_all (*collections, *requests, *environments, temps)) {
+    if (auto err = claim_all (*collections, *requests, *environments, *specs, temps)) {
         return *err;
     }
     if (auto err = resolve_parents (*collections, temps)) {
@@ -548,6 +672,12 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     std::vector<vayu::db::Request> request_rows;
     std::vector<vayu::db::Environment> environment_rows;
     std::vector<vayu::db::RequestExample> example_rows;
+    std::vector<vayu::db::SpecDocument> spec_rows;
+    // Ahead of the collections that may bind them, so a binding is validated
+    // against rows that have already been built.
+    if (auto err = build_spec_rows (db, *specs, temps, now, spec_rows)) {
+        return *err;
+    }
     if (auto err = build_collection_rows (db, *collections, temps, now, collection_rows)) {
         return *err;
     }
@@ -558,8 +688,30 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return *err;
     }
 
-    db.import_apply (collection_rows, request_rows, environment_rows, example_rows);
-    return { 200, nlohmann::json{ { "idMap", temps.real } } };
+    // The one existence check the shared applier cannot make - a binding may
+    // name a spec this payload is about to write, or one already stored, and
+    // nothing else - and the last thing before the write, under the same lock
+    // as the write. A binding validated outside the lock could be committed
+    // just after a concurrent `DELETE /specs/:id` removed the document it
+    // named, which is the dangling state the check exists to prevent. Bounded:
+    // one JSON parse per collection row, then the transaction `import_apply`
+    // was going to take the lock for anyway.
+    std::pair<int, nlohmann::json> result{ 200, nlohmann::json{ { "idMap", temps.real } } };
+    db.with_lock ([&] {
+        for (size_t i = 0; i < collection_rows.size (); ++i) {
+            if (auto err = apply_item_fields (
+                [&] {
+                    return reject_unbindable_spec (db, collection_rows[i].openapi,
+                    temps.pending_spec_ids);
+                },
+                "collection", temps.collections[i])) {
+                result = *err;
+                return;
+            }
+        }
+        db.import_apply (collection_rows, request_rows, environment_rows, example_rows, spec_rows);
+    });
+    return result;
 }
 
 void register_import_routes (RouteContext& ctx) {
@@ -578,13 +730,16 @@ void register_import_routes (RouteContext& ctx) {
      * Persists an entire parsed import atomically: collections, their requests
      * and environments in one transaction, with every real id generated
      * engine-side and returned in an `idMap` keyed by the client's temp ids.
-     * Body params: collections / requests / environments (arrays; absent or null
-     * means none). Each item carries a `tempId`; a collection may carry
-     * `parentTempId`, a request must carry `collectionTempId`, and a request
-     * may carry `examples` (an array of saved example responses, written with
-     * engine-generated ids and absent from the `idMap` - nothing references
-     * them). All other fields are the ones the matching POST /<resource>
-     * accepts, minus `id`.
+     * Body params: collections / requests / environments / specs (arrays; absent
+     * or null means none). Each item carries a `tempId`; a collection may carry
+     * `parentTempId` and may bind a spec with `openapi.specTempId` (a spec in
+     * this payload) or `openapi.specId` (one already stored), a request must
+     * carry `collectionTempId`, and a request may carry `examples` (an array of
+     * saved example responses, written with engine-generated ids and absent from
+     * the `idMap` - nothing references them). A spec item carries `content` and
+     * an optional `sourceUrl`; its `hash` and `fetchedAt` are engine-computed
+     * and rejected if sent. All other fields are the ones the matching
+     * POST /<resource> accepts, minus `id`.
      * Returns: 200 `{"idMap": {...}}`, or 400 with `error.item` naming the
      * item that failed - in which case nothing at all was written.
      */

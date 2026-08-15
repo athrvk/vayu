@@ -293,6 +293,23 @@ const ScenarioResolveOptions& options) {
         return invalid ("No collection with id '" + request.collection_id + "'");
     }
 
+    // The spec this run is measured against, read once here and stamped into the
+    // snapshot by `build_scenario_manifest` (issue #637). Read from the
+    // collection rather than looked up in `spec_documents`: the hash *stored on
+    // the binding* is what the collection was last synced to, and that - not
+    // whatever the document says today - is what the run was planned against.
+    // An unparseable blob binds nothing, the same reading every other reader of
+    // this column gives it.
+    try {
+        const auto binding = nlohmann::json::parse (collection->openapi);
+        if (binding.is_object ()) {
+            resolution.spec.spec_id   = binding.value ("specId", std::string ());
+            resolution.spec.spec_hash = binding.value ("specHash", std::string ());
+        }
+    } catch (const std::exception&) {
+        // Leaves the binding unbound; a malformed column must not fail a run.
+    }
+
     const auto rows = collect_requests (db, request.collection_id, request.recursive);
     if (rows.empty ()) {
         return invalid ("Collection '" + request.collection_id + "' has no requests" +
@@ -447,7 +464,8 @@ size_t row_index) {
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,
-const ScenarioPlan& plan) {
+const ScenarioPlan& plan,
+const SpecBinding& spec) {
     nlohmann::json steps = nlohmann::json::array ();
     for (const auto& step : plan.steps) {
         steps.push_back ({ { "index", step.index }, { "requestId", step.request_id },
@@ -455,10 +473,16 @@ const ScenarioPlan& plan) {
         { "url", step.stored_url } });
     }
 
-    return nlohmann::json{ { "source", request.source },
+    nlohmann::json manifest{ { "source", request.source },
         { "collectionId", request.collection_id },
         { "recursive", request.recursive }, { "iterations", request.iterations },
         { "dataRowCount", request.data_row_count }, { "steps", std::move (steps) } };
+    // Absent for an unbound collection, never `null` or `{}` - see the header.
+    if (spec.bound ()) {
+        manifest["openapi"] =
+        nlohmann::json{ { "specId", spec.spec_id }, { "specHash", spec.spec_hash } };
+    }
+    return manifest;
 }
 
 } // namespace vayu::core

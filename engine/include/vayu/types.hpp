@@ -819,6 +819,13 @@ struct Collection {
     // no contract. The *schema* lives here, never the rows - a data file's rows
     // are user data of unknown sensitivity and are persisted nowhere.
     std::string data_schema{ "{}" };
+    // JSON - the OpenAPI document this collection is bound to (issue #637):
+    // {"specId": "spec_...", "specHash": "<hex>", "syncedAt": ms}. `{}` means
+    // unbound, which is what every collection written before the binding
+    // existed backfills to. The *document* lives in `spec_documents`; this is
+    // only the edge, so two collections may bind the same spec and unbinding
+    // one leaves the document alone.
+    std::string openapi{ "{}" };
     int order;
     int64_t created_at;
     int64_t updated_at;
@@ -854,6 +861,17 @@ struct Request {
     // flag off the payload (`read_stream_flag`), and the by-id compose path
     // deliberately does not send it - see `payload_from_stored`.
     bool stream = false; // INTEGER NOT NULL DEFAULT 0
+    // Which operation of the bound OpenAPI document this request *is*
+    // (issue #637): {"operationId"?: "listPets", "method": "GET",
+    // "path": "/pets"}. Nullable rather than NOT NULL-with-a-default, on the
+    // `config_entries.unit` precedent: a request that answers to no operation
+    // declares nothing, and NULL is that - `{}` would be a second spelling of
+    // the same absence for every reader to handle.
+    //
+    // `path` is the *template* (`/pets/{petId}`), never a concrete URL, because
+    // it is the identity a re-fetched spec is diffed against (#627) and the key
+    // coverage counts by (#629). Two requests may name the same operation.
+    std::optional<std::string> spec_operation;
     int64_t created_at;
     int64_t updated_at;
 };
@@ -892,6 +910,40 @@ struct RequestExample {
     int order = 0;
     int64_t created_at;
     int64_t updated_at;
+};
+
+/**
+ * @brief An OpenAPI document, stored once and bound to collections (issue #637).
+ *
+ * The text is kept verbatim - not a parsed model - because everything the epic
+ * stacked behind this needs the *document*: the Spec tab renders it (#638), sync
+ * re-fetches and diffs against it (#627), response validation resolves `$ref`s
+ * through it (#628), and export writes a new one beside it (#630). A parse here
+ * would have to be re-done by each of them anyway, and would lose whatever the
+ * author wrote that the parser did not model.
+ *
+ * Owned by nobody: a spec is bound *by* collections (`Collection::openapi`)
+ * rather than owned by one, so no cascade reaches it and `DELETE /specs/:id` is
+ * refused while any collection names it.
+ */
+struct SpecDocument {
+    std::string id; // "spec_"-prefixed, engine-minted like every other id
+    std::string content;
+    /// Where it was fetched from, when it came from a URL rather than a file.
+    /// Nullable: "pasted or uploaded" is an answer, and `""` would be a second
+    /// spelling of it. Phase 2 (#627) re-fetches through this.
+    std::optional<std::string> source_url;
+    int64_t fetched_at = 0;
+    /**
+     * Hex-encoded `sha256(content)`, computed engine-side on every write.
+     *
+     * Never taken from the caller, and stored beside the content rather than
+     * derived per read: a run stamps the hash it planned against
+     * (`runs.config_snapshot`), and that stamp is only worth anything if the
+     * value it was compared to was computed by the same code on the same bytes.
+     * The `body_blobs` content+hash pair is the shape this follows.
+     */
+    std::string hash;
 };
 
 struct Environment {

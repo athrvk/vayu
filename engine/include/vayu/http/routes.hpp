@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -486,6 +487,35 @@ std::optional<std::pair<int, nlohmann::json>>
 apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json& json, bool is_create);
 
 /**
+ * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what
+ * `spec_documents.hash` stores and what a run's snapshot is stamped with.
+ * Defined in specs.cpp.
+ */
+std::string spec_content_hash (const std::string& content);
+
+/**
+ * The live `maxSpecDocumentBytes` cap, read fresh per write. Shared by
+ * `POST /specs` and `POST /import/apply` so the two cannot enforce different
+ * limits. Defined in specs.cpp.
+ */
+size_t spec_size_cap (vayu::db::Database& db);
+
+/**
+ * Rejects a collection write whose `openapi` binding names a spec that will not
+ * exist once the write lands (issue #637).
+ *
+ * Outside `apply_collection_fields` for the same reason `reject_missing_collection`
+ * is outside `apply_request_fields`: `POST /import/apply` runs the applier over
+ * rows whose spec section is still unwritten, so an existence check inside it
+ * would refuse a legal bulk import. @p pending names what the caller is about to
+ * write in the same transaction; every path but import passes an empty set.
+ * Defined in specs.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>> reject_unbindable_spec (vayu::db::Database& db,
+const std::string& openapi,
+const std::unordered_set<std::string>& pending);
+
+/**
  * The outcome of resolving `pm.info.requestName` for a `POST /execute` payload.
  *
  * `name` absent is a normal answer, not a failure: an ad-hoc request has no
@@ -675,6 +705,7 @@ void register_config_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
 void register_request_example_routes (RouteContext& ctx);
+void register_spec_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);

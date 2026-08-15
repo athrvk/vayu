@@ -114,6 +114,29 @@ struct ScenarioRequest {
 };
 
 /**
+ * The OpenAPI document a run's collection was bound to when the run was planned
+ * (issue #637).
+ *
+ * Both halves or neither: the id says *which* document and the hash says *which
+ * version of it*, and a report that carried only the id would claim a run was
+ * measured against a spec that may have been replaced since. `bound()` is false
+ * for a collection that binds nothing, and a run of one stamps no `openapi`
+ * object at all - absent, rather than an empty one that reads as "bound to
+ * nothing in particular".
+ *
+ * Captured at resolution rather than read back at report time for the same
+ * reason the whole plan is: a run is a record of what ran, and the binding is
+ * free to move afterwards.
+ */
+struct SpecBinding {
+    std::string spec_id;
+    std::string spec_hash;
+    [[nodiscard]] bool bound () const {
+        return !spec_id.empty ();
+    }
+};
+
+/**
  * A resolved scenario, ready to execute: what was asked for and what it
  * resolved to.
  *
@@ -176,6 +199,10 @@ struct ScenarioResolution {
     ScenarioPlan plan;
     /// The validated `data` rows, for `ScenarioExecution::data_rows`.
     std::vector<nlohmann::json> data_rows;
+    /// The collection's spec binding as of resolution; unbound for most runs.
+    /// Read straight into `build_scenario_manifest`, which is the only thing
+    /// that needs it - nothing about *executing* the plan depends on it.
+    SpecBinding spec;
 };
 
 /**
@@ -235,8 +262,15 @@ size_t row_index);
  * `sanitize_config_snapshot` (`utils/json.cpp`) exists to keep exactly that out
  * of the run store, and persisting a composed plan would route around its
  * allowlist. The full plan lives in memory for the run's life and nowhere else.
+ *
+ * A spec-bound collection also stamps `openapi: {specId, specHash}` here
+ * (issue #637), which `GET /runs/:id/report` echoes under `metadata` and #629's
+ * coverage report reads as its anchor. @p spec unbound stamps **nothing** - the
+ * key is absent rather than null, so "this run was not measured against a spec"
+ * is one answer with one spelling.
  */
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,
-const ScenarioPlan& plan);
+const ScenarioPlan& plan,
+const SpecBinding& spec = {});
 
 } // namespace vayu::core
