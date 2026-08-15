@@ -620,8 +620,8 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
  * refuses by name instead - the same shape the scenario planner uses for an
  * OAuth 2.0 config, whose token is likewise acquired before any row exists.
  * Refusing is the half that matters: nothing wrong reaches the wire, and the
- * message names the token and the alternative. Only consulted when the payload
- * carries a row - without one, a `data.*` token anywhere is today's
+ * message names the token and the alternative. Binding them here is issue #642.
+ * Only consulted when the payload carries a row - without one, a `data.*` token anywhere is today's
  * goes-out-literal behaviour and is not this endpoint's to reopen.
  */
 std::optional<std::string> first_auth_data_token (const nlohmann::json& json);
