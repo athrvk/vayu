@@ -21,6 +21,11 @@
 #include <variant>
 #include <vector>
 
+// For `RequestExample::origin`'s default. The only bound-carrying header this
+// one needs; constants.hpp depends on nothing but the version string, so it
+// cannot cycle back here.
+#include "vayu/core/constants.hpp"
+
 namespace vayu {
 
 // ============================================================================
@@ -908,6 +913,14 @@ struct RequestExample {
      * answers with), not a display preference.
      */
     int order = 0;
+    /**
+     * `import` or `user` - who wrote this row (issue #588).
+     *
+     * Not a display field: it exists so a spec sync (#627) can replace the
+     * examples a document produced without touching the ones a person saved
+     * from a live response. See `request_example::ORIGIN_*`.
+     */
+    std::string origin = vayu::core::constants::request_example::ORIGIN_IMPORT;
     int64_t created_at;
     int64_t updated_at;
 };

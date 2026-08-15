@@ -6,16 +6,23 @@
  */
 
 /**
- * Saved example responses for a request (issue #481).
+ * Saved example responses for a request (issues #481, #588).
  *
- * Read-only for now, and that is the whole surface: examples arrive by import,
- * so there is nothing here to create or edit one with. The engine's per-example
- * write routes exist and are documented; a hook for them belongs in the change
- * that adds the editor, not ahead of it.
+ * The list arrived first and was read-only: examples came from an importer, so
+ * there was nothing here to write one with. #588 closed that loop - a response
+ * on screen can be kept as an example, and an example can be removed again -
+ * which is why the two mutations below exist and `PUT` still does not. Editing
+ * a stored example is its own change; the panel is a viewer.
+ *
+ * Both writes settle by invalidating the one list key rather than splicing the
+ * row in. The engine decides the id, the `order` an append lands on and the
+ * stored shape of the row, so a hand-written cache entry would be this app's
+ * guess at all three - and the list is one small request.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import type { CreateRequestExampleRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
@@ -30,5 +37,52 @@ export function useRequestExamplesQuery(requestId: string | null) {
 		queryKey: queryKeys.requests.examples(requestId ?? ""),
 		queryFn: () => apiService.listRequestExamples(requestId as string),
 		enabled: !!requestId,
+	});
+}
+
+/**
+ * Keep a response as one of the request's examples (issue #588).
+ *
+ * The engine's refusals - a body over the per-example cap, the hundredth
+ * example on one request - come back as the mutation's error and are shown by
+ * the dialog that called it, not as a toast behind it.
+ */
+export function useCreateRequestExampleMutation() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({
+			requestId,
+			example,
+		}: {
+			requestId: string;
+			example: CreateRequestExampleRequest;
+		}) => apiService.createRequestExample(requestId, example),
+		onSuccess: (_created, { requestId }) => {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.requests.examples(requestId),
+			});
+		},
+	});
+}
+
+/**
+ * Remove one saved example.
+ *
+ * An example you can create and never remove is the #553 shape at a smaller
+ * scale, which is why this landed with the create rather than after it. It is
+ * not scoped to app-saved rows: the engine's route is not, an imported example
+ * is as much the user's to prune as a saved one, and telling the two apart
+ * here would mean reading an `origin` no surface displays.
+ */
+export function useDeleteRequestExampleMutation() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ requestId, exampleId }: { requestId: string; exampleId: string }) =>
+			apiService.deleteRequestExample(requestId, exampleId),
+		onSuccess: (_result, { requestId }) => {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.requests.examples(requestId),
+			});
+		},
 	});
 }

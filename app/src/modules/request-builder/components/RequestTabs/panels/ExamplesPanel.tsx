@@ -6,25 +6,27 @@
  */
 
 /**
- * ExamplesPanel - the request's saved example responses (issue #481).
+ * ExamplesPanel - the request's saved example responses (issues #481, #588).
  *
  * These are what an importer found next to the request and, until the engine
  * had a table for them, threw away: Postman's saved responses, an OpenAPI
- * operation's documented ones. This is the first surface that shows they
- * survived the import, and once the mock server lands it is also the list of
- * what that server will answer with - the first row of a matched request being
- * the one it serves, which is why the stored order is preserved rather than
- * re-sorted here.
+ * operation's documented ones - and, since #588, the responses a user kept from
+ * the response viewer. It is also the list of what a mock server for this
+ * collection will answer with, the first row of a matched request being the one
+ * it serves, which is why the stored order is preserved rather than re-sorted
+ * here.
  *
- * Read-only in this phase. Examples arrive by import; nothing in the app
- * creates or edits one yet, so there is no editor to hang off these rows and no
- * mutation hook behind them.
+ * Rows can be removed but not edited. Delete landed with save-as-example
+ * because an example you can create and never remove is the #553 zombie shape
+ * at a smaller scale; an editor for a stored example is a separate change, and
+ * this is still a viewer until it exists.
  */
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
-import { useRequestExamplesQuery } from "@/queries";
+import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { useDeleteRequestExampleMutation, useRequestExamplesQuery } from "@/queries";
 import { useRequestBuilderContext } from "../../../context";
 import type { RequestExample } from "@/types";
 
@@ -45,22 +47,53 @@ function headerMap(example: RequestExample): Record<string, string> {
 	return out;
 }
 
-function ExampleRow({ example }: { example: RequestExample }) {
+function ExampleRow({
+	example,
+	onDelete,
+	deleting,
+}: {
+	example: RequestExample;
+	onDelete: () => void;
+	deleting: boolean;
+}) {
 	const [open, setOpen] = useState(false);
 	const Chevron = open ? ChevronDown : ChevronRight;
 
 	return (
 		<div className="rounded-md border border-rule surface-card">
-			<button
-				type="button"
-				onClick={() => setOpen((v) => !v)}
-				aria-expanded={open}
-				className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
-			>
-				<Chevron className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-				<StatusCodeBadge status={example.status} />
-				<span className="truncate font-medium">{example.name}</span>
-			</button>
+			{/*
+			 * The expander and the delete cannot be one button, so the row is a
+			 * container that paints the hover and the expander stretches into it -
+			 * the drawer-row rule (`drawer-row-hit-area.test.tsx`). Without
+			 * `self-stretch` the expander is content-height and the padding above
+			 * and below it swallows clicks that look like they land on the row.
+			 */}
+			<div className="flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent">
+				<button
+					type="button"
+					onClick={() => setOpen((v) => !v)}
+					aria-expanded={open}
+					className="flex min-w-0 flex-1 items-center gap-2 self-stretch rounded-md px-3 py-2 text-left text-xs"
+				>
+					<Chevron className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+					<StatusCodeBadge status={example.status} />
+					<span className="truncate font-medium">{example.name}</span>
+				</button>
+				<Button
+					size="icon"
+					variant="ghost"
+					onClick={onDelete}
+					disabled={deleting}
+					aria-label={`Delete example ${example.name}`}
+					className="h-6 w-6 shrink-0"
+				>
+					{deleting ? (
+						<Loader2 className="h-3.5 w-3.5 animate-spin" />
+					) : (
+						<Trash2 className="h-3.5 w-3.5" />
+					)}
+				</Button>
+			</div>
 
 			{open && (
 				<div className="flex flex-col gap-3 border-t border-rule px-3 py-3">
@@ -94,6 +127,16 @@ function ExampleRow({ example }: { example: RequestExample }) {
 export default function ExamplesPanel() {
 	const { request } = useRequestBuilderContext();
 	const { data: examples, isLoading, isError } = useRequestExamplesQuery(request.id ?? null);
+	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
+	const deleteExample = useDeleteRequestExampleMutation();
+
+	const confirmDelete = () => {
+		if (!request.id || !pendingDelete) return;
+		deleteExample.mutate(
+			{ requestId: request.id, exampleId: pendingDelete.id },
+			{ onSuccess: () => setPendingDelete(null) }
+		);
+	};
 
 	// An unsaved request has no id, so there is nothing stored to list - said
 	// plainly rather than shown as an empty list, which would read as "this
@@ -114,8 +157,9 @@ export default function ExamplesPanel() {
 	if (!examples || examples.length === 0) {
 		return (
 			<p className="text-xs text-muted-foreground">
-				No example responses. Importing a Postman collection with saved responses, or an
-				OpenAPI spec that documents them, stores them here.
+				No example responses. Send this request and use{" "}
+				<span className="font-medium">Save as example</span> to keep the response, or import
+				a Postman collection with saved responses or an OpenAPI spec that documents them.
 			</p>
 		);
 	}
@@ -123,8 +167,46 @@ export default function ExamplesPanel() {
 	return (
 		<div className="flex flex-col gap-2">
 			{examples.map((example) => (
-				<ExampleRow key={example.id} example={example} />
+				<ExampleRow
+					key={example.id}
+					example={example}
+					onDelete={() => {
+						// Clears the previous refusal, so reopening does not lead
+						// with the error from the attempt before it.
+						deleteExample.reset();
+						setPendingDelete(example);
+					}}
+					deleting={deleteExample.isPending && pendingDelete?.id === example.id}
+				/>
 			))}
+
+			{/*
+			 * Confirmed rather than immediate: a mock server answers with the first
+			 * example of a matched route, so removing one can change what the next
+			 * restart serves - and nothing here can bring it back.
+			 */}
+			<DeleteConfirmDialog
+				open={!!pendingDelete}
+				onOpenChange={(open) => !open && setPendingDelete(null)}
+				title="Delete example?"
+				description={
+					<>
+						<span className="font-medium">{pendingDelete?.name}</span> is removed from
+						this request. A mock server for this collection stops answering with it once
+						it is restarted.
+						{/* The engine's refusal, in the dialog that asked for the delete.
+						    Without it a failed delete looks like nothing happened: the row
+						    is still there and the dialog is still open. */}
+						{deleteExample.error && (
+							<span className="mt-2 block text-status-error-text">
+								Could not delete it: {deleteExample.error.message}
+							</span>
+						)}
+					</>
+				}
+				onConfirm={confirmDelete}
+				isDeleting={deleteExample.isPending}
+			/>
 		</div>
 	);
 }

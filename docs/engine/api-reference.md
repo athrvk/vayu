@@ -1001,6 +1001,14 @@ otherwise come back shuffled by the id tiebreak.
 example served as if it were whole when it is not is worse than a refused write
 - and a request holds at most **100** examples.
 
+**`origin` says who wrote the row** (issue #588): `"import"` for everything an
+importer or a spec sync produced, `"user"` for one a person saved from a live
+response. It defaults to `"import"`, which is honest for every row written
+before the column existed, and an unrecognised value is a `400` rather than a
+silent fall back - the OpenAPI spec sync (#627) may replace `"import"` rows
+wholesale and must never touch a `"user"` one, so an absorbed typo would cost a
+user their saved example.
+
 ### GET /requests/:id/examples
 
 **Response:** an array of example objects, oldest first:
@@ -1015,6 +1023,7 @@ example served as if it were whole when it is not is worse than a refused write
     "body": "{\"id\":1}",
     "contentType": "application/json",
     "order": 0,
+    "origin": "import",
     "createdAt": 1730000000000,
     "updatedAt": 1730000000000
   }
@@ -1038,7 +1047,8 @@ Create one example. **Create only**, and the engine owns the id - see
   "headers": [],             // Optional, array of {key, value, enabled}
   "body": "",                // Optional. Default ""
   "contentType": "",         // Optional. Default ""
-  "order": 0                 // Optional, appended after the request's examples if omitted
+  "order": 0,                // Optional, appended after the request's examples if omitted
+  "origin": "import"         // Optional, "import" | "user". Default "import"
 }
 ```
 
@@ -1052,8 +1062,9 @@ to survive.
 **Errors:** `404` if the request does not exist. `400` if the body carries an
 `id`, if `name` is missing or `null`, on a `status` outside `100`-`599` (rejected
 rather than clamped - a stored `700` would be re-served as a status line nobody
-can send), on a malformed `headers` entry, or on a `body` over the cap. `409`
-when the request already holds the maximum number of examples.
+can send), on a malformed `headers` entry, on an `origin` that is neither
+`"import"` nor `"user"`, or on a `body` over the cap. `409` when the request
+already holds the maximum number of examples.
 
 ### PUT /requests/:id/examples/:exampleId
 
@@ -1361,7 +1372,8 @@ accepted a client-supplied `id` - which they no longer do (see
   engine-generated ids, and so **do not appear in `idMap`**. Each entry takes the
   fields `POST /requests/:id/examples` accepts, through the same field applier,
   and an entry that fails validation is a per-item `400` naming the *request's*
-  `tempId`. An entry with no `order` takes its payload position, so the stored
+  `tempId`. `origin` is among those fields and an importer leaves it at its
+  `"import"` default, which is what these rows are. An entry with no `order` takes its payload position, so the stored
   order is the order the source file listed the responses in.
 - A **`specs`** item carries `content` (required, non-empty) and an optional
   `sourceUrl`; its `hash` and `fetchedAt` are engine-computed and a per-item
@@ -1878,7 +1890,10 @@ whatever the real one did. See [architecture.md](architecture.md#listeners).
 **The route table is a start-time snapshot.** It is built once, from the
 collection and every collection under it (an OpenAPI import files its requests
 in a folder per tag, so the subtree is the only useful unit), and a running mock
-does not reload edits: stop it and start it again.
+does not reload edits: stop it and start it again. An example saved from the
+app's response viewer (issue #588) is an edit like any other - it is appended
+after the request's existing examples, so a restart keeps answering with the
+same first one, and the new row is only reachable once the mock is restarted.
 
 **How a request is matched.**
 

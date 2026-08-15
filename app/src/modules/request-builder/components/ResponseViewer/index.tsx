@@ -20,6 +20,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { BookmarkPlus } from "lucide-react";
 import {
 	Tabs,
 	TabsContent,
@@ -29,6 +30,7 @@ import {
 	TabCount,
 	TabErrorDot,
 	Badge,
+	Button,
 	Kbd,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
@@ -49,6 +51,7 @@ import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
+import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import type { ResponseState } from "../../types";
 
 type ResponseTab =
@@ -64,6 +67,7 @@ type ResponseTab =
 export default function ResponseViewer() {
 	const { request, response, isExecuting } = useRequestBuilderContext();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
+	const [savingExample, setSavingExample] = useState(false);
 
 	/*
 	 * The live stream, when it is this request's (issue #574).
@@ -207,6 +211,24 @@ export default function ResponseViewer() {
 		? shown.streamEndReason
 		: (streamIsMine && liveEndReason) || undefined;
 
+	/*
+	 * "Save as example" (issue #588) - present only when there is something to
+	 * attach it to and something finished to attach.
+	 *
+	 * Absent rather than disabled for an unsaved request. An example is owned by
+	 * a stored request, so there is no id to nest one under until the request is
+	 * saved, and the Examples tab beside this already says exactly that in a
+	 * sentence - a permanently greyed button whose explanation only appears on
+	 * hover would be a second, worse copy of it.
+	 *
+	 * Hidden while a stream is live for a different reason: `shown` is then the
+	 * placeholder built from the relay's `open` frame, whose body is empty by
+	 * construction. Saving it would store an example of a response that had not
+	 * arrived. The button comes back when the stream ends and the run's stored
+	 * response takes over.
+	 */
+	const canSaveExample = !!requestId && !isStreaming;
+
 	// Client-side error state (status === 0 means no server response)
 	const isClientError = shown.status === 0;
 
@@ -346,6 +368,28 @@ export default function ResponseViewer() {
 							<TabLabel>Raw</TabLabel>
 						</TabsTrigger>
 					</TabsList>
+
+					{/*
+					 * Here rather than beside Copy and Download, which sit in the body
+					 * pane because that is what they act on. This acts on the whole
+					 * exchange - status, headers and body together - so it belongs to
+					 * the response, not to the tab you happen to be reading.
+					 *
+					 * `h-6`, like the actions it replaced on this row: at the button
+					 * default of h-9 it, and not the 24px tab band, would set the
+					 * row's height.
+					 */}
+					{canSaveExample && (
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() => setSavingExample(true)}
+							className="h-6 shrink-0 px-2 text-xs"
+						>
+							<BookmarkPlus className="h-3.5 w-3.5" />
+							Save as example
+						</Button>
+					)}
 				</div>
 
 				{/*
@@ -455,6 +499,20 @@ export default function ResponseViewer() {
 					<RawRequestResponse rawRequest={shown.rawRequest || ""} response={shown} />
 				</TabsContent>
 			</Tabs>
+
+			{/*
+			 * Mounted only while open, so this pane - which redraws on every send -
+			 * neither holds the dialog's state nor reaches the query layer until
+			 * somebody asks to save. The mount is also the reset: a reopened dialog
+			 * starts from this response rather than the last attempt.
+			 */}
+			{savingExample && requestId && (
+				<SaveAsExampleDialog
+					requestId={requestId}
+					response={shown}
+					onClose={() => setSavingExample(false)}
+				/>
+			)}
 		</div>
 	);
 }

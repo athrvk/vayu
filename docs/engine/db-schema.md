@@ -247,6 +247,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `body`         | TEXT    | Response body, verbatim; capped (see below)       |
 | `content_type` | TEXT    | Denormalized from `headers`; `""` when unstated   |
 | `order`        | INTEGER | Sort order within the request; default 0          |
+| `origin`       | TEXT    | `import` \| `user`; NOT NULL, default `import`     |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -262,6 +263,16 @@ ties for all of them and an id tiebreak would return the author's list
 shuffled; `GET /requests/:id/examples` orders by `order`, then `created_at`,
 then `id`. A create that states no `order` appends after the request's current
 examples, exactly as a new request appends within its collection.
+
+**origin** records who wrote the row (issue #588). It carries `default_value`
+rather than being a fresh table's column, so `sync_schema` ALTERs it onto an
+existing `request_examples` and every pre-existing row backfills to `import` -
+which is what all of them are, since import was the only writer until the app
+could save a live response as an example. It exists because the OpenAPI spec
+sync (#627) replaces the examples a document produced and must leave the ones a
+person saved alone, and nothing else about a row says which it is. The write
+paths validate it against those two values and `400` on anything else; no read
+path in the app displays it.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each

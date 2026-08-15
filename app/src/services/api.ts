@@ -38,6 +38,7 @@ import type {
 	ListRequestsParams,
 	CreateRequestRequest,
 	UpdateRequestRequest,
+	CreateRequestExampleRequest,
 	ReorderRequest,
 	ReorderResponse,
 	CreateEnvironmentRequest,
@@ -221,6 +222,35 @@ export const apiService = {
 	 */
 	async listRequestExamples(requestId: string): Promise<RequestExample[]> {
 		return await httpClient.get<RequestExample[]>(API_ENDPOINTS.REQUEST_EXAMPLES(requestId));
+	},
+
+	/**
+	 * Keep a response as one of the request's examples (issue #588).
+	 *
+	 * POST, and create-only like every other resource: the engine assigns the id
+	 * (#97), and `withoutId` strips one a spread carried in for the same reason
+	 * `createRequest` does. No `order` is sent - the engine appends, which is
+	 * what keeps a running mock's first-example answer unchanged.
+	 */
+	async createRequestExample(
+		requestId: string,
+		data: CreateRequestExampleRequest
+	): Promise<RequestExample> {
+		return await httpClient.post<RequestExample>(
+			API_ENDPOINTS.REQUEST_EXAMPLES(requestId),
+			withoutId(data)
+		);
+	},
+
+	/**
+	 * Remove one saved example.
+	 *
+	 * The request id is in the path rather than inferred: the engine checks the
+	 * owner before the example, so an example reached through the wrong request
+	 * is a 404 rather than a cross-request delete.
+	 */
+	async deleteRequestExample(requestId: string, exampleId: string): Promise<void> {
+		await httpClient.delete(API_ENDPOINTS.REQUEST_EXAMPLE_BY_ID(requestId, exampleId));
 	},
 
 	/**

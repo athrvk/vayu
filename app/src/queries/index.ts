@@ -34,8 +34,12 @@ export {
 } from "./collections";
 export { RequestNotFoundError } from "./collections";
 
-// Saved example responses (issue #481)
-export { useRequestExamplesQuery } from "./request-examples";
+// Saved example responses (issues #481, #588)
+export {
+	useRequestExamplesQuery,
+	useCreateRequestExampleMutation,
+	useDeleteRequestExampleMutation,
+} from "./request-examples";
 
 // Runs (History)
 export {
