@@ -564,8 +564,41 @@ if(VAYU_BUILD_TESTS)
     # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
     # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
     # instead of blocking the suite indefinitely; healthy tests finish in <10s.
+    #
+    # DISCOVERY_TIMEOUT bounds something else entirely, and the two are easy to
+    # confuse: `PROPERTIES TIMEOUT` is handed to CTest for each discovered test,
+    # while DISCOVERY_TIMEOUT caps the single `--gtest_list_tests` run that
+    # *finds* them at build time. It is not covered by the property above and
+    # defaults to **5 seconds**.
+    #
+    # Five seconds is not enough for the macOS x64 half of the release build.
+    # That binary is cross-compiled for x86_64 and runs under Rosetta on the
+    # arm64 runners, and enumerating ~1,600 tests through binary translation -
+    # cold, on the very first execution of a freshly linked binary - overruns
+    # it. v0.17.1 died exactly there: "Process terminated due to timeout" with
+    # empty output, `ninja: build stopped`, after the arm64 half had built and
+    # passed its whole suite. The release never published.
+    #
+    # It had been passing by luck. Until v0.17.1 the same job built every vcpkg
+    # dependency from source first, which runs x86_64 configure probes under
+    # Rosetta and leaves its translation cache warm by the time gtest discovery
+    # runs. Once the dependency cache started being reused (v0.17.1 was the
+    # first release to hit it - that build dropped from 10m35s to 5m45s), no
+    # x86_64 process ran ahead of the test binary any more and discovery paid
+    # the cold-start cost itself. The cache made the build faster and this
+    # slower; the 5s default was always too tight for a translated binary.
+    #
+    # 150s is deliberately generous. This bounds a hang, and a hang is already
+    # bounded by the job timeout - so the cost of being too high is a slower
+    # failure, while the cost of being too low is a red release tag, which is
+    # what we just paid. Set globally rather than per-preset: one number is
+    # easier to trust than a platform conditional, and no healthy configuration
+    # comes close to it.
     include(GoogleTest)
-    gtest_discover_tests(vayu_tests PROPERTIES TIMEOUT 60)
+    gtest_discover_tests(vayu_tests
+        DISCOVERY_TIMEOUT 150
+        PROPERTIES TIMEOUT 60
+    )
 endif()
 
 # ============================================================================
