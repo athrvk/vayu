@@ -1170,6 +1170,26 @@ column still binds if the run's file carries it, so this is "check this", not
 The `{{` autocomplete offers declared columns as a **Data columns** group beside
 Variables and Dynamic.
 
+The same three states paint the **"Referenced:" chips** in the script panel
+(issue #604), through the same `describeDataToken` call. A `data.*` name can
+never be in `allVariables` - the namespace is disjoint from the scopes - so the
+chip row's `resolves ? secondary : destructive` rule read every data column as
+undefined, which is the paint #592 removed from the builder. `DATA_TOKEN_TONE_CLASS`
+(`lib/data-token-tone.ts`) is the one table both surfaces read, so a column the
+chip calls declared is the one the token calls declared.
+
+**A run-time token receives pointer events; the overlay does not.** The overlay
+is `pointer-events: none` so clicks reach the transparent input underneath and
+place the caret, and each token wrapper opts back in for itself -
+`EditableVariable` because it opens a popover, `RuntimeToken` because a tooltip
+*is* its whole content and cannot open without a pointer event (issue #604: it
+never had this, so neither `{{$guid}}` nor `{{data.email}}` could be hovered).
+Opting in costs the caret, so the token carries the offsets of its own text and
+a click puts the caret at the **near edge** - before the token when its left
+half was clicked, after it when its right half was. The edges, not a position
+inside: `{{data.email}}` is one atom to everything that reads it, and a caret
+between its braces is how a keystroke corrupts the name.
+
 `EditableVariable` takes the scope as a **required** prop, because a token only
 renders where there is one. `RuntimeToken` serves both run-time cases - a value
 produced when the request is sent rather than stored anywhere - and is one

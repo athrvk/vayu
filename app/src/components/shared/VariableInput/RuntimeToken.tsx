@@ -33,6 +33,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { DataTokenTone } from "@/lib/data-contract";
+import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
 
 export interface RuntimeTokenProps {
 	/** Name as written inside the braces, e.g. `"$guid"` or `"data.email"`. */
@@ -51,12 +52,6 @@ export interface RuntimeTokenProps {
 	tone?: DataTokenTone;
 }
 
-/** The one place a tone becomes a colour, so the two states cannot drift apart. */
-const TONE_CLASS: Record<DataTokenTone, string> = {
-	muted: "text-muted-foreground",
-	warning: "text-warning-text",
-};
-
 export default function RuntimeToken({
 	name,
 	description,
@@ -67,7 +62,7 @@ export default function RuntimeToken({
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
-					className={cn("inline rounded-md font-[inherit]", TONE_CLASS[tone])}
+					className={cn("inline rounded-md font-[inherit]", DATA_TOKEN_TONE_CLASS[tone])}
 					contentEditable={false}
 					suppressContentEditableWarning
 				>
