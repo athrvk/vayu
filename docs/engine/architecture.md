@@ -958,9 +958,10 @@ data/
   stores the uncomposed URL - a composed plan carries resolved `Authorization`
   headers and an `apikey` in the query string, and persisting one would route
   around that allowlist. `results.trace_data` records what was **sent**, which
-  is the only thing it is for: it stores the resolved request headers, and since
-  issue #348 the wire message itself (`request.rawRequest`, the `Cookie` line
-  included). Both are credential-grade, both are plaintext under the v1 posture
+  is the only thing it is for: it stores the resolved request headers - both as
+  composed and, since issue #664, as the transfer issued them
+  (`request.sentHeaders`) - and since issue #348 the wire message itself
+  (`request.rawRequest`, the `Cookie` line included). Both are credential-grade, both are plaintext under the v1 posture
   above, and a trace that hid what went out would have no reason to exist. What
   bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.

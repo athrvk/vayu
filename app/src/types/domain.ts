@@ -766,6 +766,22 @@ export interface RunResultTrace {
 		 * header block is never cut.
 		 */
 		rawRequest?: string;
+		/**
+		 * What the transfer actually issued - `build_result_trace`'s copy of the
+		 * live response's `requestHeaders` (issue #664), which is `headers`
+		 * minus the suppressed and value-less entries plus the two the engine
+		 * derives at send time (the body-implied `Content-Type`, the default
+		 * `User-Agent`).
+		 *
+		 * This is the map the response pane's "sent" disclosure means;
+		 * `headers` beside it is the *composed* request and stays because
+		 * `design-run-seed.ts` reseeds a request tab from it. Absent on rows
+		 * written before the field and on a step that sent nothing, which is
+		 * why `restore-response.ts`'s `sentSide` keeps `headers` as its
+		 * fallback. Values are **not redacted** - same contract as
+		 * `rawRequest`.
+		 */
+		sentHeaders?: Record<string, string>;
 	};
 	response?: {
 		headers?: Record<string, string>;

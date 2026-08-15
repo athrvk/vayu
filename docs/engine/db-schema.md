@@ -751,6 +751,20 @@ sent nothing (a `pm.execution.skipRequest()`) and on every row written before #3
 falls back to rebuilding the view from `method`/`url`/`headers`/`body` -
 `restore-response.ts`'s `sentSide` is that reader.
 
+The `request` node carries a second header map, **`sentHeaders`** - the record of what the
+transfer issued, the same map the live [`POST /execute`](api-reference.md#post-execute) response
+returns as `requestHeaders` (issue #664). It is `headers` minus the entries the transfer
+suppresses (a `form-data` `Content-Type`, which libcurl writes itself with the boundary) and the
+value-less ones libcurl drops, plus the two the engine derives at send time: the body-implied
+`Content-Type` and the default `User-Agent`. Both maps are stored because both are read, and they
+answer different questions - `sentHeaders` is what the response pane's sent-headers disclosure
+means, while `headers` is the request as *composed*, which is what a pre-request script saw and
+what `design-run-seed.ts` reseeds a request tab from. Values are **not redacted**, same contract
+as `rawRequest` beside it. The key is **absent** on a step that sent nothing and on every row
+written before #664, so a reader falls back to `headers`. The load-run writers store no sent
+record at all - the load driver passes `nullptr` for it, to keep an allocation off the hot path -
+so a sampled capture's replay reads the composed map either way.
+
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
 not live in SQLite forever. `request.rawRequest` ends with that same body and is capped to the
