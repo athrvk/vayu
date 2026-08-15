@@ -1039,6 +1039,66 @@ const std::vector<Request>& requests) {
     });
 }
 
+// ============================================================================
+// Spec sync - the write half of an OpenAPI sync, in one transaction (#655)
+// ============================================================================
+
+// Write order is owner-before-referrer, exactly like import_apply, with one
+// addition the other two batches do not need: the document lands before the
+// binding that names it, so no reader can observe a collection pointing at a
+// `spec_documents` row that is not there yet.
+//
+// The deletes run *before* the inserts. A sync that removes one operation's
+// request and adds another cannot be allowed to depend on which order the
+// caller listed them in, and an example refresh is expressed as "drop these
+// imported rows, write these" - two halves of one replacement, where writing
+// first would briefly double the list and, on a re-used id, lose the new row.
+void Database::spec_sync_apply (const SpecSyncBatch& batch) {
+    vayu::utils::log_debug ("Applying spec sync: collection=" + batch.binding.id + ", spec=" +
+    batch.spec.id + ", +" + std::to_string (batch.created.size ()) + " requests, ~" +
+    std::to_string (batch.updated.size ()) + ", -" + std::to_string (batch.deleted.size ()) +
+    ", " + std::to_string (batch.new_collections.size ()) + " new collections");
+
+    retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            if (impl_->storage.count<Collection> (
+                where (c (&Collection::id) == batch.binding.id)) == 0) {
+                throw MissingRowError ("Collection", batch.binding.id);
+            }
+            for (const auto& row : batch.updated) {
+                if (impl_->storage.count<Request> (where (c (&Request::id) == row.id)) == 0) {
+                    throw MissingRowError ("Request", row.id);
+                }
+            }
+
+            for (const auto& id : batch.deleted) {
+                impl_->storage.remove_all<RequestExample> (
+                where (c (&RequestExample::request_id) == id));
+                impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+            }
+            for (const auto& id : batch.deleted_examples) {
+                impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
+            }
+
+            impl_->storage.replace (batch.spec);
+            for (const auto& row : batch.new_collections) {
+                impl_->storage.replace (row);
+            }
+            impl_->storage.update (batch.binding);
+            for (const auto& row : batch.created) {
+                impl_->storage.replace (row);
+            }
+            for (const auto& row : batch.updated) {
+                impl_->storage.update (row);
+            }
+            for (const auto& row : batch.examples) {
+                impl_->storage.replace (row);
+            }
+            return true; // Commit
+        });
+    });
+}
+
 // The one place a caller can scope the DB mutex around more than a single call.
 // Deliberately `std::function` rather than a template: the mutex lives behind
 // the pImpl, and a header-inlined template would have to expose it.

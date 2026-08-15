@@ -89,6 +89,16 @@ export interface ChangedRequest {
 	boundOperation: SpecOperation;
 	/** The same operation as the new document declares it. */
 	operation: SpecOperation;
+	/**
+	 * The request an import of the new document would build for this operation -
+	 * the values behind {@link SpecFieldDiff.next} (issue #655).
+	 *
+	 * Kept because applying a change has to write *values*, and the rendered
+	 * `next` is truncated for display. Reading them from the same draft the
+	 * comparison was made against is what stops the diff and the apply from
+	 * disagreeing about what the document says.
+	 */
+	draft: RequestDraft;
 	matchedBy: IdentityMatch;
 	/** The document moved the identity itself - the other half of it changed. */
 	renamed: boolean;
@@ -168,6 +178,7 @@ export function diffSpec({ bound, fetched, requests }: SpecDiffInput): SpecDiff 
 			request,
 			boundOperation,
 			operation: found.entry.operation,
+			draft: found.entry.draft,
 			matchedBy: found.matchedBy,
 			renamed,
 			fields,

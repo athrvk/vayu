@@ -6,15 +6,21 @@
  */
 
 /**
- * The Spec tab's Sync section - re-read the bound document and say what moved
- * (issue #654, phase 2b of #625).
+ * The Spec tab's Sync section - re-read the bound document, say what moved, and
+ * apply the parts the user ticks (issues #654 and #655, phase 2 of #625).
  *
- * **It writes nothing, and says so.** Every judgement a sync makes lives in
- * `spec-diff`, where it is provable without a row to damage; this section shows
- * that judgement and stops. Applying it - creating the added, deleting the
- * removed, rewriting the changed while protecting what the user edited - is
- * #655, and until it lands "check" is a question the user can ask as often as
- * they like with nothing at stake.
+ * The read half and the write half stayed separate all the way down. Every
+ * judgement about what changed lives in `spec-diff`, and every judgement about
+ * what to *write* lives in `spec-apply`; both are pure, so the rules that
+ * matter - a field somebody edited is never overwritten unless they ask, a
+ * removal is never a default - are provable without a row to damage. This
+ * component ticks boxes and calls one engine route.
+ *
+ * **Applying is one call because it has to be one transaction.** `POST
+ * /specs/sync` writes the document, moves the binding and applies the rows
+ * together; a sync that stopped halfway would leave the collection bound to a
+ * document its requests do not reflect, which is the state binding exists to
+ * make impossible.
  *
  * The counts are stated in full, zeros included, for the reason `MatchSummary`
  * states its three: "4 changed" alone reads as the whole answer, while "4
@@ -22,20 +28,37 @@
  */
 
 import { useState } from "react";
-import { AlertTriangle, Check, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button } from "@/components/ui";
+import { Button, DeleteConfirmDialog } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
-import { diffSpec, type ChangedRequest, type SpecDiff } from "@/services/openapi/spec-diff";
+import { useSyncSpecMutation } from "@/queries/specs";
+import {
+	diffSpec,
+	type ChangedRequest,
+	type SpecDiff,
+	type SpecField,
+} from "@/services/openapi/spec-diff";
+import {
+	buildSyncPayload,
+	defaultSelection,
+	isEmptySelection,
+	operationKey,
+	type SpecApplySelection,
+} from "@/services/openapi/spec-apply";
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Request, SpecDocument, SpecOperation } from "@/types";
-import { SectionLabel } from "./shared";
+import type { Collection, Request, SpecDocument } from "@/types";
+import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
+	/** The bound collection - what a sync is allowed to write, and where it writes. */
+	collection: Collection;
+	/** Every stored collection, to find the tag folder an added operation lands in. */
+	collections: readonly Collection[];
 	/** The bound document, or `undefined` while the engine has not answered. */
 	spec: SpecDocument | undefined;
 	/** Where this machine keeps the picked file, when it was this machine that picked it. */
@@ -49,11 +72,27 @@ type CheckState =
 	| { phase: "checking" }
 	| { phase: "error"; message: string }
 	| { phase: "unchanged" }
-	| { phase: "diff"; diff: SpecDiff; unresolvedRefs: number };
+	| {
+			phase: "diff";
+			diff: SpecDiff;
+			unresolvedRefs: number;
+			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
+			content: string;
+			selection: SpecApplySelection;
+	  }
+	| { phase: "applied"; created: number; updated: number; deleted: number };
 
-export default function SpecSync({ spec, specFile, requests }: SpecSyncProps) {
+export default function SpecSync({
+	collection,
+	collections,
+	spec,
+	specFile,
+	requests,
+}: SpecSyncProps) {
 	const { maxBytes } = useSpecDocumentLimit();
 	const [state, setState] = useState<CheckState>({ phase: "idle" });
+	const [confirmingDeletes, setConfirmingDeletes] = useState(false);
+	const syncSpec = useSyncSpecMutation();
 
 	const handleCheck = async () => {
 		if (!spec || state.phase === "checking") return;
@@ -83,15 +122,51 @@ export default function SpecSync({ spec, specFile, requests }: SpecSyncProps) {
 			}
 
 			const fetched = readSpecOperations(text).requests;
+			const diff = diffSpec({ bound: boundDrafts(spec.content), fetched, requests });
 			setState({
 				phase: "diff",
-				diff: diffSpec({ bound: boundDrafts(spec.content), fetched, requests }),
+				diff,
 				unresolvedRefs,
+				content: text,
+				selection: defaultSelection(diff),
 			});
 		} catch (e) {
 			setState({ phase: "error", message: (e as Error).message });
 		}
 	};
+
+	const setSelection = (next: SpecApplySelection) =>
+		setState((current) =>
+			current.phase === "diff" ? { ...current, selection: next } : current
+		);
+
+	const handleApply = () => {
+		if (state.phase !== "diff" || !spec) return;
+		const payload = buildSyncPayload({
+			collectionId: collection.id,
+			diff: state.diff,
+			selection: state.selection,
+			content: state.content,
+			// The document is re-fetched from the source the binding recorded, so
+			// the new row records the same one - a file-sourced document keeps
+			// having no URL rather than acquiring one.
+			sourceUrl: spec.sourceUrl,
+			collections,
+		});
+		syncSpec.mutate(payload, {
+			onSuccess: (result) => {
+				setConfirmingDeletes(false);
+				setState({
+					phase: "applied",
+					created: result.created,
+					updated: result.updated,
+					deleted: result.deleted,
+				});
+			},
+		});
+	};
+
+	const pendingDeletes = state.phase === "diff" ? state.selection.removed.size : 0;
 
 	return (
 		<div>
@@ -101,7 +176,7 @@ export default function SpecSync({ spec, specFile, requests }: SpecSyncProps) {
 					<Button
 						variant="outline"
 						onClick={() => void handleCheck()}
-						disabled={!spec || state.phase === "checking"}
+						disabled={!spec || state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -111,7 +186,7 @@ export default function SpecSync({ spec, specFile, requests }: SpecSyncProps) {
 						Check for changes
 					</Button>
 					<span className="text-[11px] text-muted-foreground">
-						Re-reads the document and compares it. Nothing is written.
+						Re-reads the document and compares it. Nothing is written until you apply.
 					</span>
 				</div>
 
@@ -135,10 +210,68 @@ export default function SpecSync({ spec, specFile, requests }: SpecSyncProps) {
 					</p>
 				)}
 
-				{state.phase === "diff" && (
-					<DiffReport diff={state.diff} unresolvedRefs={state.unresolvedRefs} />
+				{state.phase === "applied" && (
+					<p className="flex items-center gap-2 text-xs text-status-success-text">
+						<Check className="h-3.5 w-3.5 shrink-0" />
+						Applied - {state.created} request{state.created === 1 ? "" : "s"} created,{" "}
+						{state.updated} updated, {state.deleted} deleted. This collection is now
+						bound to the document you just synced.
+					</p>
 				)}
+
+				{state.phase === "diff" && (
+					<>
+						<DiffReport
+							diff={state.diff}
+							unresolvedRefs={state.unresolvedRefs}
+							selection={state.selection}
+							onChange={setSelection}
+						/>
+						<div className="flex items-center gap-2">
+							<Button
+								onClick={() =>
+									pendingDeletes > 0 ? setConfirmingDeletes(true) : handleApply()
+								}
+								disabled={isEmptySelection(state.selection) || syncSpec.isPending}
+							>
+								{syncSpec.isPending ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<Upload className="mr-2 h-4 w-4" />
+								)}
+								Apply selected
+							</Button>
+							<span className="text-[11px] text-muted-foreground">
+								{applySummary(state.selection)}
+							</span>
+						</div>
+					</>
+				)}
+
+				<SaveFailed mutation={syncSpec} what="this sync" />
 			</div>
+
+			{/*
+			 * The count-naming confirm every destructive path here uses. A sync can
+			 * delete several requests in one click, and the number is the part a
+			 * user needs before agreeing - "delete the removed operations" is not
+			 * something anyone can weigh.
+			 */}
+			<DeleteConfirmDialog
+				open={confirmingDeletes}
+				onOpenChange={setConfirmingDeletes}
+				title="Delete requests this document no longer declares?"
+				description={
+					<>
+						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} will be deleted,
+						with everything saved on {pendingDeletes === 1 ? "it" : "them"}. The rest of
+						this sync is applied in the same step.
+					</>
+				}
+				onConfirm={handleApply}
+				isDeleting={syncSpec.isPending}
+				confirmLabel="Apply and delete"
+			/>
 		</div>
 	);
 }
@@ -158,7 +291,47 @@ function boundDrafts(content: string): SpecRequestDraft[] | null {
 	}
 }
 
-function DiffReport({ diff, unresolvedRefs }: { diff: SpecDiff; unresolvedRefs: number }) {
+/** "3 to create, 1 to update, 0 to delete" - what the button is about to do. */
+function applySummary(selection: SpecApplySelection): string {
+	if (isEmptySelection(selection)) return "Nothing selected.";
+	return (
+		`${selection.added.size} to create · ${selection.changed.size} to update · ` +
+		`${selection.removed.size} to delete`
+	);
+}
+
+interface SelectionProps {
+	selection: SpecApplySelection;
+	onChange: (next: SpecApplySelection) => void;
+}
+
+function DiffReport({
+	diff,
+	unresolvedRefs,
+	selection,
+	onChange,
+}: { diff: SpecDiff; unresolvedRefs: number } & SelectionProps) {
+	const toggleAdded = (key: string, on: boolean) => {
+		const added = new Set(selection.added);
+		if (on) added.add(key);
+		else added.delete(key);
+		onChange({ ...selection, added });
+	};
+
+	const toggleRemoved = (id: string, on: boolean) => {
+		const removed = new Set(selection.removed);
+		if (on) removed.add(id);
+		else removed.delete(id);
+		onChange({ ...selection, removed });
+	};
+
+	const setChanged = (id: string, fields: ReadonlySet<SpecField> | null) => {
+		const changed = new Map(selection.changed);
+		if (fields) changed.set(id, fields);
+		else changed.delete(id);
+		onChange({ ...selection, changed });
+	};
+
 	return (
 		<div className="space-y-3">
 			<div className="rounded-md border border-rule surface-sunken p-3 space-y-1">
@@ -185,12 +358,18 @@ function DiffReport({ diff, unresolvedRefs }: { diff: SpecDiff; unresolvedRefs: 
 			)}
 
 			{diff.added.length > 0 && (
-				<Group title="New operations" hint="No request in this collection is one of these.">
+				<Group
+					title="New operations"
+					hint="Ticked ones become requests, filed by tag the way an import files them."
+				>
 					{diff.added.map((entry) => (
-						<Row
+						<CheckRow
 							key={operationKey(entry.operation)}
+							checked={selection.added.has(operationKey(entry.operation))}
+							onChange={(on) => toggleAdded(operationKey(entry.operation), on)}
 							title={entry.draft.name}
 							detail={operationKey(entry.operation)}
+							note={entry.folder ? `into ${entry.folder}` : undefined}
 						/>
 					))}
 				</Group>
@@ -199,59 +378,107 @@ function DiffReport({ diff, unresolvedRefs }: { diff: SpecDiff; unresolvedRefs: 
 			{diff.removed.length > 0 && (
 				<Group
 					title="Operations the document no longer declares"
-					hint="These requests are still here, and stay here."
+					hint="Unticked by default - deleting a request takes everything saved on it."
 				>
 					{diff.removed.map((request) => (
-						<Row
+						<CheckRow
 							key={request.id}
+							checked={selection.removed.has(request.id)}
+							onChange={(on) => toggleRemoved(request.id, on)}
 							title={request.name}
 							detail={
 								request.specOperation
 									? operationKey(request.specOperation)
 									: request.url
 							}
+							note="delete"
 						/>
 					))}
 				</Group>
 			)}
 
 			{diff.changed.length > 0 && (
-				<Group title="Changed" hint="What the document now produces, field by field.">
+				<Group
+					title="Changed"
+					hint="Tick the fields to take from the document. Ones you changed yourself start unticked."
+				>
 					{diff.changed.map((changed) => (
-						<ChangedRow key={changed.request.id} changed={changed} />
+						<ChangedRow
+							key={changed.request.id}
+							changed={changed}
+							fields={selection.changed.get(changed.request.id)}
+							onChange={(fields) => setChanged(changed.request.id, fields)}
+						/>
 					))}
 				</Group>
 			)}
 
 			<p className="text-[11px] text-muted-foreground">
-				Nothing has been changed. Response examples are not compared yet - which of them a
-				sync may replace is decided where a sync applies.
+				Applying a change also refreshes that request&rsquo;s response examples from the
+				document - the ones a previous import or sync wrote. Examples you saved from a live
+				response are never replaced.
 			</p>
 		</div>
 	);
 }
 
-function ChangedRow({ changed }: { changed: ChangedRequest }) {
+function ChangedRow({
+	changed,
+	fields,
+	onChange,
+}: {
+	changed: ChangedRequest;
+	/** The ticked fields, or `undefined` when this request is not being applied. */
+	fields: ReadonlySet<SpecField> | undefined;
+	onChange: (fields: ReadonlySet<SpecField> | null) => void;
+}) {
+	const applying = fields !== undefined;
+
+	const toggleField = (field: SpecField, on: boolean) => {
+		const next = new Set(fields ?? []);
+		if (on) next.add(field);
+		else next.delete(field);
+		onChange(next);
+	};
+
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2 space-y-1">
-			<div className="flex items-baseline gap-2">
+			<label className="flex items-baseline gap-2">
+				<input
+					type="checkbox"
+					checked={applying}
+					onChange={(e) =>
+						onChange(
+							e.target.checked
+								? new Set(
+										changed.fields
+											.filter((field) => !field.userTouched)
+											.map((field) => field.field)
+									)
+								: null
+						)
+					}
+					aria-label={`Apply changes to ${changed.request.name}`}
+				/>
 				<span className="text-xs font-medium">{changed.request.name}</span>
 				<span className="text-[11px] font-mono text-muted-foreground break-all">
 					{operationKey(changed.operation)}
 				</span>
-			</div>
+			</label>
 
 			{changed.renamed && (
 				<p className="text-[11px] text-muted-foreground">
 					Followed by its {changed.matchedBy === "operationId" ? "operationId" : "path"}:
-					this request records {operationKey(changed.boundOperation)}.
+					this request records {operationKey(changed.boundOperation)}, and applying
+					records the new identity.
 				</p>
 			)}
 
 			{changed.previousUnknown && (
 				<p className="text-[11px] text-muted-foreground">
 					The bound document does not describe this operation, so an edit of yours and a
-					change of the document&rsquo;s cannot be told apart here.
+					change of the document&rsquo;s cannot be told apart here - nothing is ticked for
+					you.
 				</p>
 			)}
 
@@ -259,14 +486,23 @@ function ChangedRow({ changed }: { changed: ChangedRequest }) {
 				<ul className="space-y-1">
 					{changed.fields.map((field) => (
 						<li key={field.field} className="text-[11px]">
-							<span className="font-semibold">{field.field}</span>
-							{field.userTouched && (
-								<span className="ml-1.5 text-status-warning-text">
-									<AlertTriangle className="mr-1 inline h-3 w-3 align-[-1px]" />
-									edited here
-								</span>
-							)}
-							<span className="block text-muted-foreground break-all">
+							<label className="flex items-baseline gap-1.5">
+								<input
+									type="checkbox"
+									checked={fields?.has(field.field) ?? false}
+									disabled={!applying}
+									onChange={(e) => toggleField(field.field, e.target.checked)}
+									aria-label={`Apply ${field.field} to ${changed.request.name}`}
+								/>
+								<span className="font-semibold">{field.field}</span>
+								{field.userTouched && (
+									<span className="text-status-warning-text">
+										<AlertTriangle className="mr-1 inline h-3 w-3 align-[-1px]" />
+										edited here
+									</span>
+								)}
+							</label>
+							<span className="block pl-5 text-muted-foreground break-all">
 								{field.current || "empty"} &rarr; {field.next || "empty"}
 							</span>
 						</li>
@@ -295,18 +531,34 @@ function Group({
 	);
 }
 
-function Row({ title, detail }: { title: string; detail: string }) {
+function CheckRow({
+	checked,
+	onChange,
+	title,
+	detail,
+	note,
+}: {
+	checked: boolean;
+	onChange: (on: boolean) => void;
+	title: string;
+	detail: string;
+	note?: string;
+}) {
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2">
-			<span className="text-xs font-medium">{title}</span>
-			<span className="ml-2 text-[11px] font-mono text-muted-foreground break-all">
-				{detail}
-			</span>
+			<label className="flex items-baseline gap-2">
+				<input
+					type="checkbox"
+					checked={checked}
+					onChange={(e) => onChange(e.target.checked)}
+					aria-label={`${title} (${detail})`}
+				/>
+				<span className="text-xs font-medium">{title}</span>
+				<span className="text-[11px] font-mono text-muted-foreground break-all">
+					{detail}
+				</span>
+				{note && <span className="text-[11px] text-muted-foreground">{note}</span>}
+			</label>
 		</li>
 	);
-}
-
-/** `GET /pets/{petId}` - how a user recognises an operation, id or no id. */
-function operationKey(operation: SpecOperation): string {
-	return `${operation.method.toUpperCase()} ${operation.path}`;
 }

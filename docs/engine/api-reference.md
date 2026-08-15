@@ -1175,6 +1175,80 @@ The refusal is deliberate rather than a cascade to unbound: the caller asked to
 delete a document, not to edit collections it never mentioned. Unbind with
 `PUT /collections/:id` and `{"openapi": null}`, then delete.
 
+### POST /specs/sync
+
+Apply a re-fetched document to the collection bound to it, in **one
+transaction**: the document is stored, the binding moves to it, and the requests
+the caller selected are created, updated and deleted together. Half of that
+landing would leave a collection bound to a document its requests do not
+reflect, which is the state the binding exists to make impossible - so it is
+refused structurally rather than reported afterwards.
+
+Deliberately not part of `POST /import/apply`: that route only ever creates,
+which is what lets it own every id and validate a payload with nothing stored
+behind it. A sync updates and deletes rows that already exist.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",                       // Required; must be bound to a spec
+  "spec": {
+    "content": "{\"openapi\":\"3.1.0\", ...}",           // Required, non-empty, at most maxSpecDocumentBytes
+    "sourceUrl": "https://api.example.com/openapi.json" // Optional; null for a file or a paste
+  },
+  "collections": [                                     // Optional - tag folders to create
+    {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
+  ],
+  "create": [                                          // Optional - operations the document added
+    {"tempId": "t_req", "collectionTempId": "t_col", "name": "Get a pet",
+     "method": "GET", "url": "https://api.example.com/pets/{{petId}}",
+     "specOperation": {"operationId": "getPet", "method": "GET", "path": "/pets/{petId}"}}
+  ],
+  "update": [                                          // Optional - merge-patch by id
+    {"id": "req_1234...", "name": "List pets", "specOperation": {...}, "examples": [...]}
+  ],
+  "delete": ["req_5678..."]                            // Optional - request ids
+}
+```
+
+**Response:**
+```json
+{
+  "idMap": {"t_col": "col_bb21...", "t_req": "req_cc34..."},
+  "specId": "spec_dd45...",
+  "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "syncedAt": 1730000000000,
+  "created": 1, "updated": 1, "deleted": 1
+}
+```
+
+Four rules the payload cannot opt out of:
+
+- **The bound subtree is the boundary.** Every request an `update` or a `delete`
+  names, and every collection a created request lands in, must be the collection
+  being synced or one beneath it. Anything else is a `400` naming the item -
+  without this the route would be a way to delete any row by id.
+- **The engine mints every id**, as `/import/apply` does: new rows are named by
+  `tempId` and translated through `idMap`, and a body `id` is a `400`.
+- **`examples` on an update replaces only the imported ones.** Rows with
+  `origin: "user"` (issue #588) always survive; the replacements take the block
+  the replaced rows occupied, so a saved example never loses its position - "the
+  first example" is what a mock server answers with. An **absent** `examples`
+  leaves every example alone, `[]` removes the imported ones. An explicit
+  `origin` on an item is a `400`: a sync writes imported examples by definition.
+- **A request cannot be moved here.** `collectionId` inside an `update` item is a
+  `400`; use `PUT /requests/:id`.
+
+**Errors:** `404` when the collection does not exist. `400` when it is bound to
+no spec, when a section is not an array, when a payload item is malformed (with
+`error.item` naming the `tempId` or the request id, as `/import/apply` does), or
+when the document is over `maxSpecDocumentBytes` - the same helper `POST /specs`
+uses. `409` when an `update` names a request that no longer exists: nothing about
+the payload is wrong, the ground the diff was computed against has moved, and
+re-checking is what the client should do. A `delete` naming a request that is
+already gone is **not** an error - that is the state the caller asked for.
+Nothing is written unless all of it is.
+
 ## Reorder
 
 ### POST /reorder

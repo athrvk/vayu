@@ -36,6 +36,19 @@ import type { CollectionDraft, RequestDraft } from "@/services/importers/types";
 export interface SpecRequestDraft {
 	operation: SpecOperation;
 	draft: RequestDraft;
+	/**
+	 * The sub-collection an import files this operation under - its first tag -
+	 * and `""` for an operation with no tag, which imports onto the root
+	 * (issue #655).
+	 *
+	 * Kept because applying an *added* operation has to put the request
+	 * somewhere, and "where an import would have put it" is the only answer that
+	 * leaves a synced collection shaped like an imported one. A name rather than
+	 * a draft reference: the tag collection an added operation needs may already
+	 * exist under the bound collection, and matching it by the name the parser
+	 * gave it is what tells those two cases apart.
+	 */
+	folder: string;
 }
 
 /** What a document turned out to describe. */
@@ -77,7 +90,7 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 	if (!root?.spec) throw new NotASpecError(result.meta.format);
 
 	const requests: SpecRequestDraft[] = [];
-	collect(root, requests);
+	collect(root, requests, "");
 	return {
 		requests,
 		// Derived rather than collected a second time: one walk, so a reader that
@@ -89,9 +102,17 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 	};
 }
 
-function collect(collection: CollectionDraft, out: SpecRequestDraft[]): void {
+/**
+ * @param folder the name of the sub-collection being walked, `""` for the root.
+ * The OpenAPI parsers nest exactly one level - a tag collection per tag, on the
+ * root - so this is the whole of an operation's position, not a truncation of a
+ * deeper path.
+ */
+function collect(collection: CollectionDraft, out: SpecRequestDraft[], folder: string): void {
 	for (const request of collection.requests) {
-		if (request.specOperation) out.push({ operation: request.specOperation, draft: request });
+		if (request.specOperation) {
+			out.push({ operation: request.specOperation, draft: request, folder });
+		}
 	}
-	for (const child of collection.children) collect(child, out);
+	for (const child of collection.children) collect(child, out, child.name);
 }

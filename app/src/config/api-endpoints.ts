@@ -55,6 +55,10 @@ export const API_ENDPOINTS = {
 	// whoever else binds it.
 	SPECS: `/specs`,
 	SPEC_BY_ID: (id: string) => `/specs/${id}`,
+	// Applying a re-fetched document to the collection bound to it (issue #655):
+	// the new document, the moved binding and the created/updated/deleted
+	// requests in one engine transaction.
+	SPEC_SYNC: `/specs/sync`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

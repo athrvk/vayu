@@ -77,6 +77,41 @@ class MissingRowError : public std::runtime_error {
     }
 };
 
+/**
+ * @brief One OpenAPI sync, as the rows it writes (issue #655).
+ *
+ * A sync is the one write in Vayu that creates, updates *and* deletes at once,
+ * and it must be all-or-nothing for a reason the other batch writers do not
+ * share: half of it leaves a collection bound to a document its requests do not
+ * reflect, which is precisely the state binding exists to make impossible. So
+ * the whole of it - the new document, the moved binding, the rows - is one
+ * transaction rather than a sequence the client stitches together.
+ *
+ * Ids are assigned by the caller, like `import_apply`: nothing here can look up
+ * a row the same transaction has not committed yet.
+ */
+struct SpecSyncBatch {
+    /// The re-fetched document. A new row, never a rewrite - see `SpecDocument`.
+    SpecDocument spec;
+    /// The bound collection with `openapi` already moved to @ref spec. Updated,
+    /// never inserted: a sync of a collection that no longer exists is a
+    /// `MissingRowError`, not a resurrection.
+    Collection binding;
+    /// Tag folders an added operation needs and the collection does not have.
+    std::vector<Collection> new_collections;
+    std::vector<Request> created;
+    /// Updated, never inserted, on `apply_reorder`'s rule and for its reason.
+    std::vector<Request> updated;
+    /// Request ids to delete. Their examples cascade, as `delete_request` does.
+    std::vector<std::string> deleted;
+    /// Example rows to insert - a created request's, and the imported ones a
+    /// refreshed request's replace.
+    std::vector<RequestExample> examples;
+    /// The imported example rows @ref examples replaces. Ids, because the row
+    /// they name is stored and only its identity matters here.
+    std::vector<std::string> deleted_examples;
+};
+
 class Database {
     public:
     explicit Database (const std::string& db_path);
@@ -169,6 +204,23 @@ class Database {
      */
     void apply_reorder (const std::vector<Collection>& collections,
     const std::vector<Request>& requests);
+
+    /**
+     * @brief Persist a whole OpenAPI sync in one transaction (issue #655).
+     *
+     * Separate from `import_apply` for the reason `apply_reorder` is: this one
+     * writes rows that already exist and deletes rows the caller named, and an
+     * upsert on either would be a resurrection of something a concurrent delete
+     * removed. `SpecSyncBatch::binding` and every row in `updated` must be
+     * stored at commit time, or the batch throws `MissingRowError` and rolls
+     * back whole - the route turns that into a 409, because the ground the diff
+     * was computed against has moved.
+     *
+     * A named `deleted` request that is already gone is *not* an error: the
+     * sync asked for it to not be there, and it is not. Its examples are
+     * removed with it either way, the same cascade `delete_request` performs.
+     */
+    void spec_sync_apply (const SpecSyncBatch& batch);
 
     /**
      * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).

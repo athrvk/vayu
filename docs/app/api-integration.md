@@ -328,9 +328,18 @@ and then unbound holds `{}`. On `updateCollection` the field is
 ```typescript
 apiService.createSpec(data): Promise<SpecDocument>       // POST /specs
 apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
+apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 ```
 
-Create and read-by-id only. A document is immutable - a changed spec is a new
+Create and read-by-id only, plus the one write that moves a binding.
+`syncSpec` is that write (issue #655): it stores the re-fetched document, points
+the collection at it and applies the created, updated and deleted requests in a
+single engine transaction, because a sync that stopped halfway would leave a
+collection bound to a document its requests do not reflect. The renderer decides
+*what* to send (`services/openapi/spec-apply.ts`) and never sequences the writes
+itself.
+
+A document is immutable - a changed spec is a new
 document and a moved binding, which is what keeps a run's `specHash` stamp
 meaningful - and the **hash is computed engine-side** on the bytes it stored,
 never here. There is no delete call: unbinding is a `PUT /collections/:id`, and

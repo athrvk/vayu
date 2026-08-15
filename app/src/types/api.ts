@@ -1087,3 +1087,70 @@ export interface CreateSpecRequest {
 	content: string;
 	sourceUrl?: string | null;
 }
+
+// Spec sync (issue #655) - `POST /specs/sync` applies a re-fetched document to
+// the collection bound to it: the document is stored, the binding moves to it,
+// and the selected operations are created, updated and deleted in one
+// transaction. Separate from `/import/apply` because that route only ever
+// creates; see engine/src/http/routes/spec_sync.cpp.
+
+/** A tag folder an added operation needs and the collection does not have yet. */
+export interface SpecSyncCollection {
+	tempId: string;
+	name: string;
+	/** Absent means the collection being synced; anything else must be beneath it. */
+	parentId?: string;
+	description?: string;
+}
+
+/** An operation the document added, as the request it becomes. */
+export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId"> & {
+	/** The stored collection it lands in - or `collectionTempId`, never both. */
+	collectionId?: string;
+	collectionTempId?: string;
+};
+
+/**
+ * A merge-patch on one stored request: only the fields the user chose to take
+ * from the document, plus the identity when the document moved it.
+ *
+ * `examples` present replaces the request's imported examples with these and
+ * leaves the ones saved from live responses alone; absent leaves all of them.
+ */
+export interface SpecSyncUpdate {
+	id: string;
+	name?: string;
+	description?: string;
+	method?: string;
+	url?: string;
+	params?: KeyValueEntry[];
+	headers?: KeyValueEntry[];
+	body?: RequestBody;
+	bodyType?: string;
+	specOperation?: SpecOperation;
+	examples?: ImportApplyExample[];
+}
+
+export interface SpecSyncRequest {
+	/** The bound collection. Nothing outside its subtree is written. */
+	collectionId: string;
+	/** The re-fetched document. `hash` and `fetchedAt` are engine-computed. */
+	spec: { content: string; sourceUrl?: string | null };
+	collections: SpecSyncCollection[];
+	create: SpecSyncCreate[];
+	update: SpecSyncUpdate[];
+	/** Request ids. One already deleted is not an error - it is the asked-for state. */
+	delete: string[];
+}
+
+export interface SpecSyncResponse {
+	/** Every `tempId` sent, mapped to the engine-generated id it became. */
+	idMap: Record<string, string>;
+	/** The stored document the collection is now bound to. */
+	specId: string;
+	specHash: string;
+	syncedAt: number;
+	created: number;
+	updated: number;
+	deleted: number;
+}

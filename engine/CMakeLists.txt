@@ -392,6 +392,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/requests.cpp
         src/http/routes/examples.cpp
         src/http/routes/specs.cpp
+        src/http/routes/spec_sync.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/globals.cpp
@@ -518,12 +519,14 @@ if(VAYU_BUILD_TESTS)
         tests/scenario_runner_test.cpp
         tests/tree_order_test.cpp
         tests/reorder_route_test.cpp
+        tests/spec_sync_route_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
         src/http/routes/examples.cpp
         src/http/routes/specs.cpp
+        src/http/routes/spec_sync.cpp
         src/http/routes/reorder.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
