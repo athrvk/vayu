@@ -121,14 +121,16 @@ struct ScriptContext {
      * below, so `pm.info.eventName` cannot disagree with the hook that is
      * actually running.
      *
-     * `iteration` / `iterationCount` are set by the **scenario runner and by
-     * nothing else**, which is what keeps issue #300's ruling intact rather
-     * than reopening it: a load test's `tests` script runs once per *sampled*
+     * `iteration` / `iterationCount` are set **only where a row was actually
+     * bound**, which is what keeps issue #300's ruling intact rather than
+     * reopening it: a load test's `tests` script runs once per *sampled*
      * response after the run has finished, so a reservoir sample index reported
      * as an iteration number would be a binding that cannot fail - worse than
      * a missing one. `validate_scripts` therefore still sets neither, and a
-     * script that reads `pm.info.iteration` outside a scenario run reads
-     * `undefined`. A scenario run has a real iteration index, so it reports it.
+     * script that reads `pm.info.iteration` on an ordinary Send reads
+     * `undefined`. A scenario run has a real iteration index, so it reports it;
+     * so does a `POST /execute` naming a `data` row, which is row 0 of 1
+     * (issue #601).
      *
      * `iteration` is 0-based (Postman's convention); `iterationCount` is the
      * total the run will perform.
@@ -145,8 +147,10 @@ struct ScriptContext {
      *        #356).
      *
      * Points into the run's `ScenarioExecution::data_rows`, which outlives
-     * every script of the run; the object is always a JSON object, because
-     * anything else is a `400` before the run row exists.
+     * every script of the run - or, for a `POST /execute` naming a `data` row
+     * (issue #601), into the row the handler read off that payload. The object
+     * is always a JSON object, because anything else is a `400` before the run
+     * row exists.
      *
      * Null is the ordinary case and reaches the script as **`undefined`**
      * rather than as an empty scope that answers `undefined` to every key.
@@ -155,8 +159,9 @@ struct ScriptContext {
      * nothing is #188's false success. This is *data*, and "this run has no
      * data" is a fact a script may legitimately branch on -
      * `if (pm.iterationData)` is the guard, and it can only work if absence is
-     * visible. A `POST /execute` send and a load run's deferred `tests` script
-     * therefore see `undefined`, as they do for `pm.info.iteration`.
+     * visible. A `POST /execute` send carrying no `data` row and a load run's
+     * deferred `tests` script therefore see `undefined`, as they do for
+     * `pm.info.iteration`.
      */
     const nlohmann::json* iteration_data = nullptr;
 

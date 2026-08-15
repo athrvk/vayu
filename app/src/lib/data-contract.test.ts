@@ -35,7 +35,11 @@ function collection(
 describe("resolveDataContract", () => {
 	it("finds the leaf's own contract", () => {
 		const contract = resolveDataContract("leaf", [collection("leaf", undefined, ["id"])]);
-		expect(contract).toEqual({ collectionName: "collection-leaf", columns: ["id"] });
+		expect(contract).toEqual({
+			collectionId: "leaf",
+			collectionName: "collection-leaf",
+			columns: ["id"],
+		});
 	});
 
 	it("walks up to the nearest declaring ancestor when the leaf declares none", () => {
@@ -108,6 +112,7 @@ describe("collectionsUnderContract", () => {
 
 describe("describeDataToken", () => {
 	const contract = {
+		collectionId: "col-users",
 		collectionName: "Users",
 		columns: ["id", "email", "plan"],
 	};

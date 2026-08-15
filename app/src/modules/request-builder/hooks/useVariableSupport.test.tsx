@@ -24,6 +24,7 @@ import { renderHook } from "@testing-library/react";
 import type { DataContractScope } from "@/types";
 
 const contract: DataContractScope = {
+	collectionId: "col-checkout",
 	collectionName: "Checkout flow",
 	columns: ["id", "email"],
 };

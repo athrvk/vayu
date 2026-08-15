@@ -56,6 +56,7 @@ export function resolveDataContract(
 		const collection = chain[i];
 		if (!hasDataContract(collection.dataSchema)) continue;
 		return {
+			collectionId: collection.id,
 			collectionName: collection.name,
 			columns: collection.dataSchema?.columns ?? [],
 		};

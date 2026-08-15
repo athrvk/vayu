@@ -573,6 +573,60 @@ struct StreamFlag {
 StreamFlag read_stream_flag (const nlohmann::json& json);
 
 /**
+ * The outcome of reading `POST /execute`'s `data` row (issue #601).
+ *
+ * `value` is the row itself when the payload carried one, and `nullopt` when it
+ * did not - which is the ordinary send and must stay distinguishable from a row
+ * that happens to be empty, since `pm.iterationData` reads `undefined` for one
+ * and an empty scope for the other.
+ *
+ * `ok == false` carries the 400 the route answers with, and every rejection is
+ * loud for the reason the whole `{{data.column}}` namespace exists: a token says
+ * the value came from the file, so a row the engine could not read must never
+ * become a send with the token still written in it.
+ */
+struct DataRow {
+    bool ok = true;
+    std::string error;
+    std::optional<nlohmann::json> value;
+};
+
+/**
+ * Read the `data` row off a `POST /execute` payload, bounded by @p max_bytes
+ * (the `maxScenarioDataBytes` setting - one row here, where a run's whole set is
+ * measured against it).
+ *
+ * The row must be a JSON object of name/value pairs, exactly as a
+ * `scenario.data` row must be (`parse_scenario_request`): anything else has no
+ * column a `{{data.column}}` token or `pm.iterationData.get` could name.
+ *
+ * Extracted from the handler (execution.cpp) so send_with_row_test.cpp can drive
+ * it directly, matching the suite's other route-core tests.
+ */
+DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
+
+/**
+ * The first `{{data.column}}` token in @p json's `auth` block, or `nullopt`.
+ *
+ * A send-with-row binds what composition left written - the URL, header names
+ * and values, the body, both halves of every form field - and `build_request`
+ * has already collapsed the credentials into an `Authorization` header by the
+ * time the row is in hand. A `{{data.user}}` there would go out as base64 of the
+ * literal token text, silently, which is exactly the defect issue #591 removed
+ * from the load path (there by binding the *typed* credentials before
+ * `apply_auth` sees them, which a plan can afford because it is resolved once).
+ *
+ * A single send has no plan to hang a credential template off, so this endpoint
+ * refuses by name instead - the same shape the scenario planner uses for an
+ * OAuth 2.0 config, whose token is likewise acquired before any row exists.
+ * Refusing is the half that matters: nothing wrong reaches the wire, and the
+ * message names the token and the alternative. Only consulted when the payload
+ * carries a row - without one, a `data.*` token anywhere is today's
+ * goes-out-literal behaviour and is not this endpoint's to reopen.
+ */
+std::optional<std::string> first_auth_data_token (const nlohmann::json& json);
+
+/**
  * What a design execution's two scripts produced, as the four keys every
  * client already reads: `testResults`, `consoleLogs`, `preScriptError` and
  * `postScriptError`.

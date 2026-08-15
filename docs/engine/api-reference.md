@@ -2112,7 +2112,8 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "transient": false,                  // Optional, default false - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
-  "maxStreamEvents": 100000            // Optional, streaming only - see below
+  "maxStreamEvents": 100000,           // Optional, streaming only - see below
+  "data": { "id": "7" }                // Optional, one data row - see below
 }
 ```
 
@@ -2204,6 +2205,39 @@ The one caller today is the app's GraphQL schema introspection
 `run_request` deliberately does **not** set it: an agent's runs belong in
 History like anyone else's, and the tool builds its payload from named
 arguments, so an agent cannot supply the flag either.
+
+**`data` binds one row to this send** (issue #601). It is the single-send half
+of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names
+and values, the body and both halves of every form field is substituted against
+it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0`
+and `pm.info.iterationCount` `1` - the send *is* row 0 of 1. Without the field
+nothing changes: `{{data.*}}` goes out written as it stands and
+`pm.iterationData` is `undefined`.
+
+An **object** of name/value pairs, never the array a run sends - one row. The
+row is bounded by `maxScenarioDataBytes` (the same setting a run's whole set is
+measured against) and composes freely with `transient` and `stream`: a streaming
+send binds the row before the transfer opens, so the URL and headers it opens
+with are the bound ones.
+
+Refused with a **400**, before any run row exists and with nothing sent:
+
+| What | Message |
+|------|---------|
+| `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
+| over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
+| a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
+| a `null` cell, a header collision, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
+| `auth` carries a `{{data.*}}` token | `Auth credentials carry {{data.user}}, and a single send cannot bind them: ...` |
+
+That last one is the one asymmetry with a collection run, and it is a refusal
+rather than a silent wrong send. Auth is applied when the request is built -
+basic credentials are already collapsed into one base64 `Authorization` value -
+so a credential token would go out as base64 of the literal token text. A run
+resolves its plan once and can afford to keep the credentials typed and bind
+them per iteration (issue #591); a single send has no plan to hang that off, so
+it names the token and points at the alternatives (move it into the URL, a
+header or the body, or run the collection with a data file).
 
 **`requestName` is script identity, not an HTTP field** - it never reaches the
 wire. The scripts read it as `pm.info.requestName` (with `requestId` as
