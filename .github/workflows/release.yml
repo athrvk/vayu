@@ -32,6 +32,23 @@ jobs:
       VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
+      # v0.17.1's Windows leg reported 18 sccache "Cache errors" where v0.17.0
+      # had none. Nothing broke - an sccache error falls through to the real
+      # compiler, which is why that build still finished with zero compilation
+      # failures - but `--show-stats` only ever prints error *counts*, so the
+      # reason was not recoverable from the log afterwards. These two make it
+      # recoverable next time.
+      #
+      # Set at job level, not appended to $GITHUB_ENV beside the launcher vars
+      # below, because sccache reads them when its **server** starts, and the
+      # server can be up before that step runs. Job-level env is set before any
+      # step, which is the only placement that reliably wins the race. That also
+      # rules out `runner.temp`, which job-level env cannot see - hence
+      # `github.workspace`, which it can. The file is CI-only and sits outside
+      # every artifact glob (`app/release/*`, `artifacts/*`), so it cannot end
+      # up shipped.
+      SCCACHE_ERROR_LOG: '${{ github.workspace }}/sccache-error.log'
+      SCCACHE_LOG: 'warn'
 
     steps:
       - name: Checkout repository
@@ -194,6 +211,27 @@ jobs:
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure < /dev/null
+
+      # `if: always()` on purpose: a build that *failed* is the one whose
+      # sccache errors are worth reading, and without it this step would be
+      # skipped exactly then. It never fails the job - it is diagnostics, and a
+      # missing or empty log is the good case, not an error. Steps after this
+      # one carry no `always()`, so a failed build still stops here.
+      - name: Report sccache errors
+        if: always()
+        shell: bash
+        run: |
+          log="${SCCACHE_ERROR_LOG:-}"
+          if [ -z "$log" ] || [ ! -s "$log" ]; then
+            echo "No sccache errors logged."
+            exit 0
+          fi
+          echo "::group::sccache error log"
+          cat "$log"
+          echo "::endgroup::"
+          # Surfaced as a notice rather than a warning: these fall through to
+          # the real compiler, so they cost time and nothing else.
+          echo "::notice::sccache logged $(wc -l < "$log" | tr -d ' ') line(s) to its error log - see the 'Report sccache errors' step."
 
       - name: Install frontend dependencies
         working-directory: app
