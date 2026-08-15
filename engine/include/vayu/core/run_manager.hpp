@@ -110,6 +110,14 @@ struct EngineDefaults {
     /// Config key `phaseHistograms`. Whether the run feeds the five per-phase
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
+
+    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents` - the same
+    /// two the design path's stream defaults from, read here so a load stream
+    /// the caller gave no caps is bounded by the user's own settings rather
+    /// than by a second set of numbers that happen to live in the load code
+    /// (issue #576).
+    int64_t stream_max_duration_ms = constants::sse::MAX_STREAM_DURATION_MS;
+    int64_t stream_max_events      = constants::sse::MAX_STREAM_EVENTS;
 };
 
 struct RunContext {
@@ -177,6 +185,19 @@ struct RunContext {
     // copy); this one exists so a capture-off run never even reaches the
     // exemplar gate.
     bool capture_response_bodies{ constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES };
+
+    /**
+     * The caps this run's transfers stream under, or absent for the ordinary
+     * load run that does not stream (issue #576).
+     *
+     * Resolved once in the constructor - the caller's `maxStreamDurationMs` /
+     * `maxStreamEvents` over the engine's `sse*` settings - and copied onto
+     * every `Request` the executors submit. Resolved here rather than per
+     * submission because it is the same two numbers for every transfer of the
+     * run, and per-submission it would be two string-keyed JSON lookups on the
+     * strategy thread's hot path.
+     */
+    std::optional<vayu::StreamBounds> stream_bounds;
 
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
@@ -615,6 +636,13 @@ struct RunSummaryInputs {
     // user's opt-out) - which is what distinguishes "never needed to" from
     // "was never watching".
     std::optional<nlohmann::json> auth;
+
+    // What a streaming run's completions delivered, under the summary's
+    // `stream` key (issue #576). Absent for every run that streamed nothing, on
+    // the same absent-not-zeros rule as `phases` above: a load run against an
+    // ordinary endpoint has no event rate, and a zeroed one would read as a
+    // stream that delivered nothing.
+    std::optional<MetricsCollector::StreamTotals> stream;
 };
 
 /**

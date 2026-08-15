@@ -2081,6 +2081,38 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Iteration count (iterations mode)."),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
+			// Streaming under load (issue #576). Forwarded verbatim and bounded
+			// only by the engine's own `constants::sse` ranges, on the
+			// thresholds precedent: the engine validates before the run row
+			// exists, so a value this schema accepts is one `POST /runs`
+			// accepts, and re-deriving the rule here would be a second copy to
+			// keep in step. The caps are refused there without `stream`, which
+			// is what keeps an unbounded run from being mistaken for a capped
+			// one - so this schema does not quietly drop them either.
+			stream: z
+				.boolean()
+				.optional()
+				.describe(
+					"Consume each response as a text/event-stream. Under load a stream is bounded by construction: reaching a cap below completes it successfully rather than failing it."
+				),
+			maxStreamDurationMs: z
+				.number()
+				.int()
+				.min(1000)
+				.max(86_400_000)
+				.optional()
+				.describe(
+					"Wall-clock cap on one stream, in ms (requires `stream`). Defaults to the engine's sseMaxStreamDurationMs."
+				),
+			maxStreamEvents: z
+				.number()
+				.int()
+				.min(1)
+				.max(10_000_000)
+				.optional()
+				.describe(
+					"Event cap on one stream (requires `stream`). Defaults to the engine's sseMaxStreamEvents."
+				),
 			// A pending-request ceiling read as a `size_t`, so `-1` - the natural
 			// "unlimited" spelling - removes the ceiling instead of tightening it.
 			// The upper bound is the engine's, so a value this schema accepts is
@@ -2216,9 +2248,16 @@ export const TOOLS: McpTool[] = [
 				"targetRps",
 				"maxInFlight",
 				"sloMs",
+				"maxStreamDurationMs",
+				"maxStreamEvents",
 			]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
+			// Forwarded only when present: the engine refuses a cap on a
+			// non-streaming run, and refuses `stream` beside `transient`, so a
+			// defaulted `false` here would turn "the caller said nothing" into
+			// a claim the engine then has to judge (issue #576).
+			if (typeof args.stream === "boolean") payload.stream = args.stream;
 			for (const key of ["duration", "rampUpDuration", "stepDuration"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;

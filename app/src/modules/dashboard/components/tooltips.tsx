@@ -108,6 +108,8 @@ export const TOOLTIPS = {
 		"Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server.",
 	phasePercentiles:
 		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the engine's phaseHistograms setting.",
+	streamEvents:
+		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended. Time to first event is the First byte row above: a stream's first byte is its first event's.",
 } satisfies Record<string, ReactNode>;
 
 export type TooltipKey = keyof typeof TOOLTIPS;

@@ -158,6 +158,12 @@ struct ReportExtras {
     // would name a limit nothing observed.
     bool has_capacity       = false;
     nlohmann::json capacity = nlohmann::json::object ();
+    // What a streaming run's completions delivered, passed through verbatim -
+    // the producer already writes the report's camelCase names, so re-keying
+    // here would be a second place to keep them (issue #576). Empty is every
+    // non-streaming run, which leaves the section out rather than reporting an
+    // ordinary load run an event rate of zero.
+    nlohmann::json stream = nlohmann::json::object ();
     // What the run's bounded stores thinned away. `has_sampling` false is a
     // run recorded before retention was reported, which is not the same as a
     // run that dropped nothing - so the section is left out rather than shown
@@ -436,6 +442,12 @@ ReportExtras& extras) {
     if (summary.contains ("phases") && summary["phases"].is_object () &&
     !summary["phases"].empty ()) {
         extras.phases = summary["phases"];
+    }
+
+    // Same pass-through, same empty-is-absent rule (issue #576).
+    if (summary.contains ("stream") && summary["stream"].is_object () &&
+    !summary["stream"].empty ()) {
+        extras.stream = summary["stream"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -939,6 +951,13 @@ const std::string& run_id) {
     }
     if (!timing_breakdown.empty ()) {
         json_report["timingBreakdown"] = timing_breakdown;
+    }
+
+    // What this run's streams delivered: the per-completion event distribution,
+    // the totals behind it, how many the caps ended, and the derived rate.
+    // Absent for every run that did not stream - see ReportExtras::stream.
+    if (!extras.stream.empty ()) {
+        json_report["stream"] = extras.stream;
     }
 
     if (report.slow_threshold_ms > 0) {

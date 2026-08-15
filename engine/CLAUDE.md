@@ -106,8 +106,21 @@ Three things worth knowing before you design around them:
   a rule that can name itself** - server close, `POST /runs/:id/stop`,
   `maxStreamEvents`, `maxStreamDurationMs`, or the idle timeout - never a
   whole-transfer deadline, which is deliberately not set on this path. `stream`
-  with `transient`, or on `POST /runs`, is a **400** rather than a silent
-  reinterpretation. **Scripts run** (#575): the pre-request one before the
+  with `transient` is a **400** rather than a silent reinterpretation.
+  **`POST /runs` takes `stream` too** (#576), through the *same*
+  `read_stream_flag` parser, so both endpoints agree on the spelling, the types
+  and the ranges. What differs is what enforces the caps: a load stream becomes
+  `Request::stream_bounds` and the event loop ends it, counting events with
+  `SseFrameCounter` (the hot-path counter, which agrees with `SseParser` on what
+  an event is). **Under load a stream is bounded by construction** - both caps
+  are always set, never zero-for-unbounded - because the load loop refills
+  concurrency per completion, so a transfer that never ends leaks its slot for
+  the rest of the run. **Reaching a cap is a successful completion**, not a
+  timeout; the byte cap (`maxResponseBodyBytes`) stays an error, and the
+  whole-transfer timeout becomes a backstop past the duration cap. The report
+  gains a `stream` section (per-completion event distribution, totals,
+  `capped`, derived `eventsPerSecond`), absent for every run that did not
+  stream. **Scripts run** (#575): the pre-request one before the
   transfer, the post-request one after the stream ends, reading the bounded list
   as `pm.response.events`; because the route already answered `202`, their
   output is stored on the trace's `scripts` node rather than returned.

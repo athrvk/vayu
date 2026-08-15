@@ -55,6 +55,7 @@ import {
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { PhasePercentiles } from "./charts/PhasePercentiles";
+import { StreamMetrics } from "./charts/StreamMetrics";
 import { hasPhaseAverages } from "@/components/shared/response-viewer/timing-phases";
 
 function MetricsView({
@@ -528,6 +529,20 @@ function MetricsView({
 								<InfoChip tip={TOOLTIPS.phasePercentiles} />
 							</h3>
 							<PhasePercentiles report={finalReport} />
+						</div>
+					)}
+					{/* Streaming runs only, and in this card rather than a fourth
+					    one of its own: what a stream delivered is read against
+					    the first-byte row directly above it, which is the same
+					    run's time to first event. Absent for every run that did
+					    not stream - see StreamMetrics. */}
+					{finalReport?.stream && (
+						<div className="mt-3.5 pt-3.5 border-t border-border">
+							<h3 className="text-xs font-semibold text-foreground mb-3">
+								Stream events
+								<InfoChip tip={TOOLTIPS.streamEvents} />
+							</h3>
+							<StreamMetrics report={finalReport} />
 						</div>
 					)}
 				</div>

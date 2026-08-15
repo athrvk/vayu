@@ -329,6 +329,75 @@ TEST (RunConfigValidation, ANullTransientIsAcceptedAsAbsent) {
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
 
+// --- `stream` is a run's execution model now, with caps (issue #576) -------
+
+TEST (RunConfigValidation, StreamIsAcceptedOnALoadRun) {
+    // Refused outright through phase 3, because a load run's completion
+    // accounting has no place for a response that never ends. What changed is
+    // that a load stream always ends: the caps below - or the engine's `sse*`
+    // settings when the caller names none - bound every transfer.
+    auto config      = valid_config ();
+    config["stream"] = true;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, StreamIsAcceptedWithExplicitCaps) {
+    auto config                    = valid_config ();
+    config["stream"]               = true;
+    config["maxStreamDurationMs"]  = 30000;
+    config["maxStreamEvents"]      = 200;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, ACapOutOfRangeIsRejected) {
+    // The same bounds `POST /execute` enforces, because both endpoints read
+    // through `read_stream_flag`. A cap of 0 events is the one that matters
+    // most: it would be a stream that must end before it begins.
+    auto config               = valid_config ();
+    config["stream"]          = true;
+    config["maxStreamEvents"] = 0;
+    expect_rejected (config, "maxStreamEvents");
+
+    auto slow                     = valid_config ();
+    slow["stream"]                = true;
+    slow["maxStreamDurationMs"]   = 10; // below MIN_STREAM_DURATION_MS
+    expect_rejected (slow, "maxStreamDurationMs");
+}
+
+TEST (RunConfigValidation, ANonBooleanStreamIsRejected) {
+    auto config      = valid_config ();
+    config["stream"] = "true";
+    expect_rejected (config, "stream");
+}
+
+TEST (RunConfigValidation, CapsWithoutStreamAreRejected) {
+    // A cap on a non-streaming run reads as a bound the caller expects to
+    // apply, and silently ignoring it is how an unbounded run gets mistaken for
+    // a capped one. Same refusal, same message, as on a send.
+    auto config               = valid_config ();
+    config["maxStreamEvents"] = 100;
+    expect_rejected (config, "maxStreamEvents");
+}
+
+TEST (RunConfigValidation, ANullStreamIsAcceptedAsAbsent) {
+    auto config      = valid_config ();
+    config["stream"] = nullptr;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, StreamMetricsMustBeABoolean) {
+    // Read with `config.value(..., bool)` in RunContext's constructor, which
+    // throws on a string - after the run row exists, which is the stranded
+    // `pending` failure this whole function prevents.
+    auto config              = valid_config ();
+    config["stream_metrics"] = "off";
+    expect_rejected (config, "stream_metrics");
+
+    auto ok              = valid_config ();
+    ok["stream_metrics"] = false;
+    EXPECT_FALSE (validate_run_config (ok).has_value ());
+}
+
 // --- The collector's own guard, independent of the route ------------------
 
 TEST (MetricsCollectorSampleRateGuard, ZeroSampleRatesDoNotDivideByZero) {

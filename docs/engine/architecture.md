@@ -730,6 +730,47 @@ search. The stop reasons are `slo_exceeded` (two consecutive breaching windows),
 `plateau` (two step-ups bought under 5% more throughput), `cap_reached`,
 `deadline` and `stopped`, and the report's `capacity` section names which fired.
 
+### Bounded streams under load
+
+A load run may consume `text/event-stream` responses (`POST /runs` with
+`"stream": true`, issue #576), and the design principle is one line:
+**under load, every SSE stream is bounded by construction.**
+
+That follows from the refill loop below rather than from taste. The loop is
+completion-driven - `in_flight = requests_sent − completed`, refilled per
+completion - so a transfer that never completes does not merely skew a number:
+it leaks its concurrency slot for the rest of the run, and a run of *N* endless
+streams stops sending anything at all once *N* reaches the target. So a
+streaming request carries `Request::stream_bounds`, and both caps are always
+set - the payload's, or the `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
+settings - with no zero-means-unbounded spelling for either.
+
+The two caps are enforced in the two places that can see them:
+
+- **Events** in the curl write callback, by `SseFrameCounter`
+  (`http/sse_frame_counter.hpp`) - a nine-byte state machine that counts frames
+  without assembling one. It agrees with `SseParser` about what an event is (a
+  frame carrying no `data` field is not one), so a load run and a design run
+  report the same count for the same stream; `sse_frame_counter_test.cpp` drives
+  both over one table and asserts they match.
+- **Duration** in the progress callback, which libcurl runs at least once a
+  second whether or not bytes arrive - which is the only place a stream that has
+  gone *quiet* can be ended. The whole-transfer timeout is moved to a grace
+  period past the duration cap, so it backstops the callback rather than racing
+  it.
+
+Either cap ends the transfer through libcurl's documented abort, and the
+completion path turns that back into a **success** carrying the response's real
+status code. That is the point of the cap - it is the stream's intended end -
+and it is what keeps `handle_result`-exactly-once and the refill loop untouched.
+`maxResponseBodyBytes` is unchanged and still an error: it is a refusal to
+buffer, not an ending, and the event cap bounds how many events arrive rather
+than how large one is.
+
+The design path is deliberately not affected. `POST /execute` with `stream` is
+still `SseStreamManager`'s one-thread-per-stream model with no whole-transfer
+deadline; only the flag's spelling is shared, through `read_stream_flag`.
+
 ### Closed-loop controller
 
 `constant_concurrency`, `ramp_up`, `iterations` and `capacity` share a `maintain_concurrency`

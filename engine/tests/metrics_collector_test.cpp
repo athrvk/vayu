@@ -1128,3 +1128,56 @@ TEST_F (MetricsCollectorTest, PhaseHistogramsSafeUnderConcurrentWriters) {
         EXPECT_EQ (phase.count, static_cast<size_t> (kThreads * kPerThread));
     }
 }
+
+// ============================================================================
+// Stream totals (issue #576)
+// ============================================================================
+
+// Absent, not zeros - the rule the whole `stream` report section rests on. An
+// ordinary load run must not grow a section claiming it streamed nothing.
+TEST_F (MetricsCollectorTest, StreamTotalsAbsentWithoutStreamCompletions) {
+    collector->record_success (200, 10.0, 0.0);
+    EXPECT_FALSE (collector->stream_totals ().has_value ());
+}
+
+TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
+    collector->record_stream_completion (10, true);
+    collector->record_stream_completion (20, true);
+    collector->record_stream_completion (30, false);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_TRUE (totals.has_value ());
+    EXPECT_EQ (totals->completions, 3u);
+    EXPECT_EQ (totals->total_events, 60u);
+    // The server ended one of them, so it is not among the capped - which is
+    // what lets a reader tell "the run measured its own bounds" from "the
+    // target closed the connections".
+    EXPECT_EQ (totals->capped, 2u);
+    EXPECT_EQ (totals->events.count, 3u);
+    EXPECT_GE (totals->events.max, 30.0);
+}
+
+// A stream that delivered nothing is still a completion. Counting it only in
+// the histogram would lose it, since hdr cannot hold a value below 1 - which is
+// exactly the population ("every connection closed before the first event") a
+// report most needs to show.
+TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
+    collector->record_stream_completion (0, false);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_TRUE (totals.has_value ());
+    EXPECT_EQ (totals->completions, 1u);
+    EXPECT_EQ (totals->total_events, 0u);
+}
+
+TEST_F (MetricsCollectorTest, StreamMetricsOffRecordsNothing) {
+    MetricsCollectorConfig config;
+    config.stream_metrics = false;
+    MetricsCollector off ("stream_off", config);
+
+    off.record_stream_completion (25, true);
+
+    // Off means the report has no section at all, not a section of zeros - so
+    // the counters behind it must not tick either.
+    EXPECT_FALSE (off.stream_totals ().has_value ());
+}

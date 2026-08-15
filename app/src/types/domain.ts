@@ -1026,6 +1026,23 @@ export interface LoadTestConfig {
 	slo_ms?: number;
 	/** Capacity only: how long each concurrency level is held before it is judged. */
 	step_duration_seconds?: number;
+	/**
+	 * Streaming runs only (issue #576): the wall-clock ceiling on one stream,
+	 * in seconds, and the ceiling on the events it delivers.
+	 *
+	 * Both absent means "the engine's `sseMaxStreamDurationMs` /
+	 * `sseMaxStreamEvents`", which is what a stream is bounded by when the
+	 * dialog is left alone - never "unbounded". They are on the run rather than
+	 * on the request because they describe how much of a stream *this run*
+	 * measures, while whether the request streams at all is the request's own
+	 * Settings-tab flag.
+	 *
+	 * Seconds here and milliseconds on the wire, like `duration_seconds`: the
+	 * dialog's other duration is in seconds and two units in one form is how a
+	 * user enters 600 meaning ten minutes and gets 0.6.
+	 */
+	stream_duration_seconds?: number;
+	stream_max_events?: number;
 }
 
 /**
@@ -1344,6 +1361,43 @@ export interface RunReport {
 		count: number;
 		thresholdMs: number;
 		percentage: number;
+	};
+	/**
+	 * What a streaming run's completions delivered (issue #576).
+	 *
+	 * `undefined` is a run that did not stream - not a stream that delivered
+	 * nothing - so a report without it renders exactly as it did before SSE
+	 * under load existed. That distinction is why the engine omits the section
+	 * rather than writing zeros.
+	 *
+	 * `events` is the **per-completion** distribution: 500 streams of ~40
+	 * events each have a p50 near 40, not near 20000. `eventsPerSecond` is the
+	 * whole-run rate, derived engine-side from the same clock `rps` uses so the
+	 * two are comparable. Both are reported because they answer different
+	 * questions - one long stream and 250 short ones can share a rate.
+	 *
+	 * `capped` counts the completions a cap ended rather than the server. All
+	 * of them means the run measured its own bounds, not the target: the
+	 * dashboard says so rather than leaving it to be inferred.
+	 *
+	 * Time-to-first-event needs no field here: it **is** `phases.firstByte` in
+	 * {@link timingBreakdown}, since the first byte of a stream is its first
+	 * event's first byte. A second copy would be a second number to keep true.
+	 */
+	stream?: {
+		completions: number;
+		totalEvents: number;
+		capped: number;
+		eventsPerSecond: number;
+		events: {
+			min: number;
+			max: number;
+			p50: number;
+			p90: number;
+			p95: number;
+			p99: number;
+			count: number;
+		};
 	};
 	testValidation?: {
 		samplesTested: number;

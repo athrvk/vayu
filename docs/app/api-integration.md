@@ -908,6 +908,28 @@ await apiService.startLoadTest({
 });
 ```
 
+**Streaming load runs.** A load run of a request whose `stream` setting is on
+sends `stream: true` plus `maxStreamDurationMs` / `maxStreamEvents`
+(issue #576). The split is deliberate: **whether** a request streams is read off
+the request, because that is a property of the request and lives on its Settings
+tab, while **how much of each stream this run measures** comes from the load
+dialog's two cap fields, which appear only for a streaming request. The caps are
+always sent for such a run rather than elided as "the engine has defaults" - the
+engine's default is the user's `sseMaxStreamDurationMs` setting, which the
+dialog does not show, so eliding would leave the run bounded by a number the
+user was never told about while two others were on screen.
+
+Under load a stream is bounded by construction, and **reaching a cap is a
+successful completion, not a timeout** - so a streaming run's clean error rate
+is not evidence the caps went unused. The report answers that with a `stream`
+section (`RunReport.stream`): the per-completion event distribution, the totals,
+a derived `eventsPerSecond`, and `capped` - how many streams a cap ended rather
+than the server. `StreamMetrics` (`modules/dashboard/components/charts`) renders
+it, and says plainly when *every* stream was capped, because those counts then
+measure the caps rather than the target. The section is `undefined` for a run
+that did not stream, which is not the same claim as a stream that delivered
+nothing, so a report without it renders exactly as it did before.
+
 **Budgets and the verdict.** `LoadTestConfig.thresholds` (`RunThresholds`) rides
 through to `POST /runs` under the engine's own camelCase metric names, and the
 report comes back with `thresholdValidation` - one check per budget plus a
