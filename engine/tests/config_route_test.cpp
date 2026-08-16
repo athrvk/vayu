@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -338,10 +339,14 @@ TEST_F (ConfigRouteTest, NoSeededLabelSpellsOutMaxMinOrCarriesAUnit) {
 // than by count - an entry added to or dropped from the group has to say so
 // here.
 TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
+    // #703 added the five below the original six, by a heuristic that is
+    // citable in review: if an entry's own description has to say "only if" or
+    // "only for", the entry has declared itself advanced.
     const std::set<std::string> expected = { "dbBusyTimeout",
         "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs",
         "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs",
-        "sseIdleTimeoutMs" };
+        "sseIdleTimeoutMs", "oauth2RefreshMinIntervalMs", "maxStepsPerIteration",
+        "monitorScrapeTimeoutMs", "liveMaxRetainedTicks", "scriptStackSize" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";
@@ -583,7 +588,8 @@ TEST_F (ConfigRouteTest, EverySeededEntrySitsInADeclaredCategory) {
     // Kept in step with app/src/types/domain.ts (EngineSettingsCategory) and
     // app/src/modules/settings/engine-categories.ts.
     const std::set<std::string> declared = { "general_engine", "network_performance",
-        "services", "observability", "data_retention", "scripting_sandbox" };
+        "services", "observability", "data_retention", "limits",
+        "scripting_sandbox" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_GT (entries.size (), 20u)
@@ -619,6 +625,99 @@ TEST_F (ConfigRouteTest, TheRetiredDatabaseCategoryIsGoneAndItsEntriesAreInCore)
         auto entry = db_->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key;
         EXPECT_EQ (entry->category, "general_engine") << key;
+    }
+}
+
+// The #703 audit read all 48 entries against #586's own rule - *which words
+// does a user arrive with* - and moved sixteen. Pinned by key, like the
+// advanced set above, because a move is a recorded decision: an entry that
+// drifts back to the shelf it left has to say so here.
+TEST_F (ConfigRouteTest, TheAuditedEntriesSitOnTheShelfThatCoversThem) {
+    const std::map<std::string, std::string> placed = {
+        // Core kept only the engine's own machinery; a request deadline and a
+        // protocol default are transport, not engine capacity.
+        { "defaultTimeout", "network_performance" },
+        { "defaultHttpVersion", "network_performance" },
+        // Every ceiling a rejection message names, on one shelf.
+        { "maxScenarioSteps", "limits" }, { "maxScenarioDataRows", "limits" },
+        { "maxScenarioDataBytes", "limits" }, { "maxSpecDocumentBytes", "limits" },
+        { "maxStepsPerIteration", "limits" },
+        // Not retention: it fails an oversized load-run read in flight and
+        // stores nothing.
+        { "maxResponseBodyBytes", "limits" },
+        // Per-run storage budgets, which is what Data & retention is for.
+        { "maxScenarioStoredSteps", "data_retention" },
+        { "sseMaxStoredEvents", "data_retention" },
+        // A measurement toggle, whatever it costs to store.
+        { "phaseHistograms", "observability" },
+        // Five of Network & connectivity's eight entries were OAuth; the Dock
+        // files an OAuth issuer under Services and so does this.
+        { "oauth2RefreshLeadMs", "services" },
+        { "oauth2RefreshMinIntervalMs", "services" },
+        { "oauth2RefreshRetryMs", "services" },
+        { "oauth2RefreshRetryMaxMs", "services" },
+        { "oauth2RefreshPollIntervalMs", "services" } };
+
+    for (const auto& [key, category] : placed) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        EXPECT_EQ (entry->category, category) << key;
+    }
+}
+
+// A move changes one of the five fields settings search matches on: the
+// category label. The other four travel with the entry, so an entry is only
+// still reachable after a move if the words a user types for it live in its
+// key, label, description or keywords - which is what this asserts, over the
+// same corpus `matchRank` reads before it reaches the category
+// (app/src/lib/settings-index.ts). The terms below are the ones #703 committed
+// to when it moved them.
+TEST_F (ConfigRouteTest, MovedEntriesStayFindableByTheWordsTheyAreSoughtWith) {
+    const std::vector<std::pair<std::string, std::vector<std::string>>> sought = {
+        { "defaultTimeout", { "timeout", "deadline" } },
+        { "defaultHttpVersion", { "http", "protocol" } },
+        { "maxScenarioSteps", { "scenario", "steps" } },
+        { "maxScenarioDataRows", { "rows", "data" } },
+        { "maxScenarioDataBytes", { "data", "bytes" } },
+        { "maxSpecDocumentBytes", { "openapi", "swagger" } },
+        { "maxStepsPerIteration", { "iteration", "infinite loop" } },
+        { "maxResponseBodyBytes", { "response body", "load-test" } },
+        { "maxScenarioStoredSteps", { "stored", "scenario" } },
+        // The one the audit called out: it leaves Services, and "sse" and
+        // "stream" have to keep finding it from the key and the label.
+        { "sseMaxStoredEvents", { "sse", "stream" } },
+        { "phaseHistograms", { "latency", "ttfb", "timings" } },
+        // "network" is deliberately not required of these - nobody types it
+        // looking for token renewal. "oauth" is.
+        { "oauth2RefreshLeadMs", { "oauth", "token" } },
+        { "oauth2RefreshMinIntervalMs", { "oauth", "token" } },
+        { "oauth2RefreshRetryMs", { "oauth", "token" } },
+        { "oauth2RefreshRetryMaxMs", { "oauth", "token" } },
+        { "oauth2RefreshPollIntervalMs", { "oauth", "refresh" } } };
+
+    auto lowered = [] (std::string text) {
+        for (auto& c : text) {
+            c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+        }
+        return text;
+    };
+
+    for (const auto& [key, terms] : sought) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+
+        std::string haystack =
+        lowered (entry->key + " " + entry->label + " " + entry->description);
+        for (const auto& term : json::parse (entry->keywords)) {
+            haystack += " " + lowered (term.get<std::string> ());
+        }
+
+        for (const auto& term : terms) {
+            EXPECT_NE (haystack.find (term), std::string::npos)
+            << "entry '" << key << "' is no longer findable under '" << term
+            << "' - it moved category, so the category label no longer carries "
+            << "the search for it";
+        }
     }
 }
 

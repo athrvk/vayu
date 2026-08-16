@@ -14,6 +14,9 @@
  * casing are the two things about it a reader cannot check by reading one file.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { ENGINE_SETTINGS_CATEGORIES, getEngineCategory } from "./engine-categories";
 import { ENGINE_SETTINGS_EDITED_IN_APP } from "./engine-settings-edited-in-app";
@@ -26,12 +29,17 @@ describe("the engine category registry", () => {
 		// most users never open it. This used to run Core, Database
 		// Performance, Network, Scripting, Observability - the least-visited
 		// category second, and the one users arrive with questions about last.
+		//
+		// Limits joined second-to-last in #703 by the same rule: its entries
+		// are reached from a rejection message that names the setting, never
+		// by browsing, so it ranks below the shelves people open.
 		expect(ENGINE_SETTINGS_CATEGORIES.map((c) => c.id)).toEqual([
 			"general_engine",
 			"network_performance",
 			"services",
 			"observability",
 			"data_retention",
+			"limits",
 			"scripting_sandbox",
 		]);
 	});
@@ -75,6 +83,78 @@ describe("the engine category registry", () => {
 		expect(getEngineCategory("services")?.label).toBe("Services");
 		expect(getEngineCategory("dashboard")).toBeUndefined();
 		expect(getEngineCategory(null)).toBeUndefined();
+	});
+});
+
+/**
+ * The other half of the contract, checked across the language boundary.
+ *
+ * `ConfigRouteTest.EverySeededEntrySitsInADeclaredCategory` pins the same rule
+ * engine-side, but against a `std::set` hand-copied from this file - so a
+ * category added to the seed and to that set, and forgotten here, passes there
+ * and takes the entry off the screen. This side reads the seed itself, which is
+ * the only copy neither test can restate wrongly.
+ */
+describe("the seed and the registry agree on the shelves", () => {
+	const seed = readFileSync(
+		join(
+			dirname(fileURLToPath(import.meta.url)),
+			"..",
+			"..",
+			"..",
+			"..",
+			"engine",
+			"src",
+			"db",
+			"database.cpp"
+		),
+		"utf8"
+	);
+
+	const registered = new Set<string>(ENGINE_SETTINGS_CATEGORIES.map((c) => c.id));
+
+	/**
+	 * One record per seeded entry: its key, and the registered category id
+	 * found inside its `ConfigEntry{...}` literal.
+	 *
+	 * The category is matched *against the registry*, so a typo (or an id this
+	 * file does not carry) yields `undefined` and fails below naming the key -
+	 * which is the drift the alarm exists for. Every entry ends at `now }`, the
+	 * last field of the struct.
+	 */
+	const seeded = [...seed.matchAll(/ConfigEntry\{\s*"([A-Za-z0-9_]+)"/g)].map((match) => {
+		const body = seed.slice(match.index, seed.indexOf("now }", match.index));
+		const found = [...body.matchAll(/"([a-z][a-z_]*)"/g)]
+			.map((m) => m[1])
+			.filter((literal) => registered.has(literal));
+		return { key: match[1], category: found[0], matches: found.length };
+	});
+
+	it("read a non-empty seed carrying every entry", () => {
+		// The failure CLAUDE.md documents: a source scan that reads "" (or the
+		// wrong path) satisfies every assertion below for the wrong reason.
+		expect(seed.length).toBeGreaterThan(0);
+		expect(seeded.length).toBeGreaterThan(40);
+	});
+
+	it("puts every seeded entry on a shelf this registry draws", () => {
+		// An entry in a category the renderer does not know is not a cosmetic
+		// mismatch: SettingsMain filters on it and buildSettingsIndex drops it,
+		// so the setting is on no screen and in no search result.
+		const orphaned = seeded.filter((entry) => entry.category === undefined).map((e) => e.key);
+		expect(orphaned).toEqual([]);
+
+		// Exactly one, so a description that happens to quote another id is not
+		// silently taken for the entry's own category.
+		const ambiguous = seeded.filter((entry) => entry.matches !== 1).map((e) => e.key);
+		expect(ambiguous).toEqual([]);
+	});
+
+	it("draws no shelf the seed leaves empty", () => {
+		// The other direction: a sidebar row with nothing under it. "Database
+		// Performance" was retired for holding three entries; zero is worse.
+		const held = new Set(seeded.map((entry) => entry.category));
+		expect([...registered].filter((id) => !held.has(id))).toEqual([]);
 	});
 });
 

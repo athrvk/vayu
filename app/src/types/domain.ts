@@ -2099,6 +2099,7 @@ export type EngineSettingsCategory =
 	| "services"
 	| "observability"
 	| "data_retention"
+	| "limits"
 	| "scripting_sandbox";
 
 export type SettingsCategory = ClientSettingsCategory | EngineSettingsCategory;
