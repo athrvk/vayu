@@ -369,6 +369,76 @@ bool verbose) {
     return validation;
 }
 
+SampledValidationTotals validate_sampled_responses (
+const std::shared_ptr<RunContext>& context, bool verbose) {
+    SampledValidationTotals totals;
+
+    // Scenario load runs only. A single-request load run resolves no collection
+    // and so no binding - the same reason it reports no coverage - and the
+    // per-step stores are what a scenario run is recognised by, exactly as the
+    // script pass recognises it.
+    if (context->scenario == nullptr ||
+    context->metrics_collector->step_sample_step_count () == 0) {
+        return totals;
+    }
+
+    const auto& spec = context->scenario->spec;
+    if (spec.response_schemas.empty ()) {
+        return totals;
+    }
+
+    // The one parse of the document's schema index this run ever pays for, and
+    // it happens after the last completion has landed. An index that will not
+    // parse is "not measured", the reading every other reader of a stored index
+    // gives it - never an empty contract that would pass every body.
+    const auto index = ResponseSchemaIndex::parse (spec.response_schemas);
+    if (!index) {
+        return totals;
+    }
+
+    const auto& plan   = context->scenario->plan;
+    const size_t steps = std::min (plan.steps.size (),
+    context->metrics_collector->step_sample_step_count ());
+
+    for (size_t i = 0; i < steps; ++i) {
+        const auto& step = plan.steps[i];
+        // A step bound to no operation is not a step this contract speaks
+        // about. Skipped rather than counted as unchecked: it would fill the
+        // block with `no_operation` for every unbound step of a mixed
+        // collection, which says nothing about the contract.
+        if (step.spec_operation.empty ()) {
+            continue;
+        }
+
+        const auto& samples = context->metrics_collector->step_response_samples (i);
+        for (const auto& sample : samples) {
+            const auto content_type = sample.headers.find ("Content-Type");
+            try {
+                totals.record (index->check (step.spec_operation, sample.status_code,
+                               content_type != sample.headers.end () ?
+                               content_type->second :
+                               std::string (),
+                               sample.body),
+                step.name, sample.status_code);
+            } catch (const std::exception& e) {
+                // A validator that threw is not a response that failed, and it
+                // must not cost the run the rest of its samples. Same rule the
+                // design-mode hook applies to the same call.
+                vayu::utils::log_warning (
+                "Schema validation of a sample failed: " + std::string (e.what ()));
+            }
+        }
+    }
+
+    if (verbose && totals.sampled > 0) {
+        vayu::utils::log_info ("  Schema validation: " + std::to_string (totals.checked) +
+        " of " + std::to_string (totals.sampled) + " samples checked, " +
+        std::to_string (totals.valid) + " valid, " + std::to_string (totals.failed) +
+        " failed");
+    }
+    return totals;
+}
+
 void attach_step_test_totals (nlohmann::json& scenario,
 const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     auto steps = scenario.find ("steps");
@@ -1048,6 +1118,18 @@ RunManager& manager) {
             "Script validation failed: " + std::string (e.what ()));
         }
 
+        // The other deferred pass over the same reservoirs (issue #682): what
+        // the bound contract says about the responses that survived sampling.
+        // Here, beside the script replay, for its reason - the completion path
+        // refills concurrency, and neither pass may be on it.
+        SampledValidationTotals schema_totals;
+        try {
+            schema_totals = validate_sampled_responses (context, verbose);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Schema validation failed: " + std::string (e.what ()));
+        }
+
         // Store the whole-run summary: everything the report used to rebuild by
         // scanning the run's metric rows, written once, here.
         try {
@@ -1098,6 +1180,11 @@ RunManager& manager) {
                 // the payload builder treats as absent.
                 inputs.coverage = build_scenario_load_coverage (*scenario_state);
             }
+            // Beside coverage, and deliberately not inside the `scenario_state`
+            // block above: this pass reads the sample reservoirs, which are the
+            // collector's, so it is available whether or not the executor left
+            // a state behind. An empty object is treated as absent.
+            inputs.schema_validation = build_sampled_validation_payload (schema_totals);
 
             // Judged last, off the filled inputs rather than off the collector:
             // the verdict has to be computed from the same numbers the summary
@@ -1342,6 +1429,15 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // section reads as "not measured" rather than as a contract nothing covered.
     if (inputs.coverage.has_value () && !inputs.coverage->empty ()) {
         summary["coverage"] = *inputs.coverage;
+    }
+    // What the deferred pass over this run's *sampled* responses found against
+    // the bound contract (issue #682). Omitted, on the same empty-is-absent
+    // terms as `coverage`, for every run that validated nothing - so an absent
+    // section reads as "not checked" rather than as a contract nothing broke.
+    // Unlike `coverage` beside it, these numbers describe the samples: the
+    // block carries its own `sampled` denominator and the report says so.
+    if (inputs.schema_validation.has_value () && !inputs.schema_validation->empty ()) {
+        summary["schemaValidation"] = *inputs.schema_validation;
     }
     // What the server-vitals scrape recorded. Omitted for a run that configured
     // no monitor, so the report's section is absent rather than showing a run

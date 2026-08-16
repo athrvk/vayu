@@ -317,12 +317,18 @@ const ScenarioResolveOptions& options) {
     // a contract from. Any disagreement - no such document, no index on it, a
     // hash that does not match - leaves the operations empty, which is the
     // engine's one spelling of "not measured against a contract".
+    //
+    // The response schemas ride the same read and the same hash check (issue
+    // #682): the deferred pass at run end validates against them, and looking
+    // them up then instead would be the one thing this read exists to prevent.
+    // They are taken as text and parsed only if that pass runs.
     if (resolution.spec.bound ()) {
         if (const auto document = db.get_spec_document (resolution.spec.spec_id);
             document && document->hash == resolution.spec.spec_hash) {
             if (auto declared = parse_declared_operations (document->operations)) {
                 resolution.spec.declared_operations = std::move (*declared);
             }
+            resolution.spec.response_schemas = document->response_schemas;
         }
     }
 

@@ -72,6 +72,7 @@
  */
 
 #include <cstddef>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -235,6 +236,93 @@ class ResponseSchemaIndex {
     std::unordered_map<std::string, size_t> by_operation_id_;
     std::unordered_map<std::string, size_t> by_method_path_;
 };
+
+/**
+ * @brief What a deferred pass over a load run's sampled responses found
+ *        (issue #682, phase 3c of #625).
+ *
+ * **Every number here describes the samples, not the run.** A load run stores a
+ * bounded reservoir of responses per step, and this pass validates that
+ * reservoir at run end - never on the completion path, which refills
+ * concurrency and would pay for a schema walk per response. So `failed: 0`
+ * means "no *sampled* response failed", and the report has to say so beside it;
+ * that is why `sampled` is carried rather than only the four tallies #682 named
+ * - a reader who cannot see the denominator cannot tell a clean run from a
+ * thinly sampled one.
+ *
+ * Contrast `CoverageTally`, whose every number is exact: coverage counts on
+ * each send, through an atomic increment cheap enough for the hot path.
+ * Validation cannot be, and `docs/app/openapi.md`'s exact-vs-sampled table
+ * records which is which.
+ */
+struct SampledValidationTotals {
+    /// Responses this pass walked - the denominator for everything below.
+    size_t sampled = 0;
+    /// Of those, the ones a schema could speak about. `sampled - checked` is
+    /// explained by `unchecked_reasons` rather than left as a gap.
+    size_t checked = 0;
+    /// `valid + failed == checked`, always.
+    size_t valid  = 0;
+    size_t failed = 0;
+    /**
+     * Checked responses whose schema carried a keyword the draft-07 validator
+     * could not evaluate. Counted separately from `valid`/`failed` rather than
+     * subtracted from either: such a response really did pass every check that
+     * ran, and what is being disclosed is that some of its contract went
+     * unread. The dialect-honesty rule of the file comment, in aggregate.
+     */
+    size_t unevaluated = 0;
+    /// Reason code (`to_string(UncheckedReason)`) -> how many samples it
+    /// accounts for. Ordered by the map, so two runs print it the same way.
+    std::map<std::string, size_t> unchecked_reasons;
+    /// Every unevaluatable keyword this run's checked schemas carried, by name,
+    /// with how many responses met it. Named, never just counted - a bare
+    /// "3 unevaluated" tells a reader nothing they can act on.
+    std::map<std::string, size_t> unevaluated_keywords;
+    /**
+     * Bounded examples of what failed, so the block says *what* was wrong and
+     * not only how often. Capped at `constants::schema_validation::MAX_FAILURES`
+     * across the whole run - the same cap one response's verdict is held to,
+     * because a run-wide list is read for the same reason and a forty-step plan
+     * must not multiply it by forty.
+     */
+    struct FailureExample {
+        /// The plan step whose response failed, by name. Empty for a
+        /// single-request shape, which has no step to name.
+        std::string step;
+        int status = 0;
+        /// JSON Pointer into the body, `""` for the body itself.
+        std::string path;
+        std::string message;
+    };
+    std::vector<FailureExample> failure_examples;
+    /// Failures found across every sampled response, including the ones past
+    /// the cap - so `failure_examples.size()` can be read as "3 shown of 90".
+    size_t failures_total = 0;
+
+    /**
+     * @brief Fold one response's verdict in.
+     *
+     * @param step The plan step's name, for a failure example that may be read
+     *        far from the per-step breakdown.
+     * @param status The response's status code, for the same reason.
+     */
+    void record (const ValidationVerdict& verdict, const std::string& step, int status);
+};
+
+/**
+ * @brief The `schemaValidation` object a load run stores in `runs.summary`.
+ *
+ * camelCase, passed through verbatim by the report route - the `coverage` and
+ * `stream` rule, for their reason: one description of the shape rather than a
+ * writer and a translator that can drift.
+ *
+ * Returns an **empty object** when the pass walked no samples at all, which the
+ * caller leaves out of the summary entirely. A run whose reservoirs were empty
+ * validated nothing, and reporting it zeros would read as a contract nothing
+ * failed - the absent-not-zeros rule every conditional section here follows.
+ */
+[[nodiscard]] nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& totals);
 
 /**
  * @brief Validate one JSON body against one schema.

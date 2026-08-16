@@ -356,6 +356,38 @@ export interface RunCoverage {
 }
 
 /**
+ * What checking a load run's **sampled** responses against its bound contract
+ * found (issue #682). See {@link RunReport.schemaValidation} for when it is
+ * present.
+ *
+ * The sibling of {@link RunCoverage}, and the opposite of it in the one way that
+ * matters to a reader: coverage counts every send, this checks the bounded
+ * reservoir the run stored. `sampled` is therefore not decoration - it is the
+ * denominator that stops `failed: 0` being read as "no response failed" when it
+ * means "no sampled response failed".
+ *
+ * `checked` is what a schema could speak about; `uncheckedReasons` accounts for
+ * the rest by engine reason code, so `sampled - checked` is never an unexplained
+ * gap. `unevaluated` counts checked responses whose schema carried a keyword the
+ * draft-07 validator could not evaluate - they passed every check that *ran*,
+ * which is a narrower claim than valid.
+ */
+export interface RunSchemaValidation {
+	sampled: number;
+	checked: number;
+	valid: number;
+	failed: number;
+	unevaluated: number;
+	/** Engine reason code -> how many samples it accounts for. */
+	uncheckedReasons?: Partial<Record<ValidationUncheckedReason, number>>;
+	unevaluatedKeywords?: { keyword: string; count: number }[];
+	/** Bounded examples, capped engine-side across the whole run. */
+	failures: { step?: string; status: number; path: string; message: string }[];
+	/** Every failure found, the cap included - so "3 of 90" stays readable. */
+	failuresTotal: number;
+}
+
+/**
  * Which operation of a collection's bound spec a request *is* (issue #637).
  *
  * `path` is the **templated** path as the document writes it (`/pets/{petId}`),
@@ -1720,6 +1752,21 @@ export interface RunReport {
 	 * `results[]` sample a load run stores.
 	 */
 	coverage?: RunCoverage;
+	/**
+	 * Whether the responses this run kept matched the schemas its bound document
+	 * declares (issue #682).
+	 *
+	 * **Absent, never zeros**, for every run that checked nothing - an unbound
+	 * collection, a single-request run, a document carrying no response schemas.
+	 * A run whose responses were never checked did not pass a contract.
+	 *
+	 * Beside {@link RunReport.coverage} and computed against the same document,
+	 * but on different evidence: coverage is exact, this is **sampled**. The
+	 * engine defers it to run end over the bounded reservoirs, because the load
+	 * loop refills concurrency per completion and a schema walk there would cost
+	 * the run throughput. Anything rendering these numbers has to say so.
+	 */
+	schemaValidation?: RunSchemaValidation;
 	/**
 	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
 	 *

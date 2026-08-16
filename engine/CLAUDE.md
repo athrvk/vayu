@@ -195,6 +195,17 @@ Three things worth knowing before you design around them:
   restored panes cannot disagree. The status-pattern matcher is shared with
   coverage (`match_status_pattern`), so one status cannot be "covered" by one
   rule and "no schema for this status" by another.
+  **Under load the same check is deferred to run end** (#682):
+  `validate_sampled_responses` walks the per-step sample reservoirs once the run
+  has drained and stores `schemaValidation` on `runs.summary`, because the load
+  loop refills concurrency per completion and a schema walk there would cost
+  throughput invisibly - a source-scan test fails if validation reaches
+  `load_strategy.cpp` / `scenario_load.cpp`. That makes the tallies **sampled
+  where `coverage` beside them is exact**, so the block stores its own `sampled`
+  denominator and every reader prints it. A step's responses are now kept for
+  either of two reasons - a script to replay, or a contract to check - which is
+  what `configure_step_samples` is told; one budget covers both, so a bound
+  collection that also asserts thins each step's share.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

@@ -355,25 +355,31 @@ class MetricsCollector {
     /**
      * @brief Size the per-step sample stores for a scenario load run (#450).
      *
-     * @param scripted One entry per plan step, true where that step carries a
-     *        deferred script. A step with none is given no store at all: it is
-     *        never sampled and never counted as a drop, because nothing was
-     *        ever a candidate for a reservoir that does not exist.
+     * @param sampled One entry per plan step, true where a deferred pass will
+     *        read that step's responses - it carries a script to replay, or a
+     *        contract to check against (issue #682). A step no pass will read
+     *        is given no store at all: it is never sampled and never counted as
+     *        a drop, because nothing was ever a candidate for a reservoir that
+     *        does not exist.
      *
      * The run's whole `max_response_samples` budget is split evenly across the
-     * **scripted** steps rather than across every step, so a forty-step plan
-     * with two assertions gives those two the budget instead of thinning it
-     * forty ways down to noise. The split has a floor of one sample per
-     * scripted step: a plan with more scripted steps than the budget has slots
-     * still validates every one of them, which is the property "the last step
-     * of a long plan is sampled" actually needs. That floor is the only case
-     * where the retained total can exceed the configured budget, and it is
-     * bounded by `maxScenarioSteps`.
+     * **read** steps rather than across every step, so a forty-step plan with
+     * two assertions gives those two the budget instead of thinning it forty
+     * ways down to noise. The split has a floor of one sample per read step: a
+     * plan with more of them than the budget has slots still validates every
+     * one, which is the property "the last step of a long plan is sampled"
+     * actually needs. That floor is the only case where the retained total can
+     * exceed the configured budget, and it is bounded by `maxScenarioSteps`.
+     *
+     * One budget, shared by both readers: a bound collection whose steps also
+     * assert gives each step fewer samples than it would have had for scripts
+     * alone. That is the honest cost of checking more of the run, and what was
+     * thinned is disclosed as `response_samples_dropped` either way.
      *
      * Called once, before the first submission. Calling it twice, or after a
      * completion has landed, would resize a store a worker may be inside.
      */
-    void configure_step_samples (const std::vector<bool>& scripted);
+    void configure_step_samples (const std::vector<bool>& sampled);
 
     /**
      * @brief Record a response sample against the plan step that produced it.
