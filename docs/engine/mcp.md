@@ -1,3 +1,8 @@
+---
+description: >-
+  Vayu's built-in MCP server: the tools, resources and prompts it exposes to coding agents, how to register it, and the safety gates.
+---
+
 # Vayu MCP Server
 
 **Endpoint:** `http://127.0.0.1:9877/mcp` (Streamable HTTP) · **Also:** stdio CLI

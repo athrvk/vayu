@@ -1,3 +1,8 @@
+---
+description: >-
+  State in the Vayu app: Zustand stores for UI state, TanStack Query for server state, the query keys, and the cache policy.
+---
+
 # State Management
 
 The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, client settings, toasts, import modal) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.

@@ -1,0 +1,259 @@
+<!doctype html>
+<!--
+  Source for docs/images/social-card.png - the 1200x630 image every pasted link
+  to this site renders as (og:image / twitter:image, wired in
+  ../overrides/main.html).
+
+  It is checked in because the PNG alone cannot be edited: the card carries the
+  product's positioning sentence and a benchmark figure, and both of those move.
+  When they do, edit this file and regenerate rather than hand-patching pixels.
+
+    chromium --headless --disable-gpu --hide-scrollbars \
+             --force-device-scale-factor=1 --window-size=1200,760 \
+             --screenshot=/tmp/card-raw.png .github/social-card/social-card.html
+    python3 -c "from PIL import Image; Image.open('/tmp/card-raw.png') \
+        .convert('RGB').crop((0,0,1200,630)) \
+        .save('docs/images/social-card.png', optimize=True)"
+
+  Render tall, then crop - the two steps are not redundant. Headless Chromium
+  sizes the screenshot to the *window* but only paints the *viewport*, and the
+  viewport is the window minus an amount of window chrome that varies by build
+  (87px here). Passing --window-size=1200,630 therefore yields a correctly sized
+  card with its bottom rows unpainted, which is exactly the failure this note
+  exists to stop the next person rediscovering. Any window taller than
+  630 + chrome works, because the CSS below pins the page to 630.
+
+  1200x630 is what X, Slack, LinkedIn and Discord crop against, so do not change
+  the card's dimensions without checking all four.
+
+  Inter is fetched from Google Fonts at generation time (the same family the site
+  and the app use, see mkdocs.yml). It is a build-time dependency of this file
+  only: nothing at page-view time loads it, because what ships is the PNG. If
+  your network intercepts TLS with a CA that Chromium does not trust, the fetch
+  fails *silently* and the card renders in a fallback face - check the committed
+  PNG's headline against Inter rather than assuming it loaded. Inlining the
+  four latin faces as data: URIs is the workaround.
+
+  Two numbers here must stay true, and both have a home elsewhere that is
+  checked: the throughput figure is the in-app run recorded in
+  docs/engine/benchmarks.md and quoted on docs/index.md, and the positioning
+  clause is the first clause of README.md's opening sentence.
+-->
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Vayu social card</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<!-- display=block, not swap: a swap would let the screenshot fire on the
+		     fallback face and silently ship a card in DejaVu Sans. -->
+		<link
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=block"
+			rel="stylesheet"
+		/>
+		<style>
+			/* The app's default "ocean" accent and the site's dark surface - see
+			   docs/stylesheets/extra.css. The card has to read as the same product
+			   as the screenshots it sits next to. */
+			:root {
+				--accent: hsl(217 80% 58%);
+				--accent-bright: hsl(217 90% 66%);
+				--surface: hsl(225 14% 12%);
+				--ink: hsl(0 0% 100%);
+				--ink-dim: hsl(225 12% 72%);
+			}
+
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
+
+			html,
+			body {
+				width: 1200px;
+				height: 630px;
+				overflow: hidden;
+			}
+
+			body {
+				background: var(--surface);
+				color: var(--ink);
+				font-family: Inter, sans-serif;
+				-webkit-font-smoothing: antialiased;
+			}
+
+			/* One light source, top left, so the card has depth without a texture
+			   that would band at the compression these platforms apply. */
+			.card {
+				position: relative;
+				width: 1200px;
+				height: 630px;
+				padding: 62px 80px;
+				display: flex;
+				flex-direction: column;
+				justify-content: space-between;
+				background:
+					radial-gradient(
+						900px 520px at 6% -12%,
+						hsl(217 80% 40% / 0.42),
+						transparent 62%
+					),
+					radial-gradient(
+						620px 420px at 104% 118%,
+						hsl(217 85% 52% / 0.24),
+						transparent 60%
+					),
+					var(--surface);
+			}
+
+			/* The accent hairline reads as the top edge of a window chrome, which is
+			   what the product is. */
+			.card::before {
+				content: "";
+				position: absolute;
+				inset: 0 0 auto 0;
+				height: 6px;
+				background: linear-gradient(
+					90deg,
+					var(--accent) 0%,
+					var(--accent-bright) 42%,
+					hsl(217 80% 34%) 100%
+				);
+			}
+
+			.brand {
+				display: flex;
+				align-items: center;
+				gap: 20px;
+			}
+
+			/* Same white tile the site header gives the logo: the icon is a blue
+			   figure on a cloud and washes out on a blue-lit dark field without it. */
+			.brand img {
+				width: 76px;
+				height: 76px;
+				background: #fff;
+				border-radius: 18px;
+				padding: 7px;
+			}
+
+			.brand .name {
+				font-size: 52px;
+				font-weight: 800;
+				letter-spacing: -0.02em;
+			}
+
+			.brand .rule {
+				flex: 1;
+				height: 1px;
+				background: hsl(225 12% 100% / 0.14);
+				margin-left: 8px;
+			}
+
+			.brand .tag {
+				font-size: 20px;
+				font-weight: 500;
+				color: var(--ink-dim);
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+			}
+
+			h1 {
+				max-width: 950px;
+				font-size: 58px;
+				font-weight: 800;
+				line-height: 1.12;
+				letter-spacing: -0.025em;
+			}
+
+			h1 .hl {
+				color: var(--accent-bright);
+			}
+
+			.foot {
+				display: flex;
+				align-items: flex-end;
+				justify-content: space-between;
+				gap: 40px;
+			}
+
+			.metric .value {
+				font-size: 78px;
+				font-weight: 800;
+				line-height: 1;
+				letter-spacing: -0.03em;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.metric .value span {
+				font-size: 44px;
+				font-weight: 700;
+				color: var(--accent-bright);
+				margin-left: 10px;
+				letter-spacing: -0.02em;
+			}
+
+			.metric .label {
+				margin-top: 14px;
+				font-size: 23px;
+				font-weight: 500;
+				color: var(--ink-dim);
+			}
+
+			.meta {
+				text-align: right;
+				padding-bottom: 6px;
+			}
+
+			.meta .platforms {
+				font-size: 23px;
+				font-weight: 600;
+				color: var(--ink);
+			}
+
+			.meta .terms {
+				margin-top: 12px;
+				font-size: 21px;
+				font-weight: 500;
+				color: var(--ink-dim);
+			}
+
+			.meta .url {
+				margin-top: 22px;
+				font-size: 22px;
+				font-weight: 700;
+				color: var(--accent-bright);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="card">
+			<div class="brand">
+				<!-- The app's own icon, the same source .github/hooks/brand_assets.py
+				     hands the site and build.py hands the installers. -->
+				<img src="../../shared/icon_png/vayu_icon_256x256.png" alt="" />
+				<div class="name">Vayu</div>
+				<div class="rule"></div>
+				<div class="tag">Open source</div>
+			</div>
+
+			<h1>
+				An API client with a
+				<span class="hl">native C++ load engine</span> built in.
+			</h1>
+
+			<div class="foot">
+				<div class="metric">
+					<div class="value">52,738 <span>req/s</span></div>
+					<div class="label">sustained from the app's own UI, 100% success</div>
+				</div>
+				<div class="meta">
+					<div class="platforms">Windows &middot; macOS &middot; Linux</div>
+					<div class="terms">Free &middot; No account &middot; No telemetry</div>
+					<div class="url">athrvk.github.io/vayu</div>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

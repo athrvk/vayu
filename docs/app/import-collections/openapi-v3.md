@@ -1,3 +1,8 @@
+---
+description: >-
+  What Vayu generates from an OpenAPI 3.0 or 3.1 specification - collections per tag, request stubs, servers, security schemes, and schema-sampled bodies.
+---
+
 # OpenAPI 3.0
 
 Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, query and header params carrying whatever value the spec declares for them (usually none, in which case the row imports disabled - see [Parameter values & enabled state](#parameter-values--enabled-state)), and a body sampled from the request schema. Users fill in real values after import.

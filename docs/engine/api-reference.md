@@ -1,3 +1,8 @@
+---
+description: >-
+  Every HTTP endpoint the Vayu engine exposes - paths, payload shapes, status codes, and the shared error format.
+---
+
 # Vayu Engine API Reference
 
 **Base URL:** `http://127.0.0.1:9876` (default, configurable via `--port`)

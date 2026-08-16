@@ -1,3 +1,8 @@
+---
+description: >-
+  Drive a Vayu collection run from a CSV, TSV, JSON or JSONL file - one row per iteration, exposed as {{data.column}} and pm.iterationData.
+---
+
 # Data-Driven Runs
 
 A collection run can be driven by a file: one row per iteration, its columns

@@ -1,3 +1,8 @@
+---
+description: >-
+  The vayu-cli command line: flags and subcommands for running requests and load tests against the engine without the desktop app.
+---
+
 # Vayu CLI Reference
 
 The `vayu-cli` tool executes HTTP requests and load tests via the Vayu Engine daemon.

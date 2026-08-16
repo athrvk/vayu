@@ -1,3 +1,8 @@
+---
+description: >-
+  Sending GraphQL requests in Vayu - the query and variables editor, schema-aware behaviour, and how the body reaches the engine.
+---
+
 # GraphQL
 
 Vayu's GraphQL body mode is a two-pane editor - a **Query** pane and a

@@ -1,3 +1,8 @@
+---
+description: >-
+  Vayu's living backlog of deferred work - what each item needs before it can be picked up, and why it was parked.
+---
+
 # Vayu - Pending Backlog
 
 Living backlog of deferred / surfaced work. Each item notes **why** it's pending and **what** it needs so it can be picked up as a focused plan.

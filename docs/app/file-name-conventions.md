@@ -1,3 +1,8 @@
+---
+description: >-
+  File and directory naming rules across the Vayu app codebase, and the reasoning behind each convention.
+---
+
 # File Naming Conventions
 
 This document defines the standard file naming conventions for the Vayu application codebase.

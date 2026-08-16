@@ -1,3 +1,8 @@
+---
+description: >-
+  How Vayu's import pipeline turns a Postman, Insomnia, OpenAPI or Swagger file into a collection - detection, parsing, and what gets skipped.
+---
+
 # Import Collections - Parser Architecture
 
 Developer reference for Vayu's import subsystem: how raw Postman / Insomnia / OpenAPI files

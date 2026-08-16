@@ -88,6 +88,16 @@ nav:
   # the app in the same breath and only one of them is a thing you download.
   - Home: index.md
   - How It Works: architecture.md
+  # Sits high in the tab bar on purpose: these pages exist to answer "how does
+  # this compare to what I already use", which is the question a first-time
+  # visitor arrives with. They are also the pages that catch "postman
+  # alternative"-shaped searches, and internal links from Home are what gets
+  # them indexed.
+  - Compare:
+      - vs Postman: compare/vayu-vs-postman.md
+      - vs Bruno: compare/vayu-vs-bruno.md
+      - vs k6: compare/vayu-vs-k6.md
+      - vs JMeter: compare/vayu-vs-jmeter.md
   - Engine:
       - Overview: engine/architecture.md
       - HTTP API: engine/api-reference.md

@@ -1,3 +1,8 @@
+---
+description: >-
+  Writing pre-request and test scripts in Vayu - the QuickJS sandbox, the pm API, script hooks, execution order and limits.
+---
+
 # Vayu Scripting Guide
 
 Vayu uses QuickJS for JavaScript execution in pre-request and test scripts. The scripting API is compatible with Postman's `pm` object, making it easy to migrate tests from Postman.

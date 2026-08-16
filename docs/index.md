@@ -18,6 +18,12 @@ of it on your machine: no account, no cloud sync, no telemetry.
 [Use it from your agent](#drive-vayu-from-your-coding-agent){ .md-button }
 [See what it does](#what-you-can-do){ .md-button }
 
+Coming from another tool? Read the honest comparison:
+[Postman](compare/vayu-vs-postman.md) &middot;
+[Bruno](compare/vayu-vs-bruno.md) &middot;
+[k6](compare/vayu-vs-k6.md) &middot;
+[JMeter](compare/vayu-vs-jmeter.md)
+
 ![The load-test dashboard at 52,738 req/s and 738,406 requests with a 100% success rate: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest2.png){ .shot }
 
 ## Install
@@ -89,18 +95,15 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
 ## What you can do
 
+### Build and test
+
 <div class="grid cards" markdown>
 
 - :material-swap-horizontal: **Send REST and GraphQL requests**
 
-    Every method, and JSON, form-data, URL-encoded, raw, or GraphQL bodies.
-    Collections nest, with their own variables, auth, and scripts.
-
-- :material-speedometer: **Load test without a second tool**
-
-    A multi-worker C++ event loop drives the load and streams throughput,
-    latency percentiles, and error counts live. See the
-    [benchmarks](engine/benchmarks.md) against wrk and vegeta.
+    Every method, and JSON, XML, JSON-RPC, form-data, URL-encoded, raw, or
+    GraphQL bodies. Collections nest, with their own variables, auth, and
+    scripts.
 
 - :material-import: **Bring what you already have**
 
@@ -116,6 +119,41 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
     Bearer, Basic, API key, and OAuth 2.0 (client credentials, password,
     authorization code + PKCE) - resolved engine-side, inherited down the tree.
+
+- :material-broadcast: **Watch a stream as it arrives**
+
+    `text/event-stream` is a first-class request type: events land in a live
+    Events view, you can stop the stream, scripts assert on it afterwards, and
+    the list comes back when you reopen the run.
+
+- :material-magnify: **Find anything, by what is inside it**
+
+    One shortcut opens a command palette over every collection, request,
+    environment and setting - searching their contents, not just their names.
+
+</div>
+
+### Under load, and beyond
+
+<div class="grid cards" markdown>
+
+- :material-speedometer: **Load test without a second tool**
+
+    A multi-worker C++ event loop drives the load and streams throughput,
+    latency percentiles, and error counts live. See the
+    [benchmarks](engine/benchmarks.md) against wrk and vegeta.
+
+- :material-table-arrow-right: **Drive a run from a data file**
+
+    Point a collection at a CSV, TSV, JSON or JSONL file and each iteration gets
+    its own row, as `{{data.column}}` tokens and `pm.iterationData`.
+    [Data-driven runs](app/data-driven-runs.md).
+
+- :material-server-network: **Mock what is not built yet**
+
+    Serve a collection's saved examples as a live mock, with a mock OAuth issuer
+    for auth flows and a webhook inbox that captures what a third party sends
+    you.
 
 - :material-robot-outline: **Hand it to your coding agent**
 
@@ -225,7 +263,7 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**21 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+**24 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections and saved requests, plus `update_environment`) -
@@ -285,6 +323,19 @@ persists.
     Those are good API clients, but none of them load test - for that you reach
     for k6 or JMeter as a second tool. Vayu does both in one app: build the
     request, then load test that same endpoint with a native C++ engine.
+    Side by side, with what each one does better:
+    [vs Postman](compare/vayu-vs-postman.md),
+    [vs Bruno](compare/vayu-vs-bruno.md),
+    [vs k6](compare/vayu-vs-k6.md),
+    [vs JMeter](compare/vayu-vs-jmeter.md).
+
+??? question "Does Vayu support SSE / streaming endpoints?"
+
+    Yes - server-sent events are a first-class request type. Turn on Event
+    stream and `text/event-stream` responses arrive in a live Events tab as they
+    stream, with a Stop control, scripts that assert on the buffered events once
+    it closes, and the event list restored when you reopen the run from history.
+    Streams stay bounded under load rather than buffering without limit.
 
 ??? question "Can I import my Postman collections?"
 
@@ -305,7 +356,7 @@ persists.
 ??? question "Can my coding agent use it?"
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
-    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 21 tools
+    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 24 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off. See the
     [MCP reference](engine/mcp.md).

@@ -1,3 +1,8 @@
+---
+description: >-
+  How the Vayu desktop app's React code is laid out - the modules/ and components/ split, and where each part of the UI lives.
+---
+
 # Component Architecture
 
 The React component structure of the Vayu app (`app/src`).

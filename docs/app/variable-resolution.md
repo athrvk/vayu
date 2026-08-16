@@ -1,3 +1,8 @@
+---
+description: >-
+  How {{variables}} resolve in Vayu - the globals, collection chain and environment layers, precedence, and when resolution happens.
+---
+
 # Variable Resolution
 
 Vayu resolves `{{variableName}}` placeholders at request-execution time using a layered
