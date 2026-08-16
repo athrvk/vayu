@@ -203,7 +203,7 @@ the tree, variables, auth and scripts.
 
 === "OpenAPI & Swagger"
 
-    **OpenAPI 3.0 and Swagger 2.0**, JSON or YAML. A spec describes endpoints
+    **OpenAPI 3.1/3.0 and Swagger 2.0**, JSON or YAML. A spec describes endpoints
     rather than recording requests, so Vayu generates **stubs**: one collection
     per tag, a `{{baseUrl}}` variable from the server definition, parameters with
     empty values, and a request body sampled from the schema. Auth schemes map
@@ -345,7 +345,7 @@ persists.
     and pre/post-request scripts. Postman environments are a separate export;
     import that file too and it becomes a Vayu environment, and a globals export
     merges into Vayu's globals scope. Insomnia v4,
-    OpenAPI 3.0 and Swagger 2.0 import too; see
+    OpenAPI 3.1/3.0 and Swagger 2.0 import too; see
     [what carries over](#bring-your-existing-collections).
 
 ??? question "Will my Postman test scripts still run?"

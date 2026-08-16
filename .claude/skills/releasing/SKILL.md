@@ -19,6 +19,14 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
 5. CI builds installers and publishes the GitHub Release, using
    `.github/release-notes/<tag>.md` as the release body automatically (no manual
    paste).
+6. Read the sccache hit rate in the release run's log and expect **more than
+   zero engine hits** (issue #659 item 5). A version bump used to edit a header
+   every translation unit preprocessed, so every release compiled the engine
+   cold on all three platforms at a 0% hit rate by construction;
+   `core/user_agent.hpp` exists to keep the version behind a declaration. Zero
+   hits again means something has pulled `vayu/version.hpp` back into a widely
+   included header, and `version_isolation_test.cpp` is the guard that should
+   have caught it.
 
 A release commit needs no test run - every edit is a version string or Markdown.
 The version stamp is worth one cheap check (`./build/vayu-engine --help` prints

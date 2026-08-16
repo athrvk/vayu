@@ -576,6 +576,19 @@ Two surfaces consume it - the dashboard's Sampled Requests
 credential-shaped). Both notices live in `components/shared`, so the wording
 exists once rather than twice.
 
+**A sample carries the response side only, so its request headers are the
+composed ones.** `GET /runs/:id/samples` returns response headers and body; what
+a sample viewer shows for the request comes from the run's composed request, not
+from a sent record, because the load transport keeps none. So a sampled capture
+can differ from the wire in the two ways the design-mode `sentHeaders` record
+exists to state (issue #664): an enabled header whose value is empty is listed
+although libcurl dropped it, and the two the engine derives at send time - the
+body-implied `Content-Type` and the default `User-Agent` - do not appear. For
+load samples this is **recorded as permanent** (issue #677 item 7): which
+completions are sampled is decided when they finish, so a record for the few
+that are kept would have to be built for every transfer. Design-mode traces
+store `sentHeaders` and do not diverge.
+
 A sample whose transfer was a **stream** also carries `response.events` (issue
 #657) - `{items, totalEvents, eventsTruncated}`, parsed engine-side out of the
 stored `text/event-stream` body. Both surfaces render it through the shared

@@ -33,6 +33,9 @@
 
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 
 using nlohmann::json;
@@ -51,6 +54,10 @@ const std::string& id,
 const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+// Defined in runs.cpp - the reader that must not resolve coverage from the
+// collection's binding as it stands now.
+std::pair<int, nlohmann::json>
+run_report_response (vayu::db::Database& db, const std::string& run_id);
 } // namespace vayu::http::routes
 
 namespace {
@@ -445,6 +452,115 @@ TEST_F (SpecSyncRouteTest, AnEmptyDocumentIsNotASpec) {
     json{ { "collectionId", root_ }, { "spec", json{ { "content", "" } } } });
     EXPECT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (binding ()["specId"].get<std::string> (), bound_spec_);
+}
+
+// ---------------------------------------------------------------------------
+// What a sync does *not* touch: an older run's coverage (issue #629, #677 item 3)
+// ---------------------------------------------------------------------------
+
+// Coverage is pinned to the document the run was **planned** against, which
+// docs/app/openapi.md states as a promise to the reader: "sync the binding to a
+// newer spec and an older run's report still says what that run actually
+// covered". The pieces of that were each pinned on their own - the plan-time
+// hash check, and the summary round trip - but nothing ran the sentence end to
+// end, which is the only way to catch a later re-read that resolves coverage
+// from the collection's *current* binding instead of from the stored block.
+TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
+    // A document that declares one operation, bound with the hash the engine
+    // computed for it - the agreement the plan requires before it will read an
+    // index at all.
+    const json v1_index =
+    json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200", "404" }) } } });
+    auto [stored_status, stored] = routes::create_spec_document_response (
+    *db_, json{ { "content", BOUND_DOC }, { "operations", v1_index } });
+    ASSERT_EQ (stored_status, 200) << stored.dump ();
+    const std::string v1_id   = stored.value ("id", std::string{});
+    const std::string v1_hash = stored.value ("hash", std::string{});
+    {
+        auto [status, body] = routes::update_collection_response (*db_, root_,
+        json{ { "openapi",
+        json{ { "specId", v1_id }, { "specHash", v1_hash }, { "syncedAt", 1 } } } });
+        ASSERT_EQ (status, 200) << body.dump ();
+    }
+    create_request (root_,
+    json{ { "specOperation",
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+
+    // Plan the run the way a real one is planned, so the tally counts against
+    // the index this collection was bound to when it ran.
+    auto plan_now = [&] {
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms            = 1000;
+        options.limits.max_steps      = 10;
+        options.limits.max_data_rows  = 10;
+        options.limits.max_data_bytes = 4096;
+        return vayu::core::resolve_scenario (*db_,
+        json{ { "source", "collection" }, { "collectionId", root_ } }, options);
+    };
+    auto resolved = plan_now ();
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.spec.declared_operations.size (), 1u);
+
+    vayu::core::ScenarioExecution execution;
+    execution.plan = resolved.plan;
+    execution.spec = resolved.spec;
+    auto tally     = vayu::core::make_coverage_tally (execution);
+    ASSERT_TRUE (tally.active ());
+    tally.record (0, 200);
+
+    vayu::db::Run run;
+    run.id              = "run_before_sync";
+    run.type            = vayu::RunType::Scenario;
+    run.status          = vayu::RunStatus::Completed;
+    run.config_snapshot = json{
+        { "url", "https://example.test/pets" },
+        { "scenario",
+        json{ { "collectionId", root_ },
+        { "openapi", json{ { "specId", v1_id }, { "specHash", v1_hash } } } } }
+    }.dump ();
+    run.start_time = 1000;
+    run.end_time   = 1001;
+    db_->create_run (run);
+
+    vayu::core::RunSummaryInputs inputs;
+    inputs.coverage = tally.build ();
+    db_->update_run_summary (
+    run.id, vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [before_status, before] = routes::run_report_response (*db_, run.id);
+    ASSERT_EQ (before_status, 200) << before.dump ();
+    ASSERT_TRUE (before.contains ("coverage")) << before.dump ();
+    const json coverage_before = before["coverage"];
+
+    // The contract moves: a second operation, a second document, a new binding.
+    const json v2_index = json::array (
+    { { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" },
+      { "responses", json::array ({ "200", "404" }) } },
+    { { "operationId", "listOwners" }, { "method", "GET" },
+    { "path", "/owners" }, { "responses", json::array ({ "200" }) } } });
+    auto [sync_status, synced] = routes::spec_sync_response (*db_,
+    json{ { "collectionId", root_ },
+    { "spec", json{ { "content", FETCHED_DOC }, { "operations", v2_index } } } });
+    ASSERT_EQ (sync_status, 200) << synced.dump ();
+    ASSERT_NE (binding ()["specId"].get<std::string> (), v1_id)
+    << "the sync has to have actually moved the binding, or this proves "
+       "nothing";
+    // And the collection now measures against a contract of two operations, so
+    // "1" below is a discrimination rather than a number that could not move.
+    auto replanned = plan_now ();
+    ASSERT_TRUE (replanned.ok) << replanned.error;
+    ASSERT_EQ (replanned.spec.declared_operations.size (), 2u);
+
+    // Re-read the *same* run. Every number, and the stamp naming which document
+    // they were computed against, is what it was before the sync.
+    auto [after_status, after] = routes::run_report_response (*db_, run.id);
+    ASSERT_EQ (after_status, 200) << after.dump ();
+    EXPECT_EQ (after["coverage"], coverage_before);
+    EXPECT_EQ (after["coverage"]["operationsTotal"].get<size_t> (), 1u)
+    << "the newer document declares two - reading it here would say so";
+    EXPECT_EQ (after["metadata"]["openapi"]["specId"].get<std::string> (), v1_id);
+    EXPECT_EQ (after["metadata"]["openapi"]["specHash"].get<std::string> (), v1_hash);
 }
 
 } // namespace
