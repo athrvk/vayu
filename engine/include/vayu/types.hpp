@@ -1045,6 +1045,23 @@ struct SpecDocument {
      * "not measured" and "measured nothing" are different answers.
      */
     std::string operations;
+    /**
+     * The response schemas this document declares, extracted by the app when it
+     * stored the document (issue #628): a JSON object of
+     * `{refRoots?, operations: [{operationId?, method, path, responses: [{status,
+     * contentType, schema}]}]}`.
+     *
+     * A column of its own rather than a field on `operations` above, because
+     * that index is parsed when a run's plan resolves and held for the run's
+     * whole life, while these are read only when a response with a body comes
+     * back - and they are orders of magnitude larger. See
+     * `core/schema_validation.hpp` for the storage shape and why the schemas
+     * are stored as written beside one shared `refRoots`.
+     *
+     * `""` means no index, which a response reports as `checked: false` with
+     * the reason `no_index` - never as a body that passed.
+     */
+    std::string response_schemas;
 };
 
 struct Environment {

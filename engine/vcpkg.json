@@ -12,6 +12,7 @@
     },
     "libsodium",
     "nlohmann-json",
+    "valijson",
     "cpp-httplib",
     "gtest",
     {

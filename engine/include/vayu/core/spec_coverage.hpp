@@ -99,6 +99,25 @@ parse_declared_operations (const std::string& stored);
 validate_operations_index (const nlohmann::json& operations);
 
 /**
+ * @brief The one declared status pattern @p status answers to, most specific
+ *        first - exact (`"200"`), then range (`"2XX"`), then `"default"`.
+ *
+ * `std::nullopt` when the document declares nothing covering @p status.
+ *
+ * Exactly one match, and the most specific: a 200 seen against an operation
+ * declaring both `200` and `2XX` hits the `200` row and leaves `2XX` unhit,
+ * which is the honest reading - the document declared two distinct responses
+ * and the run produced one of them.
+ *
+ * Exported rather than kept private to this file because response schema
+ * validation (#628) has to pick a schema by the same rule coverage counts a
+ * response by. Two copies would let a status be "covered" here and
+ * "no schema for this status" there, on one document.
+ */
+[[nodiscard]] std::optional<size_t>
+match_status_pattern (const std::vector<std::string>& patterns, int status);
+
+/**
  * @brief Resolve an executed request's stamped identity to a declared operation.
  *
  * `operationId` first, `METHOD path` second - the rule `operation-match.ts`

@@ -295,7 +295,14 @@ inline auto make_storage (const std::string& path) {
     // row backfills to `""` - which is the truth about them: they were stored
     // before anything extracted an index, and a run of one reports no coverage
     // rather than an empty contract.
-    make_column ("operations", &SpecDocument::operations, default_value (std::string ()))),
+    make_column ("operations", &SpecDocument::operations, default_value (std::string ())),
+    // The app-extracted response schema index (issue #628), ALTERed on by the
+    // same NOT NULL + default rule as `operations` beside it. A pre-existing
+    // row backfills to `""`, which is the truth about it: nothing extracted
+    // schemas when it was stored, so a response of its operations reports
+    // `checked: false` / `no_index` rather than a contract it never had.
+    make_column ("response_schemas", &SpecDocument::response_schemas,
+    default_value (std::string ()))),
 
     // Environments: Named variable sets (dev, staging, prod)
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
