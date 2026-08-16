@@ -1012,6 +1012,32 @@ also states that its numbers are counted on every send rather than drawn from th
 stored sample - it sits among figures that *are* sampled, and a reader has no
 other way to tell them apart.
 
+## Sampled Schema Validation (`components/shared/SampledSchemaValidation.tsx`)
+
+Whether the responses a **load** run kept matched the schemas its bound contract
+declares (`RunReport.schemaValidation`, issue #682). Shown in the history
+detail's Overview directly under `ContractCoverage`, which it answers the second
+half of: coverage says what the run exercised, this says whether what came back
+honoured it.
+
+**Its numbers are sampled and the block is built to say so.** The engine defers
+validation to run end over the bounded reservoir of responses the run stored,
+because a load run refills concurrency on every completion. So the card renders
+the `sampled` denominator beside every tally and states outright that the
+coverage block above it is exact while this one is not - the two sit together and
+a reader has no other way to tell which kind each is.
+
+Same absent-vs-zero discipline as `ContractCoverage`: an absent block, or one
+that walked no samples, renders **nothing**. A run whose responses were never
+checked did not pass a contract.
+
+Reasons for a response that could not be checked come from
+`uncheckedReasonText`, the wording the response viewer already shows for a single
+response - one copy, so an aggregate row and a user's own response cannot come to
+describe the same code differently. The chip is red only for a real schema
+failure; a run that checked nothing stays neutral rather than borrowing the
+vocabulary of a failed budget.
+
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 
 Wherever a run's captured response exchanges are on screen: the run stored those

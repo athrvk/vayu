@@ -231,6 +231,13 @@ struct ReportExtras {
     // stored before the operation index existed - and leaves the section out,
     // because a run that was never judged against a contract did not fail one.
     nlohmann::json coverage = nlohmann::json::object ();
+    // What checking the run's *sampled* responses against that same contract
+    // found (issue #682), passed through verbatim on the `coverage` terms.
+    // Empty is every run that validated nothing - an unbound collection, a
+    // single-request run, a document carrying no response schemas - and leaves
+    // the section out, because a run whose responses were never checked did not
+    // pass a contract. Sampled where `coverage` is exact; the block says so.
+    nlohmann::json schema_validation = nlohmann::json::object ();
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -465,6 +472,16 @@ ReportExtras& extras) {
     summary["coverage"]["operations"].is_array () &&
     !summary["coverage"]["operations"].empty ()) {
         extras.coverage = summary["coverage"];
+    }
+
+    // Same again for sampled schema validation (issue #682). A block with no
+    // `sampled` count says nothing a reader can act on - and cannot be labelled
+    // honestly as a sample - so it is treated as absent.
+    if (summary.contains ("schemaValidation") && summary["schemaValidation"].is_object () &&
+    summary["schemaValidation"].contains ("sampled") &&
+    summary["schemaValidation"]["sampled"].is_number () &&
+    summary["schemaValidation"]["sampled"].get<size_t> () > 0) {
+        extras.schema_validation = summary["schemaValidation"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -1070,6 +1087,17 @@ const std::string& run_id) {
     // that was not measured against a contract; see ReportExtras::coverage.
     if (!extras.coverage.empty ()) {
         json_report["coverage"] = extras.coverage;
+    }
+
+    // Whether the responses this run kept matched the schemas that same
+    // document declares (issue #682). Beside `coverage` because they answer
+    // halves of one question - which of the contract was exercised, and whether
+    // what came back honoured it - but on different evidence: coverage counts
+    // every send, this checks the bounded reservoir the run stored. The
+    // `sampled` count rides along so a reader cannot mistake one for the other.
+    // Absent for every run that checked nothing; see ReportExtras.
+    if (!extras.schema_validation.empty ()) {
+        json_report["schemaValidation"] = extras.schema_validation;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived

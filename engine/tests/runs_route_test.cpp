@@ -910,6 +910,82 @@ TEST_F (RunsRouteTest, ReportOmitsCoverageForARunNotMeasuredAgainstAContract) {
     EXPECT_FALSE (empty_body.contains ("coverage")) << empty_body.dump ();
 }
 
+// ---------------------------------------------------------------------------
+// Sampled schema validation (issue #682)
+// ---------------------------------------------------------------------------
+
+// The same whole path, for the block beside coverage: the deferred pass tallies
+// what the reservoirs held, the summary stores it, and the report hands it back
+// unchanged. Nothing translates a name here either.
+TEST_F (RunsRouteTest, ReportCarriesTheSchemaValidationBlockTheRunComputed) {
+    seed ({ .id = "run_schema", .start_time = 1000 });
+
+    vayu::core::ValidationVerdict passed;
+    passed.checked = true;
+    passed.valid   = true;
+    vayu::core::ValidationVerdict broke;
+    broke.checked        = true;
+    broke.valid          = false;
+    broke.failures       = { vayu::core::SchemaFailure{ "/id", "expected integer" } };
+    broke.failures_total = 1;
+    vayu::core::ValidationVerdict skipped;
+    skipped.reason = vayu::core::UncheckedReason::BodyNotJson;
+
+    vayu::core::SampledValidationTotals totals;
+    totals.record (passed, "list pets", 200);
+    totals.record (broke, "get pet", 200);
+    totals.record (skipped, "get pet", 500);
+
+    auto inputs             = summary_inputs ();
+    inputs.schema_validation = vayu::core::build_sampled_validation_payload (totals);
+    db_->update_run_summary (
+    "run_schema", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_schema");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("schemaValidation")) << body.dump ();
+    const auto& validation = body["schemaValidation"];
+    // The denominator rides through: without it a reader cannot tell these
+    // figures describe the reservoir rather than the run.
+    EXPECT_EQ (validation["sampled"].get<size_t> (), 3u);
+    EXPECT_EQ (validation["checked"].get<size_t> (), 2u);
+    EXPECT_EQ (validation["valid"].get<size_t> (), 1u);
+    EXPECT_EQ (validation["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (validation["uncheckedReasons"]["body_not_json"].get<size_t> (), 1u);
+    ASSERT_EQ (validation["failures"].size (), 1u);
+    EXPECT_EQ (validation["failures"][0]["step"].get<std::string> (), "get pet");
+}
+
+// The absent-not-zeros gate, in both shapes it arrives in: a run whose summary
+// carries no block, and one carrying an object that checked nothing. Neither
+// reports a contract nothing failed.
+//
+// Mutation-check: drop the `sampled > 0` condition in the route's reader and
+// the second half reddens - the report gains a block claiming a clean run.
+TEST_F (RunsRouteTest, ReportOmitsSchemaValidationForARunThatCheckedNothing) {
+    seed ({ .id = "run_no_schema", .start_time = 1000 });
+    auto inputs              = summary_inputs ();
+    inputs.schema_validation = std::nullopt;
+    db_->update_run_summary (
+    "run_no_schema", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_schema");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("schemaValidation")) << body.dump ();
+
+    seed ({ .id = "run_empty_schema", .start_time = 1000 });
+    auto empty              = summary_inputs ();
+    empty.schema_validation = nlohmann::json{ { "sampled", 0 }, { "checked", 0 },
+        { "valid", 0 }, { "failed", 0 } };
+    db_->update_run_summary (
+    "run_empty_schema", vayu::core::build_run_summary_payload (empty).dump ());
+
+    auto [empty_status, empty_body] =
+    vayu::http::routes::run_report_response (*db_, "run_empty_schema");
+    ASSERT_EQ (empty_status, 200);
+    EXPECT_FALSE (empty_body.contains ("schemaValidation")) << empty_body.dump ();
+}
+
 // The anchor coverage is read against, asserted at the route for the first time
 // (noted on #629 when phase 1 closed): the report echoes the *snapshot's*
 // binding, so a reader can say which document a coverage block was computed

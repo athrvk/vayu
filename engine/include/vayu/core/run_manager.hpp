@@ -27,6 +27,7 @@
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -536,6 +537,32 @@ vayu::db::Database& db,
 bool verbose);
 
 /**
+ * @brief Check a drained load run's sampled responses against the contract it
+ *        was planned against (issue #682, phase 3c of #625).
+ *
+ * **Deferred, and that is the whole design.** The load loop refills concurrency
+ * per completion, so anything on that path costs throughput for the rest of the
+ * run - the reason the script replay is deferred too. Validation therefore
+ * happens once, here, over the reservoirs that survived, and the numbers it
+ * produces describe *those samples* rather than the run. `SampledValidationTotals`
+ * carries its own denominator so a report can say so.
+ *
+ * Scenario load runs only, and only bound ones: a single-request load run
+ * resolves no collection and therefore no binding, exactly as contract coverage
+ * does. Returns totals with `sampled == 0` - which the caller stores as no
+ * section at all - for a run with no schema index, no bound step, or no
+ * surviving sample.
+ *
+ * Declared here rather than kept file-local so the pass can be driven against a
+ * hand-seeded collector in tests; the production caller is `execute_load_test`,
+ * beside `validate_scripts`.
+ *
+ * @param verbose Log the tallies, as the run's own logging does.
+ */
+[[nodiscard]] SampledValidationTotals validate_sampled_responses (
+const std::shared_ptr<RunContext>& context, bool verbose);
+
+/**
  * @brief Hang each step's deferred-validation tallies off its entry in a
  *        scenario summary's `steps` array.
  *
@@ -632,6 +659,13 @@ struct RunSummaryInputs {
     // which is what keeps the report's coverage section out entirely rather
     // than reporting an unbound collection zero of zero operations covered.
     std::optional<nlohmann::json> coverage;
+    // What checking this run's *sampled* responses against the bound contract
+    // found, under the summary's `schemaValidation` key (issue #682). Absent -
+    // and an empty object is treated as absent - for a run that validated
+    // nothing, which keeps the report's section out rather than reporting an
+    // unbound collection a contract nothing failed. Its sibling `coverage` is
+    // exact where this is sampled; see `SampledValidationTotals`.
+    std::optional<nlohmann::json> schema_validation;
     // What the server-vitals scrape recorded, under the summary's `monitor`
     // key. Absent for a run that configured no monitor - the report then omits
     // the section entirely rather than showing a run that scraped nothing.

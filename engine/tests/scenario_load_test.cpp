@@ -1149,3 +1149,198 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
        "once";
     EXPECT_GT (state->steps_executed.load (), 0u);
 }
+
+// ============================================================================
+// Deferred schema validation over the sampled responses (issue #682)
+// ============================================================================
+
+namespace {
+
+/// The stored `response_schemas` text for a plan whose steps are bound to
+/// `step<i>` operations, each declaring one 200 response.
+///
+/// Built through the wire shape rather than a hand-made index so a change to
+/// what the app stores fails here rather than passing against a private fixture.
+std::string schema_index_for (const std::vector<json>& schemas) {
+    json operations = json::array ();
+    for (size_t i = 0; i < schemas.size (); ++i) {
+        operations.push_back (json{ { "operationId", "step" + std::to_string (i) },
+            { "method", "GET" }, { "path", "/s" + std::to_string (i) },
+            { "responses", json::array ({ json{ { "status", "200" },
+                              { "contentType", "application/json" },
+                              { "schema", schemas[i] } } }) } });
+    }
+    return json{ { "refRoots", json::object () }, { "operations", operations } }.dump ();
+}
+
+/// Bind every step of @p execution to the operation of the same index, and give
+/// the run the index those operations are declared in.
+void bind_to_schemas (vayu::core::ScenarioExecution& execution,
+const std::vector<json>& schemas) {
+    execution.spec.spec_id   = "spec_1";
+    execution.spec.spec_hash = "hash_1";
+    execution.spec.response_schemas = schema_index_for (schemas);
+    for (size_t i = 0; i < execution.plan.steps.size (); ++i) {
+        execution.plan.steps[i].spec_operation =
+        json{ { "operationId", "step" + std::to_string (i) }, { "method", "GET" },
+            { "path", "/s" + std::to_string (i) } }
+        .dump ();
+    }
+}
+
+/// The mock answers every step with `{}`, so this passes and `strict_schema`
+/// does not - which is what lets one run produce both verdicts.
+json open_schema () {
+    return json{ { "type", "object" } };
+}
+
+json strict_schema () {
+    return json{ { "type", "object" }, { "required", json::array ({ "id" }) } };
+}
+
+} // namespace
+
+// A step bound to an operation is sampled even when it carries no script - the
+// contract is the second reason to keep a response, and without it a bound
+// collection that asserts nothing would validate nothing at all.
+//
+// Mutation-check: restore the scripted-only condition in `execute_scenario_load`
+// and both stores are empty, so every assertion below reddens.
+TEST_F (ScenarioLoadTest, ABoundStepIsSampledWithNoScriptOfItsOwn) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    bind_to_schemas (execution, { open_schema (), open_schema () });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto& mc = *context_->metrics_collector;
+    EXPECT_GT (mc.step_response_samples (0).size (), 0u)
+    << "a step bound to an operation was never sampled, so its contract can "
+       "never be checked";
+    EXPECT_GT (mc.step_response_samples (1).size (), 0u);
+}
+
+// The run's own binding decides it: a plan whose steps name no operation is
+// sampled exactly as it was before this existed, so an unbound collection pays
+// nothing for a feature it cannot use.
+TEST_F (ScenarioLoadTest, AnUnboundPlanStillSamplesOnlyItsScriptedSteps) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto& mc = *context_->metrics_collector;
+    EXPECT_GT (mc.step_response_samples (0).size (), 0u);
+    EXPECT_EQ (mc.step_response_samples (1).size (), 0u)
+    << "an unbound step with no script was sampled - a body-sized copy nothing "
+       "will read";
+}
+
+TEST_F (ScenarioLoadTest, ABoundRunReportsTalliesOverItsSampledResponses) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    // One operation the mock's `{}` satisfies and one it does not, so a single
+    // run produces both verdicts and the partition is observable.
+    bind_to_schemas (execution, { open_schema (), strict_schema () });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+
+    EXPECT_EQ (totals.sampled, 6u);
+    EXPECT_EQ (totals.checked, 6u);
+    EXPECT_EQ (totals.valid, 3u);
+    EXPECT_EQ (totals.failed, 3u);
+    ASSERT_FALSE (totals.failure_examples.empty ());
+    EXPECT_EQ (totals.failure_examples.front ().step, "step1")
+    << "the failing step must be named, or a reader cannot act on the example";
+    EXPECT_EQ (totals.failure_examples.front ().status, 200);
+}
+
+// The gate the whole block turns on: a run of an unbound collection is not a
+// run that passed its contract.
+//
+// Mutation-check: drop the `response_schemas.empty()` guard in
+// `validate_sampled_responses` and this reports a block of zeros instead.
+TEST_F (ScenarioLoadTest, AnUnboundRunValidatesNothingAtAll) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    EXPECT_EQ (totals.sampled, 0u);
+    EXPECT_TRUE (vayu::core::build_sampled_validation_payload (totals).empty ())
+    << "an unbound run must carry no block at all, never one saying nothing "
+       "failed";
+}
+
+// A binding whose document carries no schema index is "not measured" too - the
+// same spelling coverage gives a document stored before its index existed.
+TEST_F (ScenarioLoadTest, ABindingWithNoSchemaIndexValidatesNothing) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    bind_to_schemas (execution, { open_schema () });
+    execution.spec.response_schemas.clear ();
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    EXPECT_EQ (vayu::core::validate_sampled_responses (context_, false).sampled, 0u);
+}
+
+// A step the document does not declare is checked and named, rather than
+// silently dropped: a collection drifting off its contract is exactly what the
+// block is read for.
+TEST_F (ScenarioLoadTest, AStepTheDocumentDoesNotDeclareIsCountedByReason) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    bind_to_schemas (execution, { open_schema (), open_schema () });
+    // The second step's identity moved off the contract.
+    execution.plan.steps[1].spec_operation =
+    json{ { "method", "GET" }, { "path", "/ghosts" } }.dump ();
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    EXPECT_EQ (totals.checked, 2u);
+    EXPECT_EQ (totals.failed, 0u)
+    << "an undeclared operation is not a response that broke its contract";
+    EXPECT_EQ (totals.unchecked_reasons.at ("operation_not_declared"), 2u);
+}
+
+// The thinning is disclosed rather than hidden: a run whose reservoirs dropped
+// candidates reports tallies over what it kept, and the retention counter says
+// what it did not.
+TEST_F (ScenarioLoadTest, ARunWhoseSamplesWereThinnedStillReportsHonestly) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    bind_to_schemas (execution, { open_schema (), open_schema () });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 8 },
+        { "concurrency", 1 }, { "max_response_samples", 4 },
+        { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    EXPECT_GT (totals.sampled, 0u);
+    EXPECT_LE (totals.sampled, 4u)
+    << "the pass validated more than the reservoirs could hold";
+    EXPECT_LT (totals.sampled, 16u)
+    << "16 completions into a 4-sample budget must have been thinned";
+    EXPECT_GT (context_->metrics_collector->response_samples_dropped (), 0u)
+    << "what was thinned must be reported, or the tallies read as the whole run";
+}

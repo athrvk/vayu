@@ -4337,7 +4337,9 @@ sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, 
 only when a test script ran, `thresholdValidation` only when the run declared
 [budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
 `capacity` run, `auth` only when the run's OAuth 2.0 credential could be
-refreshed mid-run, `coverage` only for a run measured against a bound spec).
+refreshed mid-run, `coverage` only for a run measured against a bound spec,
+`schemaValidation` only for a load run that checked some of its samples against
+one).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -4386,6 +4388,43 @@ run; a binding that has since synced to a newer spec cannot rewrite it.
 deliberately plain numbers, shaped like `thresholdValidation`'s counts, so a
 headless CI gate can threshold on them without the block being reshaped. Nothing
 thresholds on them today.
+
+**`schemaValidation`** says whether the responses a **load** run kept matched the
+schemas that same document declares (issue #682). It sits beside `coverage` and
+is computed against the same document, but on different evidence, and the
+difference is the block's most important field: coverage counts every send,
+while this walks the **bounded reservoir of responses the run stored**.
+
+| Field | Meaning |
+|---|---|
+| `sampled` | Responses this pass walked - the denominator for everything else |
+| `checked` | Of those, the ones a declared schema could speak about |
+| `valid` / `failed` | The partition of `checked`. `valid + failed == checked`, always |
+| `unevaluated` | Checked responses whose schema carried a keyword the draft-07 validator could not evaluate |
+| `uncheckedReasons` | Reason code -> count, accounting for every one of `sampled - checked` |
+| `unevaluatedKeywords[]` | `{keyword, count}`, so what went unread is named and not only counted |
+| `failures[]` | Bounded examples: `{step?, status, path, message}` |
+| `failuresTotal` | Every failure found, the cap included - so "3 shown of 90" stays readable |
+
+The reason codes are the ones [`POST /execute`'s validation
+node](#post-execute) uses, unchanged.
+
+**These numbers are sampled, and nothing here pretends otherwise.** Validation is
+deferred to run end because a load run refills concurrency on every completion,
+so a schema walk on that path would cost throughput for the whole run - and would
+do so invisibly. `failed: 0` therefore means "no *sampled* response failed".
+`sampled` is written so a reader always has the denominator; the app renders it
+beside the tallies for the same reason.
+
+A step's responses are kept when a deferred pass will read them - it carries a
+script, or it is bound to an operation and the document carries schemas - and the
+run's sample budget is split evenly across those steps. What was displaced is
+reported as `sampling.response_samples_dropped`.
+
+**Absent, never zeros**, for every run that checked nothing: an unbound
+collection, a single-request run, a document carrying no response schemas, and a
+run whose reservoirs held nothing. A run whose responses were never checked did
+not pass a contract.
 
 **Response:**
 ```json
@@ -4482,6 +4521,12 @@ thresholds on them today.
         "sent": 0, "statusesSeen": [], "declaredHit": [], "declaredMissed": ["204"],
         "undeclaredSeen": [] }
     ]
+  },
+  "schemaValidation": {
+    "sampled": 40, "checked": 36, "valid": 30, "failed": 6, "unevaluated": 0,
+    "uncheckedReasons": { "body_not_json": 4 },
+    "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
+    "failuresTotal": 6
   },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }

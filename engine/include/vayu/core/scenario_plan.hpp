@@ -149,6 +149,22 @@ struct SpecBinding {
      * measured", which leaves the coverage block out entirely.
      */
     std::vector<DeclaredOperation> declared_operations;
+    /**
+     * The bound document's stored `response_schemas`, verbatim (issue #682).
+     *
+     * Carried as **text**, not as a parsed `ResponseSchemaIndex`: parsing a
+     * document's whole schema index is the expensive half and nothing during
+     * the run needs it, so the run pays for it once at the end, in the deferred
+     * pass, or not at all. That is the same bargain
+     * `core/schema_validation.hpp` states for why the schemas are a column of
+     * their own rather than folded into `operations`.
+     *
+     * Read here, at resolution, under the same hash check the operations are -
+     * a run is judged against the document it was *planned* against, and a sync
+     * landing mid-run moves the binding to a document this run never saw. Empty
+     * for every case that leaves the schema-validation block out entirely.
+     */
+    std::string response_schemas;
     [[nodiscard]] bool bound () const {
         return !spec_id.empty ();
     }

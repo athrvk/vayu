@@ -516,6 +516,12 @@ default, so `sync_schema()` can
   "thresholds": {
     "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
     "passed": 1, "failed": 0
+  },
+  "schemaValidation": {
+    "sampled": 40, "checked": 36, "valid": 30, "failed": 6, "unevaluated": 0,
+    "uncheckedReasons": { "body_not_json": 4 },
+    "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "..." } ],
+    "failuresTotal": 6
   }
 }
 ```
@@ -532,7 +538,13 @@ from "this run did not measure it". A zero *inside* a present section is meaning
 run over reused connections genuinely has a TLS p50 of 0.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
-report's `testValidation` section absent rather than reporting zero tests. `thresholds` follows
+report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`
+follows the same rule (issue #682): omitted when the deferred pass over the run's sampled
+responses walked nothing, so an unbound collection's report carries no block rather than one
+saying its contract held. Written in camelCase because the report passes it through verbatim,
+the `phases` rule. Its `sampled` count is stored rather than derived because it is the
+denominator that says these tallies describe the run's bounded reservoir and not the run -
+unlike `coverage` beside it, which is exact. `thresholds` follows
 the same rule and for the same reason: absent when the run declared no
 [budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
 `thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
