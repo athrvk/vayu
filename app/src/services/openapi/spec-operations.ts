@@ -20,7 +20,7 @@
  * existing collection deliberately creates no requests (that is sync, #627).
  */
 
-import type { SpecOperation } from "@/types";
+import type { DeclaredOperation, SpecOperation } from "@/types";
 import { parseImport } from "@/services/importers/factory";
 import type { CollectionDraft, RequestDraft } from "@/services/importers/types";
 
@@ -60,6 +60,17 @@ export interface ReadSpecResult {
 	requests: SpecRequestDraft[];
 	/** Every operation the document declares, in document order. */
 	operations: SpecOperation[];
+	/**
+	 * The same operations with the status patterns each declares (issue #629) -
+	 * the index stored beside the document so a run of the bound collection can
+	 * report which of the contract it covered.
+	 *
+	 * Taken off the parse rather than walked for here, like `operations` above:
+	 * an index that disagreed with the identities beside it would make coverage
+	 * disagree with the requests it counts. Empty for a document that declares
+	 * no operation with a usable identity.
+	 */
+	declaredOperations: DeclaredOperation[];
 	/** The parser that claimed it - "OpenAPI 3.0", "OpenAPI 2.0 (Swagger)". */
 	format: string;
 	/** `info.title`, which is what the document calls itself. */
@@ -97,6 +108,7 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 		// wants identities and a reader that wants drafts cannot disagree about
 		// what the document declares.
 		operations: requests.map((r) => r.operation),
+		declaredOperations: root.spec.operations ?? [],
 		format: result.meta.format,
 		title: root.name,
 	};

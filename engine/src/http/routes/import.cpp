@@ -551,6 +551,9 @@ std::vector<vayu::db::SpecDocument>& out) {
         }
         s.hash       = spec_content_hash (s.content);
         s.fetched_at = now;
+        if (auto reason = read_spec_operations (item, s)) {
+            return item_error (*reason, temp);
+        }
 
         if (item.contains ("sourceUrl") && !item["sourceUrl"].is_null ()) {
             if (!item["sourceUrl"].is_string ()) {

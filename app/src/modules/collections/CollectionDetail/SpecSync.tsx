@@ -51,7 +51,7 @@ import {
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, Request, SpecDocument } from "@/types";
+import type { Collection, DeclaredOperation, Request, SpecDocument } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -78,6 +78,8 @@ type CheckState =
 			unresolvedRefs: number;
 			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
 			content: string;
+			/** The re-fetched document's declared-operation index (issue #629). */
+			operations: DeclaredOperation[];
 			selection: SpecApplySelection;
 	  }
 	| { phase: "applied"; created: number; updated: number; deleted: number };
@@ -121,13 +123,22 @@ export default function SpecSync({
 				return;
 			}
 
-			const fetched = readSpecOperations(text).requests;
-			const diff = diffSpec({ bound: boundDrafts(spec.content), fetched, requests });
+			const read = readSpecOperations(text);
+			const diff = diffSpec({
+				bound: boundDrafts(spec.content),
+				fetched: read.requests,
+				requests,
+			});
 			setState({
 				phase: "diff",
 				diff,
 				unresolvedRefs,
 				content: text,
+				// Carried from the check to the apply so the new document is
+				// stored with its own index (issue #629): the sync writes a new
+				// `spec_documents` row, and one without an index would silently
+				// turn coverage off for a collection that had it.
+				operations: read.declaredOperations,
 				selection: defaultSelection(diff),
 			});
 		} catch (e) {
@@ -147,6 +158,7 @@ export default function SpecSync({
 			diff: state.diff,
 			selection: state.selection,
 			content: state.content,
+			operations: state.operations,
 			// The document is re-fetched from the source the binding recorded, so
 			// the new row records the same one - a file-sourced document keeps
 			// having no URL rather than acquiring one.

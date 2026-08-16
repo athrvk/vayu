@@ -34,7 +34,7 @@ import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { useScenarioRunStore, useToastStore } from "@/stores";
 import { Badge } from "@/components/ui";
-import { EmptyState, Callout, StopRunButton } from "@/components/shared";
+import { ContractCoverage, EmptyState, Callout, StopRunButton } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
@@ -210,6 +210,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						in Settings to keep more.
 					</Callout>
 				)}
+
+				{/* Above the steps rather than after them: "which of the contract
+				    did this run exercise" is a whole-run answer, and a reader
+				    who has to scroll past forty step cards to reach it will not.
+				    Absent for a run of a collection bound to nothing. */}
+				<ContractCoverage coverage={report?.coverage} />
 
 				{steps.length === 0 ? (
 					/*

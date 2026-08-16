@@ -75,6 +75,7 @@ const spec = (
 	sourceUrl,
 	fetchedAt: 1_700_000_000_000,
 	hash: "abc123",
+	operations: null,
 });
 
 const request = (overrides: Partial<Request> = {}): Request =>

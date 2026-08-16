@@ -1014,6 +1014,22 @@ struct SpecDocument {
      * The `body_blobs` content+hash pair is the shape this follows.
      */
     std::string hash;
+    /**
+     * The operations this document declares, extracted by the app when it stored
+     * the document (issue #629): a JSON array of
+     * `{operationId?, method, path, responses[]}`, in document order.
+     *
+     * Supplied rather than derived because **the engine does not parse OpenAPI**
+     * - the division of labour #625 decided. `content` above is the bytes the
+     * app imported, which are YAML as often as JSON, and a C++ reader of them
+     * would be a second opinion about what a document declares.
+     *
+     * `""` means no index: a document stored before this column existed, or one
+     * written by a client that sends none. A run of such a document reports **no
+     * coverage block at all** rather than zero of zero operations covered -
+     * "not measured" and "measured nothing" are different answers.
+     */
+    std::string operations;
 };
 
 struct Environment {

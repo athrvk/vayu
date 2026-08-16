@@ -47,6 +47,7 @@ import { useBindSpecMutation, useSpecQuery } from "@/queries/specs";
 import { useSpecFileStore } from "@/stores";
 import { matchOperations } from "@/services/openapi/operation-match";
 import { readSpecOperations } from "@/services/openapi/spec-operations";
+import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
@@ -116,7 +117,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		try {
 			return { ...readSpecOperations(picked.content), error: null as string | null };
 		} catch (e) {
-			return { operations: [], format: "", title: "", error: (e as Error).message };
+			return {
+				operations: [],
+				declaredOperations: [],
+				format: "",
+				title: "",
+				error: (e as Error).message,
+			};
 		}
 	}, [picked]);
 
@@ -168,6 +175,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					requestId: request.id,
 					specOperation: operation,
 				})),
+				// Stored with the document so a run of this collection can report
+				// its contract coverage (issue #629).
+				operations: parsed?.declaredOperations ?? [],
 			},
 			{
 				onSuccess: () => {
@@ -318,6 +328,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					)}
 				</div>
 			)}
+
+			{bound && <SpecCoverageLine collectionId={collection.id} />}
 
 			{bound && (
 				<SpecSync

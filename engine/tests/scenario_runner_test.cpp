@@ -959,6 +959,23 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     EXPECT_EQ (scenario["steps_dropped"].get<size_t> (), 6u);
 }
 
+// Contract coverage rides the summary as its own top-level section, not as part
+// of `scenario` - it describes the contract, not the sequence - and is left out
+// entirely for a run that was not measured against one (issue #629).
+TEST (ScenarioSummaryPayload, CoverageIsItsOwnSectionAndAbsentWhenNotMeasured) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 2;
+    EXPECT_FALSE (vayu::core::build_scenario_summary_payload (inputs).contains ("coverage"));
+
+    inputs.coverage = nlohmann::json{ { "operationsTotal", 2 },
+        { "operationsCovered", 1 }, { "operations", nlohmann::json::array ({ 1 }) } };
+    const auto summary = vayu::core::build_scenario_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("coverage")) << summary.dump ();
+    EXPECT_EQ (summary["coverage"]["operationsCovered"], 1);
+    // Beside `scenario`, never inside it.
+    EXPECT_FALSE (summary["scenario"].contains ("coverage"));
+}
+
 TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZero) {
     vayu::core::ScenarioSummaryInputs inputs;
     inputs.steps_executed = 3;

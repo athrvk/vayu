@@ -504,6 +504,19 @@ std::string spec_content_hash (const std::string& content);
 size_t spec_size_cap (vayu::db::Database& db);
 
 /**
+ * Reads a spec write's optional `operations` index (issue #629) onto @p spec,
+ * returning the caller-facing error when it is present but malformed.
+ *
+ * One copy for all three writers - `POST /specs`, `POST /import/apply`'s spec
+ * section and `POST /specs/sync` - because a document stored through one path
+ * and re-stored through another must carry the same index or a run's coverage
+ * would depend on how the document arrived. Absent leaves `spec.operations`
+ * empty, which is "no index", not "declares nothing". Defined in specs.cpp.
+ */
+std::optional<std::string>
+read_spec_operations (const nlohmann::json& item, vayu::db::SpecDocument& spec);
+
+/**
  * Rejects a collection write whose `openapi` binding names a spec that will not
  * exist once the write lands (issue #637).
  *

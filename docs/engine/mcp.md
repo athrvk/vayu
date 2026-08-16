@@ -180,6 +180,13 @@ Notes:
   the 60s other modes fall back to), so a cap between those two values still
   injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+- **`get_run_report` carries contract coverage** for a run of a collection bound
+  to an OpenAPI document (issue #629): which of the contract's operations the run
+  exercised, which of their declared responses it saw, and any statuses the
+  document never declared, under `coverage`. Passed through verbatim - the tool
+  adds nothing. Absent, never zeros, for a run that was not measured against a
+  contract, so an agent must branch on the key's presence rather than reading a
+  zero as full non-coverage.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the

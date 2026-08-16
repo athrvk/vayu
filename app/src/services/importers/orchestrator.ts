@@ -163,6 +163,11 @@ function flatten(
 			tempId: specTempId,
 			content: c.spec.content,
 			...(c.spec.sourceUrl !== undefined ? { sourceUrl: c.spec.sourceUrl } : {}),
+			// The declared-operation index the parser extracted (issue #629),
+			// stored in the same atomic call as the document it describes.
+			...(c.spec.operations && c.spec.operations.length > 0
+				? { operations: c.spec.operations }
+				: {}),
 		});
 	}
 	collections.push({

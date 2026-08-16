@@ -107,6 +107,22 @@ class SpecsRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /**
+     * Resolves @p collection_id into a plan, with the limits every test here
+     * uses. One copy: what these assert is the *binding* the resolution carries,
+     * and four hand-written limit blocks would be four chances to disagree about
+     * the run being resolved.
+     */
+    vayu::core::ScenarioResolution resolve (const std::string& collection_id) {
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms            = 1000;
+        options.limits.max_steps      = 10;
+        options.limits.max_data_rows  = 10;
+        options.limits.max_data_bytes = 4096;
+        return vayu::core::resolve_scenario (*db_,
+        json{ { "source", "collection" }, { "collectionId", collection_id } }, options);
+    }
+
     /** Creates a request under @p collection_id and returns its id. */
     std::string create_request (const std::string& collection_id,
     const json& extra = json::object ()) {
@@ -545,6 +561,126 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
     routes::update_collection_response (*db_, col_id, json{ { "openapi", nullptr } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (manifest["openapi"]["specHash"].get<std::string> (), hash);
+}
+
+// ---------------------------------------------------------------------------
+// The declared-operation index (issue #629) - stored, refused, and pinned
+// ---------------------------------------------------------------------------
+
+TEST_F (SpecsRouteTest, AStoredIndexComesBackAsTheArrayItWasWritten) {
+    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200", "default" }) } } });
+    auto [status, body] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", index } });
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    auto [read_status, read] =
+    routes::get_spec_document_response (*db_, body.value ("id", std::string{}));
+    ASSERT_EQ (read_status, 200) << read.dump ();
+    EXPECT_EQ (read["operations"], index);
+}
+
+TEST_F (SpecsRouteTest, ADocumentWithNoIndexReadsBackNullRatherThanAnEmptyContract) {
+    auto [read_status, read] = routes::get_spec_document_response (*db_, store_spec ());
+    ASSERT_EQ (read_status, 200) << read.dump ();
+    // Null, not `[]`: "stored before coverage existed" and "declares nothing"
+    // are different answers, and only the first leaves the report's block out.
+    EXPECT_TRUE (read["operations"].is_null ()) << read.dump ();
+}
+
+TEST_F (SpecsRouteTest, AMalformedIndexIsRefusedAtTheWriteOnEveryPathThatStoresOne) {
+    const json bad = json::array ({ { { "method", "GET" } } }); // no `path`
+
+    auto [status, body] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", bad } });
+    EXPECT_EQ (status, 400) << body.dump ();
+
+    auto [import_status, import_body] = routes::import_apply_response (*db_,
+    json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE },
+                          { "operations", bad } } } } });
+    EXPECT_EQ (import_status, 400) << import_body.dump ();
+    // Nothing persisted by the refused bulk write, the transaction's own rule.
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (SpecsRouteTest, ImportStoresTheIndexBesideTheDocumentItDescribes) {
+    const json index = json::array ({ { { "method", "GET" }, { "path", "/pets" },
+    { "responses", json::array ({ "200" }) } } });
+    auto [status, body] = routes::import_apply_response (*db_,
+    json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE },
+                          { "operations", index } } } } });
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto spec_id = body["idMap"]["s1"].get<std::string> ();
+    auto [read_status, read] = routes::get_spec_document_response (*db_, spec_id);
+    ASSERT_EQ (read_status, 200) << read.dump ();
+    EXPECT_EQ (read["operations"], index);
+}
+
+TEST_F (SpecsRouteTest, AResolvedPlanCarriesTheBoundDocumentsOperations) {
+    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    auto [status, stored] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", index } });
+    ASSERT_EQ (status, 200) << stored.dump ();
+    const std::string spec_id = stored.value ("id", std::string{});
+    const std::string col_id  = create_collection (json{ { "name", "Pets" },
+    { "openapi", { { "specId", spec_id },
+    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    create_request (col_id);
+
+    auto resolved = resolve (col_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.spec.declared_operations.size (), 1u);
+    EXPECT_EQ (resolved.spec.declared_operations[0].operation_id, "listPets");
+    EXPECT_EQ (resolved.spec.declared_operations[0].method, "GET");
+
+    // And the tally built from it is live, which is what makes a run write a
+    // coverage section at all.
+    vayu::core::ScenarioExecution execution;
+    execution.plan = resolved.plan;
+    execution.spec = resolved.spec;
+    EXPECT_TRUE (vayu::core::make_coverage_tally (execution).active ());
+}
+
+TEST_F (SpecsRouteTest, ABindingWhoseHashHasMovedIsNotMeasuredRatherThanMismeasured) {
+    // The binding names the document and *a version of it*. A stored hash that
+    // disagrees means the collection is pointing at bytes it was never synced
+    // to, and reporting coverage against those would attribute a contract to a
+    // run that was planned against a different one.
+    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    auto [status, stored] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", index } });
+    ASSERT_EQ (status, 200) << stored.dump ();
+    const std::string col_id = create_collection (json{ { "name", "Pets" },
+    { "openapi", { { "specId", stored.value ("id", std::string{}) },
+    { "specHash", "a-hash-this-document-never-had" } } } });
+    create_request (col_id);
+
+    auto resolved = resolve (col_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    // Still bound - the stamp records what the collection claims - but with no
+    // operations, so the run reports no coverage block at all.
+    EXPECT_TRUE (resolved.spec.bound ());
+    EXPECT_TRUE (resolved.spec.declared_operations.empty ());
+
+    vayu::core::ScenarioExecution execution;
+    execution.plan = resolved.plan;
+    execution.spec = resolved.spec;
+    EXPECT_FALSE (vayu::core::make_coverage_tally (execution).active ());
+}
+
+TEST_F (SpecsRouteTest, ADocumentStoredWithoutAnIndexReportsNoCoverageRatherThanZero) {
+    const std::string col_id = create_collection (json{ { "name", "Pets" },
+    { "openapi", { { "specId", store_spec () },
+    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    create_request (col_id);
+
+    auto resolved = resolve (col_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_TRUE (resolved.spec.bound ());
+    EXPECT_TRUE (resolved.spec.declared_operations.empty ());
 }
 
 } // namespace

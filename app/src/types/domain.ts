@@ -205,6 +205,80 @@ export interface CollectionOpenApiBinding {
 }
 
 /**
+ * One row of the declared-operation index stored beside a spec document
+ * (issue #629): an operation's identity plus the status patterns its `responses`
+ * map declares.
+ *
+ * The index exists because **the engine does not parse OpenAPI** - the division
+ * of labour #625 decided - and contract coverage still has to know which
+ * operations a document declares and which responses each promises. So the side
+ * that already parses the document writes it down, once, at the moment the
+ * document is stored, and the engine counts against it without ever reading the
+ * document itself.
+ *
+ * `responses` keeps the patterns verbatim and in document order: `"200"`, `"4XX"`
+ * and `"default"` are three different promises, and expanding a range into codes
+ * would report a contract the document never wrote.
+ */
+export interface DeclaredOperation {
+	operationId?: string;
+	method: string;
+	path: string;
+	responses: string[];
+}
+
+/**
+ * One operation's row in a run report's coverage block (issue #629).
+ *
+ * `declaredHit` and `declaredMissed` partition the operation's declared status
+ * patterns; `undeclaredSeen` holds the statuses that answered to none of them -
+ * a 500 the document never mentions is a finding, not a miss. A status matches
+ * the most specific pattern that covers it, so an operation declaring both
+ * `200` and `2XX` that only ever answered 200 reports `2XX` as missed.
+ */
+export interface RunCoverageOperation {
+	operationId?: string;
+	method: string;
+	path: string;
+	/** Requests sent for this operation, transport failures included. */
+	sent: number;
+	statusesSeen: number[];
+	declaredHit: string[];
+	declaredMissed: string[];
+	undeclaredSeen: number[];
+	/** Sends that never got a response. Absent when there were none. */
+	transportErrors?: number;
+	/** Responses whose status fell outside 100-599. Absent when there were none. */
+	otherStatusResponses?: number;
+	/** Codes dropped from the two lists above by the per-row cap. */
+	statusesTruncated?: number;
+}
+
+/**
+ * A run's contract coverage (issue #629). See {@link RunReport.coverage} for
+ * when it is present and what it is computed against.
+ *
+ * The four rollup numbers are deliberately plain: a CLI gate (#473) can
+ * threshold on them without reshaping the block, the same way it would on
+ * `thresholdValidation`'s counts.
+ */
+export interface RunCoverage {
+	operationsTotal: number;
+	operationsCovered: number;
+	declaredResponsesTotal: number;
+	declaredResponsesHit: number;
+	declaredResponseCoveragePct: number;
+	/** Distinct (operation, status) pairs the document declares nothing for. */
+	undeclaredStatusesSeen: number;
+	/** Uncovered operations first - they are the finding. */
+	operations: RunCoverageOperation[];
+	/** Sends that never got a response, across every operation. */
+	transportErrors?: number;
+	/** Requests sent against an identity the document does not declare. */
+	undeclaredOperationRequests?: number;
+}
+
+/**
  * Which operation of a collection's bound spec a request *is* (issue #637).
  *
  * `path` is the **templated** path as the document writes it (`/pets/{petId}`),
@@ -1522,6 +1596,24 @@ export interface RunReport {
 		failed: number;
 		verdict: "passed" | "failed";
 	};
+	/**
+	 * Which operations of the collection's bound contract this run exercised, and
+	 * which of their declared responses it saw (issue #629).
+	 *
+	 * **Absent, never zeros**, for every run that was not measured against a
+	 * contract - an unbound collection, a single-request run, or a document
+	 * stored before the operation index existed. A run that was never judged
+	 * against a contract did not cover none of it.
+	 *
+	 * Computed against the document `metadata.openapi` names - the one the run
+	 * was *planned* with - so a binding that has since synced to a newer spec
+	 * cannot rewrite what an old report says was covered.
+	 *
+	 * Every number here is **exact**: the engine counts each send and each
+	 * response as it happens, rather than deriving them from the bounded
+	 * `results[]` sample a load run stores.
+	 */
+	coverage?: RunCoverage;
 	/**
 	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
 	 *

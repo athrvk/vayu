@@ -5,7 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
+import type {
+	DeclaredOperation,
+	HttpMethod,
+	KeyValueEntry,
+	RequestAuth,
+	RequestBody,
+} from "@/types";
 import type {
 	CollectionDraft,
 	ExampleDraft,
@@ -21,6 +27,7 @@ import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
 	declaredParamRow,
+	declaredResponsesOf,
 	deref,
 	exampleBodyText,
 	findJsonMediaType,
@@ -80,6 +87,11 @@ export class OpenApiV3Parser implements ImportParser {
 		const rootRequests: RequestDraft[] = [];
 		const tally = new SkipTally();
 		let requestCount = 0;
+		// The declared-operation index stored beside the document (issue #629).
+		// Built in this same walk rather than by a second pass over `paths`: a
+		// reader that disagreed with this one about what the document declares
+		// would make coverage disagree with the requests it counts.
+		const declaredOperations: DeclaredOperation[] = [];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -96,6 +108,13 @@ export class OpenApiV3Parser implements ImportParser {
 				const op = asRecord(pathItem[method]);
 				if (!op) continue;
 				requestCount += 1;
+				const identity = specOperationOf(method, path, op.operationId);
+				if (identity) {
+					declaredOperations.push({
+						...identity,
+						responses: declaredResponsesOf(op.responses),
+					});
+				}
 				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);
 				if (tag) {
@@ -121,7 +140,14 @@ export class OpenApiV3Parser implements ImportParser {
 			// collection to it in the same atomic call (issue #637). `raw` and not
 			// a re-serialization: the engine hashes the bytes it stores, and a
 			// sync compares against that hash.
-			spec: { content: raw },
+			// `operations` beside it, so a run of this collection can report what
+			// of the contract it covered without the engine parsing the document
+			// (issue #629). Absent when the document declared none, which stores
+			// as "no index" rather than as an empty contract.
+			spec: {
+				content: raw,
+				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
+			},
 		};
 
 		return {

@@ -15,7 +15,7 @@ import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import { CapacitySummary, ThresholdVerdict } from "@/components/shared";
+import { CapacitySummary, ContractCoverage, ThresholdVerdict } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
@@ -40,6 +40,12 @@ export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 			    rather than below the charts: "what can it take" is the question
 			    the run was started to answer. Absent for every other mode. */}
 			<CapacitySummary capacity={report.capacity} />
+
+			{/* Whether the run touched the contract it was measured against.
+			    Beside the verdict rather than below the charts, and for the same
+			    reason: a run can meet every budget while never calling four of
+			    eighteen operations. Absent for a run of an unbound collection. */}
+			<ContractCoverage coverage={report.coverage} />
 
 			{/* When the run went wrong, in words. Above the status/error totals
 			    because those are cumulative and this is the thing they hide: a

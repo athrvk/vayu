@@ -626,6 +626,12 @@ struct RunSummaryInputs {
     // which leaves the report's scenario section out entirely rather than
     // showing it zeros - the section exists to say what a sequence did.
     std::optional<nlohmann::json> scenario;
+    // Which of the bound contract's operations the run exercised, under the
+    // summary's `coverage` key (issue #629). Absent - and an empty object is
+    // treated as absent - for a run that was not measured against a contract,
+    // which is what keeps the report's coverage section out entirely rather
+    // than reporting an unbound collection zero of zero operations covered.
+    std::optional<nlohmann::json> coverage;
     // What the server-vitals scrape recorded, under the summary's `monitor`
     // key. Absent for a run that configured no monitor - the report then omits
     // the section entirely rather than showing a run that scraped nothing.

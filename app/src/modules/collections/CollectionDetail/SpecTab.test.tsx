@@ -78,6 +78,15 @@ vi.mock("@/queries/specs", () => ({
 	useSyncSpecMutation: () => syncSpec,
 }));
 
+// The bound half also carries the last run's contract coverage (issue #629).
+// Stubbed for the same reason the queries above are - this file renders the tab
+// without a QueryClient - and what the line says is asserted in
+// SpecCoverageLine.test.tsx.
+vi.mock("@/queries/runs", () => ({
+	useLastCollectionRunQuery: () => ({ data: undefined }),
+	useRunReportQuery: () => ({ data: undefined }),
+}));
+
 const importFetch = vi.fn();
 vi.mock("@/services/api", () => ({
 	apiService: { importFetch: (url: string) => importFetch(url) },

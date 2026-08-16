@@ -23,6 +23,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/id.hpp"
@@ -70,6 +71,30 @@ std::string spec_content_hash (const std::string& content) {
     const auto digest = vayu::utils::sha256 (content);
     return vayu::utils::hex_encode (std::string_view (
     reinterpret_cast<const char*> (digest.data ()), digest.size ()));
+}
+
+/**
+ * Reads the optional `operations` index onto @p spec (issue #629).
+ *
+ * The index is *supplied*, never derived: the engine does not parse OpenAPI (see
+ * `core/spec_coverage.hpp` for why), so this is the only place a bad one can be
+ * caught. It is validated on the way in rather than tolerated and ignored at run
+ * end - a client sending a malformed index has a bug, and a coverage block that
+ * silently went missing weeks later would not name it.
+ *
+ * `null` and absent both mean "no index"; the column stores `""` for both.
+ */
+std::optional<std::string>
+read_spec_operations (const nlohmann::json& item, vayu::db::SpecDocument& spec) {
+    auto operations = item.find ("operations");
+    if (operations == item.end () || operations->is_null ()) {
+        return std::nullopt;
+    }
+    if (auto reason = vayu::core::validate_operations_index (*operations)) {
+        return reason;
+    }
+    spec.operations = operations->dump ();
+    return std::nullopt;
 }
 
 /**
@@ -155,6 +180,9 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     spec.id      = vayu::utils::generate_id ("spec_");
     spec.content = std::move (content);
     spec.hash    = spec_content_hash (spec.content);
+    if (auto reason = read_spec_operations (json, spec)) {
+        return { 400, error_body (400, *reason) };
+    }
     // When it was taken, not when the row was written - they are the same
     // instant here, and #627 will re-stamp it on every re-fetch.
     spec.fetched_at = now_ms ();

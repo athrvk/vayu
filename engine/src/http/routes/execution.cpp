@@ -1355,7 +1355,12 @@ void register_execution_routes (RouteContext& ctx) {
             // `resolved.request` - which carries the row *count* and never the
             // rows. That is what keeps user data out of `config_snapshot`.
             execution->data_rows = std::move (resolved.data_rows);
-            scenario_execution   = std::move (execution);
+            // The contract this run is measured against, carried to the runner
+            // so coverage counts against the document that was bound when the
+            // plan resolved (issue #629) rather than whatever it is by the time
+            // the run ends. The manifest above already stamped its identity.
+            execution->spec    = std::move (resolved.spec);
+            scenario_execution = std::move (execution);
 
             vayu::utils::log_info ("POST /runs - Scenario: collection=" +
             scenario_execution->request.collection_id +

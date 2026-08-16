@@ -698,6 +698,22 @@ namespace spec_document {
 /// refused with a message naming the count and the cap, the way `MAX_DATA_BYTES`
 /// is - cpp-httplib's own body cap would drop the connection instead.
 constexpr size_t MAX_BYTES = 10 * 1024 * 1024;
+
+/// Operation rows one stored `spec_documents.operations` index may declare, and
+/// the same number of rows a coverage block reports (issue #629).
+///
+/// A cap on both halves rather than only the report's, because the index is
+/// what a run holds in memory for its whole life: an enormous document must not
+/// be able to make every scenario run of it carry a proportional allocation.
+/// Both places that enforce it *name* what they dropped - the write refuses with
+/// the count, the report carries `operationsTruncated` - because a silently
+/// shortened coverage block reads as a contract that is smaller than it is.
+constexpr size_t MAX_OPERATIONS = 2000;
+
+/// Status codes one coverage row may list under `statusesSeen`/`undeclaredSeen`.
+/// A misconfigured target can answer one operation with hundreds of distinct
+/// codes; the row stays readable and says how many it dropped.
+constexpr size_t MAX_STATUSES_PER_OPERATION = 50;
 } // namespace spec_document
 
 /**

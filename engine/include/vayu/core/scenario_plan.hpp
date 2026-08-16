@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/types.hpp"
@@ -74,6 +75,11 @@ struct ScenarioStep {
     /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
     /// resolved into `request` above.
     vayu::http::Auth auth;
+    /// The stored `requests.spec_operation` text, "" for a step whose request
+    /// names no operation. Carried on the step so contract coverage (#629) can
+    /// resolve each step's identity **once**, when the tally is built, rather
+    /// than parsing it per completion on the load path.
+    std::string spec_operation;
     /// `auth`'s tokens, split once here like `data_template`.
     ///
     /// **Non-empty means this step's auth was deferred**: `request` carries no
@@ -131,6 +137,18 @@ struct ScenarioRequest {
 struct SpecBinding {
     std::string spec_id;
     std::string spec_hash;
+    /**
+     * The bound document's declared operations, read once here (issue #629).
+     *
+     * Read at resolution rather than at run end for the reason the whole plan
+     * is: a sync that lands mid-run stores a *new* document and moves the
+     * binding, and a run that looked the index up afterwards would report itself
+     * against a contract it never ran. Empty for an unbound collection, for a
+     * document stored before the index existed, and for a binding whose stored
+     * hash no longer matches the document it names - all three are "not
+     * measured", which leaves the coverage block out entirely.
+     */
+    std::vector<DeclaredOperation> declared_operations;
     [[nodiscard]] bool bound () const {
         return !spec_id.empty ();
     }
@@ -159,6 +177,16 @@ struct ScenarioExecution {
      * never writes them there.
      */
     std::vector<nlohmann::json> data_rows;
+    /**
+     * The spec binding this run was planned against (issue #629), including the
+     * document's declared operations. Unbound for most runs, which is what makes
+     * both executors write no `coverage` section at all.
+     *
+     * Here rather than only on the manifest because the manifest is what the
+     * *snapshot* records and this is what the run *counts against* - two readers
+     * of one resolution, and only the second needs the index.
+     */
+    SpecBinding spec;
 };
 
 /** Bounds a plan must respect, read from config by the caller. */
@@ -233,6 +261,16 @@ struct ScenarioResolution {
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
 const ScenarioResolveOptions& options);
+
+/**
+ * @brief The contract-coverage tally for @p execution (issue #629).
+ *
+ * Inactive - and therefore silent in the summary - for a run that is not
+ * measured against a contract. One builder for both executors, so a design run
+ * and a load run of one collection can never come to resolve their steps'
+ * identities differently.
+ */
+[[nodiscard]] CoverageTally make_coverage_tally (const ScenarioExecution& execution);
 
 /**
  * Bind @p row into @p step's deferred credentials and apply them to @p request.

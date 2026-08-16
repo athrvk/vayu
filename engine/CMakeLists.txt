@@ -285,6 +285,7 @@ add_library(vayu_core STATIC
     src/core/scenario_load.cpp
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
+    src/core/spec_coverage.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
@@ -522,6 +523,7 @@ if(VAYU_BUILD_TESTS)
         tests/tree_order_test.cpp
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
+        tests/spec_coverage_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp

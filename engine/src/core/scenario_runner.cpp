@@ -279,6 +279,13 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         { "failed", inputs.failed }, { "skipped", inputs.skipped },
         { "errored", inputs.errored }, { "steps_stored", inputs.steps_stored },
         { "steps_dropped", inputs.steps_dropped } };
+    // Its own top-level section rather than a member of `scenario`: coverage is
+    // about the contract, not about the sequence, and the report route surfaces
+    // it beside `thresholdValidation` for the same reason. Absent - never an
+    // empty object - for a run that was not measured against one.
+    if (!inputs.coverage.empty ()) {
+        summary["coverage"] = inputs.coverage;
+    }
     return summary;
 }
 
@@ -296,6 +303,12 @@ RunManager& manager) {
     summary.iterations_requested = asked.iterations;
     const auto started_at        = std::chrono::steady_clock::now ();
     vayu::RunStatus final_status = vayu::RunStatus::Completed;
+
+    // Built before the first send and read after the last, so a run that throws
+    // mid-sequence still reports the operations it did exercise. Inactive for a
+    // collection bound to nothing, in which case it records nothing and builds
+    // nothing (issue #629).
+    CoverageTally coverage = make_coverage_tally (*execution);
 
     try {
         db.update_run_status (context->run_id, vayu::RunStatus::Running);
@@ -529,6 +542,12 @@ RunManager& manager) {
                 vayu::json::cap_trace_bodies (record.trace, max_trace_body_bytes);
 
                 ++summary.steps_executed;
+                // Only a step that actually sent counts towards coverage: a
+                // skipped step exercised no operation, and counting it would
+                // report a contract as covered by a request nobody made.
+                if (exchange.sent) {
+                    coverage.record (step.index, record.status_code);
+                }
                 switch (record.outcome) {
                 case StepOutcome::Passed: ++summary.passed; break;
                 case StepOutcome::Failed: ++summary.failed; break;
@@ -604,6 +623,7 @@ RunManager& manager) {
     summary.duration_s =
     std::chrono::duration<double> (std::chrono::steady_clock::now () - started_at)
     .count ();
+    summary.coverage = coverage.build ();
 
     try {
         db.update_run_end_time (context->run_id);
