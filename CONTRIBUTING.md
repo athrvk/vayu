@@ -98,7 +98,12 @@ vayu/
 - **Standard:** C++20
 - **Style:** Google C++ Style Guide (with modifications)
 - **Formatting:** clang-format (config in `.clang-format` if present)
-- **Linting:** clang-tidy
+- **Linting:** clang-tidy, **19 or newer**. `engine/.clang-tidy` uses
+  `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
+  the config file outright and lints nothing. The `scripts/pre-commit` hook
+  probes the version and says so rather than passing silently - if you see that
+  warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default) or
+  lean on CI, which lints on a current toolchain.
 
 #### Naming Conventions
 

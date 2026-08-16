@@ -131,6 +131,10 @@ jobs:
               - 'install.sh'
               - 'scripts/test/install_test.sh'
               - 'scripts/test/install_e2e.sh'
+              # The git hook rides this job because it is the only one with a
+              # shell toolchain (shellcheck, bash) already stood up.
+              - 'scripts/pre-commit'
+              - 'scripts/test/pre-commit_test.sh'
               - '.github/workflows/pr-tests.yml'
 
   app:
@@ -401,6 +405,17 @@ jobs:
         run: |
           shellcheck install.sh scripts/test/install_test.sh scripts/test/install_e2e.sh
           bash scripts/test/install_test.sh
+
+      # The pre-commit hook's clang-tidy version probe (#659). Linux only: the
+      # hook prepends Homebrew's LLVM directory when it exists, which shadows
+      # the stubbed clang-tidy the suite drives it with, and the probe has no
+      # platform-specific half worth running twice.
+      - name: Lint and test the pre-commit hook
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          shellcheck scripts/pre-commit scripts/test/pre-commit_test.sh
+          bash scripts/test/pre-commit_test.sh
 
       # The dry-run suite above asserts on the commands the installer would have
       # run. This one runs it: a real download from a local release, a real

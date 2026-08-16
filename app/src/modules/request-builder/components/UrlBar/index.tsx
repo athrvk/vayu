@@ -115,9 +115,27 @@ export default function UrlBar() {
 	 * Persisting it would point a saved number at a file whose rows are
 	 * deliberately not saved, so a later session would bind a different row
 	 * under the same index.
+	 *
+	 * Keyed by request, though (issue #659 item 1). Switching request tabs does
+	 * not remount this component - `Shell` renders `<RequestBuilder />` at the
+	 * same position for every request tab, so React keeps the instance and its
+	 * state - and a single number therefore followed the user from one request
+	 * to the next. The highlight, and the row a re-send would bind, belonged to
+	 * whichever request happened to pick one last. A map is the fix "per
+	 * request" always meant; it is still session-lived, and still thrown away
+	 * with the builder.
 	 */
 	const rows = useSendWithRow(dataColumns);
-	const [lastRowIndex, setLastRowIndex] = useState<number | null>(null);
+	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
+	/*
+	 * An unsaved request has no id and cannot be switched away from and back to
+	 * as itself, so every one of them shares this key. They can never collide:
+	 * a request tab holds exactly one draft.
+	 */
+	const rowMemoryKey = request.id ?? "__unsaved__";
+	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
+	const rememberRowIndex = (index: number) =>
+		setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index }));
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });
@@ -258,7 +276,7 @@ export default function UrlBar() {
 						disabled={!canExecute}
 						lastInGroup={!canStartLoadTest}
 						lastRowIndex={lastRowIndex}
-						onRowIndexChange={setLastRowIndex}
+						onRowIndexChange={rememberRowIndex}
 					/>
 				)}
 

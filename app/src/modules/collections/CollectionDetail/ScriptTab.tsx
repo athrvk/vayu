@@ -35,7 +35,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
-import { referencedVariables } from "@/lib/referenced-variables";
+import { referencedVariables, TEMPLATE_IN_SCRIPT_NOTE } from "@/lib/referenced-variables";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
@@ -151,16 +151,30 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 				.
 			</InfoBanner>
 
+			{/*
+			 * "Names mentioned", and each chip in the syntax the script actually
+			 * used (issue #659 item 3). Every name was printed as `{{name}}` in
+			 * the variable accent - including the ones written as
+			 * `pm.globals.get("name")`, which are not templates at all - and the
+			 * accent on a `{{}}` chip read as "this resolves". Neither is true
+			 * here: the engine never interpolates script text (decision D16), so
+			 * a `{{}}` in a collection script is literal characters.
+			 */}
 			{usedVars.length > 0 && (
 				<div className="flex flex-wrap gap-1.5 items-center">
-					<span className="text-[11px] text-muted-foreground">References:</span>
-					{usedVars.slice(0, 8).map((v) => (
+					<span className="text-[11px] text-muted-foreground">Names mentioned:</span>
+					{usedVars.slice(0, 8).map(({ name, via }) => (
 						<Badge
-							key={v}
+							key={name}
 							variant="chip"
-							className="font-mono text-[10px] bg-primary/10 text-variable border-0"
+							className={
+								via === "pm"
+									? "font-mono text-[10px] bg-primary/10 text-variable border-0"
+									: "font-mono text-[10px] bg-muted text-muted-foreground border-0"
+							}
+							title={via === "pm" ? undefined : TEMPLATE_IN_SCRIPT_NOTE}
 						>
-							{`{{${v}}}`}
+							{via === "pm" ? name : `{{${name}}}`}
 						</Badge>
 					))}
 					{usedVars.length > 8 && (

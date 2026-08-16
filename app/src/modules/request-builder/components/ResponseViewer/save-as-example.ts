@@ -20,28 +20,24 @@ import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
 import type { ResponseState } from "../../types";
 
 /**
- * Appended to the default name when the stored body is only the first slice of
- * the response (`maxTraceBodyBytes` on a restored run).
- *
- * A saved example is served by the mock as though it were a whole response, so
- * a partial one has to say so somewhere that survives the save. The dialog's
- * warning explains it; this is the part that stays on the row afterwards - the
- * name is the only field the panel lists, and the engine has no truncation
- * column of its own to carry the fact.
- */
-export const TRUNCATED_NAME_SUFFIX = " (truncated body)";
-
-/**
  * The name a save starts with: the status line, which is what a saved response
  * is usually called and is unique enough to tell two of them apart at a glance.
  *
  * Editable at save time - this is a starting point, not a scheme.
+ *
+ * It used to append " (truncated body)" for a capped response, because the
+ * engine had no column to carry the fact and the name was the only field the
+ * panel lists. That made the disclosure droppable: the field is editable, so
+ * renaming a partial example at save time left a row that reads as complete and
+ * a mock server that serves it as one. The engine records `bodyTruncated` now
+ * (issue #659) and the panel chips it, so the name is back to being just a
+ * name - a user may call an example whatever they like without erasing what it
+ * is.
  */
 export function defaultExampleName(response: ResponseState): string {
-	const base = response.statusText
+	return response.statusText
 		? `${response.status} ${response.statusText}`
 		: String(response.status);
-	return response.bodyTruncated ? `${base}${TRUNCATED_NAME_SUFFIX}` : base;
 }
 
 /** The response's headers as stored entries, in the order they are held. */
@@ -73,5 +69,9 @@ export function exampleFromResponse(
 		// Always `user`: this is the field a spec sync reads to know it must
 		// leave the row alone (#627). An app-saved example is never a spec's.
 		origin: "user",
+		// `?? false` rather than passing it through: `ResponseState` leaves the
+		// flag optional for responses that never went through a trace, and an
+		// absent one there means "not truncated", not "unknown".
+		bodyTruncated: response.bodyTruncated ?? false,
 	};
 }

@@ -141,6 +141,9 @@ apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create
  * `origin` is validated against its two values by `apply_origin_field` above,
  * and defaults to `import` on create - the honest answer for every caller that
  * does not claim otherwise, since import wrote every row until #588.
+ * `bodyTruncated` takes the plain boolean rule: nothing can validate it, since
+ * only the client that captured the response knows whether it was cut, and the
+ * stored body is a legitimate length either way.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields
  * to every example nested in a bulk payload.
@@ -173,6 +176,10 @@ apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json&
 
     apply_string_field (json, "contentType", x.content_type, "", is_create);
     apply_int_field (json, "order", x.order, 0, is_create);
+    // Defaults to false, which is the honest answer for every caller that does
+    // not claim otherwise: only the client that captured the response knows it
+    // was cut, and no later read of the row can tell (issue #659).
+    apply_bool_field (json, "bodyTruncated", x.body_truncated, false, is_create);
     return apply_origin_field (json, x.origin, is_create);
 }
 
@@ -326,7 +333,9 @@ void register_request_example_routes (RouteContext& ctx) {
      * Body params: name (required), status (default 200, must be 100-599),
      * headers (array of KeyValueEntry), body, contentType, order (absent or
      * null appends after the request's current examples), origin ("import" |
-     * "user", default "import" - the app's save-as-example sends "user").
+     * "user", default "import" - the app's save-as-example sends "user"),
+     * bodyTruncated (default false - true when `body` is only the first slice
+     * of the response it was captured from).
      * Returns: the created example, 404 if the request does not exist, 400 on a
      * rejected field, or 409 at the cap.
      */

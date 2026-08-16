@@ -33,7 +33,8 @@
  *     class of bug as the autocomplete's grey global badge, in a surface the
  *     earlier fix did not reach because it does not use the primitive.
  *
- *   - Opening the full list *replaced* the "Referenced:" row. The button that
+ *   - Opening the full list *replaced* the "Names mentioned:" row (then
+ *     labelled "Referenced:"). The button that
  *     promised more information removed the more useful half.
  */
 
@@ -118,7 +119,7 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 
 	it("lists the variables the script references", () => {
 		const { container } = render(<Panel />);
-		expect(container.textContent).toContain("Referenced:");
+		expect(container.textContent).toContain("Names mentioned:");
 		// One from pm.*.get(), one from a {{template}} - both scanners run.
 		expect(container.textContent).toContain("token");
 		expect(container.textContent).toContain("base_url");
@@ -128,7 +129,7 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 		const { container } = render(<Panel />);
 		openFullList(container);
 
-		expect(container.textContent).toContain("Referenced:");
+		expect(container.textContent).toContain("Names mentioned:");
 	});
 
 	it("shows every variable in scope once the full list opens", () => {
@@ -159,7 +160,7 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 		/*
 		 * The one defect the extraction could introduce. Both fields hold a
 		 * marker only they contain, so a panel wired to the wrong one names the
-		 * other's marker in its Referenced chips.
+		 * other's marker in its chip row.
 		 */
 		const { container } = render(<Panel />);
 		const other = ownMarker === "pre_only_marker" ? "post_only_marker" : "pre_only_marker";

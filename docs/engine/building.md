@@ -282,7 +282,37 @@ ctest -V
 2. Use AddressSanitizer: `-DVAYU_USE_ASAN=ON`
 3. Generate compile commands: `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (enabled by default)
 
+### The version string stays out of the widely-included headers
+
+`DEFAULT_USER_AGENT` is declared in `include/vayu/core/user_agent.hpp`, which
+includes nothing, and defined in `src/core/user_agent.cpp`, the one translation
+unit that sees `VAYU_VERSION_STRING` for it.
+
+That is a build-cache rule, not a style one (issue #659). It used to be a
+`constexpr` in `core/constants.hpp` spelled `"Vayu/" VAYU_VERSION_STRING`, which
+forced that header to include `vayu/version.hpp` - and `constants.hpp` is
+reached transitively by essentially every TU, through `types.hpp`,
+`utils/logger.hpp`, `utils/json.hpp` and `http/client.hpp`. So bumping `VERSION`
+changed a header in every compile command's input and invalidated the whole
+sccache, meaning **every release rebuilt the engine from scratch on all three
+platforms**. With the declaration in front of it, a bump recompiles
+`user_agent.cpp` plus the handful of files that include `vayu/version.hpp`
+directly (`daemon.cpp`, `cli.cpp`, `http/client.cpp`, `http/server.cpp`,
+`http/routes/health.cpp`).
+
+`tests/version_isolation_test.cpp` is the guard: it scans the hub headers for
+`vayu/version.hpp` and `VAYU_VERSION`, and asserts it read a non-empty file
+first. Including `vayu/version.hpp` from a `.cpp` is fine, and from a header only
+where that header is not itself broadly included.
+
 ### Static Analysis
+
+The pre-commit hook (`scripts/pre-commit`, installed by
+`bash scripts/install-git-hooks.sh`) needs **clang-tidy 19 or newer**:
+`engine/.clang-tidy` uses `ExcludeHeaderFilterRegex`, which landed in LLVM 19,
+and an older binary rejects the config file and lints nothing. The hook probes
+the version and warns loudly instead of exiting clean over an empty scan; CI
+lints on a current toolchain either way.
 
 Enable clang-tidy in `CMakeLists.txt` (commented out by default):
 

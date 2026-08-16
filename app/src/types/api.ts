@@ -264,6 +264,15 @@ export interface CreateRequestExampleRequest {
 	/** `""` when the response stated no media type - not a guess. */
 	contentType: string;
 	origin: "user";
+	/**
+	 * Whether `body` stops short of the response it was captured from - the
+	 * trace's `maxTraceBodyBytes` cap (issue #659).
+	 *
+	 * Required rather than optional: this is the only writer that can ever have
+	 * a partial body, so leaving it off would be a claim by omission that the
+	 * save is complete.
+	 */
+	bodyTruncated: boolean;
 }
 
 /** The rows as written - one drop is one transaction, so this is all of them. */

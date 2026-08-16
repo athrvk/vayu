@@ -248,6 +248,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `content_type` | TEXT    | Denormalized from `headers`; `""` when unstated   |
 | `order`        | INTEGER | Sort order within the request; default 0          |
 | `origin`       | TEXT    | `import` \| `user`; NOT NULL, default `import`     |
+| `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -276,6 +277,18 @@ request's `import` rows and writes the document's in their place, and an
 explicit `origin` in that payload is a `400` so a sync cannot manufacture rows
 it would then refuse to replace. The write paths validate it against those two
 values and `400` on anything else; no read path in the app displays it.
+
+**body_truncated** (issue #659) records that `body` is only the first slice of
+the response it was captured from - the trace's `maxTraceBodyBytes` cap. Added
+the same ALTER-friendly way as `origin`: NOT NULL with a `default_value`, so
+`sync_schema()` adds it and every pre-existing row backfills to false, which is
+what they all are (an importer copies a whole documented body; only the app's
+save-as-example ever had a partial one). It is stored rather than inferred
+because a short body is a legitimate body - nothing about the row says otherwise
+- and a mock server serves the bytes verbatim, so an undisclosed partial example
+is answered as though it were complete. The Examples panel is the reader,
+painting a "Partial body" chip; before the column, the fact lived only in the
+example's *name*, which the save dialog invites the user to edit.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each

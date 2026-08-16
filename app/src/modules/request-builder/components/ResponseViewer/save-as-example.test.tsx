@@ -24,7 +24,10 @@
  * - **The affordance's availability is honest.** An unsaved request has no id to
  *   nest an example under, and a live stream's placeholder response has no body
  *   yet; both are absent rather than a button that writes something wrong.
- * - **A truncated body says so**, in the dialog and in the name that outlives it.
+ * - **A truncated body says so on the row, not in the name.** The dialog warns,
+ *   and `bodyTruncated: true` rides the payload (issue #659) - the name used to
+ *   carry the disclosure, and a name is editable, so renaming at save time
+ *   erased it.
  *
  * Rendered, not source-scanned: every one of those is decided at runtime from
  * the response and the request beside it.
@@ -155,6 +158,9 @@ describe("save response as example", () => {
 			// rule - so an app-saved example and an imported one are served alike.
 			contentType: "application/json",
 			origin: "user",
+			// The response was whole, and the payload says so rather than
+			// leaving it to be assumed (issue #659).
+			bodyTruncated: false,
 		});
 		expect("order" in payload).toBe(false);
 
@@ -174,16 +180,36 @@ describe("save response as example", () => {
 		expect(createRequestExample.mock.calls[0][1].contentType).toBe("");
 	});
 
-	it("flags a truncated body in the dialog and in the name that outlives it", () => {
+	it("stores a truncated body as truncated, whatever the user renames it to", async () => {
 		state.response = okResponse({ bodyTruncated: true, bodyBytes: 4096 });
 		renderViewer();
 
 		const name = openDialog();
-		// A mock serves an example as though it were a whole response, so the
-		// partial one has to say so somewhere that survives the save - the name
-		// is the only field the Examples panel lists.
-		expect(name.value).toContain("truncated");
 		expect(screen.getByText(/not the whole response/i)).toBeTruthy();
+
+		// The rename that used to erase the disclosure: the suffix was the only
+		// record, so a user who typed over it left a partial example that a mock
+		// server would then serve as a complete response.
+		fireEvent.change(name, { target: { value: "Large order list" } });
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		const payload = createRequestExample.mock.calls[0][1];
+		expect(payload.name).toBe("Large order list");
+		expect(payload.bodyTruncated).toBe(true);
+	});
+
+	// The other half of the flag: a whole response must not be marked partial,
+	// or the chip means nothing on any row.
+	it("sends bodyTruncated false for a complete response", async () => {
+		state.response = okResponse();
+		renderViewer();
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].bodyTruncated).toBe(false);
 	});
 
 	it("shows the engine's refusal in the dialog rather than closing over it", async () => {
