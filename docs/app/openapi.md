@@ -57,6 +57,31 @@ creates is bound automatically:
 Other formats are unaffected. A Postman or Insomnia import binds nothing and
 records no operation identity: those files describe requests, not a contract.
 
+### Importing a document you are already bound to
+
+Importing a spec that a collection already binds used to make a second
+collection from scratch, and say nothing about the first. The two then diverged
+with nothing marking which was real: the bound one keeps its operation
+identities, its saved examples and its coverage history, and the fresh one has
+none of that while looking newer.
+
+So the import **stops and offers the choice**. Before anything is written, Vayu
+looks for a bound collection whose document matches the one being imported:
+
+| Matched by | The case it catches |
+|---|---|
+| The URL it was fetched from | The same address, serving a document that has changed since - what [Sync](#checking-a-bound-spec-for-changes) is for. The bytes cannot match here; they are what changed |
+| The stored bytes | A document with no URL to match on - a file picked twice, or the same text pasted again |
+
+The dialog names the collection and offers **Sync instead**, which opens that
+collection's Spec tab, and **Import anyway**, which imports exactly as before -
+a second copy of a spec is a real thing to want, so this is a fork and never a
+block. A document nothing is bound to imports straight through, with no dialog.
+
+A URL is compared as written: a trailing slash or a different query is a
+different address. A document imported through several files is compared as the
+bundle, which is what was stored.
+
 ## Specs written across several files
 
 A large document is usually not one document: schemas live in their own files,
@@ -379,6 +404,19 @@ and their bodies are a bounded reservoir. Coverage computed from those rows woul
 report an operation as uncovered whenever the store happened to thin the only
 request that touched it.
 
+The two contract blocks a run report carries are therefore **not the same kind of
+number**, and they sit next to each other:
+
+| Block | Counted over | Why |
+|---|---|---|
+| Contract coverage | Every request sent and every response received | One atomic increment per completion is cheap enough for the hot path |
+| [Schema validation](#schema-validation-under-load), under load | The bounded reservoir of responses the run stored | Validating a body is not, so it is deferred to run end over what was kept |
+| [Schema validation](#schema-validation-in-a-collection-run), in a collection run | Every step the run executed | A collection run sends one request at a time, so there is no hot path to keep off |
+
+The last row is why the block states its own denominator instead of leaving a
+reader to infer it from the run's mode: the same numbers mean two different
+things, and only the block knows which.
+
 ### Which document a run is measured against
 
 The document the run was **planned** with, pinned by the `specId` and `specHash`
@@ -462,7 +500,67 @@ part of its schema that would have rejected it was never looked at, and saying s
 is the only honest way to show a green verdict beside a schema that was half
 read.
 
-### In a collection run
+## Schema validation under load
+
+A **load run** of a bound collection reports whether the responses it kept
+matched the schemas the document declares, in a block on the run's **Overview**
+beside [contract coverage](#contract-coverage).
+
+It is checked **at the end of the run, over the responses the run stored** -
+never as each response arrives. A load run refills concurrency on every
+completion, so a schema walk on that path would cost the run throughput for as
+long as it lasted, and it would do so as a slightly lower RPS nobody would trace
+back to validation. Deferring it is what keeps the numbers the run reports about
+itself honest.
+
+### These numbers are sampled, and the block says so
+
+| Number | What it counts |
+|---|---|
+| Sampled | Responses the run kept and this pass walked - the denominator for everything else |
+| Checked | Of those, the ones a declared schema could speak about |
+| Matched | Checked responses that satisfied their schema |
+| Did not match | Checked responses that did not - the finding |
+| Not checked | Accounted for by reason, one line each, in the same words a single response shows |
+
+So **"0 did not match" means no *sampled* response failed**, not that no response
+failed. A run whose reservoir held 40 of 30,000 responses checked 40 of them.
+That is the difference from the coverage block sitting directly above it, whose
+every number is exact - and it is why the two carry a sentence each saying which
+kind they are.
+
+A response whose body is not JSON, or whose status the document declares nothing
+for, is **not checked** rather than failed. It did not break its contract; no
+schema spoke about it.
+
+### Which responses a run keeps
+
+A load run stores a bounded reservoir per step, drawn uniformly across the whole
+run. A step is kept when something will read it: it carries a **Tests** script,
+or it is bound to an operation and the document carries schemas. The run's whole
+sample budget is split evenly across those steps, so a bound collection that also
+asserts gives each step fewer samples than it would have had for scripts alone.
+What was displaced is reported as the run's dropped-sample count, next to the
+figures it explains.
+
+### When there is no schema-validation block
+
+Absent, never zeros, in each of these cases:
+
+- The collection is not bound to a document.
+- The run was a single request rather than a collection run.
+- The bound document carries **no response schemas** - it was stored before this
+  existed, or declares none. Re-bind or sync the collection.
+- Nothing survived sampling.
+
+A run whose responses were never checked did not pass a contract, and the report
+spells the two differently.
+
+Keywords the validator could not evaluate are disclosed here exactly as they are
+for a single response: **named and counted**, because a matched count computed
+against a schema half of which went unread is narrower than it looks.
+
+## Schema validation in a collection run
 
 Every step of a collection run is judged the same way, and the verdict rides
 three surfaces:
@@ -470,9 +568,7 @@ three surfaces:
 - The **step row** carries the same three-state chip the response pane does, and
   expanding it shows the failure list and the dialect disclosure in full.
 - The run's **Overview**, and the collection run's own view above the step list,
-  carry a `Schema validation` block beside contract coverage - the two halves of
-  one question: coverage says which of the contract the run touched, this says
-  whether what came back matched it.
+  carry the same `Schema validation` block a load run writes.
 - The **live step stream** carries it too, so a run being watched shows verdicts
   as they happen rather than only once the report is written.
 
@@ -484,7 +580,15 @@ The run is judged against the document it was **planned** with, read once when
 the plan resolved. A sync landing mid-run stores a new document and moves the
 binding; it does not change what the run in flight is measured against.
 
-#### A schema failure does not fail a step, unless you ask
+### These numbers are exact, unlike a load run's
+
+A collection run checks **every step it executed**, so its block is counted on
+the same evidence coverage beside it is. That is the one way it differs from the
+load-run block above, and the block says which it is rather than leaving a reader
+to infer it from the run's mode - "0 did not match" is a wider claim here than
+there, and only the sentence under the numbers can tell them apart.
+
+### A schema failure does not fail a step, unless you ask
 
 By default a schema verdict is its **own channel**: a step whose response does
 not match what the document declares still passes if its assertions passed, and
@@ -504,20 +608,3 @@ error that named it: that is the one to fix first.
 | An assertion failed, body did not match | failed - names the assertion | failed |
 | Bound collection, no schema for the status | unchanged | not checked |
 | Unbound collection | unchanged | *no verdict* |
-
-#### What the run-level block counts
-
-`checked` is a subset of `responses`: a response with no declared schema for its
-status or content type, or one whose body is not JSON, is counted as a response
-and as neither a pass nor a failure. `valid + failed` is `checked`, and the block
-says how many could not be checked rather than leaving the two numbers to
-disagree quietly.
-
-A collection run's counts are **exact** - every step it executed - and the block
-says so. That matters because the same block will say otherwise for a load run,
-where the counts describe the sampled responses only.
-
-### What is not here yet
-
-Validation of the sampled responses of a load run. It is its own change; this
-page grows with it.

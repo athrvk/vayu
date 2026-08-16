@@ -310,18 +310,25 @@ const ScenarioResolveOptions& options) {
         // Leaves the binding unbound; a malformed column must not fail a run.
     }
 
-    // The document's two indexes, read once here so contract coverage (#629) and
-    // per-step schema verdicts (#681) both judge this run against the contract it
-    // was planned against. The hash has to agree: the binding names a document
-    // *and a version of it*, and a row whose hash has moved under the binding is
-    // a state no run should report a contract from.
+    // The document's declared operations, read once here so contract coverage
+    // (#629) counts against the contract this run was planned against. The hash
+    // has to agree: the binding names a document *and a version of it*, and a
+    // row whose hash has moved under the binding is a state no run should report
+    // a contract from. Any disagreement - no such document, no index on it, a
+    // hash that does not match - leaves the operations empty, which is the
+    // engine's one spelling of "not measured against a contract".
     //
-    // The two disagree about what a miss means, and deliberately. Coverage leaves
-    // its operations empty - "not measured against a contract" has one spelling
-    // there, and an absent block is it. Validation instead records *why*, because
-    // a bound collection whose document carries no schemas is a state the reader
-    // can fix, and a per-step verdict that quietly never appears is how they
-    // never learn of it. Unbound produces neither, on both sides.
+    // The response schemas ride the same read and the same hash check (issue
+    // #682): the deferred pass at run end validates against them, and looking
+    // them up then instead would be the one thing this read exists to prevent.
+    // They are taken as text and parsed only by an executor that will use them.
+    //
+    // Which of the two disagreements happened is recorded as well (issue #681),
+    // and only the collection runner reads it: that one emits a verdict per
+    // step, so its `checked: false` has to name a reason the reader can act on -
+    // "the document has moved under the binding" is fixed by a sync, and a
+    // per-step chip that silently never appears is how they never learn of it.
+    // The load pass needs none of that; an absent block is its whole answer.
     if (resolution.spec.bound ()) {
         const auto document = db.get_spec_document (resolution.spec.spec_id);
         if (!document) {
@@ -332,11 +339,7 @@ const ScenarioResolveOptions& options) {
             if (auto declared = parse_declared_operations (document->operations)) {
                 resolution.spec.declared_operations = std::move (*declared);
             }
-            if (auto index = ResponseSchemaIndex::parse (document->response_schemas)) {
-                resolution.spec.response_schemas = std::move (index);
-            } else {
-                resolution.spec.schema_reason = UncheckedReason::NoIndex;
-            }
+            resolution.spec.response_schemas = document->response_schemas;
         }
     }
 

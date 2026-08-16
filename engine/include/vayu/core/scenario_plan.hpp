@@ -152,26 +152,37 @@ struct SpecBinding {
      */
     std::vector<DeclaredOperation> declared_operations;
     /**
-     * The bound document's response-schema index (issue #681), read here for
-     * the reason `declared_operations` is: a run must be judged against the
-     * document it was *planned* against, and a sync that lands mid-run moves
-     * the binding underneath it.
+     * The bound document's stored `response_schemas`, verbatim (issue #682).
      *
-     * Its own field rather than a member of the operation index, matching the
-     * two columns they are read from - see `core/schema_validation.hpp` on why
-     * schemas are stored apart from operations.
+     * Carried as **text**, not as a parsed `ResponseSchemaIndex`: parsing a
+     * document's whole schema index is the expensive half, so each executor
+     * pays for it once and only if it will use it - the load run at the end, in
+     * its deferred pass, and the collection runner once before its first step
+     * (issue #681), because that one checks per step and would otherwise
+     * reparse the largest column in the schema per response. That is the same
+     * bargain `core/schema_validation.hpp` states for why the schemas are a
+     * column of their own rather than folded into `operations`.
+     *
+     * Read here, at resolution, under the same hash check the operations are -
+     * a run is judged against the document it was *planned* against, and a sync
+     * landing mid-run moves the binding to a document this run never saw. Empty
+     * for every case that leaves the schema-validation block out entirely.
      */
-    std::optional<ResponseSchemaIndex> response_schemas;
+    std::string response_schemas;
     /**
      * Why there is no index to validate against, set **exactly when** `bound()`
-     * and `response_schemas` is absent.
+     * and `response_schemas` is empty for a reason the run can name (issue
+     * #681).
      *
-     * A bound collection with no readable index still gets a verdict per step -
-     * `checked: false` carrying this reason - because "the document declares no
-     * schemas" is something a reader can act on (sync the binding), while a
-     * chip that silently never appears is how a broken index stays broken.
-     * Unbound is the one state that produces no verdict at all, and it is
-     * spelled by `bound()` alone.
+     * The load-mode pass (#682) does not need this: it reports an absent block,
+     * and a run whose reservoirs were never checked has nothing per-response to
+     * explain. A collection run does - it emits a verdict per step, and
+     * `checked: false` there must carry a reason, because "the document has
+     * moved under the binding" is a state the reader can fix (sync it) while a
+     * chip that silently never appears is how they never learn of it.
+     *
+     * Unbound sets nothing, on both sides: a run nobody measured against a
+     * contract is not a run that could not be measured.
      */
     std::optional<UncheckedReason> schema_reason;
     [[nodiscard]] bool bound () const {

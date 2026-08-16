@@ -38,7 +38,7 @@ import {
 	ContractCoverage,
 	EmptyState,
 	Callout,
-	SchemaVerdict,
+	SampledSchemaValidation,
 	StopRunButton,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
@@ -223,10 +223,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    Absent for a run of a collection bound to nothing. */}
 				<ContractCoverage coverage={report?.coverage} />
 
-				{/* And whether what came back matched it - the same whole-run
-				    answer, so it sits beside coverage here exactly as it does in
+				{/* And whether what came back honoured it - the same whole-run
+				    answer, so it sits under coverage here exactly as it does in
 				    the history detail's Overview. Absent on the same terms. */}
-				<SchemaVerdict validation={report?.schemaValidation} />
+				<SampledSchemaValidation validation={report?.schemaValidation} />
 
 				{steps.length === 0 ? (
 					/*

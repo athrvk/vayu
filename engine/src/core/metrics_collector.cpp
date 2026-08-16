@@ -450,27 +450,27 @@ void MetricsCollector::record_response_sample (const Response& response) {
 
 const std::vector<ResponseSample> MetricsCollector::NO_SAMPLES;
 
-void MetricsCollector::configure_step_samples (const std::vector<bool>& scripted) {
+void MetricsCollector::configure_step_samples (const std::vector<bool>& sampled) {
     step_samples_.clear ();
-    if (scripted.empty ()) {
+    if (sampled.empty ()) {
         return;
     }
 
-    const size_t scripted_steps =
-    static_cast<size_t> (std::count (scripted.begin (), scripted.end (), true));
+    const size_t read_steps =
+    static_cast<size_t> (std::count (sampled.begin (), sampled.end (), true));
 
-    // The whole run budget across the steps that will actually be validated,
-    // floored at one so a plan with more scripted steps than slots still
-    // samples every one of them. See the header for why the floor is the
-    // deliberate over-run and not an oversight.
-    const size_t per_step = scripted_steps == 0 ?
+    // The whole run budget across the steps a deferred pass will actually read,
+    // floored at one so a plan with more of them than slots still samples every
+    // one. See the header for why the floor is the deliberate over-run and not
+    // an oversight.
+    const size_t per_step = read_steps == 0 ?
     0 :
-    std::max<size_t> (1, config_.max_response_samples / scripted_steps);
+    std::max<size_t> (1, config_.max_response_samples / read_steps);
 
-    step_samples_.reserve (scripted.size ());
-    for (bool has_script : scripted) {
+    step_samples_.reserve (sampled.size ());
+    for (bool is_read : sampled) {
         auto store      = std::make_unique<StepSampleStore> ();
-        store->capacity = has_script ? per_step : 0;
+        store->capacity = is_read ? per_step : 0;
         store->samples.reserve (store->capacity);
         step_samples_.push_back (std::move (store));
     }
@@ -484,7 +484,7 @@ std::optional<size_t> data_row_index) {
         return;
     }
     StepSampleStore& store = *step_samples_[step_index];
-    // A step no script will ever read. Refused before the rate counter, so an
+    // A step no deferred pass will read. Refused before the rate counter, so an
     // unsampled step costs one load and one compare per completion.
     if (store.capacity == 0) {
         return;

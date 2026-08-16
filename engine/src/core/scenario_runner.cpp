@@ -124,19 +124,21 @@ std::string& error) {
  * judged (issue #681).
  *
  * The resolution the design-mode hook does per response - walk to the binding,
- * read the document, parse the index - happened once when the plan resolved, so
- * what is left here is the check itself. That is the whole reason the index
- * rides on `SpecBinding`: a run of 200 steps would otherwise re-read and
- * re-parse a document's whole schema index 200 times, and would be free to get
- * a different answer each time if a sync landed mid-run.
+ * read the document, parse the index - happened once when the plan resolved and
+ * once more when this run parsed @p index, so what is left here is the check
+ * itself. That is what the binding carrying the schemas buys: a run of 200
+ * steps would otherwise re-read and re-parse a document's whole schema index
+ * 200 times, and would be free to get a different answer each time if a sync
+ * landed mid-run.
  */
 std::optional<vayu::core::ValidationVerdict> validate_step_response (const SpecBinding& spec,
+const std::optional<ResponseSchemaIndex>& index,
 const ScenarioStep& step,
 const vayu::Response& response) {
     if (!spec.bound ()) {
         return std::nullopt;
     }
-    if (!spec.response_schemas) {
+    if (!index) {
         ValidationVerdict verdict;
         verdict.reason = spec.schema_reason.value_or (UncheckedReason::NoIndex);
         return verdict;
@@ -144,7 +146,7 @@ const vayu::Response& response) {
 
     const auto content_type = response.headers.find ("Content-Type");
     try {
-        return spec.response_schemas->check (step.spec_operation, response.status_code,
+        return index->check (step.spec_operation, response.status_code,
         content_type != response.headers.end () ? content_type->second : std::string (),
         response.body);
     } catch (const std::exception& e) {
@@ -363,8 +365,17 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // coverage says which of it the run touched, this says whether what came
     // back matched what it declares. A run of an unbound collection produces
     // neither, and a zero here would read as a contract it met.
-    if (!inputs.validation.empty ()) {
-        auto validation = build_validation_summary_payload (inputs.validation, false);
+    //
+    // The load pass's payload builder, so the two run modes store one shape
+    // (issue #681 on #682's block), with the two things only this mode knows
+    // added on top.
+    if (auto validation = build_sampled_validation_payload (inputs.validation);
+        !validation.empty ()) {
+        // **The denominator is every step, not a reservoir.** #682's block is
+        // sampled by construction and its readers say so; this one is not, and
+        // a reader told "no sampled response failed" about a run that checked
+        // all of them has been told something narrower than the truth.
+        validation["exact"] = true;
         // Stored with the tally it qualifies: a report read months later cannot
         // recover the flag from the run's config if the config was pruned, and
         // "3 failed" means a different run depending on it.
@@ -400,6 +411,13 @@ RunManager& manager) {
     // value re-read per step could not change but could be got wrong twice.
     const bool fail_on_schema_error = read_fail_on_schema_error (context->config);
     summary.fail_on_schema_error = fail_on_schema_error;
+
+    // The one parse of the document's schema index this run pays for, before
+    // the first send rather than per step. `std::nullopt` - an unbound
+    // collection, a document with no index, one that will not parse - is "not
+    // measured", never an empty contract that would pass every body;
+    // `validate_step_response` turns it into the reason the binding recorded.
+    const auto schema_index = ResponseSchemaIndex::parse (execution->spec.response_schemas);
 
     try {
         db.update_run_status (context->run_id, vayu::RunStatus::Running);
@@ -578,10 +596,14 @@ RunManager& manager) {
                 // nobody made - the same reading that erases `response` from
                 // their trace below.
                 if (exchange.sent) {
-                    record.validation =
-                    validate_step_response (execution->spec, step, exchange.response);
+                    record.validation = validate_step_response (
+                    execution->spec, schema_index, step, exchange.response);
                     if (record.validation) {
-                        summary.validation.record (*record.validation);
+                        // The step's name and status ride the tally so a failure
+                        // example read far from the step list still says which
+                        // step produced it - the load pass's reason, unchanged.
+                        summary.validation.record (*record.validation,
+                        record.step_name, record.status_code);
                     }
                 }
 

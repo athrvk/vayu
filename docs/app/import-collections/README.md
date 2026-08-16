@@ -78,6 +78,18 @@ and a second send is a second copy of the tree. A combined single-payload apply
 was considered and rejected: all-or-nothing across unrelated files is the wrong
 failure mode, and per-file leaves the engine contract untouched.
 
+**A spec that is already bound forks before the apply** (issue #680). When
+Import is pressed, every entry carrying a spec document is looked up against the
+collections that bind one - by `spec_documents.source_url`, and by the stored
+bytes - and a match offers Sync in that collection instead of importing a second
+copy. The lookup lives in `services/openapi/bound-spec-match.ts`, reads the bound
+documents through `useBoundSpecReader` (the Spec tab's own query cache), and runs
+at Import rather than at detect time: it is a round trip per bound document, and
+a preview should not pay for one. **Import anyway does exactly what Import did
+before it existed** - the dialog is a fork, never a block - and an import with no
+spec in it never reaches the lookup at all. See
+[OpenAPI Collections](../openapi.md#importing-a-document-you-are-already-bound-to).
+
 **Zip import is a named non-goal.** No major tool exports collection zips today
 (Postman exports single JSON files; vendors ship git repos). Reopen when a real
 source ships them.

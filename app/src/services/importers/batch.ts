@@ -157,6 +157,18 @@ export function applicableEntries(entries: BatchEntry[]): BatchEntry[] {
 	return entries.filter((e) => e.included && e.result && !isEmptyResult(e.result));
 }
 
+/**
+ * What to call one entry on screen.
+ *
+ * A pasted document has neither a file name nor a URL, and every surface that
+ * names an entry - the ledger row, and the re-import dialog (issue #680) - has
+ * to fall back the same way, or the same file is called two different things in
+ * two places.
+ */
+export function entryLabel(entry: BatchEntry): string {
+	return entry.fileName || entry.sourceUrl || "Pasted document";
+}
+
 /** A document after bundling, before anything has tried to detect its format. */
 interface BundledDocument {
 	document: BatchDocument;

@@ -63,8 +63,28 @@ interface TabsState {
 	 * stamp for a tab that is no longer open.
 	 */
 	tabFocusedAt: Record<string, number>;
+	/**
+	 * A collection whose **Spec** tab something outside the collection screen has
+	 * pointed at, or `null` (issue #680).
+	 *
+	 * A collection tab picks its own sub-tab, and `openTab` can only say which
+	 * collection to show - so the one navigation that points *into* a collection
+	 * (the import dialog offering Sync for a document already bound) needs
+	 * somewhere to say which section it meant. `CollectionDetail` reads it when
+	 * the named collection is on screen and clears it, so it survives the tab
+	 * being opened for the first time and never fires twice.
+	 *
+	 * Session-scoped like `tabFocusedAt` (absent from `partialize`): it is one
+	 * navigation in flight, and a persisted copy would jump a user to the Spec
+	 * tab on the next launch for a choice they made yesterday.
+	 */
+	specTabTarget: string | null;
 
 	openTab: (tab: Omit<Tab, "id">) => void;
+	/** Show a collection, on its Spec tab - see `specTabTarget`. */
+	openCollectionSpecTab: (collectionId: string) => void;
+	/** Consume `specTabTarget`, once the collection screen has acted on it. */
+	clearSpecTabTarget: () => void;
 	closeTab: (tabId: string) => void;
 	/**
 	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
@@ -206,6 +226,7 @@ export const useTabsStore = create<TabsState>()(
 			openTabs: [],
 			activeTabId: null,
 			tabFocusedAt: {},
+			specTabTarget: null,
 
 			openTab: (tabDef) => {
 				const { openTabs, activeTabId, tabFocusedAt } = get();
@@ -261,6 +282,15 @@ export const useTabsStore = create<TabsState>()(
 					tabFocusedAt: stampFocus(tabFocusedAt, tabs, newTab.id),
 				});
 			},
+
+			// The target is set before the tab opens, not after: opening focuses
+			// the collection screen, which reads the target on that same render.
+			openCollectionSpecTab: (collectionId) => {
+				set({ specTabTarget: collectionId });
+				get().openTab({ type: "collection", entityId: collectionId });
+			},
+
+			clearSpecTabTarget: () => set({ specTabTarget: null }),
 
 			closeTab: (tabId) => {
 				const { openTabs, activeTabId } = get();

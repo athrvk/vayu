@@ -22,6 +22,13 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
 using nlohmann::json;
 using namespace vayu::core;
 
@@ -451,4 +458,240 @@ TEST (SchemaValidationBoundsTest, ASchemaTheValidatorRefusesIsUncheckedNotInvali
     EXPECT_FALSE (verdict.checked);
     ASSERT_TRUE (verdict.reason.has_value ());
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoIndex);
+}
+
+// ─── Sampled tallies, for a load run (issue #682) ───────────────────────────
+
+namespace {
+
+/// A verdict as one sampled response would produce it.
+ValidationVerdict checked_verdict (bool valid) {
+    ValidationVerdict verdict;
+    verdict.checked = true;
+    verdict.valid   = valid;
+    if (!valid) {
+        verdict.failures      = { SchemaFailure{ "/id", "expected integer" } };
+        verdict.failures_total = 1;
+    }
+    return verdict;
+}
+
+ValidationVerdict unchecked_verdict (UncheckedReason reason) {
+    ValidationVerdict verdict;
+    verdict.reason = reason;
+    return verdict;
+}
+
+} // namespace
+
+TEST (SampledValidationTest, AllValidSamplesReportNoFailures) {
+    SampledValidationTotals totals;
+    for (int i = 0; i < 4; ++i) {
+        totals.record (checked_verdict (true), "step0", 200);
+    }
+
+    EXPECT_EQ (totals.sampled, 4u);
+    EXPECT_EQ (totals.checked, 4u);
+    EXPECT_EQ (totals.valid, 4u);
+    EXPECT_EQ (totals.failed, 0u);
+    EXPECT_EQ (totals.failures_total, 0u);
+}
+
+TEST (SampledValidationTest, AllInvalidSamplesAreCountedAndExemplified) {
+    SampledValidationTotals totals;
+    for (int i = 0; i < 3; ++i) {
+        totals.record (checked_verdict (false), "step0", 500);
+    }
+
+    EXPECT_EQ (totals.checked, 3u);
+    EXPECT_EQ (totals.valid, 0u);
+    EXPECT_EQ (totals.failed, 3u);
+    EXPECT_EQ (totals.failures_total, 3u);
+    ASSERT_FALSE (totals.failure_examples.empty ());
+    // The example names where and which step, so it reads far from the row it
+    // came from.
+    EXPECT_EQ (totals.failure_examples.front ().step, "step0");
+    EXPECT_EQ (totals.failure_examples.front ().status, 500);
+    EXPECT_EQ (totals.failure_examples.front ().path, "/id");
+}
+
+TEST (SampledValidationTest, AMixedRunPartitionsCheckedIntoValidAndFailed) {
+    SampledValidationTotals totals;
+    totals.record (checked_verdict (true), "step0", 200);
+    totals.record (checked_verdict (false), "step0", 200);
+    totals.record (checked_verdict (true), "step1", 201);
+
+    EXPECT_EQ (totals.sampled, 3u);
+    EXPECT_EQ (totals.checked, 3u);
+    EXPECT_EQ (totals.valid + totals.failed, totals.checked);
+    EXPECT_EQ (totals.valid, 2u);
+    EXPECT_EQ (totals.failed, 1u);
+}
+
+// The distinction the whole verdict shape exists for, in aggregate: a body no
+// JSON Schema can speak about did not break its contract.
+//
+// Mutation-check: fold the unchecked branch into `failed` and this reddens on
+// both counts at once.
+TEST (SampledValidationTest, AnUncheckedSampleIsCountedByReasonNotAsAFailure) {
+    SampledValidationTotals totals;
+    totals.record (checked_verdict (true), "step0", 200);
+    totals.record (unchecked_verdict (UncheckedReason::BodyNotJson), "step0", 200);
+    totals.record (unchecked_verdict (UncheckedReason::BodyNotJson), "step0", 500);
+    totals.record (unchecked_verdict (UncheckedReason::NoSchemaForStatus), "step1", 404);
+
+    EXPECT_EQ (totals.sampled, 4u);
+    EXPECT_EQ (totals.checked, 1u);
+    EXPECT_EQ (totals.failed, 0u)
+    << "a body a schema cannot describe was reported as a contract failure";
+    EXPECT_EQ (totals.unchecked_reasons.at ("body_not_json"), 2u);
+    EXPECT_EQ (totals.unchecked_reasons.at ("no_schema_for_status"), 1u);
+    // The gap between the two is fully explained, never a silent remainder.
+    size_t unchecked = 0;
+    for (const auto& [reason, count] : totals.unchecked_reasons) {
+        (void)reason;
+        unchecked += count;
+    }
+    EXPECT_EQ (totals.checked + unchecked, totals.sampled);
+}
+
+// The dialect disclosure, aggregated: a run whose schemas were half-read says
+// so by name, and the responses stay counted as the valid ones they were.
+TEST (SampledValidationTest, UnevaluatedKeywordsAreDisclosedByNameAcrossSamples) {
+    ValidationVerdict verdict = checked_verdict (true);
+    verdict.unevaluated_keywords = { { "unevaluatedProperties", 1 }, { "prefixItems", 2 } };
+
+    SampledValidationTotals totals;
+    totals.record (verdict, "step0", 200);
+    totals.record (verdict, "step0", 200);
+    totals.record (checked_verdict (true), "step1", 200);
+
+    EXPECT_EQ (totals.valid, 3u) << "an unevaluated keyword must not unmake a "
+                                    "response that passed every check that ran";
+    EXPECT_EQ (totals.unevaluated, 2u);
+    EXPECT_EQ (totals.unevaluated_keywords.at ("unevaluatedProperties"), 2u);
+    EXPECT_EQ (totals.unevaluated_keywords.at ("prefixItems"), 4u);
+}
+
+TEST (SampledValidationTest, FailureExamplesAreCappedAndTheTotalStaysHonest) {
+    SampledValidationTotals totals;
+    for (size_t i = 0; i < constants::schema_validation::MAX_FAILURES * 3; ++i) {
+        totals.record (checked_verdict (false), "step0", 500);
+    }
+
+    EXPECT_EQ (totals.failure_examples.size (), constants::schema_validation::MAX_FAILURES);
+    // Bounded list, unbounded count - so "10 shown of 30" stays readable.
+    EXPECT_EQ (totals.failures_total, constants::schema_validation::MAX_FAILURES * 3);
+}
+
+TEST (SampledValidationPayloadTest, APassThatWalkedNothingIsAnEmptyObject) {
+    // Empty rather than zeros: the caller drops an empty object from the
+    // summary, which is what keeps an unbound run's report free of a block
+    // saying nothing failed.
+    EXPECT_TRUE (build_sampled_validation_payload (SampledValidationTotals{}).empty ());
+}
+
+TEST (SampledValidationPayloadTest, TheDenominatorAndTheTalliesAreAllWritten) {
+    SampledValidationTotals totals;
+    totals.record (checked_verdict (true), "step0", 200);
+    totals.record (checked_verdict (false), "step1", 200);
+    totals.record (unchecked_verdict (UncheckedReason::BodyNotJson), "step1", 200);
+
+    const auto node = build_sampled_validation_payload (totals);
+    // `sampled` is what tells a reader these figures describe the reservoir and
+    // not the run - the one number that must never be inferable-only.
+    EXPECT_EQ (node["sampled"].get<size_t> (), 3u);
+    EXPECT_EQ (node["checked"].get<size_t> (), 2u);
+    EXPECT_EQ (node["valid"].get<size_t> (), 1u);
+    EXPECT_EQ (node["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (node["unevaluated"].get<size_t> (), 0u);
+    EXPECT_EQ (node["uncheckedReasons"]["body_not_json"].get<size_t> (), 1u);
+    ASSERT_TRUE (node["failures"].is_array ());
+    ASSERT_EQ (node["failures"].size (), 1u);
+    EXPECT_EQ (node["failures"][0]["step"].get<std::string> (), "step1");
+    EXPECT_EQ (node["failures"][0]["status"].get<int> (), 200);
+    EXPECT_EQ (node["failuresTotal"].get<size_t> (), 1u);
+    // Absent rather than an empty array: nothing went unread here.
+    EXPECT_FALSE (node.contains ("unevaluatedKeywords"));
+}
+
+// ─── The hot path stays clear (issue #682) ──────────────────────────────────
+
+/**
+ * Validation must never be reachable from a load run's completion path.
+ *
+ * The load loop refills concurrency per completion, so a schema walk there
+ * costs throughput for the whole rest of the run - and it would do so
+ * *silently*, as a slightly lower RPS nobody would trace back. That is why the
+ * pass is deferred to run end, and why the property is asserted structurally
+ * rather than by timing: a shared CI runner cannot measure the difference, so
+ * a timing test would either be flaky or prove nothing.
+ *
+ * The scan asserts it read something first - a guard reading an empty string
+ * passes forever.
+ */
+TEST (SchemaValidationHotPathTest, NoValidationIsReachableFromTheCompletionPath) {
+    const std::filesystem::path root = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
+    ASSERT_TRUE (std::filesystem::exists (root));
+
+    // The files a *load* completion runs through: the strategy's per-completion
+    // callback, the scenario executor's virtual-user loop, and the collector
+    // each one reports into.
+    //
+    // `scenario_runner.cpp` is deliberately not among them, and the distinction
+    // is the whole point rather than an exemption. It is the **design-mode
+    // sequential** runner: one request at a time, nothing refilling concurrency
+    // behind it, so there is no completion path to keep clear - which is why
+    // #681 can check every step as it runs where #682 must defer. The load-mode
+    // scenario executor is `scenario_load.cpp`, and it stays on this list.
+    const std::vector<std::string> hot_path = { "load_strategy.cpp",
+        "scenario_load.cpp", "metrics_collector.cpp" };
+
+    size_t files_scanned = 0;
+    size_t total_bytes   = 0;
+    std::vector<std::string> validators;
+    std::vector<std::string> offenders;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (root)) {
+        if (!entry.is_regular_file () || entry.path ().extension () != ".cpp") {
+            continue;
+        }
+        std::ifstream file (entry.path ());
+        std::stringstream buffer;
+        buffer << file.rdbuf ();
+        const std::string source = buffer.str ();
+        ++files_scanned;
+        total_bytes += source.size ();
+
+        const std::string name = entry.path ().filename ().string ();
+        // The implementation itself is not a call site.
+        if (name == "schema_validation.cpp") {
+            continue;
+        }
+        if (source.find ("ResponseSchemaIndex") == std::string::npos) {
+            continue;
+        }
+        validators.push_back (name);
+        for (const auto& hot : hot_path) {
+            if (name == hot) {
+                offenders.push_back (name);
+            }
+        }
+    }
+
+    ASSERT_GT (files_scanned, 10u) << "the scan found no sources to read";
+    ASSERT_GT (total_bytes, 1000u) << "the scan read empty files";
+    EXPECT_TRUE (offenders.empty ())
+    << "response validation reached a file the completion path runs through; "
+       "it belongs in the deferred pass at run end";
+    // Exactly the three hooks that exist: design mode resolves an index per
+    // execution (`specs.cpp`), the load pass parses one at run end
+    // (`run_manager.cpp`), and a collection run parses one before its first send
+    // (`scenario_runner.cpp`, issue #681). A fourth caller is not wrong on its
+    // face - it just has to be looked at, and this is what makes that happen
+    // rather than a reviewer noticing. This list is what caught #681's hook and
+    // sent someone to decide whether the sequential runner is a hot path; it is
+    // not, and the `hot_path` comment above records why.
+    std::sort (validators.begin (), validators.end ());
+    EXPECT_EQ (validators,
+    (std::vector<std::string>{ "run_manager.cpp", "scenario_runner.cpp", "specs.cpp" }));
 }

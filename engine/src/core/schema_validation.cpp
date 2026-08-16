@@ -248,30 +248,90 @@ nlohmann::json build_validation_payload (const ValidationVerdict& verdict) {
     return node;
 }
 
-void ValidationTally::record (const ValidationVerdict& verdict) {
-    ++responses;
+void SampledValidationTotals::record (const ValidationVerdict& verdict,
+const std::string& step,
+int status) {
+    ++sampled;
+
     if (!verdict.checked) {
-        // Counted in `responses` and nowhere else: an unchecked response is not
-        // a pass and not a failure, and folding it into either is the confusion
-        // the verdict's own shape refuses to make. `responses - checked` is
-        // what a reader subtracts to get them back.
+        // Counted by reason rather than as a failure. A body a JSON Schema
+        // cannot speak about is not a body that broke its contract, and folding
+        // the two would make every HTML error page look like a schema failure.
+        ++unchecked_reasons[to_string (verdict.reason.value_or (UncheckedReason::NoIndex))];
         return;
     }
+
     ++checked;
     if (verdict.valid) {
         ++valid;
     } else {
         ++failed;
     }
+
     if (!verdict.unevaluated_keywords.empty ()) {
-        ++partly_checked;
+        ++unevaluated;
+        for (const auto& [keyword, count] : verdict.unevaluated_keywords) {
+            unevaluated_keywords[keyword] += count;
+        }
+    }
+
+    // The run-wide total counts every failure the verdicts found, including the
+    // ones each verdict's own cap already hid - so the "shown of found" figure
+    // is honest about both caps rather than only this one.
+    failures_total += verdict.failures_total;
+    for (const auto& failure : verdict.failures) {
+        if (failure_examples.size () >= limits::MAX_FAILURES) {
+            break;
+        }
+        failure_examples.push_back (
+        FailureExample{ step, status, failure.path, failure.message });
     }
 }
 
-nlohmann::json build_validation_summary_payload (const ValidationTally& tally, bool sampled) {
-    return nlohmann::json{ { "responses", tally.responses }, { "checked", tally.checked },
-        { "valid", tally.valid }, { "failed", tally.failed },
-        { "partlyChecked", tally.partly_checked }, { "sampled", sampled } };
+nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& totals) {
+    if (totals.sampled == 0) {
+        return nlohmann::json::object ();
+    }
+
+    nlohmann::json node;
+    // `sampled` first and always: it is the denominator that makes the rest
+    // readable, and the one number that says these figures describe a sample.
+    node["sampled"]     = totals.sampled;
+    node["checked"]     = totals.checked;
+    node["valid"]       = totals.valid;
+    node["failed"]      = totals.failed;
+    node["unevaluated"] = totals.unevaluated;
+
+    if (!totals.unchecked_reasons.empty ()) {
+        nlohmann::json reasons = nlohmann::json::object ();
+        for (const auto& [reason, count] : totals.unchecked_reasons) {
+            reasons[reason] = count;
+        }
+        node["uncheckedReasons"] = reasons;
+    }
+
+    if (!totals.unevaluated_keywords.empty ()) {
+        nlohmann::json keywords = nlohmann::json::array ();
+        for (const auto& [keyword, count] : totals.unevaluated_keywords) {
+            keywords.push_back ({ { "keyword", keyword }, { "count", count } });
+        }
+        node["unevaluatedKeywords"] = keywords;
+    }
+
+    nlohmann::json failures = nlohmann::json::array ();
+    for (const auto& example : totals.failure_examples) {
+        nlohmann::json entry = { { "status", example.status },
+            { "path", example.path }, { "message", example.message } };
+        if (!example.step.empty ()) {
+            entry["step"] = example.step;
+        }
+        failures.push_back (std::move (entry));
+    }
+    node["failures"] = failures;
+    // Always present, like the per-response verdict's own: a reader comparing
+    // the list's length against it needs the number to be there to compare.
+    node["failuresTotal"] = totals.failures_total;
+    return node;
 }
 
 std::vector<std::pair<std::string, size_t>>

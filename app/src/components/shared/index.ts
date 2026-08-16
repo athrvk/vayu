@@ -31,7 +31,9 @@ export * from "./SampleRetentionNote";
 export * from "./ThresholdVerdict";
 export * from "./CapacitySummary";
 export * from "./ContractCoverage";
-export * from "./SchemaVerdict";
+
+// "30 of 36 sampled responses matched their schema" - beside the coverage block
+export * from "./SampledSchemaValidation";
 
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";

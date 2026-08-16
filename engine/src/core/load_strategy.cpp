@@ -209,11 +209,11 @@ const ResultAnnotations& annotations) {
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
 
-        // Sample the response for the deferred validation pass. A scenario
-        // step's script is keyed to the step, not to the run, so its sample
-        // goes to that step's own reservoir - the collector refuses the ones
-        // whose step carries no script. A single-request run keeps the one
-        // run-level store it always had.
+        // Sample the response for the deferred validation passes. What reads a
+        // scenario sample - a step's script, a step's contract - is keyed to
+        // the step, not to the run, so it goes to that step's own reservoir;
+        // the collector refuses the steps nothing will read. A single-request
+        // run keeps the one run-level store it always had.
         if (annotations.step_index) {
             context->metrics_collector->record_step_response_sample (response,
             *annotations.step_index, annotations.iteration.value_or (0),

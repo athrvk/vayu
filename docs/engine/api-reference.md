@@ -4353,7 +4353,9 @@ sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, 
 only when a test script ran, `thresholdValidation` only when the run declared
 [budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
 `capacity` run, `auth` only when the run's OAuth 2.0 credential could be
-refreshed mid-run, `coverage` only for a run measured against a bound spec).
+refreshed mid-run, `coverage` only for a run measured against a bound spec,
+`schemaValidation` only for a run that checked at least one response against
+one).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -4403,25 +4405,61 @@ deliberately plain numbers, shaped like `thresholdValidation`'s counts, so a
 headless CI gate can threshold on them without the block being reshaped. Nothing
 thresholds on them today.
 
-**`schemaValidation`** is the other half of that question (issue #681): whether
-what came back matched the schema the document declares for it. Present on the
-same terms as `coverage` - a scenario run of a bound collection whose document
-carries a [response-schema index](#post-specs) - and **absent, never zeros**, for
-every other run, including one whose steps all skipped.
+**`schemaValidation`** says whether the responses a run checked matched the
+schemas that same document declares (issues #682, #681). It sits beside
+`coverage` and is computed against the same document, but on different evidence,
+and the difference is the block's most important field: coverage counts every
+send, while this walks whatever the run's mode gave it - the **bounded reservoir
+of responses a load run stored**, or **every step a collection run executed**.
 
 | Field | Meaning |
 |---|---|
-| `responses` | Responses a verdict was produced for at all |
-| `checked` | Of those, how many could be judged - a subset of `responses` |
-| `valid` / `failed` | The two verdicts; together they are `checked` |
-| `partlyChecked` | Checked responses whose schema used keywords the draft-07 validator cannot evaluate. Not a third verdict - these are also `valid` or `failed` |
-| `sampled` | `false` when the counts describe every response the run produced, `true` when they describe only the ones it kept |
-| `failOnSchemaError` | Whether a schema failure was allowed to fail its step in this run |
+| `sampled` | Responses this pass walked - the denominator for everything else |
+| `checked` | Of those, the ones a declared schema could speak about |
+| `valid` / `failed` | The partition of `checked`. `valid + failed == checked`, always |
+| `unevaluated` | Checked responses whose schema carried a keyword the draft-07 validator could not evaluate |
+| `uncheckedReasons` | Reason code -> count, accounting for every one of `sampled - checked` |
+| `unevaluatedKeywords[]` | `{keyword, count}`, so what went unread is named and not only counted |
+| `failures[]` | Bounded examples: `{step?, status, path, message}` |
+| `failuresTotal` | Every failure found, the cap included - so "3 shown of 90" stays readable |
+| `exact` | `true` when `sampled` is the whole population rather than a reservoir - written by a collection run, absent for a load run |
+| `failOnSchemaError` | Whether a schema failure was allowed to fail its step. Collection runs only |
 
-A response the contract could not judge - no declared schema for its status or
-content type, a body that is not JSON - is counted in `responses` and not in
-`checked`, and is neither a pass nor a failure. `responses - checked` is that
-number.
+The reason codes are the ones [`POST /execute`'s validation
+node](#post-execute) uses, unchanged.
+
+**Under load these numbers are sampled, and nothing here pretends otherwise.**
+Validation is deferred to run end because a load run refills concurrency on every
+completion, so a schema walk on that path would cost throughput for the whole run
+- and would do so invisibly. `failed: 0` therefore means "no *sampled* response
+failed". `sampled` is written so a reader always has the denominator; the app
+renders it beside the tallies for the same reason.
+
+**A collection run writes the same block with `exact: true`**, because it sends
+one request at a time and checks every step - there is no hot path to keep off,
+so `sampled` there *is* the run. The flag exists so a reader is never left to
+infer the denominator from the run's mode: the same five numbers are a wider
+claim in one than the other, and only the block knows which. A report written
+before the flag existed was sampled, which is why absent reads as sampled.
+
+A step's responses are kept when a deferred pass will read them - it carries a
+script, or it is bound to an operation and the document carries schemas - and the
+run's sample budget is split evenly across those steps. What was displaced is
+reported as `sampling.response_samples_dropped`.
+
+**Absent, never zeros**, for every run that checked nothing: an unbound
+collection, a single-request run, a document carrying no response schemas, and a
+run whose reservoirs held nothing. A run whose responses were never checked did
+not pass a contract.
+
+### Per-step verdicts in a collection run
+
+Each step of a collection run carries its own verdict on its stored trace as a
+`validation` node - the same object and the same shape
+[`POST /execute`](#post-execute) returns - and the live `step` SSE frame carries
+it too, so a run being watched and the same run read back cannot disagree
+(issue #681). A step that sent nothing carries no `validation` at all: there was
+no response to judge.
 
 **`failOnSchemaError`** is a top-level boolean on `POST /runs`, default `false`,
 type-checked before the run row is created. Left off, a schema failure does not
@@ -4431,10 +4469,6 @@ everything else and whose response did not match is classified `failed`, with th
 first problem in its `results.error`; a step already failing keeps the error that
 named it.
 
-Each step's own verdict rides its stored trace as a `validation` node - the same
-object and the same shape [`POST /execute`](#post-execute) returns - and the live
-`step` SSE frame carries it too, so a run being watched and the same run read
-back cannot disagree. A step that sent nothing carries no `validation` at all.
 
 **Response:**
 ```json
@@ -4531,6 +4565,12 @@ back cannot disagree. A step that sent nothing carries no `validation` at all.
         "sent": 0, "statusesSeen": [], "declaredHit": [], "declaredMissed": ["204"],
         "undeclaredSeen": [] }
     ]
+  },
+  "schemaValidation": {
+    "sampled": 40, "checked": 36, "valid": 30, "failed": 6, "unevaluated": 0,
+    "uncheckedReasons": { "body_not_json": 4 },
+    "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
+    "failuresTotal": 6
   },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }

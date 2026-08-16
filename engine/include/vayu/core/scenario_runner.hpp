@@ -250,8 +250,14 @@ struct ScenarioSummaryInputs {
      * What the run's steps amounted to against their declared schemas (issue
      * #681). Empty for every run that produced no verdict at all, which leaves
      * the section out of the summary on the same terms `coverage` is left out.
+     *
+     * The load pass's totals (#682), not a second tally beside them: the two run
+     * modes write one `schemaValidation` block that one component renders, so
+     * "how many responses failed their schema" cannot come to mean two things.
+     * What differs is the denominator - every step here, a bounded reservoir
+     * there - and the payload says which rather than leaving it to the mode.
      */
-    ValidationTally validation;
+    SampledValidationTotals validation;
     /// Whether this run asked a schema failure to fail its step. Recorded
     /// beside the tally because the same counts mean two different things
     /// depending on it: with the flag off, `failed` steps and schema failures

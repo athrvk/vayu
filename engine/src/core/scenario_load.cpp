@@ -264,16 +264,25 @@ const ScenarioExecution& execution) {
         context->requests_expected = max_iterations * step_count;
     }
 
-    // Which steps the deferred pass will have a script for. Sized here, before
+    // Which steps the deferred pass will read a sample of. Sized here, before
     // the first submission, because the completion path only ever reads it.
-    // A plan whose steps assert nothing gets no stores at all, so it samples
-    // nothing and the report omits the section rather than showing zeros.
+    // A plan no deferred pass will look at gets no stores at all, so it samples
+    // nothing and the report omits the sections rather than showing zeros.
+    //
+    // Two reasons to keep a step's responses, not one (issue #682): a script to
+    // replay against them, or a contract to check them against. A step bound to
+    // an operation is a candidate whenever the run carries a schema index -
+    // whether the index actually *declares* that operation is a question only
+    // the deferred pass can answer, and answering it here would mean parsing
+    // the whole index on the setup path to save a reservoir.
     {
-        std::vector<bool> scripted (step_count, false);
+        const bool validating = !execution.spec.response_schemas.empty ();
+        std::vector<bool> sampled (step_count, false);
         for (size_t i = 0; i < step_count; ++i) {
-            scripted[i] = !plan.steps[i].post_script.empty ();
+            sampled[i] = !plan.steps[i].post_script.empty () ||
+            (validating && !plan.steps[i].spec_operation.empty ());
         }
-        context->metrics_collector->configure_step_samples (scripted);
+        context->metrics_collector->configure_step_samples (sampled);
     }
 
     vayu::utils::log_info ("Starting Scenario Load Test (" + mode + ")");

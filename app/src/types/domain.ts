@@ -305,35 +305,6 @@ export interface ResponseValidation {
 }
 
 /**
- * What a whole run's responses amounted to against their declared schemas
- * (issue #681). See {@link RunReport.schemaValidation} for when it is present.
- *
- * `responses` is the denominator and `checked` is a subset of it: a response
- * the engine could not judge - no schema for its status, a body that is not
- * JSON - is counted in the first and not the second, and is neither a pass nor
- * a failure. `valid + failed === checked`.
- *
- * `partlyChecked` is not a third verdict. Those responses are also `valid` or
- * `failed`; what they are not is fully judged, because part of their schema
- * used keywords the draft-07 validator cannot evaluate.
- *
- * `sampled` says which responses the counts describe - every one the run
- * produced, or only the ones it kept. A collection run checks every step and
- * reports `false`; a load run validates its sampled reservoir and reports
- * `true`, where "0 failed" means "no *sampled* response failed".
- */
-export interface RunSchemaValidation {
-	responses: number;
-	checked: number;
-	valid: number;
-	failed: number;
-	partlyChecked: number;
-	sampled: boolean;
-	/** Whether a schema failure was allowed to fail its step in this run. */
-	failOnSchemaError?: boolean;
-}
-
-/**
  * One operation's row in a run report's coverage block (issue #629).
  *
  * `declaredHit` and `declaredMissed` partition the operation's declared status
@@ -382,6 +353,51 @@ export interface RunCoverage {
 	transportErrors?: number;
 	/** Requests sent against an identity the document does not declare. */
 	undeclaredOperationRequests?: number;
+}
+
+/**
+ * What checking a load run's **sampled** responses against its bound contract
+ * found (issue #682). See {@link RunReport.schemaValidation} for when it is
+ * present.
+ *
+ * The sibling of {@link RunCoverage}, and the opposite of it in the one way that
+ * matters to a reader: coverage counts every send, this checks the bounded
+ * reservoir the run stored. `sampled` is therefore not decoration - it is the
+ * denominator that stops `failed: 0` being read as "no response failed" when it
+ * means "no sampled response failed".
+ *
+ * `checked` is what a schema could speak about; `uncheckedReasons` accounts for
+ * the rest by engine reason code, so `sampled - checked` is never an unexplained
+ * gap. `unevaluated` counts checked responses whose schema carried a keyword the
+ * draft-07 validator could not evaluate - they passed every check that *ran*,
+ * which is a narrower claim than valid.
+ */
+export interface RunSchemaValidation {
+	sampled: number;
+	checked: number;
+	valid: number;
+	failed: number;
+	unevaluated: number;
+	/** Engine reason code -> how many samples it accounts for. */
+	uncheckedReasons?: Partial<Record<ValidationUncheckedReason, number>>;
+	unevaluatedKeywords?: { keyword: string; count: number }[];
+	/** Bounded examples, capped engine-side across the whole run. */
+	failures: { step?: string; status: number; path: string; message: string }[];
+	/** Every failure found, the cap included - so "3 of 90" stays readable. */
+	failuresTotal: number;
+	/**
+	 * Whether `sampled` is the whole population rather than a reservoir (issue
+	 * #681).
+	 *
+	 * A collection run checks **every step it executed**, so its figures are
+	 * exact and the block must not tell a reader they describe a sample. A load
+	 * run omits this, and the sampled reading below is the default - the safer
+	 * one to fall back to, since a report from an engine older than this field
+	 * was sampled.
+	 */
+	exact?: boolean;
+	/** Whether a schema failure was allowed to fail its step (collection runs). */
+	failOnSchemaError?: boolean;
 }
 
 /**
@@ -1759,16 +1775,22 @@ export interface RunReport {
 	 */
 	coverage?: RunCoverage;
 	/**
-	 * Whether what came back matched what the bound contract declares for it
-	 * (issue #681) - the other half of the question `coverage` starts.
+	 * Whether what came back matched the schemas the run's bound document
+	 * declares (issues #682, #681).
 	 *
-	 * **Absent, never zeros**, on exactly the same terms: a run of an unbound
-	 * collection, or one whose steps never sent, carries no block at all rather
-	 * than one saying nothing failed.
+	 * **Absent, never zeros**, for every run that checked nothing - an unbound
+	 * collection, a single-request run, a document carrying no response schemas.
+	 * A run whose responses were never checked did not pass a contract.
 	 *
-	 * Judged against the document the run was *planned* with, and read once when
-	 * its plan resolved - so a sync landing mid-run cannot change what the run
-	 * was measured against.
+	 * Beside {@link RunReport.coverage} and computed against the same document -
+	 * the one the run was *planned* with, read when its plan resolved, so a sync
+	 * landing mid-run cannot change what the run was measured against.
+	 *
+	 * **What the numbers describe differs by run mode, and `exact` says which.**
+	 * A load run defers the check to run end over its bounded reservoirs, because
+	 * the load loop refills concurrency per completion and a schema walk there
+	 * would cost throughput - so its figures are sampled, and anything rendering
+	 * them has to say so. A collection run checks every step it executed.
 	 */
 	schemaValidation?: RunSchemaValidation;
 	/**

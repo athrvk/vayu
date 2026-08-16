@@ -1295,14 +1295,24 @@ TEST_F (ScenarioRunnerTest, TheRunTalliesItsVerdictsForTheReport) {
 
     const auto validation = summary_of (run_id)["schemaValidation"];
     ASSERT_FALSE (validation.is_null ());
-    EXPECT_EQ (validation["responses"].get<size_t> (), 6u);
+    // The load pass's shape, written by a collection run (issue #681 on #682's
+    // block): `sampled` is the denominator, whatever produced it.
+    EXPECT_EQ (validation["sampled"].get<size_t> (), 6u);
     EXPECT_EQ (validation["checked"].get<size_t> (), 4u);
     EXPECT_EQ (validation["valid"].get<size_t> (), 2u);
     EXPECT_EQ (validation["failed"].get<size_t> (), 2u);
-    EXPECT_EQ (validation["partlyChecked"].get<size_t> (), 0u);
-    // A collection run checks every step it executed, so the counts describe
-    // the whole run. A load run's will not, which is why the block says which.
-    EXPECT_FALSE (validation["sampled"].get<bool> ());
+    EXPECT_EQ (validation["unevaluated"].get<size_t> (), 0u);
+    // ...and `exact` is what says that denominator is the whole run rather than
+    // a reservoir. A load run writes no such key, and its readers say
+    // "sampled"; drop this and a collection run starts claiming to be one.
+    EXPECT_TRUE (validation["exact"].get<bool> ());
+    // The two steps the document does not declare are accounted for by name,
+    // not left as an unexplained gap between `sampled` and `checked`.
+    EXPECT_EQ (validation["uncheckedReasons"]["operation_not_declared"].get<size_t> (), 2u);
+    // A failure example names the step it came from, which is the whole reason
+    // the tally is given one.
+    ASSERT_FALSE (validation["failures"].empty ());
+    EXPECT_EQ (validation["failures"][0]["step"].get<std::string> (), "Step req_bad");
 }
 
 TEST_F (ScenarioRunnerTest, StepEventsCarryTheVerdictOnTheSameTermsAsTheStoredRow) {
@@ -1350,35 +1360,17 @@ TEST (ScenarioSummaryPayload, SchemaVerdictsAreTheirOwnSectionAndAbsentWhenNothi
 
     vayu::core::ValidationVerdict unchecked;
     unchecked.reason = vayu::core::UncheckedReason::NoSchemaForStatus;
-    inputs.validation.record (unchecked);
+    inputs.validation.record (unchecked, "Step one", 500);
 
     const auto summary = vayu::core::build_scenario_summary_payload (inputs);
     ASSERT_TRUE (summary.contains ("schemaValidation")) << summary.dump ();
     // A run whose every response went unchecked still reports the section: "one
     // response, none of them checked" is what tells a reader to sync a binding,
     // where silence tells them nothing.
-    EXPECT_EQ (summary["schemaValidation"]["responses"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["schemaValidation"]["sampled"].get<size_t> (), 1u);
     EXPECT_EQ (summary["schemaValidation"]["checked"].get<size_t> (), 0u);
+    EXPECT_TRUE (summary["schemaValidation"]["exact"].get<bool> ());
     EXPECT_FALSE (summary["scenario"].contains ("schemaValidation"));
-}
-
-TEST (ValidationTallyTest, PartlyCheckedOverlapsTheVerdictRatherThanReplacingIt) {
-    vayu::core::ValidationTally tally;
-
-    vayu::core::ValidationVerdict partial;
-    partial.checked              = true;
-    partial.valid                = true;
-    partial.unevaluated_keywords = { { "unevaluatedProperties", 2 } };
-    tally.record (partial);
-
-    EXPECT_EQ (tally.responses, 1u);
-    EXPECT_EQ (tally.checked, 1u);
-    EXPECT_EQ (tally.valid, 1u);
-    EXPECT_EQ (tally.failed, 0u);
-    // Counted as valid *and* as partly checked - a body reported clean against a
-    // schema half of which went unread is exactly the claim that needs the
-    // second number beside it.
-    EXPECT_EQ (tally.partly_checked, 1u);
 }
 
 

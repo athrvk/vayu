@@ -50,6 +50,17 @@ and `libtool` - vcpkg builds libsodium from source there and runs `autoreconf`
 first. `python build.py --setup` installs them; without them the *dependency*
 install fails, which does not look like a missing build tool.
 
+**A `403` from vcpkg on a GitHub source archive is not a dependency you cannot
+have.** In the cloud dev environment the egress policy refuses those archives
+while allowing git-over-https, so a port fetched by `vcpkg_from_github` dies on
+a cold cache with `curl operation failed with response code 403` - which reads
+like a wall and is one command: `vcpkg-fix-port <port>` (no arguments re-does
+the whole manifest), then build again. It is repeated here rather than left in
+`engine/CLAUDE.md` alone because the message appears while running `build.py`
+from the repo root, and a session that has not opened a file under `engine/`
+never loads that file - one did, read the 403 as policy, and abandoned a phase
+of #625 over it. Full note there.
+
 **On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
 `build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,
 ninja and vcpkg inside the Visual Studio Build Tools install
