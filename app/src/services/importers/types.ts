@@ -56,7 +56,16 @@ export interface SkippedItem {
 		 * the factory, which is also why it is the one kind that says nothing about
 		 * Vayu's own representability.
 		 */
-		| "external_ref";
+		| "external_ref"
+		/**
+		 * An operation whose `operationId` another operation already declared
+		 * (issue #715). The operation itself imports whole - only the repeated id
+		 * is dropped from its recorded identity, which then rests on its method
+		 * and path alone. Counted because a sync follows the identity a request
+		 * records, so which request kept the id is not a detail the user should
+		 * have to discover from a diff.
+		 */
+		| "duplicate_operation_id";
 	count: number;
 }
 

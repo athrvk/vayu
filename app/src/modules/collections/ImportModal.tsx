@@ -1007,6 +1007,12 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 		"reference to a file Vayu could not read",
 		"references to files Vayu could not read",
 	],
+	// The operation imports; what it loses is the repeated id, so the wording
+	// says which half went (issue #715) rather than implying a dropped request.
+	duplicate_operation_id: [
+		"operation whose operationId was already used (identified by path instead)",
+		"operations whose operationId was already used (identified by path instead)",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {

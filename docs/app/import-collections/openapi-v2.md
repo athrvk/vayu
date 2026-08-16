@@ -88,7 +88,7 @@ Built inline when a tag is first encountered.
 
 ### Request (per operation)
 
-Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
+Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally, specOperation)`.
 
 | Swagger | Vayu `RequestDraft` | Notes |
 |---------|---------------------|-------|
@@ -104,6 +104,7 @@ Built by `buildSwaggerOp(method, path, op, spec, resolveRef, pathParams)`.
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 | `op.responses` | `examples` | via `buildSwaggerExamples` (see [Documented responses](#documented-responses)); **absent** when nothing was representable |
+| `op.operationId`, method, `path` | `specOperation` | the operation this request is, recorded for [sync](../openapi.md#checking-a-bound-spec-for-changes). Claimed through the shared `createOperationIdentifier`, so an `operationId` this document declares twice is kept on the first operation only and the second is identified by method and path - the rule and its reason are written out in [OpenAPI 3.0](./openapi-v3.md#operation-identity) |
 
 **Parameter resolution & merge.** `buildSwaggerOp` concatenates path-item-level `parameters` (passed in as `pathParams`) with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map` (`byKey`), so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
 
@@ -302,7 +303,7 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec` and `example_no_status` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec`, `example_no_status` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 

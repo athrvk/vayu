@@ -210,6 +210,17 @@ addition:
 - **Both changed at once** is reported as one operation gone and one arrived,
   because there is nothing left to follow, and a wrong identity is what would
   make a later apply rewrite the wrong request.
+- An **`operationId` that means two things is not followed at all**. Generated
+  documents sometimes declare one id on two operations, which is invalid
+  OpenAPI; those requests are followed by their method and path, and a request
+  whose endpoint the document no longer declares is reported as gone rather than
+  attached to the other operation that shares its id. An import keeps a repeated
+  id on the first operation only and says so in the preview, so a freshly
+  imported collection carries no ambiguous identity at all - one imported before
+  that rule has its identity repaired the first time a sync is applied.
+- A **path that still exists wins over an id that points elsewhere**: if the
+  document declares the request's own method and path, that is the operation it
+  is, whatever some other operation's `operationId` claims.
 
 ### What you edited is marked as yours
 

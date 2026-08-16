@@ -10,6 +10,33 @@ const opts = { importEnvironments: true, importScripts: true };
 describe("OpenApiV2Parser", () => {
 	const p = new OpenApiV2Parser();
 
+	it("keeps a duplicated operationId on its first declaration only (issue #715)", () => {
+		// The same rule as the v3 parser, through the same shared identifier: two
+		// requests carrying one id is what lets a later sync pair the second with
+		// the first one's operation.
+		const spec = {
+			swagger: "2.0",
+			info: { title: "Generated API" },
+			paths: {
+				"/a": { get: { operationId: "list", summary: "List A" } },
+				"/b": { post: { operationId: "list", summary: "Create B" } },
+			},
+		};
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		const requests = result.collections[0].requests;
+
+		expect(requests.find((r) => r.name === "List A")!.specOperation).toEqual({
+			operationId: "list",
+			method: "GET",
+			path: "/a",
+		});
+		expect(requests.find((r) => r.name === "Create B")!.specOperation).toEqual({
+			method: "POST",
+			path: "/b",
+		});
+		expect(result.meta.skipped).toEqual([{ kind: "duplicate_operation_id", count: 1 }]);
+	});
+
 	it("detects by swagger 2.0", () => {
 		expect(p.detect(parsed, raw)).toBe(true);
 		expect(p.detect({ openapi: "3.0.0" }, "")).toBe(false);

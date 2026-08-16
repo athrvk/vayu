@@ -314,6 +314,61 @@ describe("OpenApiV3Parser", () => {
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 2 }]);
 	});
 
+	describe("a document that declares one operationId twice (issue #715)", () => {
+		// Invalid OpenAPI, and common in generated specs. Stamping the id on both
+		// requests is what let a sync pair the second one with the first one's
+		// operation and rewrite its identity on an all-defaults apply.
+		const spec = {
+			openapi: "3.0.0",
+			info: { title: "Generated API" },
+			paths: {
+				"/a": {
+					get: {
+						operationId: "list",
+						summary: "List A",
+						responses: { "200": { description: "ok" } },
+					},
+				},
+				"/b": {
+					post: {
+						operationId: "list",
+						summary: "Create B",
+						responses: { "201": { description: "made" } },
+					},
+				},
+			},
+		};
+		const parse = () => p.parse(spec, JSON.stringify(spec), opts);
+
+		it("keeps the id on the first declaration and identifies the second by its path alone", () => {
+			const requests = parse().collections[0].requests;
+			expect(requests.find((r) => r.name === "List A")!.specOperation).toEqual({
+				operationId: "list",
+				method: "GET",
+				path: "/a",
+			});
+			expect(requests.find((r) => r.name === "Create B")!.specOperation).toEqual({
+				method: "POST",
+				path: "/b",
+			});
+		});
+
+		it("indexes the declared operations by those same identities", () => {
+			// The engine resolves coverage by operationId first, so an index that
+			// disagreed with the requests would reintroduce the ambiguity there.
+			expect(parse().collections[0].spec!.operations).toEqual([
+				{ operationId: "list", method: "GET", path: "/a", responses: ["200"] },
+				{ method: "POST", path: "/b", responses: ["201"] },
+			]);
+		});
+
+		it("names the dropped id in the preview rather than losing it silently", () => {
+			expect(parse().meta.skipped).toEqual([{ kind: "duplicate_operation_id", count: 1 }]);
+			// The operation itself imported whole - only the repeated id went.
+			expect(parse().meta.requestCount).toBe(2);
+		});
+	});
+
 	describe("a spec whose responses live in components (issue #714)", () => {
 		// GitHub's shape. Both indexes stored beside the document are built in
 		// this one walk, so this is where they can be held to the same answer.

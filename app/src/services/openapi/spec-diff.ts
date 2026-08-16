@@ -30,6 +30,9 @@
  * overwrites the wrong request. The path side is compared through
  * `specPathShape`, the same flattening `matchOperations` binds with, so a
  * renamed *path parameter* (`{petId}` -> `{id}`) is the same endpoint here too.
+ * An id is only followed while it means one thing, though - see {@link lookup}
+ * for the two ways a duplicated `operationId` stops it from meaning anything
+ * (issue #715).
  *
  * **Changed is measured against what an import would produce**, not against a
  * hand-written idea of the mapping: the drafts come from the same parsers the
@@ -144,6 +147,7 @@ export interface SpecDiffInput {
 export function diffSpec({ bound, fetched, requests }: SpecDiffInput): SpecDiff {
 	const fetchedIndex = index(fetched);
 	const boundIndex = bound ? index(bound) : null;
+	const ambiguousIds = idsMoreThanOneRequestClaims(requests);
 
 	const added: SpecRequestDraft[] = [];
 	const removed: Request[] = [];
@@ -160,14 +164,16 @@ export function diffSpec({ bound, fetched, requests }: SpecDiffInput): SpecDiff 
 			continue;
 		}
 
-		const found = lookup(fetchedIndex, boundOperation);
+		const found = lookup(fetchedIndex, boundOperation, ambiguousIds);
 		if (!found) {
 			removed.push(request);
 			continue;
 		}
 		claimed.add(found.entry);
 
-		const previous = boundIndex ? lookup(boundIndex, boundOperation)?.entry : undefined;
+		const previous = boundIndex
+			? lookup(boundIndex, boundOperation, ambiguousIds)?.entry
+			: undefined;
 		const fields = diffFields(request, found.entry.draft, previous?.draft);
 		const renamed = !sameOperation(boundOperation, found.entry.operation);
 		if (fields.length === 0 && !renamed) {
@@ -204,7 +210,9 @@ interface OperationIndex {
  * First rather than last because a document that declares one `operationId`
  * twice is already invalid, and the duplicate then falls out as an `added`
  * operation - visible, rather than silently displacing the one a request is
- * bound to.
+ * bound to. The drafts arrive from the import parsers, which drop a repeated id
+ * rather than stamping it twice (issue #715), so the second declaration reaches
+ * this with a method-and-path identity and is indexed by path alone.
  */
 function index(entries: readonly SpecRequestDraft[]): OperationIndex {
 	const byOperationId = new Map<string, SpecRequestDraft>();
@@ -218,15 +226,54 @@ function index(entries: readonly SpecRequestDraft[]): OperationIndex {
 	return { byOperationId, byPath };
 }
 
+/**
+ * The `operationId`s more than one request in this collection records - the
+ * shape a document that declared one id twice left behind (issue #715).
+ *
+ * Import no longer stamps a repeated id at all, but a collection imported
+ * before that fix still holds two requests claiming one id, and an id two
+ * requests claim identifies neither of them. They are followed by path here,
+ * which is the same refusal-to-guess `operation-match.ts` binds by.
+ */
+function idsMoreThanOneRequestClaims(requests: readonly Request[]): ReadonlySet<string> {
+	const seen = new Set<string>();
+	const repeated = new Set<string>();
+	for (const request of requests) {
+		const id = request.specOperation?.operationId;
+		if (!id) continue;
+		if (seen.has(id)) repeated.add(id);
+		else seen.add(id);
+	}
+	return repeated;
+}
+
+/**
+ * The document's entry for one recorded identity, and how it was found.
+ *
+ * The `operationId` leads - that is what follows an operation whose path moved
+ * - with two limits, both of them cases where following it would pair a request
+ * with an operation that contradicts what the request says it is (issue #715):
+ *
+ * - an id **two requests claim** identifies neither, so it is skipped entirely;
+ * - an id whose entry has a different method + path shape loses to an **exact
+ *   match on the request's own** method + path, because a document still
+ *   declaring the endpoint the request records is a stronger statement about
+ *   which operation this is than an id pointing somewhere else. With no exact
+ *   match the id is still followed: that is the ordinary rename, where the
+ *   document moved the path and the id is all there is left to follow.
+ */
 function lookup(
 	spec: OperationIndex,
-	operation: SpecOperation
+	operation: SpecOperation,
+	ambiguousIds: ReadonlySet<string>
 ): { entry: SpecRequestDraft; matchedBy: IdentityMatch } | undefined {
-	if (operation.operationId) {
-		const byId = spec.byOperationId.get(operation.operationId);
-		if (byId) return { entry: byId, matchedBy: "operationId" };
-	}
 	const byPath = spec.byPath.get(pathKey(operation));
+	const { operationId } = operation;
+	if (operationId && !ambiguousIds.has(operationId)) {
+		const byId = spec.byOperationId.get(operationId);
+		if (byId && (!byPath || pathKey(byId.operation) === pathKey(operation)))
+			return { entry: byId, matchedBy: "operationId" };
+	}
 	return byPath ? { entry: byPath, matchedBy: "path" } : undefined;
 }
 
