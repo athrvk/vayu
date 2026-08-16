@@ -183,8 +183,8 @@ describe("performing", () => {
 	});
 
 	it("reveals an engine category through the same command shape", () => {
-		commandById("settings:database_performance").perform(baseCommandContext());
-		expect(useSettingsStore.getState().selectedCategory).toBe("database_performance");
+		commandById("settings:data_retention").perform(baseCommandContext());
+		expect(useSettingsStore.getState().selectedCategory).toBe("data_retention");
 	});
 
 	it("opens the import modal through its store, not a copy of it", () => {

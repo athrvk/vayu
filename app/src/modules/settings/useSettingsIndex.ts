@@ -25,6 +25,7 @@ import { buildSettingsIndex, type SettingsIndexEntry } from "@/lib/settings-inde
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { APP_SETTINGS } from "@/modules/settings/main/app-settings";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
+import { ENGINE_SETTINGS_EDITED_IN_APP } from "@/modules/settings/engine-settings-edited-in-app";
 
 /**
  * Every searchable settings entry: the seven client panels, the settings inside
@@ -44,6 +45,7 @@ export function useSettingsIndex(): SettingsIndexEntry[] {
 				appSettings: APP_SETTINGS,
 				engineEntries: configResponse?.entries ?? [],
 				engineCategories: ENGINE_SETTINGS_CATEGORIES,
+				engineEntriesEditedInApp: ENGINE_SETTINGS_EDITED_IN_APP,
 			}),
 		[configResponse]
 	);

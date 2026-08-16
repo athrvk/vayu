@@ -28,7 +28,7 @@ import SettingsMain from "./SettingsMain";
 import type { ConfigEntry } from "@/types";
 
 const base = {
-	category: "database_performance",
+	category: "data_retention",
 	requiresRestart: false,
 	advanced: false,
 	keywords: [],
@@ -88,7 +88,7 @@ vi.mock("@/queries", () => ({
 vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: (selector?: (s: unknown) => unknown) => {
 		const state = {
-			selectedCategory: "database_performance",
+			selectedCategory: "data_retention",
 			highlightedKey,
 			clearHighlight,
 		};

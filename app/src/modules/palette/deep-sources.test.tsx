@@ -214,7 +214,7 @@ describe("settings entries", () => {
 				key: "dbCacheSize",
 				label: "Cache Size",
 				description: "SQLite page cache.",
-				category: "database_performance",
+				category: "data_retention",
 				keywords: [],
 			},
 		];
@@ -226,7 +226,7 @@ describe("settings entries", () => {
 		pickRow("Cache Size");
 
 		const settings = useSettingsStore.getState();
-		expect(settings.selectedCategory).toBe("database_performance");
+		expect(settings.selectedCategory).toBe("data_retention");
 		// The anchor is what `useRevealedSetting` scrolls to and outlines.
 		expect(settings.highlightedKey).toBe("dbCacheSize");
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ type: "settings" });
@@ -442,7 +442,7 @@ describe("the empty query", () => {
 				key: "dbCacheSize",
 				label: "Cache Size",
 				description: "SQLite page cache.",
-				category: "database_performance",
+				category: "data_retention",
 				keywords: [],
 			},
 		];

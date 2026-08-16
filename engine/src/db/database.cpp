@@ -2122,8 +2122,11 @@ void Database::seed_default_config () {
     "general_engine", "0", "0", "1000000", std::nullopt, now }));
 
     // =========================================================================
-    // DATABASE PERFORMANCE CONFIGURATION
-    // SQLite optimization settings for high-throughput load testing
+    // STORAGE INTERNALS - part of Core (general_engine)
+    // SQLite optimization settings for high-throughput load testing. These had
+    // a sidebar row of their own ("Database Performance") for three entries,
+    // two of them restart-required internals; #586 folded them into Core, where
+    // the rest of the engine's infrastructure knobs already live.
     // =========================================================================
 
     upsert_config (restart_required (unit ("bytes") (
@@ -2134,7 +2137,7 @@ void Database::seed_default_config () {
     "larger cache spares repeated reads while a high-RPS run writes results and "
     "the dashboard queries them. 64 to 128 megabytes suits runs storing 10,000 "
     "or more results a second.",
-    "database_performance", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
+    "general_engine", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "1048576",    // min: 1MB in bytes
     "1073741824", // max: 1GB in bytes
     std::nullopt, now }))));
@@ -2147,7 +2150,7 @@ void Database::seed_default_config () {
     "it. Result-storage threads compete for it during a high-concurrency run, "
     "and a longer wait turns a 'database is locked' failure into a pause "
     "instead. 10 to 30 seconds suits runs at 100 or more concurrent requests.",
-    "database_performance", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
+    "general_engine", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "1000",  // min: 1 second
     "60000", // max: 60 seconds
     std::nullopt, now })))));
@@ -2162,7 +2165,7 @@ void Database::seed_default_config () {
     "power cut, which is an acceptable trade for test telemetry. Normal and "
     "Full buy durability back at the cost of write throughput during a "
     "high-RPS run.",
-    "database_performance", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
+    "general_engine", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
     std::nullopt, std::nullopt, db_synchronous_options_json (), now })));
 
     // =========================================================================
@@ -2358,8 +2361,11 @@ void Database::seed_default_config () {
     std::nullopt, now })));
 
     // =========================================================================
-    // OBSERVABILITY & DATA CONFIGURATION
-    // Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits
+    // OBSERVABILITY CONFIGURATION
+    // Monitoring and live metrics: what a run watches, and how the dashboard's
+    // live charts are fed. What a run *stores* is `data_retention` below - the
+    // two were one category holding 24 of 48 entries until #586, and "how much
+    // of a response body is kept" was never an observability question.
     // =========================================================================
 
     upsert_config (unit ("ms") (keywords ({ "refresh rate", "sse" }) (
@@ -2381,8 +2387,10 @@ void Database::seed_default_config () {
     "How much recent live-metrics history to keep: the span the dashboard's live "
     "charts show, and the span the engine holds in memory per run so the "
     "dashboard can rebuild those charts when it attaches - or re-attaches - "
-    "mid-run. One setting drives both, so they cannot disagree; the dashboard's "
-    "Live Dashboard panel edits this same value. Expressed as elapsed time "
+    "mid-run. One setting drives both, so they cannot disagree. Its editor is "
+    "Settings > Dashboard > Chart window, which is where the effect is "
+    "visible; this list deliberately does not offer a second one. Expressed "
+    "as elapsed time "
     "rather than a tick count, so it survives a change to the tick interval. 0 "
     "means the full run (no time limit). Live Metrics Tick Ceiling is the "
     "memory backstop "
@@ -2406,20 +2414,6 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
     "1000", "500000", std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "maxStoredErrors",
-    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
-    "integer", "Stored Error Records Per Run",
-    "How many individual error records a run keeps for its report. The error "
-    "total, the failed-request count, the error rate and the status-code "
-    "breakdown are always exact - this bounds only the per-error detail behind "
-    "the report's 'By Error Type' breakdown, which on a run with more errors "
-    "than this covers the first N and will not sum to the total beside it. 0 "
-    "means unlimited, which against a fully refusing target grows for the life "
-    "of the run.",
-    "observability",
-    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
-    "0", "10000000", std::nullopt, now });
-
     upsert_config (unit ("ms") (ConfigEntry{ "liveRetentionMs",
     "60000",
     "integer", "Live Metrics Retention",
@@ -2430,6 +2424,29 @@ void Database::seed_default_config () {
     "observability", "60000",
     "0", "600000", std::nullopt, now }));
 
+    // =========================================================================
+    // DATA & RETENTION CONFIGURATION
+    // What a run stores and for how long: capture and truncation budgets, and
+    // the two retention limits. The words a user arrives with here are "why is
+    // my response body cut off" and "keep fewer runs", neither of which reads
+    // as observability - which is why these left it (#586). The app's General >
+    // Data management block, which shows and clears stored runs, points here.
+    // =========================================================================
+
+    upsert_config (ConfigEntry{ "maxStoredErrors",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "integer", "Stored Error Records Per Run",
+    "How many individual error records a run keeps for its report. The error "
+    "total, the failed-request count, the error rate and the status-code "
+    "breakdown are always exact - this bounds only the per-error detail behind "
+    "the report's 'By Error Type' breakdown, which on a run with more errors "
+    "than this covers the first N and will not sum to the total beside it. 0 "
+    "means unlimited, which against a fully refusing target grows for the life "
+    "of the run.",
+    "data_retention",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "0", "10000000", std::nullopt, now });
+
     upsert_config (unit ("bytes") (ConfigEntry{ "maxTraceBodyBytes",
     std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
     "Max Stored Trace Body Size",
@@ -2437,7 +2454,7 @@ void Database::seed_default_config () {
     "trace. A larger body is truncated in the database - the response viewer "
     "says so, and re-sending fetches the full body - so one huge response does "
     "not bloat storage forever.",
-    "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
+    "data_retention", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
     "1024",       // 1KB
     "104857600",  // 100MB
     std::nullopt, now }));
@@ -2449,7 +2466,7 @@ void Database::seed_default_config () {
     "sample. Deliberately far smaller than the design-run trace limit, because "
     "a load run captures tens of exchanges nobody asked for individually. A "
     "larger body is stored truncated and marked as such.",
-    "observability",
+    "data_retention",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
     "0",         // 0 disables body capture while keeping headers and metadata
     "104857600", // 100MB
@@ -2462,7 +2479,7 @@ void Database::seed_default_config () {
     "samples keep their headers and metadata and only their bodies are "
     "dropped, and the report says how many. Captured data is stored verbatim, "
     "can contain credentials, and is deleted with the run.",
-    "observability",
+    "data_retention",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
     "0",          // 0 disables body capture while keeping headers and metadata
     "1073741824", // 1GB
@@ -2477,7 +2494,7 @@ void Database::seed_default_config () {
     "what answers whether a slow p99 came from the server or from connection "
     "setup. It costs five histogram writes per completion; turn it off only if "
     "a run at your throughput ceiling measurably suffers.",
-    "observability",
+    "data_retention",
     vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now }));
 
@@ -2489,7 +2506,7 @@ void Database::seed_default_config () {
     "being buffered, so load testing a big download or a streaming endpoint "
     "cannot exhaust memory - every in-flight request holds its own body. "
     "Design-mode sends are not affected.",
-    "observability", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "data_retention", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
     "1024",       // 1KB
     "1073741824", // 1GB
     std::nullopt, now }));
@@ -2502,7 +2519,7 @@ void Database::seed_default_config () {
     "value - or 0 for unlimited - keeps more history but grows the database "
     "file on disk and slows down loading the run history. In-progress runs are "
     "never pruned.",
-    "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
+    "data_retention", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
     "0", "100000", std::nullopt, now }));
 
     upsert_config (unit ("days") (keywords ({ "cleanup" }) (
@@ -2513,14 +2530,23 @@ void Database::seed_default_config () {
     "startup and after each run finishes. A higher value - or 0 to keep runs "
     "forever - retains more history at the cost of a larger database file on "
     "disk. In-progress runs are never pruned.",
-    "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
+    "data_retention", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
     "0", "3650", std::nullopt, now })));
+
+    // =========================================================================
+    // SERVICES CONFIGURATION
+    // The long-lived surfaces: streaming requests, and the webhook inboxes,
+    // mock servers and OAuth issuers the Dock calls Services. Before #586 these
+    // were filed under Observability, which is the drawer's word for none of
+    // them - a user managing a service found no matching word in the tree.
+    // =========================================================================
 
     // SSE requests (issue #573). All six are read once when a stream starts, so
     // a change applies to the next stream - no restart - and one run's events
     // are all bounded by a single rule rather than by whatever the setting
     // happened to be at each arrival.
-    upsert_config (keywords ({ "eventsource" }) (ConfigEntry{ "sseMaxRetainedEvents",
+    upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
+    ConfigEntry{ "sseMaxRetainedEvents",
     std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer",
     "Stream Events Retained",
     "How many of a streaming request's events are held in memory for the Events "
@@ -2528,12 +2554,13 @@ void Database::seed_default_config () {
     "back a long stream can be scrolled while it is running; the completed run "
     "stores its own, separate list. Each event costs roughly its own size in "
     "memory.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS),
+    "services", std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS),
     std::to_string (vayu::core::constants::sse::MIN_RETAINED_EVENTS),
     std::to_string (vayu::core::constants::sse::RETAINED_EVENTS_CEILING),
     std::nullopt, now }));
 
-    upsert_config (unit ("bytes") (keywords ({ "eventsource" }) (
+    upsert_config (unit ("bytes") (
+    keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxEventBytes",
     std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer",
     "Stream Event Size Limit",
@@ -2541,12 +2568,12 @@ void Database::seed_default_config () {
     "prefix and flagged as truncated, never silently cut - the event reports "
     "the size as received either way. This is also what bounds the parser "
     "itself, so a server that sends without a line break cannot exhaust memory.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES),
+    "services", std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES),
     std::to_string (vayu::core::constants::sse::MIN_EVENT_BYTES),
     std::to_string (vayu::core::constants::sse::EVENT_BYTES_CEILING),
     std::nullopt, now })));
 
-    upsert_config (keywords ({ "eventsource" }) (
+    upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxStoredEvents",
     std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer",
     "Stream Events Stored Per Run",
@@ -2554,11 +2581,12 @@ void Database::seed_default_config () {
     "from History shows the timeline again. A run that received more says so - "
     "the stored list is marked truncated and carries the true total. 0 keeps "
     "the count and no events.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS),
+    "services", std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS),
     "0", std::to_string (vayu::core::constants::sse::STORED_EVENTS_CEILING),
     std::nullopt, now }));
 
-    upsert_config (unit ("ms") (keywords ({ "eventsource" }) (
+    upsert_config (unit ("ms") (
+    keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxStreamDurationMs",
     std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer",
     "Stream Duration Limit",
@@ -2566,24 +2594,26 @@ void Database::seed_default_config () {
     "so. A stream has no content length and no promise to end, so this is the "
     "backstop that keeps one from holding a worker forever. A request may ask "
     "for a shorter limit of its own.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS),
+    "services", std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS),
     std::to_string (vayu::core::constants::sse::MIN_STREAM_DURATION_MS),
     std::to_string (vayu::core::constants::sse::STREAM_DURATION_MS_CEILING),
     std::nullopt, now })));
 
-    upsert_config (keywords ({ "eventsource" }) (ConfigEntry{ "sseMaxStreamEvents",
+    upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
+    ConfigEntry{ "sseMaxStreamEvents",
     std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer",
     "Stream Event Limit",
     "How many events a streaming request may receive before the engine ends it "
     "and says so. The count backstop beside the time one, for a stream that "
     "talks fast rather than long. A request may ask for a lower limit of its "
     "own.",
-    "observability", std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS),
+    "services", std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS),
     std::to_string (vayu::core::constants::sse::MIN_STREAM_EVENTS),
     std::to_string (vayu::core::constants::sse::STREAM_EVENTS_CEILING),
     std::nullopt, now }));
 
-    upsert_config (advanced (unit ("ms") (keywords ({ "eventsource" }) (
+    upsert_config (advanced (unit ("ms") (
+    keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseIdleTimeoutMs",
     std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer",
     "Stream Idle Timeout",
@@ -2592,7 +2622,7 @@ void Database::seed_default_config () {
     "healthy stream mid-flight - so it must be longer than the quietest gap "
     "the endpoint you are watching leaves between events. Enforced at whole-"
     "second resolution.",
-    "observability", std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS),
+    "services", std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS),
     std::to_string (vayu::core::constants::sse::MIN_IDLE_TIMEOUT_MS),
     std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING),
     std::nullopt, now }))));
@@ -2610,7 +2640,7 @@ void Database::seed_default_config () {
     "the capture reports the size as received either way. Raise it for a "
     "provider that posts large documents; the transport still refuses anything "
     "over 8 MB outright, which is not a webhook.",
-    "observability", std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES),
+    "services", std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES),
     std::to_string (vayu::core::constants::inbox::MIN_BODY_BYTES),
     std::to_string (vayu::core::constants::inbox::MAX_PAYLOAD_BYTES), std::nullopt, now }));
 
@@ -2621,7 +2651,7 @@ void Database::seed_default_config () {
     "most a single page of the capture list may ask for. Raise it to keep a "
     "long webhook session whole; every capture is a stored row, so this and "
     "the body limit above together bound what an inbox costs on disk.",
-    "observability", std::to_string (vayu::core::constants::inbox::MAX_CAPTURES),
+    "services", std::to_string (vayu::core::constants::inbox::MAX_CAPTURES),
     std::to_string (vayu::core::constants::inbox::MIN_CAPTURES),
     std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
 
@@ -2632,7 +2662,7 @@ void Database::seed_default_config () {
     "captures. This is the delay between a webhook landing and its row "
     "appearing. Lower costs a few more wakeups per second on the one thread "
     "holding that stream and nothing on the capture path itself.",
-    "observability", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
+    "services", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
     std::to_string (vayu::core::constants::inbox::MIN_LIVE_POLL_INTERVAL_MS),
     std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now })));
 
