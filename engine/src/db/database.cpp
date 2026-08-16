@@ -273,6 +273,12 @@ inline auto make_storage (const std::string& path) {
     // writer before the app could save a response as an example.
     make_column ("origin", &RequestExample::origin,
     default_value (std::string (vayu::core::constants::request_example::ORIGIN_IMPORT))),
+    // Whether `body` is a prefix of the response it was saved from (issue
+    // #659). NOT NULL + default_value on the `origin` precedent above, so
+    // sync_schema() ALTERs it on and every existing row backfills to false -
+    // which is what they all are: import copies whole bodies, and the app's
+    // save-as-example is the only writer that ever had a partial one.
+    make_column ("body_truncated", &RequestExample::body_truncated, default_value (false)),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 

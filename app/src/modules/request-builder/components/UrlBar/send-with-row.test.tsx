@@ -55,10 +55,15 @@ function csvBytes(text = CSV): { bytes: Uint8Array; fileName: string } {
 
 function ctx(
 	executeRequest: RequestBuilderContextValue["executeRequest"],
-	dataColumns?: DataContractScope
+	dataColumns?: DataContractScope,
+	requestId: string | null = null
 ): RequestBuilderContextValue {
 	return {
-		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
+		request: {
+			...createDefaultRequestState(),
+			id: requestId,
+			url: "https://example.test/x",
+		},
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
 		restoreStoredName: vi.fn(),
@@ -98,11 +103,12 @@ function ctx(
 
 function renderBar(
 	executeRequest: RequestBuilderContextValue["executeRequest"],
-	dataColumns?: DataContractScope
+	dataColumns?: DataContractScope,
+	requestId: string | null = null
 ) {
 	return render(
 		<TooltipProvider>
-			<RequestBuilderContext.Provider value={ctx(executeRequest, dataColumns)}>
+			<RequestBuilderContext.Provider value={ctx(executeRequest, dataColumns, requestId)}>
 				<UrlBar />
 			</RequestBuilderContext.Provider>
 		</TooltipProvider>
@@ -325,5 +331,89 @@ describe("the caret's place in the attached group", () => {
 		);
 		expect(caret()).toBeNull();
 		expect(screen.getByRole("button", { name: /stop/i })).toBeTruthy();
+	});
+});
+
+/**
+ * The remembered row is per request, not per builder (issue #659 item 1).
+ *
+ * `Shell` renders `<RequestBuilder />` at the same position for every request
+ * tab and does not key it, so switching tabs does *not* remount this component -
+ * React keeps the instance and everything in its `useState`. The remembered
+ * index was one number in that state, so it followed the user from request to
+ * request: the highlight, and the row a one-click re-send binds, belonged to
+ * whichever request picked last.
+ *
+ * These drive that switch the way the shell does - a re-render with a different
+ * request in context, no unmount - because a test that mounted a second UrlBar
+ * would pass against the broken version.
+ */
+describe("the remembered row", () => {
+	/** The picker's row buttons, in order, once it is open. */
+	async function openRows() {
+		openPicker();
+		await screen.findByRole("button", { name: /ada@example\.test/ });
+		return screen
+			.getAllByRole("button")
+			.filter((el) => /@example\.test/.test(el.textContent ?? ""));
+	}
+
+	it("does not follow the user to the next request tab", async () => {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes());
+		const execute = vi.fn(async () => {});
+		const { rerender } = renderBar(execute, CONTRACT, "req_a");
+
+		// Pick the second row on request A. The picker closes on send.
+		const rows = await openRows();
+		fireEvent.click(rows[1]);
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+		// Reopening on A still shows the pick - the feature this must not break.
+		const backOnA = await openRows();
+		expect(backOnA[1].className).toContain("bg-accent");
+		fireEvent.keyDown(document.body, { key: "Escape" });
+
+		// The tab switch: same mounted builder, different request.
+		rerender(
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={ctx(execute, CONTRACT, "req_b")}>
+					<UrlBar />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		);
+
+		const onB = await openRows();
+		for (const row of onB) {
+			expect(row.className).not.toContain("bg-accent/60");
+		}
+	});
+
+	it("comes back when the user returns to the request that made it", async () => {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes());
+		const execute = vi.fn(async () => {});
+		const { rerender } = renderBar(execute, CONTRACT, "req_a");
+
+		const rows = await openRows();
+		fireEvent.click(rows[1]);
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+		const switchTo = (requestId: string) =>
+			rerender(
+				<TooltipProvider>
+					<RequestBuilderContext.Provider value={ctx(execute, CONTRACT, requestId)}>
+						<UrlBar />
+					</RequestBuilderContext.Provider>
+				</TooltipProvider>
+			);
+
+		switchTo("req_b");
+		switchTo("req_a");
+
+		// A map, not a reset: forgetting on every switch would pass the test
+		// above and lose the affordance's whole point.
+		const backOnA = await openRows();
+		expect(backOnA[1].className).toContain("bg-accent");
 	});
 });

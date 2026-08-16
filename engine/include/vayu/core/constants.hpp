@@ -11,7 +11,12 @@
 #include <cstdint>
 #include <string>
 
-#include "vayu/version.hpp"
+// `DEFAULT_USER_AGENT` only, and deliberately *not* "vayu/version.hpp" (issue
+// #659 item 5). This header is reached by essentially every translation unit, so
+// anything version-derived in it makes a release bump recompile the whole
+// engine; `user_agent.hpp` declares the symbol without naming the version, and
+// one .cpp defines it. `version_isolation_test.cpp` guards the rule.
+#include "vayu/core/user_agent.hpp"
 
 namespace vayu::core::constants {
 /**
@@ -24,8 +29,7 @@ constexpr const char* DAEMON_URL = "http://127.0.0.1:9876";
 constexpr int PORT = 9876;
 /// Default verbosity level
 constexpr bool VERBOSE = false;
-/// Default User-Agent header string
-constexpr const char* DEFAULT_USER_AGENT = "Vayu/" VAYU_VERSION_STRING;
+// DEFAULT_USER_AGENT is declared in "vayu/core/user_agent.hpp", included above.
 } // namespace defaults
 
 /**

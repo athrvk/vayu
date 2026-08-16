@@ -434,6 +434,16 @@ export interface RequestExample {
 	body: string;
 	/** `""` when the source stated no media type - not a guess. */
 	contentType: string;
+	/**
+	 * True when `body` is only the first slice of the response this was saved
+	 * from (issue #659).
+	 *
+	 * Typed here because the panel paints a chip from it: a mock server serves
+	 * the stored body verbatim, so an example nobody marked as partial is
+	 * indistinguishable from a complete one. Absent on rows written before the
+	 * engine had the column, which are all complete by construction.
+	 */
+	bodyTruncated?: boolean;
 }
 
 export interface Environment {

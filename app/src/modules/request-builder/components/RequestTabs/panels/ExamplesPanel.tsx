@@ -25,7 +25,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
-import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { Badge, Button, DeleteConfirmDialog } from "@/components/ui";
 import { useDeleteRequestExampleMutation, useRequestExamplesQuery } from "@/queries";
 import { useRequestBuilderContext } from "../../../context";
 import type { RequestExample } from "@/types";
@@ -78,6 +78,26 @@ function ExampleRow({
 					<Chevron className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 					<StatusCodeBadge status={example.status} />
 					<span className="truncate font-medium">{example.name}</span>
+					{/*
+					 * A partial body, said on the row rather than in the name
+					 * (issue #659). The name is editable at save time, so it lost
+					 * the disclosure to any rename; the engine records
+					 * `bodyTruncated` and this reads it.
+					 *
+					 * Amber, not destructive: a truncated example is a usable
+					 * one - a mock will serve it and the response is real as far
+					 * as it goes - so the state is "know this", never "broken".
+					 * The same reading `DATA_TOKEN_TONE_CLASS` gives `warning`.
+					 */}
+					{example.bodyTruncated && (
+						<Badge
+							variant="chip"
+							className="shrink-0 border border-warning/30 bg-warning/10 text-warning-text"
+							title="Only the first part of the response was captured. A mock server serves this body as though it were the whole response."
+						>
+							Partial body
+						</Badge>
+					)}
 				</button>
 				<Button
 					size="icon"

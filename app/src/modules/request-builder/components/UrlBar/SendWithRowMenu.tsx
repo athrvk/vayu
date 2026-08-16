@@ -49,11 +49,13 @@ export interface SendWithRowMenuProps {
 	/**
 	 * The row index this request was last sent with, and the setter for it.
 	 *
-	 * Held by the caller - the builder, per request, in plain state - so
+	 * Held by the caller - the builder, keyed by request id, in plain state - so
 	 * iterating on a script is one click rather than a hunt through the list
 	 * each time. Deliberately not persisted: it points into a file whose rows
 	 * are not, and a remembered index against a file that has since changed
-	 * would name a different row.
+	 * would name a different row. Keyed rather than single because the builder
+	 * is not remounted per tab (#659); a lone number followed the user across
+	 * requests.
 	 */
 	lastRowIndex: number | null;
 	onRowIndexChange: (index: number) => void;

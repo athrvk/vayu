@@ -36,12 +36,26 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	CodeEditor: () => <div data-testid="code-editor" />,
 }));
 
-/** One data column and one ordinary name nothing defines, in one script. */
-const SCRIPT = `const to = "{{data.email}}"; const k = "{{missing_key}}";`;
+/**
+ * One data column, one ordinary name read through `pm` and nothing defines, and
+ * one plain `{{}}` - the three paints this row has, in one script.
+ *
+ * `missing_key` is a `pm.*.get()` deliberately: after #659 the destructive paint
+ * belongs to names a script actually *reads*, and a `{{missing_key}}` would be
+ * the neutral template chip instead.
+ */
+const SCRIPT = [
+	'const to = "{{data.email}}";',
+	'const k = pm.environment.get("missing_key");',
+	'const u = "{{base_url}}/orders";',
+].join("\n");
 
 const contract: { value: { collectionName: string; columns: string[] } | undefined } = {
 	value: undefined,
 };
+
+/** What `getAllVariables()` answers with - empty unless a case says otherwise. */
+const variables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
 
 vi.mock("../../../context", () => ({
 	useRequestBuilderContext: () => ({
@@ -51,7 +65,7 @@ vi.mock("../../../context", () => ({
 		// the chain walk is not what these cases are about.
 		request: { preRequestScript: SCRIPT, testScript: SCRIPT, collectionId: null },
 		updateField: () => {},
-		getAllVariables: () => ({}),
+		getAllVariables: () => variables.value,
 		get dataColumns() {
 			return contract.value;
 		},
@@ -83,9 +97,10 @@ function chipFor(container: HTMLElement, name: string): HTMLElement {
 
 beforeEach(() => {
 	contract.value = undefined;
+	variables.value = {};
 });
 
-describe("a {{data.*}} name in the referenced row", () => {
+describe("a {{data.*}} name in the chip row", () => {
 	it("is never painted destructive, with no contract in scope", () => {
 		const { container } = render(<ScriptPanel variant="pre" />);
 
@@ -115,12 +130,42 @@ describe("a {{data.*}} name in the referenced row", () => {
 	});
 });
 
-describe("an ordinary name nothing defines", () => {
+describe("an ordinary name nothing defines, read through pm", () => {
 	it("keeps the destructive chip - that reading is still true for it", () => {
 		const { container } = render(<ScriptPanel variant="pre" />);
 
 		// Guards the scan as much as the behaviour: if no chip were rendered at
 		// all, every "not destructive" assertion above would pass vacuously.
 		expect(chipFor(container, "missing_key").className).toContain("bg-destructive");
+	});
+});
+
+/**
+ * The rest of what #604 left behind (issue #659 item 3).
+ *
+ * `{{base_url}}` in a script is literal characters - the engine never
+ * interpolates script source (decision D16) - so the resolved/unresolved pair
+ * cannot apply to it in either direction. Painting it green said a send would
+ * substitute it; painting it red said a name that is doing nothing is broken.
+ */
+describe("a plain {{name}} the script only contains", () => {
+	it("is neutral, spelled as a template, and says why", () => {
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const chip = chipFor(container, "{{base_url}}");
+		expect(chip.className).toContain("text-muted-foreground");
+		expect(chip.className).not.toContain("bg-destructive");
+		expect(chip.getAttribute("title")).toContain("not interpolated");
+	});
+
+	it("stays neutral even when a variable of that name is in scope", () => {
+		// The half a "paint it green when defined" rule would get wrong: the
+		// variable existing changes nothing about what this script does.
+		variables.value = { base_url: { value: "https://api.example.com", scope: "global" } };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const chip = chipFor(container, "{{base_url}}");
+		expect(chip.className).toContain("text-muted-foreground");
+		expect(chip.className).not.toContain("bg-secondary");
 	});
 });

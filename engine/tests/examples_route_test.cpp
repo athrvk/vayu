@@ -259,6 +259,63 @@ TEST_F (ExamplesRouteTest, UpdateOriginFollowsTheNullVsAbsentRule) {
 }
 
 // ---------------------------------------------------------------------------
+// Truncated bodies (issue #659 item 2)
+// ---------------------------------------------------------------------------
+
+// A mock server answers with a stored example verbatim, so an example saved
+// from a capped response is served as if it were whole. The fact has to live on
+// the row: it used to live only in the default *name*, which the save dialog
+// invites the user to edit, so renaming it erased the disclosure.
+TEST_F (ExamplesRouteTest, CreateDefaultsBodyTruncatedToFalseAndKeepsAClaimedTrue) {
+    auto [status, body] =
+    routes::create_request_example_response (*db_, "req_1", json{ { "name", "Whole" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["bodyTruncated"], false);
+    EXPECT_FALSE (db_->get_request_example (body["id"])->body_truncated);
+
+    auto [cut_status, cut] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "First slice only" }, { "body", "{\"items\":[" },
+    { "bodyTruncated", true } });
+    ASSERT_EQ (cut_status, 200) << cut.dump ();
+    EXPECT_EQ (cut["bodyTruncated"], true);
+    EXPECT_TRUE (db_->get_request_example (cut["id"])->body_truncated);
+}
+
+// The list read is what the Examples panel paints its chip from, so the flag
+// has to survive the round trip through storage rather than only the create
+// response - the same reason `origin` is asserted on both.
+TEST_F (ExamplesRouteTest, ListCarriesBodyTruncatedPerRow) {
+    create_example ("req_1", json{ { "name", "Whole" } });
+    create_example ("req_1", json{ { "name", "Cut" }, { "bodyTruncated", true } });
+
+    auto [status, body] = routes::list_request_examples_response (*db_, "req_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    ASSERT_EQ (body.size (), 2u);
+    EXPECT_EQ (body[0]["bodyTruncated"], false);
+    EXPECT_EQ (body[1]["bodyTruncated"], true);
+}
+
+// Absent keeps, null resets - the same null-vs-absent rule every other
+// defaulted field follows. Absent-keeps is the load-bearing half: renaming a
+// truncated example must not quietly promote it to a complete one, which is
+// exactly the failure the name-suffix disclosure had.
+TEST_F (ExamplesRouteTest, UpdateBodyTruncatedFollowsTheNullVsAbsentRule) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "Cut" }, { "bodyTruncated", true } });
+
+    auto [renamed_status, renamed] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Renamed by hand" } });
+    ASSERT_EQ (renamed_status, 200) << renamed.dump ();
+    EXPECT_EQ (renamed["bodyTruncated"], true);
+
+    auto [reset_status, reset_body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "bodyTruncated", nullptr } });
+    ASSERT_EQ (reset_status, 200) << reset_body.dump ();
+    EXPECT_EQ (reset_body["bodyTruncated"], false);
+    EXPECT_FALSE (db_->get_request_example (id)->body_truncated);
+}
+
+// ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
 

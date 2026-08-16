@@ -1009,6 +1009,17 @@ silent fall back - the OpenAPI spec sync (#627) may replace `"import"` rows
 wholesale and must never touch a `"user"` one, so an absorbed typo would cost a
 user their saved example.
 
+**`bodyTruncated` says the body stops short** (issue #659). A mock server serves
+a stored example verbatim, with nothing in the response to say anything is
+missing, so an example saved from a capped trace body (`maxTraceBodyBytes`) is
+served as though it were a whole response. Only the client that captured it can
+know, so the flag is stored rather than inferred - a short body is a legitimate
+body. It defaults to `false`, which is honest for every row written before the
+column existed: import copies a whole documented body, and the app's
+save-as-example is the only writer that ever had a partial one. The app disclosed
+this in the example's *name* until the column landed, which a rename at save time
+erased.
+
 ### GET /requests/:id/examples
 
 **Response:** an array of example objects, oldest first:
@@ -1024,6 +1035,7 @@ user their saved example.
     "contentType": "application/json",
     "order": 0,
     "origin": "import",
+    "bodyTruncated": false,
     "createdAt": 1730000000000,
     "updatedAt": 1730000000000
   }
@@ -1048,7 +1060,9 @@ Create one example. **Create only**, and the engine owns the id - see
   "body": "",                // Optional. Default ""
   "contentType": "",         // Optional. Default ""
   "order": 0,                // Optional, appended after the request's examples if omitted
-  "origin": "import"         // Optional, "import" | "user". Default "import"
+  "origin": "import",        // Optional, "import" | "user". Default "import"
+  "bodyTruncated": false     // Optional. Default false - true when `body` is
+                             // only the first slice of the captured response
 }
 ```
 
@@ -1930,6 +1944,14 @@ examples](#request-examples) on the paths its requests describe. It is what
 examples are *for*: import a spec, and the responses it documented become a
 running upstream you can build a frontend against, or point a Vayu load run at,
 without a cloud plan or a second machine.
+
+**A mock serves the stored body verbatim, including a partial one.** An example
+whose `bodyTruncated` is true holds only the first slice of the response it was
+captured from, and the mock answers with those bytes and the recorded headers as
+though they were a whole response - nothing on the wire says otherwise, and the
+flag deliberately does not change what is served. It is disclosure, not
+behaviour: the app paints a "Partial body" chip on the row so the choice to serve
+it is a made one (issue #659).
 
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one

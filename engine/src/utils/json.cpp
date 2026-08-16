@@ -478,8 +478,11 @@ Json serialize (const vayu::db::RequestExample& x) {
     json["contentType"] = x.content_type;
     json["order"]       = x.order;
     json["origin"]      = x.origin;
-    json["createdAt"]   = x.created_at;
-    json["updatedAt"]   = x.updated_at;
+    // Always present, never inferred from the body's length: only the writer
+    // knew the response was cut (issue #659).
+    json["bodyTruncated"] = x.body_truncated;
+    json["createdAt"]     = x.created_at;
+    json["updatedAt"]     = x.updated_at;
     return json;
 }
 
