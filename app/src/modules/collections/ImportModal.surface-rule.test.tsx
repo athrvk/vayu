@@ -109,7 +109,7 @@ describe("the import dialog declares its surfaces", () => {
 
 	it("puts the drop zone's dashed affordance on a declared sunken surface", () => {
 		renderModal();
-		const zone = screen.getByText(/Drop a file here/i).closest("button")!;
+		const zone = screen.getByText(/Drop files here/i).closest("button")!;
 		const cls = tokens(zone);
 		// On --accent, --border-strong is the faintest edge in dark (1.108, below
 		// plain --border); surface-sunken's rule is the strongest in both themes.
