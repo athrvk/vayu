@@ -56,7 +56,7 @@ and neither knows about the other - so a live response showed script results,
 stream events and now schema verdicts that a restored one did not. When you add a
 field to one, add it to both and assert they agree
 (`validation-funnels.test.ts` is the shape: drive both with the same input,
-compare). The engine helps by storing the *same* object it returned rather than
+compare). The engine helps by storing the _same_ object it returned rather than
 letting each side derive its own.
 
 **Before measuring or changing a class, `rg` for it in the components.** Twice a
