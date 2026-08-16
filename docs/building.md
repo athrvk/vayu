@@ -269,6 +269,39 @@ export PATH=$VCPKG_ROOT:$PATH
 - Or set `VCPKG_ROOT` environment variable
 - Script auto-detects Visual Studio bundled CMake and vcpkg
 
+### vcpkg Cannot Find the Pinned Baseline
+
+**Problem:** every dependency fails during configure with one of
+
+```
+fatal: path 'versions/baseline.json' exists on disk, but not in '94a5411977...'
+  while checking out baseline 94a5411977...
+```
+
+```
+error: no version database entry for cpp-httplib at 0.53.0.
+Available versions: 0.52.0, 0.51.0, ...
+```
+
+The first reads like a corrupt registry and the second like a deleted release.
+Both mean the same thing: your `$VCPKG_ROOT` clone is older than the
+`builtin-baseline` commit pinned in `engine/vcpkg.json`. Baseline bumps happen
+every release cycle, so any clone that has not been updated recently hits this.
+
+vcpkg reads the baseline map out of the pinned *commit* but the per-port version
+database out of the *worktree*, which is why a bare `git fetch` cures the first
+error and lands you on the second.
+
+**Solution:** `build.py` detects this and updates the clone itself, so the usual
+answer is to re-run the build. Where it cannot - a modified checkout, no
+network, or a vcpkg that is not a git clone - it prints the manual cure:
+
+```bash
+git -C "$VCPKG_ROOT" pull --ff-only origin master
+```
+
+CI is unaffected: the workflows check out the exact `VCPKG_COMMIT`.
+
 ### Engine Fails to Start
 
 **Problem:** "Failed to Start Engine" error

@@ -9,8 +9,9 @@ name: PR CI - run tests
 # work jobs are skipped when nothing they own was touched, and `ci-gate` still
 # reports. That is the case its "or skipped" branch was always written for.
 #
-# The work is split by tree - `app`, `engine`, `installer` - rather than run as
-# one job per OS, because the two trees have wildly different costs and are
+# The work is split by tree - `app`, `engine`, `installer`, `build-script` -
+# rather than run as one job per OS, because the trees have wildly different
+# costs and are
 # rarely touched together. Measured over the last 28 runs (median 14.0 min, p90
 # 16.6 min), with warm vcpkg and sccache caches:
 #
@@ -48,6 +49,7 @@ jobs:
       app: ${{ steps.area.outputs.app }}
       engine: ${{ steps.area.outputs.engine }}
       installer: ${{ steps.area.outputs.installer }}
+      build_script: ${{ steps.area.outputs.build_script }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -126,6 +128,10 @@ jobs:
               - 'build.py'
               - 'VERSION'
               - '.github/check-windows-deps.py'
+              - '.github/workflows/pr-tests.yml'
+            build_script:
+              - 'build.py'
+              - 'scripts/test/vcpkg_baseline_test.py'
               - '.github/workflows/pr-tests.yml'
             installer:
               - 'install.sh'
@@ -440,6 +446,28 @@ jobs:
           /bin/bash scripts/test/install_test.sh
           /bin/bash scripts/test/install_e2e.sh
 
+  # build.py's plumbing, on its own job because it needs neither a C++ toolchain
+  # nor Node: throwaway git repositories and python3. Linux only - the code under
+  # test shells out to git, which behaves the same on every runner, and the
+  # engine job already covers build.py's real use on all three.
+  build-script:
+    name: Build script
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.build_script == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Test the stale-vcpkg-baseline self-heal
+        run: python3 scripts/test/vcpkg_baseline_test.py
+
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
@@ -447,7 +475,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, app, engine, installer]
+    needs: [changes, app, engine, installer, build-script]
     if: always()
     steps:
       - name: Pass if every job succeeded or was skipped
@@ -474,6 +502,7 @@ jobs:
           check app       "${{ needs.app.result }}"
           check engine    "${{ needs.engine.result }}"
           check installer "${{ needs.installer.result }}"
+          check build-script "${{ needs['build-script'].result }}"
 
           if [[ $status -ne 0 ]]; then
             echo "CI failed"
