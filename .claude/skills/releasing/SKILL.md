@@ -11,15 +11,26 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    `engine/vcpkg.json`, and refuses to run if that file has grown a `version`
    field back: CI keys the vcpkg binary cache on the manifest's hash, so a
    version there made every release rebuild every C++ dependency from source.
-2. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
+2. Check the vcpkg baseline for staleness - `cd engine && vcpkg
+   x-update-baseline --dry-run`. **The release window is the cadence**: nothing
+   else owns baseline freshness, and #679 found cpp-httplib five minors behind
+   with curl, openssl and sqlite3 each missing point releases, purely because
+   the pin had gone unexamined since June. A bump is `builtin-baseline` in
+   `engine/vcpkg.json` **and** `VCPKG_COMMIT` in `release.yml`, `pr-tests.yml`,
+   `codeql.yml` and `cache-warm.yml` - one SHA in five places, and the `guard`
+   job in `cache-warm.yml` fails the build if any of them drift. Land a bump as
+   **its own PR before the release commit**, never inside it: a dependency
+   change and a version bump that break one platform together cannot be told
+   apart.
+3. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
-3. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
+4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
    file together).
-4. Tag: `git tag v$(cat VERSION) && git push origin --tags`
-5. CI builds installers and publishes the GitHub Release, using
+5. Tag: `git tag v$(cat VERSION) && git push origin --tags`
+6. CI builds installers and publishes the GitHub Release, using
    `.github/release-notes/<tag>.md` as the release body automatically (no manual
    paste).
-6. Read the sccache hit rate in the release run's log and expect **more than
+7. Read the sccache hit rate in the release run's log and expect **more than
    zero engine hits** (issue #659 item 5). A version bump used to edit a header
    every translation unit preprocessed, so every release compiled the engine
    cold on all three platforms at a 0% hit rate by construction;
