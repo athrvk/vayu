@@ -1126,7 +1126,9 @@ TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
     // nothing rather than `operation_not_declared`.
     stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
 
-    const auto run_id = start (/*iterations=*/1);
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = manager_.get_run (run_id);
+    ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
     const auto rows = db_->get_results (run_id);
@@ -1136,6 +1138,18 @@ TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
     // Absent from the summary too, and absent rather than a block of zeros: a
     // run nothing judged did not match none of a contract.
     EXPECT_FALSE (summary_of (run_id).contains ("schemaValidation"));
+
+    // And absent from the wire, which is the surface a live view reads. The
+    // stored row above proves the trace; this proves the `step` frame, which is
+    // built on a separate path - a key added there unconditionally (even as a
+    // null) would leave the watcher showing a verdict the report never writes.
+    const auto batch = context->ticks_since (0);
+    ASSERT_EQ (batch.payloads.size (), 1u);
+    const auto& payload = batch.payloads[0];
+    const auto data_at  = payload.find ("data: ");
+    ASSERT_NE (data_at, std::string::npos) << payload;
+    EXPECT_FALSE (json::parse (payload.substr (data_at + 6)).contains ("validation"))
+    << payload;
 }
 
 TEST_F (ScenarioRunnerTest, ABoundDocumentWithNoSchemaIndexIsSaidSoRatherThanSilent) {

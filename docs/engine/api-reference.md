@@ -1750,6 +1750,10 @@ the next. **One jar per environment**, plus one for requests sent with no
 environment selected; in memory only, for the life of the engine process, and
 never written to disk. Load runs neither read nor write it.
 
+Cookies set *during* a redirect chain follow curl's cross-origin rule rather
+than the jar's - see [POST /execute](#post-execute) for what a redirect that
+changes origin does to them.
+
 ### GET /cookies
 
 Every jar that holds anything, one entry per scope.
@@ -2637,6 +2641,20 @@ clients send these explicitly for exactly that reason (see
 [api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
 the request was configured with.
+
+**A redirect that crosses origins drops the cookies the hop set.** Since
+**curl 8.21.0** (`http: don't pass on set cookies to new origins`, which the
+engine picked up with the vcpkg baseline bump of #679), a `Set-Cookie` returned
+by one origin is not applied to the follow-up request when the `Location`
+points at a different one; a same-origin hop is unchanged. This is upstream
+security hardening, inherited deliberately, and it is not configurable - the
+engine sets `CURLOPT_FOLLOWLOCATION` per request wherever `followRedirects` is
+true, so it holds on `POST /execute`, on load runs and on streaming requests
+alike. A flow that depended on a cookie surviving a cross-origin hop (a login
+that bounces through an identity provider is the usual shape) now sends the
+follow-up request without it. Nothing about the [cookie jar](#cookies) itself
+changed: it is domain-scoped as before, so a cookie is still stored under the
+origin that set it and still sent on a later request back to that origin.
 
 **Protocol.** `httpVersion` selects which HTTP version curl attempts:
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
