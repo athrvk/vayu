@@ -268,6 +268,22 @@ ctest -V
 ./vayu_tests
 ```
 
+### Test files are registered, and the build checks it
+
+The `vayu_tests` sources are listed one by one in `engine/CMakeLists.txt`
+rather than globbed, so the set of files that gets built is visible in the
+diff. The cost of that is a file which is added to `engine/tests/` and never
+listed: it compiles into nothing, runs nothing, and says nothing about it -
+`response_capture_test.cpp` sat unbuilt for ~140 commits that way, and one of
+its assertions had been wrong since the day it was written (issue #668).
+
+A guard beside the source list globs `tests/*_test.cpp` and fails configure
+naming any file the list is missing. The glob is only the check - it never
+becomes the source list - and it is declared `CONFIGURE_DEPENDS`, so adding a
+file re-runs the check on the next `ninja` rather than waiting for someone to
+reconfigure. The guard also fails if the glob matches nothing at all, since a
+check that scans an empty set passes for the wrong reason.
+
 ## Development Tips
 
 ### Faster Rebuilds

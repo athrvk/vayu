@@ -228,6 +228,13 @@ ctest --test-dir engine/build -V
 
 #### Writing Tests
 
+A new `engine/tests/*_test.cpp` must be added to the `add_executable(vayu_tests ...)`
+source list in `engine/CMakeLists.txt`. The list is explicit, not a glob, so an
+unregistered file is simply never compiled and its tests never run - which is
+silent, because a file that is not built produces no output. A configure-time
+guard fails the build naming any test file missing from the list, so you find
+out on your next build rather than never.
+
 ```cpp
 #include <gtest/gtest.h>
 #include "vayu/http/client.hpp"
