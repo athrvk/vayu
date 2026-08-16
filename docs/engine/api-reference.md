@@ -575,8 +575,10 @@ Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
 
 The Settings panel renders entries dynamically, so new keys appear without app
-changes. These `data_retention` keys govern how much a run keeps - most of them
-on disk, one in memory:
+changes. The entries below span two categories: the `data_retention` keys govern
+how much a run keeps - most of them on disk, one in memory - and the three
+`monitor*` keys are `observability`, governing how a run scrapes the endpoint it
+watches rather than what it stores:
 
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
@@ -2698,9 +2700,17 @@ questions: the composed one is what a *pre-request* script saw and what reseeds
 a request tab from a run. The key is **absent** on a step that sent nothing and
 on every row written before the field, so a reader falls back to
 `request.headers` - `restore-response.ts`'s `sentSide` is that reader. A load
-run's sampled capture records no sent headers at all and is unaffected: its
-deferred replay keeps reading the composed map, as
-[scripting.md](scripting.md#request-object-pmrequest) documents.
+run's sampled capture records no sent headers at all: its deferred replay and
+the Samples viewer both keep reading the composed map, as
+[scripting.md](scripting.md#request-object-pmrequest) documents. That map can
+differ from the wire in exactly the two ways this record exists to state - a
+value-less enabled header is listed although it never went out, and the derived
+`User-Agent` and body-implied `Content-Type` are absent - and for load samples
+that divergence is **recorded as permanent** rather than treated as a gap to
+close (issue #677 item 7). Which completions become samples is decided when they
+finish, so a sent record for the few that are kept would have to be built for
+every transfer, and a load run exists not to charge the hot path for what it
+throws away.
 
 Values in `rawRequest` are not redacted:
 this field exists to say exactly what went out. On a followed redirect it is the

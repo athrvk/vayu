@@ -36,6 +36,7 @@ import {
 	type SpecApplySelection,
 } from "./spec-apply";
 import { readSpecOperations, type SpecRequestDraft } from "./spec-operations";
+import { buildUrlWithParams } from "@/modules/request-builder/utils/url";
 import type { Collection, Request } from "@/types";
 
 interface OperationSpec {
@@ -356,5 +357,122 @@ describe("buildSyncPayload", () => {
 		expect(
 			payload(fetched, boundCollection(), (base) => ({ ...base, added: new Set() })).create
 		).toEqual([]);
+	});
+});
+
+/**
+ * A stub parameter the user ticked on, through a whole sync (issue #677 item 1).
+ *
+ * Issues #622/#658 import an optional, value-less parameter **disabled** - the
+ * row is what the endpoint accepts, not what this request should send. Their
+ * re-application clause is the half no test reached: a person who ticked the row
+ * on has stated the intent the import declined to guess, and a sync must not tick
+ * it back off.
+ *
+ * Three separate things have to hold for that, and each has its own way of
+ * failing silently:
+ *
+ *  - the `[off]` marker in `spec-diff`'s row rendering, without which the flip is
+ *    invisible to the comparison and the field reads as matching the document;
+ *  - the three-way flag, which is what calls the flip the user's rather than the
+ *    document's;
+ *  - `defaultSelection`, which leaves a user-touched field out of the ticks.
+ *
+ * The requests here are built from the document's own drafts and then edited the
+ * way the Params table edits them - the row flipped *and* the URL rewritten from
+ * the rows, since since #590 the URL is what actually goes on the wire.
+ */
+describe("a stub parameter enabled by hand", () => {
+	const STUB = doc({
+		"/pets": {
+			get: {
+				operationId: "listPets",
+				summary: "List pets",
+				tags: ["pets"],
+				parameters: [{ name: "verbose", in: "query" }],
+			},
+		},
+	});
+
+	const stubDrafts = () => readSpecOperations(STUB).requests;
+
+	/** The imported request with `verbose` ticked on, as the Params table leaves it. */
+	function verboseEnabled(): Request {
+		const [entry] = stubDrafts();
+		const params = entry.draft.params.map((row) => ({ ...row, enabled: true }));
+		return requestFrom("req_0", entry, {
+			params,
+			url: buildUrlWithParams(entry.draft.url, params),
+		});
+	}
+
+	function syncPayload(fetchedRaw: string, requests: Request[]) {
+		const diff = diffSpec({
+			bound: stubDrafts(),
+			fetched: readSpecOperations(fetchedRaw).requests,
+			requests,
+		});
+		return {
+			diff,
+			body: buildSyncPayload({
+				collectionId: "col_root",
+				diff,
+				selection: defaultSelection(diff),
+				content: fetchedRaw,
+				sourceUrl: null,
+				collections: collections("pets"),
+			}),
+		};
+	}
+
+	it("imports disabled, which is what leaves anything to survive", () => {
+		const [entry] = stubDrafts();
+		expect(entry.draft.params).toEqual([{ key: "verbose", value: "", enabled: false }]);
+		// And off the URL, so the row is listed without being sent.
+		expect(entry.draft.url).not.toContain("verbose");
+	});
+
+	it("survives a sync against a document that did not move", () => {
+		const { diff, body } = syncPayload(STUB, [verboseEnabled()]);
+
+		// Both halves of the flip are seen, and both are the user's - the document
+		// is byte-identical, so there is nothing else they could be. Remove the
+		// `[off]` marker and `params` drops out of this list.
+		expect(diff.changed[0].fields.map((f) => f.field).sort()).toEqual(["params", "url"]);
+		expect(diff.changed[0].fields.every((f) => f.userTouched)).toBe(true);
+		expect(isEmptySelection(defaultSelection(diff))).toBe(true);
+		expect(body.update).toEqual([]);
+	});
+
+	it("survives a sync that does move the parameter list", () => {
+		// The case the marker is actually load-bearing for. The document adds a
+		// second parameter, so `params` differs from it either way and is reported
+		// either way - what the marker decides is whether the flip is *also* a
+		// difference from the bound document, and therefore the user's. Without it
+		// the field reads as untouched, gets ticked by default, and the sync writes
+		// the document's list over the row somebody enabled.
+		const moved = doc({
+			"/pets": {
+				get: {
+					operationId: "listPets",
+					summary: "List pets",
+					tags: ["pets"],
+					parameters: [
+						{ name: "verbose", in: "query" },
+						{ name: "limit", in: "query", required: true, example: "10" },
+					],
+				},
+			},
+		});
+		const { diff, body } = syncPayload(moved, [verboseEnabled()]);
+
+		const params = diff.changed[0].fields.find((f) => f.field === "params");
+		expect(params?.userTouched).toBe(true);
+		// Nothing here is safe to take, so the request is not offered at all and
+		// the payload writes no row. Remove the `[off]` marker and `params` reads
+		// as untouched, gets ticked, and this update arrives carrying the
+		// document's parameter list.
+		expect(defaultSelection(diff).changed.has("req_0")).toBe(false);
+		expect(body.update).toEqual([]);
 	});
 });
