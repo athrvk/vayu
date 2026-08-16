@@ -17,6 +17,7 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import type {
 	DeclaredOperation,
+	ResponseSchemaIndex,
 	SpecDocument,
 	SpecOperation,
 	SpecSyncRequest,
@@ -61,6 +62,12 @@ export interface BindSpecInput {
 	 * parsers produced no index for, which is stored as "no index".
 	 */
 	operations?: DeclaredOperation[];
+	/**
+	 * What the document declares responses look like (issue #628), stored beside
+	 * it so a response can be checked against its contract. Absent for a
+	 * document that declares none.
+	 */
+	responseSchemas?: ResponseSchemaIndex;
 }
 
 export interface BindSpecResult {
@@ -100,11 +107,13 @@ export function useBindSpecMutation() {
 			sourceUrl,
 			stamps,
 			operations,
+			responseSchemas,
 		}: BindSpecInput): Promise<BindSpecResult> => {
 			const spec = await apiService.createSpec({
 				content,
 				...(sourceUrl ? { sourceUrl } : {}),
 				...(operations && operations.length > 0 ? { operations } : {}),
+				...(responseSchemas ? { responseSchemas } : {}),
 			});
 
 			await apiService.updateCollection({

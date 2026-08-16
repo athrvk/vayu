@@ -51,7 +51,13 @@ import {
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, DeclaredOperation, Request, SpecDocument } from "@/types";
+import type {
+	Collection,
+	DeclaredOperation,
+	Request,
+	ResponseSchemaIndex,
+	SpecDocument,
+} from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -80,6 +86,8 @@ type CheckState =
 			content: string;
 			/** The re-fetched document's declared-operation index (issue #629). */
 			operations: DeclaredOperation[];
+			/** And its response schema index (issue #628), carried the same way. */
+			responseSchemas?: ResponseSchemaIndex;
 			selection: SpecApplySelection;
 	  }
 	| { phase: "applied"; created: number; updated: number; deleted: number };
@@ -139,6 +147,7 @@ export default function SpecSync({
 				// `spec_documents` row, and one without an index would silently
 				// turn coverage off for a collection that had it.
 				operations: read.declaredOperations,
+				...(read.responseSchemas ? { responseSchemas: read.responseSchemas } : {}),
 				selection: defaultSelection(diff),
 			});
 		} catch (e) {
@@ -159,6 +168,7 @@ export default function SpecSync({
 			selection: state.selection,
 			content: state.content,
 			operations: state.operations,
+			...(state.responseSchemas ? { responseSchemas: state.responseSchemas } : {}),
 			// The document is re-fetched from the source the binding recorded, so
 			// the new row records the same one - a file-sourced document keeps
 			// having no URL rather than acquiring one.

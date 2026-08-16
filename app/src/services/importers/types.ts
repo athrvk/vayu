@@ -11,6 +11,7 @@ import type {
 	RequestBody,
 	RequestAuth,
 	DeclaredOperation,
+	ResponseSchemaIndex,
 	SpecOperation,
 	VariableValue,
 } from "@/types";
@@ -185,6 +186,14 @@ export interface SpecDraft {
 	 * "no index" and reports as coverage not measured.
 	 */
 	operations?: DeclaredOperation[];
+	/**
+	 * The response schemas the document declares (issue #628), extracted in the
+	 * same parse, so the engine can check a response against its contract
+	 * without reading OpenAPI. Absent when nothing declared one - which the
+	 * engine stores as "no index" and reports as `checked: false`, never as a
+	 * body that passed.
+	 */
+	responseSchemas?: ResponseSchemaIndex;
 }
 
 export interface CollectionDraft {

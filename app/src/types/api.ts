@@ -12,6 +12,7 @@ import type {
 	CollectionDataSchema,
 	CollectionOpenApiBinding,
 	DeclaredOperation,
+	ResponseSchemaIndex,
 	SpecOperation,
 	Request,
 	Environment,
@@ -1017,6 +1018,13 @@ export interface ImportApplySpec {
 	 * the parsers produced no index for.
 	 */
 	operations?: DeclaredOperation[];
+	/**
+	 * The response schemas the document declares (issue #628), stored beside it
+	 * so a response can be checked against its contract. Absent for a document
+	 * that declares none, which the engine stores as "no index" - a response of
+	 * it reports that nothing checked it, never that it passed.
+	 */
+	responseSchemas?: ResponseSchemaIndex;
 }
 
 /**
@@ -1103,6 +1111,12 @@ export interface SpecDocument {
 	 * document" reads differently from "this document declares nothing".
 	 */
 	operations: DeclaredOperation[] | null;
+	/**
+	 * The response schema index (issue #628), `null` on the same terms as
+	 * `operations` above: a document stored before schemas were extracted reads
+	 * differently from one whose operations declare none.
+	 */
+	responseSchemas: ResponseSchemaIndex | null;
 }
 
 export interface CreateSpecRequest {
@@ -1117,6 +1131,13 @@ export interface CreateSpecRequest {
 	 * coverage rather than an empty contract.
 	 */
 	operations?: DeclaredOperation[];
+	/**
+	 * The response schemas the document declares (issue #628), stored beside it
+	 * so a response can be checked against its contract. Absent for a document
+	 * that declares none, which the engine stores as "no index" - a response of
+	 * it reports that nothing checked it, never that it passed.
+	 */
+	responseSchemas?: ResponseSchemaIndex;
 }
 
 // Spec sync (issue #655) - `POST /specs/sync` applies a re-fetched document to
@@ -1176,6 +1197,8 @@ export interface SpecSyncRequest {
 		 * for a collection that had it.
 		 */
 		operations?: DeclaredOperation[];
+		/** The same, for the response schema index (issue #628). */
+		responseSchemas?: ResponseSchemaIndex;
 	};
 	collections: SpecSyncCollection[];
 	create: SpecSyncCreate[];

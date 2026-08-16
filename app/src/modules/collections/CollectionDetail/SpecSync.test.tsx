@@ -76,6 +76,7 @@ const spec = (
 	fetchedAt: 1_700_000_000_000,
 	hash: "abc123",
 	operations: null,
+	responseSchemas: null,
 });
 
 const request = (overrides: Partial<Request> = {}): Request =>

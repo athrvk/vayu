@@ -120,6 +120,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			return {
 				operations: [],
 				declaredOperations: [],
+				responseSchemas: undefined,
 				format: "",
 				title: "",
 				error: (e as Error).message,
@@ -178,6 +179,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				// Stored with the document so a run of this collection can report
 				// its contract coverage (issue #629).
 				operations: parsed?.declaredOperations ?? [],
+				// And the response schema index (issue #628), so a response of a
+				// request in this collection can be checked against what the
+				// document declares for it.
+				...(parsed?.responseSchemas ? { responseSchemas: parsed.responseSchemas } : {}),
 			},
 			{
 				onSuccess: () => {

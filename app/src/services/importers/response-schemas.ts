@@ -39,14 +39,10 @@
 
 import type { DeclaredResponseSchema, ResponseSchemaIndex, SpecOperation } from "@/types";
 
-import { asArray, asRecord, asStr, findJsonMediaType, prop } from "./openapi-shared";
+import { asArray, asRecord, asStr } from "@/lib/json-node";
 
-/** The subtrees an in-document `$ref` can point into, kept once per document. */
-const REF_ROOT_KEYS = [
-	"components", // OpenAPI 3.x
-	"definitions", // Swagger 2.0
-	"x-vayu-bundled", // what #649's bundler inlines external files under
-] as const;
+/** Where #649's bundler inlines the external files a document referenced. */
+const BUNDLED_KEY = "x-vayu-bundled";
 
 /**
  * Keys OpenAPI adds to its schema language that a JSON Schema validator has
@@ -173,11 +169,46 @@ export function toJsonSchema(schema: unknown): unknown {
  */
 export function refRootsOf(spec: Record<string, unknown>): Record<string, unknown> | undefined {
 	const roots: Record<string, unknown> = {};
-	for (const key of REF_ROOT_KEYS) {
-		const subtree = asRecord(spec[key]);
-		if (subtree) roots[key] = toJsonSchema(subtree);
+
+	// `components.schemas` and `definitions` hold schemas keyed by name, so each
+	// *value* is translated - `toJsonSchema` on the container itself would walk
+	// no further than the container, which is how a `$ref`-ed 3.0 schema kept
+	// its `nullable` and produced a wrong verdict for every null the document
+	// permits.
+	//
+	// The rest of `components` - responses, parameters, examples, headers - is
+	// deliberately dropped rather than carried: a schema `$ref` resolves to a
+	// schema, so nothing here can point at them, and they are pure weight
+	// against the byte cap the index shares with the document.
+	const schemas = asRecord(asRecord(spec.components)?.schemas);
+	if (schemas) roots.components = { schemas: mapSchemas(schemas) };
+
+	const definitions = asRecord(spec.definitions);
+	if (definitions) roots.definitions = mapSchemas(definitions);
+
+	// A bundled file (#649) is a whole document inlined under its slug, and a
+	// ref into it keeps that document's own shape - so each is reduced by this
+	// same rule. One that carries neither container *is* a schema document (a
+	// bare `pet.yaml`), and is translated as one.
+	const bundled = asRecord(spec[BUNDLED_KEY]);
+	if (bundled) {
+		const inlined: Record<string, unknown> = {};
+		for (const [slug, document] of Object.entries(bundled)) {
+			const node = asRecord(document);
+			if (!node) continue;
+			inlined[slug] = refRootsOf(node) ?? toJsonSchema(node);
+		}
+		if (Object.keys(inlined).length > 0) roots[BUNDLED_KEY] = inlined;
 	}
+
 	return Object.keys(roots).length > 0 ? roots : undefined;
+}
+
+/** Each value of a name-keyed schema map, translated. */
+function mapSchemas(map: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [name, schema] of Object.entries(map)) out[name] = toJsonSchema(schema);
+	return out;
 }
 
 /**
@@ -231,7 +262,7 @@ export function responseSchemasV2(
 	const produced = (
 		Array.isArray(operation.produces) ? operation.produces : asArray(spec.produces)
 	)
-		.map((type) => asStr(type)?.toLowerCase())
+		.map((type: unknown) => asStr(type)?.toLowerCase())
 		.filter((type): type is string => !!type);
 	const mediaTypes = produced.length > 0 ? produced : ["application/json"];
 
@@ -268,10 +299,3 @@ export function buildResponseSchemaIndex(
 	const refRoots = refRootsOf(spec);
 	return { ...(refRoots ? { refRoots } : {}), operations: rows };
 }
-
-/**
- * The JSON media type of a 3.x `content` map, re-exported so a caller reading
- * this module for schemas does not have to know which file the media-type rule
- * lives in.
- */
-export { findJsonMediaType, prop };

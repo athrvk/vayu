@@ -121,6 +121,21 @@ export function scriptsFromTrace(
 	};
 }
 
+/**
+ * The stored `validation` node (issue #628), verbatim.
+ *
+ * The engine stores the *same object* it put in the live `/execute` body, so
+ * this reads it rather than deriving anything: `responseFromRunResult` and
+ * `responseFromExecuteResult` are the pair this codebase keeps finding drifted,
+ * and the only way they cannot drift is if neither computes.
+ */
+export function validationFromTrace(
+	trace: NonNullable<RunResultSample["trace"]>
+): Pick<ResponseState, "validation"> {
+	const node = trace.validation;
+	return node && typeof node === "object" ? { validation: node } : {};
+}
+
 /** Sniff a body's render mode the same way the live execute path does. */
 function detectBodyType(body: string): ResponseState["bodyType"] {
 	try {
@@ -232,6 +247,7 @@ export function responseFromRunResult(
 			// did, and the node is written on the failure path too.
 			...eventsFromTrace(trace),
 			...scriptsFromTrace(trace),
+			...validationFromTrace(trace),
 		};
 	}
 
@@ -273,5 +289,6 @@ export function responseFromRunResult(
 		restoredFrom,
 		...eventsFromTrace(trace),
 		...scriptsFromTrace(trace),
+		...validationFromTrace(trace),
 	};
 }

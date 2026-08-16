@@ -49,6 +49,16 @@ using `VariableScopeBadge`, so the scope-colour fix that landed in the primitive
 never reached them and all three scopes stayed grey. Before styling something
 that already exists as a primitive, `rg` for the primitive.
 
+**A response reaches the pane through two funnels, and a field added to one is
+missing from the other.** `responseFromExecuteResult` (live `/execute` body) and
+`responseFromRunResult` (a stored trace, from History) both build `ResponseState`
+and neither knows about the other - so a live response showed script results,
+stream events and now schema verdicts that a restored one did not. When you add a
+field to one, add it to both and assert they agree
+(`validation-funnels.test.ts` is the shape: drive both with the same input,
+compare). The engine helps by storing the *same* object it returned rather than
+letting each side derive its own.
+
 **Before measuring or changing a class, `rg` for it in the components.** Twice a
 conclusion was drawn about a combination the app never renders
 (`bg-border-strong` only existed behind a `data-[state=]` variant;

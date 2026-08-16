@@ -7,6 +7,8 @@
 
 import type {
 	DeclaredOperation,
+	DeclaredResponseSchema,
+	SpecOperation,
 	HttpMethod,
 	KeyValueEntry,
 	RequestAuth,
@@ -38,6 +40,7 @@ import {
 	specOperationOf,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
+import { buildResponseSchemaIndex, responseSchemasV3 } from "./response-schemas";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -92,6 +95,11 @@ export class OpenApiV3Parser implements ImportParser {
 		// reader that disagreed with this one about what the document declares
 		// would make coverage disagree with the requests it counts.
 		const declaredOperations: DeclaredOperation[] = [];
+		// The response schemas stored beside the document (issue #628), gathered
+		// in the same walk and for the same reason: a second pass could disagree
+		// with this one about which operation declares what.
+		const schemaOperations: { identity: SpecOperation; responses: DeclaredResponseSchema[] }[] =
+			[];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -114,6 +122,7 @@ export class OpenApiV3Parser implements ImportParser {
 						...identity,
 						responses: declaredResponsesOf(op.responses),
 					});
+					schemaOperations.push({ identity, responses: responseSchemasV3(op) });
 				}
 				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);
@@ -126,6 +135,8 @@ export class OpenApiV3Parser implements ImportParser {
 				}
 			}
 		}
+
+		const responseSchemas = buildResponseSchemaIndex(spec, schemaOperations);
 
 		const root: CollectionDraft = {
 			name: asStr(prop(spec.info, "title")) ?? "Imported API",
@@ -144,9 +155,14 @@ export class OpenApiV3Parser implements ImportParser {
 			// of the contract it covered without the engine parsing the document
 			// (issue #629). Absent when the document declared none, which stores
 			// as "no index" rather than as an empty contract.
+			// `responseSchemas` likewise (issue #628), so a response can be checked
+			// against what the document declared for it. Absent when nothing
+			// declared a schema, which stores as "no index" rather than as a
+			// contract that permits everything.
 			spec: {
 				content: raw,
 				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
+				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};
 

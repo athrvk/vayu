@@ -988,6 +988,17 @@ export interface RunResultTrace {
 	 * this node is present on streaming traces only.
 	 */
 	scripts?: RunResultScripts;
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628), stored **verbatim** as the live `/execute` body carried it - one
+	 * engine builder (`build_validation_payload`) fills both, so a restored
+	 * verdict and a live one cannot disagree.
+	 *
+	 * Absent for a request whose collection binds no document, and for a
+	 * streaming run: an event stream is not a document any response schema
+	 * describes.
+	 */
+	validation?: ResponseValidation;
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by
@@ -1395,6 +1406,14 @@ export interface SanityResult extends HttpResponse {
 	preScriptError?: string;
 	postScriptError?: string;
 	error?: string;
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628). Absent when the request's collection binds no OpenAPI document -
+	 * the engine writes no node at all rather than an unchecked verdict, so
+	 * "never judged against a contract" stays distinguishable from "checked and
+	 * could not be read".
+	 */
+	validation?: ResponseValidation;
 }
 
 export interface LoadTestMetrics {

@@ -168,6 +168,9 @@ function flatten(
 			...(c.spec.operations && c.spec.operations.length > 0
 				? { operations: c.spec.operations }
 				: {}),
+			// The response schema index (issue #628), on the same terms: stored
+			// with the document it describes, in the same transaction.
+			...(c.spec.responseSchemas ? { responseSchemas: c.spec.responseSchemas } : {}),
 		});
 	}
 	collections.push({

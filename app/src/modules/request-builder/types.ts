@@ -35,6 +35,7 @@ import type {
 	StreamEvent,
 	VariableOrigin,
 	VariableScope,
+	ResponseValidation,
 } from "@/types";
 
 // ============================================================================
@@ -224,6 +225,20 @@ export interface ResponseState {
 	 * this, a downgrade was indistinguishable from success.
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628), or absent when the request's collection is bound to no document -
+	 * "never judged against a contract" and "judged and failed" being different
+	 * answers the pane must not spell the same way.
+	 *
+	 * Set by **both** response funnels - `responseFromExecuteResult` from the
+	 * live `/execute` body and `responseFromRunResult` from the stored trace -
+	 * because a restored response must show the verdict the live one did. That
+	 * pair is the copy-does-not-receive-the-fix trap this codebase keeps
+	 * finding; the engine writes the same object to both places so neither side
+	 * recomputes anything.
+	 */
+	validation?: ResponseValidation;
 	/**
 	 * When this response arrived, ISO. Set on a live send only.
 	 *

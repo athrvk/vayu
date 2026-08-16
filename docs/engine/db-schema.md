@@ -316,6 +316,7 @@ Stores OpenAPI documents, bound to collections by
 | `fetched_at` | INTEGER | Unix ms                                            |
 | `hash`       | TEXT    | Hex `sha256(content)`, computed engine-side        |
 | `operations` | TEXT    | JSON array: the declared-operation index, `""` = none |
+| `response_schemas` | TEXT | JSON object: the response schema index, `""` = none |
 
 **content** is stored as text rather than a parsed model, because every feature
 stacked behind this needs the *document*: the Spec tab renders it, sync
@@ -362,8 +363,33 @@ stay distinguishable. Re-binding or syncing the collection stores a document tha
 has one. Capped at 2000 rows on the write, which is refused with the count rather
 than silently truncated.
 
+**response_schemas** is what the document declares each response *looks like*
+(issue #628) - a JSON object of `{refRoots?, operations: [{operationId?, method,
+path, responses: [{status, contentType, schema}]}]}`, written by the client that
+parsed the document and read when a response comes back with a body to check.
+Supplied rather than derived, for the same reason `operations` is.
+
+A column of its own rather than a field on `operations` because the two are read
+at different moments: the operation index is parsed when a run's plan resolves
+and held for the run's whole life, while schemas are touched only per response -
+and they are orders of magnitude larger.
+
+`refRoots` holds the document's `components.schemas` / `definitions` /
+`x-vayu-bundled` subtrees **once**, and each schema keeps its `$ref`s as written;
+validation merges the two into one root document. Inlining instead would copy a
+shared `Error` schema into every operation naming it, and a recursive schema - a
+tree node whose child is itself - has no finite expansion at all. Schemas arrive
+already translated out of OpenAPI's dialect (3.0's `nullable`, its draft-04
+boolean `exclusiveMinimum`): the engine consumes JSON Schema and nothing else.
+
+`""` means *no index* on the same terms as `operations`: a response of such a
+document reports `checked: false` with the reason `no_index`, never a body that
+passed, and `GET /specs/:id` reads it back as `null`. The serialized index is
+held to the same `maxSpecDocumentBytes` cap as the document, refused on the write
+with the count and the cap rather than truncated.
+
 The table itself was new when it landed, so `sync_schema()` created it outright;
-`operations` is its only migrated column.
+`operations` and `response_schemas` are its migrated columns.
 
 ---
 

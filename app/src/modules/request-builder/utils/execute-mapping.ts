@@ -201,6 +201,11 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		testResults: result.testResults,
 		preScriptError: result.preScriptError,
 		postScriptError: result.postScriptError,
+		// Absent stays absent: the engine writes no `validation` at all for a
+		// request whose collection binds no document, and spreading a key with
+		// `undefined` would make the pane render an "unchecked" state for a
+		// response nothing was ever going to check.
+		...(result.validation ? { validation: result.validation } : {}),
 	};
 }
 
