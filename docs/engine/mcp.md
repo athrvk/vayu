@@ -921,7 +921,8 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
 
 - **MCP-originated run tagging** - tag runs started via MCP so History shows
   provenance.
-- **`vayu mcp` bin** - package the stdio CLI as a first-class command (backlog M1).
+- **`vayu mcp` bin** - package the stdio CLI as a first-class command
+  ([#693](https://github.com/athrvk/vayu/issues/693)).
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 

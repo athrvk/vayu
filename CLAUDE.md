@@ -156,8 +156,13 @@ Repo-level docs:
 | `docs/building.md` | `build.py`, prerequisites, platform quirks |
 | `docs/lock-file-handling.md` | Lock / concurrency behaviour |
 | `docs/request-storage-design.md` | How requests are stored |
-| `docs/plans/pending-backlog.md` | Deferring something, or picking it up |
 | `CONTRIBUTING.md` | PR process or style rules |
+
+**Deferred work is filed as a GitHub issue in the same commit that defers it.**
+There is no backlog file - the tracker is the only backlog (#694 retired the
+last one, every entry having shipped, moved to an issue, or been answered). A
+comment saying "later" with no issue number behind it is the thing this rule
+exists to prevent.
 
 **`docs/` is published** to <https://athrvk.github.io/vayu/> via MkDocs, and
 `mkdocs build --strict` gates every docs-touching PR - a broken relative link or

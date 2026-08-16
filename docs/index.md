@@ -310,8 +310,7 @@ persists.
 
 **Design notes** - rationale that is easy to misread from the code alone:
 [Request Storage](request-storage-design.md),
-[Lock Files](lock-file-handling.md),
-[Deferred Work](plans/pending-backlog.md).
+[Lock Files](lock-file-handling.md).
 
 ## Questions people ask
 

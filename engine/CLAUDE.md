@@ -227,7 +227,7 @@ Three things worth knowing before you design around them:
 
 ## Request composition (engine-owned - POST /compose)
 
-The **engine owns** request composition (issue #226, backlog A1 shipped):
+The **engine owns** request composition (shipped in issue #226):
 `POST /compose` (`engine/src/http/request_composer.cpp`) resolves
 `{{variables}}` and `inherit` auth (collection-chain walk, `noauth`
 terminates, `none` steps over) and returns the execute-ready payload that

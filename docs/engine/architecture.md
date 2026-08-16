@@ -393,7 +393,7 @@ the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (engine-owned via POST /compose)
 
-The engine owns request composition since issue #226 (backlog A1).
+The engine owns request composition since issue #226.
 `POST /compose` (`routes/compose.cpp` → `compose_request_core` in
 `src/http/request_composer.cpp`) takes a `requestId` (a saved request) and/or
 an inline unresolved `request`, plus `collectionId` / `environmentId` scope
