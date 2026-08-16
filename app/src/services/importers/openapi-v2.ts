@@ -122,7 +122,10 @@ export class OpenApiV2Parser implements ImportParser {
 						...identity,
 						responses: declaredResponsesOf(op.responses),
 					});
-					schemaOperations.push({ identity, responses: responseSchemasV2(op, spec) });
+					schemaOperations.push({
+						identity,
+						responses: responseSchemasV2(op, spec, resolveRef),
+					});
 				}
 				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);

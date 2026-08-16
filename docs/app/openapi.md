@@ -481,6 +481,20 @@ Not a failure, and it says which of these it was:
 | The body is not JSON | A JSON Schema cannot describe HTML |
 | There was no response | The request never reached a server |
 
+A response the document writes as a reference -
+`"404": {"$ref": "#/components/responses/not_found"}`, the shape GitHub's public
+spec uses for nearly every response - is read through to the component it names,
+so it is checked like any other.
+
+**A collection bound before that was true keeps the index it was stored with**,
+and reports *the spec declares no response for this status* against every
+`$ref`-ed response in it. The index is rebuilt when the document is stored
+again, so the remedy is to **re-bind** the collection from the
+[Spec tab](#binding-a-collection-you-already-have) - or to sync it, if the
+document upstream has genuinely changed. A **Check for changes** against a
+document whose bytes are identical reports *unchanged* and stops there, by
+design: it compares bytes, and these bytes did not move.
+
 ### Where OpenAPI stops being JSON Schema
 
 Schemas are translated when the document is stored, because a validator reads

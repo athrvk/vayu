@@ -314,6 +314,98 @@ describe("OpenApiV3Parser", () => {
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 2 }]);
 	});
 
+	describe("a spec whose responses live in components (issue #714)", () => {
+		// GitHub's shape. Both indexes stored beside the document are built in
+		// this one walk, so this is where they can be held to the same answer.
+		const spec = {
+			openapi: "3.0.0",
+			paths: {
+				"/repos/{owner}/{repo}": {
+					get: {
+						operationId: "repos/get",
+						summary: "Get a repository",
+						responses: {
+							"200": {
+								description: "ok",
+								content: {
+									"application/json": {
+										schema: { $ref: "#/components/schemas/repo" },
+									},
+								},
+							},
+							"404": { $ref: "#/components/responses/not_found" },
+						},
+					},
+				},
+			},
+			components: {
+				responses: {
+					not_found: {
+						description: "Resource not found",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/basic_error" },
+							},
+						},
+					},
+				},
+				schemas: { repo: { type: "object" }, basic_error: { type: "object" } },
+			},
+		};
+
+		it("agrees with coverage about which statuses are declared", () => {
+			// Coverage reads the status *keys* and so always saw the 404;
+			// extraction read the `$ref` node's absent `content` and saw nothing,
+			// so the two contradicted each other about one document on one run.
+			// Revert the deref and the 404 vanishes from the schema index while
+			// staying in the operation index.
+			const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
+			const declared = root.spec!.operations!.find(
+				(o) => o.path === "/repos/{owner}/{repo}"
+			)!;
+			expect(declared.responses).toEqual(["200", "404"]);
+
+			const indexed = root.spec!.responseSchemas!.operations.find(
+				(o) => o.path === "/repos/{owner}/{repo}"
+			)!;
+			expect(indexed.responses.map((r) => r.status)).toEqual(["200", "404"]);
+			expect(indexed.responses.find((r) => r.status === "404")).toEqual({
+				status: "404",
+				contentType: "application/json",
+				schema: { $ref: "#/components/schemas/basic_error" },
+			});
+			// The schema the `$ref`'d response points at has to be reachable, or
+			// the entry validates nothing - `refRoots` is where the engine looks.
+			expect(root.spec!.responseSchemas!.refRoots).toEqual({
+				components: {
+					schemas: { repo: { type: "object" }, basic_error: { type: "object" } },
+				},
+			});
+		});
+
+		it("counts a response `$ref` that resolves to nothing exactly once", () => {
+			// Two readers deref this entry - examples and schema extraction - and
+			// only the examples walk tallies. Counting in both would report one
+			// broken ref as two lost items in the import preview.
+			const broken = {
+				...spec,
+				paths: {
+					"/repos/{owner}/{repo}": {
+						get: {
+							operationId: "repos/get",
+							summary: "Get a repository",
+							responses: { "404": { $ref: "#/components/responses/gone_missing" } },
+						},
+					},
+				},
+			};
+			const result = p.parse(broken, JSON.stringify(broken), opts);
+			expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
+			// And nothing half-extracted lands in the index.
+			expect(result.collections[0].spec!.responseSchemas).toBeUndefined();
+		});
+	});
+
 	it("resolves requestBody.$ref to a referenced request body", () => {
 		const spec = {
 			openapi: "3.0.0",
