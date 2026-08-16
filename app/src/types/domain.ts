@@ -270,6 +270,7 @@ export type ValidationUncheckedReason =
 	| "no_operation"
 	| "no_index"
 	| "hash_mismatch"
+	| "never_stamped"
 	| "operation_not_declared"
 	| "no_schema_for_status"
 	| "no_schema_for_content_type"

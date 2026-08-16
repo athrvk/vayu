@@ -333,6 +333,14 @@ const ScenarioResolveOptions& options) {
         const auto document = db.get_spec_document (resolution.spec.spec_id);
         if (!document) {
             resolution.spec.schema_reason = UncheckedReason::NoIndex;
+        } else if (resolution.spec.spec_hash.empty ()) {
+            // A binding that names no version is not a document that moved
+            // (issue #709). Every write path stamps the version now and the
+            // startup pass repairs the rows written before they did, so this is
+            // a database edited from outside - and it is still worth its own
+            // reason, because "sync the collection" is the wrong instruction
+            // for it and a sync of an unchanged document would not repair it.
+            resolution.spec.schema_reason = UncheckedReason::NeverStamped;
         } else if (document->hash != resolution.spec.spec_hash) {
             resolution.spec.schema_reason = UncheckedReason::HashMismatch;
         } else {

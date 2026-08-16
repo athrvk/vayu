@@ -571,6 +571,22 @@ const std::string& openapi,
 const std::unordered_set<std::string>& pending);
 
 /**
+ * Fills in the `specHash` / `syncedAt` a binding was written without, from the
+ * stored document it names (issue #709). Rewrites @p openapi in place; a
+ * binding that is unbound, complete, or names a document this database does not
+ * hold is left exactly as it was.
+ *
+ * Called by every collection write path immediately after
+ * `reject_unbindable_spec` and inside the same lock scope, because the two ask
+ * about the same row and the stamp must not be taken from a document a
+ * concurrent `DELETE /specs/:id` is about to remove. A client sends the
+ * `specId` - the only half it can know without a round trip whose answer would
+ * be stale by the time it wrote it - and the engine supplies the version, the
+ * same division `spec_documents.hash` draws. Defined in specs.cpp.
+ */
+void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi);
+
+/**
  * The outcome of resolving `pm.info.requestName` for a `POST /execute` payload.
  *
  * `name` absent is a normal answer, not a failure: an ad-hoc request has no

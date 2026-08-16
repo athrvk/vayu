@@ -48,6 +48,7 @@
 #include <unordered_set>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/utils/logger.hpp"
 
 // ============================================================================
@@ -718,6 +719,21 @@ void Database::init () {
         "Startup run reconciliation failed: " + std::string (e.what ()));
     }
 
+    // Bindings written before the engine stamped them (issue #709) name a
+    // document and no version of it, which reads to every contract check as a
+    // document that has moved - so an imported collection was measured against
+    // nothing. Best-effort, like the passes around it: a repair that fails must
+    // not cost the user their engine.
+    try {
+        if (const int64_t stamped = stamp_hashless_spec_bindings (); stamped > 0) {
+            vayu::utils::log_info ("Stamped " + std::to_string (stamped) +
+            " OpenAPI binding(s) with the version of the document they name");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup spec-binding repair failed: " + std::string (e.what ()));
+    }
+
     // No webhook inbox survives the process that opened it, so any capture row
     // still here belongs to an inbox nothing can list. Best-effort, like the
     // two passes around it.
@@ -960,6 +976,34 @@ void Database::delete_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting spec document: id=" + id);
     impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
+}
+
+int64_t Database::stamp_hashless_spec_bindings () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    int64_t stamped = 0;
+    for (auto& col : impl_->storage.get_all<Collection> ()) {
+        // `fetched_at`, not now: every row this pass can reach was written by an
+        // import that stored the document in the same transaction, so that is
+        // when the collection was bound to it. Stamping them all with the
+        // current time would tell the user they synced today.
+        auto rewritten = vayu::core::stamp_spec_binding (col.openapi,
+        [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
+            auto document = get_spec_document (spec_id);
+            if (!document) {
+                return std::nullopt;
+            }
+            return vayu::core::SpecStamp{ document->hash, document->fetched_at };
+        });
+        if (!rewritten) {
+            continue;
+        }
+        col.openapi = std::move (*rewritten);
+        // `updated_at` is deliberately left alone: this records what the row
+        // always meant rather than an edit anybody made to it.
+        impl_->storage.replace (col);
+        ++stamped;
+    }
+    return stamped;
 }
 
 // ============================================================================

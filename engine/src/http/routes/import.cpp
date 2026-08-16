@@ -13,6 +13,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/utils/id.hpp"
@@ -691,6 +692,16 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return *err;
     }
 
+    // The hash of every spec this payload is about to write, by the id it will
+    // be written under - the half of a binding the engine owns (issue #709),
+    // for the documents `stamp_binding_from_store` cannot look up yet because
+    // this transaction has not committed them.
+    std::unordered_map<std::string, std::string> pending_hashes;
+    pending_hashes.reserve (spec_rows.size ());
+    for (const auto& row : spec_rows) {
+        pending_hashes.emplace (row.id, row.hash);
+    }
+
     // The one existence check the shared applier cannot make - a binding may
     // name a spec this payload is about to write, or one already stored, and
     // nothing else - and the last thing before the write, under the same lock
@@ -710,6 +721,25 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
                 "collection", temps.collections[i])) {
                 result = *err;
                 return;
+            }
+            // Stamped here rather than in `resolve_spec_binding`, so that the
+            // version a binding records is read under the same lock that proves
+            // the document exists - and so import shares the rule with the two
+            // collection write cores instead of keeping a second copy of it.
+            if (auto stamped =
+                vayu::core::stamp_spec_binding (collection_rows[i].openapi,
+                [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
+                    auto pending = pending_hashes.find (spec_id);
+                    if (pending != pending_hashes.end ()) {
+                        return vayu::core::SpecStamp{ pending->second, now };
+                    }
+                    auto document = db.get_spec_document (spec_id);
+                    if (!document) {
+                        return std::nullopt;
+                    }
+                    return vayu::core::SpecStamp{ document->hash, now };
+                })) {
+                collection_rows[i].openapi = std::move (*stamped);
             }
         }
         db.import_apply (collection_rows, request_rows, environment_rows, example_rows, spec_rows);
