@@ -3363,6 +3363,15 @@ for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
+A step of a collection **bound to an OpenAPI document** additionally carries a
+`validation` node (issue #681) - the same object and the same shape
+[`POST /execute`](#post-execute) returns - saying whether its response matched
+the schema that document declares. Absent for an unbound collection and for a
+step that sent nothing. By default the verdict is its own channel and changes no
+outcome; `failOnSchemaError: true` on the run makes a schema failure fail a step
+that passed everything else. The run's rollup is
+[`schemaValidation`](#get-runsrunidreport) in the report.
+
 **Outcomes** are `passed`, `failed`, `skipped` and `errored`:
 
 | Outcome | Meaning | Effect on the iteration |
@@ -3908,7 +3917,10 @@ replays the steps it missed:
 event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
-       "statusCode":200,"latencyMs":42.7,"dataRowIndex":1}
+       "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
+       "validation":{"checked":true,"valid":true,"matchedStatus":"200",
+                     "matchedContentType":"application/json",
+                     "failures":[],"failuresTotal":0}}
 
 event: complete
 data: {"event":"complete","runId":"run_1234567890"}
@@ -3917,7 +3929,11 @@ data: {"event":"complete","runId":"run_1234567890"}
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
 `data`, on the same terms as on the stored row, so a step reads the same live
-and after a reload. A scenario run publishes no `metrics` ticks:
+and after a reload. `validation` is the step's schema verdict (issue #681) in
+the same shape and on the same terms - absent for a step of an unbound
+collection and for one that sent nothing, and byte-identical to the node its
+stored trace carries, so a watched run and a read-back one agree. A scenario
+run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
 
@@ -4386,6 +4402,39 @@ run; a binding that has since synced to a newer spec cannot rewrite it.
 deliberately plain numbers, shaped like `thresholdValidation`'s counts, so a
 headless CI gate can threshold on them without the block being reshaped. Nothing
 thresholds on them today.
+
+**`schemaValidation`** is the other half of that question (issue #681): whether
+what came back matched the schema the document declares for it. Present on the
+same terms as `coverage` - a scenario run of a bound collection whose document
+carries a [response-schema index](#post-specs) - and **absent, never zeros**, for
+every other run, including one whose steps all skipped.
+
+| Field | Meaning |
+|---|---|
+| `responses` | Responses a verdict was produced for at all |
+| `checked` | Of those, how many could be judged - a subset of `responses` |
+| `valid` / `failed` | The two verdicts; together they are `checked` |
+| `partlyChecked` | Checked responses whose schema used keywords the draft-07 validator cannot evaluate. Not a third verdict - these are also `valid` or `failed` |
+| `sampled` | `false` when the counts describe every response the run produced, `true` when they describe only the ones it kept |
+| `failOnSchemaError` | Whether a schema failure was allowed to fail its step in this run |
+
+A response the contract could not judge - no declared schema for its status or
+content type, a body that is not JSON - is counted in `responses` and not in
+`checked`, and is neither a pass nor a failure. `responses - checked` is that
+number.
+
+**`failOnSchemaError`** is a top-level boolean on `POST /runs`, default `false`,
+type-checked before the run row is created. Left off, a schema failure does not
+change any step's outcome: it is its own verdict channel, and a response the
+document does not describe is not a failed assertion. Set, a step that passed
+everything else and whose response did not match is classified `failed`, with the
+first problem in its `results.error`; a step already failing keeps the error that
+named it.
+
+Each step's own verdict rides its stored trace as a `validation` node - the same
+object and the same shape [`POST /execute`](#post-execute) returns - and the live
+`step` SSE frame carries it too, so a run being watched and the same run read
+back cannot disagree. A step that sent nothing carries no `validation` at all.
 
 **Response:**
 ```json

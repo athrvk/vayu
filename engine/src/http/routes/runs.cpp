@@ -231,6 +231,12 @@ struct ReportExtras {
     // stored before the operation index existed - and leaves the section out,
     // because a run that was never judged against a contract did not fail one.
     nlohmann::json coverage = nlohmann::json::object ();
+    // What the run's responses amounted to against the schemas the bound
+    // document declares (issue #681), passed through verbatim on the same terms
+    // as `coverage` - the producer writes the report's camelCase. Empty is
+    // every run that produced no verdict at all, and leaves the section out: a
+    // run nothing judged against a contract did not match zero of it.
+    nlohmann::json schema_validation = nlohmann::json::object ();
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -465,6 +471,17 @@ ReportExtras& extras) {
     summary["coverage"]["operations"].is_array () &&
     !summary["coverage"]["operations"].empty ()) {
         extras.coverage = summary["coverage"];
+    }
+
+    // Same again for schema verdicts (issue #681). `responses` is the section:
+    // a stored object claiming no response was judged says nothing a reader can
+    // act on, so it is treated as absent rather than reported as a run whose
+    // every response matched.
+    if (summary.contains ("schemaValidation") && summary["schemaValidation"].is_object () &&
+    summary["schemaValidation"].contains ("responses") &&
+    summary["schemaValidation"]["responses"].is_number_unsigned () &&
+    summary["schemaValidation"]["responses"].get<size_t> () > 0) {
+        extras.schema_validation = summary["schemaValidation"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -1070,6 +1087,14 @@ const std::string& run_id) {
     // that was not measured against a contract; see ReportExtras::coverage.
     if (!extras.coverage.empty ()) {
         json_report["coverage"] = extras.coverage;
+    }
+
+    // Whether what came back matched what the contract declares (issue #681),
+    // beside coverage because the two are halves of one question. Absent for
+    // every run that was not measured against a contract; see
+    // ReportExtras::schema_validation.
+    if (!extras.schema_validation.empty ()) {
+        json_report["schemaValidation"] = extras.schema_validation;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived

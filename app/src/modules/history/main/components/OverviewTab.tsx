@@ -15,7 +15,12 @@ import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import { CapacitySummary, ContractCoverage, ThresholdVerdict } from "@/components/shared";
+import {
+	CapacitySummary,
+	ContractCoverage,
+	SchemaVerdict,
+	ThresholdVerdict,
+} from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
@@ -46,6 +51,12 @@ export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 			    reason: a run can meet every budget while never calling four of
 			    eighteen operations. Absent for a run of an unbound collection. */}
 			<ContractCoverage coverage={report.coverage} />
+
+			{/* And whether what came back matched what the contract declares -
+			    the other half of the same question, so it sits directly under
+			    coverage. Absent on the same terms: a run of an unbound
+			    collection renders neither. */}
+			<SchemaVerdict validation={report.schemaValidation} />
 
 			{/* When the run went wrong, in words. Above the status/error totals
 			    because those are cumulative and this is the thing they hide: a

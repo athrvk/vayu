@@ -119,6 +119,44 @@ std::string& error) {
     return StepOutcome::Passed;
 }
 
+/**
+ * The verdict one step's response gets, or `std::nullopt` for a step nothing
+ * judged (issue #681).
+ *
+ * The resolution the design-mode hook does per response - walk to the binding,
+ * read the document, parse the index - happened once when the plan resolved, so
+ * what is left here is the check itself. That is the whole reason the index
+ * rides on `SpecBinding`: a run of 200 steps would otherwise re-read and
+ * re-parse a document's whole schema index 200 times, and would be free to get
+ * a different answer each time if a sync landed mid-run.
+ */
+std::optional<vayu::core::ValidationVerdict> validate_step_response (const SpecBinding& spec,
+const ScenarioStep& step,
+const vayu::Response& response) {
+    if (!spec.bound ()) {
+        return std::nullopt;
+    }
+    if (!spec.response_schemas) {
+        ValidationVerdict verdict;
+        verdict.reason = spec.schema_reason.value_or (UncheckedReason::NoIndex);
+        return verdict;
+    }
+
+    const auto content_type = response.headers.find ("Content-Type");
+    try {
+        return spec.response_schemas->check (step.spec_operation, response.status_code,
+        content_type != response.headers.end () ? content_type->second : std::string (),
+        response.body);
+    } catch (const std::exception& e) {
+        // A validator that threw is not a response that failed, and it is
+        // certainly not a step that did - the design-mode hook's rule, for its
+        // reason. The step keeps its outcome and loses only its verdict.
+        vayu::utils::log_warning (
+        "Step schema validation failed: " + std::string (e.what ()));
+        return std::nullopt;
+    }
+}
+
 /// The step's identity, added to the design-mode trace. `restore-response.ts`
 /// reads the trace it already knows and ignores these; the app's step list
 /// (phase 3) reads these to say which step a row belongs to.
@@ -132,6 +170,14 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     // `0` that reads as "row 1 of a data file" in the step list.
     if (record.data_row_index) {
         trace["dataRowIndex"] = *record.data_row_index;
+    }
+    // The *same object* the SSE frame carries, on the node design mode already
+    // writes (`execution.cpp`'s `record_design_result`) - so the step list, the
+    // restored response pane and the live frame cannot come to disagree about
+    // what one response was judged to be. Absent when the step carries no
+    // verdict, which is the state that means "nobody judged this".
+    if (record.validation) {
+        trace["validation"] = build_validation_payload (*record.validation);
     }
 }
 
@@ -259,7 +305,33 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.data_row_index) {
         data["dataRowIndex"] = *record.data_row_index;
     }
+    // On the frame as well as on the stored row, so a run being watched shows
+    // its verdicts as they happen rather than only once the report is written.
+    // Same terms as `dataRowIndex`: absent here is absent there.
+    if (record.validation) {
+        data["validation"] = build_validation_payload (*record.validation);
+    }
     return build_sse_frame ("step", data.dump (), offset);
+}
+
+bool read_fail_on_schema_error (const nlohmann::json& config) {
+    auto field = config.find ("failOnSchemaError");
+    return field != config.end () && field->is_boolean () && field->get<bool> ();
+}
+
+std::string describe_schema_failure (const ValidationVerdict& verdict) {
+    const size_t total = verdict.failures_total > 0 ? verdict.failures_total :
+                                                      verdict.failures.size ();
+    std::string described = total == 1 ?
+    "Response does not match the schema the spec declares" :
+    std::to_string (total) + " schema problems in the response";
+    if (!verdict.failures.empty ()) {
+        const auto& first = verdict.failures.front ();
+        described += " - " +
+        (first.path.empty () ? std::string ("(body)") : first.path) + ": " +
+        first.message;
+    }
+    return described;
 }
 
 nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inputs) {
@@ -286,6 +358,19 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     if (!inputs.coverage.empty ()) {
         summary["coverage"] = inputs.coverage;
     }
+    // Beside coverage rather than inside it, and on the same absent-when-not-
+    // measured terms: the two answer different questions about one contract -
+    // coverage says which of it the run touched, this says whether what came
+    // back matched what it declares. A run of an unbound collection produces
+    // neither, and a zero here would read as a contract it met.
+    if (!inputs.validation.empty ()) {
+        auto validation = build_validation_summary_payload (inputs.validation, false);
+        // Stored with the tally it qualifies: a report read months later cannot
+        // recover the flag from the run's config if the config was pruned, and
+        // "3 failed" means a different run depending on it.
+        validation["failOnSchemaError"] = inputs.fail_on_schema_error;
+        summary["schemaValidation"]     = std::move (validation);
+    }
     return summary;
 }
 
@@ -309,6 +394,12 @@ RunManager& manager) {
     // collection bound to nothing, in which case it records nothing and builds
     // nothing (issue #629).
     CoverageTally coverage = make_coverage_tally (*execution);
+
+    // Whether the contract is a gate for this run, read once: it is a property
+    // of who asked for the run, exactly as `allowScriptRequests` is, and a
+    // value re-read per step could not change but could be got wrong twice.
+    const bool fail_on_schema_error = read_fail_on_schema_error (context->config);
+    summary.fail_on_schema_error = fail_on_schema_error;
 
     try {
         db.update_run_status (context->run_id, vayu::RunStatus::Running);
@@ -479,6 +570,33 @@ RunManager& manager) {
                 record.status_code = exchange.response.status_code;
                 record.status_text = exchange.response.status_text;
                 record.latency_ms  = exchange.response.timing.total_ms;
+
+                // What the contract says about what came back (issue #681).
+                // Only for a step that sent: a skipped step and one whose data
+                // row would not bind produced no response, and a `checked:
+                // false` verdict for them would be reporting on a request
+                // nobody made - the same reading that erases `response` from
+                // their trace below.
+                if (exchange.sent) {
+                    record.validation =
+                    validate_step_response (execution->spec, step, exchange.response);
+                    if (record.validation) {
+                        summary.validation.record (*record.validation);
+                    }
+                }
+
+                // The opt-in, applied before flow control reads the outcome. It
+                // demotes **only a step that passed everything else**: a step
+                // already failing an assertion or a transport error keeps the
+                // error that named it, because that is the one a reader has to
+                // fix first. With the flag off - the default - a schema failure
+                // changes nothing here and lives entirely in its own channel.
+                if (fail_on_schema_error &&
+                record.outcome == StepOutcome::Passed && record.validation &&
+                record.validation->checked && !record.validation->valid) {
+                    record.outcome = StepOutcome::Failed;
+                    record.error = describe_schema_failure (*record.validation);
+                }
 
                 // Where this iteration goes next, decided before the row is
                 // written: an instruction that cannot be honoured is this

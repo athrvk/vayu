@@ -111,6 +111,17 @@ class ScenarioMockServer {
             std::this_thread::sleep_for (std::chrono::milliseconds (120));
             res.set_content ("{}", "application/json");
         });
+        // A body that satisfies the pet schema the schema-verdict tests declare,
+        // and one that does not - the `id` is a string where the contract says
+        // integer, which is the ordinary shape of a contract drift.
+        svr.Get ("/pet", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (R"({"id":7,"name":"Rex"})", "application/json");
+        });
+        svr.Get ("/pet-wrong", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (R"({"id":"seven","name":"Rex"})", "application/json");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -224,10 +235,43 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->save_request (r);
     }
 
+    /// Stamp a request's `spec_operation`, which is what says *which* operation
+    /// of the bound document a step is - the identity both coverage and schema
+    /// validation resolve by.
+    void stamp_spec_operation (const std::string& request_id, const json& identity) {
+        auto row = db_->get_request (request_id);
+        ASSERT_TRUE (row.has_value ()) << request_id;
+        row->spec_operation = identity.dump ();
+        db_->save_request (*row);
+    }
+
+    /// Store a document carrying @p response_schemas and bind `col_1` to it, as
+    /// an import or a sync would leave the two rows.
+    void bind_spec (const json& response_schemas, const std::string& hash = "hash-1") {
+        vayu::db::SpecDocument spec;
+        spec.id               = "spec_1";
+        spec.content          = "openapi: 3.0.0";
+        spec.hash             = hash;
+        spec.fetched_at       = 1;
+        spec.response_schemas = response_schemas.dump ();
+        db_->save_spec_document (spec);
+
+        auto col = db_->get_collection ("col_1");
+        ASSERT_TRUE (col.has_value ());
+        col->openapi =
+        json{ { "specId", "spec_1" }, { "specHash", hash }, { "syncedAt", 1 } }.dump ();
+        db_->create_collection (*col); // a replace, keyed on the id
+    }
+
     /// Resolve, create the run row and start the worker, exactly as POST /runs
     /// does - minus the HTTP layer.
     std::string start (size_t iterations, const std::string& environment_id = "") {
         return start_scenario (iterations, environment_id, json ());
+    }
+
+    /// As `start`, with the contract made a gate for the run.
+    std::string start_gated (size_t iterations) {
+        return start_scenario (iterations, "", json (), /*fail_on_schema_error=*/true);
     }
 
     /// As `start`, with a `data` block. Pass no @p iterations to leave the key
@@ -241,7 +285,8 @@ class ScenarioRunnerTest : public ::testing::Test {
 
     std::string start_scenario (std::optional<size_t> iterations,
     const std::string& environment_id,
-    const json& data) {
+    const json& data,
+    bool fail_on_schema_error = false) {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
         if (iterations) {
             scenario["iterations"] = *iterations;
@@ -264,10 +309,18 @@ class ScenarioRunnerTest : public ::testing::Test {
         execution->request = std::move (resolved.request);
         execution->plan    = std::move (resolved.plan);
         execution->data_rows = std::move (resolved.data_rows);
+        // The binding the plan resolved against, carried exactly as POST /runs
+        // carries it: without this the runner would judge every run of a bound
+        // collection as unbound, and every schema assertion below would pass by
+        // measuring nothing.
+        execution->spec = std::move (resolved.spec);
 
         json config{ { "scenario", scenario } };
         if (!environment_id.empty ()) {
             config["environmentId"] = environment_id;
+        }
+        if (fail_on_schema_error) {
+            config["failOnSchemaError"] = true;
         }
 
         const std::string run_id = "run_scenario_1";
@@ -967,8 +1020,8 @@ TEST (ScenarioSummaryPayload, CoverageIsItsOwnSectionAndAbsentWhenNotMeasured) {
     inputs.steps_executed = 2;
     EXPECT_FALSE (vayu::core::build_scenario_summary_payload (inputs).contains ("coverage"));
 
-    inputs.coverage = nlohmann::json{ { "operationsTotal", 2 },
-        { "operationsCovered", 1 }, { "operations", nlohmann::json::array ({ 1 }) } };
+    inputs.coverage    = nlohmann::json{ { "operationsTotal", 2 },
+           { "operationsCovered", 1 }, { "operations", nlohmann::json::array ({ 1 }) } };
     const auto summary = vayu::core::build_scenario_summary_payload (inputs);
     ASSERT_TRUE (summary.contains ("coverage")) << summary.dump ();
     EXPECT_EQ (summary["coverage"]["operationsCovered"], 1);
@@ -981,6 +1034,351 @@ TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZer
     inputs.steps_executed = 3;
     auto summary          = vayu::core::build_scenario_summary_payload (inputs);
     EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 0.0);
+}
+
+// ============================================================================
+// Per-step schema verdicts (issue #681)
+// ============================================================================
+
+namespace {
+
+/// The pet schema every schema test below declares: an integer id and a string
+/// name, both required - so a string id is a failure and a missing name is one
+/// too, which is what a drifting contract actually looks like.
+json pet_schema () {
+    return json::parse (R"({
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}
+    })");
+}
+
+/// A response-schema index declaring @p schema for `200 application/json` on
+/// each of @p paths, identified by `GET <path>` - the identity a step's
+/// `spec_operation` is stamped with below.
+json schema_index_for (const std::vector<std::string>& paths, const json& schema) {
+    json operations = json::array ();
+    for (const auto& path : paths) {
+        operations.push_back (json{ { "method", "GET" }, { "path", path },
+        { "responses",
+        json::array ({ json{ { "status", "200" },
+        { "contentType", "application/json" }, { "schema", schema } } }) } });
+    }
+    return json{ { "refRoots", json::object () }, { "operations", operations } };
+}
+
+/// The `validation` node the engine stamped on a stored step's trace, or a null
+/// json when it stamped none - the state that means "nobody judged this".
+json verdict_of (const vayu::db::Result& row) {
+    const auto trace = json::parse (row.trace_data);
+    auto node        = trace.find ("validation");
+    return node == trace.end () ? json () : *node;
+}
+
+} // namespace
+
+TEST_F (ScenarioRunnerTest, EachStepIsJudgedAgainstWhatItsOperationDeclares) {
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/pet");
+    seed_request ("req_bad", 1, "/pet-wrong");
+    seed_request ("req_undeclared", 2, "/ok");
+    // Two of the three operations are in the document; the third is a request
+    // whose collection has drifted off its contract.
+    bind_spec (schema_index_for ({ "/pet", "/pet-wrong" }, pet_schema ()));
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+    stamp_spec_operation ("req_bad", json{ { "method", "GET" }, { "path", "/pet-wrong" } });
+    stamp_spec_operation ("req_undeclared", json{ { "method", "GET" }, { "path", "/ok" } });
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+
+    const auto matched = verdict_of (rows[0]);
+    ASSERT_FALSE (matched.is_null ()) << rows[0].trace_data;
+    EXPECT_TRUE (matched["checked"].get<bool> ());
+    EXPECT_TRUE (matched["valid"].get<bool> ());
+    EXPECT_EQ (matched["matchedStatus"].get<std::string> (), "200");
+
+    const auto failed = verdict_of (rows[1]);
+    ASSERT_FALSE (failed.is_null ()) << rows[1].trace_data;
+    EXPECT_TRUE (failed["checked"].get<bool> ());
+    EXPECT_FALSE (failed["valid"].get<bool> ());
+    EXPECT_GT (failed["failuresTotal"].get<size_t> (), 0u);
+
+    // Bound and unjudgeable is its own answer, carrying the reason - never a
+    // silently absent verdict, which is how a drifted collection stays drifted.
+    const auto undeclared = verdict_of (rows[2]);
+    ASSERT_FALSE (undeclared.is_null ()) << rows[2].trace_data;
+    EXPECT_FALSE (undeclared["checked"].get<bool> ());
+    EXPECT_EQ (undeclared["reason"].get<std::string> (), "operation_not_declared");
+    // `checked: false` carries no validity at all - the distinction the whole
+    // node exists for.
+    EXPECT_FALSE (undeclared.contains ("valid"));
+}
+
+TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/pet");
+    // Deliberately stamped with an identity: a request can name an operation
+    // while its collection binds no document, and that must still produce
+    // nothing rather than `operation_not_declared`.
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_TRUE (verdict_of (rows[0]).is_null ()) << rows[0].trace_data;
+
+    // Absent from the summary too, and absent rather than a block of zeros: a
+    // run nothing judged did not match none of a contract.
+    EXPECT_FALSE (summary_of (run_id).contains ("schemaValidation"));
+}
+
+TEST_F (ScenarioRunnerTest, ABoundDocumentWithNoSchemaIndexIsSaidSoRatherThanSilent) {
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/pet");
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+    // A document stored before the index existed: bound, with nothing to judge
+    // against. The reader can act on this one - sync the binding.
+    vayu::db::SpecDocument spec;
+    spec.id         = "spec_1";
+    spec.content    = "openapi: 3.0.0";
+    spec.hash       = "hash-1";
+    spec.fetched_at = 1;
+    db_->save_spec_document (spec);
+    auto col = db_->get_collection ("col_1");
+    ASSERT_TRUE (col.has_value ());
+    col->openapi = json{ { "specId", "spec_1" }, { "specHash", "hash-1" } }.dump ();
+    db_->create_collection (*col);
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto verdict = verdict_of (rows[0]);
+    ASSERT_FALSE (verdict.is_null ()) << rows[0].trace_data;
+    EXPECT_FALSE (verdict["checked"].get<bool> ());
+    EXPECT_EQ (verdict["reason"].get<std::string> (), "no_index");
+}
+
+TEST_F (ScenarioRunnerTest, ABindingWhoseDocumentHasMovedSaysSoRatherThanJudgingAgainstIt) {
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/pet");
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+    bind_spec (schema_index_for ({ "/pet" }, pet_schema ()), "hash-1");
+    // The document is replaced under the binding, as a sync landing elsewhere
+    // would leave it. What it declares now is not what this run was bound to.
+    vayu::db::SpecDocument moved;
+    moved.id         = "spec_1";
+    moved.content    = "openapi: 3.0.0 # v2";
+    moved.hash       = "hash-2";
+    moved.fetched_at = 2;
+    moved.response_schemas = schema_index_for ({ "/pet" }, pet_schema ()).dump ();
+    db_->save_spec_document (moved);
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto verdict = verdict_of (rows[0]);
+    ASSERT_FALSE (verdict.is_null ()) << rows[0].trace_data;
+    EXPECT_FALSE (verdict["checked"].get<bool> ());
+    EXPECT_EQ (verdict["reason"].get<std::string> (), "hash_mismatch");
+}
+
+TEST_F (ScenarioRunnerTest, ASchemaFailureDoesNotChangeAStepsOutcomeByDefault) {
+    seed_collection ("col_1");
+    seed_request ("req_bad", 0, "/pet-wrong");
+    bind_spec (schema_index_for ({ "/pet-wrong" }, pet_schema ()));
+    stamp_spec_operation ("req_bad", json{ { "method", "GET" }, { "path", "/pet-wrong" } });
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    // The response did not match, and the step still passed: the verdict is its
+    // own channel. Revert the `record.outcome == Passed` guard in the runner
+    // and this is the assertion that reddens.
+    const auto verdict = verdict_of (rows[0]);
+    ASSERT_FALSE (verdict.is_null ());
+    EXPECT_FALSE (verdict["valid"].get<bool> ());
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "passed");
+    EXPECT_TRUE (rows[0].error.empty ()) << rows[0].error;
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["scenario"]["passed"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["scenario"]["failed"].get<size_t> (), 0u);
+    EXPECT_FALSE (summary["schemaValidation"]["failOnSchemaError"].get<bool> ());
+}
+
+TEST_F (ScenarioRunnerTest, FailOnSchemaErrorFailsTheStepAndNamesTheFirstProblem) {
+    seed_collection ("col_1");
+    seed_request ("req_bad", 0, "/pet-wrong");
+    seed_request ("req_ok", 1, "/pet");
+    bind_spec (schema_index_for ({ "/pet", "/pet-wrong" }, pet_schema ()));
+    stamp_spec_operation ("req_bad", json{ { "method", "GET" }, { "path", "/pet-wrong" } });
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+
+    const auto run_id = start_gated (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "failed");
+    // The sentence names where the body disagreed, not just that it did - the
+    // step list is all a reader has to go on.
+    EXPECT_NE (rows[0].error.find ("/id"), std::string::npos) << rows[0].error;
+    // A failure is not an error: the iteration continued and the matching step
+    // after it still ran and still passed.
+    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "passed");
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["scenario"]["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["scenario"]["passed"].get<size_t> (), 1u);
+    EXPECT_TRUE (summary["schemaValidation"]["failOnSchemaError"].get<bool> ());
+}
+
+TEST_F (ScenarioRunnerTest, TheGateNeverOverwritesAFailureThatAlreadyHasAReason) {
+    seed_collection ("col_1");
+    // A step whose test script fails *and* whose body does not match: the
+    // assertion is the one a reader has to fix first, so it keeps the error.
+    seed_request ("req_bad", 0, "/pet-wrong",
+    "", "pm.test('is a teapot', function () { pm.expect(pm.response.code).to.equal(418); });");
+    bind_spec (schema_index_for ({ "/pet-wrong" }, pet_schema ()));
+    stamp_spec_operation ("req_bad", json{ { "method", "GET" }, { "path", "/pet-wrong" } });
+
+    const auto run_id = start_gated (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[0].error.find ("is a teapot"), std::string::npos) << rows[0].error;
+}
+
+TEST_F (ScenarioRunnerTest, ASkippedStepCarriesNoVerdictBecauseItMadeNoResponse) {
+    seed_collection ("col_1");
+    seed_request ("req_skip", 0, "/pet", "pm.execution.skipRequest();");
+    bind_spec (schema_index_for ({ "/pet" }, pet_schema ()));
+    stamp_spec_operation ("req_skip", json{ { "method", "GET" }, { "path", "/pet" } });
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_TRUE (verdict_of (rows[0]).is_null ()) << rows[0].trace_data;
+    // And it is not counted as a response that went unchecked either - the run
+    // produced no responses at all.
+    EXPECT_FALSE (summary_of (run_id).contains ("schemaValidation"));
+}
+
+TEST_F (ScenarioRunnerTest, TheRunTalliesItsVerdictsForTheReport) {
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/pet");
+    seed_request ("req_bad", 1, "/pet-wrong");
+    seed_request ("req_undeclared", 2, "/ok");
+    bind_spec (schema_index_for ({ "/pet", "/pet-wrong" }, pet_schema ()));
+    stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
+    stamp_spec_operation ("req_bad", json{ { "method", "GET" }, { "path", "/pet-wrong" } });
+    stamp_spec_operation ("req_undeclared", json{ { "method", "GET" }, { "path", "/ok" } });
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto validation = summary_of (run_id)["schemaValidation"];
+    ASSERT_FALSE (validation.is_null ());
+    EXPECT_EQ (validation["responses"].get<size_t> (), 6u);
+    EXPECT_EQ (validation["checked"].get<size_t> (), 4u);
+    EXPECT_EQ (validation["valid"].get<size_t> (), 2u);
+    EXPECT_EQ (validation["failed"].get<size_t> (), 2u);
+    EXPECT_EQ (validation["partlyChecked"].get<size_t> (), 0u);
+    // A collection run checks every step it executed, so the counts describe
+    // the whole run. A load run's will not, which is why the block says which.
+    EXPECT_FALSE (validation["sampled"].get<bool> ());
+}
+
+TEST_F (ScenarioRunnerTest, StepEventsCarryTheVerdictOnTheSameTermsAsTheStoredRow) {
+    vayu::core::StepRecord record;
+    record.iteration  = 0;
+    record.step_index = 0;
+    record.step_name  = "Pet";
+    record.outcome    = StepOutcome::Passed;
+
+    const auto frame_of = [] (const vayu::core::StepRecord& r) {
+        const auto payload = vayu::core::build_step_payload (r, 0);
+        return json::parse (payload.substr (payload.find ("data: ") + 6));
+    };
+
+    // Absent here is absent there: a step of an unbound collection carries no
+    // verdict on the wire, so a live view cannot show one the report will not.
+    EXPECT_FALSE (frame_of (record).contains ("validation"));
+
+    vayu::core::ValidationVerdict verdict;
+    verdict.checked        = true;
+    verdict.valid          = false;
+    verdict.failures       = { { "/id", "unexpected instance type" } };
+    verdict.failures_total = 1;
+    verdict.matched_status = "200";
+    record.validation      = verdict;
+
+    const auto framed = frame_of (record);
+    ASSERT_TRUE (framed.contains ("validation")) << framed.dump ();
+    EXPECT_FALSE (framed["validation"]["valid"].get<bool> ());
+    EXPECT_EQ (framed["validation"]["failures"][0]["path"].get<std::string> (), "/id");
+}
+
+TEST (ScenarioSchemaGate, DefaultsToOffAndOnlyABooleanTrueTurnsItOn) {
+    using vayu::core::read_fail_on_schema_error;
+    EXPECT_FALSE (read_fail_on_schema_error (json::object ()));
+    EXPECT_FALSE (read_fail_on_schema_error (json{ { "failOnSchemaError", false } }));
+    EXPECT_TRUE (read_fail_on_schema_error (json{ { "failOnSchemaError", true } }));
+}
+
+TEST (ScenarioSummaryPayload, SchemaVerdictsAreTheirOwnSectionAndAbsentWhenNothingWasJudged) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 2;
+    EXPECT_FALSE (vayu::core::build_scenario_summary_payload (inputs).contains (
+    "schemaValidation"));
+
+    vayu::core::ValidationVerdict unchecked;
+    unchecked.reason = vayu::core::UncheckedReason::NoSchemaForStatus;
+    inputs.validation.record (unchecked);
+
+    const auto summary = vayu::core::build_scenario_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("schemaValidation")) << summary.dump ();
+    // A run whose every response went unchecked still reports the section: "one
+    // response, none of them checked" is what tells a reader to sync a binding,
+    // where silence tells them nothing.
+    EXPECT_EQ (summary["schemaValidation"]["responses"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["schemaValidation"]["checked"].get<size_t> (), 0u);
+    EXPECT_FALSE (summary["scenario"].contains ("schemaValidation"));
+}
+
+TEST (ValidationTallyTest, PartlyCheckedOverlapsTheVerdictRatherThanReplacingIt) {
+    vayu::core::ValidationTally tally;
+
+    vayu::core::ValidationVerdict partial;
+    partial.checked              = true;
+    partial.valid                = true;
+    partial.unevaluated_keywords = { { "unevaluatedProperties", 2 } };
+    tally.record (partial);
+
+    EXPECT_EQ (tally.responses, 1u);
+    EXPECT_EQ (tally.checked, 1u);
+    EXPECT_EQ (tally.valid, 1u);
+    EXPECT_EQ (tally.failed, 0u);
+    // Counted as valid *and* as partly checked - a body reported clean against a
+    // schema half of which went unread is exactly the claim that needs the
+    // second number beside it.
+    EXPECT_EQ (tally.partly_checked, 1u);
 }
 
 

@@ -31,6 +31,7 @@ export * from "./SampleRetentionNote";
 export * from "./ThresholdVerdict";
 export * from "./CapacitySummary";
 export * from "./ContractCoverage";
+export * from "./SchemaVerdict";
 
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";

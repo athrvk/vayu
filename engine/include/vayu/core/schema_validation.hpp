@@ -166,6 +166,58 @@ struct ValidationVerdict {
 [[nodiscard]] nlohmann::json build_validation_payload (const ValidationVerdict& verdict);
 
 /**
+ * @brief What a run's verdicts added up to.
+ *
+ * One tally rather than one per run mode, because "how many responses failed
+ * their schema" has to mean the same thing in a collection run's report (issue
+ * #681) and a load run's (#682). What legitimately differs between them is the
+ * *population* it was computed over, and that is stated on the payload below
+ * rather than left for a reader to infer from the run's mode.
+ */
+struct ValidationTally {
+    /// Responses a verdict was produced for at all. A response of an unbound
+    /// collection is never one of them - no verdict is built for it.
+    size_t responses = 0;
+    size_t checked   = 0;
+    size_t valid     = 0;
+    size_t failed    = 0;
+    /**
+     * Checked responses whose schema carried a keyword the validator could not
+     * evaluate.
+     *
+     * Counted beside `valid`/`failed` rather than as a third verdict, because
+     * such a response is still one or the other - what it is not is *fully*
+     * judged, and a reader taking `valid` at face value would be reading a body
+     * whose contract went half unread as clean. The file comment's dialect
+     * honesty, carried up to the rollup.
+     */
+    size_t partly_checked = 0;
+
+    void record (const ValidationVerdict& verdict);
+
+    /// True for a run that produced no verdict at all - an unbound collection,
+    /// or one whose steps never sent. Callers store no section for it.
+    [[nodiscard]] bool empty () const {
+        return responses == 0;
+    }
+};
+
+/**
+ * @brief The `schemaValidation` object a run stores in `runs.summary`.
+ *
+ * camelCase for the reason `build_validation_payload` is: the report route
+ * passes it through verbatim, so there is one description of the shape.
+ *
+ * @param sampled Whether the tally describes every response the run produced or
+ *        only the ones it kept. Stated on the payload because "0 failed" reads
+ *        as "nothing failed" unless the block says which responses it looked
+ *        at - the distinction `docs/app/openapi.md`'s exact-vs-sampled table
+ *        already draws for coverage.
+ */
+[[nodiscard]] nlohmann::json
+build_validation_summary_payload (const ValidationTally& tally, bool sampled);
+
+/**
  * @brief Validate a stored `response_schemas` index on the way in.
  *
  * Returns the caller-facing `400` sentence, or `std::nullopt` for an acceptable

@@ -939,9 +939,62 @@ const smokeResultSchema = z.object({
 			skipped: z.boolean().optional(),
 			reason: z.string().optional(),
 			error: z.string().optional(),
+			/*
+			 * What the collection's bound OpenAPI document says about this
+			 * response (issue #681). Absent for a collection bound to nothing -
+			 * a response nobody judged against a contract did not fail one - and
+			 * declared here because a field returned but not declared is
+			 * rejected by the SDK before an agent ever sees it.
+			 */
+			schema: z
+				.object({
+					checked: z.boolean(),
+					valid: z.boolean().optional(),
+					reason: z.string().optional(),
+					failuresTotal: z.number().optional(),
+					failures: z.array(z.string()).optional(),
+				})
+				.optional(),
 		})
 	),
 });
+
+/**
+ * The schema verdict a `POST /execute` body carries, flattened for a tool
+ * result (issue #681).
+ *
+ * The failures are rendered `path: message` rather than passed through as
+ * objects: an agent reads this as text, and the engine has already capped the
+ * list. `undefined` means the engine wrote no verdict at all, which is the one
+ * state that must not become `{checked: false}` - that would say the contract
+ * could not judge this response, when there was no contract.
+ */
+function readSchemaVerdict(resp: Record<string, unknown>): Record<string, unknown> | undefined {
+	const node = resp.validation;
+	if (!node || typeof node !== "object") return undefined;
+	const v = node as {
+		checked?: unknown;
+		valid?: unknown;
+		reason?: unknown;
+		failuresTotal?: unknown;
+		failures?: unknown;
+	};
+	if (typeof v.checked !== "boolean") return undefined;
+	const failures = Array.isArray(v.failures)
+		? (v.failures as Array<{ path?: unknown; message?: unknown }>).map((f) =>
+				`${typeof f.path === "string" && f.path ? f.path : "(body)"}: ${
+					typeof f.message === "string" ? f.message : ""
+				}`.trim()
+			)
+		: undefined;
+	return {
+		checked: v.checked,
+		...(typeof v.valid === "boolean" ? { valid: v.valid } : {}),
+		...(typeof v.reason === "string" ? { reason: v.reason } : {}),
+		...(typeof v.failuresTotal === "number" ? { failuresTotal: v.failuresTotal } : {}),
+		...(failures && failures.length > 0 ? { failures } : {}),
+	};
+}
 
 const configUpdateSchema = z
 	.object({
@@ -1868,7 +1921,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -1961,8 +2014,24 @@ export const TOOLS: McpTool[] = [
 								(t) => t.passed !== false
 							)
 						: true;
-					const ok = code >= 200 && code < 400 && testsOk;
-					results.push({ name, method, url, ok, statusCode: code });
+					// The contract's own verdict, folded in the way `testResults`
+					// folds (issue #681): a response the document declares a
+					// schema for and that does not match it is a failed request.
+					// Only a *checked* verdict can fail one - `checked: false`
+					// says the response could not be judged, which is not the
+					// same as judged and wrong, and failing a smoke run on it
+					// would make an undocumented status look like a broken API.
+					const schema = readSchemaVerdict(resp);
+					const schemaOk = !(schema?.checked === true && schema.valid === false);
+					const ok = code >= 200 && code < 400 && testsOk && schemaOk;
+					results.push({
+						name,
+						method,
+						url,
+						ok,
+						statusCode: code,
+						...(schema ? { schema } : {}),
+					});
 					if (ok) passed++;
 					else failed++;
 				} catch (err) {

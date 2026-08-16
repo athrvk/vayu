@@ -771,14 +771,15 @@ const vayu::core::MonitorLimits& monitor_limits) {
         }
     }
 
-    // Each is read with `config.value (..., bool)` inside RunContext's
-    // constructor, which throws `type_error.302` on a string - after the run
-    // row exists, which is the stranded-`pending` failure this whole function
-    // is here to prevent. Absent and `null` both mean "use the engine setting",
-    // matching the null-vs-absent rule the resource routes follow.
+    // Each is read as a boolean only after the run row exists - by RunContext's
+    // constructor via `config.value (..., bool)`, which throws `type_error.302`
+    // on a string, or by the scenario runner - which is the stranded-`pending`
+    // failure this whole function is here to prevent. Absent and `null` both
+    // mean "use the default", matching the null-vs-absent rule the resource
+    // routes follow.
     for (const char* key :
     { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
-    "stream_metrics" }) {
+    "stream_metrics", "failOnSchemaError" }) {
         const auto it = config.find (key);
         if (it != config.end () && !it->is_null () && !it->is_boolean ()) {
             return "'" + std::string (key) + "' must be a boolean (got " +

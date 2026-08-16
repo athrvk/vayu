@@ -268,6 +268,14 @@ Notes:
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).
+  For a collection **bound to an OpenAPI document** each row also carries a
+  `schema` verdict (issue #681) and folds it into `ok` the way `testResults`
+  folds: a response the document declares a schema for and that does not match
+  it fails the request, with the failing JSON Pointers listed so an agent need
+  not re-run to learn where. Only a *checked* verdict can fail a row -
+  `checked: false` (no declared schema for the status or content type, a body
+  that is not JSON) is reported and never counted against the run, and a
+  collection bound to nothing carries no `schema` field at all.
   Requests whose host still can't be verified after resolution (e.g. a variable
   did not resolve and allow-all is off) are skipped, not sent.
   It **does not recurse**: `GET /requests?collectionId=` serves a collection's

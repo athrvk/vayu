@@ -24,7 +24,7 @@
  * the counts are the parts worth pinning, and none of them need a DOM.
  */
 
-import type { RunReport, ScenarioStepEvent, StepOutcome } from "@/types";
+import type { ResponseValidation, RunReport, ScenarioStepEvent, StepOutcome } from "@/types";
 import type { RunResultSample } from "@/modules/request-builder/utils/restore-response";
 
 /** How many step executions ended in each outcome. */
@@ -54,6 +54,21 @@ export interface ScenarioStepRow {
 	 * stored copy arrives.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * What the contract says about this step's response (issue #681), on a row
+	 * that has no stored result yet.
+	 *
+	 * **The live half only.** A stored row's verdict is read back through
+	 * `responseFromRunResult`, the same funnel its response comes from, so
+	 * there is one reader of `trace.validation` rather than a second copy here
+	 * that would not receive its fixes. `ScenarioStepCard` takes whichever of
+	 * the two the row has; they are the same object, because the engine stores
+	 * the one it published.
+	 *
+	 * Absent for a step of an unbound collection and for one that sent nothing;
+	 * absent is never rendered as "checked and fine".
+	 */
+	validation?: ResponseValidation;
 	/** The stored result, present only on a row read back from the report. */
 	result?: RunResultSample;
 }

@@ -462,7 +462,62 @@ part of its schema that would have rejected it was never looked at, and saying s
 is the only honest way to show a green verdict beside a schema that was half
 read.
 
+### In a collection run
+
+Every step of a collection run is judged the same way, and the verdict rides
+three surfaces:
+
+- The **step row** carries the same three-state chip the response pane does, and
+  expanding it shows the failure list and the dialect disclosure in full.
+- The run's **Overview**, and the collection run's own view above the step list,
+  carry a `Schema validation` block beside contract coverage - the two halves of
+  one question: coverage says which of the contract the run touched, this says
+  whether what came back matched it.
+- The **live step stream** carries it too, so a run being watched shows verdicts
+  as they happen rather than only once the report is written.
+
+A step that sent nothing - skipped by a script, or stopped by a `{{data.column}}`
+with no column - carries **no verdict at all**. There was no response to judge,
+and an unchecked verdict there would be reporting on a request nobody made.
+
+The run is judged against the document it was **planned** with, read once when
+the plan resolved. A sync landing mid-run stores a new document and moves the
+binding; it does not change what the run in flight is measured against.
+
+#### A schema failure does not fail a step, unless you ask
+
+By default a schema verdict is its **own channel**: a step whose response does
+not match what the document declares still passes if its assertions passed, and
+the row shows both facts. They are different claims - one is about your
+assertions, the other about the contract - and folding the second into the first
+would make every undocumented field look like a broken test.
+
+Set `failOnSchemaError` on the run to make the contract a gate. Then a step that
+passed everything else and whose response did not match is **failed**, with the
+first problem named in its error. A step that was already failing keeps the
+error that named it: that is the one to fix first.
+
+| | Step outcome | Schema verdict |
+|---|---|---|
+| Assertions passed, body matched | passed | matched |
+| Assertions passed, body did not | passed (`failed` with `failOnSchemaError`) | failed |
+| An assertion failed, body did not match | failed - names the assertion | failed |
+| Bound collection, no schema for the status | unchanged | not checked |
+| Unbound collection | unchanged | *no verdict* |
+
+#### What the run-level block counts
+
+`checked` is a subset of `responses`: a response with no declared schema for its
+status or content type, or one whose body is not JSON, is counted as a response
+and as neither a pass nor a failure. `valid + failed` is `checked`, and the block
+says how many could not be checked rather than leaving the two numbers to
+disagree quietly.
+
+A collection run's counts are **exact** - every step it executed - and the block
+says so. That matters because the same block will say otherwise for a load run,
+where the counts describe the sampled responses only.
+
 ### What is not here yet
 
-Per-step verdicts in a collection run, and validation of the sampled responses of
-a load run. Both are their own change; this page grows with them.
+Validation of the sampled responses of a load run. It is its own change; this
+page grows with it.

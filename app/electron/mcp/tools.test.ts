@@ -1054,6 +1054,136 @@ describe("run_collection_smoke", () => {
 		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
 	});
 
+	/**
+	 * The contract's verdict folds into `ok` the way `testResults` does
+	 * (issue #681), and the three cases are deliberately spelled differently:
+	 * checked-and-wrong fails the request, checked-and-right does not, and a
+	 * response the document declares no schema for is neither.
+	 */
+	test("a response that contradicts its declared schema fails the request", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "matches" },
+				{ id: "r2", name: "contradicts" },
+				{ id: "r3", name: "undeclared" },
+			]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValueOnce({
+					status: 200,
+					testResults: [],
+					validation: { checked: true, valid: true, failures: [], failuresTotal: 0 },
+				})
+				.mockResolvedValueOnce({
+					status: 200,
+					testResults: [],
+					validation: {
+						checked: true,
+						valid: false,
+						failuresTotal: 1,
+						failures: [{ path: "/id", message: "unexpected instance type" }],
+					},
+				})
+				.mockResolvedValueOnce({
+					status: 200,
+					testResults: [],
+					validation: { checked: false, reason: "no_schema_for_status" },
+				}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const summary = res.structuredContent as {
+			passed: number;
+			failed: number;
+			results: Array<{ ok: boolean; schema?: { checked: boolean; failures?: string[] } }>;
+		};
+		// Only the contradicting one failed - a 200 with an undeclared status
+		// schema is not a broken API.
+		expect(summary).toMatchObject({ passed: 2, failed: 1 });
+		expect(summary.results[0].ok).toBe(true);
+		expect(summary.results[1].ok).toBe(false);
+		expect(summary.results[2].ok).toBe(true);
+		// And the row says *why*, so an agent does not have to re-run to find out.
+		expect(summary.results[1].schema?.failures).toEqual(["/id: unexpected instance type"]);
+		expect(summary.results[2].schema).toMatchObject({
+			checked: false,
+			reason: "no_schema_for_status",
+		});
+	});
+
+	test("a collection bound to no document reports no schema field at all", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			// No `validation` node - what the engine returns for an unbound
+			// collection. Absent must not become `{checked: false}`, which would
+			// claim a contract could not judge this response when there was none.
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const summary = res.structuredContent as { results: Array<Record<string, unknown>> };
+		expect(summary.results[0]).not.toHaveProperty("schema");
+	});
+
+	/**
+	 * The declared-schema-must-be-updated trap: a field the handler returns but
+	 * the `outputSchema` does not declare is rejected by the SDK before an agent
+	 * sees it, and only asserting the result against the tool's own schema
+	 * catches it.
+	 */
+	test("what the handler returns validates against the tool's declared outputSchema", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "ok" },
+				{ id: "r2", name: "offlist" },
+			]),
+			composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url: requestId === "r1" ? "https://api.example.com/ok" : "https://evil.test/x",
+				})
+			),
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 200,
+				testResults: [],
+				validation: {
+					checked: true,
+					valid: false,
+					failuresTotal: 2,
+					failures: [{ path: "", message: "required property 'name' missing" }],
+				},
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const tool = TOOLS.find((t) => t.name === "run_collection_smoke");
+		expect(tool?.outputSchema).toBeDefined();
+		expect(() => tool!.outputSchema!.parse(res.structuredContent)).not.toThrow();
+		// A body-level failure keeps a readable location rather than an empty one.
+		const summary = res.structuredContent as {
+			results: Array<{ schema?: { failures?: string[]; failuresTotal?: number } }>;
+		};
+		expect(summary.results[0].schema?.failures).toEqual([
+			"(body): required property 'name' missing",
+		]);
+		expect(summary.results[0].schema?.failuresTotal).toBe(2);
+	});
+
 	test("says nothing extra when the collection has no sub-collections", async () => {
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),

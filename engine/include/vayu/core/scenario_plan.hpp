@@ -38,10 +38,12 @@
 
 #include <cstddef>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -149,6 +151,29 @@ struct SpecBinding {
      * measured", which leaves the coverage block out entirely.
      */
     std::vector<DeclaredOperation> declared_operations;
+    /**
+     * The bound document's response-schema index (issue #681), read here for
+     * the reason `declared_operations` is: a run must be judged against the
+     * document it was *planned* against, and a sync that lands mid-run moves
+     * the binding underneath it.
+     *
+     * Its own field rather than a member of the operation index, matching the
+     * two columns they are read from - see `core/schema_validation.hpp` on why
+     * schemas are stored apart from operations.
+     */
+    std::optional<ResponseSchemaIndex> response_schemas;
+    /**
+     * Why there is no index to validate against, set **exactly when** `bound()`
+     * and `response_schemas` is absent.
+     *
+     * A bound collection with no readable index still gets a verdict per step -
+     * `checked: false` carrying this reason - because "the document declares no
+     * schemas" is something a reader can act on (sync the binding), while a
+     * chip that silently never appears is how a broken index stays broken.
+     * Unbound is the one state that produces no verdict at all, and it is
+     * spelled by `bound()` alone.
+     */
+    std::optional<UncheckedReason> schema_reason;
     [[nodiscard]] bool bound () const {
         return !spec_id.empty ();
     }

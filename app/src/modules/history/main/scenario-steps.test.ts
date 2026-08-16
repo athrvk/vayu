@@ -83,6 +83,20 @@ function report(partial: Partial<RunReport>): RunReport {
 	};
 }
 
+describe("the live schema verdict", () => {
+	it("rides the row it arrived on", () => {
+		const verdict = { checked: true, valid: false, failuresTotal: 2 } as const;
+		const steps = appendStepEvent([], event(0, 0, "passed", { validation: { ...verdict } }));
+		expect(steps[0].validation).toEqual(verdict);
+	});
+
+	it("is absent for a step of an unbound collection", () => {
+		// Absent, never `{checked: false}`: a response nobody judged against a
+		// contract did not fail to be judged by one.
+		expect(appendStepEvent([], event(0, 0))[0].validation).toBeUndefined();
+	});
+});
+
 describe("appendStepEvent", () => {
 	it("appends steps in the order they arrive", () => {
 		let steps: ScenarioStepRow[] = [];
@@ -233,6 +247,28 @@ describe("stepRowsFromReport", () => {
 	it("is empty for a report with no results at all", () => {
 		expect(stepRowsFromReport(report({}))).toEqual([]);
 		expect(stepRowsFromReport(undefined)).toEqual([]);
+	});
+
+	/**
+	 * A stored row's schema verdict (issue #681) is deliberately **not** read
+	 * here. It reaches the card through `responseFromRunResult` - the same
+	 * funnel the response itself comes from - so this file has no second reader
+	 * of `trace.validation` to keep in step, and importing that funnel here
+	 * would pull the whole response-viewer barrel into the step list's module
+	 * graph for one field. `ScenarioStepCard.validation.test.tsx` asserts the
+	 * live and stored rows render the same verdict.
+	 */
+	it("does not re-read the stored verdict onto the row", () => {
+		const stored = storedStep(0, 0);
+		stored.trace = {
+			...stored.trace,
+			validation: { checked: true, valid: false, failuresTotal: 1 },
+		};
+
+		const rows = stepRowsFromReport(report({ results: [stored] }));
+		expect(rows[0].validation).toBeUndefined();
+		// The row it *is* read from travels with the mapped row.
+		expect(rows[0].result?.trace?.validation).toBeDefined();
 	});
 
 	it("does not call an unstamped outcome a pass", () => {

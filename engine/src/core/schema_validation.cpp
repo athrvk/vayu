@@ -248,6 +248,32 @@ nlohmann::json build_validation_payload (const ValidationVerdict& verdict) {
     return node;
 }
 
+void ValidationTally::record (const ValidationVerdict& verdict) {
+    ++responses;
+    if (!verdict.checked) {
+        // Counted in `responses` and nowhere else: an unchecked response is not
+        // a pass and not a failure, and folding it into either is the confusion
+        // the verdict's own shape refuses to make. `responses - checked` is
+        // what a reader subtracts to get them back.
+        return;
+    }
+    ++checked;
+    if (verdict.valid) {
+        ++valid;
+    } else {
+        ++failed;
+    }
+    if (!verdict.unevaluated_keywords.empty ()) {
+        ++partly_checked;
+    }
+}
+
+nlohmann::json build_validation_summary_payload (const ValidationTally& tally, bool sampled) {
+    return nlohmann::json{ { "responses", tally.responses }, { "checked", tally.checked },
+        { "valid", tally.valid }, { "failed", tally.failed },
+        { "partlyChecked", tally.partly_checked }, { "sampled", sampled } };
+}
+
 std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
     const nlohmann::json root = validation_root (schema, ref_roots);

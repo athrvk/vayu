@@ -428,6 +428,8 @@ A live run can be **stopped** from this tab (`StopRunButton`, below), which matt
 
 `components/ScenarioStepCard.tsx` renders one step on the shared `SampledExchange`, restoring the response through `restore-response.ts` - the same path a design run's response pane uses, not a second reading of `trace_data`. `SampledExchange` gained an optional `state` (`success | error | slow | skipped`) and a `title` slot for this: its state is otherwise derived from the status code, which would read a `failed` assertion over a `200` as a success and a `skipped` step as a connection failure.
 
+For a step of a **spec-bound** collection the row also carries the shared `ValidationChip` beside its outcome chip, and the expansion renders the same `SchemaValidation` section the response pane's Tests tab does (issue #681) - both shared rather than re-laid-out here, so the three-state wording and the unevaluated-keyword disclosure cannot drift between the two surfaces. It sits *beside* the outcome and never inside it: with `failOnSchemaError` off, a step can pass every assertion while its response contradicts the contract, and those are two facts. A step of an unbound collection, or one that sent nothing, renders neither - `step.validation` is absent, and absent is never drawn as "checked, and fine".
+
 The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a collection row's ⋯ menu. Four options - Recursive, Iterations, a data file and Load test - because the scenario **is** the folder: the sequence is the tree's own ordering, and a step list authored here would be a second source of truth for it. Invalid iterations are refused in the dialog; the engine's own rejection (which names the step that would not compose) is shown in place rather than as a toast that scrolls away.
 
 **Load test** (issue #357) is the same plan on a different executor: the payload gains a load `mode`, and its presence is exactly what the engine reads to choose one, so a design-mode payload keeps its meaning by carrying no mode at all. It lives here rather than in the request builder's `LoadTestConfigDialog` because that dialog's target is the request that is open, and a scenario's target is a folder - picked here, by the tree that already owns the choice. Turning it on swaps Iterations (a duration-bounded run has no use for a pass count) for Virtual users and Duration, and swaps what happens after the `202`: a load run publishes `metrics` ticks and no `step` events, so it attaches `loadTestService` and opens the **dashboard**, where a design-mode run attaches `scenarioRunService` and opens the runner tab. Attaching the wrong one is not a degraded view, it is a permanently empty one.
@@ -1009,6 +1011,36 @@ it destructive would put it in the same vocabulary as a failed budget. The card
 also states that its numbers are counted on every send rather than drawn from the
 stored sample - it sits among figures that *are* sampled, and a reader has no
 other way to tell them apart.
+
+## Schema Verdict (`components/shared/SchemaVerdict.tsx`)
+
+Whether a run's responses matched the schemas its bound contract declares
+(`RunReport.schemaValidation`, issue #681). Shown directly under
+`ContractCoverage` in both surfaces that carry it - the history detail's Overview
+and a scenario run's own view - because the two are halves of one question:
+coverage says which of the contract the run touched, this says whether what came
+back matched it, and a rollup present in one place and not the other reads as a
+missing block rather than a scoping decision.
+
+Same absent-vs-zero discipline as the two beside it - an absent block, or one
+that judged no response, renders **nothing**.
+
+**Three numbers, never one percentage.** `checked` is a subset of `responses`
+(a response with no declared schema for its status is neither a pass nor a
+failure), and `partlyChecked` overlaps both verdicts rather than sitting beside
+them. The card states how many could not be checked rather than leaving a reader
+to subtract, and discloses a partly evaluated schema beside an otherwise clean
+count - a body reported clean against a contract half of which went unread is
+exactly the claim that needs the second number.
+
+The failure chip is **destructive-toned**, unlike coverage's warning: a response
+that contradicts the contract is a failure of the system under test, where an
+unexercised operation is only a gap in the run.
+
+`sampled` decides the scope sentence - "every step this run executed" for a
+collection run, "the responses this run kept" for a load run - because "0 failed"
+is a different claim depending on which, and the block is the only place that can
+say so.
 
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 

@@ -310,18 +310,32 @@ const ScenarioResolveOptions& options) {
         // Leaves the binding unbound; a malformed column must not fail a run.
     }
 
-    // The document's declared operations, read once here so contract coverage
-    // (#629) counts against the contract this run was planned against. The hash
-    // has to agree: the binding names a document *and a version of it*, and a
-    // row whose hash has moved under the binding is a state no run should report
-    // a contract from. Any disagreement - no such document, no index on it, a
-    // hash that does not match - leaves the operations empty, which is the
-    // engine's one spelling of "not measured against a contract".
+    // The document's two indexes, read once here so contract coverage (#629) and
+    // per-step schema verdicts (#681) both judge this run against the contract it
+    // was planned against. The hash has to agree: the binding names a document
+    // *and a version of it*, and a row whose hash has moved under the binding is
+    // a state no run should report a contract from.
+    //
+    // The two disagree about what a miss means, and deliberately. Coverage leaves
+    // its operations empty - "not measured against a contract" has one spelling
+    // there, and an absent block is it. Validation instead records *why*, because
+    // a bound collection whose document carries no schemas is a state the reader
+    // can fix, and a per-step verdict that quietly never appears is how they
+    // never learn of it. Unbound produces neither, on both sides.
     if (resolution.spec.bound ()) {
-        if (const auto document = db.get_spec_document (resolution.spec.spec_id);
-            document && document->hash == resolution.spec.spec_hash) {
+        const auto document = db.get_spec_document (resolution.spec.spec_id);
+        if (!document) {
+            resolution.spec.schema_reason = UncheckedReason::NoIndex;
+        } else if (document->hash != resolution.spec.spec_hash) {
+            resolution.spec.schema_reason = UncheckedReason::HashMismatch;
+        } else {
             if (auto declared = parse_declared_operations (document->operations)) {
                 resolution.spec.declared_operations = std::move (*declared);
+            }
+            if (auto index = ResponseSchemaIndex::parse (document->response_schemas)) {
+                resolution.spec.response_schemas = std::move (index);
+            } else {
+                resolution.spec.schema_reason = UncheckedReason::NoIndex;
             }
         }
     }

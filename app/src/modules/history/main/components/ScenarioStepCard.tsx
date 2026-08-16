@@ -32,10 +32,12 @@ import { Callout } from "@/components/shared";
 import {
 	SampledExchange,
 	UnifiedResponseViewer,
+	ValidationChip,
 	phasesFromTrace,
 	formatSize,
 	type ExchangeState,
 } from "@/components/shared/response-viewer";
+import SchemaValidation from "@/modules/request-builder/components/ResponseViewer/SchemaValidation";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { cn } from "@/lib/utils";
 import type { StepOutcome } from "@/types";
@@ -83,6 +85,13 @@ export default function ScenarioStepCard({
 	const response = step.result ? responseFromRunResult(step.result, runId) : null;
 	const phases = phasesFromTrace(step.result?.trace);
 
+	// The schema verdict from whichever source this row has (issue #681): the
+	// live `step` event before the run ends, and the restored response after -
+	// through the same funnel the response itself comes from, so nothing here
+	// re-reads `trace.validation` and the two cannot drift. They are one object
+	// either way: the engine publishes and stores the same node.
+	const validation = step.validation ?? response?.validation;
+
 	// The step's own failure text: a test assertion that did not hold, or the
 	// error that ended the iteration. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
@@ -108,6 +117,15 @@ export default function ScenarioStepCard({
 					<Badge variant="chip" className={cn("shrink-0", OUTCOME_CHIP[step.outcome])}>
 						{step.outcome}
 					</Badge>
+					{/*
+					 * Beside the outcome and not folded into it: with
+					 * `failOnSchemaError` off - the default - a step can pass
+					 * every assertion while its response does not match what the
+					 * document declares, and those are two separate facts. The
+					 * shared chip, so the three-state wording is the one the
+					 * response pane already uses.
+					 */}
+					{validation && <ValidationChip validation={validation} className="shrink-0" />}
 				</span>
 			}
 			state={OUTCOME_STATE[step.outcome]}
@@ -136,6 +154,15 @@ export default function ScenarioStepCard({
 						: "The request and response appear here once the run finishes - steps are stored when it ends."}
 				</p>
 			)}
+
+			{/*
+			 * The verdict in full, inside the expansion. The same section the
+			 * response pane's Tests tab renders, rather than a second layout of
+			 * one verdict - the failure list and the unevaluated-keyword
+			 * disclosure are the parts that make the chip above honest, and a
+			 * copy of them here would not receive that section's fixes.
+			 */}
+			{validation && <SchemaValidation validation={validation} />}
 
 			{response && (
 				<div className="space-y-2">

@@ -9,7 +9,13 @@
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
-import type { LoadTestMetrics, MonitorSample, ScenarioStepEvent, StepOutcome } from "@/types";
+import type {
+	LoadTestMetrics,
+	MonitorSample,
+	ResponseValidation,
+	ScenarioStepEvent,
+	StepOutcome,
+} from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
 interface RawSseMetrics {
@@ -87,6 +93,15 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		// Absent for a run with no data set, and left absent rather than
 		// defaulted: a `0` here would read as "row 1 of a data file".
 		...(typeof e.dataRowIndex === "number" ? { dataRowIndex: e.dataRowIndex } : {}),
+		// The schema verdict (issue #681), passed through as the object the
+		// engine wrote rather than re-narrowed field by field: it is the same
+		// node the stored trace carries and `validationFromTrace` passes through
+		// for exactly this reason - two narrowings of one shape are two places
+		// for it to drift. Absent stays absent; a collection bound to no
+		// document has no verdict, which is not the same as an empty one.
+		...(e.validation && typeof e.validation === "object"
+			? { validation: e.validation as ResponseValidation }
+			: {}),
 	};
 }
 

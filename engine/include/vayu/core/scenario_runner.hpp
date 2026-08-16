@@ -79,6 +79,15 @@ struct StepRecord {
     double latency_ms = 0.0;
     /// Transport error, script error or failed-assertion summary; "" on a pass.
     std::string error;
+    /**
+     * What this step's response amounted to against the contract (issue #681).
+     *
+     * Absent - not an unchecked verdict - for a step of a collection bound to no
+     * document, and for a step that sent nothing: a response nobody made was not
+     * judged against a contract, and neither was one nobody was measuring. Every
+     * other step carries a verdict, `checked: false` and a reason included.
+     */
+    std::optional<ValidationVerdict> validation;
     /// The design-mode trace (`build_result_trace`) plus this step's identity.
     nlohmann::json trace;
 };
@@ -191,6 +200,31 @@ resolve_next_step (const ScenarioStepNameIndex& index, const std::string& target
  */
 [[nodiscard]] std::string build_step_payload (const StepRecord& record, size_t offset);
 
+/**
+ * @brief Read `failOnSchemaError` off a `POST /runs` payload (issue #681).
+ *
+ * Default false, and the default is the decision: a schema verdict is its own
+ * channel, so a response that does not match what the document declares says
+ * something about the *contract* rather than about the assertion the step made.
+ * A run that wants the contract to be a gate says so, and then only a step that
+ * passed everything else is failed by it - a step already failing an assertion
+ * keeps the error that named it.
+ *
+ * Type-checked by `validate_run_config` before the run row exists, so anything
+ * reaching here is a boolean or absent.
+ */
+[[nodiscard]] bool read_fail_on_schema_error (const nlohmann::json& config);
+
+/**
+ * @brief The `results.error` sentence a schema failure produces, for a run that
+ *        asked schema failures to fail their step.
+ *
+ * Names the first problem, exactly as `describe_failed_tests` names the first
+ * failed assertion and for the same reason: the step list is all a reader has,
+ * and "3 problems" without one of them names nothing to go and look at.
+ */
+[[nodiscard]] std::string describe_schema_failure (const ValidationVerdict& verdict);
+
 /** What a scenario run reports about itself once it has finished. */
 struct ScenarioSummaryInputs {
     size_t iterations_requested = 0;
@@ -212,6 +246,17 @@ struct ScenarioSummaryInputs {
      * reporting it as zero of zero would read as a contract it failed.
      */
     nlohmann::json coverage = nlohmann::json::object ();
+    /**
+     * What the run's steps amounted to against their declared schemas (issue
+     * #681). Empty for every run that produced no verdict at all, which leaves
+     * the section out of the summary on the same terms `coverage` is left out.
+     */
+    ValidationTally validation;
+    /// Whether this run asked a schema failure to fail its step. Recorded
+    /// beside the tally because the same counts mean two different things
+    /// depending on it: with the flag off, `failed` steps and schema failures
+    /// are disjoint facts about the run rather than one.
+    bool fail_on_schema_error = false;
 };
 
 /**

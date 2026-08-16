@@ -305,6 +305,35 @@ export interface ResponseValidation {
 }
 
 /**
+ * What a whole run's responses amounted to against their declared schemas
+ * (issue #681). See {@link RunReport.schemaValidation} for when it is present.
+ *
+ * `responses` is the denominator and `checked` is a subset of it: a response
+ * the engine could not judge - no schema for its status, a body that is not
+ * JSON - is counted in the first and not the second, and is neither a pass nor
+ * a failure. `valid + failed === checked`.
+ *
+ * `partlyChecked` is not a third verdict. Those responses are also `valid` or
+ * `failed`; what they are not is fully judged, because part of their schema
+ * used keywords the draft-07 validator cannot evaluate.
+ *
+ * `sampled` says which responses the counts describe - every one the run
+ * produced, or only the ones it kept. A collection run checks every step and
+ * reports `false`; a load run validates its sampled reservoir and reports
+ * `true`, where "0 failed" means "no *sampled* response failed".
+ */
+export interface RunSchemaValidation {
+	responses: number;
+	checked: number;
+	valid: number;
+	failed: number;
+	partlyChecked: number;
+	sampled: boolean;
+	/** Whether a schema failure was allowed to fail its step in this run. */
+	failOnSchemaError?: boolean;
+}
+
+/**
  * One operation's row in a run report's coverage block (issue #629).
  *
  * `declaredHit` and `declaredMissed` partition the operation's declared status
@@ -758,6 +787,15 @@ export interface ScenarioStepEvent {
 	 * live and after a reload.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * What the contract says about this step's response (issue #681), the same
+	 * object the stored trace carries - so a step watched live and the same step
+	 * read back from the report show one verdict, not two derivations of it.
+	 *
+	 * Absent for a step of an unbound collection and for one that sent nothing:
+	 * a response nobody made was not judged against a contract.
+	 */
+	validation?: ResponseValidation;
 }
 
 /**
@@ -1720,6 +1758,19 @@ export interface RunReport {
 	 * `results[]` sample a load run stores.
 	 */
 	coverage?: RunCoverage;
+	/**
+	 * Whether what came back matched what the bound contract declares for it
+	 * (issue #681) - the other half of the question `coverage` starts.
+	 *
+	 * **Absent, never zeros**, on exactly the same terms: a run of an unbound
+	 * collection, or one whose steps never sent, carries no block at all rather
+	 * than one saying nothing failed.
+	 *
+	 * Judged against the document the run was *planned* with, and read once when
+	 * its plan resolved - so a sync landing mid-run cannot change what the run
+	 * was measured against.
+	 */
+	schemaValidation?: RunSchemaValidation;
 	/**
 	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
 	 *

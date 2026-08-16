@@ -35,6 +35,12 @@ export { default as ResponseEvents } from "./ResponseEvents";
 export type { ResponseEventsProps } from "./ResponseEvents";
 export { StatusCodeBadge } from "./StatusCodeBadge";
 export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
+// Whether one response matched the schema its contract declares. Exported now
+// that a second surface shows it - the collection run's step list beside the
+// response pane's status bar - because a hand-rolled second chip would not
+// receive this one's three-state wording (issue #681).
+export { ValidationChip } from "./ValidationChip";
+export type { ValidationChipProps } from "./ValidationChip";
 
 // Pieces shared by the two response viewers. They are two different shells -
 // seven tabs from live context, three from a stored run - so these are the
