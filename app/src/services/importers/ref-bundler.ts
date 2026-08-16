@@ -147,8 +147,13 @@ function splitRef(ref: string): { target: string; pointer: string } {
  * ordinary, so an escaping segment is preserved and handed to the main process,
  * which is where the gate lives. Collapsing it here would silently read a
  * different file than the document named.
+ *
+ * Exported for the batch layer (`batch.ts`), which resolves the same ref against
+ * the same rules to find the file *inside the picked set* - a second normalizer
+ * would be free to disagree with this one about `..`, and the two answers would
+ * be two different files.
  */
-function joinRelative(dir: string, target: string): string {
+export function joinRelative(dir: string, target: string): string {
 	const out: string[] = [];
 	for (const segment of [...dir.split("/"), ...target.split("/")]) {
 		if (!segment || segment === ".") continue;
@@ -164,7 +169,7 @@ function joinRelative(dir: string, target: string): string {
 }
 
 /** The directory part of a normalized relative path (`""` for a top-level file). */
-function dirOf(relativePath: string): string {
+export function dirOf(relativePath: string): string {
 	const cut = relativePath.lastIndexOf("/");
 	return cut < 0 ? "" : relativePath.slice(0, cut);
 }
