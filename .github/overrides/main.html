@@ -41,6 +41,22 @@
 {% endblock %}
 
 {% block extrahead %}
+  {#
+    Google Search Console ownership proof for the https://athrvk.github.io/vayu/
+    URL-prefix property. It has to sit in <head> - the same tag written into a
+    page's Markdown lands in <body> and Google will not see it - and it has to be
+    on the property root, which this block covers by emitting it site-wide.
+
+    Not a secret, and checked in on purpose: the token is a public identifier
+    served in the source of every page, and it verifies nothing for anyone else.
+    Google only accepts a token that matches the one it issued to the requesting
+    account, so a fork serving this copy gains no access to the property. That is
+    why it is a literal here rather than an `!ENV` like the analytics ID, which is
+    kept out of the tree for a different reason - stopping forks from writing into
+    the real GA property.
+  #}
+  <meta name="google-site-verification" content="9oxsHaOL-f7J6VoYf2jD82plcMxsDyjxsq6Sjfy-LK8">
+
   {% set title = page_title %}
   {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
   {#
