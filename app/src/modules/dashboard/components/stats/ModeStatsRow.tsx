@@ -8,7 +8,8 @@
 /**
  * ModeStatsRow - the mode-adaptive Row 4 router. Four stat cards swap on d.mode.
  * For three of the four modes the 4th card is the universal p99 latency stat;
- * the first three switch per mode (Plan 4 §62–69):
+ * the first three switch per mode. This table is the authority for which cards
+ * a mode shows - add a mode here, beside the branch that renders it:
  *
  *   constant_rps         Duration · Total requests · Peak concurrency · p99
  *   constant_concurrency Duration · Total requests · Throughput / VU   · p99
@@ -20,7 +21,7 @@
  * that branch renders all four cards itself. Shared cards (Duration / Total /
  * Peak) and the universal p99 card live here; the mode-only cards live in
  * ModeStatCards.tsx. Consumes {@link DashboardDerived}; never re-derives from
- * raw metrics (gate #9). All InfoChip copy via TOOLTIPS.
+ * raw metrics. All InfoChip copy via TOOLTIPS.
  */
 
 import { cn } from "@/lib/utils";

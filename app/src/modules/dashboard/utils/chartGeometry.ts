@@ -10,7 +10,7 @@
  * Shared SVG geometry for the full-width time-series charts (Throughput,
  * Latency, Percentiles, and the ramp_up Response-time-vs-concurrency scatter).
  * All of these MUST stay dimensionally identical so the dashboard rows line up
- * (Plan 4 code-quality gate #4: no chart geometry constants in component files).
+ * Chart geometry constants belong here, never in a component file.
  */
 export const TIME_SERIES_DIMS = { VW: 1080, VH: 240, PL: 56, PR: 12, PT: 16, PB: 28 } as const;
 

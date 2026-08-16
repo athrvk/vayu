@@ -11,7 +11,7 @@
  * The engine/run-config `mode` string is freeform (and historically defaulted
  * to the constant_rps model). Every mode-adaptive component MUST derive its
  * behaviour from this discriminator rather than re-parsing the raw string, so
- * the mapping lives in exactly one place (Plan 4 code-quality gate #5).
+ * the mapping lives in exactly one place - this file.
  */
 
 import { LOAD_TEST_MODES } from "@/constants/load-test-modes";

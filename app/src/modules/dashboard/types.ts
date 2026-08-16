@@ -81,7 +81,8 @@ export interface MetricsViewProps {
  * Single derived-metrics bundle the orchestrator computes once (memoized) and
  * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
  * here keeps the hero/stat card variants pure presentational components that
- * read what they need - no card re-derives from raw metrics (Plan 4 gate #9).
+ * read what they need - no card re-derives from raw metrics. `MetricsView` is
+ * the one producer; see "Code-quality gates" in this module's README.
  */
 export interface DashboardDerived {
 	mode: LoadMode;
