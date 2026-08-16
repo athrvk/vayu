@@ -16,14 +16,21 @@ import { cn } from "@/lib/utils";
 
 export interface TestResultsProps {
 	results: Array<{ name: string; passed: boolean; error?: string }>;
+	/**
+	 * Whether this component owns its padding and scroll box. False when the
+	 * Tests tab is stacking it under a schema verdict (issue #628), which owns
+	 * both for the pair - two scroll boxes in one pane scroll independently, and
+	 * two paddings indent the list twice.
+	 */
+	inset?: boolean;
 }
 
-export default function TestResults({ results }: TestResultsProps) {
+export default function TestResults({ results, inset = true }: TestResultsProps) {
 	const passedCount = results.filter((t) => t.passed).length;
 	const failedCount = results.length - passedCount;
 
 	return (
-		<div className="p-4 overflow-auto h-full">
+		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
 			{/*
 			 * The summary reads as text, not a chip.
 			 *

@@ -20,6 +20,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -504,17 +505,55 @@ std::string spec_content_hash (const std::string& content);
 size_t spec_size_cap (vayu::db::Database& db);
 
 /**
- * Reads a spec write's optional `operations` index (issue #629) onto @p spec,
- * returning the caller-facing error when it is present but malformed.
+ * Reads a spec write's optional app-extracted indexes onto @p spec - the
+ * `operations` index (issue #629) and the `responseSchemas` index (issue #628)
+ * - returning the caller-facing error when either is present but malformed.
  *
  * One copy for all three writers - `POST /specs`, `POST /import/apply`'s spec
  * section and `POST /specs/sync` - because a document stored through one path
- * and re-stored through another must carry the same index or a run's coverage
- * would depend on how the document arrived. Absent leaves `spec.operations`
- * empty, which is "no index", not "declares nothing". Defined in specs.cpp.
+ * and re-stored through another must carry the same indexes, or a run's
+ * coverage and its verdicts would depend on how the document arrived. Absent
+ * leaves the column empty, which is "no index", not "declares nothing".
+ * Defined in specs.cpp.
+ *
+ * @param schema_cap Bytes the serialized `responseSchemas` index may occupy -
+ *        `spec_size_cap(db)`, the document's own cap rather than a second knob.
  */
 std::optional<std::string>
-read_spec_operations (const nlohmann::json& item, vayu::db::SpecDocument& spec);
+read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap);
+
+/**
+ * What a design-mode response should be checked against (issue #628).
+ *
+ * `bound == false` is the one state that means **no verdict node at all**: the
+ * request's collection ancestry binds no document, so nothing here was ever
+ * measured against a contract. When `bound`, exactly one of `index` and
+ * `reason` is set.
+ */
+struct DesignSchemaResolution {
+    bool bound = false;
+    std::optional<vayu::core::UncheckedReason> reason;
+    std::optional<vayu::core::ResponseSchemaIndex> index;
+    /// The request's stored `spec_operation` text, `""` when it carries none.
+    std::string spec_operation;
+};
+
+/**
+ * Resolves the bound document's response-schema index for one stored request,
+ * walking its collection ancestry for the nearest binding. Defined in specs.cpp.
+ */
+DesignSchemaResolution resolve_design_schema_index (vayu::db::Database& db,
+const std::optional<std::string>& request_id);
+
+/**
+ * The verdict one design-mode response gets (issue #628), or `std::nullopt`
+ * when the request's collection ancestry binds no document - the state that
+ * means no verdict node at all. Defined in specs.cpp.
+ */
+std::optional<vayu::core::ValidationVerdict>
+validate_design_response (vayu::db::Database& db,
+const std::optional<std::string>& request_id,
+const vayu::Response& response);
 
 /**
  * Rejects a collection write whose `openapi` binding names a spec that will not
@@ -760,12 +799,17 @@ struct StreamRecord {
  *        which records nothing at all - the single choke point that rule lives
  *        at.
  * @param stream The streaming additions, or nullptr for an ordinary send.
+ * @param validation The schema verdict this response already got (issue #628),
+ *        stored verbatim on the trace. `std::nullopt` writes no node, which is
+ *        what an unbound collection - and a stream, whose body is an event
+ *        stream rather than a document any response schema describes - means.
  */
 void record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
-const StreamRecord* stream = nullptr);
+const StreamRecord* stream                                        = nullptr,
+const std::optional<vayu::core::ValidationVerdict>& validation = std::nullopt);
 
 /**
  * @brief Callback type for graceful shutdown

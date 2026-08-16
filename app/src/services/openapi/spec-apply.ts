@@ -38,6 +38,7 @@
 import type {
 	Collection,
 	DeclaredOperation,
+	ResponseSchemaIndex,
 	ImportApplyExample,
 	SpecOperation,
 	SpecSyncCollection,
@@ -120,6 +121,12 @@ export interface BuildSyncPayloadInput {
 	 * turn coverage off for a collection that had it.
 	 */
 	operations?: DeclaredOperation[];
+	/**
+	 * What the re-fetched document declares responses look like (issue #628),
+	 * on the same terms as `operations`: the sync writes a new row, so omitting
+	 * it would silently turn validation off for a collection that had it.
+	 */
+	responseSchemas?: ResponseSchemaIndex;
 	/** Every stored collection, to find the tag folder an added operation lands in. */
 	collections: readonly Collection[];
 }
@@ -141,6 +148,7 @@ export function buildSyncPayload({
 	content,
 	sourceUrl,
 	operations,
+	responseSchemas,
 	collections,
 }: BuildSyncPayloadInput): SpecSyncRequest {
 	const folders = new FolderResolver(collectionId, collections);
@@ -164,6 +172,7 @@ export function buildSyncPayload({
 			content,
 			sourceUrl,
 			...(operations && operations.length > 0 ? { operations } : {}),
+			...(responseSchemas ? { responseSchemas } : {}),
 		},
 		collections: folders.created,
 		create,

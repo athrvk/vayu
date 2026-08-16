@@ -129,6 +129,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SqliteOrm CONFIG REQUIRED)
+find_package(valijson CONFIG REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -286,6 +287,7 @@ add_library(vayu_core STATIC
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
     src/core/spec_coverage.cpp
+    src/core/schema_validation.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp
@@ -308,6 +310,7 @@ target_link_libraries(vayu_core PUBLIC
     # in their interface, so every consumer of vayu_core needs it too.
     unofficial-sodium::sodium
     nlohmann_json::nlohmann_json
+    valijson
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
     hdrhistogram
@@ -371,6 +374,7 @@ if(VAYU_BUILD_CLI)
         vayu_core
         httplib::httplib
         nlohmann_json::nlohmann_json
+    valijson
         vayu_warnings
         vayu_sanitizers
     )
@@ -528,6 +532,7 @@ if(VAYU_BUILD_TESTS)
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
         tests/spec_coverage_test.cpp
+        tests/schema_validation_test.cpp
         tests/version_isolation_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp

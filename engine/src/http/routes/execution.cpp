@@ -22,6 +22,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
@@ -413,8 +414,17 @@ namespace {
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
 const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result) {
+const vayu::ScriptResult& post_script_result,
+const std::optional<vayu::core::ValidationVerdict>& validation) {
     nlohmann::json response_json = vayu::json::serialize (response);
+    // The schema verdict (#628), on the same terms as the script keys below:
+    // one builder, and the stored trace gets the *same* object, so a restored
+    // response cannot show a different verdict than the live one did. Absent
+    // entirely for an unbound collection - `std::nullopt` here is the "never
+    // judged against a contract" state, not a failure.
+    if (validation) {
+        response_json["validation"] = vayu::core::build_validation_payload (*validation);
+    }
     // Merged in at the top level, which is where every client has read these
     // four keys since before there was a second placement for them. The
     // streaming path stores the same object under the trace's `scripts` node -
@@ -574,7 +584,8 @@ void record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
-const StreamRecord* stream) {
+const StreamRecord* stream,
+const std::optional<vayu::core::ValidationVerdict>& validation) {
     if (!run_id) {
         return;
     }
@@ -603,6 +614,14 @@ const StreamRecord* stream) {
         // events list carries its own cap, applied when it was built
         // (`stream_trace_node`). Putting it here rather than before makes that
         // impossible to misread as covered.
+        // The verdict the live response carried, stored verbatim rather than
+        // recomputed at restore time: `responseFromRunResult` and
+        // `responseFromExecuteResult` are the named copy-does-not-receive-the-fix
+        // pair, and a second computation here is exactly how they would drift.
+        if (validation) {
+            trace["validation"] = vayu::core::build_validation_payload (*validation);
+        }
+
         if (stream) {
             trace["events"] = stream->events;
             // Only when the run had scripts at all: an empty node would put a
@@ -1196,10 +1215,18 @@ void register_execution_routes (RouteContext& ctx) {
         auto exchange       = execute_exchange (script_engine, ctx.cookie_jar,
         cookie_scope, scopes, std::move (inputs), ctx.verbose);
 
+        // What the contract says this response should have been (#628).
+        // Resolved from the *stored* request: an unsaved editor request is not
+        // an operation of any document, and inventing a verdict for one would
+        // be a claim about a contract it is not bound by.
+        const auto validation =
+        validate_design_response (ctx.db, run.request_id, exchange.response);
+
         // Store result to database (non-blocking, errors logged). A transient
         // execution stops here: no trace row, so the post-auth headers this
         // exchange carries never reach disk.
-        record_design_result (ctx.db, run_id, exchange.request, exchange.response);
+        record_design_result (ctx.db, run_id, exchange.request, exchange.response,
+        /*stream=*/nullptr, validation);
 
         // Persist script-set variables (design mode only; best-effort)
         persist_script_variables (
@@ -1209,7 +1236,7 @@ void register_execution_routes (RouteContext& ctx) {
         // Engine returns 200 - the server's status is in the response body
         res.status = 200;
         res.set_content (build_response_json (exchange.response,
-        exchange.pre_script_result, exchange.post_script_result)
+        exchange.pre_script_result, exchange.post_script_result, validation)
         .dump (2),
         "application/json");
     };

@@ -336,6 +336,14 @@ apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 ```
 
+Every write that stores a document carries the two indexes the parsers extract
+beside it - `operations` (#629) and `responseSchemas` (#628) - and all three
+paths do: `createSpec`, `syncSpec`, and the `specs` section of `importCollection`
+below. Omitting one on any of them would silently turn coverage or response
+validation off for a collection that had it, which is why `readSpecOperations`
+returns both off the same parse rather than each caller walking the document
+again.
+
 Create and read-by-id only, plus the one write that moves a binding.
 `syncSpec` is that write (issue #655): it stores the re-fetched document, points
 the collection at it and applies the created, updated and deleted requests in a

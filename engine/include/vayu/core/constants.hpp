@@ -721,6 +721,31 @@ constexpr size_t MAX_STATUSES_PER_OPERATION = 50;
 } // namespace spec_document
 
 /**
+ * @brief Response schema validation bounds (issue #628).
+ *
+ * Every value here bounds what one *response* can make the engine do or store,
+ * because the schema comes from a document a user imported and the body comes
+ * from a server neither of them controls.
+ */
+namespace schema_validation {
+/// Failure messages one verdict carries. The whole count rides beside them as
+/// `failuresTotal`, the `MAX_FAILURE_MESSAGES` discipline: a bounded list that
+/// says what it is a list *of*, never a shortened one that reads as complete.
+constexpr size_t MAX_FAILURES = 10;
+
+/// Bytes one failure message may carry. The validator's messages quote the
+/// offending instance, so a body of a megabyte can produce a message of one.
+constexpr size_t MAX_FAILURE_MESSAGE_BYTES = 500;
+
+/// Schema nodes the dialect walk visits before it stops counting. A cycle
+/// guard already covers `$ref` loops; this covers a schema that is merely
+/// enormous, so an imported document cannot make a single response walk
+/// forever. Reaching it can only under-count a disclosure, never miss a
+/// validation - the validator itself has already run.
+constexpr size_t MAX_SCHEMA_NODES = 20000;
+} // namespace schema_validation
+
+/**
  * @brief Local mock server bounds (issue #481 phase 2)
  *
  * Rails rather than preferences, the same split the inbox and the issuer draw:

@@ -7,6 +7,8 @@
 
 import type {
 	DeclaredOperation,
+	DeclaredResponseSchema,
+	SpecOperation,
 	FormFieldEntry,
 	HttpMethod,
 	KeyValueEntry,
@@ -37,6 +39,7 @@ import {
 	specOperationOf,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
+import { buildResponseSchemaIndex, responseSchemasV2 } from "./response-schemas";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -96,6 +99,11 @@ export class OpenApiV2Parser implements ImportParser {
 		// The declared-operation index (issue #629) - see the v3 parser for why
 		// it is built in this walk rather than by a second pass over `paths`.
 		const declaredOperations: DeclaredOperation[] = [];
+		// The response schema index (issue #628) - see the v3 parser. 2.0 states
+		// its media types per operation (`produces`) rather than per response,
+		// which `responseSchemasV2` is what accounts for.
+		const schemaOperations: { identity: SpecOperation; responses: DeclaredResponseSchema[] }[] =
+			[];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -114,6 +122,7 @@ export class OpenApiV2Parser implements ImportParser {
 						...identity,
 						responses: declaredResponsesOf(op.responses),
 					});
+					schemaOperations.push({ identity, responses: responseSchemasV2(op, spec) });
 				}
 				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);
@@ -138,6 +147,8 @@ export class OpenApiV2Parser implements ImportParser {
 			}
 		}
 
+		const responseSchemas = buildResponseSchemaIndex(spec, schemaOperations);
+
 		const root: CollectionDraft = {
 			name: asStr(prop(spec.info, "title")) ?? "Imported API",
 			description: asStr(prop(spec.info, "description")) ?? "",
@@ -154,6 +165,7 @@ export class OpenApiV2Parser implements ImportParser {
 			spec: {
 				content: raw,
 				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
+				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};
 

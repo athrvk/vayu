@@ -48,6 +48,7 @@ import { Callout, EmptyState } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
+import SchemaValidation from "./SchemaValidation";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
@@ -269,6 +270,7 @@ export default function ResponseViewer() {
 				httpVersionDowngraded={shown.httpVersionDowngraded}
 				receivedAt={shown.receivedAt}
 				restoredFrom={shown.restoredFrom}
+				validation={shown.validation}
 				// Only while it is actually live. A finished stream's band shows
 				// the exchange it completed, and the Events tab is where its
 				// count and its end reason live.
@@ -474,8 +476,21 @@ export default function ResponseViewer() {
 					/>
 				</TabsContent>
 				<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
-					{testResults.length > 0 ? (
-						<TestResults results={testResults} />
+					{/*
+					 * Two kinds of test result, one tab (issue #628): the
+					 * assertions a script wrote, and the schema the spec wrote.
+					 * A response can carry either, both or neither, and the
+					 * empty state only appears when it carries neither - a
+					 * collection with no spec bound sees exactly what it saw
+					 * before.
+					 */}
+					{testResults.length > 0 || shown.validation ? (
+						<div className="h-full overflow-auto p-4 space-y-4">
+							{shown.validation && <SchemaValidation validation={shown.validation} />}
+							{testResults.length > 0 && (
+								<TestResults results={testResults} inset={false} />
+							)}
+						</div>
 					) : (
 						<EmptyState
 							variant="inline"

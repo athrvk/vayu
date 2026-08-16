@@ -551,7 +551,7 @@ std::vector<vayu::db::SpecDocument>& out) {
         }
         s.hash       = spec_content_hash (s.content);
         s.fetched_at = now;
-        if (auto reason = read_spec_operations (item, s)) {
+        if (auto reason = read_spec_indexes (item, s, cap)) {
             return item_error (*reason, temp);
         }
 

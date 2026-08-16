@@ -22,7 +22,14 @@ engine/
   `engine/tests/`)
 - Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
 - vcpkg manages all C++ dependencies - do not add one without updating
-  `engine/vcpkg.json`
+  `engine/vcpkg.json`. **In the cloud dev environment, adding one needs a second
+  step**: its egress policy answers GitHub *source archives* with `403` while
+  allowing git-over-https, so a port fetched by `vcpkg_from_github` fails on a
+  cold cache with `curl operation failed with response code 403`. That is not
+  the dependency being unavailable - run `vcpkg-fix-port <port>` (no arguments
+  re-does the whole manifest), which rewrites the port to `vcpkg_from_git` as an
+  overlay, then build again. A session read that 403 as a policy wall and
+  abandoned a phase of #625 over it.
 - A new `tests/*_test.cpp` must be listed in `add_executable(vayu_tests ...)`
   in `engine/CMakeLists.txt` - the source list is explicit, never a glob. A
   guard beside it fails configure naming any unregistered file, because an
@@ -171,6 +178,23 @@ Three things worth knowing before you design around them:
   replaces only `origin="import"` examples. `Database::spec_sync_apply` is its
   transaction, a sibling of `import_apply` and `apply_reorder` for the same
   reason those two are separate.
+  **Responses are validated against what the document declares** (#628):
+  `spec_documents.response_schemas` holds an app-extracted index (schemas as
+  written, plus one shared `refRoots` their `$ref`s resolve through), and
+  `core/schema_validation.cpp` matches a response to one by status pattern and
+  media type and validates it with **valijson** - not the `json-schema-validator`
+  #625 named, which segfaults on a recursive schema. The engine still parses no
+  OpenAPI: the app translates 3.0's dialect into JSON Schema before storing.
+  Three rules the shape enforces: an unbound collection gets **no `validation`
+  node at all** (never judged is not judged-and-passed); `checked: false` carries
+  a reason code and no validity; and keywords the draft-07 validator cannot
+  evaluate are **named and counted** on the verdict, because a body reported
+  clean by a schema half of which went unread is the failure mode this feature
+  would otherwise introduce. `POST /execute` returns the node and
+  `record_design_result` stores the *same object* on the trace, so the live and
+  restored panes cannot disagree. The status-pattern matcher is shared with
+  coverage (`match_status_pattern`), so one status cannot be "covered" by one
+  rule and "no schema for this status" by another.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

@@ -405,7 +405,64 @@ The rollup carries plain numbers - `operationsCovered`, `operationsTotal`,
 them the way it would on the run's pass/fail budgets. Nothing thresholds on them
 today; the shape is the commitment.
 
-## What is not here yet
+## Does this response match its schema?
 
-Validating responses against their declared schemas. That is its own phase; this
-page grows with it.
+A request in a bound collection is checked against the schema its document
+declares for it, and the answer sits in the response's status bar as a chip -
+**Matched schema**, **Schema failed**, or **Schema not checked** - with the
+detail in the **Tests** tab, beside whatever a Tests script asserted. A schema
+check is a test result the spec wrote rather than one you did, which is why it
+lands there rather than in a tab of its own.
+
+A collection bound to no document shows **nothing at all**. That is the
+difference the whole feature turns on: a response nobody judged against a
+contract did not pass one and did not fail one.
+
+### Which schema answers
+
+The one the document declares for this response's status and content type:
+
+- The **status** matches the most specific pattern that covers it - `200` before
+  `2XX` before `default` - the same rule [contract
+  coverage](#contract-coverage) counts by.
+- The **content type** matches exactly first, then a declared `*/*` or
+  `application/*`.
+
+### When a response is not checked
+
+Not a failure, and it says which of these it was:
+
+| It says | Because |
+|---|---|
+| This request is not bound to an operation | The request carries no operation identity - match or re-bind the collection |
+| The bound document carries no response schemas | It was stored before this existed, or declares none. Sync or re-bind |
+| The stored document has changed | The binding names a version this document no longer is. Sync |
+| The spec no longer declares this operation | The contract moved and this request did not |
+| The spec declares no response for this status | A 500 nothing documented, for instance |
+| No schema for this content type | The status is declared; this media type is not |
+| The body is not JSON | A JSON Schema cannot describe HTML |
+| There was no response | The request never reached a server |
+
+### Where OpenAPI stops being JSON Schema
+
+Schemas are translated when the document is stored, because a validator reads
+JSON Schema and OpenAPI 3.0's dialect is *not* it. `nullable: true` becomes a
+union with null, 3.0's draft-04 boolean `exclusiveMinimum` becomes the bound
+itself, and `discriminator` / `xml` / `example` are dropped as things that
+describe no constraint. Without that step a null the document explicitly permits
+would be reported as a type failure - a wrong answer, which is worse than no
+answer.
+
+**OpenAPI 3.1 is JSON Schema 2020-12, and the validator reads draft-07.** Its
+newer keywords - `unevaluatedProperties`, `prefixItems`, `dependentSchemas` -
+are not translated and cannot be evaluated, so they are **named and counted** on
+the verdict instead: the chip reads *Schema partly checked* and the Tests tab
+lists which keywords went unread. A body can pass every check that ran while the
+part of its schema that would have rejected it was never looked at, and saying so
+is the only honest way to show a green verdict beside a schema that was half
+read.
+
+### What is not here yet
+
+Per-step verdicts in a collection run, and validation of the sampled responses of
+a load run. Both are their own change; this page grows with them.

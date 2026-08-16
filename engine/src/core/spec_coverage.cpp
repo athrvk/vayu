@@ -65,33 +65,6 @@ bool matches_range (const std::string& pattern, int status) {
     return status >= hundreds * 100 && status < (hundreds + 1) * 100;
 }
 
-/**
- * The one declared pattern @p status answers to, most specific first, or
- * `nullopt` when the document declares nothing that covers it.
- *
- * Exactly one: a 200 seen against an operation declaring both `200` and `2XX`
- * hits the `200` row and leaves `2XX` unhit, which is the honest reading - the
- * document declared two distinct responses and the run produced one of them.
- */
-std::optional<size_t> match_pattern (const std::vector<std::string>& patterns, int status) {
-    for (size_t i = 0; i < patterns.size (); ++i) {
-        if (matches_exact (patterns[i], status)) {
-            return i;
-        }
-    }
-    for (size_t i = 0; i < patterns.size (); ++i) {
-        if (matches_range (patterns[i], status)) {
-            return i;
-        }
-    }
-    for (size_t i = 0; i < patterns.size (); ++i) {
-        if (patterns[i] == DEFAULT_PATTERN) {
-            return i;
-        }
-    }
-    return std::nullopt;
-}
-
 /// Serialize at most `MAX_STATUSES_PER_OPERATION` codes, ascending. Whatever is
 /// dropped is added to @p dropped and named by the row, never elided.
 nlohmann::json capped_statuses (const std::set<int>& codes, size_t& dropped) {
@@ -153,6 +126,26 @@ std::optional<std::string> validate_operations_index (const nlohmann::json& oper
                 return "Invalid '" + at +
                 ".responses': every declared status pattern must be a non-empty string";
             }
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<size_t>
+match_status_pattern (const std::vector<std::string>& patterns, int status) {
+    for (size_t i = 0; i < patterns.size (); ++i) {
+        if (matches_exact (patterns[i], status)) {
+            return i;
+        }
+    }
+    for (size_t i = 0; i < patterns.size (); ++i) {
+        if (matches_range (patterns[i], status)) {
+            return i;
+        }
+    }
+    for (size_t i = 0; i < patterns.size (); ++i) {
+        if (patterns[i] == DEFAULT_PATTERN) {
+            return i;
         }
     }
     return std::nullopt;
@@ -352,7 +345,7 @@ size_t undeclared_operation_requests) {
                 continue;
             }
             statuses_seen.insert (status);
-            if (auto index = match_pattern (operation.responses, status)) {
+            if (auto index = match_status_pattern (operation.responses, status)) {
                 hit[*index] = true;
             } else {
                 undeclared.insert (status);

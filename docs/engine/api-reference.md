@@ -1172,6 +1172,38 @@ a collection bound to it reports **no coverage block at all**. `POST
 the same validator, so a document cannot acquire or lose an index depending on
 which route stored it.
 
+**`responseSchemas`** (optional) is the other supplied index (issue #628) - what
+the document declares each response *looks like*:
+
+```json
+{
+  "refRoots": {"components": {"schemas": {"Pet": {"type": "object"}}}},
+  "operations": [
+    {
+      "operationId": "getPet",
+      "method": "GET",
+      "path": "/pets/{petId}",
+      "responses": [
+        {"status": "200", "contentType": "application/json",
+         "schema": {"$ref": "#/components/schemas/Pet"}}
+      ]
+    }
+  ]
+}
+```
+
+Schemas are **JSON Schema**, not OpenAPI's dialect: the client translates
+`nullable`, draft-04 boolean `exclusiveMinimum` and OpenAPI-only keywords before
+sending, because the engine validates and does not read OpenAPI. Each schema
+keeps its `$ref`s and `refRoots` carries the subtrees they point into once, so a
+shared schema is stored once and a recursive one is a pointer rather than an
+infinite expansion. `status` is the pattern verbatim (`"200"`, `"4XX"`,
+`"default"`), `contentType` is a media type, and a `schema` may be `true` or
+`false` as well as an object. The serialized index is held to the same
+`maxSpecDocumentBytes` cap as the document. Omitting it stores "no index", read
+back as `null`, and every response of that document reports `checked: false`
+with the reason `no_index`.
+
 `sourceUrl` is `null` rather than `""` when the document did not come from a URL,
 so a client can offer a re-fetch for exactly the documents that have somewhere to
 re-fetch from.
@@ -1184,7 +1216,9 @@ with the engine's JSON field cap. The size rejection names the byte count, the
 cap and the setting, and is checked on `POST /import/apply` too, through the same
 helper; the document is never stored truncated. A malformed `operations` index is
 a `400` naming the row and the field - it is refused at the write rather than
-stored and silently ignored when a run tries to count against it.
+stored and silently ignored when a run tries to count against it. A malformed
+`responseSchemas` index is a `400` on the same terms, and one over the byte cap
+names the count, the cap and the setting.
 
 ### GET /specs/:id
 
@@ -2655,9 +2689,66 @@ run-shaped way of stating the same field, not a second store.
   "consoleLogs": [
     { "source": "pre", "level": "log", "message": "token refreshed" },
     { "source": "test", "level": "error", "message": "unexpected shape" }
-  ]
+  ],
+  "validation": {
+    "checked": true,
+    "valid": false,
+    "matchedStatus": "200",
+    "matchedContentType": "application/json",
+    "failures": [
+      { "path": "/id", "message": "Value type not permitted by 'type' constraint." }
+    ],
+    "failuresTotal": 1,
+    "unevaluatedKeywords": [{ "keyword": "unevaluatedProperties", "count": 2 }]
+  }
 }
 ```
+
+**`validation` is what the response was against the schema its contract
+declares** (issue #628), and it is **absent entirely** for a request whose
+collection ancestry binds no OpenAPI document. That absence is load-bearing: a
+response nobody judged against a contract did not fail one, so there is no
+`checked: false` for it either.
+
+The same object is stored on the design run's `trace_data.validation`, so a
+restored response shows the verdict the live one did rather than recomputing it.
+A streaming send carries none - an event stream is not a document a response
+schema describes.
+
+| Field | Meaning |
+|---|---|
+| `checked` | Whether anything was actually validated |
+| `valid` | Present only when `checked`. A body with no failures |
+| `reason` | Present only when **not** `checked` - the code, see below |
+| `failures[]` | `path` (a JSON Pointer into the body) and `message`, capped at 10 |
+| `failuresTotal` | Every failure found, including any past the cap |
+| `unevaluatedKeywords[]` | Schema keywords the validator could not evaluate, by name and count |
+| `matchedStatus` / `matchedContentType` | Which declared response answered, verbatim |
+
+A status answers to the **most specific** pattern that covers it - exact, then
+`2XX`, then `default` - the same rule contract coverage counts by, shared rather
+than restated. A media type matches exactly first, then a declared `*/*` or
+`application/*`.
+
+**`unevaluatedKeywords` is the dialect disclosure and is not decoration.** The
+validator reads draft-07; OpenAPI 3.1 schemas are JSON Schema 2020-12, whose
+`unevaluatedProperties`, `prefixItems` and `dependentSchemas` a draft-07 reader
+silently ignores - so a schema that meant to forbid something would permit it.
+Every such keyword is named and counted, which makes a `valid: true` beside one
+narrower than it looks rather than wrong.
+
+**`reason` codes** (all mean *bound to a document, and still not judged*):
+
+| Code | What happened |
+|---|---|
+| `no_operation` | The request carries no `spec_operation` - it is not an operation |
+| `no_index` | The bound document carries no response schemas, or its schema could not be read |
+| `hash_mismatch` | The stored document no longer hashes to what the binding recorded |
+| `operation_not_declared` | The document does not declare this identity |
+| `no_schema_for_status` | Nothing the operation declares covers this status |
+| `no_schema_for_content_type` | The status matched; none of its media types did |
+| `no_response` | A transport error - there was no response to check |
+| `body_not_json` | The body is not JSON, and a JSON Schema cannot describe it |
 
 **`headers` is keyed by the lower-cased header name, and a name the response
 sent more than once holds every value folded with `", "`** - the RFC 7230 §3.2.2

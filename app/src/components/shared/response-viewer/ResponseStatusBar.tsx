@@ -22,10 +22,12 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Clock, FileText, History } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { formatRelativeTime } from "@/utils";
 import { formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
+import { ValidationChip } from "./ValidationChip";
 
 export interface ResponseStatusBarProps {
 	status: number;
@@ -72,6 +74,12 @@ export interface ResponseStatusBarProps {
 	 * chip nobody reads.
 	 */
 	streaming?: { events: number };
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628). Absent for a request whose collection binds no OpenAPI document -
+	 * the bar then shows nothing, because there is nothing to say.
+	 */
+	validation?: ResponseValidation;
 	className?: string;
 }
 
@@ -85,6 +93,7 @@ export function ResponseStatusBar({
 	receivedAt,
 	restoredFrom,
 	streaming,
+	validation,
 	className,
 }: ResponseStatusBarProps) {
 	/*
@@ -165,6 +174,14 @@ export function ResponseStatusBar({
 					</span>
 				</div>
 			)}
+
+			{/*
+			 * Beside the streaming chip and among status/time/size, because like
+			 * them it describes this exchange. Text with an icon rather than a
+			 * `Badge`: it paints no background, and the variant="chip" rule in
+			 * badge-hover.test.tsx is for the ones that do.
+			 */}
+			{validation && <ValidationChip validation={validation} />}
 
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -23,6 +23,8 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/schema_validation.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -74,27 +76,162 @@ std::string spec_content_hash (const std::string& content) {
 }
 
 /**
- * Reads the optional `operations` index onto @p spec (issue #629).
+ * Reads the optional `operations` (#629) and `responseSchemas` (#628) indexes
+ * onto @p spec.
  *
- * The index is *supplied*, never derived: the engine does not parse OpenAPI (see
- * `core/spec_coverage.hpp` for why), so this is the only place a bad one can be
- * caught. It is validated on the way in rather than tolerated and ignored at run
- * end - a client sending a malformed index has a bug, and a coverage block that
- * silently went missing weeks later would not name it.
+ * Both are *supplied*, never derived: the engine does not parse OpenAPI (see
+ * `core/spec_coverage.hpp` and `core/schema_validation.hpp` for why), so this is
+ * the only place a bad one can be caught. They are validated on the way in
+ * rather than tolerated and ignored at run end - a client sending a malformed
+ * index has a bug, and a coverage block or a validation chip that silently went
+ * missing weeks later would not name it.
  *
  * `null` and absent both mean "no index"; the column stores `""` for both.
  */
 std::optional<std::string>
-read_spec_operations (const nlohmann::json& item, vayu::db::SpecDocument& spec) {
-    auto operations = item.find ("operations");
-    if (operations == item.end () || operations->is_null ()) {
+read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap) {
+    if (auto operations = item.find ("operations");
+        operations != item.end () && !operations->is_null ()) {
+        if (auto reason = vayu::core::validate_operations_index (*operations)) {
+            return reason;
+        }
+        spec.operations = operations->dump ();
+    }
+
+    if (auto schemas = item.find ("responseSchemas");
+        schemas != item.end () && !schemas->is_null ()) {
+        if (auto reason = vayu::core::validate_response_schemas_index (*schemas, schema_cap)) {
+            return reason;
+        }
+        spec.response_schemas = schemas->dump ();
+    }
+    return std::nullopt;
+}
+
+/**
+ * Resolve what a single request's response should be validated against
+ * (issue #628).
+ *
+ * The binding lives on the collection an import created, and requests live in
+ * its *tag sub-collections*, so this walks the ancestry and takes the nearest
+ * bound collection - the same chain `POST /compose` walks for inherited auth,
+ * through the same helper, cycle guard included. A request whose ancestry binds
+ * nothing is not part of a contract: `bound` stays false and the caller writes
+ * **no verdict at all**, which is the distinction the whole node rests on - a
+ * response that was never judged against a contract did not fail one.
+ *
+ * Every other outcome is bound-but-unjudgeable and carries the reason, because
+ * a chip that silently never appears is how a broken index stays broken.
+ */
+DesignSchemaResolution
+resolve_design_schema_index (vayu::db::Database& db,
+const std::optional<std::string>& request_id) {
+    DesignSchemaResolution resolved;
+    if (!request_id || request_id->empty ()) {
+        return resolved; // editor state with no stored row - not an operation
+    }
+
+    const auto request = db.get_request (*request_id);
+    if (!request) {
+        return resolved;
+    }
+    resolved.spec_operation = request->spec_operation.value_or (std::string ());
+
+    std::string spec_id;
+    std::string spec_hash;
+    const auto chain = vayu::http::collection_chain (db, request->collection_id);
+    // Root-first, so walking backwards finds the *nearest* bound ancestor: a
+    // sub-collection that binds a document of its own answers for its own
+    // requests rather than the root's document answering for everything.
+    for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
+        try {
+            const auto binding = nlohmann::json::parse (it->openapi);
+            if (!binding.is_object ()) {
+                continue;
+            }
+            const auto id = binding.value ("specId", std::string ());
+            if (!id.empty ()) {
+                spec_id   = id;
+                spec_hash = binding.value ("specHash", std::string ());
+                break;
+            }
+        } catch (const std::exception&) {
+            continue; // an unparseable column binds nothing, as everywhere else
+        }
+    }
+    if (spec_id.empty ()) {
+        return resolved;
+    }
+
+    resolved.bound = true;
+    const auto document = db.get_spec_document (spec_id);
+    if (!document) {
+        // The write path refuses a binding naming a document that will not
+        // exist (`reject_unbindable_spec`), so this is a database edited from
+        // outside. There is nothing to validate against, which is what
+        // `no_index` says.
+        resolved.reason = vayu::core::UncheckedReason::NoIndex;
+        return resolved;
+    }
+    if (!spec_hash.empty () && document->hash != spec_hash) {
+        // The binding names a document *and a version of it*, the rule
+        // `resolve_scenario` applies to coverage. A row whose hash has moved
+        // under the binding declares something this request was never bound to.
+        resolved.reason = vayu::core::UncheckedReason::HashMismatch;
+        return resolved;
+    }
+
+    auto index = vayu::core::ResponseSchemaIndex::parse (document->response_schemas);
+    if (!index) {
+        resolved.reason = vayu::core::UncheckedReason::NoIndex;
+        return resolved;
+    }
+    resolved.index = std::move (index);
+    return resolved;
+}
+
+/**
+ * The verdict one design-mode response gets, or `std::nullopt` for a request
+ * that is not bound to a contract at all (issue #628).
+ *
+ * The whole of the design-mode hook, in one function, so the `/execute` handler
+ * states it once and the collection-run and load hooks that follow can call the
+ * same thing rather than a second arrangement of the same three steps.
+ */
+std::optional<vayu::core::ValidationVerdict>
+validate_design_response (vayu::db::Database& db,
+const std::optional<std::string>& request_id,
+const vayu::Response& response) {
+    vayu::http::routes::DesignSchemaResolution resolved;
+    try {
+        resolved = resolve_design_schema_index (db, request_id);
+    } catch (const std::exception& e) {
+        // A lookup failure costs the response its verdict, never the response.
+        vayu::utils::log_warning (
+        "Schema validation lookup failed: " + std::string (e.what ()));
         return std::nullopt;
     }
-    if (auto reason = vayu::core::validate_operations_index (*operations)) {
-        return reason;
+    if (!resolved.bound) {
+        return std::nullopt;
     }
-    spec.operations = operations->dump ();
-    return std::nullopt;
+    if (!resolved.index) {
+        vayu::core::ValidationVerdict verdict;
+        verdict.reason = resolved.reason.value_or (vayu::core::UncheckedReason::NoIndex);
+        return verdict;
+    }
+
+    const auto content_type = response.headers.find ("Content-Type");
+    try {
+        return resolved.index->check (resolved.spec_operation, response.status_code,
+        content_type != response.headers.end () ? content_type->second : std::string (),
+        response.body);
+    } catch (const std::exception& e) {
+        // Same rule as above: a validator that threw is not a response that
+        // failed, and the exchange itself is not in question.
+        vayu::utils::log_warning (
+        "Schema validation failed: " + std::string (e.what ()));
+        return std::nullopt;
+    }
 }
 
 /**
@@ -180,7 +317,7 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     spec.id      = vayu::utils::generate_id ("spec_");
     spec.content = std::move (content);
     spec.hash    = spec_content_hash (spec.content);
-    if (auto reason = read_spec_operations (json, spec)) {
+    if (auto reason = read_spec_indexes (json, spec, cap)) {
         return { 400, error_body (400, *reason) };
     }
     // When it was taken, not when the row was written - they are the same

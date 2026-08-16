@@ -228,6 +228,83 @@ export interface DeclaredOperation {
 }
 
 /**
+ * One response schema a document declares, by status pattern and media type
+ * (issue #628).
+ *
+ * `status` is the pattern verbatim - `"200"`, `"4XX"`, `"default"` - for the
+ * same reason `DeclaredOperation.responses` keeps them that way. `schema` is
+ * JSON Schema, translated out of OpenAPI's dialect when it was extracted (see
+ * `services/importers/response-schemas.ts`), and may legally be `true` or
+ * `false` as well as an object.
+ */
+export interface DeclaredResponseSchema {
+	status: string;
+	contentType: string;
+	schema: unknown;
+}
+
+/**
+ * The response schemas a document declares, as stored beside it on the engine
+ * (issue #628).
+ *
+ * `refRoots` holds the document's `components` / `definitions` /
+ * `x-vayu-bundled` subtrees **once**, and the schemas below keep their `$ref`s
+ * as written; the engine merges the two to validate. Inlining instead would
+ * copy a shared `Error` schema into every operation naming it, and a recursive
+ * schema has no finite expansion at all.
+ */
+export interface ResponseSchemaIndex {
+	refRoots?: Record<string, unknown>;
+	operations: (SpecOperation & { responses: DeclaredResponseSchema[] })[];
+}
+
+/**
+ * Why a response was not checked against its contract (issue #628).
+ *
+ * Codes rather than sentences: the engine decides *that* something could not be
+ * checked, the app decides how to say so. An unbound collection produces no
+ * verdict at all rather than one of these - "not judged against a contract" and
+ * "judged and could not be read" are different answers.
+ */
+export type ValidationUncheckedReason =
+	| "no_operation"
+	| "no_index"
+	| "hash_mismatch"
+	| "operation_not_declared"
+	| "no_schema_for_status"
+	| "no_schema_for_content_type"
+	| "no_response"
+	| "body_not_json";
+
+/** One thing wrong with a body, at a JSON Pointer inside it. */
+export interface SchemaFailure {
+	path: string;
+	message: string;
+}
+
+/**
+ * What checking one response against its declared schema found (issue #628).
+ *
+ * `checked: false` carries a `reason` and **no** `valid`: a response nothing
+ * checked has no validity to report, and rendering one as a failure is the
+ * confusion this shape exists to prevent.
+ *
+ * `unevaluatedKeywords` is the dialect disclosure - schema keywords the
+ * validator could not evaluate, by name and count. Non-empty means part of the
+ * contract went unread, so a `valid: true` beside it is narrower than it looks.
+ */
+export interface ResponseValidation {
+	checked: boolean;
+	valid?: boolean;
+	reason?: ValidationUncheckedReason;
+	failures?: SchemaFailure[];
+	failuresTotal?: number;
+	unevaluatedKeywords?: { keyword: string; count: number }[];
+	matchedStatus?: string;
+	matchedContentType?: string;
+}
+
+/**
  * One operation's row in a run report's coverage block (issue #629).
  *
  * `declaredHit` and `declaredMissed` partition the operation's declared status
@@ -911,6 +988,17 @@ export interface RunResultTrace {
 	 * this node is present on streaming traces only.
 	 */
 	scripts?: RunResultScripts;
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628), stored **verbatim** as the live `/execute` body carried it - one
+	 * engine builder (`build_validation_payload`) fills both, so a restored
+	 * verdict and a live one cannot disagree.
+	 *
+	 * Absent for a request whose collection binds no document, and for a
+	 * streaming run: an event stream is not a document any response schema
+	 * describes.
+	 */
+	validation?: ResponseValidation;
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by
@@ -1318,6 +1406,14 @@ export interface SanityResult extends HttpResponse {
 	preScriptError?: string;
 	postScriptError?: string;
 	error?: string;
+	/**
+	 * What checking this response against its declared schema found (issue
+	 * #628). Absent when the request's collection binds no OpenAPI document -
+	 * the engine writes no node at all rather than an unchecked verdict, so
+	 * "never judged against a contract" stays distinguishable from "checked and
+	 * could not be read".
+	 */
+	validation?: ResponseValidation;
 }
 
 export interface LoadTestMetrics {

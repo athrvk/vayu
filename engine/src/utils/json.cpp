@@ -329,6 +329,20 @@ Json serialize (const vayu::db::SpecDocument& s) {
             // reader of it gives; the write path is where a bad one is refused.
         }
     }
+    // The response schema index (#628), on the same null-means-none terms as
+    // `operations` above: a client can tell a document stored before schema
+    // validation existed from one whose operations declare no schema at all.
+    json["responseSchemas"] = Json (nullptr);
+    if (!s.response_schemas.empty ()) {
+        try {
+            auto parsed = Json::parse (s.response_schemas);
+            if (parsed.is_object ()) {
+                json["responseSchemas"] = std::move (parsed);
+            }
+        } catch (const std::exception&) {
+            // Same reading as above - absent, and refused at the write.
+        }
+    }
     return json;
 }
 
