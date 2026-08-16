@@ -410,7 +410,12 @@ number**, and they sit next to each other:
 | Block | Counted over | Why |
 |---|---|---|
 | Contract coverage | Every request sent and every response received | One atomic increment per completion is cheap enough for the hot path |
-| [Schema validation](#schema-validation-under-load) | The bounded reservoir of responses the run stored | Validating a body is not, so it is deferred to run end over what was kept |
+| [Schema validation](#schema-validation-under-load), under load | The bounded reservoir of responses the run stored | Validating a body is not, so it is deferred to run end over what was kept |
+| [Schema validation](#schema-validation-in-a-collection-run), in a collection run | Every step the run executed | A collection run sends one request at a time, so there is no hot path to keep off |
+
+The last row is why the block states its own denominator instead of leaving a
+reader to infer it from the run's mode: the same numbers mean two different
+things, and only the block knows which.
 
 ### Which document a run is measured against
 
@@ -555,7 +560,51 @@ Keywords the validator could not evaluate are disclosed here exactly as they are
 for a single response: **named and counted**, because a matched count computed
 against a schema half of which went unread is narrower than it looks.
 
-### What is not here yet
+## Schema validation in a collection run
 
-Per-step verdicts in a collection run, and the opt-in that lets a schema failure
-fail a run. Both are their own change; this page grows with them.
+Every step of a collection run is judged the same way, and the verdict rides
+three surfaces:
+
+- The **step row** carries the same three-state chip the response pane does, and
+  expanding it shows the failure list and the dialect disclosure in full.
+- The run's **Overview**, and the collection run's own view above the step list,
+  carry the same `Schema validation` block a load run writes.
+- The **live step stream** carries it too, so a run being watched shows verdicts
+  as they happen rather than only once the report is written.
+
+A step that sent nothing - skipped by a script, or stopped by a `{{data.column}}`
+with no column - carries **no verdict at all**. There was no response to judge,
+and an unchecked verdict there would be reporting on a request nobody made.
+
+The run is judged against the document it was **planned** with, read once when
+the plan resolved. A sync landing mid-run stores a new document and moves the
+binding; it does not change what the run in flight is measured against.
+
+### These numbers are exact, unlike a load run's
+
+A collection run checks **every step it executed**, so its block is counted on
+the same evidence coverage beside it is. That is the one way it differs from the
+load-run block above, and the block says which it is rather than leaving a reader
+to infer it from the run's mode - "0 did not match" is a wider claim here than
+there, and only the sentence under the numbers can tell them apart.
+
+### A schema failure does not fail a step, unless you ask
+
+By default a schema verdict is its **own channel**: a step whose response does
+not match what the document declares still passes if its assertions passed, and
+the row shows both facts. They are different claims - one is about your
+assertions, the other about the contract - and folding the second into the first
+would make every undocumented field look like a broken test.
+
+Set `failOnSchemaError` on the run to make the contract a gate. Then a step that
+passed everything else and whose response did not match is **failed**, with the
+first problem named in its error. A step that was already failing keeps the
+error that named it: that is the one to fix first.
+
+| | Step outcome | Schema verdict |
+|---|---|---|
+| Assertions passed, body matched | passed | matched |
+| Assertions passed, body did not | passed (`failed` with `failOnSchemaError`) | failed |
+| An assertion failed, body did not match | failed - names the assertion | failed |
+| Bound collection, no schema for the status | unchanged | not checked |
+| Unbound collection | unchanged | *no verdict* |

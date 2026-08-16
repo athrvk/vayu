@@ -321,10 +321,21 @@ const ScenarioResolveOptions& options) {
     // The response schemas ride the same read and the same hash check (issue
     // #682): the deferred pass at run end validates against them, and looking
     // them up then instead would be the one thing this read exists to prevent.
-    // They are taken as text and parsed only if that pass runs.
+    // They are taken as text and parsed only by an executor that will use them.
+    //
+    // Which of the two disagreements happened is recorded as well (issue #681),
+    // and only the collection runner reads it: that one emits a verdict per
+    // step, so its `checked: false` has to name a reason the reader can act on -
+    // "the document has moved under the binding" is fixed by a sync, and a
+    // per-step chip that silently never appears is how they never learn of it.
+    // The load pass needs none of that; an absent block is its whole answer.
     if (resolution.spec.bound ()) {
-        if (const auto document = db.get_spec_document (resolution.spec.spec_id);
-            document && document->hash == resolution.spec.spec_hash) {
+        const auto document = db.get_spec_document (resolution.spec.spec_id);
+        if (!document) {
+            resolution.spec.schema_reason = UncheckedReason::NoIndex;
+        } else if (document->hash != resolution.spec.spec_hash) {
+            resolution.spec.schema_reason = UncheckedReason::HashMismatch;
+        } else {
             if (auto declared = parse_declared_operations (document->operations)) {
                 resolution.spec.declared_operations = std::move (*declared);
             }

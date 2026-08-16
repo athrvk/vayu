@@ -385,6 +385,19 @@ export interface RunSchemaValidation {
 	failures: { step?: string; status: number; path: string; message: string }[];
 	/** Every failure found, the cap included - so "3 of 90" stays readable. */
 	failuresTotal: number;
+	/**
+	 * Whether `sampled` is the whole population rather than a reservoir (issue
+	 * #681).
+	 *
+	 * A collection run checks **every step it executed**, so its figures are
+	 * exact and the block must not tell a reader they describe a sample. A load
+	 * run omits this, and the sampled reading below is the default - the safer
+	 * one to fall back to, since a report from an engine older than this field
+	 * was sampled.
+	 */
+	exact?: boolean;
+	/** Whether a schema failure was allowed to fail its step (collection runs). */
+	failOnSchemaError?: boolean;
 }
 
 /**
@@ -790,6 +803,15 @@ export interface ScenarioStepEvent {
 	 * live and after a reload.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * What the contract says about this step's response (issue #681), the same
+	 * object the stored trace carries - so a step watched live and the same step
+	 * read back from the report show one verdict, not two derivations of it.
+	 *
+	 * Absent for a step of an unbound collection and for one that sent nothing:
+	 * a response nobody made was not judged against a contract.
+	 */
+	validation?: ResponseValidation;
 }
 
 /**
@@ -1753,18 +1775,22 @@ export interface RunReport {
 	 */
 	coverage?: RunCoverage;
 	/**
-	 * Whether the responses this run kept matched the schemas its bound document
-	 * declares (issue #682).
+	 * Whether what came back matched the schemas the run's bound document
+	 * declares (issues #682, #681).
 	 *
 	 * **Absent, never zeros**, for every run that checked nothing - an unbound
 	 * collection, a single-request run, a document carrying no response schemas.
 	 * A run whose responses were never checked did not pass a contract.
 	 *
-	 * Beside {@link RunReport.coverage} and computed against the same document,
-	 * but on different evidence: coverage is exact, this is **sampled**. The
-	 * engine defers it to run end over the bounded reservoirs, because the load
-	 * loop refills concurrency per completion and a schema walk there would cost
-	 * the run throughput. Anything rendering these numbers has to say so.
+	 * Beside {@link RunReport.coverage} and computed against the same document -
+	 * the one the run was *planned* with, read when its plan resolved, so a sync
+	 * landing mid-run cannot change what the run was measured against.
+	 *
+	 * **What the numbers describe differs by run mode, and `exact` says which.**
+	 * A load run defers the check to run end over its bounded reservoirs, because
+	 * the load loop refills concurrency per completion and a schema walk there
+	 * would cost throughput - so its figures are sampled, and anything rendering
+	 * them has to say so. A collection run checks every step it executed.
 	 */
 	schemaValidation?: RunSchemaValidation;
 	/**

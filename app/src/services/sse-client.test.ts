@@ -48,6 +48,25 @@ describe("parseStepEvent", () => {
 		expect(parseStepEvent(base)).not.toHaveProperty("dataRowIndex");
 	});
 
+	it("carries the schema verdict when the collection is bound, and no key when it is not", () => {
+		const base = {
+			iteration: 0,
+			stepIndex: 0,
+			name: "Get pet",
+			outcome: "passed",
+			statusCode: 200,
+			latencyMs: 12,
+		};
+
+		const verdict = { checked: true, valid: false, failuresTotal: 1 };
+		expect(parseStepEvent({ ...base, validation: verdict })?.validation).toEqual(verdict);
+		// Absent stays absent: an unbound collection produces no verdict, and an
+		// empty one here would render as "checked, and fine".
+		expect(parseStepEvent(base)).not.toHaveProperty("validation");
+		// A malformed node is not a verdict either.
+		expect(parseStepEvent({ ...base, validation: "nope" })).not.toHaveProperty("validation");
+	});
+
 	it("reads a scenario run's step event", () => {
 		expect(
 			parseStepEvent({

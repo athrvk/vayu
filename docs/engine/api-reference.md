@@ -3363,6 +3363,15 @@ for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
+A step of a collection **bound to an OpenAPI document** additionally carries a
+`validation` node (issue #681) - the same object and the same shape
+[`POST /execute`](#post-execute) returns - saying whether its response matched
+the schema that document declares. Absent for an unbound collection and for a
+step that sent nothing. By default the verdict is its own channel and changes no
+outcome; `failOnSchemaError: true` on the run makes a schema failure fail a step
+that passed everything else. The run's rollup is
+[`schemaValidation`](#get-runsrunidreport) in the report.
+
 **Outcomes** are `passed`, `failed`, `skipped` and `errored`:
 
 | Outcome | Meaning | Effect on the iteration |
@@ -3908,7 +3917,10 @@ replays the steps it missed:
 event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
-       "statusCode":200,"latencyMs":42.7,"dataRowIndex":1}
+       "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
+       "validation":{"checked":true,"valid":true,"matchedStatus":"200",
+                     "matchedContentType":"application/json",
+                     "failures":[],"failuresTotal":0}}
 
 event: complete
 data: {"event":"complete","runId":"run_1234567890"}
@@ -3917,7 +3929,11 @@ data: {"event":"complete","runId":"run_1234567890"}
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
 `data`, on the same terms as on the stored row, so a step reads the same live
-and after a reload. A scenario run publishes no `metrics` ticks:
+and after a reload. `validation` is the step's schema verdict (issue #681) in
+the same shape and on the same terms - absent for a step of an unbound
+collection and for one that sent nothing, and byte-identical to the node its
+stored trace carries, so a watched run and a read-back one agree. A scenario
+run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
 
@@ -4338,7 +4354,7 @@ only when a test script ran, `thresholdValidation` only when the run declared
 [budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
 `capacity` run, `auth` only when the run's OAuth 2.0 credential could be
 refreshed mid-run, `coverage` only for a run measured against a bound spec,
-`schemaValidation` only for a load run that checked some of its samples against
+`schemaValidation` only for a run that checked at least one response against
 one).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
@@ -4389,11 +4405,12 @@ deliberately plain numbers, shaped like `thresholdValidation`'s counts, so a
 headless CI gate can threshold on them without the block being reshaped. Nothing
 thresholds on them today.
 
-**`schemaValidation`** says whether the responses a **load** run kept matched the
-schemas that same document declares (issue #682). It sits beside `coverage` and
-is computed against the same document, but on different evidence, and the
-difference is the block's most important field: coverage counts every send,
-while this walks the **bounded reservoir of responses the run stored**.
+**`schemaValidation`** says whether the responses a run checked matched the
+schemas that same document declares (issues #682, #681). It sits beside
+`coverage` and is computed against the same document, but on different evidence,
+and the difference is the block's most important field: coverage counts every
+send, while this walks whatever the run's mode gave it - the **bounded reservoir
+of responses a load run stored**, or **every step a collection run executed**.
 
 | Field | Meaning |
 |---|---|
@@ -4405,16 +4422,25 @@ while this walks the **bounded reservoir of responses the run stored**.
 | `unevaluatedKeywords[]` | `{keyword, count}`, so what went unread is named and not only counted |
 | `failures[]` | Bounded examples: `{step?, status, path, message}` |
 | `failuresTotal` | Every failure found, the cap included - so "3 shown of 90" stays readable |
+| `exact` | `true` when `sampled` is the whole population rather than a reservoir - written by a collection run, absent for a load run |
+| `failOnSchemaError` | Whether a schema failure was allowed to fail its step. Collection runs only |
 
 The reason codes are the ones [`POST /execute`'s validation
 node](#post-execute) uses, unchanged.
 
-**These numbers are sampled, and nothing here pretends otherwise.** Validation is
-deferred to run end because a load run refills concurrency on every completion,
-so a schema walk on that path would cost throughput for the whole run - and would
-do so invisibly. `failed: 0` therefore means "no *sampled* response failed".
-`sampled` is written so a reader always has the denominator; the app renders it
-beside the tallies for the same reason.
+**Under load these numbers are sampled, and nothing here pretends otherwise.**
+Validation is deferred to run end because a load run refills concurrency on every
+completion, so a schema walk on that path would cost throughput for the whole run
+- and would do so invisibly. `failed: 0` therefore means "no *sampled* response
+failed". `sampled` is written so a reader always has the denominator; the app
+renders it beside the tallies for the same reason.
+
+**A collection run writes the same block with `exact: true`**, because it sends
+one request at a time and checks every step - there is no hot path to keep off,
+so `sampled` there *is* the run. The flag exists so a reader is never left to
+infer the denominator from the run's mode: the same five numbers are a wider
+claim in one than the other, and only the block knows which. A report written
+before the flag existed was sampled, which is why absent reads as sampled.
 
 A step's responses are kept when a deferred pass will read them - it carries a
 script, or it is bound to an operation and the document carries schemas - and the
@@ -4425,6 +4451,24 @@ reported as `sampling.response_samples_dropped`.
 collection, a single-request run, a document carrying no response schemas, and a
 run whose reservoirs held nothing. A run whose responses were never checked did
 not pass a contract.
+
+### Per-step verdicts in a collection run
+
+Each step of a collection run carries its own verdict on its stored trace as a
+`validation` node - the same object and the same shape
+[`POST /execute`](#post-execute) returns - and the live `step` SSE frame carries
+it too, so a run being watched and the same run read back cannot disagree
+(issue #681). A step that sent nothing carries no `validation` at all: there was
+no response to judge.
+
+**`failOnSchemaError`** is a top-level boolean on `POST /runs`, default `false`,
+type-checked before the run row is created. Left off, a schema failure does not
+change any step's outcome: it is its own verdict channel, and a response the
+document does not describe is not a failed assertion. Set, a step that passed
+everything else and whose response did not match is classified `failed`, with the
+first problem in its `results.error`; a step already failing keeps the error that
+named it.
+
 
 **Response:**
 ```json

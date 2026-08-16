@@ -6,8 +6,8 @@
  */
 
 /**
- * Whether the responses a load run kept matched the schemas its contract
- * declares (issue #682).
+ * Whether the responses a run checked matched the schemas its contract declares
+ * (issues #682, #681).
  *
  * The other half of the answer `ContractCoverage` beside it starts: coverage
  * says which of the contract the run touched, this says whether what came back
@@ -15,13 +15,18 @@
  * with, and both are absent when the run was not measured against one - a run
  * whose responses were never checked did not pass a contract.
  *
- * **The one thing this component must never let a reader assume is that these
- * numbers describe the run.** They describe the bounded reservoir of responses
- * the run stored: the engine defers validation to run end because the load loop
- * refills concurrency per completion. So the sampled denominator is rendered
- * beside every tally rather than left to a tooltip, and `Coverage is exact,
- * this is sampled` is the sentence the block carries - the same distinction
- * `docs/app/openapi.md`'s exact-vs-sampled table draws.
+ * **The one thing this component must never let a reader assume is a
+ * denominator the run did not have.** Both run modes write the same block and
+ * they are counted on different evidence: a load run defers validation to run
+ * end over the bounded reservoir it stored, because the load loop refills
+ * concurrency per completion, while a collection run checks every step as it
+ * runs. `exact` is what separates them, and the sentence the block carries
+ * follows it - the same distinction `docs/app/openapi.md`'s exact-vs-sampled
+ * table draws. Absent means sampled, because that is what a report written
+ * before the field was, and claiming exactness wrongly is the worse error.
+ *
+ * The file keeps its name from the load-mode block it was written for; the
+ * component now serves both callers.
  *
  * Reasons come from `uncheckedReasonText`, the wording the response viewer
  * already shows for a single response. One copy: a second list of sentences
@@ -41,6 +46,12 @@ export interface SampledSchemaValidationProps {
 
 export function SampledSchemaValidation({ validation, className }: SampledSchemaValidationProps) {
 	if (!validation || validation.sampled <= 0) return null;
+
+	// A collection run checks every step, so its figures are the run. Default to
+	// the sampled reading when the field is absent: that is what a report from an
+	// engine older than this field was, and overclaiming exactness is the one
+	// mistake this whole block exists to prevent.
+	const exact = validation.exact === true;
 
 	const unchecked = Object.entries(validation.uncheckedReasons ?? {}) as [
 		ValidationUncheckedReason,
@@ -79,8 +90,9 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 			</CardHeader>
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground tabular-nums">
-					{validation.checked} of {validation.sampled} sampled{" "}
-					{validation.sampled === 1 ? "response" : "responses"} checked against the spec.
+					{validation.checked} of {validation.sampled}
+					{exact ? "" : " sampled"} {validation.sampled === 1 ? "response" : "responses"}{" "}
+					checked against the spec.
 					{validation.failed > 0 &&
 						` ${validation.failed} did not match ${
 							validation.failed === 1 ? "its" : "their"
@@ -93,8 +105,9 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				 * reader to work out which kind its numbers are.
 				 */}
 				<p className="mb-3 text-[11px] text-muted-foreground">
-					Checked at the end of the run, over the responses it kept. Coverage beside this
-					is exact; these numbers describe the sample.
+					{exact
+						? "Checked as each step ran, over every response this run produced."
+						: "Checked at the end of the run, over the responses it kept. Coverage beside this is exact; these numbers describe the sample."}
 				</p>
 
 				{unchecked.length > 0 && (

@@ -634,10 +634,18 @@ TEST (SchemaValidationHotPathTest, NoValidationIsReachableFromTheCompletionPath)
     const std::filesystem::path root = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
     ASSERT_TRUE (std::filesystem::exists (root));
 
-    // The files a completion runs through: the strategy's per-completion
-    // callback and the scenario executor's virtual-user loop.
+    // The files a *load* completion runs through: the strategy's per-completion
+    // callback, the scenario executor's virtual-user loop, and the collector
+    // each one reports into.
+    //
+    // `scenario_runner.cpp` is deliberately not among them, and the distinction
+    // is the whole point rather than an exemption. It is the **design-mode
+    // sequential** runner: one request at a time, nothing refilling concurrency
+    // behind it, so there is no completion path to keep clear - which is why
+    // #681 can check every step as it runs where #682 must defer. The load-mode
+    // scenario executor is `scenario_load.cpp`, and it stays on this list.
     const std::vector<std::string> hot_path = { "load_strategy.cpp",
-        "scenario_load.cpp", "scenario_runner.cpp", "metrics_collector.cpp" };
+        "scenario_load.cpp", "metrics_collector.cpp" };
 
     size_t files_scanned = 0;
     size_t total_bytes   = 0;
@@ -675,10 +683,15 @@ TEST (SchemaValidationHotPathTest, NoValidationIsReachableFromTheCompletionPath)
     EXPECT_TRUE (offenders.empty ())
     << "response validation reached a file the completion path runs through; "
        "it belongs in the deferred pass at run end";
-    // Exactly the two hooks that exist: design mode resolves an index per
-    // execution, and the load pass parses one at run end. A third caller is not
-    // wrong on its face - it just has to be looked at, and this is what makes
-    // that happen rather than a reviewer noticing.
+    // Exactly the three hooks that exist: design mode resolves an index per
+    // execution (`specs.cpp`), the load pass parses one at run end
+    // (`run_manager.cpp`), and a collection run parses one before its first send
+    // (`scenario_runner.cpp`, issue #681). A fourth caller is not wrong on its
+    // face - it just has to be looked at, and this is what makes that happen
+    // rather than a reviewer noticing. This list is what caught #681's hook and
+    // sent someone to decide whether the sequential runner is a hot path; it is
+    // not, and the `hot_path` comment above records why.
     std::sort (validators.begin (), validators.end ());
-    EXPECT_EQ (validators, (std::vector<std::string>{ "run_manager.cpp", "specs.cpp" }));
+    EXPECT_EQ (validators,
+    (std::vector<std::string>{ "run_manager.cpp", "scenario_runner.cpp", "specs.cpp" }));
 }

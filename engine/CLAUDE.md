@@ -206,6 +206,18 @@ Three things worth knowing before you design around them:
   either of two reasons - a script to replay, or a contract to check - which is
   what `configure_step_samples` is told; one budget covers both, so a bound
   collection that also asserts thins each step's share.
+  **A collection run checks every step instead** (#681): the runner parses the
+  binding's schema index once before its first send - there is no hot path to
+  keep off when steps run one at a time - stamps each step's verdict on its
+  trace *and* its `step` SSE frame, and folds the same
+  `SampledValidationTotals` into the same `schemaValidation` block. It adds
+  `exact: true`, and that flag is load-bearing: the two modes write one block
+  that one component renders, so without it a run that checked everything would
+  be described to the reader as a sample. Absent reads as sampled, because a
+  report written before the flag was one. `failOnSchemaError` (default false,
+  scenario-only) is the opt-in that lets a schema failure fail a step - and only
+  a step that passed everything else, so a step already failing keeps the error
+  that named it.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

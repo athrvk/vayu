@@ -38,10 +38,12 @@
 
 #include <cstddef>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -153,11 +155,13 @@ struct SpecBinding {
      * The bound document's stored `response_schemas`, verbatim (issue #682).
      *
      * Carried as **text**, not as a parsed `ResponseSchemaIndex`: parsing a
-     * document's whole schema index is the expensive half and nothing during
-     * the run needs it, so the run pays for it once at the end, in the deferred
-     * pass, or not at all. That is the same bargain
-     * `core/schema_validation.hpp` states for why the schemas are a column of
-     * their own rather than folded into `operations`.
+     * document's whole schema index is the expensive half, so each executor
+     * pays for it once and only if it will use it - the load run at the end, in
+     * its deferred pass, and the collection runner once before its first step
+     * (issue #681), because that one checks per step and would otherwise
+     * reparse the largest column in the schema per response. That is the same
+     * bargain `core/schema_validation.hpp` states for why the schemas are a
+     * column of their own rather than folded into `operations`.
      *
      * Read here, at resolution, under the same hash check the operations are -
      * a run is judged against the document it was *planned* against, and a sync
@@ -165,6 +169,22 @@ struct SpecBinding {
      * for every case that leaves the schema-validation block out entirely.
      */
     std::string response_schemas;
+    /**
+     * Why there is no index to validate against, set **exactly when** `bound()`
+     * and `response_schemas` is empty for a reason the run can name (issue
+     * #681).
+     *
+     * The load-mode pass (#682) does not need this: it reports an absent block,
+     * and a run whose reservoirs were never checked has nothing per-response to
+     * explain. A collection run does - it emits a verdict per step, and
+     * `checked: false` there must carry a reason, because "the document has
+     * moved under the binding" is a state the reader can fix (sync it) while a
+     * chip that silently never appears is how they never learn of it.
+     *
+     * Unbound sets nothing, on both sides: a run nobody measured against a
+     * contract is not a run that could not be measured.
+     */
+    std::optional<UncheckedReason> schema_reason;
     [[nodiscard]] bool bound () const {
         return !spec_id.empty ();
     }

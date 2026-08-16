@@ -75,6 +75,28 @@ describe("SampledSchemaValidation", () => {
 		expect(screen.getByText(/6 did not match their declared schema/)).toBeTruthy();
 	});
 
+	/**
+	 * A collection run writes this same block having checked every step it ran
+	 * (issue #681). Telling that reader their figures describe a sample is the
+	 * mirror of the mistake the sampled wording exists to prevent - narrower
+	 * than the truth rather than wider, but still not what happened.
+	 */
+	it("drops the sampled wording when the run checked everything", () => {
+		render(<SampledSchemaValidation validation={validation({ exact: true })} />);
+
+		expect(screen.getByText(/36 of 40 responses checked/)).toBeTruthy();
+		expect(screen.queryByText(/sampled/i)).toBeNull();
+		expect(screen.getByText(/over every response this run produced/i)).toBeTruthy();
+		expect(screen.queryByText(/Coverage beside this is exact/)).toBeNull();
+	});
+
+	it("falls back to the sampled reading when the report does not say", () => {
+		// A report written before `exact` existed was a load run's. Defaulting the
+		// other way would have every one of them overclaim.
+		render(<SampledSchemaValidation validation={validation()} />);
+		expect(screen.getByText(/36 of 40 sampled responses checked/)).toBeTruthy();
+	});
+
 	it("says the numbers describe the sample, beside a coverage block that is exact", () => {
 		render(<SampledSchemaValidation validation={validation()} />);
 

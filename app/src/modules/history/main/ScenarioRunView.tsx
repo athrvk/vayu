@@ -34,7 +34,13 @@ import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { useScenarioRunStore, useToastStore } from "@/stores";
 import { Badge } from "@/components/ui";
-import { ContractCoverage, EmptyState, Callout, StopRunButton } from "@/components/shared";
+import {
+	ContractCoverage,
+	EmptyState,
+	Callout,
+	SampledSchemaValidation,
+	StopRunButton,
+} from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
@@ -216,6 +222,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    who has to scroll past forty step cards to reach it will not.
 				    Absent for a run of a collection bound to nothing. */}
 				<ContractCoverage coverage={report?.coverage} />
+
+				{/* And whether what came back honoured it - the same whole-run
+				    answer, so it sits under coverage here exactly as it does in
+				    the history detail's Overview. Absent on the same terms. */}
+				<SampledSchemaValidation validation={report?.schemaValidation} />
 
 				{steps.length === 0 ? (
 					/*

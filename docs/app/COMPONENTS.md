@@ -428,6 +428,8 @@ A live run can be **stopped** from this tab (`StopRunButton`, below), which matt
 
 `components/ScenarioStepCard.tsx` renders one step on the shared `SampledExchange`, restoring the response through `restore-response.ts` - the same path a design run's response pane uses, not a second reading of `trace_data`. `SampledExchange` gained an optional `state` (`success | error | slow | skipped`) and a `title` slot for this: its state is otherwise derived from the status code, which would read a `failed` assertion over a `200` as a success and a `skipped` step as a connection failure.
 
+For a step of a **spec-bound** collection the row also carries the shared `ValidationChip` beside its outcome chip, and the expansion renders the same `SchemaValidation` section the response pane's Tests tab does (issue #681) - both shared rather than re-laid-out here, so the three-state wording and the unevaluated-keyword disclosure cannot drift between the two surfaces. It sits *beside* the outcome and never inside it: with `failOnSchemaError` off, a step can pass every assertion while its response contradicts the contract, and those are two facts. A step of an unbound collection, or one that sent nothing, renders neither - `step.validation` is absent, and absent is never drawn as "checked, and fine".
+
 The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a collection row's ⋯ menu. Four options - Recursive, Iterations, a data file and Load test - because the scenario **is** the folder: the sequence is the tree's own ordering, and a step list authored here would be a second source of truth for it. Invalid iterations are refused in the dialog; the engine's own rejection (which names the step that would not compose) is shown in place rather than as a toast that scrolls away.
 
 **Load test** (issue #357) is the same plan on a different executor: the payload gains a load `mode`, and its presence is exactly what the engine reads to choose one, so a design-mode payload keeps its meaning by carrying no mode at all. It lives here rather than in the request builder's `LoadTestConfigDialog` because that dialog's target is the request that is open, and a scenario's target is a folder - picked here, by the tree that already owns the choice. Turning it on swaps Iterations (a duration-bounded run has no use for a pass count) for Virtual users and Duration, and swaps what happens after the `202`: a load run publishes `metrics` ticks and no `step` events, so it attaches `loadTestService` and opens the **dashboard**, where a design-mode run attaches `scenarioRunService` and opens the runner tab. Attaching the wrong one is not a degraded view, it is a permanently empty one.
@@ -1014,21 +1016,26 @@ other way to tell them apart.
 
 ## Sampled Schema Validation (`components/shared/SampledSchemaValidation.tsx`)
 
-Whether the responses a **load** run kept matched the schemas its bound contract
-declares (`RunReport.schemaValidation`, issue #682). Shown in the history
-detail's Overview directly under `ContractCoverage`, which it answers the second
-half of: coverage says what the run exercised, this says whether what came back
-honoured it.
+Whether the responses a run checked matched the schemas its bound contract
+declares (`RunReport.schemaValidation`, issues #682 and #681). Shown directly
+under `ContractCoverage`, which it answers the second half of: coverage says what
+the run exercised, this says whether what came back honoured it.
 
-**Its numbers are sampled and the block is built to say so.** The engine defers
-validation to run end over the bounded reservoir of responses the run stored,
-because a load run refills concurrency on every completion. So the card renders
-the `sampled` denominator beside every tally and states outright that the
-coverage block above it is exact while this one is not - the two sit together and
-a reader has no other way to tell which kind each is.
+**Both run modes render this one block, and its numbers do not mean the same
+thing in each.** A load run defers validation to run end over the bounded
+reservoir it stored, because it refills concurrency on every completion; a
+collection run sends one request at a time and checks every step. So the payload
+carries `exact` and the card's scope sentence follows it - "over every response
+this run produced" against "over the responses it kept, coverage beside this is
+exact". An absent `exact` renders as sampled, because that is what a report
+written before the field was, and overclaiming exactness is the worse error.
+
+It renders in every surface that carries a run report: the history detail's
+Overview, and a scenario run's own view above the step list. A rollup present in
+one and not the other reads as a missing block rather than a scoping decision.
 
 Same absent-vs-zero discipline as `ContractCoverage`: an absent block, or one
-that walked no samples, renders **nothing**. A run whose responses were never
+that walked no responses, renders **nothing**. A run whose responses were never
 checked did not pass a contract.
 
 Reasons for a response that could not be checked come from
@@ -1037,6 +1044,8 @@ response - one copy, so an aggregate row and a user's own response cannot come t
 describe the same code differently. The chip is red only for a real schema
 failure; a run that checked nothing stays neutral rather than borrowing the
 vocabulary of a failed budget.
+
+The file keeps the name it was given for the load-mode block it was written for.
 
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 
