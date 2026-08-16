@@ -18,7 +18,7 @@
 <!-- The lead asset here should MOVE: a <30s GIF/MP4 of build request -> send ->
      flip to load test -> dashboard streaming at 50k req/s. The owner records it;
      drop it in as docs/images/vayu-demo.gif above the two stills below and the
-     section is done. Structure is deliberately GIF-ready - see issue #631. -->
+     section is done. Structure is deliberately GIF-ready. -->
 
 ![Load test dashboard](docs/images/vayu-loadtest2.png)
 *The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
@@ -53,8 +53,6 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 **And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
 
 ![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
-
-A broader comparison against k6, JMeter, and the Postman collection runner is in progress - follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
 ---
 
@@ -225,16 +223,6 @@ QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment
 
 **Which platforms does Vayu support?**
 Windows (x64), macOS (Apple Silicon + Intel universal), and Linux (x86_64 AppImage).
-
----
-
-## Roadmap
-
-What is being built next, as open epics - nothing here ships today:
-
-- **[OpenAPI-native Vayu (#625)](https://github.com/athrvk/vayu/issues/625)** - bind a spec to a collection, keep it in sync, validate responses against it, and measure contract coverage from a run.
-
-Everything else on [the issues board](https://github.com/athrvk/vayu/issues) is fair game - bug reports and feature ideas welcome.
 
 ---
 
