@@ -7,9 +7,9 @@
 
 /**
  * tooltips - centralized InfoChip wording for every dashboard metric card and
- * chart (Plan 4 code-quality gate #2: components import strings by key, they
- * do not write tooltip copy inline). Wording is locked in
- * docs/plans/4-dashboard-redesign.md §"Tooltip wording".
+ * chart: components import strings by key, they do not write tooltip copy
+ * inline. This file is the authority for the wording itself - nothing outside
+ * it pins a string - so an edit here is the whole change.
  *
  * Most entries are plain strings; a few carry inline markup and are therefore
  * ReactNode. Consume as: <InfoChip tip={TOOLTIPS.rateFidelity} />.
