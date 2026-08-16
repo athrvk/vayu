@@ -21,7 +21,18 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    job in `cache-warm.yml` fails the build if any of them drift. Land a bump as
    **its own PR before the release commit**, never inside it: a dependency
    change and a version bump that break one platform together cannot be told
-   apart.
+   apart. Before merging a bump, run it against a **deliberately stale clone**
+   (issue #692) - every environment that has not updated since the last bump is
+   about to be one, and the self-heal in `build.py` is what stands between them
+   and an error that reads like a corrupt registry:
+
+   ```bash
+   git clone --depth=1 https://github.com/microsoft/vcpkg.git /tmp/stale-vcpkg
+   git -C /tmp/stale-vcpkg fetch --depth=1 origin <a-sha-from-before-the-bump>
+   git -C /tmp/stale-vcpkg reset --hard FETCH_HEAD
+   /tmp/stale-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+   VCPKG_ROOT=/tmp/stale-vcpkg python build.py -e     # must self-heal, then build
+   ```
 3. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes

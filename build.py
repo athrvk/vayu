@@ -630,6 +630,174 @@ def check_vcpkg() -> Optional[str]:
 
     return None
 
+# How vcpkg words a registry clone that predates the pinned `builtin-baseline`.
+# There are two distinct failures behind these, and they arrive in sequence:
+#
+#   1. the clone lacks the baseline *commit* - "path 'versions/baseline.json'
+#      exists on disk, but not in <sha>" (older tool builds pass git's own
+#      message through, which reads like a corrupt tree; newer ones wrap it as
+#      "while checking out baseline");
+#   2. the commit is fetched but the *worktree* is still old - "no version
+#      database entry for <port> at <version>", because vcpkg reads the version
+#      database from the checked-out tree, not from the baseline commit.
+#
+# Fetching cures the first and exposes the second, so the heal below does both.
+VCPKG_STALE_BASELINE_SIGNATURES = (
+    "exists on disk, but not in",
+    "while checking out baseline",
+    "no version database entry for",
+)
+
+def read_vcpkg_baseline(engine_dir: Path) -> Optional[str]:
+    """The commit engine/vcpkg.json pins as `builtin-baseline`, or None."""
+    try:
+        manifest = json.loads((engine_dir / "vcpkg.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    baseline = manifest.get("builtin-baseline")
+    return baseline if isinstance(baseline, str) and baseline else None
+
+def stale_baseline_hint(vcpkg_root: str) -> str:
+    """The manual cure, phrased the same way everywhere it is printed.
+
+    `pull`, not `fetch`: fetching alone makes the baseline commit reachable and
+    then fails on the next line, because the version database vcpkg reads comes
+    from the worktree.
+    """
+    return (f'Your vcpkg clone predates the pinned baseline in engine/vcpkg.json.\n'
+            f'  Fix it with:  git -C "{vcpkg_root}" pull --ff-only origin master')
+
+def git_output(args: List[str], timeout: int = 30) -> Optional[str]:
+    """Run a git command, returning its stdout, or None if it failed at all.
+
+    Every git call here is a probe on someone else's checkout, so a missing
+    git, a non-repository or a non-zero exit are all the same answer: cannot
+    tell, carry on without healing.
+    """
+    try:
+        result = subprocess.run(["git"] + args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+def heal_stale_vcpkg_baseline(vcpkg_root: str, engine_dir: Path) -> bool:
+    """Bring a vcpkg registry clone forward to the pinned baseline.
+
+    A clone that predates the pin fails once per dependency with wording that
+    reads as corruption and is only staleness. Baseline bumps are routine by
+    design - the releasing cadence examines the pin every release - so every
+    environment that has not been updated since the last bump hits this on its
+    next build.
+
+    Fetching is half of it: vcpkg reads `versions/baseline.json` out of the
+    baseline *commit*, but the per-port version database out of the **worktree**,
+    so a fetched-but-unmoved clone trades one error for "no version database
+    entry for <port> at <version>". The condition that satisfies both is the
+    same one: the baseline has to be an ancestor of what is checked out.
+
+    Returns True when the clone can resolve the baseline afterwards. False means
+    the caller should expect vcpkg to fail, having already printed the manual
+    cure - this never leaves a wall without its one-command answer.
+    """
+    baseline = read_vcpkg_baseline(engine_dir)
+    if not baseline:
+        return True
+
+    root = Path(vcpkg_root)
+    # Not every vcpkg root is a git checkout - the copy bundled with Visual
+    # Studio Build Tools resolves differently - and one that is not cannot be
+    # healed or diagnosed here. Probe, do not assume.
+    if git_output(["-C", str(root), "rev-parse", "--git-dir"]) is None:
+        return True
+
+    def carries_baseline() -> bool:
+        """Is the pinned commit in the checked-out history? Both halves at once:
+        a missing commit and a behind worktree both answer no."""
+        return git_output(["-C", str(root), "merge-base", "--is-ancestor", baseline, "HEAD"]) is not None
+
+    if carries_baseline():
+        if VERBOSE:
+            log_dim(f'vcpkg baseline {baseline[:10]} present')
+        return True
+
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} vcpkg clone predates baseline {baseline[:10]} - updating...')
+
+    remotes = (git_output(["-C", str(root), "remote"]) or "").split()
+    if not remotes:
+        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} vcpkg checkout has no git remote to update from')
+        log_dim(stale_baseline_hint(vcpkg_root))
+        return False
+    remote = "origin" if "origin" in remotes else remotes[0]
+
+    # Moving someone's worktree is only safe when there is nothing there to
+    # lose. Ignore untracked files: a bootstrapped root is full of them
+    # (the vcpkg binary, buildtrees/, installed/) and none are ours to keep.
+    if git_output(["-C", str(root), "status", "--porcelain", "--untracked-files=no"]):
+        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} vcpkg checkout has local modifications - not touching it')
+        log_dim(stale_baseline_hint(vcpkg_root))
+        return False
+
+    # A plain fetch, not a fetch of the baseline sha: it reaches the pin from a
+    # shallow `--setup` clone as well as a full one, and asking for a bare sha
+    # needs server-side support only some hosts enable. 10 minutes because a
+    # cold registry fetch is minutes of transfer, and a hung network should end
+    # the build, not own it.
+    if git_output(["-C", str(root), "fetch", "--quiet", remote], timeout=600) is None:
+        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} could not fetch the vcpkg registry from {remote}')
+        log_dim(stale_baseline_hint(vcpkg_root))
+        return False
+
+    # A shallow clone is what `--setup` bootstraps, and it is cut at the
+    # registry *tip* - so a pin that is merely older than the clone sits behind
+    # the shallow boundary, present in no fetch of new commits. Deepening is the
+    # only way back to it, and it is the difference between a fresh bootstrap
+    # that can build the engine and one that cannot.
+    if (git_output(["-C", str(root), "cat-file", "-e", f"{baseline}^{{commit}}"]) is None
+            and git_output(["-C", str(root), "rev-parse", "--is-shallow-repository"]) == "true"):
+        git_output(["-C", str(root), "fetch", "--quiet", "--unshallow", remote], timeout=600)
+
+    branch = git_output(["-C", str(root), "symbolic-ref", "--short", "-q", "HEAD"])
+    if branch:
+        # The attached case, and the one nearly everyone is in: fast-forward the
+        # checked-out branch. --ff-only so a clone carrying its own commits is
+        # refused rather than merged into.
+        git_output(["-C", str(root), "merge", "--ff-only", "--quiet", f"{remote}/{branch}"], timeout=120)
+
+    if not carries_baseline():
+        # Detached, on a branch with no counterpart upstream, or one that cannot
+        # fast-forward. Land exactly on the pinned commit: it is the version
+        # database this build needs, and it cannot overshoot into a newer
+        # registry the pin was never tested against.
+        git_output(["-C", str(root), "checkout", "--quiet", "--detach", baseline], timeout=300)
+
+    if carries_baseline():
+        # Re-read the attachment: a refused fast-forward falls through to the
+        # detach above, so the branch we started on is not what we ended on.
+        now_on = git_output(["-C", str(root), "symbolic-ref", "--short", "-q", "HEAD"])
+        where = f'on branch {now_on}' if now_on else f'detached at {baseline[:10]}'
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} vcpkg registry updated to baseline {baseline[:10]} ({where})')
+        return True
+
+    log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} vcpkg registry update did not reach baseline {baseline[:10]}')
+    log_dim(stale_baseline_hint(vcpkg_root))
+    return False
+
+def explain_vcpkg_failure(output: str, vcpkg_root: Optional[str]) -> None:
+    """Translate vcpkg's stale-baseline wording, if that is what just failed.
+
+    The self-heal above covers the case where a fetch is possible. This is the
+    case where it was not - no remote, no network, a vcpkg root that is not a
+    checkout - and the point is that the error names its own cure instead of
+    reading as a corrupt tree.
+    """
+    if not output or not any(sig in output for sig in VCPKG_STALE_BASELINE_SIGNATURES):
+        return
+    print()
+    print(f'  {Style.YELLOW}{Style.INFO} {stale_baseline_hint(vcpkg_root or "$VCPKG_ROOT")}{Style.RESET}')
+    print()
+
 def check_prerequisites(skip_app: bool):
     """Check all prerequisites with clean table output."""
     tools = [
@@ -853,9 +1021,14 @@ def setup_environment(project_root: Path):
     print()
 
     # ── vcpkg engine dependencies ─────────────────────────────────────────────
+    engine_dir = project_root / "engine"
+    # Before installing anything: a clone older than the pinned baseline fails
+    # every dependency with an error that reads like corruption. This is also
+    # the whole of the session-start hook's coverage - it runs `--setup`.
+    heal_stale_vcpkg_baseline(vcpkg_root, engine_dir)
+
     log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Pre-installing vcpkg engine dependencies...')
     vcpkg_bin = Path(vcpkg_root) / "vcpkg"
-    engine_dir = project_root / "engine"
     triplet = "x64-osx" if system_name == "macOS" else "x64-linux"
     # engine/ has a vcpkg.json manifest, so vcpkg runs in manifest mode and
     # installs the declared dependencies. Manifest mode rejects individual
@@ -993,6 +1166,13 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
             spinner.stop()
             print()
 
+    # cmake configures vcpkg in manifest mode, so a registry clone older than
+    # the pinned baseline fails here rather than at install time. Heal it first;
+    # local developers get the same self-heal `--setup` gives a fresh container.
+    vcpkg_root = check_vcpkg()
+    if vcpkg_root:
+        heal_stale_vcpkg_baseline(vcpkg_root, engine_dir)
+
     # Configure
     spinner = Spinner("Configuring CMake")
     spinner.start()
@@ -1007,6 +1187,7 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
         spinner.stop()
     else:
         spinner.stop(Style.CROSS, Style.RED)
+        explain_vcpkg_failure(output, vcpkg_root)
         return None
 
     print()

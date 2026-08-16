@@ -61,6 +61,20 @@ from the repo root, and a session that has not opened a file under `engine/`
 never loads that file - one did, read the 403 as policy, and abandoned a phase
 of #625 over it. Full note there.
 
+**A vcpkg clone older than the pinned baseline is not a corrupt registry.** It
+fails once per dependency with `path 'versions/baseline.json' exists on disk,
+but not in '<sha>'`, and - once someone runs the `git fetch` that error
+suggests - with `no version database entry for <port> at <version>`. Both mean
+the clone predates `builtin-baseline` in `engine/vcpkg.json`; the second is the
+half-cured state, because vcpkg reads the baseline map out of that commit but
+the version database out of the *worktree*. `build.py` now updates the clone
+itself before configuring, so re-running the build is normally the whole answer;
+where it cannot (modified checkout, no network) it names the manual cure,
+`git -C "$VCPKG_ROOT" pull --ff-only origin master`. Baseline bumps are routine
+by design - the releasing cadence examines the pin every release - so this is on
+the path of every environment that has sat still, which is why it is written
+down next to the 403 rather than left to be rediscovered.
+
 **On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
 `build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,
 ninja and vcpkg inside the Visual Studio Build Tools install
