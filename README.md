@@ -1,24 +1,24 @@
-# Vayu - REST/GraphQL Client and Native Load Tester, in One Desktop App
+# Vayu - Open Source API Client and Native Load Tester in One Desktop App
 
-**Build a request like you do in Postman. Load test the same endpoint at tens of thousands of requests per second - driven by a native C++ engine. Fully local. No account, no cloud, no quotas.**
+**Vayu is a free, open source API client with a native C++ load engine - build requests like Postman, load test the same endpoint at 50k+ req/s, and let your coding agent drive all of it over MCP. One app, fully local, no account.**
 
-Vayu is a free, open source desktop app for Windows, macOS, and Linux that merges two tools API teams normally split: a full REST + GraphQL request builder with collections, environments, and scripting, and a high-throughput load tester powered by a C++20 engine. The request UI will feel familiar coming from Postman or Insomnia - but underneath, a native event loop pushes load-test throughput that Electron + Node.js clients cannot reach, with every byte staying on your machine.
+- **50k+ req/s from the app's own UI** - 56,880 standalone, matching `wrk` and edging past `vegeta` on the same machine
+- **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API
+- **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed drive the same engine the UI does
 
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/athrvk/vayu/total)](https://github.com/athrvk/vayu/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
-[![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu?style=social&label=Star)](https://github.com/athrvk/vayu)
-[![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu?style=social&label=Issues)](https://github.com/athrvk/vayu/issues)
-
-![C++](https://img.shields.io/badge/C++-20-blue?logo=cplusplus)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
-![Electron](https://img.shields.io/badge/Electron-42-47848F?logo=electron)
 
 ---
 
 ## See it in action
+
+<!-- The lead asset here should MOVE: a <30s GIF/MP4 of build request -> send ->
+     flip to load test -> dashboard streaming at 50k req/s. The owner records it;
+     drop it in as docs/images/vayu-demo.gif above the two stills below and the
+     section is done. Structure is deliberately GIF-ready. -->
 
 ![Load test dashboard](docs/images/vayu-loadtest2.png)
 *The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
@@ -32,7 +32,7 @@ Vayu is a free, open source desktop app for Windows, macOS, and Linux that merge
 
 Most API teams run two tools side by side. Postman, Bruno, or Insomnia to build and send requests during development. k6, JMeter, or wrk when it is time to load test. Two UIs, two config formats, two places to keep endpoints in sync - and a context switch every time you want to confirm a change still holds under real traffic.
 
-Vayu collapses that workflow into one app. Build a request once, point the load tester at the same endpoint, and watch a live dashboard while the engine drives traffic - no second config, no separate CLI, no leaving the workspace. Because the entire stack runs on your machine with no account, no telemetry, and no cloud round-trips, it also works behind corporate firewalls and on air-gapped networks where SaaS clients simply cannot.
+Vayu collapses that workflow into one app. Build a request once, point the load tester at the same endpoint, and watch a live dashboard while the engine drives traffic - no second config, no separate CLI, no leaving the workspace. And when your coding agent needs to test what it just built, it drives the same engine over MCP - no browser automation, no copy-pasted curl. Because the entire stack runs on your machine with no account, no telemetry, and no cloud round-trips, it also works behind corporate firewalls and on air-gapped networks where SaaS clients simply cannot.
 
 ---
 
@@ -48,13 +48,11 @@ The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the E
 | wrk | 54,280 | 100% |
 | vegeta | 51,847 | 96% |
 
-Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
 **And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
 
 ![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
-
-A broader comparison against k6, JMeter, and the Postman collection runner is in progress - follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
 ---
 
@@ -70,8 +68,12 @@ A broader comparison against k6, JMeter, and the Postman collection runner is in
 | **UI Responsiveness** | High (sidecar arch) | Good | N/A | Laggy under load | Slows with large collections |
 | **Memory Usage** | Low (direct memory) | Low–Moderate | Low–Moderate | High (RAM-intensive) | High (Electron + Chrome) |
 | **Privacy / Offline** | 100% local, no account | 100% local | Local / cloud hybrid | 100% local | Cloud-heavy (optional local) |
+| **MCP / agent control** | Built in, local, drives the load engine | Official server, wraps the CLI | Official server (experimental) | No | Yes, via the cloud workspace |
+| **SSE streaming** | Live Events view, scriptable, load-tested | Connects, no event UI | Via extension | No | Client-side inspection |
+| **Mock servers** | Collection mock + OAuth issuer + webhook inbox | No | No | No | Yes (cloud tier) |
+| **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON | Yes (in script) | CSV | CSV / JSON |
 | **Postman Collection Import** | Yes (v2.0 + v2.1) | Yes (via converter) | Limited | No | Native |
-| **OpenAPI Import** | Yes (2.0 + 3.0) | No | No | No | Yes |
+| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | No | No | No | Yes |
 | **Open Source** | Yes (dual-license) | Yes (MIT) | Yes (AGPL v3) | Yes (Apache 2.0) | Partial |
 
 ---
@@ -82,80 +84,50 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 
 - **Postman** - Collection v2.0 and v2.1 JSON exports, plus environment and globals exports
 - **Insomnia** - v4 exports
-- **OpenAPI / Swagger** - 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
+- **OpenAPI / Swagger** - 3.1, 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
 
 ---
 
 ## Features
 
 - **Native load testing** - multi-worker C++ event loop sustains tens of thousands of req/s with metrics streamed over SSE in real time; no second tool needed
-- **REST + GraphQL request builder** - GET, POST, PUT, PATCH, DELETE and more; JSON, form-data, URL-encoded, raw text, and GraphQL bodies
+- **REST + GraphQL request builder** - GET, POST, PUT, PATCH, DELETE and more; JSON, XML, JSON-RPC, form-data, URL-encoded, raw text, and GraphQL bodies
+- **SSE / streaming requests** - consume `text/event-stream` endpoints as a first-class request type, with a live Events view, a Stop control, and the event list restored from history
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
-- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.0, Swagger 2.0
+- **Scenario collection runs** - run a collection as an ordered scenario, in design mode or under load, with per-step results and threshold verdicts
+- **Data-driven runs** - drive a collection from a CSV, TSV, JSON or JSONL file; columns arrive as `{{data.column}}` tokens and `pm.iterationData`, declared up front on the collection's Data tab
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.1/3.0, Swagger 2.0
+- **Saved response examples** - capture a real response against a request and keep it as a named example
+- **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
+- **MCP server for coding agents** - 24 typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
 - **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified
 - **Composable scripting** - pre/post-request scripts compose down the hierarchy (root → folder → request)
+- **Command palette + deep search** - one shortcut to jump to any collection, request, environment or setting, searching inside them rather than just their names
 - **Private by default** - 100% offline execution; no telemetry, no account, no cloud sync
 - **Cross-platform** - native installers for Windows (x64), macOS (universal), and Linux (AppImage)
 
 ---
 
-## Download
+## Install
 
-### Windows
+Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
-Install with [winget](https://learn.microsoft.com/windows/package-manager/winget/):
+**Windows** - [winget](https://learn.microsoft.com/windows/package-manager/winget/), or the [installer](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe):
 
 ```powershell
 winget install athrvk.Vayu
 ```
 
-Or download the installer directly:
-
-1. Download [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
-2. Run the installer and follow the setup wizard
-3. Launch **Vayu** from the Start menu
-
-### macOS
+**macOS** and **Linux** - the same command on both:
 
 ```sh
 bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
 ```
 
-Installs the latest release to `/Applications`. You will be prompted for your password once. Vayu is distributed unsigned - the installer ad-hoc signs it and clears the quarantine flag so it opens without the "damaged app" warning.
-
-**To update, run the same command again.** It is also how Vayu updates itself on macOS - the app checks for releases and hands you this command rather than patching itself, because an ad-hoc signature is not something macOS can verify. Updating replaces the app in place and keeps your collections, history, and settings. If Vayu is running it offers to quit it first (and reopens it afterwards); if you are already on the latest version it does nothing. Add `--force` to reinstall anyway, or set `VAYU_ASSUME_YES=1` to skip the prompt.
-
-If you already have Vayu in your own `~/Applications` folder (from dragging it out of a `.dmg`), the update goes there rather than installing a second copy in `/Applications`.
-
-To pin a specific version:
-
-```sh
-VAYU_VERSION=0.2.1 bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
-```
-
-To uninstall:
-
-```sh
-bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)" -- --uninstall
-```
-
-Add `--purge` to also remove settings and data. Or drag `Vayu.app` from `/Applications` to the Trash.
-
-### Linux
-
-```sh
-bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
-```
-
-The same command as macOS. On Linux it installs the AppImage to `~/.local/share/vayu` and registers a launcher entry, so Vayu appears in your applications menu instead of sitting in `~/Downloads` as an executable file. **No root** - everything it writes is under your home directory. If `~/.local/bin` is on your `PATH`, you also get a `vayu` command.
-
-Re-run it to update; add `-- --uninstall` (plus `--purge` for your data) to remove it. x86_64 only, matching the published builds.
-
-Or download the AppImage yourself from the [latest release](https://github.com/athrvk/vayu/releases/latest) (`Vayu-<version>-x86_64.AppImage`), `chmod +x` it and run it - it is self-contained, with no wizard and no root either way.
-
-> If Vayu doesn't start, your system may be missing FUSE 2, which AppImages need: `sudo apt install libfuse2` on Debian/Ubuntu, or run it once with `APPIMAGE_EXTRACT_AND_RUN=1`.
+Re-run it to update. Full detail per platform - what the script does and why, pinning a version, uninstalling, the AppImage route, FUSE 2 on Linux - is on the site:
+**[Install Vayu →](https://athrvk.github.io/vayu/#install)**
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
 
@@ -176,11 +148,7 @@ Vayu runs as two cooperating processes: a lightweight Electron UI (the Manager) 
 └────────────────────┘         └────────────────────┘
 ```
 
-See [Architecture Documentation](docs/architecture.md) for the full process model and IPC details.
-
----
-
-## Tech Stack
+See [Architecture Documentation](https://athrvk.github.io/vayu/architecture/) for the full process model and IPC details.
 
 | Layer | Technology |
 |---|---|
@@ -201,12 +169,16 @@ See [Architecture Documentation](docs/architecture.md) for the full process mode
 
 | Document | Description |
 |---|---|
-| [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |
-| [Engine API Reference](docs/engine/api-reference.md) | Full HTTP API for the C++ engine |
-| [Engine Benchmarks](docs/engine/benchmarks.md) | RPS head-to-head vs wrk and vegeta - methodology, results, and tuning |
-| [DB Schema](docs/engine/db-schema.md) | SQLite table definitions and JSON shapes |
-| [Variable Resolution](docs/app/variable-resolution.md) | How `{{variables}}` resolve at runtime |
-| [Building from Source](docs/building.md) | Prerequisites, CMake presets, all build commands |
+| [Architecture](https://athrvk.github.io/vayu/architecture/) | Sidecar pattern, process model, IPC |
+| [Engine API Reference](https://athrvk.github.io/vayu/engine/api-reference/) | Full HTTP API for the C++ engine |
+| [Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/) | RPS head-to-head vs wrk and vegeta - methodology, results, and tuning |
+| [MCP Server](https://athrvk.github.io/vayu/engine/mcp/) | The tool surface exposed to coding agents, and how to register it |
+| [Test Scripting](https://athrvk.github.io/vayu/engine/scripting/) | The QuickJS sandbox, script globals, hooks, limits |
+| [Data-Driven Runs](https://athrvk.github.io/vayu/app/data-driven-runs/) | Driving a collection from CSV, TSV, JSON or JSONL |
+| [DB Schema](https://athrvk.github.io/vayu/engine/db-schema/) | SQLite table definitions and JSON shapes |
+| [Variable Resolution](https://athrvk.github.io/vayu/app/variable-resolution/) | How `{{variables}}` resolve at runtime |
+| [Importing Collections](https://athrvk.github.io/vayu/app/import-collections/) | The import pipeline, format by format |
+| [Building from Source](https://athrvk.github.io/vayu/building/) | Prerequisites, CMake presets, all build commands |
 | [Contributing](CONTRIBUTING.md) | Dev setup, code style, PR process |
 
 ---
@@ -228,6 +200,12 @@ Those are excellent API clients, but they do not load test - for that, you reach
 **How fast is the load testing?**
 The C++ engine sustains tens of thousands of requests per second on modern hardware; see the [Performance](#performance) section. Exact numbers depend on your machine, the target server, and network conditions.
 
+**Can my coding agent use Vayu?**
+Yes. Vayu ships an MCP server inside the app on `127.0.0.1:9877`, and one command registers it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 24 typed tools - inspection (`list_collections`, `get_run_report`, `compare_runs`), execution (`run_request`, `run_collection_smoke`), load runs (`start_load_run`, `stop_run`) and writes over collections, requests and environments. Because an agent pointed at your engine is a real capability, it is gated: network tools refuse any host outside an allowlist that starts empty, load runs are capped on RPS, concurrency and duration, and the tools that mutate saved data sit behind a write toggle that ships off. Nothing leaves the machine.
+
+**Does Vayu support SSE / streaming endpoints?**
+Yes. Turn on Event stream for a request and Vayu consumes `text/event-stream` as a first-class request type: events arrive in a live Events tab as they stream, you can stop the stream yourself, scripts can assert on the buffered events after it closes, and the event list is restored when you reopen the run from history. Streams are bounded under load rather than buffering without limit.
+
 **Does Vayu work offline?**
 Yes. All execution happens locally. Vayu never contacts external servers during normal use - no telemetry, no license checks, no cloud sync.
 
@@ -238,7 +216,7 @@ No. Download, install, and use it immediately with no sign-up.
 Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file; drop that in too and it imports as a Vayu environment. A Postman globals export imports the same way, merging into Vayu's globals scope. Insomnia workspace environments import as well.
 
 **Can I import OpenAPI / Swagger specs?**
-Yes. Drop in an OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.
+Yes. Drop in an OpenAPI 3.1, OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.
 
 **What scripting syntax does Vayu support?**
 QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*`), so most Postman test scripts run without modification.
