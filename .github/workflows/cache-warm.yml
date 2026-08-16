@@ -136,6 +136,22 @@ jobs:
           done
           echo "All ${#files[@]} workflows agree."
 
+          # The four workflows agreeing with each other is only half of it.
+          # The commit they check vcpkg out at must also be the commit
+          # `engine/vcpkg.json` resolves dependency versions against - they are
+          # the same number written in two places, and nothing compared them
+          # until now. Diverged, CI resolves versions from the manifest's
+          # baseline while building against a different clone's port files, and
+          # the mismatch surfaces as an unexplained platform failure rather
+          # than as the config error it is.
+          baseline=$(python3 -c "import json; print(json.load(open('engine/vcpkg.json'))['builtin-baseline'])")
+          pinned=$(printf '%s' "${commits[0]}" | grep -oE '[0-9a-f]{40}')
+          if [ "$baseline" != "$pinned" ]; then
+            echo "::error file=engine/vcpkg.json::builtin-baseline ($baseline) and the workflows' VCPKG_COMMIT ($pinned) disagree. Bump them together." >&2
+            exit 1
+          fi
+          echo "engine/vcpkg.json builtin-baseline agrees: $baseline"
+
       - name: Assert every workflow resolves the same pnpm store key
         shell: bash
         run: |
@@ -212,7 +228,7 @@ jobs:
     env:
       # Keep these three byte-identical to release.yml and pr-tests.yml. The
       # `guard` job above fails the build if they drift.
-      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
+      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
 
     steps:

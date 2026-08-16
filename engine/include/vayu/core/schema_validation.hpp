@@ -48,7 +48,9 @@
  *
  * ### Which validator, and why not the one the issue named
  *
- * `valijson` (v1.1.0, BSD-2), not `json-schema-validator` (pboettch) which
+ * `valijson` (BSD-2; the version is `engine/vcpkg.json`'s baseline to pin, not
+ * this comment's - it named v1.1.0 and went stale the first time the baseline
+ * moved), not `json-schema-validator` (pboettch) which
  * #625/#628 named first and #628 recorded valijson as the fallback for. The
  * fallback was taken, and the reason is not taste: pboettch's `set_root_schema`
  * **segfaults on a recursive schema** - a `Node` whose `child` is a `Node`,
