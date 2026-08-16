@@ -1,3 +1,8 @@
+---
+description: >-
+  Importing Postman environment and globals exports into Vayu - keys, values, enabled state, secret flags, and how globals merge.
+---
+
 # Postman Environment and Globals
 
 Parses the two variable exports Postman writes as standalone files, both from _Environments → Export_:

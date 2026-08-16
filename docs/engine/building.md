@@ -1,3 +1,8 @@
+---
+description: >-
+  Build the Vayu C++ engine from source - CMake presets, vcpkg dependencies, test targets, and per-platform notes.
+---
+
 # Building Vayu Engine
 
 ## Quick Build

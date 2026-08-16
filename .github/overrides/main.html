@@ -10,8 +10,8 @@
 
   The alternative was Material's `social` plugin, which renders a per-page OG
   image at build time. It needs cairo/pango/libffi system packages in CI, which is
-  a real cost for a docs job that currently installs one wheel; the product
-  screenshot works as a static preview image and needs nothing. Revisit if
+  a real cost for a docs job that currently installs one wheel; one designed card,
+  checked in and shared by every page, needs nothing at build time. Revisit if
   per-page previews become worth the build dependency.
 #}
 {#
@@ -43,20 +43,39 @@
 {% block extrahead %}
   {% set title = page_title %}
   {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
-  {% set image = config.site_url ~ "images/vayu-loadtest.png" %}
+  {#
+    Two images, deliberately not the same one.
+
+    `social_image` is a designed 1200x630 card (source and regeneration command:
+    ../social-card/social-card.html). It replaced the raw product screenshot that
+    used to fill this slot: a screenshot is 16:9-ish and full of 11px UI text, so
+    every platform letterboxed it and cropped the one number worth reading. The
+    card is built to this exact aspect ratio and says what Vayu is at thumbnail
+    size. It is also the asset for the repo's GitHub social preview, so the two
+    surfaces cannot drift.
+
+    `screenshot` stays the real dashboard capture, because schema.org's
+    `screenshot` property means a picture of the running software - a marketing
+    card there would be a false claim in structured data.
+  #}
+  {% set social_image = config.site_url ~ "images/social-card.png" %}
+  {% set screenshot = config.site_url ~ "images/vayu-loadtest.png" %}
 
   <meta property="og:type" content="{{ 'website' if page.is_homepage else 'article' }}">
   <meta property="og:site_name" content="{{ config.site_name }}">
   <meta property="og:title" content="{{ title }}">
   <meta property="og:description" content="{{ description }}">
-  <meta property="og:image" content="{{ image }}">
-  <meta property="og:image:alt" content="Vayu's load-test dashboard showing live throughput, latency percentiles and error counters.">
+  <meta property="og:image" content="{{ social_image }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Vayu - an API client with a native C++ load engine built in. 52,738 req/s sustained from the app's own UI.">
   <meta property="og:url" content="{{ page.canonical_url }}">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ title }}">
   <meta name="twitter:description" content="{{ description }}">
-  <meta name="twitter:image" content="{{ image }}">
+  <meta name="twitter:image" content="{{ social_image }}">
+  <meta name="twitter:image:alt" content="Vayu - an API client with a native C++ load engine built in. 52,738 req/s sustained from the app's own UI.">
 
   {#
     SoftwareApplication on the home page only - it describes the product, not each
@@ -86,7 +105,7 @@
         "price": "0",
         "priceCurrency": "USD"
       },
-      "screenshot": {{ image | tojson }},
+      "screenshot": {{ screenshot | tojson }},
       "featureList": [
         "REST and GraphQL request builder",
         "Native C++ load testing with live metrics over SSE",

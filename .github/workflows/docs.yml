@@ -26,6 +26,12 @@ on:
       - 'docs/**'
       - '.github/mkdocs.yml'
       - '.github/hooks/**'
+      # theme.custom_dir - main.html writes the <title>, the Open Graph and
+      # Twitter card tags and the home page's structured data into *every* built
+      # page. Editing it changes what a pasted link renders as, with no change
+      # under docs/ to trigger a deploy, so it belongs here for the same reason
+      # install.sh does.
+      - '.github/overrides/**'
       - 'shared/icon_png/**'
       # Published at the site root by hooks/install_script.py, and the URL the
       # macOS install command curls. It is not under docs/, so without this line
@@ -41,6 +47,7 @@ on:
       - 'docs/**'
       - '.github/mkdocs.yml'
       - '.github/hooks/**'
+      - '.github/overrides/**'
       - 'shared/icon_png/**'
       - 'install.sh'
       - 'requirements-docs.txt'

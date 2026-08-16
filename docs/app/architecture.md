@@ -1,3 +1,8 @@
+---
+description: >-
+  Structure of the Vayu desktop app: the Electron main and renderer split, process boundaries, and the renderer's own architecture.
+---
+
 # Vayu App Architecture
 
 The Vayu Manager is an Electron-based desktop application built with React and TypeScript. It provides a user interface for designing API requests, executing them, and running load tests. The app communicates with the Vayu Engine (a C++ daemon) via HTTP on `localhost:9876`.

@@ -1,3 +1,8 @@
+---
+description: >-
+  Build Vayu from source on macOS, Linux or Windows - prerequisites, the build.py entry point, CMake presets, and platform quirks.
+---
+
 # Building Vayu
 
 This guide covers building Vayu on all platforms (macOS, Linux, Windows).

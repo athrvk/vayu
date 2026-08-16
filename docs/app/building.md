@@ -1,3 +1,8 @@
+---
+description: >-
+  Build the Vayu desktop app from source - prerequisites, pnpm scripts, the Vite and Electron pipeline, and packaging.
+---
+
 # Building Vayu App
 
 This document outlines how to build the Vayu Manager Electron application from source.

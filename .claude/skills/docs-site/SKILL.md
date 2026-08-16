@@ -39,6 +39,21 @@ heading anchor, so:
   docs website, not the app**; `no telemetry` in `docs/index.md` and `README.md`
   is a claim about the app and stays true, so keep the two apart when editing
   either.
+- **Every page needs a front-matter `description:`.** It is the page's
+  `<meta name="description">` *and* the description on its social card, and the
+  strict build does not check for it - a page without one silently inherits
+  `site_description`, which describes the product rather than the page. New
+  pages get one in the same commit.
+- **One social card for the whole site.** `og:image` / `twitter:image` point at
+  `docs/images/social-card.png`, a designed 1200x630 asset wired in
+  `.github/overrides/main.html`. Its source and the exact regeneration command
+  are in `.github/social-card/social-card.html` - edit that and re-render rather
+  than touching the PNG, because the card carries the positioning sentence and a
+  benchmark figure that both move. The same asset is the repo's GitHub social
+  preview. `main.html` also emits every page's `<title>` and the home page's
+  structured data, which is why `.github/overrides/**` is in `docs.yml`'s
+  `paths:` filters: an edit there changes every published page with nothing
+  under `docs/` to trigger the deploy.
 - **Jekyll is not an option here** and the workflow says why: Pages' default
   Jekyll build runs Liquid over page content, and these docs contain 40+
   `{{variable}}` examples (rendered as empty strings) plus `{% ... %}` (an

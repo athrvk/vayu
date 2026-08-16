@@ -1,3 +1,8 @@
+---
+description: >-
+  How Vayu handles vayu.lock during install and uninstall on each platform, and what happens when a stale lock is found.
+---
+
 # Lock File Handling During Install/Uninstall
 
 This document describes how lock files (`vayu.lock`) are handled during installation and uninstallation across all platforms.

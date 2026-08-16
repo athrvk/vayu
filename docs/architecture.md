@@ -1,3 +1,8 @@
+---
+description: >-
+  How Vayu works: an Electron UI and a C++20 engine as a local sidecar over HTTP, the process lifecycle, and why the split exists.
+---
+
 # Vayu System Architecture
 
 Vayu uses a **Sidecar Architecture** that decouples the user interface from the execution engine. This separation allows each component to be optimized for its specific purpose:

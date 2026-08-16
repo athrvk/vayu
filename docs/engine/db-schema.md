@@ -1,3 +1,8 @@
+---
+description: >-
+  The SQLite schema Vayu stores locally - every table, its columns, and the JSON shapes kept inside them.
+---
+
 # Engine Database Schema
 
 Vayu uses SQLite via `sqlite_orm`. The schema is defined in `engine/src/db/database.cpp` and the

@@ -1,3 +1,8 @@
+---
+description: >-
+  What carries over when you import a Postman Collection v2.0 or v2.1 export into Vayu - folders, variables, auth, scripts, and bodies.
+---
+
 # Postman Collection v2.1 / v2.0
 
 Parses exported Postman Collection JSON (schema v2.1.0 and v2.0.0) into the Vayu draft model. Both versions share the same parse implementation; the only differences are detection and the shape of the `url`/`auth` objects (handled transparently by the shared helpers).

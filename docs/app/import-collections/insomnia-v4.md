@@ -1,3 +1,8 @@
+---
+description: >-
+  What carries over when you import an Insomnia Export v4 file into Vayu - workspaces, folders, requests, environments, and template syntax.
+---
+
 # Insomnia v4
 
 Parses an Insomnia "Export v4" JSON document into the Vayu draft model. Insomnia exports are a single flat array of typed resources joined by `_id`/`parentId`; the parser reconstructs the workspace → request_group → request tree and emits one root collection per workspace.

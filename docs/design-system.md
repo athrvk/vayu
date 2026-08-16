@@ -1,3 +1,8 @@
+---
+description: >-
+  Vayu's UI design system: colour tokens, the elevation model that inverts between themes, typography, spacing and component patterns.
+---
+
 # Vayu Design System
 
 > Reference for all UI tokens, component patterns, and visual conventions.

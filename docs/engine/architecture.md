@@ -1,3 +1,8 @@
+---
+description: >-
+  Inside the Vayu C++ engine: the multi-worker event loop, thread pool, engine-side auth resolution, persistence and metrics.
+---
+
 # Vayu Engine Architecture
 
 **Version:** 0.3.0  

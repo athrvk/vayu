@@ -1,3 +1,8 @@
+---
+description: >-
+  How the Vayu Electron app talks to the C++ engine over local HTTP - endpoints, request shapes, streaming, and error handling.
+---
+
 # API Integration
 
 This document describes how the Vayu Manager communicates with the Vayu Engine (C++ daemon) via HTTP.

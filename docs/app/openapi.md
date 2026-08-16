@@ -1,3 +1,8 @@
+---
+description: >-
+  Binding an OpenAPI document to a Vayu collection - what the spec stores, how operations map to requests, and what stays in sync.
+---
+
 # OpenAPI Collections
 
 A collection can be **bound** to an OpenAPI document: the spec is stored with

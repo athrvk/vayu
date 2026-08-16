@@ -1,3 +1,8 @@
+---
+description: >-
+  What Vayu generates from a Swagger 2.0 specification - one collection per tag, request stubs, parameters, security schemes, and sampled bodies.
+---
+
 # OpenAPI 2.0 (Swagger)
 
 Parses a Swagger 2.0 specification into the Vayu draft model. Swagger 2.0, like OpenAPI 3.0, is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` built from `schemes`/`host`/`basePath`, query and header params carrying a declared `default` when there is one (and importing disabled when there is not - see [Parameter values & enabled state](#parameter-values--enabled-state)), and a body sampled from the `in: "body"` parameter schema. Users fill in real values after import.
