@@ -104,12 +104,24 @@ export interface SettingsEngineCategorySource {
 	label: string;
 }
 
+/** Where an engine entry is edited when an app panel row owns it, not the engine list. */
+export interface SettingsAppEditorLocation {
+	panel: SettingsCategory;
+	anchor: string;
+}
+
 interface BuildSettingsIndexInput {
 	panels: readonly SettingsPanelSource[];
 	/** The settings inside those panels. Omitted only by tests that do not need them. */
 	appSettings?: readonly SettingsAppSettingSource[];
 	engineEntries: readonly SettingsEngineEntrySource[];
 	engineCategories: readonly SettingsEngineCategorySource[];
+	/**
+	 * Engine keys whose editor is an app panel row (`ENGINE_SETTINGS_EDITED_IN_APP`),
+	 * keyed by engine key. Such an entry is folded into that row rather than
+	 * indexed beside it - see the note on `buildSettingsIndex`.
+	 */
+	engineEntriesEditedInApp?: Readonly<Record<string, SettingsAppEditorLocation>>;
 }
 
 /**
@@ -118,12 +130,20 @@ interface BuildSettingsIndexInput {
  * An engine entry whose category is not in the registry is dropped rather than
  * shown under a made-up heading: it has no row in the sidebar to navigate to,
  * so a result for it would lead nowhere.
+ *
+ * An engine entry an app panel row edits (`engineEntriesEditedInApp`) is not a
+ * result of its own either - it *becomes* a keyword on that row. One knob, one
+ * result, one editor: indexing both would put two rows for one value back in
+ * front of the user, which is the thing dropping the second editor fixed. Its
+ * key still finds it, because that is the name the docs, the logs and the MCP
+ * tool use.
  */
 export function buildSettingsIndex({
 	panels,
 	appSettings = [],
 	engineEntries,
 	engineCategories,
+	engineEntriesEditedInApp = {},
 }: BuildSettingsIndexInput): SettingsIndexEntry[] {
 	const categoryLabels = new Map(engineCategories.map((c) => [c.id as string, c.label]));
 	const panelLabels = new Map(panels.map((p) => [p.id as string, p.label]));
@@ -138,6 +158,14 @@ export function buildSettingsIndex({
 		keywords: [],
 	}));
 
+	// Engine keys that belong to an app row, grouped by the row that owns them,
+	// so the row can carry each as a match term.
+	const foldedKeys = new Map<string, string[]>();
+	for (const [engineKey, editor] of Object.entries(engineEntriesEditedInApp)) {
+		const rowId = `${editor.panel}:${editor.anchor}`;
+		foldedKeys.set(rowId, [...(foldedKeys.get(rowId) ?? []), engineKey]);
+	}
+
 	for (const setting of appSettings) {
 		const panelLabel = panelLabels.get(setting.panel);
 		// Same rule as an engine entry in an unknown category: with no row in the
@@ -151,11 +179,15 @@ export function buildSettingsIndex({
 			category: setting.panel,
 			categoryLabel: panelLabel,
 			anchor: setting.anchor,
-			keywords: setting.keywords ?? [],
+			keywords: [
+				...(setting.keywords ?? []),
+				...(foldedKeys.get(`${setting.panel}:${setting.anchor}`) ?? []),
+			],
 		});
 	}
 
 	for (const entry of engineEntries) {
+		if (entry.key in engineEntriesEditedInApp) continue;
 		const categoryLabel = categoryLabels.get(entry.category);
 		if (categoryLabel === undefined) continue;
 		index.push({

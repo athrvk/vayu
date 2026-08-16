@@ -27,8 +27,8 @@ const panels = [
 ];
 
 const engineCategories = [
-	{ id: "database_performance" as const, label: "Database Performance" },
-	{ id: "network_performance" as const, label: "Network & Connectivity" },
+	{ id: "data_retention" as const, label: "Data & retention" },
+	{ id: "network_performance" as const, label: "Network & connectivity" },
 ];
 
 const engineEntries = [
@@ -36,7 +36,7 @@ const engineEntries = [
 		key: "dbCacheSize",
 		label: "Cache Size",
 		description: "Memory SQLite keeps for pages it has already read.",
-		category: "database_performance",
+		category: "data_retention",
 		// The engine's own keyword for this entry: "ram" is what a user types
 		// and what neither the label nor the description says.
 		keywords: ["ram"],
@@ -113,8 +113,8 @@ describe("buildSettingsIndex", () => {
 
 	it("points each result at the category that reveals it", () => {
 		const cacheSize = index.find((e) => e.id === "dbCacheSize");
-		expect(cacheSize?.category).toBe("database_performance");
-		expect(cacheSize?.categoryLabel).toBe("Database Performance");
+		expect(cacheSize?.category).toBe("data_retention");
+		expect(cacheSize?.categoryLabel).toBe("Data & retention");
 		expect(cacheSize?.kind).toBe("engine");
 
 		const general = index.find((e) => e.id === "general");
@@ -232,20 +232,20 @@ describe("searchSettings", () => {
 					key: "byDescription",
 					label: "Something else",
 					description: "Mentions zebra in passing.",
-					category: "database_performance",
+					category: "data_retention",
 				},
 				{
 					key: "byKeyword",
 					label: "Another thing",
 					description: "No mention here.",
-					category: "database_performance",
+					category: "data_retention",
 					keywords: ["zebra"],
 				},
 				{
 					key: "zebraKey",
 					label: "Another one still",
 					description: "No mention here either.",
-					category: "database_performance",
+					category: "data_retention",
 				},
 			],
 			engineCategories,
@@ -266,5 +266,97 @@ describe("searchSettings", () => {
 			"theme-mode",
 		]);
 		expect(searchSettings(index, "zzzz")).toEqual([]);
+	});
+});
+
+describe("an engine entry an app panel row edits", () => {
+	// #586: `liveReplayWindowMs` had an editor in the engine list *and* a row in
+	// App > Dashboard. Dropping the engine editor is only half the fix - the
+	// index must not answer with two rows for one value either, and the engine
+	// key has to keep finding it, because that is the name the docs, the logs
+	// and the MCP `update_config` call use.
+	const editedInApp = {
+		liveReplayWindowMs: { panel: "appearance" as const, anchor: "theme-mode" },
+	};
+
+	const folded = buildSettingsIndex({
+		panels,
+		appSettings,
+		engineEntries: [
+			...engineEntries,
+			{
+				key: "liveReplayWindowMs",
+				label: "Live Chart Window",
+				description: "How much recent live-metrics history to keep.",
+				category: "data_retention",
+			},
+		],
+		engineCategories,
+		engineEntriesEditedInApp: editedInApp,
+	});
+
+	it("finds the app row by the engine key, and finds it once", () => {
+		const hits = searchSettings(folded, "liveReplayWindowMs");
+		expect(hits.map((h) => h.id)).toEqual(["theme-mode"]);
+		expect(hits[0].kind).toBe("app-setting");
+		expect(hits[0].anchor).toBe("theme-mode");
+	});
+
+	it("does not index the engine entry beside the row that edits it", () => {
+		expect(folded.find((e) => e.id === "liveReplayWindowMs")).toBeUndefined();
+	});
+
+	it("leaves the row's own keywords working", () => {
+		// The engine key is appended to them, not substituted for them.
+		expect(searchSettings(folded, "dark mode").map((h) => h.id)).toEqual(["theme-mode"]);
+	});
+
+	it("leaves every other engine entry indexed as itself", () => {
+		expect(folded.find((e) => e.id === "dbCacheSize")?.kind).toBe("engine");
+	});
+});
+
+describe("the words a moved setting is still found by", () => {
+	// The regression #586's split could cause: an entry that changed category
+	// must stay findable under the word a user already arrives with, and must
+	// name its new home when it is found.
+	const moved = buildSettingsIndex({
+		panels,
+		appSettings,
+		engineEntries: [
+			{
+				key: "inboxMaxCaptures",
+				label: "Inbox Captures Retained",
+				description: "How many requests one inbox keeps before the oldest are dropped.",
+				category: "services",
+			},
+			{
+				key: "runRetentionDays",
+				label: "Run Retention",
+				description: "Delete runs older than this age.",
+				category: "data_retention",
+			},
+			{
+				key: "dbCacheSize",
+				label: "Database Cache Size",
+				description: "Memory SQLite keeps per connection for recently used pages.",
+				category: "general_engine",
+			},
+		],
+		engineCategories: [
+			{ id: "general_engine" as const, label: "Core" },
+			{ id: "services" as const, label: "Services" },
+			{ id: "data_retention" as const, label: "Data & retention" },
+		],
+	});
+
+	it.each([
+		["inbox", "inboxMaxCaptures", "Services"],
+		["retention", "runRetentionDays", "Data & retention"],
+		["cache", "dbCacheSize", "Core"],
+	])("still answers %s, under its new category", (query, id, categoryLabel) => {
+		const hit = searchSettings(moved, query).find((h) => h.id === id);
+		expect(hit).toBeDefined();
+		expect(hit?.categoryLabel).toBe(categoryLabel);
 	});
 });

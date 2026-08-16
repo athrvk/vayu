@@ -8,7 +8,7 @@
 /**
  * Engine settings category registry
  *
- * The five engine categories, declared once and in sidebar order - mirroring
+ * The six engine categories, declared once and in sidebar order - mirroring
  * `app-panels.ts` on the client side.
  *
  * This replaces two hand-maintained maps: `ENGINE_CATEGORY_META` in the sidebar
@@ -17,10 +17,18 @@
  * edited copies of the label, and the sidebar's order was whatever
  * `Object.keys` returned. An array fixes both: one label per category, and the
  * order is written down.
+ *
+ * **Order is by likelihood of visit** (#586), not by how the engine happens to
+ * seed them. It used to put the least-visited category second and the one users
+ * arrive with questions about last.
+ *
+ * **Labels are sentence case**, like the app panels above them in the sidebar.
+ * The two registries meet at a section boundary, and Title Case on one side of
+ * it was the only thing that made the seam visible.
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Server, Code, Network, Activity, Database } from "lucide-react";
+import { Server, Code, Network, Activity, Database, Radio } from "lucide-react";
 import type { EngineSettingsCategory } from "@/types";
 
 export interface EngineSettingsCategoryMeta {
@@ -34,35 +42,47 @@ export interface EngineSettingsCategoryMeta {
 export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] = [
 	{
 		id: "general_engine",
-		label: "General & Engine",
-		description: "Core settings defining the application's base capacity and threading model",
+		// Not "General & Engine": it sits under a heading already reading
+		// "Engine Settings", so "& Engine" was noise, and it put a second
+		// "General" in the same sidebar as the app panel of that name.
+		label: "Core",
+		description:
+			"The engine's base capacity, threading model and storage internals - the settings a run is built on",
 		icon: Server,
 	},
 	{
-		id: "database_performance",
-		label: "Database Performance",
-		description:
-			"SQLite optimization settings for high-throughput load testing and result storage",
-		icon: Database,
-	},
-	{
 		id: "network_performance",
-		label: "Network & Connectivity",
+		label: "Network & connectivity",
 		description: "Low-level networking tuning for throughput, DNS, and connection persistence",
 		icon: Network,
 	},
 	{
-		id: "scripting_sandbox",
-		label: "Scripting Environment",
-		description: "Configuration for the QuickJS sandbox execution, limits, and debugging",
-		icon: Code,
+		id: "services",
+		// The Dock's word for this group, and its icon - a user managing an
+		// inbox or a mock server looks for the name the drawer gave it.
+		label: "Services",
+		description:
+			"Limits for the long-lived surfaces: streaming requests, webhook inboxes, mock servers and OAuth issuers",
+		icon: Radio,
 	},
 	{
 		id: "observability",
-		label: "Observability & Data",
-		description:
-			"Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits",
+		label: "Observability",
+		description: "Server monitoring and the live metrics that feed the dashboard's charts",
 		icon: Activity,
+	},
+	{
+		id: "data_retention",
+		label: "Data & retention",
+		description:
+			"What a run stores and for how long: capture and truncation budgets, and the run retention limits",
+		icon: Database,
+	},
+	{
+		id: "scripting_sandbox",
+		label: "Scripting environment",
+		description: "Configuration for the QuickJS sandbox execution, limits, and debugging",
+		icon: Code,
 	},
 ];
 

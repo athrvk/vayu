@@ -497,7 +497,7 @@ min/max/options):
       "type": "integer",
       "label": "Database Cache Size",
       "description": "Memory SQLite keeps per connection for recently used database pages...",
-      "category": "database_performance",
+      "category": "general_engine",
       "default": "67108864",
       "min": "1048576",
       "max": "1073741824",
@@ -570,7 +570,7 @@ Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
 
 The Settings panel renders entries dynamically, so new keys appear without app
-changes. These `observability` keys govern how much a run keeps - most of them
+changes. These `data_retention` keys govern how much a run keeps - most of them
 on disk, one in memory:
 
 | Key                 | Default   | Range        | Effect |
@@ -1745,8 +1745,8 @@ inbox reports `loopback: false` from then on so a client can badge it. See
 [architecture.md](architecture.md#listeners) for why only the inbox listener may
 bind wide and the management API never may.
 
-**Bounds.** Three are settings (`GET`/`POST /config`, category *Observability &
-Data*), read once when an inbox starts - so a change applies to the next inbox
+**Bounds.** Three are settings (`GET`/`POST /config`, category *Services*),
+read once when an inbox starts - so a change applies to the next inbox
 started, and a running listener keeps what it was started with:
 
 | Setting | Default | Range | What it bounds |
@@ -3552,7 +3552,7 @@ ramp. If `duration` is shorter than `rampUpDuration`, the run stops partway up
 (or down) the curve.
 
 **Response bodies are capped.** A load-run request reads at most
-`maxResponseBodyBytes` (Settings → Observability, default 32MB) into memory.
+`maxResponseBodyBytes` (Settings → Data & retention, default 32MB) into memory.
 Every in-flight request holds its own body, so an uncapped one multiplies by
 concurrency; a response past the cap **fails that request** rather than being
 buffered. It is reported like any other transport failure - `statusCode: 0`

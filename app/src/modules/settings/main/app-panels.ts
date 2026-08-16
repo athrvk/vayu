@@ -91,7 +91,9 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 	},
 	{
 		id: "mcp",
-		label: "MCP",
+		// The sidebar's only unexpanded acronym. "MCP" stays in the parenthetical
+		// so it is still findable by eye for someone who arrives knowing the term.
+		label: "AI agents (MCP)",
 		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 		icon: Plug,
 		Component: McpSettingsPanel,

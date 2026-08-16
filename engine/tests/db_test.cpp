@@ -266,6 +266,38 @@ TEST_F (DatabaseTest, SeedRemovesRetiredContextPoolSizeEntry) {
 // than one test per key - the guarantee is identical for all of them, and a key
 // added to the retirement list without its row being deleted is the only way
 // this can regress.
+// A category can be retired too, and that is the more dangerous half: the app
+// renders one sidebar row per declared category and drops an entry whose
+// category it does not know, so a row left behind in "database_performance"
+// after #586 folded those three into Core would be a setting with no screen -
+// present in the database, absent from Settings and from its search. Reseeding
+// rewrites metadata over the stored value, which is what carries an upgraded
+// database across; simulated here by planting the old category before it runs.
+TEST_F (DatabaseTest, SeedMovesAnEntryOutOfARetiredCategory) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto seeded = db.get_config_entry ("dbCacheSize");
+    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_EQ (seeded->category, "general_engine");
+
+    ConfigEntry stale = *seeded;
+
+    // A value the user chose, which the move must not reset.
+    stale.category = "database_performance";
+    stale.value    = "33554432";
+    db.save_config_entry (stale);
+    ASSERT_EQ (db.get_config_entry ("dbCacheSize")->category, "database_performance");
+
+    db.seed_default_config ();
+
+    auto migrated = db.get_config_entry ("dbCacheSize");
+    ASSERT_TRUE (migrated.has_value ());
+    EXPECT_EQ (migrated->category, "general_engine");
+    EXPECT_EQ (migrated->value, "33554432")
+    << "a category move must not reset the value the user stored";
+}
+
 TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
     const std::vector<std::string> retired = { "maxConnections", "tcpKeepAliveIdle",
         "tcpKeepAliveInterval", "statsInterval", "maxJsonFieldSize",

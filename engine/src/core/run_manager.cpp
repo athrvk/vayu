@@ -432,7 +432,7 @@ EngineDefaults engine_defaults)
     // Response capture for the retained samples. On by default because the
     // policy is failure-and-outlier-shaped rather than uniform - a healthy run
     // captures a handful of exemplars and nothing else. The per-body cap and
-    // the whole-run budget default from engine config (both `observability`
+    // the whole-run budget default from engine config (both `data_retention`
     // keys) and can be overridden per run, the same way the retention caps are.
     mc_config.capture_response_bodies = config.value ("capture_response_bodies",
     constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES);

@@ -560,7 +560,10 @@ TEST_F (InboxListenerTest, SeedsTheThreeLimitsFromTheConstants) {
     { "inboxMaxBodyBytes", "inboxMaxCaptures", "inboxLivePollIntervalMs" }) {
         auto entry = db_->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key;
-        EXPECT_EQ (entry->category, "observability") << key;
+        // Services, not Observability: the Dock's word for inboxes, mock
+        // servers and issuers, so the settings tree and the drawer name
+        // the same group the same way (#586).
+        EXPECT_EQ (entry->category, "services") << key;
         EXPECT_TRUE (entry->min_value.has_value ()) << key;
         EXPECT_TRUE (entry->max_value.has_value ()) << key;
     }

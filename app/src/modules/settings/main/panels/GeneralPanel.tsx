@@ -37,6 +37,11 @@ import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { UpdatesCard } from "./UpdatesCard";
 import { CookiesCard } from "./CookiesCard";
+import { useSettingsStore } from "@/modules/settings/settings-store";
+import type { EngineSettingsCategory } from "@/types";
+
+/** Where the retention knobs the runs on this card obey actually live. */
+const RETENTION_CATEGORY: EngineSettingsCategory = "data_retention";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -67,6 +72,7 @@ export default function GeneralPanel() {
 	const [clearing, setClearing] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
+	const setSelectedCategory = useSettingsStore((s) => s.setSelectedCategory);
 
 	useEffect(() => {
 		window.electronAPI
@@ -201,6 +207,22 @@ export default function GeneralPanel() {
 							Clear run history
 						</Button>
 					</div>
+					{/* This card shows and clears the runs; how many are kept, and for
+					    how long, are engine settings at the far end of the tree.
+					    Nothing here said so, so the two halves of run retention were
+					    findable only by already knowing both (#586). */}
+					<p className="text-xs text-muted-foreground mt-3">
+						How many runs are kept, and for how long, is set in{" "}
+						<Button
+							variant="link"
+							size="sm"
+							className="h-auto p-0 text-xs align-baseline"
+							onClick={() => setSelectedCategory(RETENTION_CATEGORY)}
+						>
+							Engine &gt; Data &amp; retention
+						</Button>
+						.
+					</p>
 				</CardContent>
 			</Card>
 
