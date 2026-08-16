@@ -38,8 +38,10 @@
  */
 
 import type { DeclaredResponseSchema, ResponseSchemaIndex, SpecOperation } from "@/types";
+import type { RefResolver } from "./openapi-shared";
 
 import { asArray, asRecord, asStr } from "@/lib/json-node";
+import { deref } from "./openapi-shared";
 
 /** Where #649's bundler inlines the external files a document referenced. */
 const BUNDLED_KEY = "x-vayu-bundled";
@@ -212,6 +214,38 @@ function mapSchemas(map: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
+ * Why both extractors below `deref` each `responses` entry before reading it
+ * (issue #714).
+ *
+ * A response may be `{"$ref": "#/components/responses/not_found"}` in 3.x, or
+ * `{"$ref": "#/responses/NotFound"}` in 2.0 - the shape GitHub's public spec
+ * uses for nearly every response it declares. The `$ref` node carries no
+ * `content` and no `schema` of its own, so reading it unresolved emits no
+ * schema, and the engine then reports `no_schema_for_status` - "the spec
+ * declares no response for this status" - about a status the document declares
+ * plainly, while coverage (which reads the status *keys*, and so never needed
+ * the ref) counts the very same status as declared. The examples half of this
+ * same parse already follows the ref (`deref` in `buildExamples` /
+ * `buildSwaggerExamples`); extraction was the one reader that did not.
+ *
+ * Single-hop, like every other ref these parsers follow: a ref to a ref is not
+ * a shape generators emit, and chasing one needs a cycle guard.
+ *
+ * **A ref that resolves to nothing is skipped and not counted here**, though
+ * the issue's pathway suggested counting it. The examples walk derefs the same
+ * entry of the same operation and already tallies `malformed_spec` for it, over
+ * a superset of what extraction sees - it runs for every operation, extraction
+ * only for those with a usable `specOperation` identity. A second count would
+ * report one broken ref as two lost items in the import preview.
+ * `openapi-v3.test.ts` holds the count at one, so the double cannot be added
+ * back without a red test.
+ *
+ * Schemas *inside* the resolved response keep their own `$ref`s as written, the
+ * same as an inline response's - `refRootsOf` carries `components.schemas` and
+ * `definitions`, which is what those point into.
+ */
+
+/**
  * An OpenAPI 3.x operation's declared response schemas.
  *
  * Every media type is kept, not just the JSON one: what can be validated is
@@ -221,13 +255,16 @@ function mapSchemas(map: Record<string, unknown>): Record<string, unknown> {
  * is nothing to check against, and an empty schema would claim everything is
  * valid.
  */
-export function responseSchemasV3(operation: Record<string, unknown>): DeclaredResponseSchema[] {
+export function responseSchemasV3(
+	operation: Record<string, unknown>,
+	resolveRef: RefResolver
+): DeclaredResponseSchema[] {
 	const responses = asRecord(operation.responses);
 	if (!responses) return [];
 
 	const declared: DeclaredResponseSchema[] = [];
 	for (const [status, response] of Object.entries(responses)) {
-		const node = asRecord(response);
+		const node = asRecord(deref(response, resolveRef));
 		if (!node || !status) continue;
 		const content = asRecord(node.content);
 		if (!content) continue;
@@ -254,7 +291,8 @@ export function responseSchemasV3(operation: Record<string, unknown>): DeclaredR
  */
 export function responseSchemasV2(
 	operation: Record<string, unknown>,
-	spec: Record<string, unknown>
+	spec: Record<string, unknown>,
+	resolveRef: RefResolver
 ): DeclaredResponseSchema[] {
 	const responses = asRecord(operation.responses);
 	if (!responses) return [];
@@ -268,7 +306,7 @@ export function responseSchemasV2(
 
 	const declared: DeclaredResponseSchema[] = [];
 	for (const [status, response] of Object.entries(responses)) {
-		const node = asRecord(response);
+		const node = asRecord(deref(response, resolveRef));
 		if (!node || !status || node.schema === undefined) continue;
 		const schema = toJsonSchema(node.schema);
 		for (const contentType of mediaTypes) {

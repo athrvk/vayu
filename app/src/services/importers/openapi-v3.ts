@@ -122,7 +122,10 @@ export class OpenApiV3Parser implements ImportParser {
 						...identity,
 						responses: declaredResponsesOf(op.responses),
 					});
-					schemaOperations.push({ identity, responses: responseSchemasV3(op) });
+					schemaOperations.push({
+						identity,
+						responses: responseSchemasV3(op, resolveRef),
+					});
 				}
 				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);
