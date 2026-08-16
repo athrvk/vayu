@@ -98,7 +98,12 @@ vayu/
 - **Standard:** C++20
 - **Style:** Google C++ Style Guide (with modifications)
 - **Formatting:** clang-format (config in `.clang-format` if present)
-- **Linting:** clang-tidy
+- **Linting:** clang-tidy, **19 or newer**. `engine/.clang-tidy` uses
+  `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
+  the config file outright and lints nothing. The `scripts/pre-commit` hook
+  probes the version and says so rather than passing silently - if you see that
+  warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default) or
+  lean on CI, which lints on a current toolchain.
 
 #### Naming Conventions
 
@@ -227,6 +232,13 @@ ctest --test-dir engine/build -V
 ```
 
 #### Writing Tests
+
+A new `engine/tests/*_test.cpp` must be added to the `add_executable(vayu_tests ...)`
+source list in `engine/CMakeLists.txt`. The list is explicit, not a glob, so an
+unregistered file is simply never compiled and its tests never run - which is
+silent, because a file that is not built produces no output. A configure-time
+guard fails the build naming any test file missing from the list, so you find
+out on your next build rather than never.
 
 ```cpp
 #include <gtest/gtest.h>

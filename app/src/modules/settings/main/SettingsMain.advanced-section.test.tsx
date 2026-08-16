@@ -33,7 +33,7 @@ import type { ConfigEntry } from "@/types";
 const base = {
 	type: "integer" as const,
 	description: "",
-	category: "database_performance",
+	category: "data_retention",
 	min: "1",
 	max: "100000",
 	requiresRestart: false,
@@ -76,7 +76,7 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory: "database_performance" }),
+	useSettingsStore: () => ({ selectedCategory: "data_retention" }),
 }));
 
 const showToast = vi.fn();

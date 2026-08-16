@@ -19,10 +19,13 @@
  * could only drift from it, with one side retaining less than the other assumes.
  * Reading and writing the same entries is what keeps them equal by construction.
  *
- * Only the window is user-facing here (the Live Dashboard panel's picker); the
- * ceiling is a memory backstop edited from the engine settings list, synced in
- * so the two sides agree. Until the config query resolves the store keeps its
- * module defaults, so retention is bounded from the first tick.
+ * The Live Dashboard panel's picker is the window's **only** editor (#586): the
+ * engine settings list used to offer a second one under a second label and a
+ * second save model, and `ENGINE_SETTINGS_EDITED_IN_APP` is what keeps that row
+ * out of it. The ceiling is a memory backstop, edited from the engine list and
+ * only read here, which is why it is returned rather than settable. Until the
+ * config query resolves the store keeps its module defaults, so retention is
+ * bounded from the first tick.
  */
 
 import { useCallback, useEffect } from "react";

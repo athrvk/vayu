@@ -508,6 +508,16 @@ export interface RequestExample {
 	body: string;
 	/** `""` when the source stated no media type - not a guess. */
 	contentType: string;
+	/**
+	 * True when `body` is only the first slice of the response this was saved
+	 * from (issue #659).
+	 *
+	 * Typed here because the panel paints a chip from it: a mock server serves
+	 * the stored body verbatim, so an example nobody marked as partial is
+	 * indistinguishable from a complete one. Absent on rows written before the
+	 * engine had the column, which are all complete by construction.
+	 */
+	bodyTruncated?: boolean;
 }
 
 export interface Environment {
@@ -1906,13 +1916,21 @@ export type ClientSettingsCategory =
 	| "general"
 	| "mcp";
 
-/** Engine settings categories (data-driven from the engine `/config` API). */
+/**
+ * Engine settings categories (data-driven from the engine `/config` API).
+ *
+ * Seeded engine-side in `seed_default_config`; this union is the renderer's
+ * copy of that set, and `ENGINE_SETTINGS_CATEGORIES` gives each one its
+ * sidebar row. An entry whose category is in neither is dropped from the
+ * search index rather than shown under a heading that does not exist.
+ */
 export type EngineSettingsCategory =
 	| "general_engine"
-	| "database_performance"
 	| "network_performance"
-	| "scripting_sandbox"
-	| "observability";
+	| "services"
+	| "observability"
+	| "data_retention"
+	| "scripting_sandbox";
 
 export type SettingsCategory = ClientSettingsCategory | EngineSettingsCategory;
 

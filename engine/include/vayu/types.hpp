@@ -978,6 +978,21 @@ struct RequestExample {
      * from a live response. See `request_example::ORIGIN_*`.
      */
     std::string origin = vayu::core::constants::request_example::ORIGIN_IMPORT;
+    /**
+     * Whether `body` is only the first slice of the response it was saved from
+     * (issue #659 item 2).
+     *
+     * A stored example is what a mock server answers with, verbatim and with no
+     * sign that anything is missing - so an example saved from a body the trace
+     * had already capped (`maxTraceBodyBytes`) is served as though it were a
+     * whole response. That was disclosed only in the default *name*, which a
+     * user renames at save time, and the disclosure went with it.
+     *
+     * `false` is honest for every row that predates the column: an importer
+     * copies a complete documented body, and the app's save is the only writer
+     * that ever had a partial one.
+     */
+    bool body_truncated = false;
     int64_t created_at;
     int64_t updated_at;
 };

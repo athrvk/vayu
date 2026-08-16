@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -566,6 +567,82 @@ TEST_F (ConfigRouteTest, UpdatingAValueKeepsItsMetadataFlags) {
     EXPECT_TRUE (entry["requiresRestart"].get<bool> ());
     EXPECT_TRUE (entry["advanced"].get<bool> ());
     EXPECT_EQ (entry["unit"].get<std::string> (), "ms");
+}
+
+// ---------------------------------------------------------------------------
+// category: which shelf an entry sits on, and whether that shelf exists.
+// ---------------------------------------------------------------------------
+
+// The app renders one sidebar row per *declared* category and drops an entry
+// whose category it does not know (`buildSettingsIndex`, `SettingsMain`), so a
+// category the renderer's `EngineSettingsCategory` union does not carry is not
+// a cosmetic mismatch - the setting simply is not on screen anywhere. That is
+// how #586's split could have gone wrong, and the reason the two lists are
+// pinned against each other here rather than compared by eye.
+TEST_F (ConfigRouteTest, EverySeededEntrySitsInADeclaredCategory) {
+    // Kept in step with app/src/types/domain.ts (EngineSettingsCategory) and
+    // app/src/modules/settings/engine-categories.ts.
+    const std::set<std::string> declared = { "general_engine", "network_performance",
+        "services", "observability", "data_retention", "scripting_sandbox" };
+
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    std::set<std::string> seen;
+    for (const auto& entry : entries) {
+        EXPECT_EQ (declared.count (entry.category), 1u)
+        << "entry '" << entry.key << "' is in category '" << entry.category
+        << "', which the app's registry does not render - the setting would be "
+        << "invisible in Settings and unreachable from its search";
+        seen.insert (entry.category);
+    }
+
+    // And the other direction: a declared category with nothing in it is an
+    // empty sidebar row. "Database Performance" was retired for holding three
+    // entries; zero is worse.
+    for (const auto& category : declared) {
+        EXPECT_EQ (seen.count (category), 1u)
+        << "category '" << category << "' is declared but holds no entry";
+    }
+}
+
+// The retired one, both ways round: nothing is seeded into it, and its three
+// entries are in Core where the merge put them. Pinned by key because "which
+// category did these land in" is the whole question the merge answers.
+TEST_F (ConfigRouteTest, TheRetiredDatabaseCategoryIsGoneAndItsEntriesAreInCore) {
+    for (const auto& entry : db_->get_all_config_entries ()) {
+        EXPECT_NE (entry.category, "database_performance") << entry.key;
+    }
+
+    for (const char* key : { "dbCacheSize", "dbBusyTimeout", "dbSynchronous" }) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_TRUE (entry.has_value ()) << key;
+        EXPECT_EQ (entry->category, "general_engine") << key;
+    }
+}
+
+// A smell alarm, not a design rule. Observability held 24 of 48 entries when
+// #586 split it - four unrelated concerns under one ops word, with the next
+// largest category at 8 - and no test noticed, because a category has no size
+// anyone reads. The bound is loose enough that a category can grow by a few
+// without anyone touching this file, and tight enough that a dumping ground
+// says so before a user has to scroll one.
+TEST_F (ConfigRouteTest, NoCategoryBecomesADumpingGround) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    std::map<std::string, size_t> per_category;
+    for (const auto& entry : entries) {
+        ++per_category[entry.category];
+    }
+
+    for (const auto& [category, count] : per_category) {
+        EXPECT_LE (count, 15u)
+        << "category '" << category << "' holds " << count
+        << " entries - split it, or move what does not belong";
+    }
 }
 
 } // namespace

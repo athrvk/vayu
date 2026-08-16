@@ -114,7 +114,7 @@ describe("ImportModal", () => {
 
 	it("renders the File drop zone when open", () => {
 		renderModal();
-		expect(screen.getByText(/Drop a file here/i)).toBeInTheDocument();
+		expect(screen.getByText(/Drop files here/i)).toBeInTheDocument();
 	});
 
 	it("previews a pasted Postman collection with detection badge + stats", async () => {

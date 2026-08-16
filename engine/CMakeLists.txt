@@ -292,6 +292,9 @@ add_library(vayu_core STATIC
     src/core/threshold_eval.cpp
     src/core/capacity_controller.cpp
     src/core/monitor.cpp
+    # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
+    # that way, or a version bump invalidates the whole compile cache (#659).
+    src/core/user_agent.cpp
     ${PLATFORM_SOURCES}
 )
 
@@ -483,6 +486,7 @@ if(VAYU_BUILD_TESTS)
         tests/refill_deficit_test.cpp
         tests/reservoir_test.cpp
         tests/sample_capture_test.cpp
+        tests/response_capture_test.cpp
         tests/load_pacing_test.cpp
         tests/threshold_eval_test.cpp
         tests/capacity_controller_test.cpp
@@ -524,6 +528,7 @@ if(VAYU_BUILD_TESTS)
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
         tests/spec_coverage_test.cpp
+        tests/version_isolation_test.cpp
         src/http/routes/import.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
@@ -554,7 +559,48 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/health.cpp
         src/http/server.cpp
     )
-    
+
+    # A *_test.cpp that is on disk but absent from the list above is compiled
+    # into nothing and reports nothing - no output, no failure, just a suite
+    # count that quietly never included it. response_capture_test.cpp sat that
+    # way for ~140 commits and its 16 tests never ran once (#668). This is the
+    # "assert you scanned something non-empty" rule applied to the build: the
+    # glob is a *check* against the explicit list, never a substitute for it,
+    # so nothing about how the target is built becomes order-dependent or
+    # invisible in the diff. CONFIGURE_DEPENDS re-runs the glob when the
+    # directory changes, so the failure lands on whoever adds the file rather
+    # than on whoever notices years later.
+    file(GLOB vayu_test_files_on_disk CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*_test.cpp")
+    if(NOT vayu_test_files_on_disk)
+        message(FATAL_ERROR
+            "Test registration guard found no tests/*_test.cpp under "
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests - the guard is scanning the "
+            "wrong place and would pass no matter what is missing.")
+    endif()
+    get_target_property(vayu_registered_test_sources vayu_tests SOURCES)
+    set(vayu_registered_test_paths "")
+    foreach(source IN LISTS vayu_registered_test_sources)
+        if(NOT IS_ABSOLUTE "${source}")
+            set(source "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+        endif()
+        list(APPEND vayu_registered_test_paths "${source}")
+    endforeach()
+    set(vayu_unregistered_tests "")
+    foreach(test_file IN LISTS vayu_test_files_on_disk)
+        if(NOT test_file IN_LIST vayu_registered_test_paths)
+            file(RELATIVE_PATH relative_test_file "${CMAKE_CURRENT_SOURCE_DIR}" "${test_file}")
+            list(APPEND vayu_unregistered_tests "${relative_test_file}")
+        endif()
+    endforeach()
+    if(vayu_unregistered_tests)
+        string(REPLACE ";" "\n  " vayu_unregistered_tests "${vayu_unregistered_tests}")
+        message(FATAL_ERROR
+            "These test files exist but are not in add_executable(vayu_tests ...), "
+            "so none of their tests would run:\n  ${vayu_unregistered_tests}\n"
+            "Add them to the source list in engine/CMakeLists.txt.")
+    endif()
+
     # The cross-language conformance fixture lives in the source tree and is
     # read at test runtime by path (the app's vitest suite reads the same file),
     # so the tests need to know where the sources are regardless of the build

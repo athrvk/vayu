@@ -6,7 +6,18 @@
  */
 
 import { useRef, useState } from "react";
-import { Upload, CheckCircle2, X, Folder, Layers, Globe, AlertTriangle } from "lucide-react";
+import {
+	Upload,
+	CheckCircle2,
+	X,
+	Folder,
+	FolderOpen,
+	Layers,
+	Globe,
+	AlertTriangle,
+	FileWarning,
+	Link2,
+} from "lucide-react";
 import {
 	Button,
 	Dialog,
@@ -24,14 +35,16 @@ import {
 import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
-import { parseImport, type ImportSource } from "@/services/importers/factory";
-import {
-	UnrecognisedFormatError,
-	type ImportResult,
-	type SkippedItem,
-} from "@/services/importers/types";
+import { type ImportResult, type SkippedItem } from "@/services/importers/types";
 import { importFailureMessage } from "@/services/importers/failure-message";
-import { bundleExternalRefs } from "@/services/importers/ref-bundler";
+import {
+	applicableEntries,
+	detectBatch,
+	isImportableFileName,
+	reparseBatch,
+	type BatchDocument,
+	type BatchEntry,
+} from "@/services/importers/batch";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { MethodBadge } from "@/components/shared";
 
@@ -55,37 +68,34 @@ export function ImportModal() {
 	const [tab, setTab] = useState<Tab>("file");
 	const [phase, setPhase] = useState<Phase>("idle");
 	const [error, setError] = useState("");
-	const [result, setResult] = useState<ImportResult | null>(null);
-	const [lastRaw, setLastRaw] = useState("");
+	/**
+	 * One row per picked document, in pick order (issue #666).
+	 *
+	 * A single file is this same list with one entry, so the URL and Paste tabs -
+	 * single by construction - travel the batch path rather than a second one
+	 * beside it. Each entry carries its own bundled text, its own parse and its
+	 * own apply outcome; nothing about a batch is derived from another file's.
+	 */
+	const [entries, setEntries] = useState<BatchEntry[]>([]);
 	const [pasteText, setPasteText] = useState("");
 	const [url, setUrl] = useState("");
 	const [importEnvironments, setImportEnvironments] = useState(true);
 	const [importScripts, setImportScripts] = useState(true);
-	// Where the parsed bytes came from. Both are persisted when the file turns
-	// out to be an OpenAPI document (issue #638): the URL as
-	// `spec_documents.source_url`, which is what makes a re-fetch possible, and
-	// the path in `spec-file-store`, which is machine-local and never leaves.
-	// They used to live only long enough to render the preview.
-	const [specFilePath, setSpecFilePath] = useState("");
-	const [sourceUrl, setSourceUrl] = useState("");
-	// External `$ref`s the bundling pass below could not reach (issue #649).
-	// Held in state because a toggle re-parses the already-bundled text, and the
-	// count belongs to the document rather than to the parse - a re-detect that
-	// dropped it would quietly un-report a loss the user was already told about.
-	const [unresolvedRefs, setUnresolvedRefs] = useState(0);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
+
+	/** The one-file case, which renders the full preview rather than a ledger row. */
+	const single = entries.length === 1 ? entries[0] : null;
+	/** What Import would send: included, parsed, and carrying something to create. */
+	const applicable = applicableEntries(entries);
 
 	const reset = () => {
 		setPhase("idle");
 		setError("");
-		setResult(null);
-		setLastRaw("");
+		setEntries([]);
 		setPasteText("");
 		setUrl("");
-		setSpecFilePath("");
-		setSourceUrl("");
-		setUnresolvedRefs(0);
 	};
 
 	const handleClose = () => {
@@ -94,57 +104,32 @@ export function ImportModal() {
 		close();
 	};
 
-	const detect = (
-		raw: string,
-		opts: { importEnvironments: boolean; importScripts: boolean },
-		source: ImportSource = {}
-	) => {
-		try {
-			const parsed = parseImport(raw, opts, source);
-			setResult(parsed);
-			setLastRaw(raw);
-			setPhase("preview");
-		} catch (e) {
-			setResult(null);
-			setError(
-				e instanceof UnrecognisedFormatError ? "Unrecognised format" : (e as Error).message
-			);
-			setPhase("error");
-		}
-	};
-
 	/**
-	 * Resolve what the document references, then detect it (issue #649).
+	 * Bundle, detect and parse everything the user just handed over (issue #649
+	 * for the bundling, #666 for the "everything").
 	 *
-	 * A multi-file OpenAPI spec is only itself once its `$ref`s are followed:
-	 * before this, every one of them parsed to `undefined` and the operation
-	 * imported without the body or parameters it declared, silently. Bundling is
-	 * async and parsing is not, so it happens here rather than inside
-	 * `parseImport`, and what the parser (and the engine) then sees is one
-	 * self-contained document. A spec with nothing external is passed through
-	 * byte for byte.
-	 *
-	 * Both intakes are handed over, and the bundler uses whichever a given ref
-	 * needs: absolute URLs go through the engine proxy for a file-picked spec
-	 * too, and a relative ref in a pasted document has neither, which is the one
-	 * case that can only be reported.
+	 * A multi-file OpenAPI spec is only itself once its `$ref`s are followed, and
+	 * bundling is async while parsing is not - so it happens here rather than
+	 * inside `parseImport`, and what each parser (and the engine) then sees is one
+	 * self-contained document. Both intakes are handed over and the batch layer
+	 * uses whichever a given ref needs: a file already in this batch, a sibling on
+	 * disk through the gated IPC, or an absolute URL through the engine proxy.
 	 */
-	const runDetect = async (
-		raw: string,
-		source: ImportSource & { specPath?: string } = {}
-	): Promise<void> => {
+	const runBatch = async (documents: BatchDocument[]): Promise<void> => {
+		if (documents.length === 0) return;
 		setPhase("detecting");
-		const { specPath, ...rest } = source;
+		setError("");
 		const readSpecFile = window.electronAPI?.readSpecFile;
-		try {
-			const bundle = await bundleExternalRefs(raw, {
+		const next = await detectBatch(
+			documents,
+			{ importEnvironments, importScripts },
+			{
 				maxBytes: specMaxBytes,
-				...(rest.sourceUrl ? { sourceUrl: rest.sourceUrl } : {}),
 				fetchUrl: async (target) => (await apiService.importFetch(target)).content,
-				...(specPath && readSpecFile
+				...(readSpecFile
 					? {
-							readSibling: async (relativePath) => {
-								const { bytes } = await readSpecFile(specPath, relativePath);
+							readSibling: async (specPath, refPath) => {
+								const { bytes } = await readSpecFile(specPath, refPath);
 								// UTF-8, exactly as `FileReader.readAsText` decoded the
 								// document these bytes sit beside. A sibling that is not
 								// UTF-8 fails to parse and is reported as an unresolved
@@ -153,70 +138,94 @@ export function ImportModal() {
 							},
 						}
 					: {}),
-			});
-			setUnresolvedRefs(bundle.unresolvedRefs);
-			detect(
-				bundle.text,
-				{ importEnvironments, importScripts },
-				{
-					...rest,
-					...(bundle.unresolvedRefs ? { unresolvedRefs: bundle.unresolvedRefs } : {}),
-				}
-			);
-		} catch (e) {
-			// Only the size cap throws - an unreachable reference is counted, not
-			// fatal. A bundle over the cap is fatal because the engine would refuse
-			// to store it, leaving a collection bound to nothing.
-			setResult(null);
-			setError((e as Error).message);
+			}
+		);
+		setEntries(next);
+		// One document that failed is the whole import failing, and says so where
+		// it always did. Several is a ledger: the failures are rows in it, beside
+		// the files that did parse, which is the only way a batch can report a
+		// mixed outcome at all.
+		if (next.length === 1 && next[0].error) {
+			setError(next[0].error);
 			setPhase("error");
+			return;
 		}
+		setPhase("preview");
 	};
 
-	// Re-parse the already-loaded source when an option toggle changes in preview.
-	// The source travels with it: a re-parse that dropped the fetched URL would
-	// store a spec with nothing to re-fetch from, and the toggles say nothing
-	// about where the bytes came from.
+	// Re-parse every entry when an option toggle changes in preview, from the text
+	// already bundled - nothing is re-fetched, and each file keeps the source it
+	// was read from. A re-parse that dropped the fetched URL would store a spec
+	// with nothing to re-fetch from, and the toggles say nothing about where any
+	// of the bytes came from.
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
-		if (phase === "preview" && lastRaw) {
-			detect(lastRaw, next, {
-				fileName: result?.meta.fileName,
-				...(sourceUrl ? { sourceUrl } : {}),
-				// `lastRaw` is the bundled text, so nothing is re-fetched - but the
-				// refs that stayed unresolved are still unresolved, and the count has
-				// to be restated or the preview stops mentioning them.
-				...(unresolvedRefs ? { unresolvedRefs } : {}),
-			});
+		if (phase === "preview") setEntries((current) => reparseBatch(current, next));
+	};
+
+	/**
+	 * Read one picked file into a batch document.
+	 *
+	 * A file that cannot be read at all - a directory in a drop, a file that moved
+	 * between the pick and the read - becomes a document carrying that failure
+	 * rather than nothing, because a picked file with no row anywhere is exactly
+	 * the silent discard this flow exists to end.
+	 */
+	const readDocument = (file: File): Promise<BatchDocument> =>
+		new Promise((resolve) => {
+			// The path at pick time, while there is still a `File` to take it from -
+			// `getFilePath` is a preload-local read of the object, not a channel the
+			// renderer can name a path on. Empty outside Electron and for a
+			// drag-and-drop of remote content, which is the state "no remembered
+			// file" already means. It is also what a `$ref` to a sibling file on
+			// disk is resolved against, in the main process - see `readSpecFile`.
+			const specPath = window.electronAPI?.getFilePath(file) ?? "";
+			// `webkitRelativePath` is set by a folder pick and empty otherwise, so a
+			// flat drop is keyed by file name - which is the same thing for files
+			// that share one directory.
+			const relativePath = file.webkitRelativePath || file.name;
+			const reader = new FileReader();
+			reader.onload = () =>
+				resolve({
+					fileName: file.name,
+					relativePath,
+					specPath,
+					text: String(reader.result),
+				});
+			reader.onerror = () =>
+				resolve({
+					fileName: file.name,
+					relativePath,
+					specPath,
+					text: "",
+					readError: "Could not read file",
+				});
+			reader.readAsText(file);
+		});
+
+	/**
+	 * @param filterExtensions only for a folder pick, which hands over everything
+	 * under the directory. A drop or an explicit selection is never filtered: the
+	 * user named those files, and dropping one for its extension would be the
+	 * silent discard this replaced.
+	 */
+	const handleFiles = async (files: File[], filterExtensions = false): Promise<void> => {
+		const picked = filterExtensions ? files.filter((f) => isImportableFileName(f.name)) : files;
+		if (picked.length === 0) {
+			if (files.length > 0) {
+				setError("No .json, .yaml or .yml files in that folder.");
+				setPhase("error");
+			}
+			return;
 		}
+		setPhase("detecting");
+		await runBatch(await Promise.all(picked.map(readDocument)));
 	};
 
-	const handleFile = (file: File) => {
-		const reader = new FileReader();
-		reader.onload = () => {
-			const path = window.electronAPI?.getFilePath(file) ?? "";
-			// The path at pick time, while there is still a `File` to take it
-			// from - `getFilePath` is a preload-local read of the object, not a
-			// channel the renderer can name a path on. Empty outside Electron and
-			// for a drag-and-drop of remote content, which is the state "no
-			// remembered file" already means.
-			setSpecFilePath(path);
-			setSourceUrl("");
-			// The path is also what a `$ref` to a sibling file is resolved against,
-			// in the main process - see `readSpecFile`.
-			void runDetect(String(reader.result), { fileName: file.name, specPath: path });
-		};
-		reader.onerror = () => {
-			setError("Could not read file");
-			setPhase("error");
-		};
-		reader.readAsText(file);
-	};
-
-	// Fetching a URL is the only asynchronous source, so it is the only one that
-	// can be entered twice. `phase === "detecting"` was set here and in
-	// runDetect and then never read by anything that renders - the button stayed
-	// enabled and unchanged for the whole round-trip, so a second click fired a
-	// second fetch whose result raced the first.
+	// Fetching a URL is the only source the user can enter twice by hand, so it is
+	// the one that needs the guard. `phase === "detecting"` was set here and in
+	// the detect path and then never read by anything that renders - the button
+	// stayed enabled and unchanged for the whole round-trip, so a second click
+	// fired a second fetch whose result raced the first.
 	const isFetching = phase === "detecting";
 
 	const handleFetchUrl = async () => {
@@ -224,52 +233,84 @@ export function ImportModal() {
 		setPhase("detecting");
 		try {
 			const { content } = await apiService.importFetch(url);
-			setSpecFilePath("");
-			setSourceUrl(url);
-			await runDetect(content, { sourceUrl: url });
+			await runBatch([{ text: content, sourceUrl: url }]);
 		} catch (e) {
 			setError((e as Error).message);
 			setPhase("error");
 		}
 	};
 
+	/**
+	 * Apply the included files, **one transaction each** (issue #666).
+	 *
+	 * Sequential and per-file on purpose: `POST /import/apply` is atomic within
+	 * one call, so a seventh file the engine refuses cannot roll back six good
+	 * ones, and each file lands as its own root collection - exactly what N
+	 * manual imports produce today. A single combined payload was rejected for
+	 * the same reason: all-or-nothing across unrelated files is the wrong failure
+	 * mode, and per-file leaves the engine contract untouched.
+	 *
+	 * Every attempted entry is unchecked afterwards, and an applied one can no
+	 * longer be checked at all: the route is create-only and carries no
+	 * idempotency key, so a second send is a second copy of the tree rather than
+	 * a retry. A file that *failed* can be checked again - that is a deliberate
+	 * act, and the only honest way to retry one - which is why the outcome stays
+	 * on its row.
+	 */
 	const handleImport = async () => {
-		if (!result) return;
-		try {
-			await importMutation.mutateAsync({
-				result,
-				opts: { importEnvironments, importScripts },
-				// Only meaningful for a spec import; the mutation ignores it when
-				// the parsed tree carries no spec document.
-				...(specFilePath && result.meta.fileName
-					? { specFile: { path: specFilePath, fileName: result.meta.fileName } }
-					: {}),
-			});
-			handleClose();
-		} catch (e) {
-			// There is no rollback since #145: the engine write is atomic, so a validation
-			// failure persisted nothing - but a failure *after* it (the id-map check, the
-			// globals write) leaves the tree committed. Surface the error and leave the
-			// modal in its error phase; the mutation invalidates on every outcome, so
-			// whatever did land is already visible behind this dialog.
-			//
-			// The engine names the item that broke by its temp id; `importFailureMessage`
-			// resolves that back to the name shown in the preview (issue #173).
-			setError(importFailureMessage(e, result));
-			setPhase("error");
+		if (applicable.length === 0) return;
+		const outcomes = new Map<string, BatchEntry["outcome"]>();
+		for (const entry of applicable) {
+			const result = entry.result as ImportResult;
+			try {
+				await importMutation.mutateAsync({
+					result,
+					opts: { importEnvironments, importScripts },
+					// Only meaningful for a spec import; the mutation ignores it when
+					// the parsed tree carries no spec document.
+					...(entry.specPath && result.meta.fileName
+						? { specFile: { path: entry.specPath, fileName: result.meta.fileName } }
+						: {}),
+				});
+				outcomes.set(entry.id, { ok: true, message: "Imported" });
+			} catch (e) {
+				// There is no rollback since #145: the engine write is atomic, so a validation
+				// failure persisted nothing - but a failure *after* it (the id-map check, the
+				// globals write) leaves the tree committed. Surface the error and leave the
+				// modal open; the mutation invalidates on every outcome, so whatever did land
+				// is already visible behind this dialog.
+				//
+				// The engine names the item that broke by its temp id; `importFailureMessage`
+				// resolves that back to the name shown in the preview (issue #173).
+				outcomes.set(entry.id, { ok: false, message: importFailureMessage(e, result) });
+			}
 		}
+		const failures = [...outcomes.values()].filter((o) => o && !o.ok);
+		if (failures.length === 0) {
+			handleClose();
+			return;
+		}
+		setEntries((current) =>
+			current.map((entry) => {
+				const outcome = outcomes.get(entry.id);
+				return outcome ? { ...entry, outcome, included: false } : entry;
+			})
+		);
+		// One file: the engine's own message, where it has always been. Several:
+		// the count, because each row already carries its own message.
+		setError(
+			outcomes.size === 1
+				? (failures[0]?.message ?? "Import failed")
+				: `${failures.length} of ${outcomes.size} files failed to import.`
+		);
 	};
 
-	// A Postman *environment* or *globals* export parses to a result with no
-	// collections, and the options are applied at parse time - so with "Import
-	// environments & variables" off the whole result is empty and Import would create
-	// nothing and close the modal. Block it instead; the toggle that recovers it sits
-	// in the same footer.
-	const nothingToImport =
-		!!result &&
-		result.collections.length === 0 &&
-		result.environments.length === 0 &&
-		Object.keys(result.globals).length === 0;
+	/** Include or exclude one file of the batch. Nothing re-parses; only the apply set changes. */
+	const toggleEntry = (id: string, included: boolean) => {
+		setEntries((current) =>
+			current.map((entry) => (entry.id === id ? { ...entry, included } : entry))
+		);
+	};
 
 	const toggleEnvironments = (v: boolean) => {
 		setImportEnvironments(v);
@@ -284,12 +325,27 @@ export function ImportModal() {
 	// the active tab, and only the active panel is mounted.
 	const panelBody = (
 		<>
-			{phase === "preview" && result ? (
-				<PreviewView
-					result={result}
-					importEnvironments={importEnvironments}
-					onDismiss={reset}
-				/>
+			{phase === "preview" ? (
+				<>
+					{single?.result ? (
+						<PreviewView
+							result={single.result}
+							importEnvironments={importEnvironments}
+							onDismiss={reset}
+						/>
+					) : (
+						<BatchLedger entries={entries} onToggle={toggleEntry} onDismiss={reset} />
+					)}
+					{/* An apply that failed leaves the list on screen - the per-file
+					    outcomes are in it - so the message that would have replaced it
+					    is stated here instead. */}
+					{error && (
+						<p className="mt-3 flex items-center gap-1.5 text-xs text-destructive-text">
+							<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+							{error}
+						</p>
+					)}
+				</>
 			) : (
 				<>
 					{tab === "file" && (
@@ -318,16 +374,19 @@ export function ImportModal() {
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
 								e.preventDefault();
-								const f = e.dataTransfer.files[0];
-								if (f) handleFile(f);
+								// Every dropped file, not `files[0]`: the input had no
+								// `multiple` and this read one element, so a folder's
+								// worth of specs imported the first and discarded the
+								// rest without a word (issue #666).
+								void handleFiles(Array.from(e.dataTransfer.files));
 							}}
 						>
 							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
 							<span className="mt-2 block text-sm font-medium">
-								Drop a file here, or click to browse
+								Drop files here, or click to browse
 							</span>
 							<span className="block text-[11px] text-muted-foreground">
-								Format is detected automatically
+								Format is detected per file - drop as many as you like
 							</span>
 							<span className="mt-4 flex flex-wrap justify-center gap-1.5">
 								{FORMAT_BADGES.map((b) => (
@@ -344,6 +403,19 @@ export function ImportModal() {
 							</span>
 						</button>
 					)}
+					{tab === "file" && (
+						<div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+							<span>Or bring in a whole directory of specs:</span>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => folderInputRef.current?.click()}
+							>
+								<FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+								Import folder
+							</Button>
+						</div>
+					)}
 					{/*
 					 * Outside the button on purpose. Nested inside it, the
 					 * programmatic .click() would bubble back to the button and
@@ -353,8 +425,29 @@ export function ImportModal() {
 					<input
 						ref={fileInputRef}
 						type="file"
+						multiple
 						className="hidden"
-						onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+						onChange={(e) => void handleFiles(Array.from(e.target.files ?? []))}
+					/>
+					{/*
+					 * The folder variant of the same input. `webkitdirectory` is not in
+					 * React's attribute table - it is spread in rather than written as
+					 * a prop, which is what makes it reach the DOM. Chromium (so
+					 * Electron) is the only engine that implements it, and outside one
+					 * the input degrades to an ordinary multi-file picker rather than
+					 * failing.
+					 *
+					 * Filtered to importable extensions on the way in: a directory pick
+					 * hands over everything under it, and a ledger of PNGs would bury
+					 * the specs it was opened for.
+					 */}
+					<input
+						ref={folderInputRef}
+						type="file"
+						multiple
+						className="hidden"
+						{...{ webkitdirectory: "", directory: "" }}
+						onChange={(e) => void handleFiles(Array.from(e.target.files ?? []), true)}
 					/>
 					{tab === "url" && (
 						<div className="flex gap-2">
@@ -382,7 +475,7 @@ export function ImportModal() {
 								className="h-40 w-full font-mono text-xs"
 							/>
 							<Button
-								onClick={() => void runDetect(pasteText)}
+								onClick={() => void runBatch([{ text: pasteText }])}
 								disabled={!pasteText.trim()}
 								className="mt-2"
 							>
@@ -527,9 +620,16 @@ export function ImportModal() {
 							</Button>
 							<Button
 								onClick={handleImport}
-								disabled={importMutation.isPending || nothingToImport}
+								disabled={importMutation.isPending || applicable.length === 0}
 							>
-								{importMutation.isPending ? "Importing…" : "Import →"}
+								{importMutation.isPending
+									? "Importing…"
+									: // The count only appears for a batch: it is what the
+										// button is about to do N times, and on one file it
+										// would just restate the preview.
+										applicable.length > 1
+										? `Import ${applicable.length} files →`
+										: "Import →"}
 							</Button>
 						</div>
 					</div>
@@ -626,31 +726,167 @@ function PreviewView({
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
-			{(meta.skipped.length > 0 ||
-				meta.nonExecutableAuth > 0 ||
-				meta.unattachedFileParts > 0) && (
+			{lossSummary(meta) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
-					{[
-						...meta.skipped.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
-						...(meta.nonExecutableAuth > 0
-							? [`${meta.nonExecutableAuth} auth not executed`]
-							: []),
-						// An OpenAPI upload imports as a file row with nothing attached -
-						// the user has to pick the file before the request can be sent, so
-						// the preview says how many are waiting rather than letting them be
-						// discovered one 400 at a time.
-						...(meta.unattachedFileParts > 0
-							? [
-									`${meta.unattachedFileParts} file ${
-										meta.unattachedFileParts === 1 ? "part needs" : "parts need"
-									} a file`,
-								]
-							: []),
-					].join(" · ")}
+					{lossSummary(meta)}
 				</p>
 			)}
 		</div>
+	);
+}
+
+/**
+ * What this file lost, in words - or `""` when it lost nothing.
+ *
+ * Shared by the single-file preview and every ledger row rather than written
+ * twice: a batch has to state per file exactly what one file states on its own,
+ * and a copy of this list is a copy that stops matching the first time a skip
+ * kind is added.
+ */
+function lossSummary(meta: ImportResult["meta"]): string {
+	return [
+		...meta.skipped.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
+		...(meta.nonExecutableAuth > 0 ? [`${meta.nonExecutableAuth} auth not executed`] : []),
+		// An OpenAPI upload imports as a file row with nothing attached - the user
+		// has to pick the file before the request can be sent, so the preview says
+		// how many are waiting rather than letting them be discovered one 400 at a
+		// time.
+		...(meta.unattachedFileParts > 0
+			? [
+					`${meta.unattachedFileParts} file ${
+						meta.unattachedFileParts === 1 ? "part needs" : "parts need"
+					} a file`,
+				]
+			: []),
+	].join(" · ");
+}
+
+/**
+ * The batch ledger: one row per picked file (issue #666).
+ *
+ * Every file the user handed over has a row, whatever became of it - parsed,
+ * unrecognised, unreadable, or inlined into another document as a `$ref` target.
+ * That is the whole point: the flow this replaced kept the first file and said
+ * nothing about the rest, so "there is a row for it" is the property to hold on
+ * to, and a row that says "Unrecognised format" is doing its job.
+ *
+ * Rows that cannot be imported start unchecked, and the checkbox is the only
+ * thing the user has to touch: the counts, the losses and the outcome are all
+ * stated per file, in the same words the single-file preview uses.
+ */
+function BatchLedger({
+	entries,
+	onToggle,
+	onDismiss,
+}: {
+	entries: BatchEntry[];
+	onToggle: (id: string, included: boolean) => void;
+	onDismiss: () => void;
+}) {
+	const selected = applicableEntries(entries).length;
+	return (
+		<div className="space-y-3">
+			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
+				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
+				<span className="text-xs font-semibold">{entries.length} files</span>
+				<span className="text-[11px] text-muted-foreground">
+					{selected} selected for import
+				</span>
+				<button
+					className="ml-auto text-muted-foreground hover:text-foreground"
+					onClick={onDismiss}
+					aria-label="Dismiss"
+				>
+					<X className="h-3.5 w-3.5" />
+				</button>
+			</div>
+			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
+				{entries.map((entry) => (
+					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />
+				))}
+			</div>
+			<p className="text-[11px] text-muted-foreground">
+				Each file is imported on its own, as its own collection - a file the engine refuses
+				does not undo the ones before it.
+			</p>
+		</div>
+	);
+}
+
+function BatchRow({
+	entry,
+	onToggle,
+}: {
+	entry: BatchEntry;
+	onToggle: (id: string, included: boolean) => void;
+}) {
+	const { result, error, bundledInto, outcome } = entry;
+	const name = entry.fileName || entry.sourceUrl || "Pasted document";
+	const loss = result ? lossSummary(result.meta) : "";
+	return (
+		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
+			<input
+				type="checkbox"
+				className="mt-1"
+				checked={entry.included}
+				// An applied file is the one thing that must not be re-sent:
+				// `POST /import/apply` is create-only and carries no idempotency key,
+				// so a second send is a second copy of the tree, not a retry.
+				disabled={!result || outcome?.ok === true}
+				onChange={(e) => onToggle(entry.id, e.target.checked)}
+				aria-label={name}
+			/>
+			<span className="min-w-0 flex-1">
+				<span className="flex items-baseline gap-1.5">
+					<span className="truncate font-medium">{name}</span>
+					{result && (
+						<span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+							{result.meta.format}
+						</span>
+					)}
+				</span>
+				{result && (
+					<span className="block text-[11px] text-muted-foreground">
+						{result.meta.requestCount} requests · {result.meta.folderCount} folders ·{" "}
+						{result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
+						environments · {result.meta.globalCount} globals
+					</span>
+				)}
+				{bundledInto && (
+					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+						<Link2 className="h-3 w-3 shrink-0" />
+						Referenced by {bundledInto} - imported as part of it
+					</span>
+				)}
+				{error && (
+					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
+						<FileWarning className="h-3 w-3 shrink-0" />
+						{error}
+					</span>
+				)}
+				{loss && (
+					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
+						<AlertTriangle className="h-3 w-3 shrink-0" />
+						{loss}
+					</span>
+				)}
+				{outcome && (
+					<span
+						className={`flex items-center gap-1.5 text-[11px] ${
+							outcome.ok ? "text-status-success-text" : "text-destructive-text"
+						}`}
+					>
+						{outcome.ok ? (
+							<CheckCircle2 className="h-3 w-3 shrink-0" />
+						) : (
+							<FileWarning className="h-3 w-3 shrink-0" />
+						)}
+						{outcome.message}
+					</span>
+				)}
+			</span>
+		</label>
 	);
 }
 

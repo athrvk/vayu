@@ -10,6 +10,13 @@ elif [ -d "/usr/local/opt/llvm/bin" ]; then
     export PATH="/usr/local/opt/llvm/bin:$PATH"
 fi
 
+# The oldest clang-tidy that can parse engine/.clang-tidy. `ExcludeHeaderFilterRegex`
+# landed in LLVM 19; an older binary rejects the whole config file, so it lints
+# *nothing* and still exits 0 - a hook that scans an empty set and reports success
+# (issue #659 item 4). Ubuntu 24.04 ships 18 by default, so this is the common case,
+# not an exotic one.
+MIN_CLANG_TIDY_MAJOR=19
+
 # Get list of changed C++ files
 FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(cpp|hpp|c|h)$")
 
@@ -23,13 +30,27 @@ if ! command -v clang-tidy &> /dev/null; then
     exit 0
 fi
 
+# Version probe, before any file is linted. Said loudly and once: the failure this
+# replaces was silent, and a contributor on 18 had no way to tell "clean" from
+# "never ran". CI lints on a current toolchain either way, so this stays a skip
+# rather than a refusal to commit.
+CLANG_TIDY_VERSION=$(clang-tidy --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+CLANG_TIDY_MAJOR=${CLANG_TIDY_VERSION%%.*}
+if [ -z "$CLANG_TIDY_MAJOR" ] || [ "$CLANG_TIDY_MAJOR" -lt "$MIN_CLANG_TIDY_MAJOR" ] 2>/dev/null; then
+    echo "WARNING: clang-tidy ${CLANG_TIDY_VERSION:-(unknown version)} cannot read engine/.clang-tidy."
+    echo "         It uses ExcludeHeaderFilterRegex, which needs clang-tidy >= ${MIN_CLANG_TIDY_MAJOR}."
+    echo "         NOTHING WAS LINTED. Install a newer clang-tidy (e.g. 'apt install clang-tidy-19')"
+    echo "         or rely on CI, which lints on a current toolchain."
+    exit 0
+fi
+
 # Run clang-tidy
 for FILE in $FILES; do
     # Skip vendor files
     if [[ "$FILE" == *"vendor/"* ]]; then
         continue
     fi
-    
+
     # Check if file exists
     if [ ! -f "$FILE" ]; then
         continue

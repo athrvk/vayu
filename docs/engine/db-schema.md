@@ -248,6 +248,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `content_type` | TEXT    | Denormalized from `headers`; `""` when unstated   |
 | `order`        | INTEGER | Sort order within the request; default 0          |
 | `origin`       | TEXT    | `import` \| `user`; NOT NULL, default `import`     |
+| `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -276,6 +277,18 @@ request's `import` rows and writes the document's in their place, and an
 explicit `origin` in that payload is a `400` so a sync cannot manufacture rows
 it would then refuse to replace. The write paths validate it against those two
 values and `400` on anything else; no read path in the app displays it.
+
+**body_truncated** (issue #659) records that `body` is only the first slice of
+the response it was captured from - the trace's `maxTraceBodyBytes` cap. Added
+the same ALTER-friendly way as `origin`: NOT NULL with a `default_value`, so
+`sync_schema()` adds it and every pre-existing row backfills to false, which is
+what they all are (an importer copies a whole documented body; only the app's
+save-as-example ever had a partial one). It is stored rather than inferred
+because a short body is a legitimate body - nothing about the row says otherwise
+- and a mock server serves the bytes verbatim, so an undisclosed partial example
+is answered as though it were complete. The Examples panel is the reader,
+painting a "Partial body" chip; before the column, the fact lived only in the
+example's *name*, which the save dialog invites the user to edit.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each
@@ -566,7 +579,7 @@ their `monitor_samples` + their `results`), batched inside transactions that rel
 backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
 is wired into both at once. `prune_runs_configured()` reads the two
-knobs (config, `observability`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
+knobs (config, `data_retention`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
 after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
 completion/failure paths in `run_manager.cpp`).
 
@@ -601,7 +614,7 @@ two renewals (`oauth2RefreshMinIntervalMs`), the retry backoff after a refused
 renewal (`oauth2RefreshRetryMs` doubling to `oauth2RefreshRetryMaxMs`) and how
 often the watchdog wakes to notice the run ended (`oauth2RefreshPollIntervalMs`,
 which bounds how long a finished run waits to join it) are all settings under
-**Network & Connectivity**, read once when a run arms its watchdog, so a change
+**Network & connectivity**, read once when a run arms its watchdog, so a change
 applies to the next run started. It stays out of the way
 for the shapes it cannot renew - `tokenPlacement: "query"` (the credential is in the
 URL every transfer copies), `autoRefreshToken: false`, an `authorization_code`
@@ -784,7 +797,7 @@ record at all - the load driver passes `nullptr` for it, to keep an allocation o
 so a sampled capture's replay reads the composed map either way.
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
-(config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
+(config, `data_retention`, default 5 MiB) before storage, so downloading one 50 MB response does
 not live in SQLite forever. `request.rawRequest` ends with that same body and is capped to the
 same limit, **body half only** - its header block is never cut, being the reason the field is
 stored at all. When a body is cut, its node gains two keys:
@@ -859,7 +872,7 @@ defaulted to 0.
 
 A uniformly sampled success (`success_sample_rate`) is deliberately body-less.
 
-**Budgets.** `maxSampleBodyBytes` (config, `observability`, default 32 KiB) caps a single body;
+**Budgets.** `maxSampleBodyBytes` (config, `data_retention`, default 32 KiB) caps a single body;
 `maxSampleBytes` (default 2 MiB) is the whole-run budget. Once the run budget is spent, samples
 keep their headers and metadata and lose only their bodies - the row then has `blob_id = 0` with
 `body_bytes > 0`, and `runs.summary`'s `sampling.sample_bodies_dropped` counts them, so the UI
@@ -964,7 +977,7 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"` / `"enum"` |
 | `label`         | TEXT    | Display label                                          |
 | `description`   | TEXT    | Help text                                              |
-| `category`      | TEXT    | Grouping (e.g. `server`, `network_performance`)        |
+| `category`      | TEXT    | Which sidebar row it renders under; one of `general_engine`, `network_performance`, `services`, `observability`, `data_retention`, `scripting_sandbox` |
 | `default_value` | TEXT    | Default as string                                      |
 | `min_value`     | TEXT    | Optional minimum (numbers)                             |
 | `max_value`     | TEXT    | Optional maximum (numbers)                             |
@@ -974,6 +987,17 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `advanced`      | INTEGER | Boolean; an internal, rendered collapsed under "Advanced" |
 | `keywords`      | TEXT    | JSON array of extra search terms; `"[]"` when the entry declares none |
 | `unit`          | TEXT    | What a numeric value measures (`ms`, `sec`, `days`, `bytes`); NULL for a count |
+
+**category** is a closed set, and it is the app that closes it: the renderer
+draws one sidebar row per category it declares
+(`app/src/modules/settings/engine-categories.ts`) and drops an entry whose
+category it does not know, so a value outside the list above is a setting with
+no screen. `seed_default_config` is the only writer, and
+`ConfigRouteTest.EverySeededEntrySitsInADeclaredCategory` pins the two lists
+against each other. Reseeding rewrites an existing row's metadata while keeping
+its value, which is how a retired category (`database_performance`, folded into
+`general_engine` in #586) carries an upgraded database across with nothing to
+migrate by hand.
 
 **requires_restart / advanced / keywords** are NOT NULL with a `default_value`
 (false, false and `"[]"`), so

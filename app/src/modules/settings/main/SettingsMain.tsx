@@ -52,6 +52,7 @@ import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import { DefaultValueLine, NumberSettingRow } from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { getEngineCategory } from "../engine-categories";
+import { appEditorFor } from "../engine-settings-edited-in-app";
 import { useRevealedSetting } from "../useRevealedSetting";
 import { isByteUnit, formatBytes, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
@@ -186,6 +187,10 @@ export default function SettingsMain() {
 		selectedCategory && configResponse?.entries
 			? configResponse.entries
 					.filter((entry) => entry.category === selectedCategory)
+					// A few entries are edited from an app panel row instead, and a
+					// second editor here would be a second label and a second save
+					// model for one value - see `engine-settings-edited-in-app.ts`.
+					.filter((entry) => appEditorFor(entry.key) === undefined)
 					.sort((a, b) => a.label.localeCompare(b.label))
 			: [];
 	// The engine marks its internals - a lock pragma, a watchdog's backoff -

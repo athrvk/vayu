@@ -461,7 +461,12 @@ TEST_F (ResponseCaptureTest, SamplesEndpointPaginatesAndFourOhFours) {
     auto [missing_status, missing] =
     vayu::http::routes::run_samples_response (*db_, "no_such_run", 50, 0);
     EXPECT_EQ (missing_status, 404);
-    EXPECT_EQ (missing["error"]["code"].get<int> (), 404);
+    // The shared error shape (#173) carries a per-status *slug*, not the
+    // numeric status - `error_shape_route_test.cpp` pins the table this route
+    // reads through. The assertion here asked for a number, which threw rather
+    // than failed, and no one saw it because the file was never compiled (#668).
+    EXPECT_EQ (missing["error"]["code"], "not_found");
+    EXPECT_FALSE (missing["error"]["message"].get<std::string> ().empty ());
 }
 
 // A run that captured nothing is an empty page, not an error - the Samples tab

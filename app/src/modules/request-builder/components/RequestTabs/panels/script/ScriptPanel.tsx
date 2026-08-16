@@ -25,7 +25,7 @@ import { useRequestBuilderContext } from "../../../../context";
 import InheritedScriptsNotice from "../InheritedScriptsNotice";
 import LegacyScriptNotice from "../LegacyScriptNotice";
 import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
-import { referencedVariables } from "@/lib/referenced-variables";
+import { referencedVariables, TEMPLATE_IN_SCRIPT_NOTE } from "@/lib/referenced-variables";
 import { describeDataToken } from "@/lib/data-contract";
 import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
 import { isDataVariableName } from "@/lib/variable-resolution";
@@ -81,11 +81,20 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 			 * actually mentions, and whether each one resolves - and gave back an
 			 * unfiltered dump of everything in scope. The two answer different
 			 * questions, so both are shown and the button names the one it opens.
+			 *
+			 * **"Names mentioned", not "Referenced" (issue #659 item 3).** The row
+			 * chipped every name a script writes and painted each one green or red
+			 * by whether a variable of that name is in scope - which is a true
+			 * answer for a `pm.*.get()` and a false one for a `{{name}}`, because
+			 * the engine never interpolates script text (decision D16). A green
+			 * `{{base_url}}` chip told the author the send would substitute it. It
+			 * will not: those characters reach QuickJS verbatim. #635 fixed the
+			 * `data.*` half of this; the rest of the row had the same defect.
 			 */}
 			{hasReferencedVars && (
 				<div className="flex flex-wrap items-center gap-2">
-					<span className="text-xs text-muted-foreground">Referenced:</span>
-					{usedVars.slice(0, CHIP_LIMIT).map((varName) => {
+					<span className="text-xs text-muted-foreground">Names mentioned:</span>
+					{usedVars.slice(0, CHIP_LIMIT).map(({ name, via }) => {
 						/*
 						 * A `data.*` name is not a variable and never becomes one
 						 * (issue #604): the namespace is disjoint from the scopes,
@@ -99,29 +108,59 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 						 * chip calls declared is the one the token in the URL bar
 						 * calls declared. Muted or amber, never destructive.
 						 */
-						if (isDataVariableName(varName)) {
-							const data = describeDataToken(varName, context.dataColumns);
+						if (isDataVariableName(name)) {
+							const data = describeDataToken(name, context.dataColumns);
 							return (
 								<Badge
-									key={varName}
+									key={name}
 									variant="chip"
 									className={cn(
 										"font-mono text-xs bg-muted",
 										DATA_TOKEN_TONE_CLASS[data.tone]
 									)}
-									title={`${data.description} - ${data.note}`}
+									title={`${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`}
 								>
-									{varName}
+									{name}
 								</Badge>
 							);
 						}
+						/*
+						 * A `{{name}}` the script merely contains. Neutral, and
+						 * never the resolved/unresolved pair: whether something in
+						 * scope answers to this name has no bearing on a string
+						 * nothing substitutes, so both colours would be a lie in
+						 * opposite directions. The tooltip carries the rule and
+						 * the way to actually read the variable.
+						 */
+						if (via === "template") {
+							return (
+								<Badge
+									key={name}
+									variant="chip"
+									className="font-mono text-xs bg-muted text-muted-foreground"
+									title={TEMPLATE_IN_SCRIPT_NOTE}
+								>
+									{`{{${name}}}`}
+								</Badge>
+							);
+						}
+						/*
+						 * A `pm.*.get()` - the script really reads this one, so
+						 * "defined" and "not defined" are both meaningful, and the
+						 * destructive paint keeps the meaning it always had here.
+						 */
 						return (
 							<Badge
-								key={varName}
-								variant={allVariables[varName] ? "secondary" : "destructive"}
+								key={name}
+								variant={allVariables[name] ? "secondary" : "destructive"}
 								className="font-mono text-xs"
+								title={
+									allVariables[name]
+										? `${name} resolves in the current scope.`
+										: `Nothing in scope defines ${name}; pm.environment.get("${name}") returns undefined.`
+								}
 							>
-								{varName}
+								{name}
 							</Badge>
 						);
 					})}

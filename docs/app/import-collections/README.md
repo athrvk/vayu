@@ -22,15 +22,60 @@ are detected, parsed into Vayu's internal draft model, and persisted.
 
 ## Pipeline overview
 
-A raw import string flows through three stages:
+A raw import string flows through three stages, once per document:
 
 ```
-raw string ──▶ parseImport() ──▶ assignTempIds() ──▶ ImportOrchestrator.run()
-              (factory.ts)       (assign-ids.ts)      (orchestrator.ts)
-                  │                   │                     │
-            detect + parse      stamp opaque temp     flatten to one
-            → ImportResult      ids (c1/r1/e1)        POST /import/apply
+picked files ──▶ detectBatch() ──▶ parseImport() ──▶ assignTempIds() ──▶ ImportOrchestrator.run()
+                 (batch.ts)        (factory.ts)      (assign-ids.ts)      (orchestrator.ts)
+                     │                  │                  │                     │
+             one row per file,   detect + parse      stamp opaque temp     flatten to one
+             bundle its $refs    → ImportResult      ids (c1/r1/e1)        POST /import/apply
 ```
+
+### 0. The batch - `batch.ts`
+
+Entry is per **file**, not per import: the File tab takes a multi-file drop or
+selection, and "Import folder" takes a whole directory (`webkitdirectory`,
+recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml`). The
+URL and Paste tabs are single by construction and travel the same path as a
+one-entry batch, so there is no second flow beside this one to drift from it.
+
+`detectBatch(documents, opts, intake)` returns one `BatchEntry` per picked file,
+in pick order, and **every picked file gets a row** - that is the property the
+whole module exists for. The dialog used to read `e.dataTransfer.files[0]` with
+no `multiple` on the input, so dropping a folder's worth of specs imported the
+first and discarded the rest without a word (issue #666). A row saying
+"Unrecognised format" is the flow working; no row is the bug.
+
+An entry carries the bundled `raw` text, its `result` **or** its `error`, the
+unresolved-ref count, and its `included` state. Three row states are not
+failures and are not errors:
+
+| Row state | What it means |
+|---|---|
+| `error` | Unreadable, unparseable, unrecognised, or over the spec byte cap. Listed, unchecked. |
+| `bundledInto` | Another picked document inlined this file as a `$ref` target. It is part of that spec, so it is never applied on its own - which is also what stops a split spec importing twice. |
+| parsed but empty | Parsed fine, but the options left nothing to create. Included stays available; Import stays disabled while it is the only file. |
+
+**Siblings come from the batch first.** `bundleExternalRefs` reads a referenced
+file through the gated `specFile:read` IPC; when that file is already in the
+batch its text is right here, so the batch answers and nothing touches disk. Ref
+targets are resolved with the bundler's own `joinRelative` / `dirOf` against the
+entry's `webkitRelativePath`, rather than a second normalizer that could disagree
+about `..`.
+
+**Apply is per file, sequentially** - each entry is its own
+`POST /import/apply` transaction, so a seventh file the engine refuses cannot
+roll back six good ones, and each lands as its own root collection (exactly what
+N manual imports produce). The ledger states each outcome; an applied row is
+unchecked and disabled, because the route is create-only with no idempotency key
+and a second send is a second copy of the tree. A combined single-payload apply
+was considered and rejected: all-or-nothing across unrelated files is the wrong
+failure mode, and per-file leaves the engine contract untouched.
+
+**Zip import is a named non-goal.** No major tool exports collection zips today
+(Postman exports single JSON files; vendors ship git repos). Reopen when a real
+source ships them.
 
 ### 1. Detect + parse - `factory.ts`
 

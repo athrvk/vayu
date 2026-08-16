@@ -40,7 +40,7 @@ const entries: ConfigEntry[] = [
 		key: "dbCacheSize",
 		label: "Cache Size",
 		description: "Memory SQLite keeps for pages it has already read.",
-		category: "database_performance",
+		category: "data_retention",
 		// The keyword this entry is really seeded with (`database.cpp`).
 		keywords: ["ram"],
 	},
@@ -101,7 +101,7 @@ describe("settings search", () => {
 		expect(screen.queryByText("App Settings")).not.toBeInTheDocument();
 		// The subtitle names the owning category and the engine key, so two
 		// similarly-named settings are told apart before the click.
-		expect(screen.getByText(/Database Performance · dbCacheSize/)).toBeInTheDocument();
+		expect(screen.getByText(/Data & retention · dbCacheSize/)).toBeInTheDocument();
 	});
 
 	it("finds a setting by its key, and by words only its description carries", () => {
@@ -125,7 +125,7 @@ describe("settings search", () => {
 		// Presence, not a result count: "ram" is a substring of "histogram" and
 		// "parameter", so the real app catalogue answers this query too. What
 		// this pins is that the engine entry is among them at all.
-		expect(screen.getByText(/Database Performance · dbCacheSize/)).toBeInTheDocument();
+		expect(screen.getByText(/Data & retention · dbCacheSize/)).toBeInTheDocument();
 	});
 
 	it("selects the owning category and names the entry to reveal", () => {
@@ -134,7 +134,7 @@ describe("settings search", () => {
 		fireEvent.click(screen.getByText("Cache Size"));
 
 		const state = useSettingsStore.getState();
-		expect(state.selectedCategory).toBe("database_performance");
+		expect(state.selectedCategory).toBe("data_retention");
 		// Without the key the view would open on the right category and leave
 		// the user to find the row among 45 of them.
 		expect(state.highlightedKey).toBe("dbCacheSize");
