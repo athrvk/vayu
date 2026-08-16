@@ -32,14 +32,23 @@ import {
 	TabLabel,
 	Textarea,
 } from "@/components/ui";
-import { useImportModalStore } from "@/stores";
+import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
+import { useCollectionsQuery } from "@/queries/collections";
+import { useBoundSpecReader } from "@/queries/specs";
+import {
+	matchBoundSpecs,
+	specCandidates,
+	type SpecReimportMatch,
+} from "@/services/openapi/bound-spec-match";
+import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type ImportResult, type SkippedItem } from "@/services/importers/types";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import {
 	applicableEntries,
 	detectBatch,
+	entryLabel,
 	isImportableFileName,
 	reparseBatch,
 	type BatchDocument,
@@ -64,6 +73,9 @@ const FORMAT_BADGES = [
 export function ImportModal() {
 	const { isOpen, close } = useImportModalStore();
 	const importMutation = useImportMutation();
+	const { data: collections = [] } = useCollectionsQuery();
+	const readBoundSpecs = useBoundSpecReader();
+	const openCollectionSpecTab = useTabsStore((s) => s.openCollectionSpecTab);
 
 	const [tab, setTab] = useState<Tab>("file");
 	const [phase, setPhase] = useState<Phase>("idle");
@@ -81,6 +93,13 @@ export function ImportModal() {
 	const [url, setUrl] = useState("");
 	const [importEnvironments, setImportEnvironments] = useState(true);
 	const [importScripts, setImportScripts] = useState(true);
+	/**
+	 * The documents in this import that a collection already binds, while the
+	 * fork is on screen; `null` when it is not (issue #680).
+	 */
+	const [reimports, setReimports] = useState<SpecReimportMatch[] | null>(null);
+	/** The bound-document lookup is a round trip - see `handleImport`. */
+	const [checkingBindings, setCheckingBindings] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
@@ -96,10 +115,11 @@ export function ImportModal() {
 		setEntries([]);
 		setPasteText("");
 		setUrl("");
+		setReimports(null);
 	};
 
 	const handleClose = () => {
-		if (importMutation.isPending) return;
+		if (importMutation.isPending || checkingBindings) return;
 		reset();
 		close();
 	};
@@ -241,6 +261,38 @@ export function ImportModal() {
 	};
 
 	/**
+	 * What Import does: check for a document already bound, then apply
+	 * (issue #680).
+	 *
+	 * The check runs here rather than at detect time for two reasons. It is a
+	 * round trip per bound document, which nobody should pay for merely
+	 * previewing a file - and Import is the last moment the answer can still
+	 * change anything, since a collection may have been bound in another window
+	 * since the preview was drawn.
+	 *
+	 * The lookup holds the button the way the apply does: `POST /import/apply` is
+	 * create-only, so a second press while this is in flight would import
+	 * everything twice.
+	 */
+	const handleImport = async () => {
+		if (applicable.length === 0 || checkingBindings || importMutation.isPending) return;
+		const candidates = specCandidates(applicable);
+		if (candidates.length > 0) {
+			setCheckingBindings(true);
+			try {
+				const matches = matchBoundSpecs(candidates, await readBoundSpecs(collections));
+				if (matches.length > 0) {
+					setReimports(matches);
+					return;
+				}
+			} finally {
+				setCheckingBindings(false);
+			}
+		}
+		await runImport();
+	};
+
+	/**
 	 * Apply the included files, **one transaction each** (issue #666).
 	 *
 	 * Sequential and per-file on purpose: `POST /import/apply` is atomic within
@@ -256,8 +308,12 @@ export function ImportModal() {
 	 * a retry. A file that *failed* can be checked again - that is a deliberate
 	 * act, and the only honest way to retry one - which is why the outcome stays
 	 * on its row.
+	 *
+	 * Reached from Import, and from Import anyway on the re-import fork - which
+	 * is why it does not re-check the bindings: the user has just answered that
+	 * question.
 	 */
-	const handleImport = async () => {
+	const runImport = async () => {
 		if (applicable.length === 0) return;
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
 		for (const entry of applicable) {
@@ -620,9 +676,13 @@ export function ImportModal() {
 							</Button>
 							<Button
 								onClick={handleImport}
-								disabled={importMutation.isPending || applicable.length === 0}
+								disabled={
+									importMutation.isPending ||
+									checkingBindings ||
+									applicable.length === 0
+								}
 							>
-								{importMutation.isPending
+								{importMutation.isPending || checkingBindings
 									? "Importing…"
 									: // The count only appears for a batch: it is what the
 										// button is about to do N times, and on one file it
@@ -633,6 +693,27 @@ export function ImportModal() {
 							</Button>
 						</div>
 					</div>
+				)}
+
+				{/* Mounted only while the fork is on screen, over this dialog: the
+				    preview underneath is what Cancel goes back to, and what Import
+				    anyway then imports. */}
+				{reimports && (
+					<SpecReimportDialog
+						matches={reimports}
+						onSync={(collectionId) => {
+							setReimports(null);
+							// Before the close, which resets this component's state:
+							// the store call is what survives it.
+							openCollectionSpecTab(collectionId);
+							handleClose();
+						}}
+						onImportAnyway={() => {
+							setReimports(null);
+							void runImport();
+						}}
+						onCancel={() => setReimports(null)}
+					/>
 				)}
 			</DialogContent>
 		</Dialog>
@@ -822,7 +903,9 @@ function BatchRow({
 	onToggle: (id: string, included: boolean) => void;
 }) {
 	const { result, error, bundledInto, outcome } = entry;
-	const name = entry.fileName || entry.sourceUrl || "Pasted document";
+	// Shared with the re-import dialog, so one file is called the same thing
+	// wherever it is named.
+	const name = entryLabel(entry);
 	const loss = result ? lossSummary(result.meta) : "";
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">

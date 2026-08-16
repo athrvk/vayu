@@ -12,10 +12,13 @@
  * exists, and applying a re-fetched one (issues #637, #638, #655).
  */
 
+import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
+import { boundCollections, type BoundSpec } from "@/services/openapi/bound-spec-match";
 import type {
+	Collection,
 	DeclaredOperation,
 	ResponseSchemaIndex,
 	SpecDocument,
@@ -40,6 +43,62 @@ export function useSpecQuery(specId: string | null | undefined) {
 		enabled: !!specId,
 		staleTime: Infinity,
 	});
+}
+
+/**
+ * Read the document behind every collection's binding (issue #680).
+ *
+ * A reader rather than a query, because the caller is an event handler: the
+ * import dialog asks this once, when Import is pressed, and paying for every
+ * bound document merely because someone opened the dialog would fetch whole
+ * specs nobody is going to compare. `fetchQuery` on `useSpecQuery`'s own key
+ * means the answer is shared with the Spec tab both ways - a document either
+ * side has read is already here, and one this reads is there for the tab.
+ *
+ * A document that cannot be read is left out rather than failing the lookup. A
+ * binding whose document the engine no longer has is not a re-import target -
+ * there is nothing to sync against - and an import must not be blocked by a
+ * check that could not run. A failure that is really the engine being down
+ * surfaces on the import itself, which happens next and says so.
+ */
+export function useBoundSpecReader(): (collections: readonly Collection[]) => Promise<BoundSpec[]> {
+	const queryClient = useQueryClient();
+
+	return useCallback(
+		async (collections) => {
+			const bound = boundCollections(collections);
+			// By spec id, not by collection: several collections may bind one
+			// document, and that document is one read.
+			const documents = new Map<string, Promise<SpecDocument | null>>();
+			for (const { specId } of bound) {
+				if (documents.has(specId)) continue;
+				documents.set(
+					specId,
+					queryClient
+						.fetchQuery({
+							queryKey: queryKeys.specs.detail(specId),
+							queryFn: () => apiService.getSpec(specId),
+							staleTime: Infinity,
+						})
+						.catch(() => null)
+				);
+			}
+			const read = new Map(
+				await Promise.all(
+					[...documents].map(
+						async ([specId, pending]) => [specId, await pending] as const
+					)
+				)
+			);
+			return bound.flatMap((binding) => {
+				const document = read.get(binding.specId);
+				return document
+					? [{ ...binding, sourceUrl: document.sourceUrl, content: document.content }]
+					: [];
+			});
+		},
+		[queryClient]
+	);
 }
 
 /** One request the caller worked out is a given operation - see `matchOperations`. */

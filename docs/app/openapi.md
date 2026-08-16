@@ -57,6 +57,31 @@ creates is bound automatically:
 Other formats are unaffected. A Postman or Insomnia import binds nothing and
 records no operation identity: those files describe requests, not a contract.
 
+### Importing a document you are already bound to
+
+Importing a spec that a collection already binds used to make a second
+collection from scratch, and say nothing about the first. The two then diverged
+with nothing marking which was real: the bound one keeps its operation
+identities, its saved examples and its coverage history, and the fresh one has
+none of that while looking newer.
+
+So the import **stops and offers the choice**. Before anything is written, Vayu
+looks for a bound collection whose document matches the one being imported:
+
+| Matched by | The case it catches |
+|---|---|
+| The URL it was fetched from | The same address, serving a document that has changed since - what [Sync](#checking-a-bound-spec-for-changes) is for. The bytes cannot match here; they are what changed |
+| The stored bytes | A document with no URL to match on - a file picked twice, or the same text pasted again |
+
+The dialog names the collection and offers **Sync instead**, which opens that
+collection's Spec tab, and **Import anyway**, which imports exactly as before -
+a second copy of a spec is a real thing to want, so this is a fork and never a
+block. A document nothing is bound to imports straight through, with no dialog.
+
+A URL is compared as written: a trailing slash or a different query is a
+different address. A document imported through several files is compared as the
+bundle, which is what was stored.
+
 ## Specs written across several files
 
 A large document is usually not one document: schemas live in their own files,

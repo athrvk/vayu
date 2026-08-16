@@ -56,6 +56,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   openTabs: Tab[]                        // Each tab has unique id, type, and optional entityId
   activeTabId: string | null
   tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
+  specTabTarget: string | null           // Collection whose Spec tab something pointed at
 }
 ```
 
@@ -86,6 +87,14 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   list by yesterday's attention, and an empty map falls back to strip order.
   Entries for closed tabs are dropped on the next focus rather than in every
   close path - nothing reads a stamp for a tab that is not open
+- Pointing *into* a collection: `openTab` can only name a collection, and a
+  collection tab picks its own sub-tab, so `specTabTarget` is where the one
+  navigation that means a *section* says which. The import dialog sets it when a
+  re-import is answered with Sync (issue #680); `CollectionDetail` opens on Spec
+  when the named collection is on screen and clears it, so it survives the tab
+  opening for the first time and never fires twice. Session-scoped like
+  `tabFocusedAt` - a persisted copy would jump the user to Spec on the next
+  launch for a choice they made yesterday
 - Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
   a payload whose *stamped* version differs from the store's when no `migrate`
   is supplied, so the stub is where the next bump goes; it also refuses a
@@ -96,6 +105,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 const { openTab, closeTab, focusTab, closeTabsForEntities } = useTabsStore();
 openTab({ type: "request", entityId: "req-123" });
 closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
+openCollectionSpecTab("col-123"); // opens the collection, on its Spec tab
 ```
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio

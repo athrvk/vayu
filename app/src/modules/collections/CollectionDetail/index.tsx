@@ -69,7 +69,7 @@ const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set([
 ]);
 
 export default function CollectionDetail() {
-	const { openTabs, activeTabId } = useTabsStore();
+	const { openTabs, activeTabId, specTabTarget, clearSpecTabTarget } = useTabsStore();
 
 	// Get selected collection ID from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -100,6 +100,28 @@ export default function CollectionDetail() {
 	// a draft can only exist in a tab the user has opened, and two of these
 	// carry a Monaco editor that costs nothing while nobody has asked for it.
 	const [visited, setVisited] = useState<ReadonlySet<CollectionTab>>(() => new Set(["info"]));
+
+	/*
+	 * Something outside this screen pointed at a collection's Spec tab - today
+	 * the import dialog, offering Sync for a document that is already bound
+	 * (issue #680). The store carries the collection rather than the section
+	 * because `openTab` can only name a collection, and which sub-tab is showing
+	 * is state that lives here.
+	 *
+	 * Cleared once acted on, so a later visit to the same collection opens on
+	 * Info the way every other one does. The write cannot be derived away: the
+	 * target has to survive this tab mounting for the first time, and the tab it
+	 * selects then has to stay put when the target is consumed - so the state is
+	 * genuinely handed over rather than mirrored, and it happens once per
+	 * navigation rather than per render.
+	 */
+	useEffect(() => {
+		if (!specTabTarget || specTabTarget !== selectedCollectionId) return;
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+		setTab("spec");
+		setVisited((prev) => (prev.has("spec") ? prev : new Set(prev).add("spec")));
+		clearSpecTabTarget();
+	}, [specTabTarget, selectedCollectionId, clearSpecTabTarget]);
 
 	// Loading and missing are different answers. `collections` defaults to `[]`,
 	// so a collection tab restored from a previous session resolves to nothing
