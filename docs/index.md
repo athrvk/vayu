@@ -24,8 +24,10 @@ of it on your machine: no account, no cloud sync, no telemetry.
 
 Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
-<!-- Keep these in step with the Download section of README.md, which is the
-     canonical copy - both point at the same release assets and install.sh.
+<!-- This section is the canonical install copy (flipped from README.md in #631).
+     The README carries the three one-liners only and links back here for the
+     detail, so per-platform wording is added and corrected here first - both
+     point at the same release assets and install.sh.
 
      The macOS URL is this site serving the repo's own install.sh, published at
      the site root by .github/hooks/install_script.py. It is a real file, not a
@@ -225,7 +227,7 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**21 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+**24 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections and saved requests, plus `update_environment`) -
@@ -305,7 +307,7 @@ persists.
 ??? question "Can my coding agent use it?"
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
-    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 21 tools
+    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 24 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off. See the
     [MCP reference](engine/mcp.md).
