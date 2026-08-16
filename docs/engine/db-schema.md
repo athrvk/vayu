@@ -315,6 +315,7 @@ Stores OpenAPI documents, bound to collections by
 | `source_url` | TEXT    | Where it was fetched from; NULL when pasted/uploaded |
 | `fetched_at` | INTEGER | Unix ms                                            |
 | `hash`       | TEXT    | Hex `sha256(content)`, computed engine-side        |
+| `operations` | TEXT    | JSON array: the declared-operation index, `""` = none |
 
 **content** is stored as text rather than a parsed model, because every feature
 stacked behind this needs the *document*: the Spec tab renders it, sync
@@ -345,7 +346,24 @@ hash every run of every bound collection was stamped with.
 paths - never a truncation, and never cpp-httplib's own body cap dropping the
 connection without explaining itself.
 
-A new table, so `sync_schema()` creates it outright and there is no migration.
+**operations** is what the document *declares* - a JSON array of
+`{operationId?, method, path, responses[]}` in document order - written by the
+client that parsed the document and read by [contract coverage](../app/openapi.md#contract-coverage)
+(issue #629). **Supplied, never derived:** the engine does not parse OpenAPI, and
+`content` above is as often YAML as JSON, so a C++ reader of it would be a second
+opinion about what the document declares. NOT NULL with a `default_value`, the
+same migration shape `request_examples.origin` uses, so `sync_schema()` ALTERs it
+onto an existing table and every pre-existing row backfills to `""`.
+
+`""` means *no index*, which is not the same as a document declaring nothing: a
+run of a collection bound to such a document reports no coverage block at all,
+and `GET /specs/:id` reads the column back as `null` rather than `[]` so the two
+stay distinguishable. Re-binding or syncing the collection stores a document that
+has one. Capped at 2000 rows on the write, which is refused with the count rather
+than silently truncated.
+
+The table itself was new when it landed, so `sync_schema()` created it outright;
+`operations` is its only migrated column.
 
 ---
 

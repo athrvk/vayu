@@ -207,6 +207,10 @@ const ScenarioPlan& plan) {
     };
 }
 
+nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
+    return state.coverage.build ();
+}
+
 // ============================================================================
 // The virtual-user state machine
 // ============================================================================
@@ -248,7 +252,8 @@ const ScenarioExecution& execution) {
     std::max<size_t> (1, static_cast<size_t> (config.value ("iterations", 1000))) :
     0;
 
-    auto state = std::make_shared<ScenarioLoadState> (step_count, vu_count);
+    auto state =
+    std::make_shared<ScenarioLoadState> (step_count, vu_count, make_coverage_tally (execution));
     state->data_row_count = execution.data_rows.size ();
     state->vus.reserve (vu_count);
     for (size_t i = 0; i < vu_count; ++i) {
@@ -431,6 +436,14 @@ const ScenarioExecution& execution) {
             if (!errored) {
                 state->steps.record (step_index, result.value ().timing.total_ms);
             }
+            // Every completion, including the failed ones: a transport error is
+            // a request this operation was sent and did not answer, and coverage
+            // that counted only successes would report the send as if it never
+            // happened. `is_error()` is the no-response case, which records as
+            // status 0 and is reported as a transport error rather than a
+            // status the server never sent (issue #629).
+            state->coverage.record (step_index,
+            result.is_error () ? 0 : result.value ().status_code);
             finish_step (vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
             handle_result (context, db, std::move (result),

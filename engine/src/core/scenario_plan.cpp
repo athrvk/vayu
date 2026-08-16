@@ -310,6 +310,22 @@ const ScenarioResolveOptions& options) {
         // Leaves the binding unbound; a malformed column must not fail a run.
     }
 
+    // The document's declared operations, read once here so contract coverage
+    // (#629) counts against the contract this run was planned against. The hash
+    // has to agree: the binding names a document *and a version of it*, and a
+    // row whose hash has moved under the binding is a state no run should report
+    // a contract from. Any disagreement - no such document, no index on it, a
+    // hash that does not match - leaves the operations empty, which is the
+    // engine's one spelling of "not measured against a contract".
+    if (resolution.spec.bound ()) {
+        if (const auto document = db.get_spec_document (resolution.spec.spec_id);
+            document && document->hash == resolution.spec.spec_hash) {
+            if (auto declared = parse_declared_operations (document->operations)) {
+                resolution.spec.declared_operations = std::move (*declared);
+            }
+        }
+    }
+
     const auto rows = collect_requests (db, request.collection_id, request.recursive);
     if (rows.empty ()) {
         return invalid ("Collection '" + request.collection_id + "' has no requests" +
@@ -423,6 +439,7 @@ const ScenarioResolveOptions& options) {
         step.pre_script    = vayu::http::read_pre_request_script (payload);
         step.post_script   = vayu::http::read_post_request_script (payload);
         step.stored_url    = row.url;
+        step.spec_operation = row.spec_operation.value_or (std::string ());
         step.data_template = std::move (data_template);
         // Only ever reached with rows behind it: the refusal above returns for
         // a credential token in a run that has no data set, so a deferred step
@@ -436,6 +453,15 @@ const ScenarioResolveOptions& options) {
 
     resolution.ok = true;
     return resolution;
+}
+
+CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
+    std::vector<std::string> step_operations;
+    step_operations.reserve (execution.plan.steps.size ());
+    for (const auto& step : execution.plan.steps) {
+        step_operations.push_back (step.spec_operation);
+    }
+    return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
 DataBindResult bind_step_auth (vayu::Request& request,

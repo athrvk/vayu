@@ -224,6 +224,13 @@ struct ReportExtras {
     // sample's mean against every completion's distribution, not two views of
     // the same rows.
     nlohmann::json phases = nlohmann::json::object ();
+    // Which of the bound contract's operations the run exercised (issue #629),
+    // passed through verbatim: the producer writes the report's own camelCase,
+    // the `stream`/`monitor` rule. Empty is every run not measured against a
+    // contract - an unbound collection, a single-request run, or a document
+    // stored before the operation index existed - and leaves the section out,
+    // because a run that was never judged against a contract did not fail one.
+    nlohmann::json coverage = nlohmann::json::object ();
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -448,6 +455,16 @@ ReportExtras& extras) {
     if (summary.contains ("stream") && summary["stream"].is_object () &&
     !summary["stream"].empty ()) {
         extras.stream = summary["stream"];
+    }
+
+    // Same again for contract coverage (issue #629). An object with no
+    // `operations` array says nothing a reader can act on and is treated as
+    // absent, the rule `thresholds` follows for its `checks`.
+    if (summary.contains ("coverage") && summary["coverage"].is_object () &&
+    summary["coverage"].contains ("operations") &&
+    summary["coverage"]["operations"].is_array () &&
+    !summary["coverage"]["operations"].empty ()) {
+        extras.coverage = summary["coverage"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -1043,6 +1060,16 @@ const std::string& run_id) {
     // other report renders exactly as it did before the mode existed.
     if (extras.has_capacity) {
         json_report["capacity"] = extras.capacity;
+    }
+
+    // Which operations of the bound contract this run exercised, and which of
+    // their declared responses it saw (issue #629). Computed against the
+    // document `metadata.openapi` names - the one the run was *planned* with -
+    // and stored at run end, so a binding that has since synced to a newer spec
+    // cannot rewrite what an old report says was covered. Absent for every run
+    // that was not measured against a contract; see ReportExtras::coverage.
+    if (!extras.coverage.empty ()) {
+        json_report["coverage"] = extras.coverage;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived

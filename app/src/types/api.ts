@@ -11,6 +11,7 @@ import type {
 	Collection,
 	CollectionDataSchema,
 	CollectionOpenApiBinding,
+	DeclaredOperation,
 	SpecOperation,
 	Request,
 	Environment,
@@ -1010,6 +1011,12 @@ export interface ImportApplySpec {
 	content: string;
 	/** Absent when the document did not come from a URL (a file or a paste). */
 	sourceUrl?: string;
+	/**
+	 * What the document declares (issue #629), stored beside it so a run of the
+	 * imported collection can report its contract coverage. Absent for a document
+	 * the parsers produced no index for.
+	 */
+	operations?: DeclaredOperation[];
 }
 
 /**
@@ -1088,6 +1095,14 @@ export interface SpecDocument {
 	fetchedAt: number;
 	/** Hex sha256, computed engine-side on every write. */
 	hash: string;
+	/**
+	 * The declared-operation index stored beside the document (issue #629).
+	 *
+	 * `null` - not `[]` - for a document stored before the index existed or by a
+	 * client that sends none, so "coverage was never extractable for this
+	 * document" reads differently from "this document declares nothing".
+	 */
+	operations: DeclaredOperation[] | null;
 }
 
 export interface CreateSpecRequest {
@@ -1095,6 +1110,13 @@ export interface CreateSpecRequest {
 	id?: never;
 	content: string;
 	sourceUrl?: string | null;
+	/**
+	 * What the document declares, extracted by whichever parser read it
+	 * (issue #629). Omitted for a document nothing here parsed, which the engine
+	 * stores as "no index"; a run of the bound collection then reports no
+	 * coverage rather than an empty contract.
+	 */
+	operations?: DeclaredOperation[];
 }
 
 // Spec sync (issue #655) - `POST /specs/sync` applies a re-fetched document to
@@ -1144,7 +1166,17 @@ export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;
 	/** The re-fetched document. `hash` and `fetchedAt` are engine-computed. */
-	spec: { content: string; sourceUrl?: string | null };
+	spec: {
+		content: string;
+		sourceUrl?: string | null;
+		/**
+		 * The re-fetched document's declared-operation index (issue #629). Sent
+		 * on every sync for the same reason the content is: the new document is
+		 * a new row, and a sync that omitted it would silently turn coverage off
+		 * for a collection that had it.
+		 */
+		operations?: DeclaredOperation[];
+	};
 	collections: SpecSyncCollection[];
 	create: SpecSyncCreate[];
 	update: SpecSyncUpdate[];

@@ -402,6 +402,10 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         batch.spec.content    = content;
         batch.spec.hash       = spec_content_hash (content);
         batch.spec.fetched_at = now;
+        if (auto reason = read_spec_operations (spec_item, batch.spec)) {
+            result = body_error (*reason);
+            return;
+        }
         if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
             if (!spec_item["sourceUrl"].is_string ()) {
                 result = body_error ("Invalid 'spec.sourceUrl': must be a string or null");

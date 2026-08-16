@@ -23,6 +23,7 @@
 
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -834,6 +835,102 @@ TEST_F (RunsRouteTest, AThresholdVerdictPassesOnlyWhenNothingFailed) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["thresholdValidation"]["verdict"].get<std::string> (), "passed");
     EXPECT_EQ (body["thresholdValidation"]["failed"].get<size_t> (), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Contract coverage (issue #629)
+// ---------------------------------------------------------------------------
+
+// The whole path in one assertion set: a tally records what a run sent, the
+// summary stores what it built, and the report hands it back unchanged. The
+// pass-through is the property - re-keying it in the route would be a second
+// place to keep the shape, which is why nothing here translates a name.
+TEST_F (RunsRouteTest, ReportCarriesTheCoverageBlockTheRunComputed) {
+    seed ({ .id = "run_coverage", .start_time = 1000 });
+
+    vayu::core::DeclaredOperation listed;
+    listed.operation_id = "listPets";
+    listed.method       = "GET";
+    listed.path         = "/pets";
+    listed.responses    = { "200", "404" };
+    vayu::core::DeclaredOperation never;
+    never.method    = "DELETE";
+    never.path      = "/pets/{petId}";
+    never.responses = { "204" };
+
+    vayu::core::CoverageTally tally ({ listed, never },
+    { R"({"operationId":"listPets","method":"GET","path":"/pets"})" });
+    tally.record (0, 200);
+    tally.record (0, 500);
+
+    auto inputs     = summary_inputs ();
+    inputs.coverage = tally.build ();
+    db_->update_run_summary (
+    "run_coverage", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_coverage");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("coverage")) << body.dump ();
+    const auto& coverage = body["coverage"];
+    EXPECT_EQ (coverage["operationsTotal"].get<size_t> (), 2u);
+    EXPECT_EQ (coverage["operationsCovered"].get<size_t> (), 1u);
+    EXPECT_EQ (coverage["declaredResponsesTotal"].get<size_t> (), 3u);
+    EXPECT_EQ (coverage["declaredResponsesHit"].get<size_t> (), 1u);
+    EXPECT_EQ (coverage["undeclaredStatusesSeen"].get<size_t> (), 1u);
+    // Uncovered first, so the operation nobody called is the first row read.
+    ASSERT_EQ (coverage["operations"].size (), 2u);
+    EXPECT_EQ (coverage["operations"][0]["path"].get<std::string> (), "/pets/{petId}");
+    EXPECT_EQ (coverage["operations"][0]["sent"].get<size_t> (), 0u);
+}
+
+// The not-measured rule, in both shapes it arrives in: a run whose summary
+// carries no coverage at all, and one carrying an object with no rows (an older
+// or a partial writer). Neither reports a contract of zero operations.
+TEST_F (RunsRouteTest, ReportOmitsCoverageForARunNotMeasuredAgainstAContract) {
+    seed ({ .id = "run_no_coverage", .start_time = 1000 });
+    auto inputs     = summary_inputs ();
+    inputs.coverage = std::nullopt;
+    db_->update_run_summary (
+    "run_no_coverage", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_coverage");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("coverage")) << body.dump ();
+
+    seed ({ .id = "run_empty_coverage", .start_time = 1000 });
+    auto empty     = summary_inputs ();
+    empty.coverage = nlohmann::json{ { "operationsTotal", 0 },
+        { "operations", nlohmann::json::array () } };
+    db_->update_run_summary (
+    "run_empty_coverage", vayu::core::build_run_summary_payload (empty).dump ());
+
+    auto [empty_status, empty_body] =
+    vayu::http::routes::run_report_response (*db_, "run_empty_coverage");
+    ASSERT_EQ (empty_status, 200);
+    EXPECT_FALSE (empty_body.contains ("coverage")) << empty_body.dump ();
+}
+
+// The anchor coverage is read against, asserted at the route for the first time
+// (noted on #629 when phase 1 closed): the report echoes the *snapshot's*
+// binding, so a reader can say which document a coverage block was computed
+// against - and an unbound run echoes nothing at all.
+TEST_F (RunsRouteTest, ReportEchoesTheSpecTheRunWasPlannedAgainst) {
+    seed ({ .id = "run_openapi", .start_time = 1000,
+    .config_snapshot =
+    R"({"url":"https://x.test/","scenario":{"collectionId":"col_1","openapi":{"specId":"spec_1","specHash":"abc"}}})" });
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_openapi");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body["metadata"].contains ("openapi")) << body.dump ();
+    EXPECT_EQ (body["metadata"]["openapi"]["specId"].get<std::string> (), "spec_1");
+    EXPECT_EQ (body["metadata"]["openapi"]["specHash"].get<std::string> (), "abc");
+
+    seed ({ .id = "run_unbound", .start_time = 1000,
+    .config_snapshot = R"({"url":"https://x.test/","scenario":{"collectionId":"col_1"}})" });
+    auto [unbound_status, unbound] =
+    vayu::http::routes::run_report_response (*db_, "run_unbound");
+    ASSERT_EQ (unbound_status, 200);
+    EXPECT_FALSE (unbound["metadata"].contains ("openapi")) << unbound.dump ();
 }
 
 // A run that declared no budgets keeps the section out entirely - and so does

@@ -67,6 +67,20 @@ export function specOperationOf(
 }
 
 /**
+ * The status patterns an operation's `responses` map declares.
+ *
+ * Identical between Swagger 2.0 and OpenAPI 3.x - both key `responses` by status
+ * pattern - which is why it is here rather than once per parser. Keys are taken
+ * as written; a `$ref`-ed response object still declares its status *key* in the
+ * operation, so nothing needs resolving to read them.
+ */
+export function declaredResponsesOf(responses: unknown): string[] {
+	const map = asRecord(responses);
+	if (!map) return [];
+	return Object.keys(map).filter((key) => key.length > 0);
+}
+
+/**
  * Helpers shared by the two OpenAPI/Swagger parsers. They are structural clones of
  * each other, which is how both ended up with the same unguarded `parameters` spread
  * and the same hardcoded `skipped: []`; a second copy of these three would drift the

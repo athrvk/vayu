@@ -313,6 +313,22 @@ Json serialize (const vayu::db::SpecDocument& s) {
     json["sourceUrl"] = s.source_url.has_value () ? Json (*s.source_url) : Json (nullptr);
     json["fetchedAt"] = s.fetched_at;
     json["hash"]      = s.hash;
+    // The declared-operation index (#629), as the array it was stored as. Null
+    // for a document that carries none, so a client can tell "this document was
+    // stored before coverage existed" from "this document declares nothing" -
+    // an empty array would spell both the same way.
+    json["operations"] = Json (nullptr);
+    if (!s.operations.empty ()) {
+        try {
+            auto parsed = Json::parse (s.operations);
+            if (parsed.is_array ()) {
+                json["operations"] = std::move (parsed);
+            }
+        } catch (const std::exception&) {
+            // Unreadable stored index reads as absent, the same answer every
+            // reader of it gives; the write path is where a bad one is refused.
+        }
+    }
     return json;
 }
 

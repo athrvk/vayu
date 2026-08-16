@@ -208,11 +208,24 @@ build_step_breakdown (const ScenarioPlan& plan, const StepHistograms& steps);
  * after the drain, not before.
  */
 struct ScenarioLoadState {
-    explicit ScenarioLoadState (size_t step_count, size_t virtual_users)
-    : steps (step_count), virtual_users (virtual_users) {
+    ScenarioLoadState (size_t step_count, size_t virtual_users, CoverageTally coverage)
+    : steps (step_count), coverage (std::move (coverage)), virtual_users (virtual_users) {
     }
 
     StepHistograms steps;
+    /**
+     * Contract coverage (issue #629), written by every completion callback.
+     *
+     * Here rather than derived from the run's stored samples because it must be
+     * **exact**: `results[]` is a bounded reservoir under load, and coverage
+     * computed from it would report a contract as uncovered whenever the store
+     * happened to thin the only request that touched it. One relaxed atomic
+     * increment per completion is what that costs.
+     *
+     * Inactive - recording and building nothing - for a run of a collection that
+     * is not bound to a contract.
+     */
+    CoverageTally coverage;
     std::vector<std::unique_ptr<VirtualUser>> vus;
     size_t virtual_users = 0;
     /// Producer-thread only: how many iterations were ever begun.
@@ -251,6 +264,16 @@ struct ScenarioLoadState {
  */
 [[nodiscard]] nlohmann::json
 build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan& plan);
+
+/**
+ * @brief The `coverage` object a scenario load run stores in `runs.summary`,
+ *        or an empty one for a run not measured against a contract (issue #629).
+ *
+ * A sibling of `build_scenario_load_summary` rather than a member of it because
+ * coverage is a top-level report section, not part of what the sequence did -
+ * the design-mode payload places it the same way.
+ */
+[[nodiscard]] nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state);
 
 /**
  * @brief Run the VU state machine to completion. Called by `execute_load_test`

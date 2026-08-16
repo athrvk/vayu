@@ -1092,6 +1092,11 @@ RunManager& manager) {
                 // The whole-run `tests` section above says only that something
                 // failed, which over a sequence is not an answer.
                 attach_step_test_totals (*inputs.scenario, validation.steps);
+                // Read on the same edge and for the same reason: a completion
+                // still in flight is a request this contract was exercised with
+                // (issue #629). Empty for a run of an unbound collection, which
+                // the payload builder treats as absent.
+                inputs.coverage = build_scenario_load_coverage (*scenario_state);
             }
 
             // Judged last, off the filled inputs rather than off the collector:
@@ -1329,6 +1334,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // executors. Omitted for a single-request load run, which has no sequence.
     if (inputs.scenario.has_value ()) {
         summary["scenario"] = *inputs.scenario;
+    }
+    // Which of the bound contract's operations this run exercised (issue #629),
+    // in the same shape the design-mode runner writes. Omitted for every run not
+    // measured against a contract - an unbound collection, a single-request load
+    // run, a document stored before the operation index existed - so an absent
+    // section reads as "not measured" rather than as a contract nothing covered.
+    if (inputs.coverage.has_value () && !inputs.coverage->empty ()) {
+        summary["coverage"] = *inputs.coverage;
     }
     // What the server-vitals scrape recorded. Omitted for a run that configured
     // no monitor, so the report's section is absent rather than showing a run

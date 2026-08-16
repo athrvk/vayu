@@ -20,6 +20,7 @@ a document.
 | The document itself | Engine, one row in `spec_documents`, hashed on write | Yes |
 | The binding (`specId`, `specHash`, `syncedAt`) | Engine, on the collection | Yes |
 | The operation each request is | Engine, on the request | Yes |
+| What the document declares (the operation index) | Engine, `spec_documents.operations` | Yes |
 | The URL it was fetched from | Engine, `spec_documents.source_url` | Yes |
 | A picked file's path on disk | This machine only, renderer storage | No |
 
@@ -325,7 +326,81 @@ statement: a request whose URL states no path, two requests that reduce to the
 same method and path (the first wins), an example whose media type was never
 recorded (the response is written, the body is not). Nothing is dropped quietly.
 
+## Contract coverage
+
+A run of a bound collection reports **which operations it exercised and which of
+their declared responses it saw**. It answers the question a green run still
+hides: every assertion can pass while four of eighteen operations were never
+called at all.
+
+It appears in three places, and only for a run that was measured against a
+contract:
+
+- The run's **Overview**, beside the pass/fail budgets.
+- A collection run's own view, above the step list.
+- One line on the **Spec tab**, for the collection's last run.
+
+### What a coverage block says
+
+| Number | What it counts |
+|---|---|
+| Operations covered | Operations the run sent at least one request for |
+| Declared responses seen | Status patterns the document declares that the run actually produced |
+| Undeclared statuses | Statuses the run saw that the document declares nothing for |
+| Never called | Operations with no request at all - listed first, because they are the finding |
+
+A status answers to the **most specific** pattern that covers it. An operation
+declaring both `200` and `2XX` that only ever answered 200 reports `2XX` as not
+seen: those are two distinct promises, and the run produced one of them. A
+`default` catches whatever the exact and range patterns did not.
+
+A **transport error** - a request that never got a response - counts as a request
+sent and as no response seen. The operation still counts as covered (something
+was tried), no declared response is hit, and the row says how many failed. Status
+`0` never appears as a status the server sent, because no server sent it.
+
+Requests whose operation the document does not declare are counted too, as
+`requests went to operations this document does not declare`. That is a
+collection that has drifted off its contract, which is exactly what the block
+exists to notice.
+
+### What is exact and what is sampled
+
+**Every number in a coverage block is exact.** It is counted as each request is
+sent and each response comes back, not derived from what the run stored. This
+matters because the block sits among figures that *are* sampled: under load, the
+latency percentiles come from every completion but the stored `results[]` rows
+and their bodies are a bounded reservoir. Coverage computed from those rows would
+report an operation as uncovered whenever the store happened to thin the only
+request that touched it.
+
+### Which document a run is measured against
+
+The document the run was **planned** with, pinned by the `specId` and `specHash`
+stamped on the run - not whatever the collection is bound to now. Sync the
+binding to a newer spec and an older run's report still says what that run
+actually covered.
+
+### When there is no coverage block
+
+Absent, never zeros, in each of these cases:
+
+- The collection is not bound to a document.
+- The run was a single request rather than a collection run.
+- The bound document has **no operation index** - it was stored before this
+  existed. Re-bind or sync the collection and its next run reports coverage.
+
+A run that was never judged against a contract did not cover none of it, and the
+report spells the two differently.
+
+### For a CI gate
+
+The rollup carries plain numbers - `operationsCovered`, `operationsTotal`,
+`declaredResponseCoveragePct` - shaped so a future headless gate can threshold on
+them the way it would on the run's pass/fail budgets. Nothing thresholds on them
+today; the shape is the commitment.
+
 ## What is not here yet
 
-Validating responses against their declared schemas, and contract coverage on a
-run report. Each is its own phase; this page grows with them.
+Validating responses against their declared schemas. That is its own phase; this
+page grows with it.

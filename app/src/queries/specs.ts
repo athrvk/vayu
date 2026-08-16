@@ -15,7 +15,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import type { SpecDocument, SpecOperation, SpecSyncRequest, SpecSyncResponse } from "@/types";
+import type {
+	DeclaredOperation,
+	SpecDocument,
+	SpecOperation,
+	SpecSyncRequest,
+	SpecSyncResponse,
+} from "@/types";
 
 /**
  * The document a collection is bound to, or nothing while it is bound to none.
@@ -49,6 +55,12 @@ export interface BindSpecInput {
 	sourceUrl?: string | null;
 	/** Identity to stamp on the requests that matched. May be empty. */
 	stamps: SpecOperationStamp[];
+	/**
+	 * What the document declares, stored beside it so a run of this collection
+	 * can report its contract coverage (issue #629). Absent for a document the
+	 * parsers produced no index for, which is stored as "no index".
+	 */
+	operations?: DeclaredOperation[];
 }
 
 export interface BindSpecResult {
@@ -87,10 +99,12 @@ export function useBindSpecMutation() {
 			content,
 			sourceUrl,
 			stamps,
+			operations,
 		}: BindSpecInput): Promise<BindSpecResult> => {
 			const spec = await apiService.createSpec({
 				content,
 				...(sourceUrl ? { sourceUrl } : {}),
+				...(operations && operations.length > 0 ? { operations } : {}),
 			});
 
 			await apiService.updateCollection({

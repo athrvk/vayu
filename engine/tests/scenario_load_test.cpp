@@ -492,6 +492,63 @@ TEST_F (ScenarioLoadTest, AnUnreachedStepReportsZeroesRatherThanAnEmptyHistogram
     EXPECT_EQ (unreached.max, 0.0);
 }
 
+// Contract coverage under load (issue #629). What this pins that the tally's
+// own tests cannot: the completion callback records on the real event loop, so
+// every virtual user's send lands on the right operation - and the count is
+// exact rather than derived from the bounded store the mode thins.
+TEST_F (ScenarioLoadTest, ALoadRunCountsEveryCompletionAgainstItsOperation) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].spec_operation =
+    R"({"operationId":"listPets","method":"GET","path":"/pets"})";
+    // Step 1 names no operation at all, so its sends land in the off-contract
+    // tally rather than on a row they do not belong to.
+    vayu::core::DeclaredOperation listed;
+    listed.operation_id = "listPets";
+    listed.method       = "GET";
+    listed.path         = "/pets";
+    listed.responses    = { "200", "404" };
+    vayu::core::DeclaredOperation never;
+    never.operation_id                  = "deletePet";
+    never.method                        = "DELETE";
+    never.path                          = "/pets/{petId}";
+    never.responses                     = { "204" };
+    execution.spec.spec_id              = "spec_1";
+    execution.spec.declared_operations  = { listed, never };
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto coverage = vayu::core::build_scenario_load_coverage (*state);
+    ASSERT_FALSE (coverage.empty ()) << "a bound run must report coverage";
+    EXPECT_EQ (coverage["operationsTotal"], 2);
+    EXPECT_EQ (coverage["operationsCovered"], 1);
+    // Three iterations, one send of step 0 each - exact, not a sample.
+    for (const auto& row : coverage["operations"]) {
+        if (row["path"] == "/pets") {
+            EXPECT_EQ (row["sent"], 3);
+            EXPECT_EQ (row["declaredHit"], json::array ({ "200" }));
+            EXPECT_EQ (row["declaredMissed"], json::array ({ "404" }));
+        }
+    }
+    EXPECT_EQ (coverage["undeclaredOperationRequests"], 3);
+}
+
+// The other half of the per-mode rule: a load run of an unbound collection - the
+// overwhelming majority - writes no coverage at all rather than a contract of
+// zero operations.
+TEST_F (ScenarioLoadTest, AnUnboundLoadRunReportsNoCoverageAtAll) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/s0") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_TRUE (vayu::core::build_scenario_load_coverage (*state).empty ());
+}
+
 // The breakdown carries each step's identity beside its numbers, and the
 // summary keeps the keys the report route already reads for a scenario run.
 TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenarioKeys) {

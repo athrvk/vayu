@@ -203,6 +203,15 @@ struct ScenarioSummaryInputs {
     size_t steps_stored         = 0;
     size_t steps_dropped        = 0;
     double duration_s           = 0.0;
+    /**
+     * The run's contract coverage (issue #629), already in the report's shape.
+     *
+     * Empty for every run that was not measured against a contract, which is
+     * what leaves the section out of the summary entirely - a run of an unbound
+     * collection covered no operations because there were none to cover, and
+     * reporting it as zero of zero would read as a contract it failed.
+     */
+    nlohmann::json coverage = nlohmann::json::object ();
 };
 
 /**

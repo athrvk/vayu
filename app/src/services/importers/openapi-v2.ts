@@ -5,7 +5,14 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { FormFieldEntry, HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
+import type {
+	DeclaredOperation,
+	FormFieldEntry,
+	HttpMethod,
+	KeyValueEntry,
+	RequestAuth,
+	RequestBody,
+} from "@/types";
 import type {
 	CollectionDraft,
 	ExampleDraft,
@@ -21,6 +28,7 @@ import { mapSwaggerOAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
 	declaredParamRow,
+	declaredResponsesOf,
 	deref,
 	exampleBodyText,
 	resolvePathItem,
@@ -85,6 +93,9 @@ export class OpenApiV2Parser implements ImportParser {
 		const rootRequests: RequestDraft[] = [];
 		const tally = new SkipTally();
 		let requestCount = 0;
+		// The declared-operation index (issue #629) - see the v3 parser for why
+		// it is built in this walk rather than by a second pass over `paths`.
+		const declaredOperations: DeclaredOperation[] = [];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -97,6 +108,13 @@ export class OpenApiV2Parser implements ImportParser {
 				const op = asRecord(pathItem[method]);
 				if (!op) continue;
 				requestCount += 1;
+				const identity = specOperationOf(method, path, op.operationId);
+				if (identity) {
+					declaredOperations.push({
+						...identity,
+						responses: declaredResponsesOf(op.responses),
+					});
+				}
 				const req = buildSwaggerOp(method, path, op, spec, resolveRef, pathParams, tally);
 				const tag = asStr(asArray(op.tags)[0]);
 				if (tag) {
@@ -131,8 +149,12 @@ export class OpenApiV2Parser implements ImportParser {
 			requests: rootRequests,
 			// The document itself, so the import can store it and bind this
 			// collection to it in the same atomic call (issue #637) - see the v3
-			// parser for why it is `raw` rather than a re-serialization.
-			spec: { content: raw },
+			// parser for why it is `raw` rather than a re-serialization, and for
+			// why the declared-operation index (issue #629) rides beside it.
+			spec: {
+				content: raw,
+				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
+			},
 		};
 
 		return {

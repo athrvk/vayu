@@ -977,6 +977,34 @@ so the rows are keyed by index rather than by level. A `stopReason` this build
 has no words for renders under its raw key, as `ThresholdVerdict` does with an
 unknown metric.
 
+## Contract Coverage (`components/shared/ContractCoverage.tsx`)
+
+Which operations of a collection's bound OpenAPI contract a run exercised, and
+which of their declared responses it saw (`RunReport.coverage`, issue #629).
+Shown in the history detail's Overview beside `ThresholdVerdict`, and above the
+step list in `ScenarioRunView`; the Spec tab carries a one-line version of the
+same numbers for the collection's last run (`SpecCoverageLine`).
+
+The other half of "did this run prove anything". `ThresholdVerdict` beside it
+says whether the run met its budgets; this says whether it touched the contract
+at all, which a run where every assertion passed can still have failed to do.
+
+**Rows are rendered in the order the engine sends them** - uncovered first,
+document order within each group. Re-sorting here would be a second opinion
+about which operations are the finding, and the two could disagree.
+
+Same absent-vs-zero discipline as `ThresholdVerdict`: an absent `coverage`
+renders **nothing**, because "not measured against a contract" is a different
+claim from "covered none of it", and it is why a run of an unbound collection
+looks exactly as it did before coverage existed.
+
+The uncovered chip is **warning-toned, not destructive**. An operation nobody
+called is a gap in the run, not a failure of the system under test, and painting
+it destructive would put it in the same vocabulary as a failed budget. The card
+also states that its numbers are counted on every send rather than drawn from the
+stored sample - it sits among figures that *are* sampled, and a reader has no
+other way to tell them apart.
+
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 
 Wherever a run's captured response exchanges are on screen: the run stored those

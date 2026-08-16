@@ -1127,7 +1127,10 @@ Store one OpenAPI document. **Create only**, and the engine owns the id - see
 ```json
 {
   "content": "{\"openapi\":\"3.1.0\", ...}",  // Required, non-empty, at most maxSpecDocumentBytes
-  "sourceUrl": "https://api.example.com/openapi.json"  // Optional; null when pasted or uploaded
+  "sourceUrl": "https://api.example.com/openapi.json",  // Optional; null when pasted or uploaded
+  "operations": [                                       // Optional - the declared-operation index
+    {"operationId": "listPets", "method": "GET", "path": "/pets", "responses": ["200", "default"]}
+  ]
 }
 ```
 
@@ -1138,9 +1141,31 @@ Store one OpenAPI document. **Create only**, and the engine owns the id - see
   "content": "{\"openapi\":\"3.1.0\", ...}",
   "sourceUrl": "https://api.example.com/openapi.json",
   "fetchedAt": 1730000000000,
-  "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "operations": [
+    {"operationId": "listPets", "method": "GET", "path": "/pets", "responses": ["200", "default"]}
+  ]
 }
 ```
+
+**`operations` is supplied, never derived - the engine does not parse OpenAPI.**
+`content` is the bytes the client imported, which are YAML as often as JSON, and
+a C++ reader of them would be a second opinion about what a document declares.
+So whichever side parsed the document writes down what it found, once, and the
+engine counts [contract coverage](#get-runsrunidreport) against that index
+without ever reading the document itself.
+
+Each row needs a non-empty `method` and `path` (the **templated** path, as the
+document keys it); `operationId` is optional, and `responses` holds the status
+patterns the document declares - `"200"`, `"4XX"`, `"default"` - verbatim and in
+document order. At most **2000** rows.
+
+Omitting it stores "no index", which is not the same as a document that declares
+nothing: `GET /specs/:id` reads it back as `null` rather than `[]`, and a run of
+a collection bound to it reports **no coverage block at all**. `POST
+/import/apply`'s spec section and `POST /specs/sync` take the same field through
+the same validator, so a document cannot acquire or lose an index depending on
+which route stored it.
 
 `sourceUrl` is `null` rather than `""` when the document did not come from a URL,
 so a client can offer a re-fetch for exactly the documents that have somewhere to
@@ -1152,7 +1177,9 @@ present and not a string or `null`, or if the document is larger than the live
 `maxSpecDocumentBytes` [config entry](#get-config) - default **10 MiB**, aligned
 with the engine's JSON field cap. The size rejection names the byte count, the
 cap and the setting, and is checked on `POST /import/apply` too, through the same
-helper; the document is never stored truncated.
+helper; the document is never stored truncated. A malformed `operations` index is
+a `400` naming the row and the field - it is refused at the write rather than
+stored and silently ignored when a run tries to count against it.
 
 ### GET /specs/:id
 
@@ -1208,7 +1235,8 @@ behind it. A sync updates and deletes rows that already exist.
   "collectionId": "col_9a1f...",                       // Required; must be bound to a spec
   "spec": {
     "content": "{\"openapi\":\"3.1.0\", ...}",           // Required, non-empty, at most maxSpecDocumentBytes
-    "sourceUrl": "https://api.example.com/openapi.json" // Optional; null for a file or a paste
+    "sourceUrl": "https://api.example.com/openapi.json", // Optional; null for a file or a paste
+    "operations": [...]                                // Optional - see POST /specs
   },
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
@@ -4203,7 +4231,7 @@ sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, 
 only when a test script ran, `thresholdValidation` only when the run declared
 [budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
 `capacity` run, `auth` only when the run's OAuth 2.0 credential could be
-refreshed mid-run).
+refreshed mid-run, `coverage` only for a run measured against a bound spec).
 
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
@@ -4217,6 +4245,41 @@ echoed from the run's snapshot rather than re-read from the collection: a report
 has to say what the run was measured against, and the binding is free to have
 moved since. An unbound run carries **no `openapi` key at all** - absent rather
 than an empty object, so "not measured against a spec" has one spelling.
+
+**`coverage`** says which of that spec's operations the run exercised and which
+of their declared responses it saw (issue #629). It is present only for a
+scenario run - design or load - of a collection bound to a document that carries
+an [operation index](#post-specs), and **absent, never zeros**, for every other
+run: an unbound collection, a single-request run, and a document stored before
+the index existed all report no block rather than a contract covered zero of.
+
+| Field | Meaning |
+|---|---|
+| `operationsTotal` / `operationsCovered` | Declared operations, and how many got at least one request |
+| `declaredResponsesTotal` / `declaredResponsesHit` / `declaredResponseCoveragePct` | Declared status patterns, and how many the run produced |
+| `undeclaredStatusesSeen` | Distinct (operation, status) pairs the document declares nothing for |
+| `operations[]` | Per operation: `sent`, `statusesSeen`, `declaredHit`, `declaredMissed`, `undeclaredSeen`, and `transportErrors` / `otherStatusResponses` / `statusesTruncated` when non-zero |
+| `transportErrors` / `undeclaredOperationRequests` | Whole-run findings, present only when they happened |
+
+Rows come back **uncovered first** - an operation nothing exercised is the
+finding - and in document order within each group, so two runs of one contract
+print the same way. A status hits the **most specific** declared pattern that
+covers it (exact, then a `2XX` range, then `default`), so an operation declaring
+both `200` and `2XX` that only answered 200 reports `2XX` as missed: those are
+two distinct promises. A transport error counts as a request sent and as no
+response seen; status `0` is never listed as a status the server sent.
+
+**Every number here is exact, not sampled.** The engine counts each send and each
+response as it happens, through a tally that is not the bounded `results[]`
+store - so a load run whose rows were thinned to a reservoir still reports every
+operation it touched. Coverage is computed against the document
+`metadata.openapi` names, at the moment the plan resolved, and stored with the
+run; a binding that has since synced to a newer spec cannot rewrite it.
+
+`operationsCovered`, `operationsTotal` and `declaredResponseCoveragePct` are
+deliberately plain numbers, shaped like `thresholdValidation`'s counts, so a
+headless CI gate can threshold on them without the block being reshaped. Nothing
+thresholds on them today.
 
 **Response:**
 ```json
@@ -4304,6 +4367,16 @@ than an empty object, so "not measured against a spec" has one spelling.
     "passed": 1, "failed": 0, "verdict": "passed"
   },
   "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
+  "coverage": {
+    "operationsTotal": 18, "operationsCovered": 14,
+    "declaredResponsesTotal": 41, "declaredResponsesHit": 29,
+    "declaredResponseCoveragePct": 70.7, "undeclaredStatusesSeen": 1,
+    "operations": [
+      { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}",
+        "sent": 0, "statusesSeen": [], "declaredHit": [], "declaredMissed": ["204"],
+        "undeclaredSeen": [] }
+    ]
+  },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```

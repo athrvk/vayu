@@ -10,6 +10,7 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
+	DeclaredOperation,
 	SpecOperation,
 	VariableValue,
 } from "@/types";
@@ -173,6 +174,17 @@ export interface SpecDraft {
 	content: string;
 	/** Set only for a URL-sourced import - a file or a paste has no URL to re-fetch. */
 	sourceUrl?: string;
+	/**
+	 * What the document declares, extracted while it was being parsed and stored
+	 * beside it (issue #629), so a run of the bound collection can report which
+	 * operations it exercised and which declared responses it saw.
+	 *
+	 * Written here rather than derived engine-side because the engine does not
+	 * parse OpenAPI - see `DeclaredOperation` for the whole of that reasoning.
+	 * Absent for a document no parser here produced, which the engine stores as
+	 * "no index" and reports as coverage not measured.
+	 */
+	operations?: DeclaredOperation[];
 }
 
 export interface CollectionDraft {

@@ -37,6 +37,7 @@
 
 import type {
 	Collection,
+	DeclaredOperation,
 	ImportApplyExample,
 	SpecOperation,
 	SpecSyncCollection,
@@ -113,6 +114,12 @@ export interface BuildSyncPayloadInput {
 	content: string;
 	/** Where it was re-fetched from, or `null` for a file or a paste. */
 	sourceUrl: string | null;
+	/**
+	 * What the re-fetched document declares (issue #629), stored beside it. The
+	 * sync writes a *new* `spec_documents` row, so omitting it would silently
+	 * turn coverage off for a collection that had it.
+	 */
+	operations?: DeclaredOperation[];
 	/** Every stored collection, to find the tag folder an added operation lands in. */
 	collections: readonly Collection[];
 }
@@ -133,6 +140,7 @@ export function buildSyncPayload({
 	selection,
 	content,
 	sourceUrl,
+	operations,
 	collections,
 }: BuildSyncPayloadInput): SpecSyncRequest {
 	const folders = new FolderResolver(collectionId, collections);
@@ -152,7 +160,11 @@ export function buildSyncPayload({
 
 	return {
 		collectionId,
-		spec: { content, sourceUrl },
+		spec: {
+			content,
+			sourceUrl,
+			...(operations && operations.length > 0 ? { operations } : {}),
+		},
 		collections: folders.created,
 		create,
 		update,

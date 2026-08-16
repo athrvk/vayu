@@ -55,6 +55,22 @@ const POSTMAN = JSON.stringify({
 	item: [{ name: "Ping", request: { method: "GET", url: "https://example.com/ping" } }],
 });
 
+/**
+ * What the index of {@link OPENAPI_V3} is, in document order (issue #629). Named
+ * once because three assertions read it: the parser's own output, the payload it
+ * becomes, and the file-picked draft beside it.
+ *
+ * Every `responses` is empty because the fixture's operations declare none - the
+ * patterns themselves are pinned by their own test on a document that does.
+ */
+const OPENAPI_V3_INDEX = [
+	{ operationId: "listPets", method: "GET", path: "/pets", responses: [] },
+	// No `operationId`: the document declares none, and an invented one would be
+	// an identity a re-fetch could not reproduce.
+	{ method: "POST", path: "/pets", responses: [] },
+	{ operationId: "getPet", method: "GET", path: "/pets/{petId}", responses: [] },
+];
+
 /** Every request in the tree, roots and tag folders alike. */
 function allRequests(result: ImportResult) {
 	const out: ImportResult["collections"][number]["requests"] = [];
@@ -103,6 +119,79 @@ describe("OpenAPI parsers record operation identity", () => {
 		expect(parseImport(OPENAPI_V3, opts).collections[0].children[0].spec).toBeUndefined();
 	});
 
+	it("extracts the declared-operation index beside the document (issue #629)", () => {
+		// The index is what makes contract coverage computable at all: the engine
+		// does not parse OpenAPI, so an operation missing here is one no run can
+		// ever report as covered - or as uncovered.
+		expect(parseImport(OPENAPI_V3, opts).collections[0].spec?.operations).toEqual(
+			OPENAPI_V3_INDEX
+		);
+	});
+
+	it("keeps declared status patterns verbatim, ranges and default included", () => {
+		// `200`, `4XX` and `default` are three different promises. Expanding a
+		// range into codes would report a contract the document never wrote, and
+		// dropping the non-numeric keys would under-report what was promised -
+		// which is exactly what the saved-example path does, deliberately, for a
+		// different reason (there is no status line to serve them under).
+		const document = JSON.stringify({
+			openapi: "3.0.3",
+			info: { title: "Pets API" },
+			paths: {
+				"/pets": {
+					get: {
+						operationId: "listPets",
+						responses: { "200": {}, "4XX": {}, default: {} },
+					},
+				},
+			},
+		});
+
+		expect(parseImport(document, opts).collections[0].spec?.operations).toEqual([
+			{
+				operationId: "listPets",
+				method: "GET",
+				path: "/pets",
+				responses: ["200", "4XX", "default"],
+			},
+		]);
+	});
+
+	it("indexes a Swagger 2.0 document by the same rule", () => {
+		const document = JSON.stringify({
+			swagger: "2.0",
+			info: { title: "Pets API" },
+			host: "api.example.com",
+			paths: {
+				"/pets/{petId}": {
+					get: { operationId: "getPet", responses: { "200": {}, "404": {} } },
+				},
+			},
+		});
+
+		expect(parseImport(document, opts).collections[0].spec?.operations).toEqual([
+			{
+				operationId: "getPet",
+				method: "GET",
+				path: "/pets/{petId}",
+				responses: ["200", "404"],
+			},
+		]);
+	});
+
+	it("indexes only the operations that have a usable identity", () => {
+		// The same rule the stamp follows: a path key the engine would refuse
+		// names no operation, so it is absent from the index rather than present
+		// under an identity nothing can ever match.
+		const malformed = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Odd" },
+			paths: { pets: { get: { operationId: "listPets" } } },
+		});
+
+		expect(parseImport(malformed, opts).collections[0].spec?.operations).toBeUndefined();
+	});
+
 	it("imports an operation under a malformed path key without an identity", () => {
 		// The engine refuses a `specOperation.path` that does not start with `/`,
 		// and one bad key in a document must not turn the whole import into a
@@ -135,7 +224,7 @@ describe("OpenAPI parsers record operation identity", () => {
 		// the payload spells that - `sourceUrl: ""` would look like an origin.
 		expect(
 			parseImport(OPENAPI_V3, opts, { fileName: "petstore.json" }).collections[0].spec
-		).toEqual({ content: OPENAPI_V3 });
+		).toEqual({ content: OPENAPI_V3, operations: OPENAPI_V3_INDEX });
 	});
 });
 
@@ -178,6 +267,9 @@ describe("the apply payload binds the collection to the document", () => {
 				tempId: "s1",
 				content: OPENAPI_V3,
 				sourceUrl: "https://api.example.com/openapi.json",
+				// The declared-operation index rides in the same atomic call as
+				// the document it describes (issue #629).
+				operations: OPENAPI_V3_INDEX,
 			},
 		]);
 		// The root binds it; a tag folder does not - one document, one binding.
