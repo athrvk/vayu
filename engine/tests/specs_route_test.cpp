@@ -34,6 +34,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -318,6 +319,103 @@ TEST_F (SpecsRouteTest, AnUpdateThatSaysNothingAboutTheBindingKeepsIt) {
 }
 
 // ---------------------------------------------------------------------------
+// The version half of a binding, which the engine owns (issue #709)
+// ---------------------------------------------------------------------------
+
+TEST_F (SpecsRouteTest, ABindingWrittenWithoutAVersionIsStampedFromTheStoredDocument) {
+    const std::string spec_id = store_spec ();
+    auto [status, body]       = routes::create_collection_response (
+    *db_, json{ { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    // A caller can only name the document; which *version* of it is stored is
+    // the engine's to say, exactly as `spec_documents.hash` is.
+    EXPECT_EQ (body["openapi"].value ("specHash", std::string{}),
+    routes::spec_content_hash (PETSTORE));
+    EXPECT_GT (body["openapi"].value ("syncedAt", int64_t{ 0 }), 0);
+
+    const json stored =
+    json::parse (db_->get_collection (body["id"].get<std::string> ())->openapi);
+    EXPECT_EQ (stored.value ("specHash", std::string{}), routes::spec_content_hash (PETSTORE))
+    << "the response must be the row, not a dressed-up copy of it";
+}
+
+TEST_F (SpecsRouteTest, AnUpdateThatBindsIsStampedTheSameWay) {
+    const std::string spec_id = store_spec ();
+    // The path the Spec tab's bind-from-here flow actually takes.
+    const std::string col_id = create_collection (json{ { "name", "Pets" } });
+    auto [status, body]      = routes::update_collection_response (
+    *db_, col_id, json{ { "openapi", { { "specId", spec_id } } } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["openapi"]["specHash"].get<std::string> (),
+    routes::spec_content_hash (PETSTORE));
+    EXPECT_GT (body["openapi"]["syncedAt"].get<int64_t> (), 0);
+}
+
+TEST_F (SpecsRouteTest, AStampFillsWhatIsMissingAndOverwritesNothing) {
+    const std::string spec_id = store_spec ();
+    // A binding whose recorded version the document has since moved past is a
+    // real state - it is what a run reports as `hash_mismatch` - so a write must
+    // not quietly "repair" it into agreement with whatever is stored today.
+    const std::string col_id = create_collection (json{ { "name", "Pets" },
+    { "openapi", { { "specId", spec_id }, { "specHash", "stale-hash" }, { "syncedAt", 42 } } } });
+    const json stored = json::parse (db_->get_collection (col_id)->openapi);
+    EXPECT_EQ (stored.value ("specHash", std::string{}), "stale-hash");
+    EXPECT_EQ (stored.value ("syncedAt", int64_t{ 0 }), 42);
+}
+
+// ---------------------------------------------------------------------------
+// The startup repair for bindings written before the engine stamped them
+// ---------------------------------------------------------------------------
+
+TEST_F (SpecsRouteTest, StartupStampsAnUnstampedBindingFromTheDocumentItNames) {
+    const std::string spec_id = store_spec ();
+    // Written the way every pre-#709 import wrote it: the id alone. Straight to
+    // the row, because no route produces this state any more.
+    vayu::db::Collection legacy;
+    legacy.id         = "col_legacy";
+    legacy.name       = "Imported";
+    legacy.order      = 0;
+    legacy.created_at = 1;
+    legacy.updated_at = 1;
+    legacy.openapi    = json{ { "specId", spec_id } }.dump ();
+    db_->create_collection (legacy);
+
+    db_->init (); // idempotent, and where the repair pass runs
+
+    const auto document = db_->get_spec_document (spec_id);
+    ASSERT_TRUE (document.has_value ());
+    const json stored = json::parse (db_->get_collection ("col_legacy")->openapi);
+    EXPECT_EQ (stored.value ("specHash", std::string{}), document->hash);
+    EXPECT_EQ (stored.value ("syncedAt", int64_t{ 0 }), document->fetched_at)
+    << "the binding was made when the document was stored, not on this restart";
+
+    // And a second start leaves it alone - a repair pass that re-stamped would
+    // move `syncedAt` forward on every launch.
+    db_->init ();
+    EXPECT_EQ (
+    json::parse (db_->get_collection ("col_legacy")->openapi).value ("syncedAt", int64_t{ 0 }),
+    document->fetched_at);
+}
+
+TEST_F (SpecsRouteTest, StartupLeavesABindingWhoseDocumentIsGoneUntouched) {
+    vayu::db::Collection orphan;
+    orphan.id         = "col_orphan";
+    orphan.name       = "Imported";
+    orphan.order      = 0;
+    orphan.created_at = 1;
+    orphan.updated_at = 1;
+    orphan.openapi    = json{ { "specId", "spec_ghost" } }.dump ();
+    db_->create_collection (orphan);
+
+    db_->init ();
+
+    const json stored = json::parse (db_->get_collection ("col_orphan")->openapi);
+    EXPECT_EQ (stored["specId"].get<std::string> (), "spec_ghost");
+    EXPECT_FALSE (stored.contains ("specHash"))
+    << "there is nothing to stamp it from, and a run says so already";
+}
+
+// ---------------------------------------------------------------------------
 // Per-request operation identity - through both serializers
 // ---------------------------------------------------------------------------
 
@@ -435,6 +533,10 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
     << "the temp id must have been rewritten to the engine's real id";
     EXPECT_FALSE (binding.contains ("specTempId"));
     EXPECT_EQ (binding["syncedAt"].get<int> (), 9);
+    // The version is the engine's half, taken from the document this same call
+    // stored (issue #709) - the payload never carries it.
+    EXPECT_EQ (binding.value ("specHash", std::string{}),
+    routes::spec_content_hash (PETSTORE));
 
     // Operation identity rides the shared applier, so it arrives free.
     auto stored_req = db_->get_request (body["idMap"]["r1"].get<std::string> ());
@@ -453,7 +555,83 @@ TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     ASSERT_EQ (status, 200) << body.dump ();
     auto stored = db_->get_collection (body["idMap"]["c1"].get<std::string> ());
     ASSERT_TRUE (stored.has_value ());
-    EXPECT_EQ (json::parse (stored->openapi)["specId"].get<std::string> (), spec_id);
+    const json binding = json::parse (stored->openapi);
+    EXPECT_EQ (binding["specId"].get<std::string> (), spec_id);
+    // Stamped from the stored document, the same as the payload-local case -
+    // an incremental import binds a version too, or it binds nothing usable.
+    EXPECT_EQ (binding.value ("specHash", std::string{}),
+    routes::spec_content_hash (PETSTORE));
+    EXPECT_GT (binding.value ("syncedAt", int64_t{ 0 }), 0);
+}
+
+/**
+ * The end-to-end nobody had: import the way the app imports, then plan a run of
+ * what was imported and ask whether it is measured against the contract.
+ *
+ * Every fixture for coverage (#629) and response validation (#628) hand-writes
+ * a binding *with* a hash, so all of them passed while the only path that
+ * produces bindings in the field wrote none - and the features were inert for
+ * every imported collection (issue #709). This asserts the join.
+ */
+TEST_F (SpecsRouteTest, AnImportedCollectionIsPlannedAgainstItsContract) {
+    const json operations =
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    const json response_schemas = { { "refRoots", json::object () },
+        { "operations",
+        json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
+        { "responses",
+        json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
+        { "schema", json{ { "type", "array" } } } } }) } } }) } };
+
+    json payload = { { "specs",
+                     { { { "tempId", "s1" }, { "content", PETSTORE }, { "operations", operations },
+                     { "responseSchemas", response_schemas } } } },
+        { "collections",
+        { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specTempId", "s1" } } } } } },
+        { "requests",
+        { { { "tempId", "r1" }, { "collectionTempId", "c1" }, { "name", "list" },
+        { "method", "GET" }, { "url", "https://example.test/pets" },
+        { "specOperation",
+        { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } } } } };
+
+    auto [status, body] = routes::import_apply_response (*db_, payload);
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto resolved = resolve (body["idMap"]["c1"].get<std::string> ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_TRUE (resolved.spec.bound ());
+    EXPECT_FALSE (resolved.spec.schema_reason.has_value ())
+    << "an import-bound collection is measurable, not a binding to explain "
+       "away";
+    EXPECT_EQ (resolved.spec.declared_operations.size (), 1u)
+    << "no declared operations means no coverage block on every run of this "
+       "collection";
+    EXPECT_FALSE (resolved.spec.response_schemas.empty ())
+    << "no schema index means no response was ever validated";
+}
+
+TEST_F (SpecsRouteTest, ABindingWithNoVersionIsNamedRatherThanBlamedOnTheDocument) {
+    // Reachable only by editing the database from outside now, and still worth
+    // its own reason: "the document moved, sync it" sends the reader to
+    // re-fetch a spec that never changed, and a sync of an unchanged document
+    // short-circuits without touching the binding - so the wrong reason is also
+    // one whose remedy cannot work.
+    const std::string spec_id = store_spec ();
+    vayu::db::Collection legacy;
+    legacy.id         = "col_unstamped";
+    legacy.name       = "Imported";
+    legacy.order      = 0;
+    legacy.created_at = 1;
+    legacy.updated_at = 1;
+    legacy.openapi    = json{ { "specId", spec_id } }.dump ();
+    db_->create_collection (legacy);
+    create_request ("col_unstamped");
+
+    const auto resolved = resolve ("col_unstamped");
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_TRUE (resolved.spec.schema_reason.has_value ());
+    EXPECT_EQ (vayu::core::to_string (*resolved.spec.schema_reason), "never_stamped");
 }
 
 TEST_F (SpecsRouteTest, ImportRefusesAnUnresolvableBindingAndWritesNothing) {

@@ -286,6 +286,7 @@ add_library(vayu_core STATIC
     src/core/scenario_load.cpp
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
+    src/core/spec_binding.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
     src/core/run_manager.cpp

@@ -103,6 +103,18 @@ enum class UncheckedReason {
     /// The document behind the binding no longer hashes to what the binding
     /// recorded, so what it declares is not what this request was bound to.
     HashMismatch,
+    /**
+     * The binding names a document and no version of it (issue #709).
+     *
+     * Kept apart from @ref HashMismatch because the two are different user
+     * actions: a document that moved is fixed by syncing, while a binding that
+     * was never stamped is fixed by re-binding - and telling someone their
+     * document changed when it never did sends them to re-fetch a spec that was
+     * already current. No write path can produce this state and the startup
+     * pass repairs the rows that predate those paths, so reaching it means the
+     * database was edited from outside.
+     */
+    NeverStamped,
     /// The identity is not one the index declares.
     OperationNotDeclared,
     /// The operation declares responses, none matching this status.

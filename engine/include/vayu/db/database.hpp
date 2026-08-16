@@ -166,6 +166,28 @@ class Database {
     void delete_spec_document (const std::string& id);
 
     /**
+     * @brief Repair bindings stored without the document version they name
+     *        (issue #709), returning how many were stamped.
+     *
+     * Until #709 the import path - which produces nearly every binding - wrote
+     * `{specId}` alone, and contract coverage and response-schema validation
+     * both require the binding's `specHash` to agree with the stored document,
+     * so every run of an imported collection reported no contract at all. The
+     * write paths stamp now; these are the rows written before they did.
+     *
+     * Safe by construction: a hashless binding can only have come from an
+     * import, and that import stored exactly the document the binding names, so
+     * the document's current hash *is* the version it was bound to. A binding
+     * naming a document this database no longer holds is left untouched - there
+     * is nothing to stamp it from, and a run says so already.
+     *
+     * Idempotent, and run at startup beside the other repair passes rather than
+     * behind a one-shot migration flag: a stamped binding is skipped on the
+     * next start, so the pass costs one scan of the sidebar-sized table.
+     */
+    int64_t stamp_hashless_spec_bindings ();
+
+    /**
      * @brief Persist a whole import in one transaction (issue #96).
      *
      * Either every row lands or none does: a bulk import that failed halfway

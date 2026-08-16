@@ -23,6 +23,8 @@ export const UNCHECKED_REASONS: Record<ValidationUncheckedReason, string> = {
 	no_index: "The bound document carries no response schemas. Re-bind or sync the collection.",
 	hash_mismatch:
 		"The stored document has changed since this collection was bound to it. Sync the collection.",
+	never_stamped:
+		"This collection's binding never recorded which version of the document it was bound to. Re-bind the collection.",
 	operation_not_declared: "The spec no longer declares this operation.",
 	no_schema_for_status: "The spec declares no response for this status.",
 	no_schema_for_content_type: "The spec declares no schema for this response's content type.",

@@ -754,6 +754,13 @@ resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
 to; a scenario run of a bound collection stamps both values into its snapshot and
 report (see [GET /runs/:runId/report](#get-runsrunidreport)).
 
+**Send the `specId` alone and the engine fills in the rest** (issue #709): every
+write path stamps `specHash` from the document the id names and `syncedAt` from
+the moment of the write, so a binding cannot be stored without the version that
+contract coverage and response-schema validation compare against. Only the
+halves you omit are filled - a binding that states an older `specHash` keeps it,
+and a run of it reports `hash_mismatch` as before.
+
 Deleting the document is refused while a collection binds it - the binding is
 never cascaded away, see [DELETE /specs/:id](#delete-specsid).
 
@@ -1545,7 +1552,11 @@ accepted a client-supplied `id` - which they no longer do (see
   payload, resolved through the temp-id map exactly as `collectionTempId` is) or
   **`openapi.specId`** (one already stored). Sending both is a per-item `400`,
   and so is either one that resolves to nothing. The resolved value is stored as
-  `openapi.specId`; `specTempId` is never persisted.
+  `openapi.specId`; `specTempId` is never persisted. The binding's `specHash` and
+  `syncedAt` are stamped by the engine from the document - the one this payload
+  just wrote, or the stored one an `openapi.specId` names - so an imported
+  collection is bound to a *version* and its runs are measured against the
+  contract (issue #709).
 - Up to **10,000 items** per call (collections + requests + environments + specs
   + nested examples - they are rows this call allocates and writes, so they
   count).
@@ -2768,6 +2779,7 @@ narrower than it looks rather than wrong.
 | `no_operation` | The request carries no `spec_operation` - it is not an operation |
 | `no_index` | The bound document carries no response schemas, or its schema could not be read |
 | `hash_mismatch` | The stored document no longer hashes to what the binding recorded |
+| `never_stamped` | The binding names a document and no version of it, so nothing can be compared - re-bind the collection. Distinct from `hash_mismatch` because a sync of an unchanged document would not repair it |
 | `operation_not_declared` | The document does not declare this identity |
 | `no_schema_for_status` | Nothing the operation declares covers this status |
 | `no_schema_for_content_type` | The status matched; none of its media types did |

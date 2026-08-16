@@ -24,6 +24,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/schema_validation.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/http/routes.hpp"
@@ -267,6 +268,30 @@ const std::unordered_set<std::string>& pending) {
     }
     return std::make_pair (400,
     error_body (400, "Spec '" + spec_id + "' does not exist"));
+}
+
+/**
+ * Completes a binding the caller wrote without a version (issue #709), from the
+ * document already in the store.
+ *
+ * The rule itself is `vayu::core::stamp_spec_binding`; this is the store's
+ * answer to its one question. `syncedAt` is *now* rather than the document's
+ * `fetched_at`: this write is the moment the collection was bound to that
+ * version, which is what the Spec tab's "Bound" reports and what a later sync
+ * compares against.
+ */
+void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
+    auto stamped = vayu::core::stamp_spec_binding (openapi,
+    [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
+        auto document = db.get_spec_document (spec_id);
+        if (!document) {
+            return std::nullopt;
+        }
+        return vayu::core::SpecStamp{ document->hash, now_ms () };
+    });
+    if (stamped) {
+        openapi = std::move (*stamped);
+    }
 }
 
 /**

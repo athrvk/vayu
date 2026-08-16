@@ -200,6 +200,7 @@ std::string to_string (UncheckedReason reason) {
     case UncheckedReason::NoOperation: return "no_operation";
     case UncheckedReason::NoIndex: return "no_index";
     case UncheckedReason::HashMismatch: return "hash_mismatch";
+    case UncheckedReason::NeverStamped: return "never_stamped";
     case UncheckedReason::OperationNotDeclared: return "operation_not_declared";
     case UncheckedReason::NoSchemaForStatus: return "no_schema_for_status";
     case UncheckedReason::NoSchemaForContentType: return "no_schema_for_content_type";

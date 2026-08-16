@@ -88,6 +88,20 @@ lives in `apply_collection_fields` so all three write paths enforce it, and the
 resolvability check sits in the route cores beside `reject_missing_collection` -
 `POST /import/apply` binds specs it is about to write in the same transaction.
 
+**The version half is the engine's** (issue #709). A client sends the `specId`;
+whichever write path receives it fills in `specHash` from the document that id
+names and `syncedAt` from the moment of the write - the same division
+`spec_documents.hash` itself draws. Only the halves the caller left out are
+filled, so a binding that deliberately records an older version keeps it and a
+run still reports `hash_mismatch` for it. This matters because both contract
+readers - coverage and response-schema validation - require the binding's hash
+to equal the stored document's before they engage: until #709 the import path
+stored `{specId}` alone, and every run of an imported collection therefore
+reported no contract at all. `Database::stamp_hashless_spec_bindings()` repairs
+the rows written before that rule, on every startup, stamping the document's
+`fetched_at` (when the import that made the binding stored it, not the moment of
+the restart) and skipping any binding whose document is gone.
+
 The **edge** is stored here; the **document** is not. Several collections may
 bind the same spec, so nothing here owns it: no cascade reaches `spec_documents`,
 and `DELETE /specs/:id` is refused while any collection names the row. NOT NULL

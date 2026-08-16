@@ -50,6 +50,12 @@ creates is bound automatically:
   across several files is the one exception - see
   [Specs written across several files](#specs-written-across-several-files).
 - A **fetched URL is kept**, so the document knows where it came from.
+- The binding records the document's **hash and the moment it was bound**, which
+  the engine stamps as it stores the two rows. Contract coverage and response
+  validation both compare that hash against the stored document before they
+  measure anything, so a binding without it is a collection nothing is measured
+  against - which is what imported collections were, until issue #709. Bindings
+  made before that fix are stamped on the next engine start.
 - Every request created from an operation records that operation's
   `operationId` (when the document declares one), its method, and its
   **templated** path - `/pets/{petId}`, not the URL the request sends.
@@ -475,6 +481,7 @@ Not a failure, and it says which of these it was:
 | This request is not bound to an operation | The request carries no operation identity - match or re-bind the collection |
 | The bound document carries no response schemas | It was stored before this existed, or declares none. Sync or re-bind |
 | The stored document has changed | The binding names a version this document no longer is. Sync |
+| The binding never recorded a version | The collection is bound to a document and to no version of it, so there is nothing to compare - re-bind. Vayu stamps the version on every write and repairs older bindings at startup, so this means the database was edited from outside |
 | The spec no longer declares this operation | The contract moved and this request did not |
 | The spec declares no response for this status | A 500 nothing documented, for instance |
 | No schema for this content type | The status is declared; this media type is not |

@@ -351,6 +351,7 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
             result = *err;
             return;
         }
+        stamp_binding_from_store (db, c.openapi);
         db.create_collection (c);
         result = { 200, vayu::json::serialize (c) };
     });
@@ -397,6 +398,7 @@ const nlohmann::json& json) {
                 result = *err;
                 return;
             }
+            stamp_binding_from_store (db, c.openapi);
         }
         db.create_collection (c);
         result = { 200, vayu::json::serialize (c) };
