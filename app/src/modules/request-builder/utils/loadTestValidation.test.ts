@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { validateCapacityRange, validateRampDuration } from "./loadTestValidation";
+import {
+	validateCapacityRange,
+	validateRampDuration,
+	validateStartConcurrencyFloor,
+} from "./loadTestValidation";
 
 describe("validateRampDuration", () => {
 	it("returns null for non-ramp_up modes regardless of durations", () => {
@@ -21,6 +25,37 @@ describe("validateRampDuration", () => {
 		expect(msg).not.toBeNull();
 		expect(msg).toContain("6");
 		expect(msg).toContain("10");
+	});
+});
+
+describe("validateStartConcurrencyFloor", () => {
+	// The value the engine answers with a 400, and the one a cleared number
+	// input produces: `Number("")` is 0, not NaN.
+	it("rejects a start of 0 in both profiles that climb from it", () => {
+		expect(validateStartConcurrencyFloor("ramp_up", 0)).toContain("at least 1");
+		expect(validateStartConcurrencyFloor("capacity", 0)).toContain("at least 1");
+	});
+
+	it("rejects a negative start, which the engine reads as a size_t", () => {
+		expect(validateStartConcurrencyFloor("ramp_up", -1)).toContain("at least 1");
+	});
+
+	it("rejects a non-numeric start rather than sending JSON null", () => {
+		expect(validateStartConcurrencyFloor("capacity", Number.NaN)).toContain("at least 1");
+	});
+
+	it("accepts the floor itself and anything above it", () => {
+		expect(validateStartConcurrencyFloor("ramp_up", 1)).toBeNull();
+		expect(validateStartConcurrencyFloor("capacity", 64)).toBeNull();
+	});
+
+	// The other modes never send `start_concurrency`, so a stale 0 left in the
+	// field by a profile switch must not block them.
+	it("says nothing about a mode that does not send a start", () => {
+		expect(validateStartConcurrencyFloor("constant_rps", 0)).toBeNull();
+		expect(validateStartConcurrencyFloor("constant_concurrency", 0)).toBeNull();
+		expect(validateStartConcurrencyFloor("iterations", 0)).toBeNull();
+		expect(validateStartConcurrencyFloor(undefined, 0)).toBeNull();
 	});
 });
 

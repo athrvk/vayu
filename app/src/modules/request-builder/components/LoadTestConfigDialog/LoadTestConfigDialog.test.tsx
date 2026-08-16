@@ -416,6 +416,24 @@ describe("ramp start concurrency", () => {
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
 	});
 
+	/*
+	 * `min={1}` on the input is advisory - a controlled number field still
+	 * takes the value, and clearing it reads back as `Number("") === 0`. Until
+	 * the floor rule the only feedback was the engine's 400, after Start.
+	 */
+	it("blocks a start below one connection, in both profiles that climb from it", () => {
+		open();
+		pickProfile("Ramp-Up");
+		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "0" } });
+		expect(screen.getByText(/Start is below one connection/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+
+		pickProfile("Capacity Discovery");
+		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "" } });
+		expect(screen.getByText(/Start is below one connection/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+
 	it("says where the ramp begins in the summary", () => {
 		open();
 		pickProfile("Ramp-Up");

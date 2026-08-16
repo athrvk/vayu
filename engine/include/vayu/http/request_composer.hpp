@@ -10,7 +10,7 @@
 /**
  * @file request_composer.hpp
  * @brief Engine-side request composition: `{{variable}}` interpolation and
- *        `inherit` auth resolution (issue #226, backlog A1).
+ *        `inherit` auth resolution (issue #226).
  *
  * Until #226 every engine client prepared its requests itself - the renderer
  * and the MCP layer each carried a copy of the variable map, the substitution

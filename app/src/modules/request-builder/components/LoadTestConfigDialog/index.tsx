@@ -33,6 +33,7 @@ import {
 	validateCapacityRange,
 	validateRampDuration,
 	validateStartConcurrency,
+	validateStartConcurrencyFloor,
 } from "../../utils/loadTestValidation";
 import {
 	LOAD_TEST_DEFAULTS,
@@ -348,12 +349,17 @@ export default function LoadTestConfigDialog({
 	const usesDuration = mode !== "iterations";
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
+	// Checked before the two range rules, which both compare the start against
+	// the target: a start below the floor is wrong on its own terms, and saying
+	// so is more useful than "this would ramp down".
+	const startFloorError = validateStartConcurrencyFloor(mode, startConcurrency);
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
 	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
 	const budgetsError = budgetError(budgets);
 	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
 	const blockingError =
 		rampDurationError ??
+		startFloorError ??
 		startConcurrencyError ??
 		capacityRangeError ??
 		budgetsError ??
@@ -410,6 +416,18 @@ export default function LoadTestConfigDialog({
 			});
 		}
 
+		if (startFloorError) {
+			list.push({
+				key: "start-floor",
+				severity: "blocking",
+				node: (
+					<Callout severity="blocking" title="Start is below one connection">
+						{startFloorError}
+					</Callout>
+				),
+			});
+		}
+
 		if (startConcurrencyError) {
 			list.push({
 				key: "start-concurrency",
@@ -454,6 +472,7 @@ export default function LoadTestConfigDialog({
 		);
 	}, [
 		rampDurationError,
+		startFloorError,
 		startConcurrencyError,
 		capacityRangeError,
 		budgetsError,
