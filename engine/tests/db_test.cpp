@@ -298,6 +298,35 @@ TEST_F (DatabaseTest, SeedMovesAnEntryOutOfARetiredCategory) {
     << "a category move must not reset the value the user stored";
 }
 
+// The same guarantee for a category move that is *live* rather than historical.
+// #703 re-shelved sixteen entries, and every install that has ever started the
+// engine carries the old category on the row; the value beside it may be one
+// the user chose deliberately (a provider slow to issue tokens is exactly why
+// this knob is settable). `upsert_config` preserves the value and rewrites the
+// metadata around it, so the migration is the next startup and nothing else -
+// but only a test says so before an upgrade does.
+TEST_F (DatabaseTest, SeedRehomesAnAuditedEntryWithoutResettingItsValue) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto seeded = db.get_config_entry ("oauth2RefreshLeadMs");
+    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_EQ (seeded->category, "services");
+
+    ConfigEntry stale = *seeded;
+    stale.category    = "network_performance"; // where it sat before #703
+    stale.value       = "120000";
+    db.save_config_entry (stale);
+
+    db.seed_default_config ();
+
+    auto migrated = db.get_config_entry ("oauth2RefreshLeadMs");
+    ASSERT_TRUE (migrated.has_value ());
+    EXPECT_EQ (migrated->category, "services");
+    EXPECT_EQ (migrated->value, "120000")
+    << "a category move must not reset the value the user stored";
+}
+
 TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
     const std::vector<std::string> retired = { "maxConnections", "tcpKeepAliveIdle",
         "tcpKeepAliveInterval", "statsInterval", "maxJsonFieldSize",

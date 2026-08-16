@@ -8,7 +8,7 @@
 /**
  * Engine settings category registry
  *
- * The six engine categories, declared once and in sidebar order - mirroring
+ * The seven engine categories, declared once and in sidebar order - mirroring
  * `app-panels.ts` on the client side.
  *
  * This replaces two hand-maintained maps: `ENGINE_CATEGORY_META` in the sidebar
@@ -28,7 +28,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Server, Code, Network, Activity, Database, Radio } from "lucide-react";
+import { Server, Code, Network, Activity, Database, Radio, Gauge } from "lucide-react";
 import type { EngineSettingsCategory } from "@/types";
 
 export interface EngineSettingsCategoryMeta {
@@ -53,7 +53,11 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 	{
 		id: "network_performance",
 		label: "Network & connectivity",
-		description: "Low-level networking tuning for throughput, DNS, and connection persistence",
+		// Widened by #703, which moved the request transport defaults in and
+		// the OAuth renewal watchdog out: the shelf is the wire itself, not
+		// only the throughput knobs it used to hold.
+		description:
+			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,
 	},
 	{
@@ -68,7 +72,8 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 	{
 		id: "observability",
 		label: "Observability",
-		description: "Server monitoring and the live metrics that feed the dashboard's charts",
+		description:
+			"Server monitoring, per-phase latency measurement, and the live metrics that feed the dashboard's charts",
 		icon: Activity,
 	},
 	{
@@ -77,6 +82,16 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"What a run stores and for how long: capture and truncation budgets, and the run retention limits",
 		icon: Database,
+	},
+	{
+		id: "limits",
+		label: "Limits",
+		// Late in the order on purpose (#586's rule is likelihood of visit):
+		// nobody browses here. Every entry is arrived at from a rejection
+		// message that names the setting, so search is the way in.
+		description:
+			"The sizes and counts a run or a collection may not exceed - the ceilings that reject an oversized input rather than truncate it",
+		icon: Gauge,
 	},
 	{
 		id: "scripting_sandbox",

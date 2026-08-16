@@ -484,7 +484,7 @@ min/max/options):
       "type": "enum",
       "label": "Default HTTP Version",
       "description": "Protocol a newly created request starts with...",
-      "category": "general_engine",
+      "category": "network_performance",
       "default": "auto",
       "options": [
         { "value": "auto", "label": "Auto" },
@@ -533,10 +533,13 @@ hand-maintained value-to-label map. `value` and `default` are always strings;
   suffix drifted out of step with the mechanism and misinformed the settings
   screen and the MCP `update_config` result at the same time.
 - **`advanced`** - an internal with no everyday user story (`dbBusyTimeout`, the
-  three `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`,
-  `sseIdleTimeoutMs`). Still
+  four `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`,
+  `sseIdleTimeoutMs`, `maxStepsPerIteration`, `monitorScrapeTimeoutMs`,
+  `liveMaxRetainedTicks`, `scriptStackSize` - eleven entries). Still
   live and still settable; the app renders these collapsed under an "Advanced"
-  section at the bottom of their category.
+  section at the bottom of their category. The membership rule is citable: if
+  an entry's own description has to say "only if" or "only for", the entry has
+  declared itself advanced.
 
 `keywords` is an array of strings, **always present** and empty for the entries
 that declare none - a client never has to tell "declares none" from "this
@@ -575,10 +578,11 @@ Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
 
 The Settings panel renders entries dynamically, so new keys appear without app
-changes. The entries below span two categories: the `data_retention` keys govern
-how much a run keeps - most of them on disk, one in memory - and the three
-`monitor*` keys are `observability`, governing how a run scrapes the endpoint it
-watches rather than what it stores:
+changes. The entries below span three categories: the `data_retention` keys
+govern how much of a run is kept on disk; `maxResponseBodyBytes` is `limits`,
+because it fails an oversized read in flight and stores nothing; and
+`phaseHistograms` joins the three `monitor*` keys in `observability`, which
+governs what a run measures rather than what it keeps:
 
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
@@ -3163,8 +3167,10 @@ as a smaller one:
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
 
-**Five settings bound a scenario** (all in the `general_engine` category, see
-[GET /config](#get-config)):
+**Five settings bound a scenario** (see [GET /config](#get-config)). Four are in
+the `limits` category, which is where a ceiling that rejects an oversized input
+lives; `maxScenarioStoredSteps` is `data_retention`, because it bounds what a
+finished run keeps rather than what one may ask for:
 
 | Key                   | Default | Range      | Effect |
 |-----------------------|---------|------------|--------|

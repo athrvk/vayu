@@ -800,7 +800,7 @@ than assuming all eight are there and flat:
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`, plus **`dataRowIndex`** for a scenario load run given `scenario.data`. A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing. |
 | Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
-| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps `dataRowCount` alone. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `general_engine`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
+| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps `dataRowCount` alone. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
 A **streaming** design run (`POST /execute` with `"stream": true`, issue #573)
 adds one node the others never carry: **`events`**, holding `items` (the first
@@ -1020,7 +1020,7 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"` / `"enum"` |
 | `label`         | TEXT    | Display label                                          |
 | `description`   | TEXT    | Help text                                              |
-| `category`      | TEXT    | Which sidebar row it renders under; one of `general_engine`, `network_performance`, `services`, `observability`, `data_retention`, `scripting_sandbox` |
+| `category`      | TEXT    | Which sidebar row it renders under; one of `general_engine`, `network_performance`, `services`, `observability`, `data_retention`, `limits`, `scripting_sandbox` |
 | `default_value` | TEXT    | Default as string                                      |
 | `min_value`     | TEXT    | Optional minimum (numbers)                             |
 | `max_value`     | TEXT    | Optional maximum (numbers)                             |
@@ -1035,9 +1035,12 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 draws one sidebar row per category it declares
 (`app/src/modules/settings/engine-categories.ts`) and drops an entry whose
 category it does not know, so a value outside the list above is a setting with
-no screen. `seed_default_config` is the only writer, and
-`ConfigRouteTest.EverySeededEntrySitsInADeclaredCategory` pins the two lists
-against each other. Reseeding rewrites an existing row's metadata while keeping
+no screen. `seed_default_config` is the only writer, and two guards pin the two
+lists against each other from opposite sides:
+`ConfigRouteTest.EverySeededEntrySitsInADeclaredCategory` reads the seeded rows
+against a set copied into the C++ test, and `engine-categories.test.ts` reads
+`database.cpp` itself against the renderer's registry - so a category added to
+the seed and to the C++ set but forgotten in the app still fails. Reseeding rewrites an existing row's metadata while keeping
 its value, which is how a retired category (`database_performance`, folded into
 `general_engine` in #586) carries an upgraded database across with nothing to
 migrate by hand.

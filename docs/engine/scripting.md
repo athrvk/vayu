@@ -960,7 +960,7 @@ the iteration with the step marked `errored` and the reason in its row:
 ### The cycle bound
 
 `setNextRequest` makes an infinite loop a two-line script, so an iteration has a
-ceiling: **`maxStepsPerIteration`** (config, `general_engine`). Its default of
+ceiling: **`maxStepsPerIteration`** (config, `limits`). Its default of
 `0` derives the bound from the collection - ten times its request count, and
 never fewer than 100 - so a straight-through iteration can never trip it, and a
 legitimate retry loop in a short collection has room. Exceeding it fails that
