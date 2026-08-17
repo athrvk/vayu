@@ -412,6 +412,12 @@ RunManager& manager) {
     const bool fail_on_schema_error = read_fail_on_schema_error (context->config);
     summary.fail_on_schema_error = fail_on_schema_error;
 
+    // Run-scoped, like every other read-once property above: a collection run
+    // is one run, and steps that left the machine by different routes because
+    // Settings changed mid-sequence would make its results unreproducible
+    // (issue #705, epic decision 3 of #704).
+    const auto transport = vayu::http::resolve_transport_policy (db);
+
     // The one parse of the document's schema index this run pays for, before
     // the first send rather than per step. `std::nullopt` - an unbound
     // collection, a document with no index, one that will not parse - is "not
@@ -517,6 +523,7 @@ RunManager& manager) {
                 inputs.request_name    = step.name;
                 inputs.iteration       = iteration;
                 inputs.iteration_count = asked.iterations;
+                inputs.transport       = transport;
                 // The one caller that sets it: `pm.execution` throws
                 // everywhere else, because nowhere else has a sequence to
                 // redirect (issue #355).

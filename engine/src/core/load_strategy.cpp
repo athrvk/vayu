@@ -35,6 +35,7 @@ const char* error_type_name (vayu::ErrorCode code) {
     case vayu::ErrorCode::InvalidMethod: return "invalid_method";
     case vayu::ErrorCode::ScriptError: return "script_error";
     case vayu::ErrorCode::DataBindingFailed: return "data_binding_failed";
+    case vayu::ErrorCode::ProxyError: return "proxy_error";
     case vayu::ErrorCode::InternalError: return "internal_error";
     default: return "unknown";
     }

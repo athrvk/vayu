@@ -1099,10 +1099,13 @@ were considered and rejected as a place to carry the option list - they are
 engine-side validation only and unread by the app, whereas `options` is part of
 the client contract: the renderer cannot draw the dropdown without it.
 
-The one seeded `enum` entry today is **`defaultHttpVersion`**
-(`upsert_config` in `database.cpp`), whose `options` is derived from the same
-`HttpVersion` enumeration that validates `requests.http_version` - see
-[`requests`](#requests) above - so the two cannot drift:
+Three entries are seeded as `enum` today (`upsert_config` in `database.cpp`).
+Two of them derive their `options` from the C++ enumeration that gives the
+values meaning, rather than from a literal list, so the picker cannot offer a
+value the engine rejects or omit one it accepts.
+
+**`defaultHttpVersion`** derives from the same `HttpVersion` enumeration that
+validates `requests.http_version` - see [`requests`](#requests) above:
 ```json
 [
   {"value": "auto", "label": "Auto"},
@@ -1113,6 +1116,26 @@ The one seeded `enum` entry today is **`defaultHttpVersion`**
 Its `value` is this instance's current global, read fresh (not cached) on
 every request create; changing it applies to the next request created, never
 retroactively.
+
+**`proxyMode`** derives from `all_proxy_modes()`
+(`engine/include/vayu/http/transport_policy.hpp`), the same enumeration
+`resolve_transport_policy` parses the stored value back into:
+```json
+[
+  {"value": "environment", "label": "From environment"},
+  {"value": "manual", "label": "Manual"},
+  {"value": "off", "label": "None"}
+]
+```
+It sits beside two plain `string` entries, `proxyUrl` and `proxyBypass`, and
+the three are read together as one policy at the point of use - see
+[Proxy settings](api-reference.md#proxy-settings) for the values, the
+cross-field rule `POST /config` enforces over `proxyMode` + `proxyUrl`, and why
+`proxyUrl` holds credentials in plaintext exactly as `oauth_tokens` does.
+
+**`dbSynchronous`** is the exception: SQLite's durability levels (`"0"` Off,
+`"1"` Normal, `"2"` Full) are its enumeration rather than ours, so that one
+list is literal.
 
 ---
 

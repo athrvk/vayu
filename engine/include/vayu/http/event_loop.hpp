@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -67,8 +68,11 @@ struct EventLoopConfig {
     /// Enable verbose curl output for debugging
     bool verbose = vayu::core::constants::defaults::VERBOSE;
 
-    /// Proxy URL (optional)
-    std::string proxy_url;
+    /// How this run's transfers reach the network. Resolved once at run start
+    /// and held for the run (issue #705, epic decision 3 of #704): libcurl
+    /// reuses a cached connection only when its proxy and TLS config match, so
+    /// a policy that varied per transfer would partition each worker's pool.
+    TransportPolicy transport;
 
     /// DNS cache timeout in seconds (0 = no caching, negative = never expires).
     /// Governs curl's own resolver cache and the pre-resolution pin cache.

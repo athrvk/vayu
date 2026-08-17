@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "vayu/http/routes.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http::routes {
@@ -246,6 +247,39 @@ const std::string& body) {
         std::chrono::system_clock::now ().time_since_epoch ())
                              .count ();
         to_update.push_back (updated);
+    }
+
+    // Cross-field rule: `manual` mode with no usable URL would accept the
+    // write, say "Manual" in Settings and send every request direct - the
+    // invisible failure issue #705 exists to end. Judged against the state the
+    // batch would *leave*, not against either half alone, because the two keys
+    // may arrive in one request or in either order across two.
+    if (errors.empty () &&
+    (updates.count ("proxyMode") != 0 || updates.count ("proxyUrl") != 0)) {
+        const auto effective = [&] (const char* key) {
+            const auto it = updates.find (key);
+            if (it != updates.end ()) {
+                return it->second;
+            }
+            const auto stored = db.get_config_entry (key);
+            return stored ? stored->value : std::string ();
+        };
+        const std::string mode = effective ("proxyMode");
+        const std::string url  = effective ("proxyUrl");
+        if (vayu::http::proxy_mode_from_string (mode) == vayu::http::ProxyMode::Manual) {
+            if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
+                errors.push_back ("'proxyUrl' is required when 'proxyMode' is "
+                                  "'manual': " +
+                *rejection);
+            }
+        } else if (!url.empty ()) {
+            // A URL stored under another mode is inert rather than wrong - it
+            // is how someone keeps their proxy while temporarily switching it
+            // off - so it is validated but not required.
+            if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
+                errors.push_back ("'proxyUrl' is not usable: " + *rejection);
+            }
+        }
     }
 
     if (!errors.empty ()) {

@@ -275,34 +275,6 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     return raw_req.str ();
 }
 
-/**
- * @brief Convert curl error code to our ErrorCode
- */
-Error curl_to_error (CURLcode code, const char* error_buffer) {
-    Error error;
-    error.message = error_buffer[0] ? error_buffer : curl_easy_strerror (code);
-
-    switch (code) {
-    case CURLE_OK: error.code = ErrorCode::None; break;
-    case CURLE_OPERATION_TIMEDOUT: error.code = ErrorCode::Timeout; break;
-    case CURLE_COULDNT_CONNECT:
-    case CURLE_COULDNT_RESOLVE_HOST:
-    case CURLE_COULDNT_RESOLVE_PROXY:
-        error.code = ErrorCode::ConnectionFailed;
-        break;
-    case CURLE_SSL_CONNECT_ERROR:
-    case CURLE_SSL_CERTPROBLEM:
-    case CURLE_SSL_CIPHER:
-    case CURLE_PEER_FAILED_VERIFICATION:
-        error.code = ErrorCode::SslError;
-        break;
-    case CURLE_URL_MALFORMAT: error.code = ErrorCode::InvalidUrl; break;
-    default: error.code = ErrorCode::InternalError; break;
-    }
-
-    return error;
-}
-
 } // namespace
 
 // ============================================================================
@@ -401,9 +373,8 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
     }
 
-    // SSL verification
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+    // TLS verification and the proxy, both through the one shared applier.
+    detail::apply_transport_policy (curl, impl_->config.transport, request.verify_ssl);
 
     // Protocol selection. This path (POST /execute, "Send") previously set no
     // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -
@@ -423,11 +394,6 @@ Result<Response> Client::send (const Request& request) {
     curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
     curl_easy_setopt (curl, CURLOPT_DEBUGDATA, &transfer_debug);
-
-    // Proxy
-    if (!impl_->config.proxy_url.empty ()) {
-        curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
-    }
 
     // Cookie jar (issue #301) - only when a caller opted in; see
     // ClientConfig::cookie_jar.
@@ -514,7 +480,7 @@ Result<Response> Client::send (const Request& request) {
     // Check for errors
     if (res != CURLE_OK) {
         // Convert curl error to ErrorCode and message
-        Error error = curl_to_error (res, impl_->error_buffer);
+        Error error = detail::curl_to_error (curl, res, impl_->error_buffer);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)

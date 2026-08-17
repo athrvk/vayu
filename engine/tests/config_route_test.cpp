@@ -744,4 +744,67 @@ TEST_F (ConfigRouteTest, NoCategoryBecomesADumpingGround) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Proxy settings (issue #705) - the cross-field rule the per-key loop cannot
+// express. Manual mode with no usable URL would be accepted, say "Manual" in
+// Settings and send every request direct: the invisible failure the whole
+// issue exists to end, so it is refused at the write.
+// ---------------------------------------------------------------------------
+
+TEST_F (ConfigRouteTest, ManualProxyModeWithoutUrlIs400) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyMode":"manual"}})");
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("proxyUrl"),
+    std::string::npos)
+    << body.dump ();
+}
+
+TEST_F (ConfigRouteTest, ManualProxyModeWithUrlInTheSameBatchIsAccepted) {
+    auto [status, body] = vayu::http::routes::apply_config_update (*db_,
+    R"({"entries":{"proxyMode":"manual","proxyUrl":"http://proxy.example:8080"}})");
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://proxy.example:8080");
+}
+
+TEST_F (ConfigRouteTest, ClearingTheUrlWhileManualIs400) {
+    // The half-update: the mode is already stored, so the rule has to be
+    // judged against the state the batch would leave, not against the batch.
+    ASSERT_EQ (vayu::http::routes::apply_config_update (*db_,
+               R"({"entries":{"proxyMode":"manual","proxyUrl":"http://proxy.example:8080"}})")
+               .first,
+    200);
+
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":""}})");
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://proxy.example:8080")
+    << "a rejected batch must write nothing";
+}
+
+TEST_F (ConfigRouteTest, MalformedProxyUrlIs400EvenWhenTheModeIsOff) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":"htp://proxy.example:8080"}})");
+    EXPECT_EQ (status, 400) << body.dump ();
+}
+
+TEST_F (ConfigRouteTest, AStoredUrlSurvivesSwitchingTheModeOff) {
+    // Keeping the proxy while turning it off is the ordinary thing to do, so
+    // the "required" half of the rule must not fire outside manual mode.
+    ASSERT_EQ (vayu::http::routes::apply_config_update (*db_,
+               R"({"entries":{"proxyMode":"manual","proxyUrl":"http://proxy.example:8080"}})")
+               .first,
+    200);
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyMode":"off"}})");
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://proxy.example:8080");
+}
+
+TEST_F (ConfigRouteTest, UnknownProxyModeIs400) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyMode":"sometimes"}})");
+    EXPECT_EQ (status, 400) << body.dump ();
+}
+
 } // namespace

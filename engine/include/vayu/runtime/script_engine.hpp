@@ -24,6 +24,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::runtime {
@@ -247,6 +248,19 @@ struct ScriptContext {
      * went nowhere.
      */
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
+
+    /**
+     * @brief How `pm.sendRequest` reaches the network (issue #705).
+     *
+     * The same policy the enclosing exchange's own send uses, for the same
+     * reason the jar is shared: a script that logs in through `sendRequest`
+     * and then lets the real request carry the session must take the same
+     * route out of the machine, or one of the two is unreachable behind a
+     * corporate proxy. A context built by hand keeps the default (the
+     * environment pickup), which is what every script send did before the
+     * policy existed.
+     */
+    vayu::http::TransportPolicy transport;
 
     /**
      * @brief Expose @p req to the script as a mutable `pm.request`.

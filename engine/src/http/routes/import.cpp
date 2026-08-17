@@ -32,9 +32,18 @@ namespace vayu::http::routes {
 
 /**
  * Fetch the URL in `request_body` ({"url": "..."}) via libcurl.
+ *
+ * @param transport How to reach the network. Passed in rather than resolved
+ *                  here because this function is deliberately `Database`-free
+ *                  so it can be unit tested - and required rather than
+ *                  defaulted, so a future caller cannot acquire a direct
+ *                  connection by forgetting an argument. Spec re-fetch and
+ *                  `$ref` bundling ride this path, so it is what makes
+ *                  importing a spec by URL work behind a proxy (issue #705).
  * @return {http_status, json_body}. Separated from the route for unit testing.
  */
-std::pair<int, nlohmann::json> import_fetch (const std::string& request_body) {
+std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
+const vayu::http::TransportPolicy& transport) {
     nlohmann::json req;
     try {
         req = nlohmann::json::parse (request_body);
@@ -50,7 +59,9 @@ std::pair<int, nlohmann::json> import_fetch (const std::string& request_body) {
         return { 400, error_body (400, "Invalid URL") };
     }
 
-    vayu::http::Client client;
+    vayu::http::ClientConfig client_config;
+    client_config.transport = transport;
+    vayu::http::Client client (client_config);
     auto result = client.get (url);
     if (!result.is_ok ()) {
         return { 502, error_body (502, "Failed to fetch: " + client.last_error ()) };
@@ -749,9 +760,10 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
 
 void register_import_routes (RouteContext& ctx) {
     ctx.server.Post ("/import/fetch",
-    [] (const httplib::Request& req, httplib::Response& res) {
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         vayu::utils::log_info ("POST /import/fetch");
-        auto [status, body] = import_fetch (req.body);
+        auto [status, body] =
+        import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
         res.status = status;
         res.set_content (
         body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),

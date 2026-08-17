@@ -1056,6 +1056,12 @@ void register_execution_routes (RouteContext& ctx) {
             ScriptVariableScopes scopes;
             vayu::ScriptResult pre_script_result;
             std::vector<vayu::http::CookieWrite> pre_cookie_writes;
+            // Resolved once here rather than at each of the three uses below
+            // (the pre-request script's `pm.sendRequest`, the transfer, and
+            // the post-request script's on the worker thread): they are one
+            // stream, and a settings change between them would otherwise send
+            // the two halves out by different routes.
+            const auto transport = vayu::http::resolve_transport_policy (ctx.db);
             const bool has_scripts =
             !pre_request_script.empty () || !post_request_script.empty ();
             if (has_scripts) {
@@ -1068,6 +1074,7 @@ void register_execution_routes (RouteContext& ctx) {
                 cookie_scope, &pre_cookie_writes);
                 pre_ctx.request_id   = run.request_id;
                 pre_ctx.request_name = script_request_name;
+                pre_ctx.transport    = transport;
                 // The same row the transfer below carries, on the same terms
                 // as the buffered path: a stream is still one send, and one
                 // send with a row is iteration 0 of 1.
@@ -1084,6 +1091,7 @@ void register_execution_routes (RouteContext& ctx) {
             spec.run_id          = *run_id;
             spec.request         = std::move (request);
             spec.limits          = vayu::http::read_sse_limits (ctx.db);
+            spec.transport       = transport;
             spec.max_duration_ms = stream.max_duration_ms;
             spec.max_events      = stream.max_events;
             spec.cookie_jar      = &ctx.cookie_jar;
@@ -1102,7 +1110,7 @@ void register_execution_routes (RouteContext& ctx) {
             spec.on_complete = [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id,
                                cookie_scope, run, script_config, post_request_script,
                                request_name = script_request_name, scopes,
-                               iteration_data = data_row.value,
+                               iteration_data = data_row.value, transport,
                                pre_script_result] (const vayu::Request& sent,
                                const vayu::Response& response,
                                const vayu::http::SseStreamContext& context) mutable {
@@ -1134,6 +1142,7 @@ void register_execution_routes (RouteContext& ctx) {
                             cookie_scope, &post_cookie_writes);
                             post_ctx.request_id   = run.request_id;
                             post_ctx.request_name = request_name;
+                            post_ctx.transport    = transport;
                             if (iteration_data) {
                                 post_ctx.iteration_data  = &*iteration_data;
                                 post_ctx.iteration       = 0;
@@ -1212,6 +1221,9 @@ void register_execution_routes (RouteContext& ctx) {
         inputs.post_script  = post_request_script;
         inputs.request_id   = run.request_id;
         inputs.request_name = script_request_name;
+        // Read at the point of use, so a settings change applies to the next
+        // send without a restart (issue #705).
+        inputs.transport    = vayu::http::resolve_transport_policy (ctx.db);
         if (data_row.value) {
             inputs.iteration_data = &*data_row.value;
             // Row 0 of 1: a send-with-row *is* an iteration, and the one it is

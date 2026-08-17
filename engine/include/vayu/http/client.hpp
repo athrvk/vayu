@@ -16,6 +16,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -26,8 +27,18 @@ namespace vayu::http {
 struct ClientConfig {
     std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
     bool verbose = vayu::core::constants::defaults::VERBOSE;
-    std::string proxy_url;
-    std::string ca_bundle_path;
+
+    /**
+     * @brief How this transfer reaches the network (issue #705).
+     *
+     * Defaults to the environment pickup, which is what every `Client` did
+     * before the policy existed. It replaced a `proxy_url` and a
+     * `ca_bundle_path` that no code in the repo's history ever assigned - the
+     * "written but never read" defect inverted - so a caller that wants a
+     * proxy now has one field to set and `resolve_transport_policy(db)` to
+     * fill it.
+     */
+    TransportPolicy transport;
 
     /**
      * @brief The jar this client reads cookies from and writes them back to,
