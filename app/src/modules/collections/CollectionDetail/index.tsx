@@ -252,7 +252,12 @@ export default function CollectionDetail() {
 							/>
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
-						{t.id === "data" && <DataTab collection={collection} />}
+						{/* Keyed: the Data tab reads the remembered file on mount
+						    (issue #727), and this component is not remounted when
+						    the user switches to another collection's tab - so
+						    without a key, collection B would show A's file and
+						    never open its own. It holds no draft to lose. */}
+						{t.id === "data" && <DataTab key={collection.id} collection={collection} />}
 						{t.id === "spec" && <SpecTab collection={collection} />}
 					</TabsContent>
 				))}

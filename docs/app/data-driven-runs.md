@@ -15,18 +15,18 @@ a value becomes once it is bound.
 
 ## Supported files
 
-| Extension | Format | Values arrive as |
-|-----------|--------|------------------|
-| `.csv` | Comma-separated, RFC 4180 | strings, always |
-| `.tsv`, `.tab` | Tab-separated, same grammar | strings, always |
-| `.json` | An array of row objects | their JSON types |
+| Extension           | Format                           | Values arrive as |
+| ------------------- | -------------------------------- | ---------------- |
+| `.csv`              | Comma-separated, RFC 4180        | strings, always  |
+| `.tsv`, `.tab`      | Tab-separated, same grammar      | strings, always  |
+| `.json`             | An array of row objects          | their JSON types |
 | `.jsonl`, `.ndjson` | JSON Lines - one object per line | their JSON types |
 
 There is no XLSX support and no headerless mode. A spreadsheet exports to CSV in
 one step, and a file whose first row is data would leave every column
 unaddressable - see below.
 
-## The header row *is* the mapping
+## The header row _is_ the mapping
 
 Column names become `{{data.column}}` tokens and `pm.iterationData` keys with no
 remapping step, exactly as Postman, JMeter and k6 work. A mapping UI would be a
@@ -44,7 +44,7 @@ cell:
   one would drop cells nobody can see.
 
 JSON and JSONL have no header, so the columns are the union of every row's keys,
-in first-seen order. A key that only *some* rows carry is a **warning** at pick
+in first-seen order. A key that only _some_ rows carry is a **warning** at pick
 time naming how many rows lack it - the iterations bound to those rows would
 fail on a `{{data.*}}` token naming it, but a column nothing references is
 harmless, so it does not block the run.
@@ -57,7 +57,7 @@ JSON and JSONL keep what the file declared - `3` is a number, `true` is a
 boolean, `null` is null.
 
 If you need a number to arrive as a number, use a JSON file - and write the
-token *outside* the quotes in the body, `{"n": {{data.n}}}`, because that is
+token _outside_ the quotes in the body, `{"n": {{data.n}}}`, because that is
 what decides whether it arrives as `2` or `"2"`.
 
 A `null` cell is a value `pm.iterationData` hands to a script and a value a
@@ -69,7 +69,7 @@ The parser is RFC 4180, not a `split(",")`:
 
 - A quoted field may contain the delimiter, newlines, and CRLF.
 - A literal quote inside a quoted field is written doubled: `"say ""hi"""`.
-- A quote that does not *open* a field is an ordinary character, so `6" pipe`
+- A quote that does not _open_ a field is an ordinary character, so `6" pipe`
   needs no escaping.
 - Blank lines are skipped, and the count is reported as a warning.
 
@@ -91,12 +91,12 @@ catch it. Re-save as UTF-8 and pick it again.
 ## Size limits
 
 Two engine settings bound a run's data set, and the picker enforces both
-*before* the run rather than letting `POST /runs` refuse it afterwards:
+_before_ the run rather than letting `POST /runs` refuse it afterwards:
 
-| Setting | Default | Bounds |
-|---------|---------|--------|
-| `maxScenarioDataRows` | 1000 | How many rows one run may carry |
-| `maxScenarioDataBytes` | 16 MiB | How large the data set may be |
+| Setting                | Default | Bounds                          |
+| ---------------------- | ------- | ------------------------------- |
+| `maxScenarioDataRows`  | 1000    | How many rows one run may carry |
+| `maxScenarioDataBytes` | 16 MiB  | How large the data set may be   |
 
 Both are editable in **Settings -> Engine -> General**, and the picker reads the
 live values - raise a limit there and the same file is accepted without
@@ -110,14 +110,14 @@ are never persisted on either side - a run's snapshot records their count alone.
 
 ## Reading a row: `{{data.column}}` vs `pm.iterationData`
 
-Both read the same row. They differ in *when*:
+Both read the same row. They differ in _when_:
 
 - **`{{data.column}}`** is substituted into the request - URL, headers, body,
   form fields - immediately before the send. Use it to make each iteration hit a
   different endpoint or send a different payload. See the
   [`{{data.column}}` contract](../engine/api-reference.md#post-runs) in the
   engine's HTTP API reference.
-- **`pm.iterationData`** is read by scripts, *after* the step's request was
+- **`pm.iterationData`** is read by scripts, _after_ the step's request was
   composed, so it cannot change where the request goes. Use it for assertions
   and for values a script derives. See
   [Data rows](../engine/scripting.md#data-rows-pmiterationdata).
@@ -138,19 +138,19 @@ hands `null` to a branch that can read it.
 A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as
 that text inside valid JSON rather than ending the string. A token written
-*outside* a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
+_outside_ a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
 a JSON file's number arrives as a number.
 
 A cell is **safe in an XML body** too, and by a rule that reads the token's
 position rather than one that escapes everything:
 
-| Where the token sits | What the cell arrives as |
-|----------------------|--------------------------|
-| Element text | `&`, `<` and `>` escaped - `Ben & Jerry's` arrives intact |
-| An attribute value | the above, plus whichever quote delimits *that* attribute |
-| A `<![CDATA[…]]>` section | byte for byte, which is what the section is for; a `]]>` in the cell splits and reopens the section rather than ending it |
-| A tag or attribute **name** - `<{{data.tag}}>` | byte for byte: no escape is legal in a name |
-| An XML **comment** or **processing instruction** | nothing - the row is **refused**, naming the token |
+| Where the token sits                             | What the cell arrives as                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Element text                                     | `&`, `<` and `>` escaped - `Ben & Jerry's` arrives intact                                                                 |
+| An attribute value                               | the above, plus whichever quote delimits _that_ attribute                                                                 |
+| A `<![CDATA[…]]>` section                        | byte for byte, which is what the section is for; a `]]>` in the cell splits and reopens the section rather than ending it |
+| A tag or attribute **name** - `<{{data.tag}}>`   | byte for byte: no escape is legal in a name                                                                               |
+| An XML **comment** or **processing instruction** | nothing - the row is **refused**, naming the token                                                                        |
 
 The comment and processing-instruction refusals are deliberate: neither is
 content the server reads, and a cell carrying `-->` or `?>` would end the
@@ -206,20 +206,26 @@ preview, and press **Declare columns**.
 
 What that stores, and what it does not:
 
-| | Where it lives | Travels with the collection? |
-|---|---|---|
-| The **columns** | On the collection, as `dataSchema` | Yes - and through import |
-| The file's **path** | This machine only, in local app storage | No |
-| The file's **rows** | Nowhere | No |
+|                     | Where it lives                          | Travels with the collection? |
+| ------------------- | --------------------------------------- | ---------------------------- |
+| The **columns**     | On the collection, as `dataSchema`      | Yes - and through import     |
+| The file's **path** | This machine only, in local app storage | No                           |
+| The file's **rows** | Nowhere                                 | No                           |
 
 Declaring changes no binding rule - a token still binds from the row the run
-carries. What it buys is everything that needs to know the columns *before* a
+carries. What it buys is everything that needs to know the columns _before_ a
 run:
 
 - **The Run dialog pre-fills.** If the declared file is still where you left it,
   opening **Run collection** re-reads it and previews it, ready to start. Move
   or rename the file and the dialog says so and offers the picker - it is a
   note, not a refusal.
+- **The Data tab re-opens it too.** Coming back to the tab reads the declared
+  file again and lines it up against the contract with no re-pick: comparing
+  them is what the tab is for, so it does not wait to be handed the same file a
+  second time. Edit the file on disk and the drift shows on the next visit. A
+  file that has moved has its name struck through beside the declared columns,
+  and the picker stands - which is also how you compare a _different_ file.
 - **A file that does not match is flagged**, in both directions and in both
   places: a declared column the file is missing (every `{{data.x}}` written
   against it would fail to bind at iteration 1) and a column the file carries
@@ -243,8 +249,8 @@ run:
   the script editors.
 - **You can send one request against one row.** A caret appears beside **Send**
   in the request builder whenever a contract and a declared file are both in
-  scope; it lists the file's first rows, and picking one sends *that* request
-  bound to *that* row - the tokens substituted, and `pm.iterationData` readable
+  scope; it lists the file's first rows, and picking one sends _that_ request
+  bound to _that_ row - the tokens substituted, and `pm.iterationData` readable
   in both scripts. This is how you iterate on a script that reads a row without
   starting a whole run each time. See [Send with a row](#send-with-a-row).
 - **The Data tab audits the collection.** A **Referenced columns** panel splits
@@ -267,7 +273,7 @@ is not a general licence to read your disk.
 
 ## Send with a row
 
-Everything above is about a *run*. One thing is worth doing without one: a
+Everything above is about a _run_. One thing is worth doing without one: a
 pre-request script that reads `pm.iterationData`, or a URL carrying
 `{{data.id}}`, used to be testable only by starting a collection run and digging
 the step out of the result - a run per line of script.
@@ -279,7 +285,7 @@ request is sent bound to it:
 - every `{{data.column}}` in the URL, headers and body is substituted from that
   row, exactly as a run's iteration would substitute it;
 - both scripts read the row as `pm.iterationData`, with `pm.info.iteration` `0`
-  and `pm.info.iterationCount` `1` - the send *is* row 0 of 1;
+  and `pm.info.iterationCount` `1` - the send _is_ row 0 of 1;
 - the response lands in the response pane like any other Send, and the send
   appears in History like any other design run.
 
@@ -290,11 +296,12 @@ it again in the Data tab is the fix.
 
 **Auth credentials bind on a single send too.** A `{{data.user}}` in a
 basic-auth username, a bearer token or an api key takes the row's value the same
-way the URL and the body do, and it does so *before* the credentials are encoded
+way the URL and the body do, and it does so _before_ the credentials are encoded
+
 - so the header carries the row's values rather than base64 of the token text.
-This is the same thing a collection run does per iteration, which is what makes
-a credentials file work identically under Send-with-row and under Run
-collection.
+  This is the same thing a collection run does per iteration, which is what makes
+  a credentials file work identically under Send-with-row and under Run
+  collection.
 
 The exception is **OAuth 2.0**: its token is fetched from the token endpoint
 rather than written into the request, so no row can reach it, under either
@@ -312,5 +319,5 @@ user data of unknown sensitivity - credentials, customer records - so neither
 the app nor the engine persists them, and the file itself is read fresh every
 time - whether you pick it or the dialog pre-fills it from the declared path.
 
-Declaring a contract does not change this. What is saved is the *shape* of the
+Declaring a contract does not change this. What is saved is the _shape_ of the
 file - its column names, and its name for display - never a cell of it.
