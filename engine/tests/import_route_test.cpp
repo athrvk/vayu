@@ -13,9 +13,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/http/transport_policy.hpp"
+
 namespace vayu::http::routes {
 // Declared in import.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> import_fetch (const std::string& request_body);
+std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
+const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
 
 namespace {
@@ -51,13 +54,15 @@ class MockSpecServer {
 };
 
 TEST (ImportFetch, RejectsInvalidJson) {
-    auto [status, body] = vayu::http::routes::import_fetch ("not json");
+    auto [status, body] = vayu::http::routes::import_fetch (
+    "not json", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 400);
     EXPECT_TRUE (body.contains ("error"));
 }
 
 TEST (ImportFetch, RejectsNonHttpUrl) {
-    auto [status, body] = vayu::http::routes::import_fetch (R"({"url":"ftp://x/y"})");
+    auto [status, body] = vayu::http::routes::import_fetch (
+    R"({"url":"ftp://x/y"})", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 400);
 }
 
@@ -65,14 +70,16 @@ TEST (ImportFetch, ProxiesSuccessfully) {
     MockSpecServer mock;
     std::string body =
     R"({"url":"http://127.0.0.1:)" + std::to_string (mock.port ()) + R"(/spec.json"})";
-    auto [status, json] = vayu::http::routes::import_fetch (body);
+    auto [status, json] =
+    vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 200);
     EXPECT_EQ (json["content"].get<std::string> (), R"({"openapi":"3.0.0"})");
 }
 
 TEST (ImportFetch, ReturnsBadGatewayOnFetchFailure) {
     // Port 1 is not listening → connection failure.
-    auto [status, body] = vayu::http::routes::import_fetch (R"({"url":"http://127.0.0.1:1/x"})");
+    auto [status, body] = vayu::http::routes::import_fetch (
+    R"({"url":"http://127.0.0.1:1/x"})", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 502);
 }
 
@@ -80,7 +87,8 @@ TEST (ImportFetch, ProxiesNon2xxRemoteResponse) {
     MockSpecServer mock;
     std::string body =
     R"({"url":"http://127.0.0.1:)" + std::to_string (mock.port ()) + R"(/missing"})";
-    auto [status, json] = vayu::http::routes::import_fetch (body);
+    auto [status, json] =
+    vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 200); // transport OK → proxied through, not 502
     EXPECT_EQ (json["content"].get<std::string> (), R"({"error":"not found"})");
 }

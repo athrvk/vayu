@@ -119,7 +119,13 @@ const std::string& url, TokenRequest& req, const std::string& key) {
     req.headers["Content-Type"] = "application/x-www-form-urlencoded";
     req.headers["Accept"]       = "application/json";
 
-    vayu::http::Client client;
+    // The token endpoint is behind the same network as everything else, and it
+    // is the one a corporate proxy most often fronts (issue #705) - an
+    // execute path that proxied while token acquisition did not would fail
+    // every authenticated request with an auth error rather than a proxy one.
+    vayu::http::ClientConfig client_config;
+    client_config.transport = vayu::http::resolve_transport_policy (db);
+    vayu::http::Client client (client_config);
     auto result = client.post (url, vayu::utils::form_encode (req.form), req.headers);
     if (!result.is_ok ()) {
         return TokenError{ 502, "oauth2_network_error",

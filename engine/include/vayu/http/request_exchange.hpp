@@ -32,6 +32,7 @@
 
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 
@@ -187,6 +188,12 @@ struct ExchangeInputs {
     /// the run has none. Borrowed for the length of the call and outlived by
     /// the run's `ScenarioExecution` (issue #356).
     const nlohmann::json* iteration_data = nullptr;
+    /// How this exchange's send - and any `pm.sendRequest` its scripts make -
+    /// reaches the network (issue #705). Carried on the inputs rather than
+    /// resolved here because `execute_exchange` holds no `Database`; the two
+    /// callers that do (the design route and the scenario runner) resolve it
+    /// once and hand it down.
+    vayu::http::TransportPolicy transport;
 };
 
 /** What one exchange produced. */

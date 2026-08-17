@@ -454,8 +454,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         curl_easy_setopt (curl, CURLOPT_MAXREDIRS,
         static_cast<long> (request.request.max_redirects));
     }
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.request.verify_ssl ? 1L : 0L);
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.request.verify_ssl ? 2L : 0L);
+    // Until #705 this path set no proxy option at all, so a configured proxy
+    // covered every send and every load run and silently skipped streams. The
+    // shared applier is what makes that unrepeatable.
+    detail::apply_transport_policy (curl, request.transport, request.request.verify_ssl);
     curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
     vayu::http::to_curl_http_version (request.request.http_version));
     if (request.cookie_jar) {
@@ -518,7 +520,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         reason = SseEndReason::Idle;
     } else if (result != CURLE_OK) {
         reason                 = SseEndReason::Error;
-        const Error error      = detail::curl_to_error (result, error_buffer);
+        const Error error      = detail::curl_to_error (curl, result, error_buffer);
         response.status_code   = 0;
         response.status_text   = vayu::http::status_text (0);
         response.error_code    = error.code;

@@ -1003,6 +1003,9 @@ RunManager& manager) {
         loop_config.burst_size     = target_rps > 0 ? target_rps * 2.0 : 0.0;
         loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
         vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
+        // Read once for the run and held for it - see EventLoopConfig::transport
+        // for why a per-request policy would cost the connection pool.
+        loop_config.transport = vayu::http::resolve_transport_policy (db);
         loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
         db.get_config_int ("maxResponseBodyBytes",
         static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
@@ -1807,7 +1810,13 @@ MonitorConfig config) {
 
     // No cookie jar: this is the engine talking on its own behalf, like the
     // OAuth token call and the update check (see ClientConfig::cookie_jar).
-    vayu::http::Client client{ vayu::http::ClientConfig{} };
+    // The proxy is not the engine's own business though - a vitals endpoint
+    // inside a corporate network is reached the same way everything else is
+    // (issue #705). Resolved once, like the scrape cadence beside it, because
+    // the loop below runs for the length of the run.
+    vayu::http::ClientConfig monitor_client_config;
+    monitor_client_config.transport = vayu::http::resolve_transport_policy (db);
+    vayu::http::Client client{ monitor_client_config };
 
     int consecutive_failures = 0;
     bool backoff_logged      = false;

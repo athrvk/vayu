@@ -441,16 +441,51 @@ std::optional<Error> add_to_multi (CURLM* multi_handle, CURL* easy) {
     return error;
 }
 
-Error curl_to_error (CURLcode code, const char* error_buffer) {
+namespace {
+
+/// Whether the proxy itself refused the tunnel, which the CURLcode alone
+/// cannot say: curl reports a 4xx answered to a CONNECT as `CURLE_RECV_ERROR`,
+/// the same code an upstream that hung up mid-body produces. The connect code
+/// is the only place the distinction survives, and it is 0 on every transfer
+/// that never issued a CONNECT.
+bool proxy_refused_tunnel (CURL* curl) {
+    if (!curl) {
+        return false;
+    }
+    long connect_code = 0;
+    if (curl_easy_getinfo (curl, CURLINFO_HTTP_CONNECTCODE, &connect_code) != CURLE_OK) {
+        return false;
+    }
+    return connect_code >= 400;
+}
+
+} // namespace
+
+Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
     Error error;
     error.message = error_buffer[0] ? error_buffer : curl_easy_strerror (code);
+
+    // Checked before the code, not as a fallback under it: a proxy that
+    // answered the CONNECT with a 4xx is a proxy failure whatever CURLcode
+    // came out, and curl spreads that one event across at least two of them
+    // (`CURLE_COULDNT_CONNECT` for the refusal, `CURLE_RECV_ERROR` when the
+    // tunnel dies after). Deciding from the connect code first means the
+    // mapping does not have to enumerate them.
+    if (code != CURLE_OK && proxy_refused_tunnel (curl)) {
+        error.code = ErrorCode::ProxyError;
+        return error;
+    }
 
     switch (code) {
     case CURLE_OK: error.code = ErrorCode::None; break;
     case CURLE_OPERATION_TIMEDOUT: error.code = ErrorCode::Timeout; break;
+    // The proxy hop is a distinct failure domain from the target's: "cannot
+    // resolve the proxy" reported as a connection failure sent users hunting
+    // an endpoint that was never the problem (issue #705).
+    case CURLE_COULDNT_RESOLVE_PROXY: error.code = ErrorCode::ProxyError; break;
+    case CURLE_PROXY: error.code = ErrorCode::ProxyError; break;
     case CURLE_COULDNT_CONNECT:
     case CURLE_COULDNT_RESOLVE_HOST:
-    case CURLE_COULDNT_RESOLVE_PROXY:
         error.code = ErrorCode::ConnectionFailed;
         break;
     case CURLE_SSL_CONNECT_ERROR:
@@ -464,6 +499,63 @@ Error curl_to_error (CURLcode code, const char* error_buffer) {
     }
 
     return error;
+}
+
+void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool verify_ssl) {
+    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, verify_ssl ? 1L : 0L);
+    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, verify_ssl ? 2L : 0L);
+
+    switch (policy.proxy_mode) {
+    case ProxyMode::Environment:
+        // Null restores libcurl's default, which *is* the environment pickup.
+        // Written rather than skipped so a reused handle cannot keep a proxy
+        // the previous policy set - see the header.
+        curl_easy_setopt (curl, CURLOPT_PROXY, static_cast<const char*> (nullptr));
+        break;
+    case ProxyMode::Manual:
+        curl_easy_setopt (curl, CURLOPT_PROXY, policy.proxy_url.c_str ());
+        break;
+    case ProxyMode::Off:
+        // Empty string, not null: an empty CURLOPT_PROXY is what disables the
+        // environment pickup. Null would re-enable it, and "off" that still
+        // proxies because a shell exported https_proxy is not off.
+        curl_easy_setopt (curl, CURLOPT_PROXY, "");
+        break;
+    }
+
+    // The bypass list, and the null-versus-empty distinction is load-bearing:
+    // libcurl falls back to the process's `no_proxy` variable whenever
+    // CURLOPT_NOPROXY is null, and an empty string means "exempt nothing".
+    //
+    // So `manual` always writes the list, empty or not. A user who names a
+    // proxy in Settings has said where their traffic goes, and an inherited
+    // `no_proxy` quietly exempting half of it is the same invisible failure
+    // this issue exists to end - it is also not hypothetical: a container that
+    // exports `no_proxy=...,127.0.0.1,...` bypassed a configured proxy for
+    // every local target and reported nothing.
+    //
+    // `environment` leaves it null on purpose: that mode *is* "do what the
+    // environment says", `no_proxy` included, unless a bypass list overrides
+    // it. `off` has no proxy for a list to modify.
+    switch (policy.proxy_mode) {
+    case ProxyMode::Manual:
+        curl_easy_setopt (curl, CURLOPT_NOPROXY, policy.proxy_bypass.c_str ());
+        break;
+    case ProxyMode::Environment:
+        curl_easy_setopt (curl, CURLOPT_NOPROXY,
+        policy.proxy_bypass.empty () ? static_cast<const char*> (nullptr) :
+                                       policy.proxy_bypass.c_str ());
+        break;
+    case ProxyMode::Off:
+        curl_easy_setopt (curl, CURLOPT_NOPROXY, static_cast<const char*> (nullptr));
+        break;
+    }
+
+    // Cookies need no thought here, and that is worth stating because it looks
+    // like they should: libcurl owns the wire cookies and matches them on the
+    // *origin* host, never the proxy hop, and curl 8.21's cross-origin
+    // redirect-cookie rule keys on origin too. A proxy changes which socket
+    // the bytes leave by and nothing about which jar lines apply.
 }
 
 CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& config, DnsCache* dns_cache) {
@@ -586,9 +678,12 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
     }
 
-    // SSL verification
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+    // TLS verification and the proxy, both from the run-scoped policy. Run-
+    // scoped rather than per-request because libcurl only reuses a cached
+    // connection when its proxy and TLS config match, so varying either per
+    // transfer would partition every worker's pool and multiply handshakes
+    // (epic decision 3 of #704).
+    apply_transport_policy (curl, config.transport, request.verify_ssl);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
@@ -633,11 +728,6 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     if (config.verbose) {
         curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
         curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
-    }
-
-    // Proxy
-    if (!config.proxy_url.empty ()) {
-        curl_easy_setopt (curl, CURLOPT_PROXY, config.proxy_url.c_str ());
     }
 
     // Store private data pointer
@@ -778,7 +868,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
              Error{ ErrorCode::InternalError,
             "Response body exceeded the " + std::to_string (data->max_response_bytes) +
             " byte cap (maxResponseBodyBytes)" } :
-             curl_to_error (result, data->error_buffer);
+             curl_to_error (curl, result, data->error_buffer);
         response.error_code    = error.code;
         response.error_message = error.message;
         response.status_code   = 0;

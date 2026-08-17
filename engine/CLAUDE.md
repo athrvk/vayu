@@ -224,6 +224,20 @@ Three things worth knowing before you design around them:
   the defaults, because the engine's `follow_redirects` defaults to **true** -
   an omitted `false` would silently follow the 3xx the user asked to see.
   **`verifySSL` is still engine-only**; it was deliberately not exposed.
+- **Every outbound transfer leaves through one `TransportPolicy`** (#705,
+  `include/vayu/http/transport_policy.hpp`). It is resolved from the
+  `proxyMode` / `proxyUrl` / `proxyBypass` settings at the point of use -
+  run-scoped on the load and collection paths, because libcurl only reuses a
+  pooled connection when its proxy config matches - and applied by the single
+  `detail::apply_transport_policy`, which owns TLS verification and the proxy
+  options for **all three** drivers. Add a transport option there, never to a
+  driver: the three had grown their own SSL blocks and only two ever grew a
+  proxy block, so SSE silently ignored `CURLOPT_PROXY` for its whole life.
+  Every mode writes `CURLOPT_PROXY` rather than skipping it, because handles
+  are reused. A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
+  the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
+  because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
+  `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no.
 
 ## Request composition (engine-owned - POST /compose)
 

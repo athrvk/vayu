@@ -49,6 +49,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/spec_binding.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/logger.hpp"
 
 // ============================================================================
@@ -1950,6 +1951,19 @@ std::string http_version_options_json () {
 // are its own enumeration, not ours, so the list is literal - but it belongs in
 // the `options` column rather than spelled out as "0 = Off, 1 = ..." prose over
 // an integer input, which is what the entry used to do.
+// The `{value,label}` array for "proxyMode". Derived from the enumeration the
+// resolver parses, so a mode added to `ProxyMode` cannot be missing from the
+// options the config route validates against - which would make it a value
+// the engine understands and `POST /config` refuses.
+std::string proxy_mode_options_json () {
+    nlohmann::json options = nlohmann::json::array ();
+    for (const auto mode : vayu::http::all_proxy_modes ()) {
+        options.push_back ({ { "value", vayu::http::to_string (mode) },
+        { "label", vayu::http::proxy_mode_label (mode) } });
+    }
+    return options.dump ();
+}
+
 std::string db_synchronous_options_json () {
     const nlohmann::json options = { { { "value", "0" }, { "label", "Off" } },
         { { "value", "1" }, { "label", "Normal" } },
@@ -2198,6 +2212,42 @@ void Database::seed_default_config () {
     "0",    // Disable cache
     "3600", // 1 hour
     std::nullopt, now })));
+
+    // Proxy (issue #705). Three entries, read together by
+    // `resolve_transport_policy` at the point of use, so a change applies to
+    // the next transfer rather than the next restart. The keywords are the
+    // words someone arrives with when nothing works and they suspect the
+    // network - none of which the labels say.
+    upsert_config (keywords ({ "corporate", "firewall", "mitm", "zscaler", "vpn" }) (
+    ConfigEntry{ "proxyMode",
+    vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), "enum",
+    "Proxy",
+    "How outbound requests reach the network. From environment uses the "
+    "http_proxy and https_proxy variables the engine was started with, which "
+    "is what a terminal-launched engine already picks up and a desktop launch "
+    "usually has none of. Manual routes everything through the proxy URL "
+    "below. None sends direct, ignoring those variables too.",
+    "network_performance",
+    vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), std::nullopt,
+    std::nullopt, proxy_mode_options_json (), now }));
+
+    upsert_config (keywords ({ "corporate", "firewall", "mitm" }) (ConfigEntry{ "proxyUrl", "",
+    "string", "Proxy URL",
+    "The proxy to route through when Proxy is set to Manual, written the way "
+    "curl takes it: scheme://user:password@host:port. The scheme selects the "
+    "kind - http, https, socks4, socks4a, socks5, socks5h - and credentials in "
+    "the URL are sent as basic proxy authentication.",
+    "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    upsert_config (keywords ({ "exclude", "whitelist", "intranet" }) (
+    ConfigEntry{ "proxyBypass", "", "string", "Proxy Bypass List",
+    "Hosts that skip the proxy, comma-separated. A leading dot matches a "
+    "domain and everything under it (.internal.example.com), and a single * "
+    "bypasses the proxy for every host. Under Manual this list is the whole "
+    "rule, so an empty one means nothing is exempt and any no_proxy the engine "
+    "was started with is ignored. Under From environment it overrides that "
+    "variable when set, and defers to it when empty.",
+    "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // =========================================================================
     // SERVICES (services)

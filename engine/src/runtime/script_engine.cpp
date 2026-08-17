@@ -131,6 +131,10 @@ struct ContextData {
     /// hands them to the auxiliary transfer.
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
 
+    /// How `pm.sendRequest` reaches the network - see
+    /// `ScriptContext::transport`, which owns the rationale.
+    vayu::http::TransportPolicy transport;
+
     /// Whether `pm.execution` may record an intent at all - see
     /// `ScriptContext::in_scenario`.
     bool in_scenario = false;
@@ -4326,6 +4330,11 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     vayu::http::ClientConfig client_config;
     client_config.cookie_jar   = data->cookie_jar;
     client_config.cookie_scope = data->cookie_scope;
+    // The same route out of the machine the enclosing exchange's own send
+    // takes (issue #705). A script that authenticates through sendRequest and
+    // then lets the real request carry the session needs both to reach the
+    // network the same way.
+    client_config.transport = data->transport;
     // Staged jar writes ride the next transfer of this execution, and this is
     // it - so a script that sets a cookie and then sends through
     // pm.sendRequest carries it. Drained rather than copied: this transfer's
@@ -5275,6 +5284,7 @@ class ScriptEngine::Impl {
         ctx_data.cookie_jar         = ctx.cookie_jar;
         ctx_data.cookie_scope       = ctx.cookie_scope;
         ctx_data.cookie_writes      = ctx.cookie_writes;
+        ctx_data.transport          = ctx.transport;
         ctx_data.in_scenario        = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 

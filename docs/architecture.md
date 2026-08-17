@@ -216,6 +216,35 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 6. Manager updates dashboard in real-time
 7. When test completes, Manager fetches final report (`/runs/{runId}/report`)
 
+### Outbound Transport
+
+Every request the engine puts on the wire - a design send, a load run, an SSE
+stream, an OAuth token fetch, a spec import by URL, a monitor scrape - leaves
+through one transport policy, resolved from Settings > Network & connectivity
+at the point of use and applied by a single function
+(`detail::apply_transport_policy`). There is one hop between the engine and the
+target and it is either absent or a proxy:
+
+```
+Engine (libcurl) ──▶ [proxy, when configured] ──▶ Target API
+```
+
+`proxyMode` decides which:
+
+- `environment` (default) - libcurl's own `http_proxy` / `https_proxy` /
+  `no_proxy` pickup. This is the behaviour a terminal-launched engine already
+  had; a desktop launch usually inherits none of those variables.
+- `manual` - the configured `proxyUrl`, written the way curl takes it
+  (`scheme://user:password@host:port`, which covers SOCKS and basic proxy
+  auth).
+- `off` - no proxy at all, environment variables included.
+
+`proxyBypass` (curl's `NOPROXY` semantics) exempts hosts from the proxy in
+either proxying mode. A failure of the hop itself - an unresolvable proxy host,
+a refused CONNECT - is reported as its own `PROXY_ERROR`, never as the target's
+`CONNECTION_FAILED`. Cookies are unaffected: libcurl matches them on the origin
+host, never on the proxy.
+
 ### Variable Resolution
 
 Variables are resolved with priority: **Environment > Collection > Global**
@@ -231,6 +260,10 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
 - **Context Isolation**: Electron renderer runs in isolated context (no Node.js access)
 - **No Cloud Sync**: All data stored locally in SQLite database
+- **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
+  SQLite, the same way every other stored credential is. libcurl derives the
+  `Proxy-Authorization` header from the URL, and that header is on the
+  redaction list, so credentials never reach a stored trace or a debug log.
 
 ## Performance Characteristics
 

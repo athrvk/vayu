@@ -53,6 +53,7 @@
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/live_claim.hpp"
 #include "vayu/http/sse_parser.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -307,6 +308,11 @@ struct SseStreamRequest {
     /// and in the order the send decides - the same route the non-streaming
     /// client's `ClientConfig::cookie_writes` takes.
     std::vector<CookieWrite> cookie_writes;
+    /// How this stream reaches the network (issue #705). Resolved by the route
+    /// alongside `limits`, for the same reason: read once when the stream
+    /// starts, so a settings change applies to the next stream and one
+    /// transfer is never reconfigured underneath itself.
+    TransportPolicy transport;
     std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
     /**
      * Called on the worker thread once the stream has terminated, with the

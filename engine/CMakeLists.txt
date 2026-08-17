@@ -271,6 +271,7 @@ add_library(vayu_core STATIC
     src/http/set_cookie.cpp
     src/http/sse_parser.cpp
     src/http/sse_stream.cpp
+    src/http/transport_policy.cpp
     src/http/cookie_jar.cpp
     src/http/form_body.cpp
     src/http/graphql_body.cpp
@@ -465,6 +466,7 @@ if(VAYU_BUILD_TESTS)
         tests/sse_load_stream_test.cpp
         tests/load_stream_events_test.cpp
         tests/sse_stream_test.cpp
+        tests/transport_policy_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp
         tests/specs_route_test.cpp

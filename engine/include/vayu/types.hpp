@@ -338,7 +338,13 @@ enum class ErrorCode {
     /// so the request could not be built and nothing was sent. Appended rather
     /// than inserted: the numeric value is what a stored trace's `error_code`
     /// holds, so the existing ones cannot move.
-    DataBindingFailed
+    DataBindingFailed,
+    /// The proxy hop failed, not the target: an unresolvable proxy host, a
+    /// SOCKS handshake failure, or a 4xx answered to the CONNECT. Distinct
+    /// because reporting these as `ConnectionFailed` or `InternalError` sent
+    /// users debugging an endpoint that was never reached (issue #705).
+    /// Appended for the same reason `DataBindingFailed` was.
+    ProxyError
 };
 
 /**
@@ -358,6 +364,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::AuthFailed: return "AUTH_FAILED";
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
     case ErrorCode::DataBindingFailed: return "DATA_BINDING_FAILED";
+    case ErrorCode::ProxyError: return "PROXY_ERROR";
     }
     return "UNKNOWN";
 }

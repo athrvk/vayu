@@ -15,6 +15,7 @@
 
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http::detail {
@@ -25,8 +26,34 @@ class DnsCache;
 
 /**
  * @brief Convert CURL error code to vayu Error
+ *
+ * @param curl The handle the transfer ran on, read for the proxy detail curl
+ *             only exposes through `curl_easy_getinfo` - a 407 answered to a
+ *             CONNECT comes back as a plain `CURLE_RECV_ERROR` and is
+ *             indistinguishable from an upstream one without it. May be null
+ *             where no handle is available; the mapping then falls back to the
+ *             code alone.
  */
-Error curl_to_error (CURLcode code, const char* error_buffer);
+Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer);
+
+/**
+ * @brief Put the transport policy on a handle: TLS verification and the proxy.
+ *
+ * The one place any driver configures either. It exists because the three
+ * drivers each grew their own copy of the SSL block and only two of them ever
+ * grew a proxy block, so `POST /execute` and a load run honoured
+ * `CURLOPT_PROXY` while an SSE stream silently did not (issue #705). A
+ * transport option added here reaches all three by construction.
+ *
+ * Every mode writes `CURLOPT_PROXY` rather than skipping it: handles are
+ * reused (the single-request client keeps one for its lifetime, the event loop
+ * recycles them across transfers), so a branch that left the option alone
+ * would inherit whatever the previous policy put there.
+ *
+ * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
+ *                   of #704 adds the policy-level CA fields beside it.
+ */
+void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool verify_ssl);
 
 /**
  * @brief Get HTTP status text from status code

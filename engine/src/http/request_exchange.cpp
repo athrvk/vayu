@@ -321,6 +321,9 @@ bool verbose) {
         ctx.iteration       = inputs.iteration;
         ctx.iteration_count = inputs.iteration_count;
         ctx.in_scenario     = inputs.in_scenario;
+        // Both scripts' `pm.sendRequest` leaves by the same route the send
+        // below does - see ScriptContext::transport.
+        ctx.transport = inputs.transport;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.
@@ -352,6 +355,7 @@ bool verbose) {
     config.cookie_jar    = &jar;
     config.cookie_scope  = cookie_scope;
     config.cookie_writes = std::move (pre_cookie_writes);
+    config.transport     = inputs.transport;
     vayu::http::Client client (config);
     outcome.response = client.send (outcome.request).value ();
 

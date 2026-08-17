@@ -569,13 +569,14 @@ three keys - so a byte-valued entry added engine-side was formatted as a raw
 number until someone edited a TypeScript array. A client that meets a unit it
 does not know should show it verbatim rather than drop it.
 
-Two entries are seeded as `enum` today. `defaultHttpVersion` is the protocol a
+Three entries are seeded as `enum` today. `defaultHttpVersion` is the protocol a
 **newly created** request starts with (see [POST /requests](#post-requests)).
 It is a write-time seed only - changing it never alters a request that already
 exists, and it is never consulted at execution time. `dbSynchronous` is
 SQLite's durability level, whose three values (`"0"` Off, `"1"` Normal, `"2"`
 Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
+`proxyMode` is the third - see [Proxy settings](#proxy-settings) below.
 
 The Settings panel renders entries dynamically, so new keys appear without app
 changes. The entries below span three categories: the `data_retention` keys
@@ -596,6 +597,58 @@ governs what a run measures rather than what it keeps:
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
+
+#### Proxy settings
+
+Three `network_performance` entries decide how **every** outbound request
+leaves the machine - design sends, load runs, SSE streams, OAuth token
+acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride)
+and the monitor scrape alike. They are read at the point of use, so a change
+applies to the next transfer with no restart; a load run and a collection run
+read the policy **once at run start** and hold it for the run, because libcurl
+reuses a pooled connection only when its proxy configuration matches.
+
+| Key | Default | Values | Effect |
+|-----|---------|--------|--------|
+| `proxyMode` | `environment` | `environment`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
+| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. |
+| `proxyBypass` | `""` | comma-separated hosts | Hosts that skip the proxy, passed to curl's `NOPROXY` verbatim: a leading dot matches a domain and everything under it, a single `*` bypasses everything. |
+
+**`proxyBypass` and an inherited `no_proxy` interact by mode, deliberately.**
+libcurl consults the process's `no_proxy` variable whenever `CURLOPT_NOPROXY`
+is unset, so:
+
+- Under **`manual`**, this list is the entire rule and is always written, empty
+  or not. An empty list exempts nothing, and an inherited `no_proxy` is
+  ignored. Anything else means a user who named a proxy in Settings has their
+  traffic silently exempted from it by an ambient variable - which is the same
+  invisible failure the mode exists to fix, and not hypothetical: a container
+  exporting `no_proxy=...,127.0.0.1,...` bypasses a configured proxy for every
+  local target and says nothing.
+- Under **`environment`**, an empty list defers to `no_proxy` - "do what the
+  environment says" includes the exemptions it names - and a non-empty one
+  overrides it.
+- Under **`off`** there is no proxy for a bypass list to modify.
+
+`POST /config` enforces one cross-field rule these three have and the per-key
+validation cannot express: **`proxyMode: "manual"` requires a usable
+`proxyUrl`**, judged against the state the update would leave rather than
+against the keys in the body, so setting the mode alone is a `400` and so is
+clearing the URL while the mode is already `manual`. A malformed URL is
+rejected under any mode; a *valid* URL stored while the mode is `off` is kept
+untouched, which is how a proxy is switched off temporarily without losing it.
+
+A failure of the proxy hop is reported as its own error code, `PROXY_ERROR`,
+rather than as the target's: an unresolvable proxy hostname (previously
+`CONNECTION_FAILED`, which sent people debugging an endpoint that was never
+reached), a SOCKS handshake failure, and a `4xx` answered to a `CONNECT` -
+including the `407` a proxy demanding authentication returns, which curl
+reports as a generic receive error and which previously surfaced as
+`INTERNAL_ERROR`. The code is **appended** to the error enumeration, so the
+numeric values stored in existing traces are unchanged.
+
+Cookies are unaffected by any of this: libcurl owns the wire cookies and
+matches them on the **origin** host, never the proxy hop.
 
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
