@@ -221,7 +221,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    did this run exercise" is a whole-run answer, and a reader
 				    who has to scroll past forty step cards to reach it will not.
 				    Absent for a run of a collection bound to nothing. */}
-				<ContractCoverage coverage={report?.coverage} />
+				<ContractCoverage
+					coverage={report?.coverage}
+					inheritedBinding={report?.metadata?.openapi?.inherited}
+				/>
 
 				{/* And whether what came back honoured it - the same whole-run
 				    answer, so it sits under coverage here exactly as it does in

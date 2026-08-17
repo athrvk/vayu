@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/http/request_composer.hpp"
+
 namespace vayu::core {
 
 std::optional<std::string> stamp_spec_binding (const std::string& openapi,
@@ -47,6 +49,39 @@ const std::function<std::optional<SpecStamp> (const std::string& spec_id)>& stam
         binding["syncedAt"] = stamp->synced_at;
     }
     return binding.dump ();
+}
+
+namespace {
+
+/// A binding field, or `""` for one that is absent or not a string. Typed
+/// rather than `value()`d because a column edited from outside the engine can
+/// hold anything, and `value()` throws on a type it did not expect.
+std::string string_field (const nlohmann::json& binding, const char* key) {
+    const auto field = binding.find (key);
+    return field != binding.end () && field->is_string () ?
+    field->get<std::string> () :
+    std::string ();
+}
+
+} // namespace
+
+std::optional<BoundSpec>
+nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id) {
+    const auto chain = vayu::http::collection_chain (db, collection_id);
+    // Root-first, so walking backwards finds the *nearest* bound ancestor.
+    for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
+        const nlohmann::json binding =
+        nlohmann::json::parse (it->openapi, nullptr, /*allow_exceptions=*/false);
+        if (!binding.is_object ()) {
+            continue; // an unparseable column binds nothing, as everywhere else
+        }
+        auto spec_id = string_field (binding, "specId");
+        if (spec_id.empty ()) {
+            continue;
+        }
+        return BoundSpec{ it->id, std::move (spec_id), string_field (binding, "specHash") };
+    }
+    return std::nullopt;
 }
 
 } // namespace vayu::core

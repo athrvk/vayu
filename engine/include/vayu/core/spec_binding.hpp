@@ -11,6 +11,8 @@
 #include <optional>
 #include <string>
 
+#include "vayu/db/database.hpp"
+
 /**
  * @file spec_binding.hpp
  * @brief Completing a collection's `openapi` binding (issue #709).
@@ -69,5 +71,46 @@ struct SpecStamp {
  */
 [[nodiscard]] std::optional<std::string> stamp_spec_binding (const std::string& openapi,
 const std::function<std::optional<SpecStamp> (const std::string& spec_id)>& stamp_of);
+
+/** Which collection answers for a request's contract, and what it binds. */
+struct BoundSpec {
+    /**
+     * The collection the binding was found on - the run's own collection, or an
+     * ancestor of it.
+     *
+     * Carried rather than dropped because it is the difference between "this
+     * collection covers 4 of 618 operations" and the same sentence read as a
+     * catastrophe: a run of one tag sub-collection is measured against the
+     * whole document its root binds, and the reader has to be told that is what
+     * happened (issue #716).
+     */
+    std::string collection_id;
+    std::string spec_id;
+    /// `""` for a binding that names no version - see `stamp_spec_binding`.
+    std::string spec_hash;
+};
+
+/**
+ * The binding that answers for @p collection_id: the nearest bound collection
+ * walking from it up to the root, or `std::nullopt` when nothing in its
+ * ancestry binds a document.
+ *
+ * **One walk, because the two callers must agree.** An OpenAPI import binds the
+ * ROOT and files every request under tag sub-collections, so a request's own
+ * collection almost never carries the binding. Design-mode validation resolved
+ * that by walking the chain while scenario resolution read only the named
+ * collection's own column, and the two disagreed about what "bound" means -
+ * running the `pets` tag folder measured no coverage and validated nothing,
+ * silently (issue #716). Nearest ancestor wins, so a sub-collection that binds a
+ * document of its own answers for its own requests rather than the root's
+ * document answering for everything.
+ *
+ * An unparseable or non-object `openapi` column binds nothing and the walk
+ * continues past it, the reading every other reader of that column gives it. The
+ * chain is cycle-guarded by `collection_chain`, so corrupted `parent_id` data
+ * terminates instead of looping under the DB mutex.
+ */
+[[nodiscard]] std::optional<BoundSpec>
+nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id);
 
 } // namespace vayu::core

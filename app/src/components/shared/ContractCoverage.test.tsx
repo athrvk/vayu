@@ -110,6 +110,21 @@ describe("ContractCoverage", () => {
 		).toBeTruthy();
 	});
 
+	it("says whose contract it is when the binding came from a parent collection", () => {
+		// A tag sub-collection of an imported spec is measured against the whole
+		// document, so most of it is honestly uncovered - without this line the
+		// same numbers read as a catastrophe (issue #716).
+		render(<ContractCoverage coverage={coverage()} inheritedBinding />);
+		expect(screen.getByText(/contract is bound on a parent collection/)).toBeTruthy();
+	});
+
+	it("stays silent about the binding when the collection that ran carries it", () => {
+		// Absent is the engine's spelling of "nothing to disclose", and a line
+		// about parent collections on a whole-collection run would be noise.
+		render(<ContractCoverage coverage={coverage()} />);
+		expect(screen.queryByText(/parent collection/)).toBeNull();
+	});
+
 	it("reads as complete only when nothing is uncovered and nothing undeclared", () => {
 		render(
 			<ContractCoverage

@@ -36,6 +36,9 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/db/database.hpp"
+// For `resolve_design_schema_index` - the design path this file now pins
+// against the scenario path (issue #716).
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
@@ -847,6 +850,157 @@ TEST_F (SpecsRouteTest, ABindingWhoseHashHasMovedIsNotMeasuredRatherThanMismeasu
     execution.plan = resolved.plan;
     execution.spec = resolved.spec;
     EXPECT_FALSE (vayu::core::make_coverage_tally (execution).active ());
+}
+
+// ---------------------------------------------------------------------------
+// The ancestor walk (issue #716) - one answer for both paths
+// ---------------------------------------------------------------------------
+
+/**
+ * The shape an OpenAPI import actually produces: the ROOT binds the document and
+ * every request lives under a tag sub-collection that binds nothing. Returns the
+ * tag sub-collection's id, the one a user right-clicks to run.
+ */
+std::string bind_root_with_tag_child (vayu::db::Database& db,
+const std::string& spec_id,
+const std::string& hash,
+std::string* root_out = nullptr) {
+    auto [root_status, root] = routes::create_collection_response (db,
+    json{ { "name", "Pets API" },
+    { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
+    EXPECT_EQ (root_status, 200) << root.dump ();
+    const std::string root_id = root.value ("id", std::string{});
+    if (root_out != nullptr) {
+        *root_out = root_id;
+    }
+    auto [tag_status, tag] = routes::create_collection_response (db,
+    json{ { "name", "pets" }, { "parentId", root_id } });
+    EXPECT_EQ (tag_status, 200) << tag.dump ();
+    return tag.value ("id", std::string{});
+}
+
+TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
+    // The whole of the reported bug: the binding is on the root an import
+    // created, the requests are one level down, and running that tag folder used
+    // to resolve `{}` - no coverage, no schema validation, and an absent block
+    // is indistinguishable from "never bound".
+    const json operations =
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    const json response_schemas = { { "refRoots", json::object () },
+        { "operations",
+        json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
+        { "responses",
+        json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
+        { "schema", json{ { "type", "array" } } } } }) } } }) } };
+    auto [status, stored] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", operations },
+    { "responseSchemas", response_schemas } });
+    ASSERT_EQ (status, 200) << stored.dump ();
+    const std::string spec_id = stored.value ("id", std::string{});
+    const std::string hash    = routes::spec_content_hash (PETSTORE);
+
+    const std::string tag_id = bind_root_with_tag_child (*db_, spec_id, hash);
+    create_request (tag_id,
+    json{ { "specOperation",
+    { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+
+    auto resolved = resolve (tag_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_TRUE (resolved.spec.bound ()) << "the root's binding answers for its subtree";
+    EXPECT_EQ (resolved.spec.spec_id, spec_id);
+    EXPECT_EQ (resolved.spec.spec_hash, hash);
+    EXPECT_FALSE (resolved.spec.schema_reason.has_value ())
+    << "measurable, not a binding to explain away";
+    EXPECT_EQ (resolved.spec.declared_operations.size (), 1u)
+    << "no declared operations means no coverage block on this run";
+    EXPECT_FALSE (resolved.spec.response_schemas.empty ())
+    << "no schema index means no response of this run was ever validated";
+
+    vayu::core::ScenarioExecution execution;
+    execution.plan = resolved.plan;
+    execution.spec = resolved.spec;
+    EXPECT_TRUE (vayu::core::make_coverage_tally (execution).active ())
+    << "an inactive tally is how the coverage section goes missing";
+
+    // And the run says whose contract it was measured against, because most of
+    // those 618 operations being uncovered is scoped-run truth, not catastrophe.
+    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
+    resolved.plan, resolved.spec);
+    ASSERT_TRUE (manifest.contains ("openapi")) << manifest.dump ();
+    EXPECT_EQ (manifest["openapi"]["specId"].get<std::string> (), spec_id);
+    EXPECT_TRUE (manifest["openapi"].value ("inherited", false)) << manifest.dump ();
+}
+
+TEST_F (SpecsRouteTest, ACollectionCarryingItsOwnBindingDisclosesNothingToDisclose) {
+    const std::string spec_id = store_spec ();
+    const std::string col_id  = create_collection (json{ { "name", "Pets" },
+    { "openapi", { { "specId", spec_id },
+    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    create_request (col_id);
+
+    auto resolved = resolve (col_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_FALSE (resolved.spec.inherited);
+    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
+    resolved.plan, resolved.spec);
+    // Absent rather than `false`, the rule every other finding in the report
+    // follows: carried only where it happened.
+    EXPECT_FALSE (manifest["openapi"].contains ("inherited")) << manifest.dump ();
+}
+
+TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
+    // Both walks must answer "the nearest bound ancestor", so a fixture where
+    // the nearest and the root disagree tells them apart. The nearer binding is
+    // deliberately stale: picking the root instead would resolve *cleanly*, so
+    // an agreeing pair of "unmeasurable" verdicts can only come from both paths
+    // having chosen the same - nearer - binding.
+    const json operations =
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    auto [status, stored] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "operations", operations } });
+    ASSERT_EQ (status, 200) << stored.dump ();
+    const std::string root_spec = stored.value ("id", std::string{});
+
+    constexpr const char* OTHER =
+    R"({"openapi":"3.1.0","info":{"title":"Store","version":"1.0.0"},"paths":{}})";
+    const std::string nearer_spec = store_spec (OTHER);
+
+    std::string root_id;
+    const std::string tag_id = bind_root_with_tag_child (
+    *db_, root_spec, routes::spec_content_hash (PETSTORE), &root_id);
+    auto [bind_status, bound] = routes::update_collection_response (*db_, tag_id,
+    json{ { "openapi",
+    { { "specId", nearer_spec }, { "specHash", "a-hash-this-document-never-had" } } } });
+    ASSERT_EQ (bind_status, 200) << bound.dump ();
+    // One level deeper again, so neither path is answering from the collection
+    // the binding sits on.
+    auto [leaf_status, leaf] = routes::create_collection_response (*db_,
+    json{ { "name", "pets/{petId}" }, { "parentId", tag_id } });
+    ASSERT_EQ (leaf_status, 200) << leaf.dump ();
+    const std::string leaf_id = leaf.value ("id", std::string{});
+    const std::string req_id  = create_request (leaf_id,
+    json{ { "specOperation",
+    { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+
+    auto resolved = resolve (leaf_id);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.spec.spec_id, nearer_spec)
+    << "nearest bound ancestor wins";
+    ASSERT_TRUE (resolved.spec.schema_reason.has_value ());
+    EXPECT_EQ (*resolved.spec.schema_reason, vayu::core::UncheckedReason::HashMismatch);
+    EXPECT_TRUE (resolved.spec.declared_operations.empty ())
+    << "the root's operations would mean the scenario walk took the wrong "
+       "binding";
+
+    const auto design = routes::resolve_design_schema_index (*db_, req_id);
+    EXPECT_TRUE (design.bound);
+    ASSERT_TRUE (design.reason.has_value ())
+    << "a clean index here means the design walk took the root's binding";
+    EXPECT_EQ (*design.reason, *resolved.spec.schema_reason)
+    << "the two paths must resolve one binding, or a Send and a run of the same "
+       "request disagree about what it is measured against";
 }
 
 TEST_F (SpecsRouteTest, ADocumentStoredWithoutAnIndexReportsNoCoverageRatherThanZero) {

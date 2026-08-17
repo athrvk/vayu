@@ -25,7 +25,6 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_binding.hpp"
-#include "vayu/http/request_composer.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -115,8 +114,9 @@ read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, siz
  *
  * The binding lives on the collection an import created, and requests live in
  * its *tag sub-collections*, so this walks the ancestry and takes the nearest
- * bound collection - the same chain `POST /compose` walks for inherited auth,
- * through the same helper, cycle guard included. A request whose ancestry binds
+ * bound collection - `core::nearest_spec_binding`, over the same chain
+ * `POST /compose` walks for inherited auth, cycle guard included, and the same
+ * function a scenario run resolves through. A request whose ancestry binds
  * nothing is not part of a contract: `bound` stays false and the caller writes
  * **no verdict at all**, which is the distinction the whole node rests on - a
  * response that was never judged against a contract did not fail one.
@@ -138,31 +138,16 @@ const std::optional<std::string>& request_id) {
     }
     resolved.spec_operation = request->spec_operation.value_or (std::string ());
 
-    std::string spec_id;
-    std::string spec_hash;
-    const auto chain = vayu::http::collection_chain (db, request->collection_id);
-    // Root-first, so walking backwards finds the *nearest* bound ancestor: a
-    // sub-collection that binds a document of its own answers for its own
-    // requests rather than the root's document answering for everything.
-    for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
-        try {
-            const auto binding = nlohmann::json::parse (it->openapi);
-            if (!binding.is_object ()) {
-                continue;
-            }
-            const auto id = binding.value ("specId", std::string ());
-            if (!id.empty ()) {
-                spec_id   = id;
-                spec_hash = binding.value ("specHash", std::string ());
-                break;
-            }
-        } catch (const std::exception&) {
-            continue; // an unparseable column binds nothing, as everywhere else
-        }
-    }
-    if (spec_id.empty ()) {
+    // The same walk `resolve_scenario` uses, through the same function: the two
+    // paths disagreeing about what "bound" means is what left a tag
+    // sub-collection's run measuring nothing while a Send of the same request
+    // was checked (issue #716).
+    const auto bound = vayu::core::nearest_spec_binding (db, request->collection_id);
+    if (!bound) {
         return resolved;
     }
+    const std::string& spec_id   = bound->spec_id;
+    const std::string& spec_hash = bound->spec_hash;
 
     resolved.bound = true;
     const auto document = db.get_spec_document (spec_id);

@@ -50,7 +50,10 @@ export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 			    Beside the verdict rather than below the charts, and for the same
 			    reason: a run can meet every budget while never calling four of
 			    eighteen operations. Absent for a run of an unbound collection. */}
-			<ContractCoverage coverage={report.coverage} />
+			<ContractCoverage
+				coverage={report.coverage}
+				inheritedBinding={report.metadata?.openapi?.inherited}
+			/>
 
 			{/* And whether what came back honoured that contract. Directly under
 			    coverage because the two answer halves of one question against the

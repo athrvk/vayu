@@ -36,6 +36,17 @@ import type { RunCoverage, RunCoverageOperation } from "@/types/domain";
 
 export interface ContractCoverageProps {
 	coverage: RunCoverage | undefined;
+	/**
+	 * `metadata.openapi.inherited` - the contract belongs to an ancestor of the
+	 * collection that ran (issue #716).
+	 *
+	 * The numbers are unchanged by it; what changes is how they read. Running one
+	 * tag sub-collection of an imported spec is measured against the whole
+	 * document, so "4 / 618 operations" is the honest answer for a scoped run and
+	 * a catastrophe for a whole-collection one, and nothing else on this card
+	 * tells them apart.
+	 */
+	inheritedBinding?: boolean;
 	className?: string;
 }
 
@@ -45,7 +56,7 @@ function formatPct(value: number): string {
 	return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
 }
 
-export function ContractCoverage({ coverage, className }: ContractCoverageProps) {
+export function ContractCoverage({ coverage, inheritedBinding, className }: ContractCoverageProps) {
 	if (!coverage || coverage.operations.length === 0) return null;
 
 	const uncovered = coverage.operationsTotal - coverage.operationsCovered;
@@ -102,6 +113,15 @@ export function ContractCoverage({ coverage, className }: ContractCoverageProps)
 				 */}
 				<p className="mb-3 text-[11px] text-muted-foreground">
 					Counted on every send, not from the stored sample.
+					{/*
+					 * Beside "what these numbers are" rather than raised as a
+					 * warning: running one tag folder of an imported spec is an
+					 * ordinary thing to do, and the operations it leaves uncovered
+					 * are the truth about the contract rather than a fault to flag
+					 * (issue #716).
+					 */}
+					{inheritedBinding &&
+						" The contract is bound on a parent collection, so its operations outside this one count as uncovered."}
 				</p>
 				<ul className="space-y-1.5">
 					{coverage.operations.map((operation) => (

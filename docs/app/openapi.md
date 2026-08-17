@@ -441,11 +441,24 @@ stamped on the run - not whatever the collection is bound to now. Sync the
 binding to a newer spec and an older run's report still says what that run
 actually covered.
 
+**Which collection's binding that is** follows the same rule a single Send does:
+the nearest bound collection walking from the one that ran up to the root. An
+import binds the root and files every request under its tag sub-collections, so
+running the `pets` folder is measured against the whole document - it is not an
+unbound run, and it was never meant to be one.
+
+That makes a scoped run's coverage **partial on purpose**: the run enumerates one
+folder, the contract is the whole API, and the operations under every other tag
+are honestly uncovered. The block says so in a line of its own when the contract
+came from a parent collection, so `4 / 618 operations` reads as the scope of the
+run rather than an API nobody is calling.
+
 ### When there is no coverage block
 
 Absent, never zeros, in each of these cases:
 
-- The collection is not bound to a document.
+- The collection is not bound to a document, and neither is any collection
+  above it.
 - The run was a single request rather than a collection run.
 - The bound document has **no operation index** - it was stored before this
   existed. Re-bind or sync the collection and its next run reports coverage.
@@ -579,7 +592,8 @@ figures it explains.
 
 Absent, never zeros, in each of these cases:
 
-- The collection is not bound to a document.
+- The collection is not bound to a document, and neither is any collection
+  above it.
 - The run was a single request rather than a collection run.
 - The bound document carries **no response schemas** - it was stored before this
   existed, or declares none. Re-bind or sync the collection.
