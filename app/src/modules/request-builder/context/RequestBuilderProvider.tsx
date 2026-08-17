@@ -21,6 +21,7 @@ import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
+import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import {
 	useCollectionAncestors,
 	useGlobalsQuery,
@@ -610,6 +611,13 @@ export default function RequestBuilderProvider({
 		[collectionId, collections]
 	);
 
+	/*
+	 * The row cap Send-with-row measures the declared file against (issue #751),
+	 * read here for the same reason the contract is resolved here: the config
+	 * query is the provider's to hold, not the URL bar's.
+	 */
+	const { maxRows: dataFileMaxRows } = useDataFileLimits();
+
 	const writableScopes = useMemo((): VariableScope[] => {
 		const scopes: VariableScope[] = [];
 		if (globalsData?.variables) scopes.push("global");
@@ -846,6 +854,7 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			dataFileMaxRows,
 			executeRequest,
 			saveRequest,
 			startLoadTest,
@@ -885,6 +894,7 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			dataFileMaxRows,
 			executeRequest,
 			saveRequest,
 			startLoadTest,

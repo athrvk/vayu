@@ -65,6 +65,7 @@ import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } fr
 import { loadTestService, scenarioRunService } from "@/services";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
 import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
+import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import type { Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
@@ -133,6 +134,14 @@ export default function RunCollectionDialog({
 	const [prefillNote, setPrefillNote] = useState<string | null>(null);
 
 	const rememberedFile = useDataFileStore((s) => s.locations[collection.id]);
+	/*
+	 * The row cap the pre-filled file has to fit inside, same as a hand-picked
+	 * one (issue #751). Read here as well as in the picker below because the
+	 * re-read happens before any picker holds the file - a file that grew past
+	 * the setting would otherwise pre-fill, preview, and be refused by the
+	 * engine at Run.
+	 */
+	const { maxRows } = useDataFileLimits();
 
 	/**
 	 * Pre-fill from the file this collection was last run with (issue #599).
@@ -152,7 +161,7 @@ export default function RunCollectionDialog({
 		// No Electron, no path to re-read - the picker stands.
 		if (!canReadDeclaredDataFile()) return;
 
-		void readDeclaredDataFile(rememberedFile.path)
+		void readDeclaredDataFile(rememberedFile.path, { maxRows })
 			.then((read) => {
 				if (cancelled) return;
 				setDataFile(read);

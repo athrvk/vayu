@@ -71,8 +71,18 @@ export interface SendWithRowState {
  *        needed a `QueryClientProvider` to render is the coupling issue #564
  *        removed from the variable slice and #600 kept out of the token
  *        painter. The provider already holds this answer.
+ * @param maxRows The live `maxScenarioDataRows` (issue #751), from the builder
+ *        context's `dataFileMaxRows` - and for the same reason as the contract,
+ *        since it is the config query that knows it. The cap bounds a *run* and
+ *        a Send binds one row, but the file is the collection's data set: one
+ *        the picker would refuse is not a set to offer rows out of, and letting
+ *        it through here would mean a request sending happily beside a
+ *        collection that cannot run at all.
  */
-export function useSendWithRow(contract: DataContractScope | undefined): SendWithRowState {
+export function useSendWithRow(
+	contract: DataContractScope | undefined,
+	maxRows: number
+): SendWithRowState {
 	// Keyed by the collection that *declared* the contract, not by the request's
 	// own parent: under the chain rule a sub-collection inherits an ancestor's
 	// contract, and the file was picked in that ancestor's Data tab.
@@ -98,7 +108,7 @@ export function useSendWithRow(contract: DataContractScope | undefined): SendWit
 		}
 		setStatus("loading");
 		setError(null);
-		void readDeclaredDataFile(path)
+		void readDeclaredDataFile(path, { maxRows })
 			.then((read) => {
 				setParsed(read.parsed);
 				setStatus("ready");
@@ -112,7 +122,7 @@ export function useSendWithRow(contract: DataContractScope | undefined): SendWit
 						: `The declared file is no longer at ${fileName ?? "its recorded path"} - pick it again in the Data tab.`
 				);
 			});
-	}, [path, fileName]);
+	}, [path, fileName, maxRows]);
 
 	return {
 		available: !!contract && !!path,

@@ -449,6 +449,16 @@ export interface RequestBuilderContextValue {
 	 * removed for the variable slice (#564).
 	 */
 	dataColumns?: DataContractScope;
+	/**
+	 * The live `maxScenarioDataRows` a declared data file has to fit inside
+	 * (issue #751), for Send-with-row's re-read of it.
+	 *
+	 * On the context for the same reason `dataColumns` is: it is the config
+	 * query's answer, and the UrlBar reading that query itself would make the
+	 * bar unrenderable without a `QueryClientProvider`. Never a constant -
+	 * raising the setting has to reach the next read without a restart.
+	 */
+	dataFileMaxRows: number;
 
 	// Actions
 	/**

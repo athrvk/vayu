@@ -55,6 +55,9 @@ vi.mock("@/queries", () => ({
 	useEnvironmentsQuery: () => ({ data: [] }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
 	useLastDesignRunQuery: () => ({ run: undefined, report: undefined, isLoading: false }),
+	// The provider reads the engine data caps for Send-with-row's row cap
+	// (`useDataFileLimits`); empty entries leave it on the seeds.
+	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
 function makeResponse(tag: string): ResponseState {

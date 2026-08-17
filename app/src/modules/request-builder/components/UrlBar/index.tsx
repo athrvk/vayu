@@ -102,6 +102,7 @@ export default function UrlBar() {
 		startLoadTest,
 		canStartLoadTest,
 		dataColumns,
+		dataFileMaxRows,
 	} = useRequestBuilderContext();
 	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
 	const openTab = useTabsStore((s) => s.openTab);
@@ -125,7 +126,7 @@ export default function UrlBar() {
 	 * request" always meant; it is still session-lived, and still thrown away
 	 * with the builder.
 	 */
-	const rows = useSendWithRow(dataColumns);
+	const rows = useSendWithRow(dataColumns, dataFileMaxRows);
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
 	/*
 	 * An unsaved request has no id and cannot be switched away from and back to
