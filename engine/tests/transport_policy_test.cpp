@@ -19,8 +19,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -93,9 +95,9 @@ class MockUpstream {
 class ScopedEnv {
     public:
     ScopedEnv (const char* name, const std::string& value) : name_ (name) {
-        if (const char* previous = std::getenv (name)) {
+        if (auto previous = read (name)) {
             had_previous_ = true;
-            previous_     = previous;
+            previous_     = std::move (*previous);
         }
         set (name_.c_str (), value.c_str ());
     }
@@ -110,6 +112,33 @@ class ScopedEnv {
     ScopedEnv& operator= (const ScopedEnv&) = delete;
 
     private:
+    /**
+     * The variable's current value, or nullopt when it is unset.
+     *
+     * MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996) and this
+     * suite is built `/W4 /WX`, so the deprecation is followed rather than
+     * suppressed - the same shape `script_types_test.cpp`'s `env_is_set` uses,
+     * and for the same reason: a `#pragma warning(disable)` would be a
+     * permanent suppression bought for a one-line read.
+     */
+    static std::optional<std::string> read (const char* name) {
+#ifdef _WIN32
+        char* value   = nullptr;
+        size_t length = 0;
+        if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
+            return std::nullopt;
+        }
+        std::string copy (value);
+        std::free (value);
+        return copy;
+#else
+        if (const char* value = std::getenv (name)) {
+            return std::string (value);
+        }
+        return std::nullopt;
+#endif
+    }
+
     static void set (const char* name, const char* value) {
 #ifdef _WIN32
         // An empty value removes the variable on Windows, which is what the
