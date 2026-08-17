@@ -124,6 +124,20 @@ vayu::runtime::ScriptContext& ctx,
 const std::string& script_type);
 
 /**
+ * Point @p ctx's four variable scopes at @p scopes, and nothing else.
+ *
+ * The leaf collection scope is handed over writable while its ancestors are
+ * read-only (issue #234); that rule is the reason this is a function rather
+ * than four assignments at each call site.
+ *
+ * Separate from `bind_script_scopes` because a **deferred** replay - a load
+ * run's `tests` script, a scenario load run's per-step script - has scopes to
+ * read but no transfer and therefore no cookie jar to bind (issue #728). It
+ * must not be the call site that re-derives which scope is writable.
+ */
+void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScopes& scopes);
+
+/**
  * Point @p ctx's variable scopes and cookie surfaces at this run's.
  *
  * The rules here are not obvious and each one is load-bearing: the leaf

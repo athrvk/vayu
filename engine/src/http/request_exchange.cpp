@@ -278,18 +278,22 @@ const std::string& script_type) {
     return result;
 }
 
+void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScopes& scopes) {
+    ctx.environment         = &scopes.environment;
+    ctx.globals             = &scopes.globals;
+    ctx.collectionVariables = &scopes.collection;
+    ctx.collectionAncestors = &scopes.collection_ancestors;
+}
+
 void bind_script_scopes (vayu::runtime::ScriptContext& ctx,
 ScriptVariableScopes& scopes,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 std::vector<vayu::http::CookieWrite>* writes) {
-    ctx.cookie_jar          = &jar;
-    ctx.cookie_scope        = cookie_scope;
-    ctx.cookie_writes       = writes;
-    ctx.environment         = &scopes.environment;
-    ctx.globals             = &scopes.globals;
-    ctx.collectionVariables = &scopes.collection;
-    ctx.collectionAncestors = &scopes.collection_ancestors;
+    bind_variable_scopes (ctx, scopes);
+    ctx.cookie_jar    = &jar;
+    ctx.cookie_scope  = cookie_scope;
+    ctx.cookie_writes = writes;
 }
 
 ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,

@@ -474,6 +474,7 @@ if(VAYU_BUILD_TESTS)
         tests/error_shape_route_test.cpp
         tests/globals_route_test.cpp
         tests/script_variables_test.cpp
+        tests/load_script_scopes_test.cpp
         tests/script_info_test.cpp
         tests/script_send_request_test.cpp
         tests/script_sent_headers_test.cpp
