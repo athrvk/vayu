@@ -1468,6 +1468,24 @@ The **language** is current; what is missing is the **host environment**:
   [Script Parts](#script-parts) below) - a collection-level assertion is now
   checked under load, not only in design mode
 
+**All three variable scopes are readable, and none of them is written back.** A
+deferred replay reads the run's own environment (the `environmentId` the run was
+started with), the globals, and the collection chain - the leaf plus its
+ancestors, exactly as a Send does, so an inherited name answers the same in both
+modes. A scenario load run's collection scope is the collection being *run*; a
+single-request run's is the collection of its linked request. Earlier engines
+bound an empty environment and no other scope at all, so
+`pm.environment.get('region')` read `undefined` under load and the same test
+gave opposite verdicts on Send and under load.
+
+Writes are the deliberate exception. A `set()`, `unset()` or `clear()` in a
+deferred script is visible to the samples replayed after it - one set of scopes
+serves the whole pass - but **nothing is persisted**: only design mode writes
+variables back. A sampled response is not an iteration, so there is no ordering
+under which "whichever replay ran last wins" would be a defensible thing to
+store. If a load run's scripts must leave a value behind, write it in design
+mode instead.
+
 **A scenario load run validates per step instead.** It has no run-level `tests`
 field: each plan step carries its own post-request script, and after the run
 drains each is replayed against the responses *that step* produced. The tallies

@@ -17,6 +17,7 @@
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -78,11 +79,14 @@ struct ScriptReplay {
 /**
  * @brief Replay one script against one set of samples, tallying the results.
  *
+ * @param scopes The run's stored variable scopes, shared by every replay of the
+ *        pass and mutated in place by any `set()` a script performs - see
+ *        `validate_scripts` for why those writes are never persisted.
  * @param failure_messages Appended to, bounded by MAX_FAILURE_MESSAGES across
  *        the whole run - a forty-step plan must not multiply the cap by forty.
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
-vayu::Environment& env,
+vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 std::vector<std::string>& failure_messages) {
     ScriptValidationTotals totals;
@@ -107,7 +111,11 @@ std::vector<std::string>& failure_messages) {
         try {
             auto script_ctx =
             vayu::runtime::ScriptContext::for_test (*replay.request, response);
-            script_ctx.environment  = &env;
+            // All four scopes, through the one function that knows which of
+            // them a script may write (issue #728). Binding only `environment`
+            // here - and an empty one at that - is what made the same test
+            // script pass on Send and fail on every replay.
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             script_ctx.request_id   = replay.request_id;
             script_ctx.request_name = replay.request_name;
             // The iteration this response was actually sent in, for a scenario
@@ -218,7 +226,6 @@ bool verbose) {
     vayu::http::read_allow_script_requests (context->config);
 
     vayu::runtime::ScriptEngine engine (script_config);
-    vayu::Environment env;
     // One read for the whole pass, shared by every replay it drives.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
 
@@ -228,6 +235,7 @@ bool verbose) {
     vayu::Request dummy_request;
     std::optional<std::string> script_request_id;
     std::optional<std::string> script_request_name;
+    std::optional<vayu::db::Request> linked_request;
     if (!per_step) {
         // Build a dummy request for script context (HTTP request fields are at root level)
         auto request_result = vayu::json::deserialize_request (context->config);
@@ -243,23 +251,67 @@ bool verbose) {
             id->is_string () && !id->get<std::string> ().empty ()) {
             script_request_id = id->get<std::string> ();
         }
+        // The linked request row, read once for the two readers below: the
+        // `pm.info.requestName` fallback, and the collection scope its scripts
+        // read (issue #728). The lookup used to be wrapped in a catch, on the
+        // grounds that it cost the script only a name - it now also decides
+        // which collection scope the replay binds, and empty scopes are the
+        // silently wrong verdicts this pass exists to avoid, so a failure is
+        // left to propagate (see the scopes note below).
+        if (script_request_id) {
+            linked_request = db.get_request (*script_request_id);
+        }
+
         if (auto name = context->config.find ("requestName");
             name != context->config.end () && name->is_string () &&
             !name->get<std::string> ().empty ()) {
             script_request_name = name->get<std::string> ();
-        } else if (script_request_id) {
-            try {
-                if (auto stored = db.get_request (*script_request_id);
-                    stored && !stored->name.empty ()) {
-                    script_request_name = stored->name;
-                }
-            } catch (const std::exception& e) {
-                // A lookup failure costs the script a name, never the validation.
-                vayu::utils::log_warning (
-                "pm.info.requestName lookup failed: " + std::string (e.what ()));
-            }
+        } else if (linked_request && !linked_request->name.empty ()) {
+            script_request_name = linked_request->name;
         }
     }
+
+    // The scopes the replayed scripts read (issue #728). A load run's `tests`
+    // script is the same script a Send runs, so `pm.environment.get('region')`
+    // must answer the same here as it does there - before this, every replay
+    // read an empty environment and no globals or collection scope at all, so a
+    // test comparing a response against a variable failed on every sample and
+    // reported the target as broken.
+    //
+    // Which collection scope is the run's is the same question the two
+    // sequential paths answer: a scenario run's is the collection being run
+    // (`scenario_runner.cpp`), a single-request run's is the collection of the
+    // request it links (`load_script_variable_scopes(db, run)`). Read off the
+    // payload, which is what the run row itself was populated from, and where
+    // this function already reads `requestId` from.
+    //
+    // A database failure here is deliberately not caught: it propagates to
+    // `execute_load_test`, which logs it and stores no `testValidation`
+    // section. Tallies computed against scopes that failed to load would be
+    // the silently wrong verdicts this issue is about, and "never judged" must
+    // not be reported as "judged and passed".
+    std::optional<std::string> environment_id;
+    if (auto it = context->config.find ("environmentId");
+        it != context->config.end () && it->is_string () &&
+        !it->get<std::string> ().empty ()) {
+        environment_id = it->get<std::string> ();
+    }
+
+    std::string collection_id;
+    if (per_step) {
+        collection_id = context->scenario->request.collection_id;
+    } else if (linked_request) {
+        collection_id = linked_request->collection_id;
+    }
+
+    // Loaded once and shared by every replay of the pass, so a `set()` is
+    // readable by the samples replayed after it - the same within-a-run
+    // visibility a sequential run gives. Never persisted:
+    // `persist_script_variables` is design-mode only, and a reservoir sample is
+    // not an iteration, so writing back whichever replay ran last would store a
+    // value no ordering justifies.
+    auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+    environment_id, collection_id);
 
     size_t passed = 0;
     size_t failed = 0;
@@ -309,7 +361,8 @@ bool verbose) {
             step.name + ": ";
             replay.sse_limits = sse_limits;
 
-            const auto totals = run_replay (engine, env, replay, failure_messages);
+            const auto totals =
+            run_replay (engine, scopes, replay, failure_messages);
             validation.steps[i] = totals;
             sampled += totals.sampled;
             passed += totals.passed;
@@ -335,7 +388,8 @@ bool verbose) {
         replay.request_name = script_request_name;
         replay.sse_limits   = sse_limits;
 
-        const auto totals = run_replay (engine, env, replay, failure_messages);
+        const auto totals =
+        run_replay (engine, scopes, replay, failure_messages);
         sampled           = totals.sampled;
         passed            = totals.passed;
         failed            = totals.failed;
