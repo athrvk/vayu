@@ -476,10 +476,13 @@ struct Database::Impl {
     /// size in force instead of the size requested.
     std::atomic<int> applied_cache_size_bytes{ 0 };
 
-    /// The file `storage` was opened on, for `Database::path`.
-    std::string db_path;
+    /// The file `storage` was opened on, for `Database::path`. Named for the
+    /// file rather than `db_path`, which the constructor below already uses for
+    /// the parsed `std::filesystem::path` - MSVC builds this /W4 /WX and a
+    /// shadowed member is C4458, an error here.
+    std::string opened_file;
 
-    Impl (const std::string& path) : storage (make_storage (path)), db_path (path) {
+    Impl (const std::string& path) : storage (make_storage (path)), opened_file (path) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
             std::filesystem::create_directories (db_path.parent_path ());
@@ -664,7 +667,7 @@ Database::Database (const std::string& db_path) {
 Database::~Database () = default;
 
 const std::string& Database::path () const {
-    return impl_->db_path;
+    return impl_->opened_file;
 }
 
 // Initialize database with optimized SQLite settings
