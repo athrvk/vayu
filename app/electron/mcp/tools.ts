@@ -2554,8 +2554,10 @@ export const TOOLS: McpTool[] = [
 					`The run executes engine-side. Read it with get_run_report(runId): the ` +
 					`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
 					`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
-					`(non-passing steps are kept first). Response bodies are not on the report - ` +
-					`GET /runs/:id/samples has them. stop_run ends the run early.`,
+					`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
+					`request and response bodies inline, so a long plan against large responses ` +
+					`makes for a large report - read the totals first and the rows when you need ` +
+					`them. stop_run ends the run early.`,
 			});
 		},
 	},

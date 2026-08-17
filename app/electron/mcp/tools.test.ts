@@ -1513,6 +1513,11 @@ describe("run_collection", () => {
 		// a 200-step plan does not come back as 200 rows.
 		expect(firstText(res)).toMatch(/at most 100 step rows/);
 		expect(firstText(res)).toMatch(/get_run_report/);
+		// And that the rows carry bodies inline. A design-mode step trace embeds
+		// the request and response bodies (`build_result_trace`), unlike a load
+		// run's captures, which live behind GET /runs/:id/samples - so an agent
+		// told the opposite would size a 100-step report as if it were metadata.
+		expect(firstText(res)).toMatch(/bodies inline/);
 	});
 
 	test("surfaces the engine's own refusal verbatim", async () => {

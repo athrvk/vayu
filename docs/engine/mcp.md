@@ -516,7 +516,11 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     `{{data.column}}` bound and `pm.iterationData` set. It returns the run id
     immediately - the run continues engine-side - along with the plan's step
     count and the note that `get_run_report`'s `results` carries **at most 100**
-    step rows.
+    step rows. Each of those rows carries that step's request and response
+    bodies inline, under `trace` (`build_result_trace`, the same node a
+    single design-mode send stores) - not behind `GET /runs/:id/samples`, which
+    is the load-run capture route - so a long plan against large responses
+    makes for a large report.
   - `start_load_run` takes the same block as an optional `scenario` argument
     and posts it **with** a mode, which hands the plan to the load executor:
     `concurrency` is the number of virtual users, each walking the whole plan
