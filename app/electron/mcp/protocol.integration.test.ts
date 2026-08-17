@@ -315,7 +315,11 @@ describe("client cancellation reaches the engine", () => {
 	it("aborts the engine request for a static resource read", async () => {
 		const hang = hangingEngineCall();
 		const { client, server } = await connectClient({
-			client: fakeClient({ listRuns: hang.call }),
+			// Matching the real arity matters: `listRuns(query, signal)` hands
+			// the signal second.
+			client: fakeClient({
+				listRuns: (_query: unknown, signal?: AbortSignal) => hang.call(signal),
+			}),
 		});
 		const controller = new AbortController();
 		const read = client.readResource({ uri: "vayu://runs" }, { signal: controller.signal });
@@ -354,7 +358,11 @@ describe("client cancellation reaches the engine", () => {
 	it("aborts the engine request behind the template's list callback", async () => {
 		const hang = hangingEngineCall();
 		const { client, server } = await connectClient({
-			client: fakeClient({ listRuns: hang.call }),
+			// Matching the real arity matters: `listRuns(query, signal)` hands
+			// the signal second.
+			client: fakeClient({
+				listRuns: (_query: unknown, signal?: AbortSignal) => hang.call(signal),
+			}),
 		});
 		const controller = new AbortController();
 		const list = client.listResources(undefined, { signal: controller.signal });

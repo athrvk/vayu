@@ -339,3 +339,102 @@ describe("EngineClient.consumeStreamEvents", () => {
 		).rejects.toThrow(/404/);
 	});
 });
+
+/*
+ * Run housekeeping (#755). What these pin is the *URL*: the engine ignores a
+ * filter it cannot parse and answers the unfiltered page, so a misspelled query
+ * key here would look like "nothing matched" rather than like a bug.
+ */
+describe("EngineClient run housekeeping", () => {
+	function recordingFetch(payload: unknown = { data: [], pagination: { total: 0 } }) {
+		const calls: Array<{ url: string; method?: string; body?: string }> = [];
+		const fetchImpl = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+			calls.push({
+				url: String(url),
+				method: opts?.method,
+				body: typeof opts?.body === "string" ? opts.body : undefined,
+			});
+			return new Response(JSON.stringify(payload));
+		}) as unknown as typeof fetch;
+		return { fetchImpl, calls };
+	}
+
+	const client = (fetchImpl: typeof fetch) =>
+		new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+
+	it("asks for the envelope even with no filters", async () => {
+		// A request carrying no recognised param takes the route's legacy path,
+		// which answers a bare array of full-snapshot rows - a different shape
+		// than every reader here expects.
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).listRuns();
+		expect(calls[0].url).toBe("http://127.0.0.1:9876/runs?limit=100&offset=0");
+	});
+
+	it("sends every stated filter, and only those", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).listRuns({
+			limit: 25,
+			offset: 50,
+			type: "load",
+			status: "completed",
+			requestId: "req 1",
+			collectionId: "col_1",
+			q: "checkout flow",
+			baseline: false,
+		});
+		const url = new URL(calls[0].url);
+		expect(Object.fromEntries(url.searchParams)).toEqual({
+			limit: "25",
+			offset: "50",
+			type: "load",
+			status: "completed",
+			requestId: "req 1",
+			collectionId: "col_1",
+			q: "checkout flow",
+			baseline: "false",
+		});
+	});
+
+	it("resolves a baseline through the same query builder", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).listBaselineRuns("req_1");
+		const url = new URL(calls[0].url);
+		expect(url.pathname).toBe("/runs");
+		expect(Object.fromEntries(url.searchParams)).toEqual({
+			limit: "1",
+			offset: "0",
+			requestId: "req_1",
+			baseline: "true",
+		});
+	});
+
+	it("deletes and pins through the engine's own verbs", async () => {
+		const { fetchImpl, calls } = recordingFetch({ message: "Run deleted successfully" });
+		const engine = client(fetchImpl);
+		await engine.deleteRun("run_1");
+		await engine.setRunBaseline("run_1", true);
+		expect(calls[0]).toMatchObject({
+			url: expect.stringContaining("/runs/run_1"),
+			method: "DELETE",
+		});
+		expect(calls[1]).toMatchObject({
+			url: "http://127.0.0.1:9876/runs/run_1/baseline",
+			method: "PUT",
+			body: JSON.stringify({ baseline: true }),
+		});
+	});
+
+	it("pages the three per-run reads on their own paths", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		const engine = client(fetchImpl);
+		await engine.getRunSamples("run_1", 25, 0);
+		await engine.getRunTimeSeries("run_1", 100, 100);
+		await engine.getRunMonitorSeries("run_1", 10, 5);
+		expect(calls.map((c) => c.url)).toEqual([
+			"http://127.0.0.1:9876/runs/run_1/samples?limit=25&offset=0",
+			"http://127.0.0.1:9876/runs/run_1/metrics?limit=100&offset=100",
+			"http://127.0.0.1:9876/runs/run_1/monitor?limit=10&offset=5",
+		]);
+	});
+});

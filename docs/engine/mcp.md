@@ -151,8 +151,11 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | -                          |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
-| `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
+| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report |
+| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max |
+| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
+| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
@@ -166,6 +169,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle               |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
+| `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
+| `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
@@ -273,6 +278,33 @@ Notes:
   `lower-is-better`, `higher-is-better` or `neutral` (total requests, which
   moves with how long a run was told to run) - so a reader can tell a
   regression from an improvement without knowing each metric's sense.
+- **Run housekeeping** (issue #755) is the History surface an agent could
+  otherwise only page through: `list_runs` takes the engine's own filters
+  (`type`, `status`, `requestId`, `collectionId`, `q` over the stored config,
+  `baseline`) plus `limit`/`offset`, so finding one run is a query rather than a
+  scan of 100-row blobs. Order is fixed newest-first - `GET /runs` takes no sort
+  parameter, and the app's oldest-first view sorts client-side. `collectionId`
+  matches a **collection run** only, since a design or load run stores none. The
+  filters are Zod enums rather than passthrough strings because the engine
+  *ignores* a `type` or `status` it cannot parse: forwarded raw, a typo would
+  answer the unfiltered page and read as "nothing matched anywhere".
+  `set_run_baseline` writes the pin `compare_runs` already resolved but nothing
+  could set (the write half #472 never shipped), and `delete_run` deletes a run
+  and everything recorded against it behind the same write toggle + confirmation
+  `delete_request` uses. A run still executing is stopped engine-side and
+  deleted only once its worker settles; a worker that does not settle in time is
+  a **409 with the run intact**, surfaced as "not deleted, retry once it reports
+  a terminal status" rather than as a generic engine error.
+- **The stored-series reads are bounded on this side of the boundary.**
+  `get_run_samples`, `get_run_timeseries` and `get_run_monitor` default to 25 /
+  100 / 100 rows against engine defaults of 50 / 5000 / 5000: those defaults are
+  sized for the dashboard's charts, which draw every point for a human, and an
+  agent reads the same rows as JSON through a context window. The ceilings are
+  500 (the engine's own page cap, shared with `GET /runs`) and 1000 for the two
+  series, well under the engine's 50000. A `limit` past a ceiling is **refused,
+  not clamped** - the #319 precedent - because a short page silently substituted
+  for the one asked for reads as the whole answer. A page with more behind it
+  says so in words beside the JSON, with the `offset` to read next.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (read from each entry's typed
@@ -643,7 +675,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
-| `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. |
+| `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |
@@ -799,18 +831,19 @@ configurable in **Settings → MCP** and persisted.
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side
   (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Three tools carry it - `start_load_run`,
-  `delete_collection` and `delete_request` - through one implementation, so the
-  elicitation path cannot drift between them. A preview is a *successful* result
+  prompt where supported. Four tools carry it - `start_load_run`,
+  `delete_collection`, `delete_request` and `delete_run` - through one
+  implementation, so the elicitation path cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category: `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
-  `update_environment`, `update_engine_config`. Does not gate `run_request` /
-  `run_collection_smoke` / load runs (allowlist + caps). The two deletes need
-  the toggle **and** confirmation: the toggle is a single session-wide switch a
-  user flips once to let an agent save a request, which is not consent to
-  destroy a subtree.
+  `update_environment`, `update_engine_config`, `set_run_baseline`,
+  `delete_run`. Does not gate `run_request` / `run_collection_smoke` / load runs
+  (allowlist + caps). The three deletes need the toggle **and** confirmation:
+  the toggle is a single session-wide switch a user flips once to let an agent
+  save a request, which is not consent to destroy a subtree or a run's stored
+  history.
 - **Loopback services carry no gate of their own** - `start_mock_issuer` and
   `stop_mock_issuer` are `execute` tools that neither the allowlist nor the
   write toggle governs. The allowlist exists to stop an agent generating traffic

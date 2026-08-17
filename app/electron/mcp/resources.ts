@@ -35,14 +35,18 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		uri: "vayu://runs",
 		title: "Runs",
 		// Says "100" because that is what the reader asks for
-		// (`EngineClient.listRuns`). The content's `pagination.total` / `hasMore`
-		// carry the real count, but an agent reads the description first: a
-		// workspace with more than 100 runs must not have last week's baseline
-		// presented as absent.
+		// (`EngineClient.listRuns`'s default page). The content's
+		// `pagination.total` / `hasMore` carry the real count, but an agent reads
+		// the description first: a workspace with more than 100 runs must not have
+		// last week's baseline presented as absent. A resource takes no arguments,
+		// so the filters and paging `list_runs` accepts are named here as the way
+		// to reach a run this page does not carry.
 		description:
 			"The most recent 100 runs (single requests and load tests), newest first. " +
-			"Read `pagination.total` / `pagination.hasMore` in the content for the full count.",
-		read: (ctx, signal) => ctx.client.listRuns(signal),
+			"Read `pagination.total` / `pagination.hasMore` in the content for the full count, " +
+			"and use the `list_runs` tool to filter (by request, collection, type, status, text) " +
+			"or page beyond this first block.",
+		read: (ctx, signal) => ctx.client.listRuns({}, signal),
 	},
 	{
 		name: "collections",
@@ -141,7 +145,7 @@ export const RUN_REPORT_RESOURCE = {
 		"Full report for a run: latency percentiles, throughput, error rate, and status-code mix. Attach as context for analysis.",
 	read: (ctx: ToolContext, runId: string, signal?: AbortSignal) =>
 		ctx.client.getRunReport(runId, signal),
-	listRuns: (ctx: ToolContext, signal?: AbortSignal) => ctx.client.listRuns(signal),
+	listRuns: (ctx: ToolContext, signal?: AbortSignal) => ctx.client.listRuns({}, signal),
 };
 
 /**

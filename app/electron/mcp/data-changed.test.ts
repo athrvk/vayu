@@ -44,6 +44,9 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		updateEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
+		getRun: vi.fn().mockResolvedValue({ id: "run_1", type: "load", status: "completed" }),
+		deleteRun: vi.fn().mockResolvedValue({ message: "Run deleted successfully" }),
+		setRunBaseline: vi.fn().mockResolvedValue({ id: "run_1", baseline: true }),
 		composeRequest: vi
 			.fn()
 			.mockImplementation((body: { request?: object }) =>
@@ -102,6 +105,10 @@ describe("the registry declares its effects", () => {
 			run_collection: ["run", "cookie"],
 			start_load_run: ["run"],
 			stop_run: ["run"],
+			// Run housekeeping (#755): both rewrite a history row the renderer
+			// lists, so both invalidate `run` exactly as the runners do.
+			set_run_baseline: ["run"],
+			delete_run: ["run"],
 		};
 		for (const [name, entities] of Object.entries(expected)) {
 			const tool = TOOLS.find((t) => t.name === name);
@@ -270,6 +277,26 @@ describe("dispatch emits mcp:data-changed", () => {
 		const event = onDataChanged.mock.calls[0][0];
 		expect(event).toEqual({ entity: "run" });
 		expect("requestId" in event).toBe(false);
+	});
+
+	test("run housekeeping writes report the run family", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const pinned = await dispatchTool(
+			"set_run_baseline",
+			{ runId: "run_1", baseline: true },
+			ctx
+		);
+		expect(pinned.isError).toBeFalsy();
+		const deleted = await dispatchTool("delete_run", { runId: "run_1", confirmed: true }, ctx);
+		expect(deleted.isError).toBeFalsy();
+		expect(onDataChanged.mock.calls.map(([e]) => e.entity)).toEqual(["run", "run"]);
+	});
+
+	test("a delete_run preview changed nothing, so it notifies nothing", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("delete_run", { runId: "run_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 
 	test("stop_run reports the run family", async () => {
