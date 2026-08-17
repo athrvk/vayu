@@ -86,7 +86,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && onClose()}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Move &ldquo;{entity.name}&rdquo;</DialogTitle>
 					<DialogDescription>

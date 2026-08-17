@@ -70,7 +70,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && onClose()}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Save response as example</DialogTitle>
 					<DialogDescription>

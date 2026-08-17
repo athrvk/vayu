@@ -568,7 +568,7 @@ export default function LoadTestConfigDialog({
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+			<DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>

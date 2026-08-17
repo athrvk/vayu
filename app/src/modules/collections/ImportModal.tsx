@@ -571,7 +571,12 @@ export function ImportModal() {
 				// strips the primitive's. The utility wins the cascade; the surface
 				// class contributes the `--rule` declaration the dividers below
 				// resolve against.
-				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
+				//
+				// The width is the shared `xl` (576px) rather than the hard
+				// `w-[560px]` this carried: a fixed width is one the panel keeps
+				// on a viewport narrower than it, and the primitive's `w-full`
+				// under a cap gives the same stable band without that edge.
+				className="flex max-w-xl max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
 				// No prose description; without this Radix logs a missing
 				// aria-describedby warning.
 				aria-describedby={undefined}

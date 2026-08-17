@@ -77,7 +77,18 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// `grid-cols-[minmax(0,1fr)]` that says it more directly:
 					// Tailwind emits no rule for that one, so it would have been
 					// a class that reads correctly and styles nothing.
-					"dialog-panel fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-1 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg",
+					//
+					// Two widths, not eleven. A dialog is either a form or a
+					// decision, which is `sm:max-w-lg` (512px), or it holds
+					// something with a shape of its own - a table, a diff, a
+					// preview, a dense config - which is `max-w-xl` (576px) and
+					// the default here. They were spread across five values
+					// including two one-off pixel widths, so the same kind of
+					// dialog came out a different size depending on who wrote it.
+					// See docs/design-system.md; go wider only with content that
+					// earns it, since a dialog is a focus device before it is a
+					// container.
+					"dialog-panel fixed left-[50%] top-[50%] z-50 grid w-full max-w-xl grid-cols-1 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg",
 					className
 				)}
 				{...props}

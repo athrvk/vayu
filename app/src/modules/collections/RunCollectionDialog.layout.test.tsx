@@ -76,10 +76,11 @@ describe("the run dialog's panel", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
 		const panel = document.querySelector('[data-slot="dialog-content"]');
-		// The bug was never that the panel was too narrow. Widening it would have
-		// traded a dialog whose controls sit outside it for one that is as wide
-		// as whatever file was picked.
-		expect(panel?.className).toContain("sm:max-w-md");
+		// This dialog holds a preview table, so it takes the wider of the two
+		// sizes - but a *cap* is the point either way. Letting the panel size
+		// itself from its content would trade a dialog whose controls sit
+		// outside it for one that is as wide as whatever file was picked.
+		expect(panel?.className).toContain("sm:max-w-xl");
 	});
 
 	it("keeps the footer a child of the panel it is painted in", () => {

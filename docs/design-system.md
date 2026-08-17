@@ -1448,6 +1448,25 @@ directly. **Tailwind emits no rule for `grid-cols-[minmax(0,1fr)]`** (verified
 against the built CSS), so that spelling is a class that reads correctly, passes
 a `className` assertion, and styles nothing.
 
+### Dialog widths: two sizes
+
+| Size | Class | For |
+| ---- | ----- | --- |
+| Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
+| Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
+
+These had drifted to five values across eleven call sites, including two one-off
+pixel widths, so the same kind of dialog came out a different size depending on
+who wrote it. `dialog-width-scale.test.tsx` holds the set closed; a dialog that
+genuinely needs a third size should widen the scale here and in `dialog.tsx`
+rather than open a sixth one-off.
+
+Prefer a **cap** (`max-w-*`) over a fixed `w-[…]`: a fixed width is one the panel
+keeps on a viewport narrower than it, where `w-full` under a cap gives the same
+stable band and still fits. And widening is never the fix for content escaping
+the panel - a wider panel with an `auto` track spills exactly the same way, just
+further along. Clamp the track; widen only for the reading.
+
 ---
 
 ## Layout Structure
