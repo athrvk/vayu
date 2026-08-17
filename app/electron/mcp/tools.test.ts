@@ -1117,6 +1117,78 @@ describe("run_collection_smoke", () => {
 		});
 	});
 
+	/**
+	 * The gate, made switchable (issue #720). Both directions in one test on the
+	 * same fixture, because the pair is the claim: the argument has to change
+	 * the verdict *and* leave the row's evidence alone. Absent is the on state -
+	 * this tool has folded since #681 and says so in its description, so a
+	 * default of off would silently pass contract failures for every agent
+	 * already reading the matrix.
+	 */
+	test.each([
+		{ label: "absent", args: {}, ok: false, passed: 0, failed: 1 },
+		{ label: "true", args: { failOnSchemaError: true }, ok: false, passed: 0, failed: 1 },
+		{ label: "false", args: { failOnSchemaError: false }, ok: true, passed: 1, failed: 0 },
+	])(
+		"failOnSchemaError $label: a contradicting response is ok=$ok, verdict kept either way",
+		async ({ args, ok, passed, failed }) => {
+			const client = fakeClient({
+				listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "contradicts" }]),
+				composeRequest: vi
+					.fn()
+					.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+				executeRequest: vi.fn().mockResolvedValue({
+					status: 200,
+					testResults: [],
+					validation: {
+						checked: true,
+						valid: false,
+						failuresTotal: 1,
+						failures: [{ path: "/id", message: "unexpected instance type" }],
+					},
+				}),
+			});
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			const summary = res.structuredContent as {
+				passed: number;
+				failed: number;
+				results: Array<{ ok: boolean; schema?: { valid?: boolean; failures?: string[] } }>;
+			};
+			expect(summary).toMatchObject({ passed, failed });
+			expect(summary.results[0].ok).toBe(ok);
+			// Withheld from the outcome, never from the row: an agent that turned
+			// the gate off still has to be able to see what it turned off.
+			expect(summary.results[0].schema).toMatchObject({ valid: false });
+			expect(summary.results[0].schema?.failures).toEqual(["/id: unexpected instance type"]);
+		}
+	);
+
+	test("failOnSchemaError: false does not rescue a failing status or a failing test", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "500s" },
+				{ id: "r2", name: "assertion fails" },
+			]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValueOnce({ status: 500, testResults: [] })
+				.mockResolvedValueOnce({ status: 200, testResults: [{ passed: false }] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1", failOnSchemaError: false },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.structuredContent).toMatchObject({ passed: 0, failed: 2 });
+	});
+
 	test("a collection bound to no document reports no schema field at all", async () => {
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),

@@ -97,6 +97,34 @@ describe("SampledSchemaValidation", () => {
 		expect(screen.getByText(/36 of 40 sampled responses checked/)).toBeTruthy();
 	});
 
+	/**
+	 * The gate the run was started with (issue #720). Its whole reason for being
+	 * on screen is that the step list's failure count means a different thing
+	 * with it than without, and the report is the only place the flag survives -
+	 * so a reader with the report and no memory of the dialog can still tell the
+	 * two runs apart.
+	 */
+	it("says the contract was a gate when the run asked for one", () => {
+		render(
+			<SampledSchemaValidation
+				validation={validation({ exact: true, failOnSchemaError: true })}
+			/>
+		);
+		expect(screen.getByText(/made the contract a gate/i)).toBeTruthy();
+	});
+
+	it("says nothing about a gate for a run that did not ask, or a report predating the flag", () => {
+		// Mutation-check: render on anything other than `=== true` and the first
+		// of these two produces the sentence for the default every collection run
+		// has, and the second for a load run that has no such flag at all.
+		render(<SampledSchemaValidation validation={validation({ failOnSchemaError: false })} />);
+		expect(screen.queryByText(/made the contract a gate/i)).toBeNull();
+
+		cleanup();
+		render(<SampledSchemaValidation validation={validation()} />);
+		expect(screen.queryByText(/made the contract a gate/i)).toBeNull();
+	});
+
 	it("says the numbers describe the sample, beside a coverage block that is exact", () => {
 		render(<SampledSchemaValidation validation={validation()} />);
 

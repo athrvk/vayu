@@ -119,6 +119,50 @@ describe("the payload", () => {
 	});
 });
 
+/**
+ * The contract gate (issue #720). The flag was readable on a stored report and
+ * writable by nobody while `docs/app/openapi.md` told users to set it, so what
+ * these pin is that the dialog is now its writer - and that it stays absent
+ * unless asked for, which is what keeps "absent means the engine's default"
+ * true for a payload written before the toggle existed.
+ */
+describe("failing steps on schema errors", () => {
+	const toggle = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /fail steps on schema errors/i }));
+
+	it("sends the flag once the user turns it on", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		toggle();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).toMatchObject({ failOnSchemaError: true });
+	});
+
+	it("omits it entirely while it is off", () => {
+		// Not `failOnSchemaError: false`: the engine's default is off, so absent
+		// already says it, and a key written on every run would claim a gate was
+		// considered by a payload from before this control existed.
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("failOnSchemaError");
+	});
+
+	it("is not offered for a load run, and is not sent if it was on first", () => {
+		// Only the design-mode runner demotes a step on a schema failure - the
+		// load executor validates once the run has drained - so a load payload
+		// carrying the flag would promise a gate nothing applies.
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		toggle();
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+
+		expect(screen.queryByRole("switch", { name: /fail steps on schema errors/i })).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("failOnSchemaError");
+	});
+});
+
 describe("invalid iterations", () => {
 	it("refuses a zero, a fraction and an empty field rather than sending them", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);

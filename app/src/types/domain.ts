@@ -397,7 +397,14 @@ export interface RunSchemaValidation {
 	 * was sampled.
 	 */
 	exact?: boolean;
-	/** Whether a schema failure was allowed to fail its step (collection runs). */
+	/**
+	 * Whether a schema failure was allowed to fail its step (collection runs).
+	 *
+	 * Set from the Run dialog and disclosed by `SampledSchemaValidation`
+	 * (issue #720): the step list's failure count means a different thing
+	 * depending on it, so the block that carries the tally says which run this
+	 * was rather than leaving a reader to infer it.
+	 */
 	failOnSchemaError?: boolean;
 }
 

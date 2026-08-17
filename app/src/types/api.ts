@@ -658,6 +658,23 @@ export interface StartScenarioRunRequest {
 	};
 	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
 	environmentId?: string;
+	/**
+	 * Make the collection's OpenAPI contract a gate: a step that passed
+	 * everything else and whose response does not match the schema the bound
+	 * document declares is **failed** (issue #720).
+	 *
+	 * Top-level rather than inside `scenario`, because that is where the engine
+	 * reads it (`read_fail_on_schema_error`), beside the other run-scoped
+	 * properties of who asked for the run.
+	 *
+	 * **Omitted when off**, unlike `followRedirects`: the engine's default is
+	 * `false`, so absent already means what the user asked for, and a run
+	 * snapshot that carries the key only when it was on keeps a payload written
+	 * before this existed reading the same way. Design-mode collection runs
+	 * only - the load executor defers validation to run end and never demotes a
+	 * step on it.
+	 */
+	failOnSchemaError?: boolean;
 }
 
 // Run Management API

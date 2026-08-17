@@ -40,6 +40,13 @@
  * a second way to choose a scenario beside the tree that already owns the
  * choice.
  *
+ * **Fail steps on schema errors** is the fifth (issue #720), and it is the only
+ * writer of the engine's `failOnSchemaError` anywhere in the app: the flag was
+ * readable in a stored report and settable by nobody, while the docs told users
+ * to set it. It belongs on the run rather than on a request or the collection
+ * because it decides what "failed" means for *this* run's report, which is
+ * where the report records it.
+ *
  * Only the three closed-loop modes exist for a scenario. `constant_rps` is a
  * `400` engine-side - an open-loop arrival rate over a multi-step sequence is an
  * arrival-rate executor, which Vayu does not implement - so it is not offered.
@@ -123,6 +130,14 @@ export default function RunCollectionDialog({
 	const [dataFile, setDataFile] = useState<SelectedDataFile | null>(null);
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [loadTest, setLoadTest] = useState(false);
+	/**
+	 * Whether the bound contract is a gate for this run (issue #720).
+	 *
+	 * Off by default, the engine's own default and the #628-era decision: a
+	 * schema verdict is its own channel, and folding it into the step outcome
+	 * would make every undocumented field look like a broken test.
+	 */
+	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
 	const [virtualUsers, setVirtualUsers] = useState(DEFAULT_VIRTUAL_USERS);
 	const [durationSeconds, setDurationSeconds] = useState(DEFAULT_DURATION_SECONDS);
 	/**
@@ -283,6 +298,16 @@ export default function RunCollectionDialog({
 				// resolved `{{variables}}` against a different one than Send does
 				// would be a different request wearing the same name.
 				...(activeEnvironmentId ? { environmentId: activeEnvironmentId } : {}),
+				// Sent only when the user asked for the gate. The engine's
+				// default is off, so absent already says what a `false` would,
+				// and the run snapshot then carries the key exactly when the
+				// flag changed what "failed" means in the report.
+				//
+				// Never on a load run: only the design-mode runner demotes a
+				// step on a schema failure (the load executor validates once the
+				// run has drained), so a load payload carrying it would promise
+				// a gate nothing applies.
+				...(!loadTest && failOnSchemaError ? { failOnSchemaError: true } : {}),
 			},
 			{
 				onSuccess: ({ runId }) => {
@@ -453,6 +478,32 @@ export default function RunCollectionDialog({
 								</Callout>
 							)}
 						</>
+					)}
+
+					{/* Hidden for a load run rather than shown disabled, for the same
+					    reason Iterations is: only the design-mode runner can honour it,
+					    so offering it there would be a promise the executor does not
+					    keep. Shown for every design-mode run, bound or not - the app
+					    resolves a binding through the collection chain engine-side at
+					    plan time, and a dialog that guessed at it would refuse the
+					    option to a collection whose parent carries the document. */}
+					{!loadTest && (
+						<div className="flex items-center justify-between gap-4">
+							<Label htmlFor="run-collection-fail-on-schema" className="leading-snug">
+								Fail steps on schema errors
+								<span className="block text-xs font-normal text-muted-foreground">
+									Make the OpenAPI contract a gate: a step that passed everything
+									else, whose response does not match the schema the bound
+									document declares, is failed. Off, the verdict still shows on
+									the step - it just does not change the outcome.
+								</span>
+							</Label>
+							<Switch
+								id="run-collection-fail-on-schema"
+								checked={failOnSchemaError}
+								onCheckedChange={setFailOnSchemaError}
+							/>
+						</div>
 					)}
 
 					{/* A file that could not be re-read is a warning, not a blocker -
