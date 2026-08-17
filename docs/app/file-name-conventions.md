@@ -133,7 +133,7 @@ This document defines the standard file naming conventions for the Vayu applicat
 **Pattern:** `kebab-case.ts`
 
 **Examples:**
-- `error-codes.ts`
+- `storage-keys.ts`
 
 **Rationale:** Constants files follow kebab-case convention.
 
@@ -190,7 +190,7 @@ This document defines the standard file naming conventions for the Vayu applicat
 | Queries | `kebab-case.ts` | `collections.ts` |
 | Types | `kebab-case.ts` | `api.ts` |
 | Utils | `kebab-case.ts` | `helpers.ts` |
-| Constants | `kebab-case.ts` | `error-codes.ts` |
+| Constants | `kebab-case.ts` | `storage-keys.ts` |
 | Config | `kebab-case.ts` | `api-endpoints.ts` |
 | Error Components | `PascalCase.tsx` | `ErrorBoundary.tsx` |
 | Error Utilities | `kebab-case.ts` | `error-handler.ts` |

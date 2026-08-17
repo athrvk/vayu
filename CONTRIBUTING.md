@@ -175,7 +175,7 @@ private:
 - Queries: `kebab-case.ts` (e.g., `collections.ts`)
 - Types: `kebab-case.ts` (e.g., `api.ts`)
 - Utils: `kebab-case.ts` (e.g., `helpers.ts`)
-- Constants: `kebab-case.ts` (e.g., `error-codes.ts`)
+- Constants: `kebab-case.ts` (e.g., `storage-keys.ts`)
 - Error Components: `PascalCase.tsx` (e.g., `ErrorBoundary.tsx`)
 - Error Utilities: `kebab-case.ts` (e.g., `error-handler.ts`)
 
