@@ -1304,6 +1304,452 @@ describe("run_collection_smoke", () => {
 	});
 });
 
+/**
+ * Scenario runs from MCP (issue #754), reversing #454's deferral. Two surfaces
+ * over one engine route: `run_collection` posts a `scenario` block with no
+ * `mode` (design-mode runner), `start_load_run` posts the same block *with* one
+ * (virtual users). What these tests own is the same thing every other tool test
+ * owns - what reaches `POST /runs`, and that no traffic is arranged before the
+ * gates have run. The plan resolution itself is engine-side.
+ */
+describe("run_collection", () => {
+	/** A client whose collection `c1` holds two allowlisted requests. */
+	function scenarioClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
+		return fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "login" },
+				{ id: "r2", name: "checkout" },
+			]),
+			composeRequest: vi
+				.fn()
+				.mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({ method: "GET", url: `https://api.example.com/${requestId}` })
+				),
+			...overrides,
+		});
+	}
+
+	test("is an execute tool that invalidates runs and the cookie jar", () => {
+		const tool = TOOLS.find((t) => t.name === "run_collection");
+		expect(tool?.category).toBe("execute");
+		// Steps share the environment's jar, the way a Send does.
+		expect(tool?.invalidates).toEqual(["run", "cookie"]);
+	});
+
+	test("posts the scenario block with rows, recursion and iterations intact", async () => {
+		const client = scenarioClient();
+		const rows = [{ id: "1" }, { id: "2" }];
+		const res = await dispatchTool(
+			"run_collection",
+			{
+				collectionId: "c1",
+				environmentId: "env_1",
+				recursive: false,
+				iterations: 3,
+				data: rows,
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.startRun).toHaveBeenCalledTimes(1);
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toEqual({
+			scenario: {
+				source: "collection",
+				collectionId: "c1",
+				recursive: false,
+				iterations: 3,
+				data: rows,
+			},
+			environmentId: "env_1",
+		});
+		// The absence of `mode` is what makes this a design-mode run: a mode
+		// beside the block would hand the same plan to the load executor.
+		expect(payload).not.toHaveProperty("mode");
+	});
+
+	test("omits iterations and data when the caller named neither", async () => {
+		const client = scenarioClient();
+		await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+			scenario: Record<string, unknown>;
+		};
+		// The engine owns both defaults (1 pass, or the row count with data), so
+		// a computed copy here would be a second place for that rule to live.
+		expect(payload.scenario).not.toHaveProperty("iterations");
+		expect(payload.scenario).not.toHaveProperty("data");
+		expect(payload.scenario.recursive).toBe(false);
+	});
+
+	test("refuses the whole run on the first un-allowlisted step, starting nothing", async () => {
+		const client = scenarioClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "login" },
+				{ id: "r2", name: "offsite" },
+				{ id: "r3", name: "checkout" },
+			]),
+			composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url:
+						requestId === "r2"
+							? "https://evil.test/x"
+							: `https://api.example.com/${requestId}`,
+				})
+			),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		// Named the way the engine names a step, so the row is findable.
+		expect(firstText(res)).toMatch(/step 1 \(request 'offsite', id 'r2'\)/);
+		expect(firstText(res)).toMatch(/evil\.test/);
+		expect(firstText(res)).toMatch(/Nothing was started/);
+		expect(client.startRun).not.toHaveBeenCalled();
+		// The walk stops at the refusal rather than composing the rest.
+		expect(client.composeRequest).toHaveBeenCalledTimes(2);
+	});
+
+	test("a step that cannot compose refuses the run rather than starting a plan the engine would reject", async () => {
+		const client = scenarioClient({
+			composeRequest: vi
+				.fn()
+				.mockRejectedValue(new EngineRequestError("Engine responded 500", 500, "boom")),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/Cannot compose step 0 \(request 'login', id 'r1'\)/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * The engine emits each sub-collection's whole subtree before the folder's
+	 * own requests (`collect_requests`, the sidebar's order). The pre-flight walk
+	 * has to agree, or its "first bad step" names a step the run reaches later.
+	 */
+	test("walks sub-collections in the engine's order when recursive", async () => {
+		const requestsByCollection: Record<string, Array<{ id: string; name: string }>> = {
+			c1: [{ id: "root_a", name: "root a" }],
+			c2: [{ id: "child_a", name: "child a" }],
+			c3: [{ id: "grand_a", name: "grand a" }],
+		};
+		const client = scenarioClient({
+			listCollections: vi.fn().mockResolvedValue([
+				{ id: "c1", name: "API" },
+				{ id: "c2", name: "Billing", parentId: "c1" },
+				{ id: "c3", name: "Invoices", parentId: "c2" },
+				{ id: "c9", name: "Elsewhere" },
+			]),
+			listRequests: vi
+				.fn()
+				.mockImplementation((id: string) =>
+					Promise.resolve(requestsByCollection[id] ?? [])
+				),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", recursive: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const composedIds = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls.map(
+			(call) => (call[0] as { requestId: string }).requestId
+		);
+		expect(composedIds).toEqual(["grand_a", "child_a", "root_a"]);
+		expect(res.structuredContent).toMatchObject({ plannedSteps: 3 });
+		// A collection outside the subtree is not walked.
+		expect(client.listRequests).not.toHaveBeenCalledWith("c9", undefined);
+	});
+
+	test("a parent cycle terminates instead of walking forever", async () => {
+		const client = scenarioClient({
+			listCollections: vi.fn().mockResolvedValue([
+				{ id: "c1", name: "A", parentId: "c2" },
+				{ id: "c2", name: "B", parentId: "c1" },
+			]),
+			listRequests: vi.fn().mockResolvedValue([]),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", recursive: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		// An empty plan is the engine's refusal to make, not this walk's - what
+		// matters here is that the walk returned at all.
+		expect(res.isError).toBeFalsy();
+		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	test("returns the run id with the plan size and how to follow it", async () => {
+		const client = scenarioClient({
+			startRun: vi.fn().mockResolvedValue({
+				runId: "run_7",
+				status: "pending",
+				message: "Collection run started",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.structuredContent).toMatchObject({
+			runId: "run_7",
+			status: "pending",
+			plannedSteps: 2,
+		});
+		// The report's own bound, stated where the agent reads the run id -
+		// a 200-step plan does not come back as 200 rows.
+		expect(firstText(res)).toMatch(/at most 100 step rows/);
+		expect(firstText(res)).toMatch(/get_run_report/);
+	});
+
+	test("surfaces the engine's own refusal verbatim", async () => {
+		const client = scenarioClient({
+			startRun: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 400",
+						400,
+						"'scenario.data' has 2000 rows, over the limit of 1000"
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", data: [{ id: "1" }] },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/over the limit of 1000/);
+	});
+});
+
+describe("start_load_run scenario runs", () => {
+	function scenarioLoadClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
+		return fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/login" }),
+			...overrides,
+		});
+	}
+
+	const allowed = { allowlist: ["api.example.com"] };
+
+	test("posts the scenario block beside the load shape", async () => {
+		const client = scenarioLoadClient();
+		const rows = [{ id: "1" }];
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1", recursive: true, data: rows },
+				mode: "constant_concurrency",
+				concurrency: 5,
+				duration: "30s",
+				environmentId: "env_1",
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBeFalsy();
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0]).toEqual({
+			mode: "constant_concurrency",
+			scenario: { source: "collection", collectionId: "c1", recursive: true, data: rows },
+			environmentId: "env_1",
+			concurrency: 5,
+			duration: "30s",
+		});
+	});
+
+	test("refuses the single-target arguments by name instead of ignoring them", async () => {
+		const client = scenarioLoadClient();
+		for (const [key, value] of [
+			["url", "https://api.example.com/x"],
+			["requestId", "req_1"],
+			["method", "POST"],
+			["auth", { mode: "bearer", token: "t" }],
+			["postRequestScript", "pm.test('ok', () => {})"],
+			["collectionId", "c1"],
+			["maxInFlight", 10],
+			["stream", true],
+			["sloMs", 500],
+		] as Array<[string, unknown]>) {
+			const res = await dispatchTool(
+				"start_load_run",
+				{ scenario: { collectionId: "c1" }, [key]: value, confirmed: true },
+				ctxWith(client, allowed)
+			);
+			expect(res.isError, key).toBe(true);
+			expect(firstText(res), key).toContain(`"${key}"`);
+			expect(firstText(res), key).toMatch(/do not apply to a scenario load run/);
+		}
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("refuses the two modes the engine cannot drive, with its reasoning", async () => {
+		const client = scenarioLoadClient();
+		const capacity = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, mode: "capacity", confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(capacity.isError).toBe(true);
+		expect(firstText(capacity)).toMatch(/one windowed p99/);
+		expect(firstText(capacity)).toMatch(/constant_concurrency, ramp_up, iterations/);
+
+		const rps = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, mode: "constant_rps", confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(rps.isError).toBe(true);
+		expect(firstText(rps)).toMatch(/arrival-rate executor/);
+
+		// The rate itself is what selects that path, whatever mode is declared.
+		const rate = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				mode: "constant_concurrency",
+				targetRps: 50,
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(rate.isError).toBe(true);
+		expect(firstText(rate)).toMatch(/closed-loop by design/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("applies the load caps to virtual users, duration and iterations", async () => {
+		const client = scenarioLoadClient();
+		const vus = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, concurrency: 5000, confirmed: true },
+			ctxWith(client, { ...allowed, maxConcurrency: 50 })
+		);
+		expect(vus.isError).toBe(true);
+		expect(firstText(vus)).toMatch(/concurrency 5000 exceeds the MCP cap of 50/);
+
+		const duration = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, duration: "2h", confirmed: true },
+			ctxWith(client, { ...allowed, maxDurationSeconds: 300 })
+		);
+		expect(duration.isError).toBe(true);
+		expect(firstText(duration)).toMatch(/exceeds the MCP cap of 300s/);
+
+		const iterations = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				mode: "iterations",
+				iterations: 999_999,
+				confirmed: true,
+			},
+			ctxWith(client, { ...allowed, maxIterations: 1000 })
+		);
+		expect(iterations.isError).toBe(true);
+		expect(firstText(iterations)).toMatch(/exceeds the MCP cap of 1000/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("injects the capped duration when the caller omitted one", async () => {
+		const client = scenarioLoadClient();
+		await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, confirmed: true },
+			ctxWith(client, { ...allowed, maxDurationSeconds: 20 })
+		);
+		// The engine's own default is 60s, so a 20s cap only binds if it is sent.
+		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
+			duration: "20s",
+		});
+	});
+
+	test("gates every step on the allowlist before anything is started", async () => {
+		const client = scenarioLoadClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "login" },
+				{ id: "r2", name: "offsite" },
+			]),
+			composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+				Promise.resolve({
+					method: "GET",
+					url:
+						requestId === "r2"
+							? "https://evil.test/x"
+							: "https://api.example.com/login",
+				})
+			),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/step 1 \(request 'offsite', id 'r2'\)/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("previews the planned run and starts nothing until confirmed", async () => {
+		const client = scenarioLoadClient();
+		const preview = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, concurrency: 4 },
+			ctxWith(client, allowed)
+		);
+		expect(preview.isError).toBeFalsy();
+		expect(firstText(preview)).toMatch(/AWAITING CONFIRMATION/);
+		expect(firstText(preview)).toMatch(/1 step\(s\) per iteration/);
+		expect(client.startRun).not.toHaveBeenCalled();
+
+		const started = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, concurrency: 4, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(started.isError).toBeFalsy();
+		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	test("a declined elicitation starts nothing", async () => {
+		const client = scenarioLoadClient();
+		const ctx: ToolContext = {
+			...ctxWith(client, allowed),
+			elicit: vi.fn().mockResolvedValue({ action: "decline" }),
+		};
+		const res = await dispatchTool("start_load_run", { scenario: { collectionId: "c1" } }, ctx);
+		expect(firstText(res)).toMatch(/declined/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("the scenario block offers no iterations of its own", () => {
+		// A load run reads the top-level `iterations`; `scenario.iterations` is the
+		// design runner's pass count and the load executor never looks at it, so
+		// offering it here would be an argument written and never read.
+		const tool = TOOLS.find((t) => t.name === "start_load_run");
+		const shape = (tool!.inputSchema.scenario as z.ZodOptional<z.ZodObject<z.ZodRawShape>>)._def
+			.innerType.shape;
+		expect(Object.keys(shape).sort()).toEqual(["collectionId", "data", "recursive"]);
+	});
+});
+
 describe("get_live_metrics limit", () => {
 	function metricsClient() {
 		return fakeClient({ getLiveMetricsSnapshot: vi.fn().mockResolvedValue([]) });
@@ -1832,14 +2278,15 @@ describe("dispatchTool", () => {
 		expect(Object.keys(loadRun!.inputSchema)).toContain("tests");
 	});
 
-	test("start_load_run states that scenario runs are out of its scope", () => {
-		// The tool loads one target. Collection/scenario load runs exist and are
-		// app-dialog-only (`RunCollectionDialog.tsx`), and an agent reading the
-		// tool list has no other place to learn that - so silence here reads as
-		// "scenarios are not a thing", not as "not here".
+	test("start_load_run offers scenario runs rather than deferring them", () => {
+		// #454 scoped them out and said so in the description; #754 reversed that.
+		// The description is where an agent learns a collection can be the target
+		// at all, so it has to name the argument and what `concurrency` becomes.
 		const loadRun = TOOLS.find((t) => t.name === "start_load_run");
 		expect(loadRun?.description).toMatch(/scenario/i);
-		expect(loadRun?.description).toMatch(/Run Collection dialog/);
+		expect(loadRun?.description).toMatch(/virtual users/);
+		expect(loadRun?.description).not.toMatch(/cannot be started from here/);
+		expect(Object.keys(loadRun!.inputSchema)).toContain("scenario");
 	});
 
 	test("both execute-shaped tools name the validation script the same way", () => {

@@ -97,6 +97,9 @@ describe("the registry declares its effects", () => {
 			update_engine_config: ["config"],
 			run_request: ["run", "cookie"],
 			run_collection_smoke: ["run", "cookie"],
+			// The design-mode runner is the one executor handed the cookie jar
+			// (`start_scenario_run`), so its steps refill it the way a Send does.
+			run_collection: ["run", "cookie"],
 			start_load_run: ["run"],
 			stop_run: ["run"],
 		};
