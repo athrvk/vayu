@@ -49,9 +49,14 @@ export const queryKeys = {
 		// plain `RunListResponse`, so it must NOT sit under `lists()`: the
 		// delete-run patch walks every cache under that prefix as `InfiniteData`
 		// and threw on this shape (`old.pages` undefined) for any open request
-		// tab. Its own family keeps the two apart at the root.
-		lastDesign: (requestId: string) =>
-			[...queryKeys.runs.all, "lastDesign", requestId] as const,
+		// tab. Its own family keeps the two apart at the root. `lastDesigns()`
+		// is the prefix to invalidate when the run set changes without a known
+		// request (a delete, a history clear): a run id gives no way back to the
+		// request the run belonged to, and `RequestBuilderProvider` mounts this
+		// query for every open request tab, so without the prefix a deleted run
+		// goes on being restored into one.
+		lastDesigns: () => [...queryKeys.runs.all, "lastDesign"] as const,
+		lastDesign: (requestId: string) => [...queryKeys.runs.lastDesigns(), requestId] as const,
 		// The last N design runs of one request, for the context bar's Recent
 		// sends section. Its own family for the same reason `lastDesign` has
 		// one: it caches a plain `RunListResponse`, and the delete-run patch

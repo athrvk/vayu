@@ -91,8 +91,13 @@ export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
  * The three scope hints are read from the call's own arguments and narrow the
  * invalidation to the caches that can have gone stale; each is absent when the
  * call did not name it. They are hints, not identity: `requestId` on a
- * `run` event is the saved request a design run was linked to (the key
- * `runs.lastDesign` uses), not the run's own id - `runId` is that.
+ * `run` event is the saved request a design run was linked to, not the run's
+ * own id - `runId` is that. The renderer narrows on `collectionId` (the
+ * `request` family's list key) and on `runId` (the per-run caches it removes);
+ * a run event's `requestId` is emitted because every hint is read off the same
+ * arguments, and the run families it could narrow are invalidated at their
+ * prefixes instead - a `delete_run` names no request, so a per-request key
+ * could not reach the caches a delete moves (see `lib/mcp-invalidation.ts`).
  */
 export interface McpDataChangedEvent {
 	entity: McpDataEntity;

@@ -569,6 +569,11 @@ export function useDeleteRunMutation() {
 			// same reason: the deleted run may have been the pin, and its id
 			// gives no way back to the request it was pinned for.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+			// And the per-request last-design caches, for the fourth time and
+			// the same reason. This one is the tab-visible case: every open
+			// request tab mounts `useLastDesignRunQuery`, so without it a tab
+			// goes on restoring the response of the run just deleted.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 		},
 	});
 }
@@ -625,8 +630,9 @@ export function useSetRunBaselineMutation() {
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
  * all-runs Settings query, the per-request Recent sends and per-collection
- * Last run lists, and the per-request baseline lookups, which are their own
- * families and would otherwise survive a cleared history.
+ * Last run lists, the per-request baseline lookups and the per-request
+ * last-design lookups, which are their own families and would otherwise survive
+ * a cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();
@@ -637,5 +643,6 @@ export function useInvalidateRuns() {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 	};
 }
