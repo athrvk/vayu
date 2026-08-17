@@ -245,6 +245,16 @@ a refused CONNECT - is reported as its own `PROXY_ERROR`, never as the target's
 `CONNECTION_FAILED`. Cookies are unaffected: libcurl matches them on the origin
 host, never on the proxy.
 
+The same policy carries **who the engine trusts**. `customCaCertificates` holds
+pasted PEM anchors, materialized as a bundle beside the database and added to
+the platform's own trust rather than replacing it, so a TLS-inspecting proxy or
+an internal authority is verifiable on every one of those paths at once. Per
+request, the Settings tab's *Verify TLS certificate* row turns verification off
+for one endpoint - stored, sent on every send and load test, and painted as a
+warning while it is off. See
+[TLS trust settings](engine/api-reference.md#tls-trust-settings) for the
+per-backend behaviour on each platform.
+
 ### Variable Resolution
 
 Variables are resolved with priority: **Environment > Collection > Global**

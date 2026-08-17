@@ -12,14 +12,18 @@
  * end.
  */
 
+#include <curl/curl.h>
 #include <gtest/gtest.h>
 #include <httplib.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -178,6 +182,15 @@ Request get_request (const std::string& url) {
     return request;
 }
 
+/// The whole of @p path as a string - the bundle assertions read the file the
+/// resolver wrote rather than the value it returned.
+std::string read_whole_file (const std::string& path) {
+    std::ifstream in (path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << in.rdbuf ();
+    return buffer.str ();
+}
+
 TransportPolicy manual_through (const MockProxy& proxy) {
     TransportPolicy policy;
     policy.proxy_mode = ProxyMode::Manual;
@@ -299,6 +312,138 @@ TEST (ProxyUrlValidation, RejectsTheShapesThatAreAlwaysMistakes) {
     EXPECT_TRUE (proxy_url_rejection ("ftp://proxy.example:8080").has_value ());
     EXPECT_TRUE (proxy_url_rejection ("http://:8080").has_value ());
     EXPECT_TRUE (proxy_url_rejection ("http://").has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// TLS trust - the pasted bundle, and what this platform's backend does with it
+// (issue #706)
+// ---------------------------------------------------------------------------
+
+/// A syntactically complete certificate block. Never parsed as a certificate by
+/// anything under test - the validation here is deliberately about PEM shape,
+/// so a body that is only base64-shaped is exactly the right fixture.
+constexpr const char* SAMPLE_CERT =
+"-----BEGIN CERTIFICATE-----\n"
+"MIIBkTCB+wIJAJ2Vayu0TESTMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnZh\n"
+"eXUtY2EwHhcNMjYwMTAxMDAwMDAwWhcNMzYwMTAxMDAwMDAwWjARMQ8wDQYDVQQD\n"
+"-----END CERTIFICATE-----\n";
+
+TEST (CaPemValidation, AcceptsACertificateBlock) {
+    EXPECT_FALSE (ca_pem_rejection (SAMPLE_CERT).has_value ());
+    // Two anchors in one paste is the normal corporate shape (root plus the
+    // issuing intermediate).
+    EXPECT_FALSE (ca_pem_rejection (std::string (SAMPLE_CERT) + SAMPLE_CERT).has_value ());
+}
+
+TEST (CaPemValidation, RejectsWhatIsNotAPemBundle) {
+    EXPECT_TRUE (ca_pem_rejection ("").has_value ());
+    EXPECT_TRUE (ca_pem_rejection ("   \n\t ").has_value ());
+    EXPECT_TRUE (ca_pem_rejection ("not a certificate").has_value ());
+    // Truncated at the paste: the half-copied block, which curl would refuse at
+    // handshake time with an error naming nothing the user recognises.
+    EXPECT_TRUE (
+    ca_pem_rejection ("-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJ\n").has_value ());
+}
+
+TEST (CaPemValidation, NamesAPastedPrivateKeyForWhatItIs) {
+    // The mistake worth its own message: the file this would land in is not a
+    // secret store, and "no certificate found" would send the user looking for
+    // a formatting problem instead of telling them what they pasted.
+    const auto rejection = ca_pem_rejection (
+    "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n");
+    ASSERT_TRUE (rejection.has_value ());
+    EXPECT_NE (rejection->find ("private key"), std::string::npos) << *rejection;
+}
+
+TEST_F (TransportPolicyDbTest, NoPastedCertificatesMeansNoBundle) {
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_TRUE (policy.ca_bundle_path.empty ())
+    << "with nothing pasted the backend's own trust store must be left alone";
+}
+
+TEST_F (TransportPolicyDbTest, PastedCertificatesAreMaterializedBesideTheDatabase) {
+    set_config ("customCaCertificates", SAMPLE_CERT);
+
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_FALSE (policy.ca_bundle_path.empty ());
+    ASSERT_TRUE (std::filesystem::exists (policy.ca_bundle_path));
+    // Beside the database, whatever shape its path has: this fixture opens one
+    // by bare filename (parent path ""), which is the working directory - the
+    // same case a CLI invocation produces.
+    const std::filesystem::path db_dir =
+    std::filesystem::path (db_->path ()).parent_path ();
+    EXPECT_EQ (std::filesystem::absolute (
+               std::filesystem::path (policy.ca_bundle_path).parent_path ()),
+    std::filesystem::absolute (db_dir.empty () ? std::filesystem::path (".") : db_dir));
+
+    const std::string bundle = read_whole_file (policy.ca_bundle_path);
+    EXPECT_NE (bundle.find (SAMPLE_CERT), std::string::npos)
+    << "the pasted certificate is not in the bundle curl is pointed at";
+
+    // The additive rule of #704, asserted where it is actually enforceable:
+    // wherever this platform exposes its anchors as a file (every
+    // OpenSSL-backed build, which is where CAINFO *replaces* the default),
+    // the merged bundle has to still contain them - otherwise adding one
+    // corporate CA would quietly untrust the public web.
+    const std::string system_anchors = system_ca_bundle_pem ();
+    if (!system_anchors.empty ()) {
+        EXPECT_NE (bundle.find (system_anchors), std::string::npos)
+        << "the platform's own anchors were replaced rather than extended";
+        EXPECT_GT (bundle.size (), system_anchors.size ());
+    }
+    std::filesystem::remove (policy.ca_bundle_path);
+}
+
+TEST_F (TransportPolicyDbTest, AChangedPasteReachesTheNextTransfer) {
+    // The bundle is cached on the content that produced it, because the policy
+    // is resolved per transfer. A cache that ignored a settings change would
+    // keep verifying against the old anchors until the engine restarted.
+    set_config ("customCaCertificates", SAMPLE_CERT);
+    const auto first = resolve_transport_policy (*db_);
+    ASSERT_FALSE (first.ca_bundle_path.empty ());
+
+    const std::string second_cert = std::string (SAMPLE_CERT) +
+    "-----BEGIN CERTIFICATE-----\nQkJCQkJC\n-----END CERTIFICATE-----\n";
+    set_config ("customCaCertificates", second_cert);
+    const auto second = resolve_transport_policy (*db_);
+    ASSERT_FALSE (second.ca_bundle_path.empty ());
+
+    const std::string bundle = read_whole_file (second.ca_bundle_path);
+    EXPECT_NE (bundle.find ("QkJCQkJC"), std::string::npos)
+    << "the second paste never reached the file";
+    std::filesystem::remove (second.ca_bundle_path);
+}
+
+TEST_F (TransportPolicyDbTest, AnUnusablePasteIsNotMaterialized) {
+    // Only reachable from a hand-edited row - POST /config refuses this shape.
+    // What must not happen is a file curl is pointed at that holds no
+    // certificate: every HTTPS request would then fail verification, with the
+    // trust store looking configured.
+    set_config ("customCaCertificates", "-----BEGIN PRIVATE KEY-----\nMIIB\n");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_TRUE (policy.ca_bundle_path.empty ());
+}
+
+TEST (TlsBackend, AcceptsACustomCaBundleOnThisPlatform) {
+    // The per-platform claim, checked on the platform rather than reasoned
+    // about: `CURLOPT_CAINFO` is the one transport option a TLS backend can
+    // refuse outright (`CURLE_NOT_BUILT_IN`), and the three CI legs build
+    // against three different backends - OpenSSL on Linux, Apple SecTrust on
+    // macOS, Schannel on Windows. A refusal here means the docs' additive-trust
+    // claim is false for this build, which is a security claim, so it fails the
+    // suite rather than being discovered by a user whose requests all stop
+    // verifying.
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    const CURLcode result =
+    curl_easy_setopt (curl, CURLOPT_CAINFO, "/nonexistent/ca-bundle.pem");
+    const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+    EXPECT_EQ (result, CURLE_OK)
+    << "TLS backend '"
+    << (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown")
+    << "' refuses CURLOPT_CAINFO: " << curl_easy_strerror (result);
+    curl_easy_cleanup (curl);
 }
 
 // ---------------------------------------------------------------------------

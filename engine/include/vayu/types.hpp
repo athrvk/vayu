@@ -922,6 +922,12 @@ struct Request {
     bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
     int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
     std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
+    // Whether the TLS certificate is verified (issue #706). Stored beside the
+    // redirect policy for the same reason: it is a property of *this* endpoint
+    // - the internal host with the self-signed certificate - not a mode the
+    // whole app is put into. Defaults to verifying, here and in the column, so
+    // that no row can arrive at "trust anything" by omission.
+    bool verify_ssl = true; // INTEGER NOT NULL DEFAULT 1
     // Consume this request's response as a `text/event-stream` (issue #574).
     // Stored rather than chosen per send, because it changes what Send *is* for
     // this endpoint - the execution model, not one run's options - and a toggle

@@ -28,6 +28,7 @@ import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
+	DEFAULT_VERIFY_SSL,
 	isHttpVersion,
 } from "@/constants/request";
 
@@ -45,6 +46,7 @@ interface DesignSnapshot {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: string;
+	verifySSL?: boolean;
 }
 
 export interface DesignRunSeed {
@@ -145,6 +147,10 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			httpVersion: isHttpVersion(snapshot.httpVersion)
 				? snapshot.httpVersion
 				: DEFAULT_HTTP_VERSION,
+			// A run recorded before the field was sent has no key, and reads as
+			// verifying - the same direction every other default here takes,
+			// and the only safe one for this field.
+			verifySSL: snapshot.verifySSL ?? DEFAULT_VERIFY_SSL,
 		},
 		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
 		collectionPostScripts: collectionParts(snapshot.postRequestScripts),

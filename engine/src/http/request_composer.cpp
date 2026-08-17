@@ -560,6 +560,11 @@ const std::vector<vayu::db::Collection>& chain) {
     payload["followRedirects"] = request.follow_redirects;
     payload["maxRedirects"]    = request.max_redirects;
     payload["httpVersion"]     = request.http_version;
+    // Same rule, and the one field where eliding the default would be a
+    // security bug rather than a surprise: `verify_ssl` defaults to *true*
+    // engine-side, so an omitted `false` would verify the certificate the user
+    // explicitly asked the engine not to check (issue #706).
+    payload["verifySSL"]       = request.verify_ssl;
     payload["requestId"]       = request.id;
 
     // Identity for the script sandbox (`pm.info.requestName`), not an HTTP

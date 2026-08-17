@@ -54,6 +54,8 @@ export interface PreparedRequest {
 	body: PreparedBody | undefined;
 	/** Whether the response is a stream - see `SnippetRequest.stream`. */
 	stream: boolean;
+	/** Whether TLS verification is on - see `SnippetRequest.verifySSL`. */
+	verifySSL: boolean;
 	notes: string[];
 	masked: boolean;
 }
@@ -268,6 +270,9 @@ export function prepareRequest(
 		basicAuth: maskedBasic,
 		body: body ? maskedBody(body, masker.apply) : undefined,
 		stream: request.stream === true,
+		// Absent means verifying: the engine's default, and the safe reading of
+		// a caller that never set it.
+		verifySSL: request.verifySSL !== false,
 		notes,
 		masked: masker.wasUsed(),
 	};

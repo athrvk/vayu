@@ -807,4 +807,55 @@ TEST_F (ConfigRouteTest, UnknownProxyModeIs400) {
     EXPECT_EQ (status, 400) << body.dump ();
 }
 
+// ---------------------------------------------------------------------------
+// Custom CA certificates (issue #706) - the paste is checked at the boundary,
+// because what a bad one produces is a bundle curl is pointed at that holds no
+// anchor: every HTTPS request fails verification afterwards while Settings
+// shows a trust store that looks configured.
+// ---------------------------------------------------------------------------
+
+TEST_F (ConfigRouteTest, PastedCertificatesAreStored) {
+    const nlohmann::json body = { { "entries",
+    { { "customCaCertificates", "-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n" } } } };
+    auto [status, response] =
+    vayu::http::routes::apply_config_update (*db_, body.dump ());
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_NE (db_->get_config_string ("customCaCertificates", "").find ("BEGIN CERTIFICATE"),
+    std::string::npos);
+}
+
+TEST_F (ConfigRouteTest, TextThatHoldsNoCertificateIs400) {
+    const nlohmann::json body = { { "entries",
+    { { "customCaCertificates", "paste your certificate here" } } } };
+    auto [status, response] =
+    vayu::http::routes::apply_config_update (*db_, body.dump ());
+    EXPECT_EQ (status, 400) << response.dump ();
+    EXPECT_TRUE (db_->get_config_string ("customCaCertificates", "").empty ())
+    << "a rejected update must not leave the value behind";
+}
+
+TEST_F (ConfigRouteTest, APastedPrivateKeyIs400AndSaysSo) {
+    const nlohmann::json body = { { "entries",
+    { { "customCaCertificates",
+    "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n" } } } };
+    auto [status, response] =
+    vayu::http::routes::apply_config_update (*db_, body.dump ());
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_NE (response.dump ().find ("private key"), std::string::npos)
+    << response.dump ();
+}
+
+TEST_F (ConfigRouteTest, ClearingTheCertificatesIsAllowed) {
+    // Empty is how the setting is turned off, so the PEM rule must not make it
+    // impossible to undo a paste.
+    const nlohmann::json set = { { "entries",
+    { { "customCaCertificates", "-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n" } } } };
+    ASSERT_EQ (vayu::http::routes::apply_config_update (*db_, set.dump ()).first, 200);
+
+    auto [status, response] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"customCaCertificates":""}})");
+    EXPECT_EQ (status, 200) << response.dump ();
+    EXPECT_TRUE (db_->get_config_string ("customCaCertificates", "x").empty ());
+}
+
 } // namespace

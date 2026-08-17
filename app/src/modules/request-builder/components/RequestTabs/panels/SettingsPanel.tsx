@@ -22,8 +22,14 @@
  * POST - and what it changes is how the response is *delivered*, which is
  * exactly what this tab is for.
  *
- * `verifySSL` is deliberately not exposed here - it weakens transport security
- * and was deferred; issue #706 is the record and the place it will land.
+ * **Verification off is loud, not hidden** (issue #706). The row was withheld
+ * for years on the grounds that exposing it weakens transport security; what
+ * that produced was an unreachable knob and users with no way to reach an
+ * internal host at all. The answer to a dangerous state is to make it say so -
+ * the warning line below the toggle, and the Settings tab's own badge - not to
+ * remove the control and leave the trust store as the only way out. The row
+ * says which of the two the reader probably wants: trusting the authority in
+ * Settings > Network & connectivity keeps verification on everywhere.
  *
  * **The rows are the app-settings rows** (issue #702). This tab used to
  * hand-roll a toggle arrangement, a number field and a labelled dropdown that
@@ -34,6 +40,8 @@
  * now (11px, uppercase, muted), and a section holding one row *is* that row,
  * which is why Protocol and Streaming carry no heading of their own.
  */
+
+import { AlertTriangle } from "lucide-react";
 
 import { Eyebrow } from "@/components/ui";
 import {
@@ -57,6 +65,7 @@ const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
 const PROTOCOL_LABEL = "Protocol";
 const STREAM_LABEL = "Event stream";
+const VERIFY_LABEL = "Verify TLS certificate";
 
 export default function SettingsPanel() {
 	const { request, setRequest, updateField, getAutoAccept, setAutoAccept } =
@@ -164,6 +173,40 @@ export default function SettingsPanel() {
 							: "Only applies while Follow redirects is on."
 					}
 				/>
+			</div>
+
+			<div className="space-y-4">
+				<Eyebrow>Security</Eyebrow>
+
+				<ToggleRow
+					label={VERIFY_LABEL}
+					checked={request.verifySSL}
+					onChange={(checked) => updateField("verifySSL", checked)}
+					description={
+						<>
+							Off skips the certificate check entirely - hostname included - so an
+							internal or self-signed host answers instead of failing. To keep
+							verification on, add the authority under Settings &gt; Network &amp;
+							connectivity instead.
+						</>
+					}
+				/>
+
+				{/*
+				 * Text, not a Badge: it paints no background, which is the rule
+				 * `badge-hover.test.tsx` exists for - and the same treatment the
+				 * response bar gives its protocol-downgrade line, so the two
+				 * warnings in the request builder read as one thing.
+				 */}
+				{!request.verifySSL && (
+					<div className="flex items-start gap-1.5 text-xs text-status-warning-text">
+						<AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+						<span>
+							This request accepts any certificate. A machine in the middle can read
+							and rewrite it - Send, load tests and streams alike.
+						</span>
+					</div>
+				)}
 			</div>
 
 			<ToggleRow

@@ -52,6 +52,15 @@ export interface SnippetRequest {
 	 * command that would hang on an endless stream.
 	 */
 	stream?: boolean;
+	/**
+	 * Verify the TLS certificate (issue #706). Default `true`, and the snippet
+	 * only says anything when it is off - `curl -k` is the flag `parseCurl`
+	 * reads back, so a request pasted from a command that turned verification
+	 * off regenerates the command it came from. Targets with no first-class
+	 * spelling for it carry a note instead of silently emitting a verifying
+	 * request, the same split `stream` above takes.
+	 */
+	verifySSL?: boolean;
 }
 
 export interface CodegenOptions {

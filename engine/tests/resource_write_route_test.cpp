@@ -72,6 +72,9 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// Defined in requests.cpp - the list serializer, which is separate code from
+// the single-request one and has been the half a new field missed before.
+std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
 // Defined in config.cpp - used here only to flip the "defaultHttpVersion"
 // global mid-test, proving the httpVersion seed is read live rather than
 // baked in at process start.
@@ -661,6 +664,78 @@ TEST_F (ResourceWriteRouteTest, RequestMaxRedirectsIsClamped) {
     update_request_response (*db_, id, json{ { "maxRedirects", 5000 } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["maxRedirects"], 100);
+}
+
+// ---------------------------------------------------------------------------
+// Requests - verifySSL (issue #706). Stored like the redirect policy and
+// defaulted like it: absent means verifying on create, `null` resets to
+// verifying on update. The direction is what these pin - a field that read as
+// "accept any certificate" whenever a client left it out would turn every
+// pre-existing request insecure on the first save.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestCreateAbsentVerifySSLVerifies) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("verifySSL"));
+    EXPECT_EQ (body["verifySSL"], true);
+    EXPECT_TRUE (db_->get_request (body["id"].get<std::string> ())->verify_ssl);
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateStoresVerifySSLFalse) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" }, { "verifySSL", false } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["verifySSL"], false);
+    EXPECT_FALSE (db_->get_request (body["id"].get<std::string> ())->verify_ssl);
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateKeepsVerifySSLWhenAbsent) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (
+    update_request_response (*db_, id, json{ { "verifySSL", false } }).first, 200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["verifySSL"], false)
+    << "an untouched field must survive a patch";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateNullVerifySSLResetsToVerifying) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (
+    update_request_response (*db_, id, json{ { "verifySSL", false } }).first, 200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "verifySSL", nullptr } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["verifySSL"], true);
+}
+
+TEST_F (ResourceWriteRouteTest, VerifySSLReadsBackThroughBothSerializers) {
+    // The two-serializer rule: `serialize` answers the single-request route and
+    // `serialize_to_stream` the list, and this repo has shipped a field on one
+    // and not the other before.
+    const std::string collection = make_collection ();
+    auto [status, created]       = create_request_response (*db_,
+          json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+          { "url", "https://internal.example.com" }, { "verifySSL", false } });
+    ASSERT_EQ (status, 200);
+
+    const json listed =
+    json::parse (vayu::http::routes::list_requests_body (*db_, collection));
+    ASSERT_EQ (listed.size (), 1u);
+    ASSERT_TRUE (listed[0].contains ("verifySSL"))
+    << "the list serializer dropped the field the single-request one carries";
+    EXPECT_EQ (listed[0]["verifySSL"], created["verifySSL"]);
 }
 
 // ---------------------------------------------------------------------------

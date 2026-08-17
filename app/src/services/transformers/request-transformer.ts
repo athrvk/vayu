@@ -25,6 +25,7 @@ import { asRecord, asStr } from "@/lib/json-node";
 import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_STREAM,
+	DEFAULT_VERIFY_SSL,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
 	MAX_MAX_REDIRECTS,
@@ -139,6 +140,9 @@ export class RequestTransformer {
 			// carrying a value this build doesn't recognise, reads as the
 			// engine default rather than as an unselectable value.
 			httpVersion: coerceHttpVersion(raw.httpVersion),
+			// TLS verification: same rule again, and the direction matters -
+			// a row stored before this column existed reads as verifying.
+			verifySSL: typeof raw.verifySSL === "boolean" ? raw.verifySSL : DEFAULT_VERIFY_SSL,
 			// Event stream: same rule as the redirect policy - a row stored
 			// before this column existed reads as `false`, which is what it was.
 			stream: typeof raw.stream === "boolean" ? raw.stream : DEFAULT_STREAM,

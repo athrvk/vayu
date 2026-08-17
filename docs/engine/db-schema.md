@@ -153,6 +153,7 @@ Stores individual HTTP request definitions.
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
+| `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
 | `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
 | `created_at`          | INTEGER | Unix ms                                              |
@@ -1132,6 +1133,14 @@ the three are read together as one policy at the point of use - see
 [Proxy settings](api-reference.md#proxy-settings) for the values, the
 cross-field rule `POST /config` enforces over `proxyMode` + `proxyUrl`, and why
 `proxyUrl` holds credentials in plaintext exactly as `oauth_tokens` does.
+
+**`customCaCertificates`** is the one `text` entry - a multi-line string, which
+is a rendering distinction rather than a value-space one: the app draws a
+textarea for it because what it holds is pasted PEM whose line breaks are the
+format. The certificates themselves are public, so nothing here is a
+credential; the engine materializes them as `ca-bundle.pem` beside this
+database (see [TLS trust settings](api-reference.md#tls-trust-settings)), which
+is derived state a delete only costs a rewrite.
 
 **`dbSynchronous`** is the exception: SQLite's durability levels (`"0"` Off,
 `"1"` Normal, `"2"` Full) are its enumeration rather than ours, so that one

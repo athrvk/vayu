@@ -223,7 +223,12 @@ Three things worth knowing before you design around them:
   Both clients send them on *every* execute and load test rather than eliding
   the defaults, because the engine's `follow_redirects` defaults to **true** -
   an omitted `false` would silently follow the 3xx the user asked to see.
-  **`verifySSL` is still engine-only**; it was deliberately not exposed.
+  **`verifySSL` joined them** (#706, `requests.verify_ssl` → **Settings** tab),
+  under the same never-elided rule and for a stronger reason: the engine
+  verifies unless told otherwise, so a dropped `false` verifies the certificate
+  the user opted out for. The old "engine-only, deliberately not exposed" line
+  is gone with the deferral it recorded - the answer to a dangerous state is a
+  loud control, not an unreachable one.
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`). It is resolved from the
   `proxyMode` / `proxyUrl` / `proxyBypass` settings at the point of use -
@@ -234,7 +239,14 @@ Three things worth knowing before you design around them:
   driver: the three had grown their own SSL blocks and only two ever grew a
   proxy block, so SSE silently ignored `CURLOPT_PROXY` for its whole life.
   Every mode writes `CURLOPT_PROXY` rather than skipping it, because handles
-  are reused. A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
+  are reused - and #706's `ca_bundle_path` writes `CURLOPT_CAINFO` the same
+  way, empty included. That bundle is materialized from the
+  `customCaCertificates` setting beside the database and **extends** the
+  platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
+  the whole store, so the file is the system anchors plus the user's, while
+  Schannel and Apple SecTrust keep their OS store. The per-backend claim is
+  tested on each CI platform (`TlsBackend.AcceptsACustomCaBundleOnThisPlatform`)
+  rather than reasoned about, because a wrong claim here is a security claim. A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
   `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no.

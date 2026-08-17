@@ -68,6 +68,7 @@ const REQUEST: Request = {
 	postRequestScript: "",
 	followRedirects: true,
 	maxRedirects: 10,
+	verifySSL: true,
 	httpVersion: "auto",
 	stream: false,
 	order: 0,

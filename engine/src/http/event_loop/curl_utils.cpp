@@ -14,6 +14,7 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -519,6 +520,42 @@ Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
 void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool verify_ssl) {
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, verify_ssl ? 1L : 0L);
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, verify_ssl ? 2L : 0L);
+
+    // The user's trust anchors (issue #706). Written on every handle, empty
+    // path included, for the reason the proxy options are: handles are reused,
+    // so a bundle left behind by a previous policy would outlive the setting
+    // that asked for it. Null restores the backend's own default.
+    //
+    // The return code is checked because this is the one transport option a
+    // TLS backend can refuse outright - `CURLE_NOT_BUILT_IN` from a backend
+    // with no CAINFO support - and a silently ignored bundle means every
+    // request fails verification with nothing anywhere saying the certificates
+    // were never loaded. Logged once per process: the load path applies a
+    // policy per transfer, and a per-request line would be the log.
+    const CURLcode ca_result = curl_easy_setopt (curl, CURLOPT_CAINFO,
+    policy.ca_bundle_path.empty () ? static_cast<const char*> (nullptr) :
+                                     policy.ca_bundle_path.c_str ());
+    if (ca_result != CURLE_OK && !policy.ca_bundle_path.empty ()) {
+        static std::once_flag warned;
+        std::call_once (warned, [ca_result] {
+            const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+            vayu::utils::log_error ("This build's TLS backend (" +
+            std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
+            ") refused a custom CA bundle: " + std::string (curl_easy_strerror (ca_result)) +
+            ". Custom CA certificates are not in use on this platform.");
+        });
+    }
+
+    // With a bundle in force, ask the backend to keep consulting the operating
+    // system's own store as well. On an OpenSSL build CAINFO *replaces* the
+    // default bundle, which is why the materialized file already carries the
+    // system anchors; this is the same guarantee said the other way for the
+    // backends that can honour it, and a no-op where they cannot. Written in
+    // both directions - the default `0` when no bundle is set - because a
+    // reused handle would otherwise keep a flag the current policy never asked
+    // for, the rule every option here follows.
+    curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS,
+    policy.ca_bundle_path.empty () ? 0L : static_cast<long> (CURLSSLOPT_NATIVE_CA));
 
     switch (policy.proxy_mode) {
     case ProxyMode::Environment:

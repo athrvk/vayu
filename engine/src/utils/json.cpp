@@ -472,6 +472,7 @@ Json serialize (const vayu::db::Request& r) {
     json["followRedirects"]   = r.follow_redirects;
     json["maxRedirects"]      = r.max_redirects;
     json["httpVersion"]       = r.http_version;
+    json["verifySSL"]         = r.verify_ssl;
     json["stream"]            = r.stream;
     // Operation identity (issue #637). Always present as a key, `null` when the
     // request declares none - the column is nullable, and a client that has to
@@ -1110,6 +1111,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
+    out << "\"verifySSL\":" << (r.verify_ssl ? "true" : "false") << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
     // Through the same `spec_operation_node` the object serializer uses, so the
     // list route and the single route cannot come to disagree about it.

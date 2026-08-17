@@ -40,6 +40,7 @@ import {
 	CardHeader,
 	CardTitle,
 	Skeleton,
+	Textarea,
 } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
@@ -725,6 +726,25 @@ export default function SettingsMain() {
 							defaultValue={entry.default}
 							defaultDisplay={defaultDisplay}
 							onResetToDefault={() => handleResetToDefault(entry)}
+						/>
+					) : entry.type === "text" ? (
+						/*
+						 * The multi-line string: what goes in it is pasted rather
+						 * than typed (a PEM bundle, today), and a single-line
+						 * input shows one line of it with the rest scrolled out
+						 * of sight. Monospace because the content is delimited
+						 * text whose line breaks are load-bearing - a wrapped
+						 * -----BEGIN CERTIFICATE----- is not the same string.
+						 */
+						<Textarea
+							value={currentValue}
+							onChange={(e) => handleValueChange(entry, e.target.value)}
+							rows={8}
+							spellCheck={false}
+							className="font-mono text-xs"
+							// Same as the Switch above: the name is in the
+							// CardTitle, which nothing links to this control.
+							aria-label={entry.label}
 						/>
 					) : (
 						<Input

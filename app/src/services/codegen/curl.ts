@@ -61,6 +61,14 @@ export function generateCurl(
 		if (accept) args.push(`-H ${shellQuote(`${ACCEPT_HEADER}: ${accept}`)}`);
 	}
 
+	if (!prepared.verifySSL) {
+		// Emitted only when verification is off, and `parseCurl` reads it back
+		// as the same setting - the round trip issue #706 asks for. The verifying
+		// default needs no flag: `curl` verifies unless told otherwise, so
+		// emitting nothing is emitting the request.
+		args.push("-k");
+	}
+
 	if (prepared.basicAuth) {
 		args.push(
 			`-u ${shellQuote(`${prepared.basicAuth.username}:${prepared.basicAuth.password}`)}`

@@ -16,8 +16,9 @@
  * single-request client, the load event loop and the SSE consumer - reads the
  * same struct, which is the whole point: building transport config per-driver
  * is how the SSE path came to have no proxy option at all while the other two
- * did. Phases 2 and 3 of #704 extend this struct with the TLS fields; nothing
- * about the plumbing changes when they do.
+ * did. Phase 2 (#706) added the CA bundle to it and touched no driver, which
+ * is the plumbing working as designed; phase 3's client certificates arrive
+ * the same way.
  */
 
 #include <array>
@@ -106,7 +107,47 @@ struct TransportPolicy {
      * that ships in libcurl is the one the user's other tools already obey.
      */
     std::string proxy_bypass;
+
+    /**
+     * The materialized CA bundle `CURLOPT_CAINFO` points at, empty when the
+     * user has added no certificate of their own (issue #706).
+     *
+     * A *path*, because that is the only shape libcurl takes - but what the
+     * user stores is the PEM *content* (`customCaCertificates`), and this file
+     * is derived from it beside the database. A stored path would break the
+     * moment the file moved and could not be shown back in Settings.
+     *
+     * On an OpenSSL-backed build `CURLOPT_CAINFO` *replaces* the default
+     * bundle, so the file this names is the system anchors and the user's PEMs
+     * concatenated - the additive rule of #704 is kept by construction rather
+     * than by hoping the backend merges for us. See `resolve_transport_policy`.
+     */
+    std::string ca_bundle_path;
 };
+
+/**
+ * @brief Why @p pem cannot be a CA bundle, or nullopt when it can.
+ *
+ * The one copy of the rule, shared by `POST /config` (which rejects a bad
+ * paste outright) and the resolver (which re-checks a row edited around the
+ * route). Deliberately shallow - it asks whether the text is PEM-shaped, not
+ * whether the certificates inside it are valid or unexpired, because a
+ * pasted-in-full chain that curl accepts must not be refused by a parser of
+ * ours, and the certificate that fails to verify says so at handshake time
+ * with libcurl's own error rather than a guess of ours at paste time.
+ */
+std::optional<std::string> ca_pem_rejection (std::string_view pem);
+
+/**
+ * @brief The trust anchors this platform verifies with today, as PEM text.
+ *
+ * Empty when they cannot be read as a file - which is the normal case on
+ * Windows (Schannel) and macOS (Apple SecTrust), where the anchors live in an
+ * OS store rather than a bundle. Exposed for the tests and for the per-platform
+ * disclosure in the docs; production code reaches it through
+ * `resolve_transport_policy`.
+ */
+std::string system_ca_bundle_pem ();
 
 /**
  * @brief Read the policy out of the config table.

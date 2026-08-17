@@ -236,6 +236,18 @@ const std::string& body) {
             }
         }
 
+        // Per-key rule, the way the proxy URL's lives in `proxy_url_rejection`:
+        // the type system says "text" and only this key knows that the text has
+        // to be PEM. Rejected at the boundary rather than at handshake time,
+        // because a pasted key or a truncated block would otherwise be stored,
+        // materialized, and reported as an unrelated verification failure on
+        // every request afterwards (issue #706).
+        if (reason.empty () && key == "customCaCertificates" && !value.empty ()) {
+            if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
+                reason = "'customCaCertificates' is not a usable PEM bundle: " + *rejection;
+            }
+        }
+
         if (!reason.empty ()) {
             errors.push_back (reason);
             continue;

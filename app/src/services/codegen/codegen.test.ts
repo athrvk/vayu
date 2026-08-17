@@ -831,6 +831,38 @@ describe("the target registry", () => {
 });
 
 /**
+ * A request that skips certificate verification (issue #706). curl has the
+ * flag and emits it; the round trip through `parseCommand` is what keeps the
+ * paste and the snippet describing one request.
+ */
+describe("a request with TLS verification off", () => {
+	const INSECURE: SnippetRequest = {
+		method: "GET",
+		url: "https://internal.example.com/health",
+		verifySSL: false,
+	};
+
+	it("curl emits -k, and parseCurl reads it back as the same setting", () => {
+		const { code } = generateCurl(INSECURE);
+		expect(code).toContain(" -k");
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.verifySSL).toBe(false);
+	});
+
+	it("says nothing when the request verifies, which is curl's own default", () => {
+		const { code } = generateCurl({ ...INSECURE, verifySSL: true });
+		expect(code).not.toContain(" -k");
+	});
+
+	it("treats an unstated verifySSL as verifying", () => {
+		// Every caller that predates the field, and the codegen preview's own
+		// fixtures: absent must not read as "do not verify".
+		const { code } = generateCurl({ method: "GET", url: "https://api.example.com/" });
+		expect(code).not.toContain(" -k");
+	});
+});
+
+/**
  * A stream-flagged request (issue #575). Two targets have a first-class
  * unbuffered mode and emit it; the three whose stock idiom buffers the whole
  * body say so, because a snippet that looked like the request would hang on an

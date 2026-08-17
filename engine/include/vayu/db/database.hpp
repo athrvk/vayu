@@ -120,6 +120,16 @@ class Database {
     // Initialize database (create tables, etc.)
     void init ();
 
+    /**
+     * @brief The database file this instance was opened on.
+     *
+     * The engine's data directory, effectively: files derived from settings
+     * are written beside it (the CA bundle `resolve_transport_policy`
+     * materializes, issue #706) so that a caller holding a `Database` needs no
+     * second path parameter threaded through it to find them.
+     */
+    const std::string& path () const;
+
     // Project Management
     void create_collection (const Collection& c);
     std::vector<Collection> get_collections ();

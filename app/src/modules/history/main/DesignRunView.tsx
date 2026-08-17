@@ -207,6 +207,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// actually used (seeded by design-run-seed.ts), not
 						// whatever the engine would default to.
 						httpVersion: request.httpVersion,
+						// And the TLS verification the run was recorded with -
+						// a resend that verified where the run did not would
+						// fail against the host the run was aimed at.
+						verifySSL: request.verifySSL,
 						// Identity for the script sandbox (pm.info), not an HTTP
 						// field. A replay copy is detached, so its name is the
 						// only one the engine can be told about.

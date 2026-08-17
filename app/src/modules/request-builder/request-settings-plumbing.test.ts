@@ -34,7 +34,13 @@
  * `isRedirectPolicyNonDefault` was renamed to `isRequestSettingsNonDefault`: a
  * name that only mentions redirects is how the next field misses this file.
  *
- * All three fields have the same shape at every hop, deliberately. A revision
+ * `verifySSL` joined them in issue #706, with the same four hops and one extra
+ * reason to send it at the default: the engine's default is to *verify*, so a
+ * dropped `false` does not merely pick the engine's preference - it verifies
+ * the certificate the user turned verification off for, and the request fails
+ * against the host the setting exists for.
+ *
+ * All four fields have the same shape at every hop, deliberately. A revision
  * of this branch gave `httpVersion` a per-run picker in the load test dialog,
  * so the load-test hop read the confirmed `LoadTestConfig` instead of the
  * request. That was reversed: one control in the request builder's Settings
@@ -68,7 +74,7 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(source).toContain("engineExecuteRequest");
 	});
 
-	for (const field of ["followRedirects", "maxRedirects", "httpVersion"] as const) {
+	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
 		it(`loads ${field} from the saved request into the editor state`, () => {
 			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
 		});
@@ -79,7 +85,7 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		});
 	}
 
-	for (const field of ["followRedirects", "maxRedirects", "httpVersion"] as const) {
+	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
 		it(`sends ${field} with the load test`, () => {
 			expect(hops(source ?? "", "pendingLoadTestRequest", field)).toBe(1);
 		});

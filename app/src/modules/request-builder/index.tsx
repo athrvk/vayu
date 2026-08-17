@@ -176,6 +176,7 @@ export default function RequestBuilder() {
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
 			httpVersion: fetchedRequest.httpVersion,
+			verifySSL: fetchedRequest.verifySSL,
 			stream: fetchedRequest.stream,
 			collectionId: fetchedRequest.collectionId,
 		};
@@ -247,6 +248,11 @@ export default function RequestBuilder() {
 					// engine's own default win silently, which is not a
 					// decision this client should hand over.
 					httpVersion: request.httpVersion,
+					// And the one where the silent default is a security
+					// decision: `verify_ssl` defaults to true engine-side, so an
+					// omitted `false` verifies the certificate the user turned
+					// verification off for (issue #706).
+					verifySSL: request.verifySSL,
 					// Identity for the script sandbox (pm.info), not an HTTP
 					// field - it rides through composition to /execute.
 					...execIdentity(request),
@@ -492,6 +498,7 @@ export default function RequestBuilder() {
 				followRedirects: request.followRedirects,
 				maxRedirects: request.maxRedirects,
 				httpVersion: request.httpVersion,
+				verifySSL: request.verifySSL,
 				stream: request.stream,
 			});
 		},
@@ -562,6 +569,10 @@ export default function RequestBuilder() {
 						// One control in the Settings tab governs both modes; the
 						// load dialog decides load shape, not request semantics.
 						httpVersion: pendingLoadTestRequest.httpVersion,
+						// And its TLS verification, for the same reason: a load
+						// test that verified where Send did not would fail on
+						// every request against the host the user opted out for.
+						verifySSL: pendingLoadTestRequest.verifySSL,
 						// The collection chain's test scripts too. Load runs only ever
 						// validated the request's own, so a collection-level assertion
 						// passed in design mode and was never checked under load.

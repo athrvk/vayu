@@ -149,6 +149,7 @@ const request = (id: string, url: string, specOperation?: Request["specOperation
 		postRequestScript: "",
 		followRedirects: true,
 		maxRedirects: 10,
+		verifySSL: true,
 		httpVersion: "auto",
 		stream: false,
 		specOperation,

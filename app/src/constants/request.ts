@@ -22,6 +22,14 @@ export const DEFAULT_REQUEST_NAME = "New Request";
 export const DEFAULT_FOLLOW_REDIRECTS = true;
 export const DEFAULT_MAX_REDIRECTS = 10;
 
+/**
+ * TLS verification default (issue #706). Mirrors `vayu::Request::verify_ssl`
+ * and the `requests.verify_ssl` column default. `true` is the only safe seed:
+ * a request that reached the app without the field must verify, never trust
+ * whatever answers.
+ */
+export const DEFAULT_VERIFY_SSL = true;
+
 /** Bounds offered by the Settings tab; the engine clamps to the same range. */
 export const MIN_MAX_REDIRECTS = 0;
 export const MAX_MAX_REDIRECTS = 100;
