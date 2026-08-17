@@ -25,6 +25,9 @@
 
 #include <httplib.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <thread>
