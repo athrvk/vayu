@@ -17,6 +17,7 @@
 #include <regex>
 #include <unordered_set>
 
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -274,22 +275,81 @@ const std::function<bool (const std::string&)>& keep) {
     return split;
 }
 
+/// What `{{name}}` resolves to, or nullopt for a token left written as it
+/// stands. The one lookup rule every resolution in this file substitutes
+/// through, named rather than inlined so the header-aware resolver below sees
+/// exactly the value an ordinary field would have got.
+std::optional<std::string>
+lookup_variable (const std::string& name, const VariableValues& vars) {
+    // Before the scopes, not after: the namespace is disjoint from them, so
+    // a variable someone named `data.id` must not answer for the column.
+    if (is_data_variable_name (name)) {
+        return std::nullopt; // bound per iteration, or not at all (#402)
+    }
+    if (auto defined = vars.find (name); defined != vars.end ()) {
+        return defined->second;
+    }
+    if (is_dynamic_variable_name (name)) {
+        return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
+    }
+    return std::string{}; // ordinary unknown name resolves to ""
+}
+
 std::string resolve_template (const std::string& input, const VariableValues& vars) {
-    return substitute_tokens (
-    input, [&vars] (const std::string& name) -> std::optional<std::string> {
-        // Before the scopes, not after: the namespace is disjoint from them, so
-        // a variable someone named `data.id` must not answer for the column.
-        if (is_data_variable_name (name)) {
-            return std::nullopt; // bound per iteration, or not at all (#402)
+    return substitute_tokens (input,
+    [&vars] (const std::string& name) { return lookup_variable (name, vars); });
+}
+
+/// The variable whose value cannot be written into a header line, and whether
+/// its bytes end that line or cut it short.
+struct HeaderTextRefusal {
+    std::string variable;
+    bool line_break = true;
+};
+
+/**
+ * Resolve @p input as header text, recording the first variable whose value
+ * could not be spelled in a header line.
+ *
+ * Composition is where the *variable* is still known - by the time the payload
+ * reaches a driver, the value is indistinguishable from text the user typed -
+ * which is the whole reason this layer exists beside the pre-send gate that
+ * refuses the same bytes from every other origin (see `http/header_text.hpp`).
+ *
+ * Checked on the substituted value rather than on the finished field: a CR the
+ * user typed into the header themselves is not a variable's doing, and naming
+ * one for it would be a lie. The gate still refuses that request, naming the
+ * header instead.
+ */
+std::string resolve_header_template (const std::string& input,
+const VariableValues& vars,
+std::optional<HeaderTextRefusal>& refusal) {
+    return substitute_tokens (input,
+    [&vars, &refusal] (const std::string& name) -> std::optional<std::string> {
+        auto value = lookup_variable (name, vars);
+        if (!value || refusal) {
+            return value; // nothing substituted, or already refused - first wins
         }
-        if (auto defined = vars.find (name); defined != vars.end ()) {
-            return defined->second;
+        if (vayu::http::ends_a_header_line (*value)) {
+            refusal = HeaderTextRefusal{ name, true };
+        } else if (vayu::http::truncates_a_header_line (*value)) {
+            refusal = HeaderTextRefusal{ name, false };
         }
-        if (is_dynamic_variable_name (name)) {
-            return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
-        }
-        return std::string{}; // ordinary unknown name resolves to ""
+        return value;
     });
+}
+
+/// The refusal a header-bound variable carrying an unspellable byte reads as -
+/// the shape #732's bind-time message established, with the variable in the
+/// place the column holds there.
+std::string describe_header_text_refusal (const HeaderTextRefusal& refusal) {
+    return "{{" + refusal.variable + "}} is written into a header, and its value has " +
+    (refusal.line_break ?
+    "a line break - a CR or LF ends the header line rather than sitting in it, "
+    "so the rest of the value would be read as headers of its own" :
+    "a NUL - it cuts the header line short, so the rest of the value would be "
+    "dropped on the wire without a word") +
+    "; the request is refused rather than composed into a forged header";
 }
 
 nlohmann::json resolve_json_strings (const nlohmann::json& value, const VariableValues& vars) {
@@ -604,10 +664,21 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     if (auto headers = payload.find ("headers");
         headers != payload.end () && headers->is_object ()) {
         nlohmann::json resolved = nlohmann::json::object ();
+        // A header is the one field composition refuses a payload over, because
+        // it is the one whose text has a terminator and no escape for it: a
+        // substituted CR or LF does not sit in the header, it ends the line and
+        // makes the remainder a header nobody wrote. See `http/header_text.hpp`
+        // for the rule and for the pre-send gate that catches every other origin.
+        std::optional<HeaderTextRefusal> refusal;
         for (const auto& [key, value] : headers->items ()) {
-            resolved[resolve_template (key, vars)] = value.is_string () ?
-            nlohmann::json (resolve_template (value.get<std::string> (), vars)) :
+            resolved[resolve_header_template (key, vars, refusal)] = value.is_string () ?
+            nlohmann::json (
+            resolve_header_template (value.get<std::string> (), vars, refusal)) :
             value;
+        }
+        if (refusal) {
+            return compose_error (
+            400, "unsendable_header", describe_header_text_refusal (*refusal));
         }
         *headers = resolved;
     }

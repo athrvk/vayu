@@ -16,6 +16,10 @@
 #include <variant>
 
 #include "vayu/http/graphql_body.hpp"
+// `ends_a_header_line` - the same rule the composer and the pre-send gate
+// apply, so a bound cell and a substituted variable cannot drift apart on what
+// a header may hold.
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
 
 namespace vayu::core {
@@ -204,11 +208,6 @@ std::string describe_header_line_break (const std::string& column, size_t row_in
     " has a line break in that column - a CR or LF ends the header line rather "
     "than sitting in it, so the rest of the value would be read as headers of "
     "its own; the row is refused rather than sent forging a header";
-}
-
-/// Whether @p value carries a byte that ends the header line it is written into.
-bool ends_a_header_line (std::string_view value) {
-    return value.find_first_of ("\r\n") != std::string_view::npos;
 }
 
 /**
@@ -686,7 +685,7 @@ class TemplateJoiner {
             // line break is a line terminator. Everywhere else the same bytes
             // are ordinary content: a JSON body escapes them, and a URL, a form
             // field or a text body carries them as the cell wrote them.
-            if (context == FieldContext::Header && ends_a_header_line (encoded)) {
+            if (context == FieldContext::Header && vayu::http::ends_a_header_line (encoded)) {
                 result_.ok = false;
                 result_.error = describe_header_line_break (entry.columns[i], row_index_);
                 return;

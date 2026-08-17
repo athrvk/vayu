@@ -22,6 +22,7 @@
 
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/types.hpp"
@@ -264,6 +265,26 @@ TEST (ScenarioDataHeaderLineBreakTest, AHeaderNameIsCheckedAsWellAsItsValue) {
 
     EXPECT_FALSE (result.ok);
     EXPECT_NE (result.error.find ("{{data.hn}}"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataHeaderLineBreakTest, TheBindRuleIsTheOneSharedHeaderTextRule) {
+    // #738 gave the same rule two more layers - the composer, which names the
+    // variable that carried the byte, and the pre-send gate, which catches
+    // every other origin. Three private copies of "what a header cannot hold"
+    // would drift the way the design-path and scenario-path binding resolution
+    // did in #716, so there is one predicate and this pins the bind path to it.
+    // The composer's suite pins its own layer to the same function.
+    for (const std::string cell :
+    { "plain", "a b", "a\tb", "a: b", "a\nb", "a\rb", "a\r\nb" }) {
+        auto request              = request_with_url ("https://api.test/");
+        request.headers["X-Note"] = "{{data.note}}";
+        json row                  = json::object ();
+        row["note"]               = cell;
+
+        const auto result = bind_data_row (request, row, 0);
+        EXPECT_EQ (result.ok, !vayu::http::ends_a_header_line (cell))
+        << "cell: " << json (cell).dump () << " - " << result.error;
+    }
 }
 
 TEST (ScenarioDataHeaderLineBreakTest, TheSameCellIsFineEverywhereElse) {

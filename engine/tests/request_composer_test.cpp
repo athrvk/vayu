@@ -30,6 +30,7 @@
 
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -483,6 +484,130 @@ TEST_F (RequestComposerTest, MalformedBodiesAre400sInTheNestedShape) {
         EXPECT_EQ (status, 400) << body.dump ();
         EXPECT_EQ (payload["error"]["code"], "invalid_compose_request") << body.dump ();
         EXPECT_TRUE (payload["error"]["message"].is_string ()) << body.dump ();
+    }
+}
+
+// --- Header forgery through a substituted variable (#738) --------------------
+//
+// #732 closed the same forgery from a bound `{{data.column}}`; an environment,
+// collection or global variable reached `build_request_header_list` with no
+// check at all. Composition is the layer that still knows *which* variable
+// carried the byte, so it is the layer that can say so.
+//
+// Mutation-check for all four below: drop the `refusal` check in the headers
+// loop of `compose_request_core` and every one of them fails - the first three
+// on the status, the fourth on nothing (it must keep passing).
+
+TEST_F (RequestComposerTest, AVariableCarryingCrlfIntoAHeaderValueIsRefusedByName) {
+    seed_environment ("env_1", R"({"note":{"value":"ok\r\nX-Admin: true","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X-Note", "{{note}}" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "unsendable_header");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    // Naming the variable is the whole reason this layer exists beside the
+    // pre-send gate - the gate can only name the header.
+    EXPECT_NE (message.find ("{{note}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("line break"), std::string::npos) << message;
+}
+
+// A bare LF and a bare CR end the line as surely as the pair, and the header
+// *name* is as forgeable as its value.
+TEST_F (RequestComposerTest, EitherByteAndEitherHalfOfTheHeaderIsRefused) {
+    seed_environment ("env_1", R"({"lf":{"value":"a\nb","enabled":true},
+                                   "cr":{"value":"a\rb","enabled":true}})");
+    const auto compose = [this] (const json& headers) {
+        return vayu::http::compose_request_core (*db_,
+        json{ { "request", { { "method", "GET" }, { "url", "https://x.test/" }, { "headers", headers } } },
+        { "environmentId", "env_1" } });
+    };
+
+    for (const json& headers : { json{ { "X-A", "{{lf}}" } }, json{ { "X-A", "{{cr}}" } },
+         json{ { "X-{{lf}}", "v" } }, json{ { "X-{{cr}}", "v" } } }) {
+        auto [status, payload] = compose (headers);
+        EXPECT_EQ (status, 400) << headers.dump ();
+        EXPECT_EQ (payload["error"]["code"], "unsendable_header") << headers.dump ();
+    }
+}
+
+// A NUL forges nothing - it truncates, because the engine hands
+// `curl_slist_append` a C string. Same class of quiet wrong request, so the
+// same refusal, with its own clause (#738 item 3).
+TEST_F (RequestComposerTest, AVariableCarryingANulIntoAHeaderIsRefusedToo) {
+    seed_environment ("env_1", R"({"nul":{"value":"ok\u0000dropped","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X-Note", "{{nul}}" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{nul}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("NUL"), std::string::npos) << message;
+}
+
+// The refusal is scoped to the field that has a line terminator: the same
+// variable is ordinary text in a URL, a body and a form field, and composing
+// it there must stay a 200 carrying the bytes unchanged. This is the twin of
+// PR #737's `TheSameCellIsFineEverywhereElse` - the two paths agree on where
+// the rule applies, not just on what it refuses.
+TEST_F (RequestComposerTest, TheSameVariableIsFineEverywhereElse) {
+    seed_environment ("env_1", R"({"note":{"value":"ok\r\nX-Admin: true","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "POST" }, { "url", "https://x.test/{{note}}" },
+        { "body",
+        { { "mode", "x-www-form-urlencoded" },
+        { "fields", json::array ({ { { "key", "k" }, { "value", "{{note}}" }, { "enabled", true } } }) } } } } },
+        { "environmentId", "env_1" }
+    };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://x.test/ok\r\nX-Admin: true");
+    EXPECT_EQ (payload["body"]["fields"][0]["value"], "ok\r\nX-Admin: true");
+}
+
+// A CR the user typed into the header themselves is not a variable's doing, so
+// composition must not name one for it. The request is still refused - by the
+// pre-send gate, which names the header instead (see curl_utils_test).
+TEST_F (RequestComposerTest, ALiteralLineBreakInTheHeaderIsNotBlamedOnAVariable) {
+    seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X-Note", "typed\r\nX-Admin: true {{ok}}" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"]["X-Note"], "typed\r\nX-Admin: true fine");
+}
+
+// The twin of `TheBindRuleIsTheOneSharedHeaderTextRule` in the scenario-data
+// suite: both layers are pinned to the same predicate over the same table, so
+// the data path and the variable path cannot drift on what a header may hold.
+// The composer answers for the NUL as well, which the bind path (older, #732)
+// leaves to the gate.
+TEST_F (RequestComposerTest, TheComposerRuleIsTheOneSharedHeaderTextRule) {
+    const std::vector<std::string> values = { "plain", "a b", "a\tb", "a: b",
+        "a\nb", "a\rb", "a\r\nb", std::string ("a\0b", 3) };
+    for (const std::string& value : values) {
+        seed_environment ("env_1",
+        json{ { "v", { { "value", value }, { "enabled", true } } } }.dump ());
+        const json body = { { "request",
+                            { { "method", "GET" }, { "url", "https://x.test/" },
+                            { "headers", { { "X-Note", "{{v}}" } } } } },
+            { "environmentId", "env_1" } };
+
+        auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+        const bool refused     = vayu::http::ends_a_header_line (value) ||
+        vayu::http::truncates_a_header_line (value);
+        EXPECT_EQ (status, refused ? 400 : 200)
+        << "value: " << json (value).dump () << " - " << payload.dump ();
     }
 }
 

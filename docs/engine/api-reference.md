@@ -2477,6 +2477,28 @@ with specific codes:
 - `404` `{"error": {"code": "request_not_found", "message": "..."}}` - unknown `requestId`.
 - `400` `{"error": {"code": "invalid_compose_request", "message": "..."}}` -
   malformed JSON, neither `requestId` nor `request`, or a field of the wrong type.
+- `400` `{"error": {"code": "unsendable_header", "message": "..."}}` - a
+  variable substituted into a header name or value carries a byte no header line
+  can hold. This is the one payload composition rejects over a *value* rather
+  than over its shape, and it is deliberate: a header line ends at CRLF and has
+  no escape for it, so `ok\r\nX-Admin: true` arriving from an environment
+  variable does not sit in the header - it ends the line and makes the remainder
+  a header nobody wrote. The message names the variable, because composition is
+  the last layer that knows which one carried the byte. A NUL is refused with
+  it: the engine spells a header `key + ": " + value` for `curl_slist_append`,
+  which reads to the first NUL, so the rest of the line would go out missing
+  rather than refused. The same bytes remain ordinary text in a URL, a body and
+  a form field's value, which compose unchanged.
+
+  A header carrying either byte from any *other* origin - a script's assignment
+  to `pm.request.headers`, an auth credential, an import, a payload posted
+  straight to `POST /execute` - is refused one step later, before any transfer
+  starts: the response carries `statusCode: 0` and an `errorCode` of
+  `INTERNAL_ERROR` whose message names the header instead of a variable. The
+  same refusal covers a multipart part's field name, declared filename and
+  per-part content type, which libcurl writes into that part's own header block.
+  A bound `{{data.column}}` is refused earlier still, at bind time, naming the
+  column and the row (see [Scenario runs](#scenario-runs)).
 
 ### POST /execute
 
@@ -3436,6 +3458,14 @@ the query are base64- and percent-encoded before they reach the wire, so they
 bind unchanged. JSON and JSONL rows keep native strings - there is no CSV
 grammar to have stripped the newline - so this is an ordinary cell, not an
 exotic one.
+
+The cell is one of three origins the rule covers, and they share one definition
+of what a header may hold. A `{{variable}}` substituted into a header is refused
+by `POST /compose` with `unsendable_header`, naming the variable; every other
+origin - a script, an auth credential, an import, a raw `POST /execute` payload
+- is refused before the transfer starts, naming the header. That last gate also
+covers a NUL (which truncates the line rather than forging one) and a multipart
+part's field name, filename and content type.
 
 **Two headers that bind to one name** error the same way. `X-{{data.h}}`
 resolving to `authorization` beside a literal `Authorization`, or two templated
