@@ -57,6 +57,38 @@ describe("NumberSettingRow", () => {
 		);
 	});
 
+	it("points the field at its description, and at both when there is an error too", () => {
+		// The description is why the field is what it is ("Only applies while
+		// Follow redirects is on"), so it belongs to the field rather than
+		// sitting near it - a reader that jumps control to control would
+		// otherwise never hear it.
+		const { rerender } = render(
+			<NumberSettingRow label="A" value="5" description="Hops to follow before giving up." />
+		);
+		const described = () => (field("A").getAttribute("aria-describedby") ?? "").split(" ");
+		const textOf = (ids: string[]) => ids.map((id) => document.getElementById(id)?.textContent);
+
+		expect(textOf(described())).toEqual(["Hops to follow before giving up."]);
+
+		rerender(
+			<NumberSettingRow
+				label="A"
+				value="5"
+				description="Hops to follow before giving up."
+				error="Must be at least 1"
+			/>
+		);
+		expect(textOf(described())).toEqual([
+			"Must be at least 1",
+			"Hops to follow before giving up.",
+		]);
+	});
+
+	it("carries no aria-describedby when there is nothing to describe", () => {
+		render(<NumberSettingRow label="A" value="5" />);
+		expect(field("A").getAttribute("aria-describedby")).toBeNull();
+	});
+
 	describe("commit strategies", () => {
 		it("commit=change reports every parseable keystroke", () => {
 			const onCommit = vi.fn();

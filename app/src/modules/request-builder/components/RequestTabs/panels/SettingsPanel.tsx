@@ -23,19 +23,19 @@
  * exactly what this tab is for.
  *
  * `verifySSL` is deliberately not exposed here - it weakens transport security
- * and was deferred.
+ * and was deferred; issue #706 is the record and the place it will land.
+ *
+ * **The rows are the app-settings rows** (issue #702). This tab used to
+ * hand-roll a toggle arrangement, a number field and a labelled dropdown that
+ * `SettingControls` already defines, and paid for it twice over: the rows drifted
+ * from the settings screen's, and its `h3` section headings were `text-sm
+ * font-medium` - the same type as the control labels below them - so six
+ * sibling headings read where three groups were meant. Sections are `Eyebrow`
+ * now (11px, uppercase, muted), and a section holding one row *is* that row,
+ * which is why Protocol and Streaming carry no heading of their own.
  */
 
-import {
-	Input,
-	Label,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-	Switch,
-} from "@/components/ui";
+import { Eyebrow } from "@/components/ui";
 import {
 	ACCEPT_HEADER,
 	DEFAULT_MAX_REDIRECTS,
@@ -45,7 +45,11 @@ import {
 	SSE_ACCEPT,
 	isHttpVersion,
 } from "@/constants/request";
-import { cn } from "@/lib/utils";
+import {
+	NumberSettingRow,
+	SelectSettingRow,
+	ToggleRow,
+} from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
 import { switchAutoHeader } from "../../../utils/auto-header";
 
@@ -86,16 +90,8 @@ export default function SettingsPanel() {
 		setAutoAccept(next.auto);
 	};
 
-	/**
-	 * Keep the stored value inside the range the engine clamps to. An empty
-	 * field would coerce to NaN, so it falls back to the default rather than
-	 * writing a broken number into the request.
-	 */
-	const handleMaxRedirectsChange = (raw: string) => {
-		if (raw === "") {
-			updateField("maxRedirects", DEFAULT_MAX_REDIRECTS);
-			return;
-		}
+	/** Keep the stored value inside the range the engine clamps to. */
+	const commitMaxRedirects = (raw: string) => {
 		const parsed = Number.parseInt(raw, 10);
 		if (Number.isNaN(parsed)) return;
 		updateField(
@@ -104,127 +100,88 @@ export default function SettingsPanel() {
 		);
 	};
 
+	/**
+	 * An emptied field writes the default rather than nothing.
+	 *
+	 * `NumberSettingRow` holds an unparseable draft instead of committing it,
+	 * which is right for a setting whose owner may simply keep the old number.
+	 * This one has no such state: `maxRedirects` is a column on the request and
+	 * goes out on every Send, so "empty" would have to be serialized as
+	 * something. It is serialized as the default, and the draft stays on screen
+	 * until a number replaces it.
+	 */
+	const handleMaxRedirectsDraft = (raw: string) => {
+		if (raw === "") updateField("maxRedirects", DEFAULT_MAX_REDIRECTS);
+	};
+
 	return (
 		<div className="space-y-6 max-w-xl">
-			<div className="space-y-1">
-				<h3 className="text-sm font-medium">Protocol</h3>
-				<p className="text-xs text-muted-foreground">
-					The HTTP protocol to negotiate. Applies to Send and to load tests.
-				</p>
-			</div>
+			{/*
+			 * The scope, once. It was on all three sections, in two variants, and
+			 * the one row it is not true of says so itself (Streaming, below).
+			 */}
+			<p className="text-xs text-muted-foreground">
+				Stored on the request and sent with every Send and every load test.
+			</p>
 
-			<div className="space-y-1.5">
-				<Label htmlFor="setting-protocol" className="text-sm font-medium">
-					{PROTOCOL_LABEL}
-				</Label>
-				<Select value={request.httpVersion} onValueChange={handleProtocolChange}>
-					<SelectTrigger
-						id="setting-protocol"
-						className="h-9 w-48 text-sm"
-						aria-label={PROTOCOL_LABEL}
-					>
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{HTTP_VERSIONS.map((version) => (
-							<SelectItem key={version.value} value={version.value}>
-								{version.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
+			<SelectSettingRow
+				label={PROTOCOL_LABEL}
+				value={request.httpVersion}
+				onChange={handleProtocolChange}
+				options={HTTP_VERSIONS}
+				description="The HTTP protocol to negotiate."
+			/>
 
-			<div className="space-y-1">
-				<h3 className="text-sm font-medium">Redirects</h3>
-				<p className="text-xs text-muted-foreground">
-					How this request handles a 3xx response. Applies to Send and to load tests.
-				</p>
-			</div>
+			<div className="space-y-4">
+				<Eyebrow>Redirects</Eyebrow>
 
-			<div className="flex items-start justify-between gap-4">
-				<div className="min-w-0">
-					<Label htmlFor="setting-follow-redirects" className="text-sm font-medium">
-						{FOLLOW_LABEL}
-					</Label>
-					<p className="text-xs text-muted-foreground mt-0.5">
-						Off shows the 3xx itself - its status and <code>Location</code> header -
-						instead of the page it points at.
-					</p>
-				</div>
-				{/*
-				 * Radix renders a button, not an input, so the visible <Label>
-				 * does not name it on its own - aria-label does. The id is still
-				 * set so the label's htmlFor click target resolves.
-				 */}
-				<Switch
-					id="setting-follow-redirects"
+				<ToggleRow
+					label={FOLLOW_LABEL}
 					checked={followRedirects}
-					onCheckedChange={(checked) => updateField("followRedirects", checked)}
-					aria-label={FOLLOW_LABEL}
+					onChange={(checked) => updateField("followRedirects", checked)}
+					description={
+						<>
+							Off shows the 3xx itself - its status and <code>Location</code> header -
+							instead of the page it points at.
+						</>
+					}
 				/>
-			</div>
 
-			<div className="space-y-1.5">
-				<Label
-					htmlFor="setting-max-redirects"
-					className={cn(
-						"text-sm font-medium",
-						!followRedirects && "text-muted-foreground"
-					)}
-				>
-					{MAX_LABEL}
-				</Label>
-				<Input
-					id="setting-max-redirects"
-					type="number"
-					inputMode="numeric"
-					min={MIN_MAX_REDIRECTS}
-					max={MAX_MAX_REDIRECTS}
-					value={request.maxRedirects}
-					onChange={(e) => handleMaxRedirectsChange(e.target.value)}
+				<NumberSettingRow
+					label={MAX_LABEL}
+					value={String(request.maxRedirects)}
+					commit="change"
+					onCommit={commitMaxRedirects}
+					onDraftChange={handleMaxRedirectsDraft}
+					min={String(MIN_MAX_REDIRECTS)}
+					max={String(MAX_MAX_REDIRECTS)}
 					disabled={!followRedirects}
-					aria-describedby="setting-max-redirects-hint"
-					className="h-9 w-32 text-sm"
+					defaultValue={String(DEFAULT_MAX_REDIRECTS)}
+					onResetToDefault={() => updateField("maxRedirects", DEFAULT_MAX_REDIRECTS)}
+					description={
+						followRedirects
+							? "Hops to follow before giving up."
+							: "Only applies while Follow redirects is on."
+					}
 				/>
-				<p id="setting-max-redirects-hint" className="text-xs text-muted-foreground">
-					{followRedirects
-						? `Hops to follow before giving up (${MIN_MAX_REDIRECTS}-${MAX_MAX_REDIRECTS}). Default ${DEFAULT_MAX_REDIRECTS}.`
-						: "Only applies while Follow redirects is on."}
-				</p>
 			</div>
 
-			<div className="space-y-1">
-				<h3 className="text-sm font-medium">Streaming</h3>
-				<p className="text-xs text-muted-foreground">
-					How this request reads a response that never ends. Applies to Send; a load test
-					always buffers.
-				</p>
-			</div>
-
-			<div className="flex items-start justify-between gap-4">
-				<div className="min-w-0">
-					<Label htmlFor="setting-stream" className="text-sm font-medium">
-						{STREAM_LABEL}
-					</Label>
-					<p className="text-xs text-muted-foreground mt-0.5">
+			<ToggleRow
+				label={STREAM_LABEL}
+				checked={request.stream}
+				onChange={handleStreamChange}
+				description={
+					<>
 						Send returns as soon as the stream opens and events arrive live in the
 						Events tab, instead of waiting for a body that never completes. Adds{" "}
 						<code>
 							{ACCEPT_HEADER}: {SSE_ACCEPT}
 						</code>{" "}
-						unless this request already declares one.
-					</p>
-				</div>
-				{/* Radix renders a button, not an input - see the redirect switch above
-				    for why both the id and the aria-label are set. */}
-				<Switch
-					id="setting-stream"
-					checked={request.stream}
-					onCheckedChange={handleStreamChange}
-					aria-label={STREAM_LABEL}
-				/>
-			</div>
+						unless this request already declares one. Applies to Send; a load test
+						always buffers.
+					</>
+				}
+			/>
 
 			{/*
 			 * Kept, but no longer a refusal: #612 shipped scripts on a streaming
