@@ -32,12 +32,8 @@
 import { useCallback, useState } from "react";
 
 import { useDataFileStore } from "@/stores";
-import {
-	DataFileError,
-	decodeDataFile,
-	parseDataFile,
-	type ParsedDataFile,
-} from "@/services/data-files";
+import { DataFileError, type ParsedDataFile } from "@/services/data-files";
+import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
 import type { DataContractScope } from "@/types";
 
 /** Why the rows are not available, in a sentence the affordance can show. */
@@ -93,8 +89,7 @@ export function useSendWithRow(contract: DataContractScope | undefined): SendWit
 
 	const load = useCallback(() => {
 		if (!path) return;
-		const read = window.electronAPI?.readDataFile;
-		if (!read) {
+		if (!canReadDeclaredDataFile()) {
 			// No Electron, no path to re-read. Said plainly rather than left as a
 			// spinner that never resolves.
 			setStatus("unavailable");
@@ -103,13 +98,9 @@ export function useSendWithRow(contract: DataContractScope | undefined): SendWit
 		}
 		setStatus("loading");
 		setError(null);
-		void read(path)
-			.then(({ bytes, fileName: readName }) => {
-				// The same decode and the same parser the picker and the Run
-				// dialog run, so a file read here cannot disagree with the file
-				// as it was declared.
-				const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
-				setParsed(parseDataFile(text, readName));
+		void readDeclaredDataFile(path)
+			.then((read) => {
+				setParsed(read.parsed);
 				setStatus("ready");
 			})
 			.catch((e: unknown) => {

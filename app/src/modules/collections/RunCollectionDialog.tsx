@@ -63,12 +63,8 @@ import { Callout } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
 import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
-import {
-	DataFileError,
-	decodeDataFile,
-	describeDataSchemaDiff,
-	parseDataFile,
-} from "@/services/data-files";
+import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
+import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
 import type { Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
@@ -153,17 +149,13 @@ export default function RunCollectionDialog({
 	useEffect(() => {
 		if (!rememberedFile?.path) return;
 		let cancelled = false;
-		const read = window.electronAPI?.readDataFile;
-		if (!read) return; // No Electron, no path to re-read - the picker stands.
+		// No Electron, no path to re-read - the picker stands.
+		if (!canReadDeclaredDataFile()) return;
 
-		void read(rememberedFile.path)
-			.then(({ bytes, fileName }) => {
+		void readDeclaredDataFile(rememberedFile.path)
+			.then((read) => {
 				if (cancelled) return;
-				// The same decode and the same parser the picker runs, so a file
-				// re-read here cannot disagree with the file as it was picked.
-				const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
-				const parsed = parseDataFile(text, fileName);
-				setDataFile({ fileName, parsed, path: rememberedFile.path });
+				setDataFile(read);
 				// Same rule as a hand-picked file: a pristine `1` becomes "one
 				// pass per row", a typed one is the user's.
 				if (!iterationsTouched.current) {
