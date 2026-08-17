@@ -152,7 +152,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
 | `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
-| `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node, and 96 KB across the report |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
@@ -214,6 +214,28 @@ Notes:
   load run's results never go through `build_result_trace`, so they carry no
   trace node at all, and its captured bodies live behind
   `GET /runs/:id/samples`, which has always truncated and disclosed this way.
+- **The traces are bounded as a set, not only one at a time** (issue #769).
+  Capping each node does not cap the report: `/runs/:id/report` returns up to
+  100 rows and each may keep 32 KB on each of three nodes, so a 100-step
+  scenario measured **3.3 M characters** with every node honestly flagged as
+  truncated - 2.5x the size that failed in #767. At that row count truncation is
+  no longer the binding constraint: 100 steps of an 8 KB body, under the
+  per-node cap and so never touched, still totalled 845 K. So `get_run_report`
+  also holds the traces to **96 KB in total** - `MAX_INLINE_BODY_BYTES * 3`, the
+  largest single row the per-node bound can produce, rather than a new number
+  beside it. Rows past the budget keep every scalar (id, status, latency, step
+  identity) and carry `traceOmitted: true` in place of their trace, with
+  `tracesOmitted` and `traceBudgetBytes` on the report. **Non-passing steps
+  spend the budget first**, matching `ScenarioStepStore::add`'s own rule for
+  `stepsStored`, so the two do not disagree about which steps matter - and the
+  rows come back in run order regardless, since the budget decides what a row
+  carries, never where it sits. The first trace is always embedded whatever it
+  costs, so a design run's single-row report never comes back empty. The rows
+  themselves are not capped further: at ~200 bytes of scalars each they are
+  noise beside one body, and the run's shape is the answer even when the
+  payloads cannot come along. Bounded sizes for the fixtures above: 33 K
+  characters for the single 1 MB row, 76 K for 100 steps x 1 MB, 120 K for
+  200 rows with all three nodes populated (24.7 M unbounded).
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the
@@ -541,7 +563,9 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     bodies inline, under `trace` (`build_result_trace`, the same node a
     single design-mode send stores) - not behind `GET /runs/:id/samples`, which
     is the load-run capture route - so a long plan against large responses
-    makes for a large report.
+    makes for a large report. That is what the 96 KB total trace budget above
+    bounds: past it a step row keeps its scalars and carries `traceOmitted`
+    instead of its bodies, non-passing steps last to lose them.
   - `start_load_run` takes the same block as an optional `scenario` argument
     and posts it **with** a mode, which hands the plan to the load executor:
     `concurrency` is the number of virtual users, each walking the whole plan

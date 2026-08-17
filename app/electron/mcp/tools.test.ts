@@ -11,6 +11,7 @@ import {
 	dispatchTool,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_INLINE_BODY_BYTES,
+	MAX_REPORT_TRACE_BYTES,
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
@@ -2093,6 +2094,154 @@ describe("inline body bounds", () => {
 			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
 			expect(description).toMatch(/bodyTruncated/);
 		}
+	});
+
+	/**
+	 * The total bound (issue #769).
+	 *
+	 * The per-node bound does not bound the result: `results[]` holds up to 100
+	 * rows and each keeps up to `MAX_INLINE_BODY_BYTES` per node, so a 100-step
+	 * scenario measured 3.3M characters with every node correctly flagged as
+	 * truncated - 2.5x the 1.3M that failed in #767. At that row count even an
+	 * 8KB body, never touched by the per-node cut, totalled 845K.
+	 */
+	describe("total trace budget", () => {
+		/** A scenario row in the shape `stamp_step_identity` writes. */
+		function step(index: number, outcome: string, body: string) {
+			return {
+				id: index + 1,
+				statusCode: outcome === "passed" ? 200 : 500,
+				latencyMs: 4,
+				trace: {
+					iteration: 0,
+					stepIndex: index,
+					stepName: `step-${index}`,
+					outcome,
+					response: { body },
+				},
+			};
+		}
+
+		function scenarioReport(rows: unknown[]) {
+			return { summary: {}, scenario: { stepsStored: rows.length }, results: rows };
+		}
+
+		test("a 100-step report of oversized bodies comes back inside the budget", async () => {
+			const out = await runReport(
+				reported(
+					scenarioReport(Array.from({ length: 100 }, (_, i) => step(i, "passed", huge)))
+				)
+			);
+
+			const rows = out.results as Array<Record<string, unknown>>;
+			expect(rows).toHaveLength(100);
+			const embedded = rows.filter((row) => row.trace !== undefined);
+			const carried = embedded.reduce(
+				(sum, row) => sum + Buffer.byteLength(JSON.stringify(row.trace), "utf8"),
+				0
+			);
+			expect(carried).toBeLessThanOrEqual(MAX_REPORT_TRACE_BYTES);
+			// The whole result, which is what actually reaches the agent: the
+			// pre-fix measurement for this exact fixture was 3,328,454 characters.
+			expect(JSON.stringify(out).length).toBeLessThan(200_000);
+		});
+
+		test("what was dropped is disclosed on the row and on the report", async () => {
+			const out = await runReport(
+				reported(
+					scenarioReport(Array.from({ length: 100 }, (_, i) => step(i, "passed", huge)))
+				)
+			);
+
+			const rows = out.results as Array<Record<string, unknown>>;
+			const dropped = rows.filter((row) => row.traceOmitted === true);
+			expect(dropped.length).toBeGreaterThan(0);
+			expect(out.tracesOmitted).toBe(dropped.length);
+			expect(out.traceBudgetBytes).toBe(MAX_REPORT_TRACE_BYTES);
+			// A dropped row keeps everything that is not the trace - the run's
+			// shape is the answer even when the payloads cannot come along.
+			expect(dropped[0]).toMatchObject({ statusCode: 200, latencyMs: 4 });
+			expect(dropped[0]).not.toHaveProperty("trace");
+		});
+
+		test("non-passing steps keep their traces first", async () => {
+			// Failures last in run order, so a first-come budget would drop
+			// exactly them - which is the engine's rule for `stepsStored`
+			// (`ScenarioStepStore::add`) read backwards.
+			const rows = [
+				...Array.from({ length: 40 }, (_, i) => step(i, "passed", huge)),
+				step(40, "failed", huge),
+				step(41, "errored", huge),
+			];
+			const out = await runReport(reported(scenarioReport(rows)));
+
+			const results = out.results as Array<Record<string, unknown>>;
+			expect(results).toHaveLength(42);
+			// Row order is the run's, not the budget's.
+			expect((results[40].trace as Record<string, unknown>).outcome).toBe("failed");
+			expect((results[41].trace as Record<string, unknown>).outcome).toBe("errored");
+			expect(results[40]).not.toHaveProperty("traceOmitted");
+			expect(results[41]).not.toHaveProperty("traceOmitted");
+			expect(out.tracesOmitted).toBeGreaterThan(0);
+		});
+
+		test("a single oversized row keeps its trace whatever it costs", async () => {
+			// The #767 case itself: a design report is one row, and a budget that
+			// dropped it would answer nothing at all.
+			const out = await runReport(
+				reported({
+					summary: {},
+					results: [
+						{
+							id: 1,
+							trace: {
+								request: {
+									body: huge,
+									rawRequest: `POST /x HTTP/2\r\n\r\n${huge}`,
+								},
+								response: { body: huge },
+							},
+						},
+					],
+				})
+			);
+
+			const row = (out.results as Row[])[0];
+			expect(Buffer.byteLength(row.trace!.response!.body as string, "utf8")).toBe(
+				MAX_INLINE_BODY_BYTES
+			);
+			expect(out).not.toHaveProperty("tracesOmitted");
+		});
+
+		test("a report inside the budget is byte-for-byte unchanged", async () => {
+			// Under the per-node bound and under the total: nothing added, no
+			// disclosure invented, exactly the object the engine returned.
+			const report = scenarioReport(
+				Array.from({ length: 30 }, (_, i) => step(i, "passed", '{"ok":true}'))
+			);
+			expect(await runReport(reported(report))).toEqual(report);
+		});
+
+		test("rows carrying no trace are never counted or flagged", async () => {
+			// A load report has no traces at all, so there is nothing to omit -
+			// the budget must not invent a disclosure for rows it cannot spend on.
+			const report = {
+				summary: { totalRequests: 5_000 },
+				results: Array.from({ length: 100 }, (_, i) => ({
+					id: i,
+					statusCode: 200,
+					latencyMs: 4,
+				})),
+			};
+			expect(await runReport(reported(report))).toEqual(report);
+		});
+
+		test("the tool description states the total bound and its disclosure", () => {
+			const description = TOOLS.find((t) => t.name === "get_run_report")!.description;
+			expect(description).toContain(String(MAX_REPORT_TRACE_BYTES));
+			expect(description).toMatch(/traceOmitted/);
+			expect(description).toMatch(/tracesOmitted/);
+		});
 	});
 });
 
