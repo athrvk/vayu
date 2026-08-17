@@ -152,11 +152,11 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
 | `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
-| `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | Stored trace bodies capped at 32 KB per node |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist                  |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run |
 | `create_collection`    | write    | `POST /collections`                          | write toggle               |
@@ -193,6 +193,27 @@ Notes:
   adds nothing. Absent, never zeros, for a run that was not measured against a
   contract, so an agent must branch on the key's presence rather than reading a
   zero as full non-coverage.
+- **Bodies are bounded before they reach an agent** (issue #767). `run_request`
+  and `get_run_report` were raw passthroughs, and neither engine cap covers this
+  case: `maxResponseBodyBytes` bounds load runs only ("Design-mode sends are not
+  affected") and `maxTraceBodyBytes` is 5 MB, sized for the database and a human
+  reading one full trace. So a single ordinary page fetch answered with 1.3 M
+  characters and blew the tool-result token limit outright. Both tools now cap a
+  body at **32 KB** - `maxSampleBodyBytes`, the engine's own answer to how much
+  of a body an automated reader gets, rather than a new number. What a cut looks
+  like, in the engine's existing vocabulary (`cap_node_body`,
+  `run_samples_response`): `bodyTruncated: true` beside the full size, in
+  `bodySize` on a `run_request` response and `bodyBytes` on a stored trace node,
+  and `rawRequestTruncated` / `rawRequestBytes` for a cut wire message - whose
+  headers are always kept whole, since the `Cookie` line libcurl attached
+  appears nowhere else. A cut `bodyRaw` comes back with its parsed `body` as
+  `null`, because the two carry the same payload and an intact `body` would
+  return in full exactly what was just dropped. A trace the engine had already
+  truncated keeps the original size the engine recorded. Under the bound,
+  nothing is added and nothing is changed. Load-run reports are unaffected: a
+  load run's results never go through `build_result_trace`, so they carry no
+  trace node at all, and its captured bodies live behind
+  `GET /runs/:id/samples`, which has always truncated and disclosed this way.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the

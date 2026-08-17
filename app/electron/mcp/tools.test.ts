@@ -10,6 +10,7 @@ import { z } from "zod";
 import {
 	dispatchTool,
 	MAX_IN_FLIGHT_BOUND,
+	MAX_INLINE_BODY_BYTES,
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
@@ -1812,6 +1813,289 @@ describe("get_live_metrics limit", () => {
  * schema being broken - hiding the body. So every 200 the engine can answer
  * with must produce a result the schema accepts.
  */
+/**
+ * Inline body bounds (issue #767).
+ *
+ * `run_request` and `get_run_report` were raw passthroughs, and an ordinary
+ * page fetch came back as 1.3M characters - over the tool-result token limit,
+ * so the agent got an error instead of a response. The bound lives here rather
+ * than in the engine: full fidelity is right for a person clicking Send, and
+ * what is being violated is specific to a result feeding a context window.
+ */
+describe("inline body bounds", () => {
+	const allow = { allowlist: ["api.example.com"] };
+	const huge = "x".repeat(MAX_INLINE_BODY_BYTES + 5_000);
+
+	/** A `/execute` answer in the shape `serialize(Response)` emits. */
+	function executeAnswer(over: Record<string, unknown>) {
+		return {
+			status: 200,
+			statusText: "OK",
+			headers: { "content-type": "application/json" },
+			requestHeaders: {},
+			bodySize: 128,
+			httpVersion: "2",
+			httpVersionDowngraded: false,
+			body: null,
+			bodyRaw: "",
+			timing: { totalMs: 12 },
+			...over,
+		};
+	}
+
+	function executed(answer: Record<string, unknown>) {
+		return fakeClient({ executeRequest: vi.fn().mockResolvedValue(answer) });
+	}
+
+	async function runRequest(client: EngineClient) {
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(client, allow)
+		);
+		expect(res.isError).toBeFalsy();
+		return JSON.parse(firstText(res)) as Record<string, unknown>;
+	}
+
+	test("run_request cuts an oversized body and states its real size", async () => {
+		const answer = executeAnswer({ bodyRaw: huge, bodySize: huge.length });
+		const out = await runRequest(executed(answer));
+
+		expect(Buffer.byteLength(out.bodyRaw as string, "utf8")).toBe(MAX_INLINE_BODY_BYTES);
+		expect(out.bodyTruncated).toBe(true);
+		// The engine's own count, not the size of the slice we kept - the whole
+		// point of the flag is to say how much was not sent.
+		expect(out.bodySize).toBe(huge.length);
+	});
+
+	test("run_request leaves a body under the bound byte-for-byte", async () => {
+		const small = JSON.stringify({ userId: 1, id: 5, completed: false });
+		const answer = executeAnswer({
+			body: { userId: 1, id: 5, completed: false },
+			bodyRaw: small,
+			bodySize: small.length,
+		});
+		const out = await runRequest(executed(answer));
+
+		// Exact equality, not a subset: over-truncating an ordinary small
+		// response would be its own regression, and so would a stray flag.
+		expect(out).toEqual(answer);
+		expect(out).not.toHaveProperty("bodyTruncated");
+	});
+
+	test("run_request nulls the parsed body once bodyRaw has been cut", async () => {
+		const payload = {
+			items: Array.from({ length: 4_000 }, (_, i) => ({ i, pad: "xxxxxxxx" })),
+		};
+		const raw = JSON.stringify(payload);
+		expect(raw.length).toBeGreaterThan(MAX_INLINE_BODY_BYTES);
+		const out = await runRequest(
+			executed(executeAnswer({ body: payload, bodyRaw: raw, bodySize: raw.length }))
+		);
+
+		// The doubling case: `body` and `bodyRaw` carry the same payload, so a
+		// cut bodyRaw beside an intact parsed body would hand back in full the
+		// bytes it just claimed to have dropped.
+		expect(out.body).toBeNull();
+		expect(out.bodyTruncated).toBe(true);
+	});
+
+	test("run_request cuts a large rawRequest but keeps its headers whole", async () => {
+		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\nCookie: session=abc\r\n\r\n";
+		const out = await runRequest(executed(executeAnswer({ rawRequest: head + huge })));
+
+		const raw = out.rawRequest as string;
+		expect(raw.startsWith(head)).toBe(true);
+		expect(raw).toContain("Cookie: session=abc");
+		expect(Buffer.byteLength(raw, "utf8")).toBe(head.length + MAX_INLINE_BODY_BYTES);
+		expect(out.rawRequestTruncated).toBe(true);
+		expect(out.rawRequestBytes).toBe(head.length + huge.length);
+	});
+
+	test("run_request does not touch a headers-only rawRequest", async () => {
+		const answer = executeAnswer({ rawRequest: "GET /x HTTP/2\r\nHost: api.example.com\r\n" });
+		expect(await runRequest(executed(answer))).toEqual(answer);
+	});
+
+	test("the cut never splits a multi-byte character", async () => {
+		// Two-byte characters against a bound that is not a multiple of two:
+		// a naive byte slice would end mid-character and decode to U+FFFD.
+		const out = await runRequest(
+			executed(executeAnswer({ bodyRaw: "é".repeat(MAX_INLINE_BODY_BYTES) }))
+		);
+		expect(out.bodyRaw as string).not.toContain("�");
+		expect(Buffer.byteLength(out.bodyRaw as string, "utf8")).toBeLessThanOrEqual(
+			MAX_INLINE_BODY_BYTES
+		);
+	});
+
+	function reported(report: Record<string, unknown>) {
+		return fakeClient({ getRunReport: vi.fn().mockResolvedValue(report) });
+	}
+
+	async function runReport(client: EngineClient) {
+		const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		return JSON.parse(firstText(res)) as Record<string, unknown>;
+	}
+
+	type Row = {
+		trace?: { request?: Record<string, unknown>; response?: Record<string, unknown> };
+	};
+
+	test("get_run_report cuts a stored trace body on every row", async () => {
+		const out = await runReport(
+			reported({
+				summary: {},
+				results: [
+					{ id: 1, trace: { request: { url: "u" }, response: { body: huge } } },
+					{ id: 2, trace: { request: { url: "u" }, response: { body: huge } } },
+				],
+			})
+		);
+
+		// Per row, not just the first: a scenario run carries one trace per step
+		// (up to 100 in a report), which is what multiplies this defect.
+		for (const row of out.results as Row[]) {
+			const response = row.trace!.response!;
+			expect(Buffer.byteLength(response.body as string, "utf8")).toBe(MAX_INLINE_BODY_BYTES);
+			expect(response.bodyTruncated).toBe(true);
+			expect(response.bodyBytes).toBe(huge.length);
+		}
+	});
+
+	test("get_run_report keeps the engine's own bodyBytes when it already truncated", async () => {
+		const out = await runReport(
+			reported({
+				results: [
+					{
+						id: 1,
+						trace: {
+							// What a trace the engine cut at maxTraceBodyBytes looks
+							// like: a 5MB slice that records the true original size.
+							response: { body: huge, bodyTruncated: true, bodyBytes: 40_000_000 },
+						},
+					},
+				],
+			})
+		);
+
+		const response = (out.results as Row[])[0].trace!.response!;
+		expect(response.bodyBytes).toBe(40_000_000);
+	});
+
+	test("get_run_report bounds the request side too", async () => {
+		const head = "POST /x HTTP/2\r\nHost: api.example.com\r\n\r\n";
+		const out = await runReport(
+			reported({
+				results: [{ id: 1, trace: { request: { body: huge, rawRequest: head + huge } } }],
+			})
+		);
+
+		const request = (out.results as Row[])[0].trace!.request!;
+		expect(Buffer.byteLength(request.body as string, "utf8")).toBe(MAX_INLINE_BODY_BYTES);
+		expect(request.bodyTruncated).toBe(true);
+		expect(Buffer.byteLength(request.rawRequest as string, "utf8")).toBe(
+			head.length + MAX_INLINE_BODY_BYTES
+		);
+		expect(request.rawRequestTruncated).toBe(true);
+	});
+
+	test("a load-mode report passes through untouched", async () => {
+		// A load run's results never go through build_result_trace, so they
+		// carry no trace node - exact equality proves the walk added nothing.
+		const report = {
+			summary: { totalRequests: 5_000 },
+			latency: { p95: 12 },
+			results: [
+				{ id: 1, statusCode: 200, latencyMs: 4 },
+				{ id: 2, statusCode: 500, latencyMs: 9, error: "timeout" },
+			],
+		};
+		expect(await runReport(reported(report))).toEqual(report);
+	});
+
+	test("a design report under the bound passes through untouched", async () => {
+		const report = {
+			summary: {},
+			results: [
+				{ id: 1, trace: { request: { url: "u" }, response: { body: '{"ok":true}' } } },
+			],
+		};
+		expect(await runReport(reported(report))).toEqual(report);
+	});
+
+	/**
+	 * The scenario shape, pinned ahead of `run_collection` (#754 / PR #765).
+	 *
+	 * A scenario step is written through the same pair a single `/execute` uses
+	 * - `build_result_trace` then `cap_trace_bodies`
+	 * (`scenario_runner.cpp:678-689`) - into the same `results.trace_data`
+	 * column (`scenario_runner.cpp:715`) that `/runs/:id/report` parses back
+	 * into `results[].trace`. So one scenario report carries one such trace per
+	 * step, up to the report route's 100-row cap, instead of the single trace
+	 * reproduced in #767. This fixture is that shape: step identity stamped on
+	 * the trace beside the nodes, and a skipped step whose `response` the
+	 * runner erased.
+	 */
+	test("a scenario report is bounded per step, skipped steps included", async () => {
+		const out = await runReport(
+			reported({
+				summary: {},
+				scenario: { iterations: 1, steps: [{ index: 0, name: "login", executed: 1 }] },
+				results: [
+					{
+						id: 1,
+						trace: {
+							iteration: 0,
+							stepIndex: 0,
+							stepName: "login",
+							outcome: "passed",
+							request: { url: "u" },
+							response: { body: huge },
+						},
+					},
+					{
+						id: 2,
+						trace: {
+							iteration: 0,
+							stepIndex: 1,
+							stepName: "checkout",
+							outcome: "skipped",
+							// No `response` node at all: the runner erases it for a
+							// step that never sent.
+							request: { body: huge },
+						},
+					},
+				],
+			})
+		);
+
+		const rows = out.results as Array<Row & { trace: Record<string, unknown> }>;
+		expect(Buffer.byteLength(rows[0].trace.response!.body as string, "utf8")).toBe(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(rows[0].trace.response!.bodyBytes).toBe(huge.length);
+		// Identity survives the rebuild - the step list reads these.
+		expect(rows[0].trace.stepName).toBe("login");
+		// The skipped step's request is bounded, and no empty `response` is
+		// invented for it: an erased node must stay erased, or the step's
+		// expanded view reads as a server that answered with nothing.
+		expect(Buffer.byteLength(rows[1].trace.request!.body as string, "utf8")).toBe(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(rows[1].trace).not.toHaveProperty("response");
+	});
+
+	test("both tool descriptions state the bound", () => {
+		for (const name of ["run_request", "get_run_report"]) {
+			const description = TOOLS.find((t) => t.name === name)!.description;
+			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
+			expect(description).toMatch(/bodyTruncated/);
+		}
+	});
+});
+
 describe("get_engine_health output always satisfies its own schema", () => {
 	const healthSchema = () => TOOLS.find((t) => t.name === "get_engine_health")!.outputSchema!;
 
