@@ -1436,12 +1436,21 @@ the backdrop. Issue #701 found this in the Run Collection dialog, where a
 seven-column data-file preview put the footer buttons 428px outside the painted
 panel.
 
-`DialogContent` therefore declares `grid-cols-1` - `repeat(1, minmax(0, 1fr))` -
-and that is the fix for any width-capped grid surface: the `0` lets the track be
-narrower than its content's min-content, which is what gives the scrollers
-inside it room to scroll. Prefer it on the surface over `min-w-0` sprinkled on
-the items - the items are written by every caller, and the cap is the surface's
-own promise.
+`grid-cols-1` - `repeat(1, minmax(0, 1fr))` - is the fix for any width-capped
+grid surface: the `0` lets the track be narrower than its content's min-content,
+which is what gives the scrollers inside it room to scroll. Prefer it on the
+surface over `min-w-0` sprinkled on the items - the items are written by every
+caller, and the cap is the surface's own promise.
+
+`DialogContent` itself is a **column flex container** rather than that grid
+since issue #773, which needed a height cap a grid will not honour (see below),
+and it refuses the same widening for a different reason: `min-width: auto` is a
+main-axis rule, so on the cross axis an item stretches to the line - the panel's
+own content width - and a wide descendant overflows inside it instead of
+widening it. Measured in Chromium on the seven-column shape from #701, the
+footer landed 580px past the painted edge under a bare `auto` track and 25px
+*inside* it under either spelling of the clamp. The grid version is still the
+right one for a surface that is genuinely a grid.
 
 Write it as the stock utility, not as the arbitrary value that says it more
 directly. **Tailwind emits no rule for `grid-cols-[minmax(0,1fr)]`** (verified
@@ -1466,6 +1475,49 @@ keeps on a viewport narrower than it, where `w-full` under a cap gives the same
 stable band and still fits. And widening is never the fix for content escaping
 the panel - a wider panel with an `auto` track spills exactly the same way, just
 further along. Clamp the track; widen only for the reading.
+
+### Dialog height: one cap, and the band that scrolls
+
+A dialog panel is `fixed` and centred by a translate, so a panel taller than the
+viewport is centred on a box it does not fit: clipped at the **top and the
+bottom** at once, with nothing to scroll, because a fixed box does not scroll the
+page. The footer is the half that goes, which makes the dialog's primary action
+unreachable by pointer - and only *by pointer*, since Tab still reaches it, which
+is how this survived fourteen call sites (issue #773). Measured in Chromium at a
+613px viewport, an eighteen-row dialog put its Run button 227px below the screen.
+
+The panel therefore declares `max-h-[85vh]`, and the band between the header and
+the footer is a **`DialogBody`**:
+
+```tsx
+<DialogContent className="sm:max-w-xl">
+  <DialogHeader>…</DialogHeader>
+  <DialogBody className="space-y-4 py-2">…</DialogBody>   {/* the only scroller */}
+  <DialogFooter>…</DialogFooter>
+</DialogContent>
+```
+
+Three rules hold it together:
+
+- **The body scrolls, never the panel.** `overflow-y-auto` on the panel is the
+  tempting one-liner and it is the wrong one: the corner close button is
+  `absolute` *inside* the panel, so it scrolls away exactly when the dialog is
+  long enough to need a visible way out. The panel keeps one anyway as a
+  fallback for a dialog with no band; with a band present the panel never
+  scrolls and the button stays pinned.
+- **`min-h-0` on the band is load-bearing**, for the same reason `min-w-0` is
+  one section up: a flex item's automatic minimum on the main axis is its
+  content, so without it the band refuses to shrink and the overflow moves
+  straight back out to the panel.
+- **`flex-auto`, not `flex-1`.** Basis `0%` asks a short dialog to stretch its
+  one band over the whole cap; basis `auto` grows only into height that is free.
+
+Header and footer are `shrink-0` so they stay bands rather than being the first
+thing squashed. A dialog with no middle to scroll - a confirm, a rename - needs
+no body. A dialog that manages bands of its own (`ImportModal`) or whose content
+is already a self-scrolling list (`CommandDialog`) opts out at the call site with
+the reason written there; `dialog-height-band.test.tsx` holds that list closed,
+so a new dialog cannot skip the band silently.
 
 ---
 

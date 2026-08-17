@@ -60,23 +60,42 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// property, which the scale-only keyframes compose with
 					// rather than fight.
 					//
-					// `grid-cols-1` is load-bearing, not tidiness (issue #701).
-					// It is `repeat(1, minmax(0, 1fr))`, and the `0` is the
-					// point: an implicit track is `auto`, whose minimum is its
-					// items' min-content, so one wide descendant - a data-file
-					// preview table, a long unbroken URL - grows the track past
-					// this panel's own `max-w`, which cannot follow it. The panel
-					// stays the painted width while every row inside lays out at
-					// the track's, so right-aligned controls and the footer end
-					// up over the backdrop. Making the descendant a scroller does
-					// not help: `overflow-auto` bounds the box, not the
-					// min-content width it contributes upward. Clamping the track
-					// is what lets those scrollers scroll.
+					// `flex flex-col` carries two jobs, and both are
+					// load-bearing.
 					//
-					// Written as the stock utility rather than the arbitrary
-					// `grid-cols-[minmax(0,1fr)]` that says it more directly:
-					// Tailwind emits no rule for that one, so it would have been
-					// a class that reads correctly and styles nothing.
+					// **Width** (issue #701). This was `grid grid-cols-1` -
+					// `repeat(1, minmax(0, 1fr))` - because an implicit grid
+					// track is `auto`, whose minimum is its items' min-content,
+					// so one wide descendant - a data-file preview table, a long
+					// unbroken URL - grew the track past this panel's own
+					// `max-w`, which cannot follow it. The panel stayed the
+					// painted width while every row inside laid out at the
+					// track's, so right-aligned controls and the footer ended up
+					// over the backdrop. A column flex container refuses the same
+					// thing for a different reason: `min-width: auto` does not
+					// apply on the cross axis, so an item stretches to the line -
+					// this panel's own content width - and a wide descendant
+					// overflows *inside* it rather than widening it. Measured in
+					// Chromium against the seven-column shape from #701: an
+					// `auto` track put the footer 580px past the painted edge,
+					// and `grid-cols-1` and this flex column both put it 25px
+					// inside it, to the pixel.
+					//
+					// **Height** (issue #773). `max-h-[85vh]` plus a
+					// `DialogBody`, which is the band that scrolls. Without the
+					// cap a panel taller than the viewport is centred on a box it
+					// does not fit and clipped at *both* ends, with nothing to
+					// scroll because it is `fixed` - an eighteen-row dialog at a
+					// 613px viewport left its Run button 198px below the screen,
+					// reachable by Tab and not by pointer.
+					//
+					// `overflow-y-auto` here is the fallback for a dialog with no
+					// `DialogBody`: nothing claims the leftover height, so the
+					// panel scrolls itself and the footer stays reachable. It
+					// takes the corner close button with it, which is exactly why
+					// a dialog that can grow should take the band instead - with
+					// one present the panel never scrolls at all and the button
+					// stays pinned.
 					//
 					// Two widths, not eleven. A dialog is either a form or a
 					// decision, which is `sm:max-w-lg` (512px), or it holds
@@ -88,7 +107,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// See docs/design-system.md; go wider only with content that
 					// earns it, since a dialog is a focus device before it is a
 					// container.
-					"dialog-panel fixed left-[50%] top-[50%] z-50 grid w-full max-w-xl grid-cols-1 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg",
+					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg",
 					className
 				)}
 				{...props}
@@ -108,7 +127,37 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
 	<div
 		data-slot="dialog-header"
-		className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)}
+		className={cn("flex shrink-0 flex-col space-y-1.5 text-center sm:text-left", className)}
+		{...props}
+	/>
+);
+
+/**
+ * The band that scrolls (issue #773).
+ *
+ * A dialog that can grow past the viewport puts everything between its header
+ * and its footer in here: `flex-auto` claims the height the two fixed bands
+ * leave, and once that is less than the content asks for, this box scrolls -
+ * so the title stays readable, the primary action stays on screen, and the
+ * corner close button, which is positioned against the panel rather than
+ * against this box, does not scroll away with the content.
+ *
+ * `min-h-0` is what allows the shrink at all: a flex item's automatic minimum
+ * size on the main axis is its content, so without it this band refuses to be
+ * shorter than its content and the overflow moves back out to the panel. It is
+ * the vertical case of the `min-w-0` rule in docs/design-system.md.
+ *
+ * `flex-auto` and not `flex-1`: `flex-1` bases the item at `0%`, which asks a
+ * short dialog to stretch its one band over the whole cap. Basis `auto` grows
+ * only into height that is actually free and shrinks only when there is none.
+ *
+ * A short dialog does not need one - a confirm, a rename, a three-field form.
+ * The panel keeps its own `overflow-y-auto` for those.
+ */
+const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+	<div
+		data-slot="dialog-body"
+		className={cn("min-h-0 min-w-0 flex-auto overflow-y-auto", className)}
 		{...props}
 	/>
 );
@@ -116,7 +165,10 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
 	<div
 		data-slot="dialog-footer"
-		className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)}
+		className={cn(
+			"flex shrink-0 flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+			className
+		)}
 		{...props}
 	/>
 );
@@ -152,6 +204,7 @@ export {
 	DialogClose,
 	DialogContent,
 	DialogHeader,
+	DialogBody,
 	DialogFooter,
 	DialogTitle,
 	DialogDescription,

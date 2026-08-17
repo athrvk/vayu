@@ -26,6 +26,7 @@ import {
 	Button,
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -80,7 +81,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4 py-2">
+				<DialogBody className="space-y-4 py-2">
 					<div className="space-y-1">
 						<Label htmlFor="example-name" className="leading-snug">
 							Name
@@ -133,7 +134,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 							{save.error.message}
 						</Callout>
 					)}
-				</div>
+				</DialogBody>
 
 				<DialogFooter>
 					<Button variant="outline" onClick={onClose}>

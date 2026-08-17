@@ -29,6 +29,7 @@ import { Loader2, ArrowRight, ChevronRight } from "lucide-react";
 import {
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogHeader,
 	DialogFooter,
 	DialogTitle,
@@ -262,28 +263,30 @@ export default function SaveRunToRequestDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				{tally.length > 0 && (
-					<div className="flex flex-wrap gap-3 font-mono text-[11px] tabular-nums">
-						{tally.map((t) => (
-							<span key={t.state} className="text-muted-foreground">
-								<span className={cn("font-bold", t.text)}>{t.glyph}</span> {t.n}{" "}
-								{t.state}
-							</span>
+				<DialogBody className="space-y-4">
+					{tally.length > 0 && (
+						<div className="flex flex-wrap gap-3 font-mono text-[11px] tabular-nums">
+							{tally.map((t) => (
+								<span key={t.state} className="text-muted-foreground">
+									<span className={cn("font-bold", t.text)}>{t.glyph}</span> {t.n}{" "}
+									{t.state}
+								</span>
+							))}
+						</div>
+					)}
+
+					<div className="max-h-[24rem] overflow-y-auto surface-sunken rounded-md">
+						{writable.length === 0 && (
+							<p className="px-4 py-3 text-xs text-muted-foreground">
+								The request already matches this run. Only fields the run cannot
+								write are shown below.
+							</p>
+						)}
+						{items.map((item) => (
+							<ChangeRow key={item.field} item={item} />
 						))}
 					</div>
-				)}
-
-				<div className="max-h-[24rem] overflow-y-auto surface-sunken rounded-md">
-					{writable.length === 0 && (
-						<p className="px-4 py-3 text-xs text-muted-foreground">
-							The request already matches this run. Only fields the run cannot write
-							are shown below.
-						</p>
-					)}
-					{items.map((item) => (
-						<ChangeRow key={item.field} item={item} />
-					))}
-				</div>
+				</DialogBody>
 
 				<DialogFooter className="items-center gap-2 sm:gap-0">
 					<span className="mr-auto text-[11px] text-muted-foreground">

@@ -57,6 +57,7 @@ import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogHeader,
 	DialogFooter,
 	DialogTitle,
@@ -353,7 +354,7 @@ export default function RunCollectionDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4 py-2">
+				<DialogBody className="space-y-4 py-2">
 					<div className="flex items-center justify-between gap-4">
 						<Label htmlFor="run-collection-recursive" className="leading-snug">
 							Include sub-folders
@@ -531,7 +532,7 @@ export default function RunCollectionDialog({
 							{error instanceof Error ? error.message : "The engine refused it."}
 						</Callout>
 					)}
-				</div>
+				</DialogBody>
 
 				<DialogFooter>
 					<Button

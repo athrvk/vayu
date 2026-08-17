@@ -32,6 +32,7 @@ import {
 	Button,
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -126,7 +127,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-3">
+				<DialogBody className="space-y-3">
 					<div className="flex items-center gap-3">
 						<span className="text-xs text-muted-foreground">Format</span>
 						<ToggleGroup
@@ -164,7 +165,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 					)}
 
 					{result?.value && <ExportSummary notes={result.value.notes} />}
-				</div>
+				</DialogBody>
 
 				<DialogFooter>
 					<Button variant="ghost" onClick={() => onOpenChange(false)}>

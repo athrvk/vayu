@@ -1338,6 +1338,19 @@ Primitives built on Radix UI + cmdk:
 
 `badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
+### `dialog`
+
+`DialogContent` is a column flex panel with two caps: `max-w-xl` (the width
+scale, issue #701) and `max-h-[85vh]` (issue #773). Anything between the header
+and the footer that can grow goes in **`DialogBody`**, which is the band that
+scrolls - so the title and the primary action stay on screen and the corner
+close button, positioned against the panel, does not scroll away with the
+content. `ImportModal` and `CommandDialog` opt out because each already has a
+self-scrolling band of its own, and `DeleteConfirmDialog` has no middle at all;
+every other call site takes the band, which `dialog-height-band.test.tsx`
+enforces. The rules and the measurements are in
+[design-system.md](../design-system.md).
+
 The `cva` definitions for `badge`, `button` and `toast` live in sibling
 `*-variants.ts` modules and are re-exported from `components/ui/index.ts`. A
 module that exports both a component and a value cannot be hot-reloaded, which

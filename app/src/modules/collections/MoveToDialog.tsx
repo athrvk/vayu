@@ -22,6 +22,7 @@ import { Folder, FolderTree } from "lucide-react";
 import {
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogHeader,
 	DialogTitle,
 	DialogDescription,
@@ -93,7 +94,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 						Currently in {ownerName}. Choose where it should go - it lands at the end.
 					</DialogDescription>
 				</DialogHeader>
-				<div className="max-h-72 overflow-y-auto -mx-1 px-1">
+				<DialogBody className="max-h-72 -mx-1 px-1">
 					{offersTopLevel && (
 						<Button
 							variant="ghost"
@@ -121,7 +122,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 							There is nowhere else to move this.
 						</p>
 					)}
-				</div>
+				</DialogBody>
 			</DialogContent>
 		</Dialog>
 	);

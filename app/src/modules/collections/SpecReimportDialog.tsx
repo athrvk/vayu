@@ -27,6 +27,7 @@ import {
 	Button,
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -80,37 +81,42 @@ export default function SpecReimportDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<ul className="space-y-2">
-					{matches.map((match) => (
-						<li
-							key={match.entryId}
-							className="flex items-center gap-3 rounded-md border border-rule surface-sunken p-2"
-						>
-							<span className="min-w-0 flex-1">
-								<span className="flex items-baseline gap-1.5">
-									<FileJson className="h-3.5 w-3.5 shrink-0 text-primary" />
-									<span className="truncate text-xs font-medium">
-										{match.label}
+				<DialogBody>
+					<ul className="space-y-2">
+						{matches.map((match) => (
+							<li
+								key={match.entryId}
+								className="flex items-center gap-3 rounded-md border border-rule surface-sunken p-2"
+							>
+								<span className="min-w-0 flex-1">
+									<span className="flex items-baseline gap-1.5">
+										<FileJson className="h-3.5 w-3.5 shrink-0 text-primary" />
+										<span className="truncate text-xs font-medium">
+											{match.label}
+										</span>
+									</span>
+									<span className="block text-[11px] text-muted-foreground">
+										Bound to{" "}
+										<span className="font-medium text-foreground">
+											{match.collectionName}
+										</span>{" "}
+										-{" "}
+										{match.matchedBy === "sourceUrl"
+											? "the same URL that collection was bound from, so this may be a newer version of it"
+											: "byte for byte the document that collection is bound to"}
 									</span>
 								</span>
-								<span className="block text-[11px] text-muted-foreground">
-									Bound to{" "}
-									<span className="font-medium text-foreground">
-										{match.collectionName}
-									</span>{" "}
-									-{" "}
-									{match.matchedBy === "sourceUrl"
-										? "the same URL that collection was bound from, so this may be a newer version of it"
-										: "byte for byte the document that collection is bound to"}
-								</span>
-							</span>
-							<Button variant="outline" onClick={() => onSync(match.collectionId)}>
-								<RefreshCw className="mr-2 h-4 w-4" />
-								Sync instead
-							</Button>
-						</li>
-					))}
-				</ul>
+								<Button
+									variant="outline"
+									onClick={() => onSync(match.collectionId)}
+								>
+									<RefreshCw className="mr-2 h-4 w-4" />
+									Sync instead
+								</Button>
+							</li>
+						))}
+					</ul>
+				</DialogBody>
 
 				<DialogFooter className="gap-2 sm:gap-0">
 					<Button ref={cancelRef} variant="secondary" onClick={onCancel}>

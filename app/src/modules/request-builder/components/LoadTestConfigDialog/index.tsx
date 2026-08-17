@@ -56,6 +56,7 @@ import {
 	CollapsibleTrigger,
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogHeader,
 	DialogTitle,
 	DialogDescription,
@@ -568,7 +569,7 @@ export default function LoadTestConfigDialog({
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+			<DialogContent className="max-w-xl">
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
@@ -576,7 +577,7 @@ export default function LoadTestConfigDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4">
+				<DialogBody className="space-y-4">
 					{notices.map((n) => (
 						<div key={n.key}>{n.node}</div>
 					))}
@@ -1050,7 +1051,7 @@ export default function LoadTestConfigDialog({
 							onGateChange={setOauthGated}
 						/>
 					)}
-				</div>
+				</DialogBody>
 
 				<DialogFooter>
 					<Button variant="outline" onClick={onClose} disabled={isStarting}>

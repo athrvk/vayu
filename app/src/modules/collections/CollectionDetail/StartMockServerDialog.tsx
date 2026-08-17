@@ -33,6 +33,7 @@ import {
 	Button,
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -93,7 +94,7 @@ export function StartMockServerDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4 py-2">
+				<DialogBody className="space-y-4 py-2">
 					{/* The bound in words, not only in `aria-invalid` and a disabled
 					    button: a field that reddens while Start greys out states that
 					    something is wrong and never which field or why. */}
@@ -166,7 +167,7 @@ export function StartMockServerDialog({
 							{error.message}
 						</Callout>
 					)}
-				</div>
+				</DialogBody>
 
 				<DialogFooter>
 					<Button variant="outline" onClick={() => onOpenChange(false)}>
