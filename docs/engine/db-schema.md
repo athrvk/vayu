@@ -671,7 +671,7 @@ two renewals (`oauth2RefreshMinIntervalMs`), the retry backoff after a refused
 renewal (`oauth2RefreshRetryMs` doubling to `oauth2RefreshRetryMaxMs`) and how
 often the watchdog wakes to notice the run ended (`oauth2RefreshPollIntervalMs`,
 which bounds how long a finished run waits to join it) are all settings under
-**Network & connectivity**, read once when a run arms its watchdog, so a change
+**Services**, read once when a run arms its watchdog, so a change
 applies to the next run started. It stays out of the way
 for the shapes it cannot renew - `tokenPlacement: "query"` (the credential is in the
 URL every transfer copies), `autoRefreshToken: false`, an `authorization_code`
