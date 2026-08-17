@@ -313,7 +313,21 @@ export default function DataFilePicker({
 					)}
 
 					{/* The grid scrolls rather than widening the dialog: a file
-					    with twenty columns must not push the footer off-screen. */}
+					    with twenty columns must not push the footer off-screen.
+
+					    `overflow-auto` alone does not buy that, which is what
+					    issue #701 found the hard way - seven columns of ordinary
+					    CSV was enough. It bounds this box; it does not stop the
+					    table's min-content width propagating up to whichever
+					    ancestor is sized from its content. In the Run dialog that
+					    ancestor is the panel's grid track, and the clamp lives
+					    there (`DialogContent`'s `grid-cols-1`, which is
+					    `minmax(0, 1fr)`); in the Data tab the flex column already
+					    hands its children a definite width, so nothing escapes.
+					    This component cannot defend itself - measured, a clamp
+					    here or on the card changes nothing - so a third host that
+					    lays the picker out from its content has to clamp its own
+					    chain. */}
 					<div className="max-h-56 overflow-auto rounded-md border border-rule">
 						<Table>
 							<TableHeader>
@@ -339,10 +353,24 @@ export default function DataFilePicker({
 						</Table>
 					</div>
 
-					{rowCount > PREVIEW_ROWS && (
+					{/* Said in both directions, because the table can clip without
+					    looking clipped: it scrolls inside `max-h-56`, and on
+					    overlay-scrollbar platforms an unscrolled container draws
+					    no scrollbar at all. A file of a handful of rows then ends
+					    at a half-drawn row with nothing saying the rest are
+					    there - so the count says which rows are in the table, and
+					    that the table is the thing that scrolls. A single row
+					    cannot be cut off by a box this tall and says nothing. */}
+					{rowCount > PREVIEW_ROWS ? (
 						<p className="text-xs text-muted-foreground">
-							Showing the first {PREVIEW_ROWS} of {rowCount} rows.
+							Showing the first {PREVIEW_ROWS} of {rowCount} rows - the table scrolls.
 						</p>
+					) : (
+						rowCount > 1 && (
+							<p className="text-xs text-muted-foreground">
+								Showing all {rowCount} rows - scroll the table if they do not fit.
+							</p>
+						)
 					)}
 
 					{[...selected.parsed.warnings, ...(additionalWarnings ?? [])].map((warning) => (

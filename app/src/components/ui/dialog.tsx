@@ -59,7 +59,25 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// they centre the panel via the standalone `translate`
 					// property, which the scale-only keyframes compose with
 					// rather than fight.
-					"dialog-panel fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg",
+					//
+					// `grid-cols-1` is load-bearing, not tidiness (issue #701).
+					// It is `repeat(1, minmax(0, 1fr))`, and the `0` is the
+					// point: an implicit track is `auto`, whose minimum is its
+					// items' min-content, so one wide descendant - a data-file
+					// preview table, a long unbroken URL - grows the track past
+					// this panel's own `max-w`, which cannot follow it. The panel
+					// stays the painted width while every row inside lays out at
+					// the track's, so right-aligned controls and the footer end
+					// up over the backdrop. Making the descendant a scroller does
+					// not help: `overflow-auto` bounds the box, not the
+					// min-content width it contributes upward. Clamping the track
+					// is what lets those scrollers scroll.
+					//
+					// Written as the stock utility rather than the arbitrary
+					// `grid-cols-[minmax(0,1fr)]` that says it more directly:
+					// Tailwind emits no rule for that one, so it would have been
+					// a class that reads correctly and styles nothing.
+					"dialog-panel fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-1 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg",
 					className
 				)}
 				{...props}
