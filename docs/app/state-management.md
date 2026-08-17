@@ -1300,14 +1300,26 @@ to keys through `lib/mcp-invalidation.ts`:
 | `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
 | `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
-| `run` | `runs.lists()`, `runs.allRuns()`, plus `runs.lastDesign(requestId)` and `runs.recentDesign(requestId)` when the call named one | The history list polls, but Settings' count, a request tab's restored response and its Recent sends list do not |
+| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, plus `runs.lastDesign(requestId)` when the call named one - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends and Last run do not. The three prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
 
 The event carries no engine data, only which family went stale, so a row still
 reaches the UI by exactly one path: the query layer. Per-run reports and time
-series are deliberately left alone - a new run cannot have changed an existing
-run's report. The entity list is duplicated across the process boundary
+series are still never invalidated *wholesale* - a new run cannot have changed
+an existing run's report, and those are the expensive fetches in the family.
+They are dropped only for the one run a call named: `stop_run`,
+`set_run_baseline` and `delete_run` each take a `runId`, and the event carries
+it as a third scope hint. Removal rather than invalidation, because `samples`
+and both series are `staleTime: Infinity` - a deleted run would otherwise go on
+rendering under an open History tab until its entry was garbage collected.
+`runs.detail` goes with them so the pane refetches, takes its 404 and shows
+`HistoryDetail`'s "This run no longer exists" state instead of a run the sidebar
+no longer lists. The hint says *which* run changed, not *how*, so a `set_run_baseline`
+costs an open detail pane one refetch of data it already had; a stale answer is
+a lie and a refetch is a wait. `runs.lastDesign` has no prefix family, so a
+deleted design run can still leave one stale - issue #776, shared with
+`useDeleteRunMutation`. The entity list is duplicated across the process boundary
 (`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
 `types/domain.ts`) because production code under `electron/` cannot import from
 `app/src`; `data-changed.conformance.test.ts` is what keeps the copies equal,

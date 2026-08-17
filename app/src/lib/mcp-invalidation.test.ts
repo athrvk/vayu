@@ -11,12 +11,24 @@ import { invalidateForMcpEvent } from "./mcp-invalidation";
 import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent } from "@/types/domain";
 
-/** Apply one event against a spied client and return the keys it invalidated. */
+/**
+ * Apply one event against a spied client and return what it did.
+ *
+ * `removed` is kept apart from `keys` because the two are not
+ * interchangeable: invalidation leaves the cached answer in place until a
+ * refetch replaces it, removal drops it. A run that no longer exists needs the
+ * second, and a test that read them as one list could not tell.
+ */
 function keysFor(event: McpDataChangedEvent) {
 	const queryClient = new QueryClient();
 	const spy = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+	const removeSpy = vi.spyOn(queryClient, "removeQueries").mockImplementation(() => {});
 	const handled = invalidateForMcpEvent(queryClient, event);
-	return { handled, keys: spy.mock.calls.map(([filters]) => filters?.queryKey) };
+	return {
+		handled,
+		keys: spy.mock.calls.map(([filters]) => filters?.queryKey),
+		removed: removeSpy.mock.calls.map(([filters]) => filters?.queryKey),
+	};
 }
 
 afterEach(() => {
@@ -75,7 +87,19 @@ describe("invalidateForMcpEvent", () => {
 
 	test("a run invalidates both list families", () => {
 		const { keys } = keysFor({ entity: "run" });
-		expect(keys).toEqual([queryKeys.runs.lists(), queryKeys.runs.allRuns()]);
+		expect(keys).toContainEqual(queryKeys.runs.lists());
+		expect(keys).toContainEqual(queryKeys.runs.allRuns());
+	});
+
+	test("a run invalidates the baseline, Recent sends and Last run families", () => {
+		// None of the three is polled, and each answers something a run write can
+		// move - the pin, the newest send, the collection's last run. Their
+		// prefixes because a run id gives no way back to the request or
+		// collection, exactly as `useDeleteRunMutation` argues.
+		const { keys } = keysFor({ entity: "run" });
+		expect(keys).toContainEqual(queryKeys.runs.baselines());
+		expect(keys).toContainEqual(queryKeys.runs.recentDesigns());
+		expect(keys).toContainEqual(queryKeys.runs.lastCollectionRuns());
 	});
 
 	test("a run linked to a saved request also invalidates its last design run", () => {
@@ -83,12 +107,53 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.runs.lastDesign("req_7"));
 	});
 
-	test("a run leaves per-run reports alone", () => {
+	test("a run that named no id leaves every per-run cache alone", () => {
 		// A new run cannot have changed an existing run's report, and those are
 		// the expensive fetches in this family.
-		const { keys } = keysFor({ entity: "run", requestId: "req_7" });
+		const { keys, removed } = keysFor({ entity: "run", requestId: "req_7" });
 		expect(keys).not.toContainEqual(queryKeys.runs.report("req_7"));
 		expect(keys).not.toContainEqual(queryKeys.runs.all);
+		expect(removed).toEqual([]);
+	});
+
+	test("a named run has its report, samples, both series and detail removed", () => {
+		// Removed rather than invalidated: samples and both series are
+		// `staleTime: Infinity`, so a deleted run would go on feeding an open
+		// History tab until the entry was garbage collected.
+		const { removed } = keysFor({ entity: "run", runId: "run_1" });
+		expect(removed).toEqual([
+			queryKeys.runs.detail("run_1"),
+			queryKeys.runs.report("run_1"),
+			queryKeys.runs.samples("run_1"),
+			queryKeys.runs.timeSeries("run_1"),
+			queryKeys.runs.monitorSeries("run_1"),
+		]);
+	});
+
+	test("a named run leaves another run's per-run caches untouched", () => {
+		// The removal is keyed, not a prefix sweep over `runs.all` - which would
+		// take every other run's report with it.
+		const { removed } = keysFor({ entity: "run", runId: "run_1" });
+		for (const key of removed) {
+			expect(key).not.toEqual(queryKeys.runs.all);
+			expect(key).toContain("run_1");
+		}
+		expect(removed).not.toContainEqual(queryKeys.runs.report("run_2"));
+	});
+
+	test("a deleted run really is gone from a live cache, not just marked stale", () => {
+		// The spied version above proves which keys were named; this proves the
+		// call has the effect claimed, against a real QueryClient.
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(queryKeys.runs.report("run_1"), { id: "run_1" });
+		queryClient.setQueryData(queryKeys.runs.samples("run_1"), { id: "run_1" });
+		queryClient.setQueryData(queryKeys.runs.report("run_2"), { id: "run_2" });
+
+		invalidateForMcpEvent(queryClient, { entity: "run", runId: "run_1" });
+
+		expect(queryClient.getQueryData(queryKeys.runs.report("run_1"))).toBeUndefined();
+		expect(queryClient.getQueryData(queryKeys.runs.samples("run_1"))).toBeUndefined();
+		expect(queryClient.getQueryData(queryKeys.runs.report("run_2"))).toEqual({ id: "run_2" });
 	});
 
 	test("a cookie change invalidates the single jar key", () => {

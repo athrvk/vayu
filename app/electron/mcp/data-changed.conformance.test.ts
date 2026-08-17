@@ -21,8 +21,8 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { MCP_DATA_ENTITIES } from "./tools.js";
-import type { McpDataEntity } from "@/types/domain";
+import { MCP_DATA_ENTITIES, type McpDataChangedEvent as MainEvent } from "./tools.js";
+import type { McpDataEntity, McpDataChangedEvent as RendererEvent } from "@/types/domain";
 
 /*
  * Exhaustive by construction: TypeScript rejects this literal if the renderer's
@@ -48,5 +48,29 @@ describe("McpDataEntity mirror", () => {
 		// A comparison of two empty lists passes while proving nothing - the
 		// failure mode CLAUDE.md records for source-scanning guards.
 		expect(MCP_DATA_ENTITIES.length).toBeGreaterThan(0);
+	});
+});
+
+/*
+ * The entity union is not the only thing written twice: the event carrying it
+ * is too, scope hints and all. A hint added on the emitting side and forgotten
+ * on the reading side is the same silent failure - the main process would send
+ * a narrowing the renderer's invalidator never reads.
+ *
+ * Mutual assignability alone would not see it (an extra optional property is
+ * still assignable both ways), so the property *names* are compared as well.
+ * The check is the compiler's - `pnpm type-check` is where it fails; the
+ * assertions below exist so the constants are read rather than left as dead
+ * declarations lint would strip.
+ */
+type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+const EVENT_TYPES_MATCH: Exact<MainEvent, RendererEvent> = true;
+const EVENT_KEYS_MATCH: Exact<keyof MainEvent, keyof RendererEvent> = true;
+
+describe("McpDataChangedEvent mirror", () => {
+	test("both sides describe the same event, with the same scope hints", () => {
+		expect(EVENT_TYPES_MATCH).toBe(true);
+		expect(EVENT_KEYS_MATCH).toBe(true);
 	});
 });

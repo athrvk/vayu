@@ -88,11 +88,11 @@ export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
  * One thing changed. Invalidation only - no data rides across, the renderer
  * refetches through its normal query layer.
  *
- * The two scope hints are read from the call's own arguments and narrow the
- * invalidation to the caches that can have gone stale; both are absent when the
- * call named neither. They are hints, not identity: `requestId` on a
+ * The three scope hints are read from the call's own arguments and narrow the
+ * invalidation to the caches that can have gone stale; each is absent when the
+ * call did not name it. They are hints, not identity: `requestId` on a
  * `run` event is the saved request a design run was linked to (the key
- * `runs.lastDesign` uses), not the run's own id.
+ * `runs.lastDesign` uses), not the run's own id - `runId` is that.
  */
 export interface McpDataChangedEvent {
 	entity: McpDataEntity;
@@ -100,6 +100,13 @@ export interface McpDataChangedEvent {
 	collectionId?: string;
 	/** The saved request the call named, when it named one. */
 	requestId?: string;
+	/**
+	 * The history run the call named, when it named one. Only the tools that
+	 * rewrite or remove an *existing* run spell this (`stop_run`,
+	 * `set_run_baseline`, `delete_run`); a runner names the request or
+	 * collection it ran, and the run it created has no per-run cache yet.
+	 */
+	runId?: string;
 }
 
 export interface ToolContext {
@@ -3921,12 +3928,14 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 	if (!ctx.onDataChanged || tool.invalidates.length === 0) return;
 	const collectionId = str(args, "collectionId");
 	const requestId = str(args, "requestId");
+	const runId = str(args, "runId");
 	for (const entity of tool.invalidates) {
 		try {
 			ctx.onDataChanged({
 				entity,
 				...(collectionId !== undefined ? { collectionId } : {}),
 				...(requestId !== undefined ? { requestId } : {}),
+				...(runId !== undefined ? { runId } : {}),
 			});
 		} catch (err) {
 			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);

@@ -292,6 +292,30 @@ describe("dispatch emits mcp:data-changed", () => {
 		expect(onDataChanged.mock.calls.map(([e]) => e.entity)).toEqual(["run", "run"]);
 	});
 
+	test("a housekeeping write carries the run id as its scope hint", async () => {
+		// The renderer needs it to drop that one run's report and series caches
+		// (issue #774): they are `staleTime: Infinity` and keyed per run, so
+		// without the hint a deleted run keeps rendering under an open tab.
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		await dispatchTool("delete_run", { runId: "run_1", confirmed: true }, ctx);
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run", runId: "run_1" });
+	});
+
+	test("a runner names no run id - the run it made has no per-run cache yet", async () => {
+		// The hint means "this existing run changed"; attaching it to a create
+		// would drop caches for a run nothing has fetched.
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), {
+			allowlist: ["api.example.com"],
+		});
+		await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/users", requestId: "req_7" },
+			ctx
+		);
+		const event = onDataChanged.mock.calls[0][0];
+		expect("runId" in event).toBe(false);
+	});
+
 	test("a delete_run preview changed nothing, so it notifies nothing", async () => {
 		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
 		const res = await dispatchTool("delete_run", { runId: "run_1" }, ctx);
@@ -303,7 +327,9 @@ describe("dispatch emits mcp:data-changed", () => {
 		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient());
 		const res = await dispatchTool("stop_run", { runId: "run_1" }, ctx);
 		expect(res.isError).toBeFalsy();
-		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run" });
+		// With the hint, because a stopped run's own report and series are what
+		// changed - it went terminal.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run", runId: "run_1" });
 	});
 
 	test("a context without a notifier dispatches normally", async () => {
