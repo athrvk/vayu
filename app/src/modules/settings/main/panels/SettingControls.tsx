@@ -194,6 +194,13 @@ export function ToggleRow({
 
 interface SelectSettingRowProps {
 	label: string;
+	/**
+	 * Keeps the label as the trigger's accessible name without printing it - for
+	 * the engine cards, where the CardTitle above already says it and a visible
+	 * second copy would read it out twice. Same reason as on
+	 * {@link NumberSettingRow}, which those cards already use this way.
+	 */
+	labelHidden?: boolean;
 	description?: ReactNode;
 	/** The stored value. Must be one of `options`, or the trigger renders empty. */
 	value: string;
@@ -220,9 +227,17 @@ interface SelectSettingRowProps {
  * label with the trigger, and the same string names the trigger for a screen
  * reader, because Radix renders a button whose text is the *chosen option*, not
  * the setting.
+ *
+ * The trigger's width is the row's, not the caller's: `w-48` is what
+ * {@link NumberSettingRow}'s input already caps at (`max-w-[12rem]`), so the
+ * two control types line up down an engine settings card instead of ending at
+ * different places. It holds every option label the two consumers have -
+ * "From environment", the longest, at ~16 characters - so a knob would be a
+ * setting with one value.
  */
 export function SelectSettingRow({
 	label,
+	labelHidden = false,
 	description,
 	value,
 	onChange,
@@ -234,7 +249,10 @@ export function SelectSettingRow({
 		// `data-setting-row` names the row's box from the same string the trigger
 		// is named by - the convention the other two rows already keep.
 		<div className="space-y-1.5" data-setting-row={label}>
-			<Label htmlFor={triggerId} className="text-sm font-medium">
+			<Label
+				htmlFor={triggerId}
+				className={cn("text-sm font-medium", labelHidden && "sr-only")}
+			>
 				{label}
 			</Label>
 			<Select value={value} onValueChange={onChange}>

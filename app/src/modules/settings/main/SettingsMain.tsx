@@ -34,11 +34,6 @@ import {
 	Input,
 	Label,
 	Switch,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
 	Card,
 	CardContent,
 	CardDescription,
@@ -49,7 +44,7 @@ import {
 import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
-import { DefaultValueLine, NumberSettingRow } from "./panels/SettingControls";
+import { DefaultValueLine, NumberSettingRow, SelectSettingRow } from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { getEngineCategory } from "../engine-categories";
 import { appEditorFor } from "../engine-settings-edited-in-app";
@@ -679,21 +674,20 @@ export default function SettingsMain() {
 						// from the payload so the two sides of the boundary cannot
 						// drift apart.
 						entry.options && entry.options.length > 0 ? (
-							<Select
+							/*
+							 * `labelHidden` for the same reason the numeric row below
+							 * passes it: the CardTitle above is the setting's name, and
+							 * the trigger's own text is the *chosen option*, so the
+							 * label stays in the DOM to name the control and out of
+							 * sight so the card does not say it twice.
+							 */
+							<SelectSettingRow
+								label={entry.label}
+								labelHidden
 								value={currentValue}
-								onValueChange={(value) => handleValueChange(entry, value)}
-							>
-								<SelectTrigger className="max-w-xs" aria-label={entry.label}>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									{entry.options.map((option) => (
-										<SelectItem key={option.value} value={option.value}>
-											{option.label}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
+								onChange={(value) => handleValueChange(entry, value)}
+								options={entry.options}
+							/>
 						) : null
 					) : isNumeric ? (
 						/*
