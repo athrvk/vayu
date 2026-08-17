@@ -1574,6 +1574,68 @@ describe("inline body bounds", () => {
 		expect(await runReport(reported(report))).toEqual(report);
 	});
 
+	/**
+	 * The scenario shape, pinned ahead of `run_collection` (#754 / PR #765).
+	 *
+	 * A scenario step is written through the same pair a single `/execute` uses
+	 * - `build_result_trace` then `cap_trace_bodies`
+	 * (`scenario_runner.cpp:678-689`) - into the same `results.trace_data`
+	 * column (`scenario_runner.cpp:715`) that `/runs/:id/report` parses back
+	 * into `results[].trace`. So one scenario report carries one such trace per
+	 * step, up to the report route's 100-row cap, instead of the single trace
+	 * reproduced in #767. This fixture is that shape: step identity stamped on
+	 * the trace beside the nodes, and a skipped step whose `response` the
+	 * runner erased.
+	 */
+	test("a scenario report is bounded per step, skipped steps included", async () => {
+		const out = await runReport(
+			reported({
+				summary: {},
+				scenario: { iterations: 1, steps: [{ index: 0, name: "login", executed: 1 }] },
+				results: [
+					{
+						id: 1,
+						trace: {
+							iteration: 0,
+							stepIndex: 0,
+							stepName: "login",
+							outcome: "passed",
+							request: { url: "u" },
+							response: { body: huge },
+						},
+					},
+					{
+						id: 2,
+						trace: {
+							iteration: 0,
+							stepIndex: 1,
+							stepName: "checkout",
+							outcome: "skipped",
+							// No `response` node at all: the runner erases it for a
+							// step that never sent.
+							request: { body: huge },
+						},
+					},
+				],
+			})
+		);
+
+		const rows = out.results as Array<Row & { trace: Record<string, unknown> }>;
+		expect(Buffer.byteLength(rows[0].trace.response!.body as string, "utf8")).toBe(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(rows[0].trace.response!.bodyBytes).toBe(huge.length);
+		// Identity survives the rebuild - the step list reads these.
+		expect(rows[0].trace.stepName).toBe("login");
+		// The skipped step's request is bounded, and no empty `response` is
+		// invented for it: an erased node must stay erased, or the step's
+		// expanded view reads as a server that answered with nothing.
+		expect(Buffer.byteLength(rows[1].trace.request!.body as string, "utf8")).toBe(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(rows[1].trace).not.toHaveProperty("response");
+	});
+
 	test("both tool descriptions state the bound", () => {
 		for (const name of ["run_request", "get_run_report"]) {
 			const description = TOOLS.find((t) => t.name === name)!.description;
