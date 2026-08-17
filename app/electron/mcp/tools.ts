@@ -317,32 +317,137 @@ function boundTraceNode(node: unknown): unknown {
 }
 
 /**
+ * How many bytes of stored trace one run report carries in total (issue #769).
+ *
+ * The per-node bound above does not bound the *result*: the report route caps
+ * `results[]` at 100 rows and each row may keep up to `MAX_INLINE_BODY_BYTES`
+ * on each of three nodes, so a 100-step scenario measured at 3.3M characters
+ * with every node honestly flagged as truncated - 2.5x the 1.3M that made #767
+ * fail in the first place. Truncation stops being the binding constraint at
+ * that row count: 100 steps of an 8KB body, well under the per-node bound and
+ * so never touched, still totalled 845K characters.
+ *
+ * 96KB is `MAX_INLINE_BODY_BYTES * 3`: the largest single row the per-node
+ * bound can produce (a request body, a response body and a `rawRequest`, each
+ * at the cap), derived from the existing bound rather than invented beside it.
+ * That is the number with a reason - a budget below it would drop rows for
+ * being merely as big as one row is allowed to be - and it leaves the whole
+ * result an order of magnitude under the 1.3M characters that failed in #767,
+ * or dozens of rows when the bodies are ordinary.
+ *
+ * It bounds the traces, not the report: the row scalars (id, status, latency,
+ * step identity) are ~200 bytes a row, so 100 of them are noise beside one
+ * body, and they are never dropped - the run's shape is the answer even when
+ * the payloads cannot come along, which is why no second row cap is needed.
+ */
+export const MAX_REPORT_TRACE_BYTES = MAX_INLINE_BODY_BYTES * 3;
+
+/**
+ * Whether a row's trace is one to keep first when the budget cannot hold them
+ * all, mirroring the engine's own thinning rule for `stepsStored`
+ * (`ScenarioStepStore::add`, called with `outcome != Passed`) so the two do not
+ * disagree about which steps matter.
+ *
+ * A row the engine stamped no outcome on is a design-mode row, where the engine
+ * has no rule to disagree with; its transport error is the only failure signal
+ * it carries.
+ */
+function isPriorityTraceRow(row: Record<string, unknown>): boolean {
+	const trace = row.trace;
+	if (isRecord(trace) && typeof trace.outcome === "string") return trace.outcome !== "passed";
+	return typeof row.error === "string" && row.error !== "";
+}
+
+/** One report row, with its trace bounded per node and measured. */
+interface MeasuredRow {
+	row: unknown;
+	/** Set only for a row that carries a trace; the per-node-bounded copy. */
+	traced?: { record: Record<string, unknown>; trace: Record<string, unknown>; priority: boolean };
+	/** True when bounding changed the trace, so the row must be rebuilt. */
+	rebuilt: boolean;
+	bytes: number;
+}
+
+/**
  * Bound the stored traces in a run report - what `get_run_report` hands back.
+ *
+ * Two bounds, because one does not imply the other: every trace node is cut to
+ * `MAX_INLINE_BODY_BYTES` (issue #767), and the traces together are cut to
+ * `MAX_REPORT_TRACE_BYTES` (issue #769). Rows past the total budget keep every
+ * scalar and lose only their trace, flagged `traceOmitted` on the row with
+ * `tracesOmitted` and `traceBudgetBytes` on the report - the same disclose-in-
+ * band shape `list_runs` uses for its 100-row page, so an agent that reads a
+ * short report never mistakes it for the whole run.
  *
  * Design and scenario rows only: a load run's results never go through
  * `build_result_trace` (it is called from `record_design_result` and the
  * scenario runner, never the load hot path), so they carry no `trace` node and
  * the walk leaves them untouched. Rebuilt rather than mutated so a report with
- * nothing over the bound comes back as the object the engine returned.
+ * nothing over either bound comes back as the object the engine returned.
  */
 function boundRunReport(value: unknown): unknown {
 	if (!isRecord(value) || !Array.isArray(value.results)) return value;
-	let changed = false;
-	const results = value.results.map((row) => {
-		if (!isRecord(row) || !isRecord(row.trace)) return row;
+
+	let nodeBounded = false;
+	const measured: MeasuredRow[] = value.results.map((row) => {
+		if (!isRecord(row) || !isRecord(row.trace)) return { row, rebuilt: false, bytes: 0 };
 		const trace = row.trace;
 		const next: Record<string, unknown> = { ...trace };
-		let rowChanged = false;
+		let rebuilt = false;
 		for (const key of ["request", "response"] as const) {
 			if (!(key in trace)) continue;
 			next[key] = boundTraceNode(trace[key]);
-			if (next[key] !== trace[key]) rowChanged = true;
+			if (next[key] !== trace[key]) rebuilt = true;
 		}
-		if (!rowChanged) return row;
-		changed = true;
-		return { ...row, trace: next };
+		if (rebuilt) nodeBounded = true;
+		const bounded = rebuilt ? next : trace;
+		// The compact size of what this row would embed. Measured after the
+		// per-node cut, since that is what the result would actually carry.
+		return {
+			row,
+			traced: { record: row, trace: bounded, priority: isPriorityTraceRow(row) },
+			rebuilt,
+			bytes: Buffer.byteLength(JSON.stringify(bounded), "utf8"),
+		};
 	});
-	return changed ? { ...value, results } : value;
+
+	// Spend the budget on the rows that matter first, then in run order. The
+	// first trace is always embedded, whatever it costs: a design run's report
+	// is one row, and a report that dropped it would answer nothing at all.
+	const spendOrder = [
+		...measured.filter((m) => m.traced?.priority),
+		...measured.filter((m) => m.traced && !m.traced.priority),
+	];
+	const keep = new Set<MeasuredRow>();
+	let spent = 0;
+	for (const entry of spendOrder) {
+		if (keep.size > 0 && spent + entry.bytes > MAX_REPORT_TRACE_BYTES) break;
+		keep.add(entry);
+		spent += entry.bytes;
+	}
+
+	const omitted = spendOrder.length - keep.size;
+	if (!nodeBounded && omitted === 0) return value;
+
+	const results = measured.map((entry) => {
+		if (!entry.traced) return entry.row;
+		if (keep.has(entry)) {
+			return entry.rebuilt
+				? { ...entry.traced.record, trace: entry.traced.trace }
+				: entry.row;
+		}
+		const withoutTrace = { ...entry.traced.record };
+		delete withoutTrace.trace;
+		return { ...withoutTrace, traceOmitted: true };
+	});
+
+	if (omitted === 0) return { ...value, results };
+	return {
+		...value,
+		results,
+		tracesOmitted: omitted,
+		traceBudgetBytes: MAX_REPORT_TRACE_BYTES,
+	};
 }
 
 /** Result that carries both a text rendering and structured content. */
@@ -1922,7 +2027,8 @@ export const TOOLS: McpTool[] = [
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
-			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history.`,
+			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history. ` +
+			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history.`,
 		annotations: {
 			title: "Get run report",
 			readOnlyHint: true,
