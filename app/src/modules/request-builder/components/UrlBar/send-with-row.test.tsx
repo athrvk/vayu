@@ -56,7 +56,8 @@ function csvBytes(text = CSV): { bytes: Uint8Array; fileName: string } {
 function ctx(
 	executeRequest: RequestBuilderContextValue["executeRequest"],
 	dataColumns?: DataContractScope,
-	requestId: string | null = null
+	requestId: string | null = null,
+	dataFileMaxRows = 1000
 ): RequestBuilderContextValue {
 	return {
 		request: {
@@ -94,6 +95,7 @@ function ctx(
 		updateVariable: vi.fn(),
 		writableScopes: [],
 		dataColumns,
+		dataFileMaxRows,
 		executeRequest,
 		saveRequest: vi.fn(async () => {}),
 		startLoadTest: vi.fn(),
@@ -104,11 +106,14 @@ function ctx(
 function renderBar(
 	executeRequest: RequestBuilderContextValue["executeRequest"],
 	dataColumns?: DataContractScope,
-	requestId: string | null = null
+	requestId: string | null = null,
+	dataFileMaxRows?: number
 ) {
 	return render(
 		<TooltipProvider>
-			<RequestBuilderContext.Provider value={ctx(executeRequest, dataColumns, requestId)}>
+			<RequestBuilderContext.Provider
+				value={ctx(executeRequest, dataColumns, requestId, dataFileMaxRows)}
+			>
 				<UrlBar />
 			</RequestBuilderContext.Provider>
 		</TooltipProvider>
@@ -266,6 +271,27 @@ describe("picking a row", () => {
 		// been: picking the file again in the Data tab is the whole fix, and a
 		// toast that scrolled away would not say what to do.
 		expect(await screen.findByText(/no such file or directory/i)).toBeTruthy();
+	});
+
+	it("offers no rows out of a file over the run's row cap, naming the setting", async () => {
+		// Two data rows against a cap of one (issue #751). The file is the
+		// collection's data set, so one the picker would refuse - and `POST /runs`
+		// after it - is not a set to bind a Send from.
+		rememberFile();
+		stubReadDataFile(async () => csvBytes());
+		renderBar(
+			vi.fn(async () => {}),
+			CONTRACT,
+			null,
+			1
+		);
+
+		openPicker();
+
+		expect(
+			await screen.findByText(/2 rows, over the 1[\s\S]*maxScenarioDataRows/)
+		).toBeTruthy();
+		expect(screen.queryByText(/ada@example\.test/)).toBeNull();
 	});
 });
 

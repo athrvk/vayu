@@ -46,10 +46,16 @@ vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
 }));
 
+/**
+ * The engine data caps, as `useDataFileLimits` reads them. Empty leaves the
+ * seeds standing, which is every case but the row-cap one below.
+ */
+const configEntries: { key: string; value: string }[] = [];
+
 vi.mock("@/queries", () => ({
-	// The picker reads the two engine caps through `useDataFileLimits`; empty
-	// entries leave it on the seeds, which no case here goes near.
-	useConfigQuery: () => ({ data: { entries: [] } }),
+	// The picker and the tab's own re-read both read the caps through
+	// `useDataFileLimits`.
+	useConfigQuery: () => ({ data: { entries: configEntries } }),
 	// The referenced-columns panel (issue #600) reads both of these. It has its
 	// own suite - `ColumnAudit.test.tsx` - so here it only has to render: no
 	// collections means no subtree to audit, and no requests means every
@@ -93,6 +99,7 @@ function succeed() {
 }
 
 beforeEach(() => {
+	configEntries.length = 0;
 	mutation.mutate.mockClear();
 	mutation.isPending = false;
 	mutation.isError = false;
@@ -292,6 +299,44 @@ describe("the remembered file", () => {
 		expect(screen.queryByText(/Could not read the data file/i)).toBeNull();
 		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
 		expect(screen.getByRole("button", { name: /re-declare/i })).toBeTruthy();
+	});
+
+	/*
+	 * The row cap on the tab's own re-read (issue #751). The picker refuses a
+	 * hand-picked file over `maxScenarioDataRows` naming the setting; a file
+	 * declared under a higher cap and re-read under a lower one has to meet the
+	 * same refusal, rather than being compared against the contract and then
+	 * refused by `POST /runs` at the next run.
+	 */
+	it("refuses a remembered file over the row cap, naming the setting", async () => {
+		remember("/home/u/grown.csv", "grown.csv");
+		vi.stubGlobal("electronAPI", {
+			readDataFile: bridge(() => csv("id\n1\n2\n3", "grown.csv")),
+			getFilePath: () => "",
+		});
+		configEntries.push({ key: "maxScenarioDataRows", value: "2" });
+
+		render(<DataTab collection={collection({ columns: ["id"], fileName: "grown.csv" })} />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/3 rows, over the 2[\s\S]*maxScenarioDataRows/)).toBeTruthy()
+		);
+		// Refused, not compared: no preview of a file no run can use.
+		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
+	});
+
+	it("compares that same file once the setting is raised", async () => {
+		remember("/home/u/grown.csv", "grown.csv");
+		vi.stubGlobal("electronAPI", {
+			readDataFile: bridge(() => csv("id\n1\n2\n3", "grown.csv")),
+			getFilePath: () => "",
+		});
+		configEntries.push({ key: "maxScenarioDataRows", value: "3" });
+
+		render(<DataTab collection={collection({ columns: ["id"], fileName: "grown.csv" })} />);
+
+		await waitFor(() => expect(screen.getByText("grown.csv")).toBeTruthy());
+		expect(screen.queryByText(/maxScenarioDataRows/)).toBeNull();
 	});
 
 	it("reads nothing without a contract to compare against", () => {

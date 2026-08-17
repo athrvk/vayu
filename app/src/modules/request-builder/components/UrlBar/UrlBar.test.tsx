@@ -77,6 +77,11 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		getVariableOrigins: () => [],
 		updateVariable: vi.fn(),
 		writableScopes: [],
+		// Send-with-row's row cap. The bar reads it off the context rather than
+		// the config query precisely so this file can render without a
+		// `QueryClientProvider`; no case here declares a contract, so nothing
+		// measures anything against it.
+		dataFileMaxRows: 1000,
 		executeRequest: vi.fn(async () => {}),
 		saveRequest: vi.fn(async () => {}),
 		startLoadTest: vi.fn(),

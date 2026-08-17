@@ -49,6 +49,7 @@ import {
 	DATA_FILE_ACCEPT,
 	DataFileError,
 	decodeDataFile,
+	describeRowCapRefusal,
 	parseDataFile,
 	resolveIterationCount,
 	type ParsedDataFile,
@@ -171,10 +172,12 @@ export default function DataFilePicker({
 			try {
 				const { text } = decodeDataFile(reader.result as ArrayBuffer);
 				const parsed = parseDataFile(text, file.name);
-				if (parsed.rows.length > maxRows) {
-					refuse(
-						`The file has ${parsed.rows.length} rows, over the ${maxRows} a run may carry. Raise the maxScenarioDataRows engine setting, or split the file.`
-					);
+				// The same sentence a re-read of a remembered path refuses with
+				// (`read-declared.ts`), from one place - the two used to be one
+				// refusal and one silent acceptance.
+				const overRowCap = describeRowCapRefusal(parsed.rows.length, maxRows);
+				if (overRowCap) {
+					refuse(overRowCap);
 					return;
 				}
 				// The path is Electron's to give (`webUtils`, inside the preload)

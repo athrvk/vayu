@@ -31,11 +31,18 @@ const startRunState = {
 	error: null as Error | null,
 };
 
+/**
+ * The two engine data caps, as `useDataFileLimits` reads them. Empty by default,
+ * which leaves the seeds standing - only the row-cap cases below set one, and
+ * they set it to a number the engine does not seed so a hardcoded copy could not
+ * pass for the fetched value.
+ */
+const configEntries: { key: string; value: string }[] = [];
+
 vi.mock("@/queries", () => ({
 	useStartScenarioRunMutation: () => startRunState,
-	// The picker reads the two engine data caps through `useDataFileLimits`.
-	// Empty entries leave it on the seeds, which no case here goes near.
-	useConfigQuery: () => ({ data: { entries: [] } }),
+	// The picker and the pre-fill both read the caps through `useDataFileLimits`.
+	useConfigQuery: () => ({ data: { entries: configEntries } }),
 }));
 
 const startMonitoring = vi.fn();
@@ -59,6 +66,7 @@ function succeedWith(runId: string) {
 }
 
 beforeEach(() => {
+	configEntries.length = 0;
 	mutate.mockClear();
 	startMonitoring.mockClear();
 	startLoadMonitoring.mockClear();
@@ -539,6 +547,53 @@ describe("pre-filling from the declared data file", () => {
 		// Not a blocking refusal: a run without a file is a legal run.
 		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
 		expect(screen.getByText(/choose file/i)).toBeTruthy();
+	});
+
+	/*
+	 * The row cap on the pre-fill path (issue #751).
+	 *
+	 * A hand-picked file over `maxScenarioDataRows` is refused by the picker
+	 * naming the setting; the remembered path was accepted, previewed, and
+	 * refused by `POST /runs` at Start - the late failure the preview exists to
+	 * move earlier. Lowering the setting reaches the same file, which is why the
+	 * cap is read live rather than captured when the file was declared.
+	 */
+	it("refuses a remembered file that is now over the row cap, naming the setting", async () => {
+		configEntries.push({ key: "maxScenarioDataRows", value: "2" });
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user\nada\ngrace\nalan"),
+			fileName: "users.csv",
+		}));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/3 rows, over the 2[\s\S]*maxScenarioDataRows/)).toBeTruthy()
+		);
+		// Nothing pre-filled: the rows the engine would refuse never reach a Run
+		// the user can start.
+		expect(screen.queryByText("ada")).toBeNull();
+		expect(screen.getByText(/choose file/i)).toBeTruthy();
+		// A note, not a blocker - a run without a file is still a legal run.
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("data");
+	});
+
+	it("pre-fills the same file once the setting is raised, with no restart", async () => {
+		configEntries.push({ key: "maxScenarioDataRows", value: "3" });
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user\nada\ngrace\nalan"),
+			fileName: "users.csv",
+		}));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		await waitFor(() => expect(screen.getByText("ada")).toBeTruthy());
+		expect(screen.queryByText(/maxScenarioDataRows/)).toBeNull();
 	});
 
 	it("does nothing when the collection has no remembered file", async () => {

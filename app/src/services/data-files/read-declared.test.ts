@@ -18,6 +18,11 @@
  * it: the bytes go through the *same* decoder (a UTF-16 CSV is not garbage), the
  * name comes back from disk rather than from the caller's memory of it, and the
  * two failures a caller has to tell apart are two different errors.
+ *
+ * And the refusal the re-read used to skip (issue #751): the picker turns down a
+ * hand-picked file over `maxScenarioDataRows`, so a remembered path that has
+ * grown past it must be turned down here rather than previewed and refused by
+ * `POST /runs` afterwards.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -46,6 +51,14 @@ function bridge(text: string, fileName: string, encoding: "utf-8" | "utf-16le" =
 	return vi.fn(() => Promise.resolve({ bytes, fileName }));
 }
 
+/** A cap no case below is testing, so the read turns on the file alone. */
+const LIMITS = { maxRows: 1000 };
+
+/** A CSV with `count` data rows under a single `user` column. */
+function csvOfRows(count: number): string {
+	return `user\n${Array.from({ length: count }, (_, i) => `user-${i}`).join("\n")}`;
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 });
@@ -67,7 +80,7 @@ describe("readDeclaredDataFile", () => {
 		const read = bridge("id,email\n1,a@b.c", "users-renamed.csv");
 		vi.stubGlobal("electronAPI", { readDataFile: read });
 
-		const file = await readDeclaredDataFile("/home/u/users.csv");
+		const file = await readDeclaredDataFile("/home/u/users.csv", LIMITS);
 
 		expect(read).toHaveBeenCalledWith("/home/u/users.csv");
 		expect(file.fileName).toBe("users-renamed.csv");
@@ -84,7 +97,7 @@ describe("readDeclaredDataFile", () => {
 			readDataFile: bridge("id,city\n1,Köln", "excel.csv", "utf-16le"),
 		});
 
-		const file = await readDeclaredDataFile("/home/u/excel.csv");
+		const file = await readDeclaredDataFile("/home/u/excel.csv", LIMITS);
 
 		expect(file.parsed.columns).toEqual(["id", "city"]);
 		expect(file.parsed.rows[0].city).toBe("Köln");
@@ -92,7 +105,7 @@ describe("readDeclaredDataFile", () => {
 
 	it("rejects with NoDataFileBridgeError outside Electron", async () => {
 		vi.stubGlobal("electronAPI", undefined);
-		await expect(readDeclaredDataFile("/home/u/users.csv")).rejects.toBeInstanceOf(
+		await expect(readDeclaredDataFile("/home/u/users.csv", LIMITS)).rejects.toBeInstanceOf(
 			NoDataFileBridgeError
 		);
 	});
@@ -101,13 +114,41 @@ describe("readDeclaredDataFile", () => {
 		vi.stubGlobal("electronAPI", {
 			readDataFile: () => Promise.reject(new Error("ENOENT: no such file or directory")),
 		});
-		await expect(readDeclaredDataFile("/home/u/gone.csv")).rejects.toThrow(/ENOENT/);
+		await expect(readDeclaredDataFile("/home/u/gone.csv", LIMITS)).rejects.toThrow(/ENOENT/);
 	});
 
 	it("rejects a file that no longer parses with the parser's own message", async () => {
 		vi.stubGlobal("electronAPI", { readDataFile: bridge("id,id\n1,2", "dupes.csv") });
-		await expect(readDeclaredDataFile("/home/u/dupes.csv")).rejects.toBeInstanceOf(
+		await expect(readDeclaredDataFile("/home/u/dupes.csv", LIMITS)).rejects.toBeInstanceOf(
 			DataFileError
 		);
+	});
+});
+
+describe("the row cap on a re-read", () => {
+	it("refuses a remembered file over it, naming the count and the setting", async () => {
+		vi.stubGlobal("electronAPI", { readDataFile: bridge(csvOfRows(4), "grown.csv") });
+
+		// The picker's sentence, not a second one: a user who has read
+		// "raise maxScenarioDataRows" once should not meet a paraphrase of it.
+		await expect(readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3 })).rejects.toThrow(
+			/4 rows, over the 3[\s\S]*maxScenarioDataRows/
+		);
+		// A `DataFileError`, which is what every caller's catch already shows
+		// verbatim beside a picker that is still usable.
+		await expect(
+			readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3 })
+		).rejects.toBeInstanceOf(DataFileError);
+	});
+
+	it("reads the cap it was handed, so raising the setting accepts the same file", async () => {
+		// The file the case above refused, under a setting the user has raised.
+		// The cap cannot be a seed captured anywhere: this is the whole reason it
+		// travels in as an argument.
+		vi.stubGlobal("electronAPI", { readDataFile: bridge(csvOfRows(4), "grown.csv") });
+
+		const file = await readDeclaredDataFile("/home/u/grown.csv", { maxRows: 4 });
+
+		expect(file.parsed.rows).toHaveLength(4);
 	});
 });

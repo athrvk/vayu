@@ -48,6 +48,7 @@ import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useDataFileStore } from "@/stores";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
 import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
+import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import { hasDataContract, type Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "../DataFilePicker";
 import ColumnAudit from "./ColumnAudit";
@@ -87,6 +88,12 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * the file again is the whole fix.
 	 */
 	const [readFailure, setReadFailure] = useState<string | null>(null);
+	/*
+	 * The row cap the re-read is measured against, same as a hand-picked file
+	 * (issue #751). A file that has grown past the setting is refused here rather
+	 * than compared against the contract and then refused at Run.
+	 */
+	const { maxRows } = useDataFileLimits();
 	const updateCollection = useUpdateCollectionMutation();
 	const setDataFile = useDataFileStore((s) => s.setDataFile);
 	const clearDataFile = useDataFileStore((s) => s.clearDataFile);
@@ -117,7 +124,7 @@ export default function DataTab({ collection }: DataTabProps) {
 		if (!willReadRemembered(collection) || !path) return;
 
 		let cancelled = false;
-		void readDeclaredDataFile(path)
+		void readDeclaredDataFile(path, { maxRows })
 			.then((read) => {
 				if (cancelled) return;
 				// `?? read`: a file the user picked while this was in flight is

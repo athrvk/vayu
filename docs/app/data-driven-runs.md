@@ -90,18 +90,28 @@ catch it. Re-save as UTF-8 and pick it again.
 
 ## Size limits
 
-Two engine settings bound a run's data set, and the picker enforces both
-_before_ the run rather than letting `POST /runs` refuse it afterwards:
+Two engine settings bound a run's data set, and the app enforces both _before_
+the run rather than letting `POST /runs` refuse it afterwards:
 
 | Setting                | Default | Bounds                          |
 | ---------------------- | ------- | ------------------------------- |
 | `maxScenarioDataRows`  | 1000    | How many rows one run may carry |
 | `maxScenarioDataBytes` | 16 MiB  | How large the data set may be   |
 
-Both are editable in **Settings -> Engine -> General**, and the picker reads the
+Both are editable in **Settings -> Engine -> General**, and the app reads the
 live values - raise a limit there and the same file is accepted without
 restarting anything. The row limit alone does not bound the payload, since one
 row is free to hold a megabyte in a single cell, which is why there are two.
+
+The caps apply to a file **re-read from a remembered path** exactly as they do
+to one picked by hand, and both refusals name the setting. That matters because
+neither side of the comparison holds still: a declared file grows rows after it
+was declared, and the setting itself can be lowered under a file that has not
+changed at all. So the Run dialog's pre-fill, Send-with-row and the Data tab
+each refuse a file over the cap instead of previewing it - the byte cap when the
+file is opened (the app's main process stats it before reading), the row cap
+once it is parsed, since counting rows means parsing and the engine never opens
+a file.
 
 The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
@@ -269,7 +279,9 @@ same way a variable defined on a parent collection is in scope below it.
 
 Vayu only ever re-opens a file whose extension is one of the formats above, and
 only up to the same `maxScenarioDataBytes` a run may carry - the remembered path
-is not a general licence to read your disk.
+is not a general licence to read your disk. A re-opened file over
+`maxScenarioDataRows` is refused too, once it has been parsed, so a file that
+outgrew the cap says so here rather than at the next run.
 
 ## Send with a row
 
@@ -292,7 +304,9 @@ request is sent bound to it:
 The caret is **absent**, not greyed out, when there is nothing to bind - no
 contract in the collection chain, or no remembered file for the collection that
 declared it. A file that has moved says so when you open the list, and picking
-it again in the Data tab is the fix.
+it again in the Data tab is the fix. So does a file over `maxScenarioDataRows`:
+a single send binds one row, but the file is the collection's data set, and one
+no run can use is not a set to pick a row out of.
 
 **Auth credentials bind on a single send too.** A `{{data.user}}` in a
 basic-auth username, a bearer token or an api key takes the row's value the same

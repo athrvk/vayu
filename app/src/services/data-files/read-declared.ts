@@ -23,9 +23,19 @@
  * is a different answer: a browser has no path to re-read and never will, so the
  * caller shows its degraded state instead of a message inviting a retry that
  * cannot work.
+ *
+ * The row cap is enforced **here**, against the live setting the caller passes
+ * in (issue #751). The main-process gate this reads through already refuses the
+ * byte cap on the way out (`electron/data-file.ts`), but it deliberately does
+ * not parse - the app owns parsing - so it cannot count rows, and without this
+ * the remembered path was the one way past a refusal the picker makes on every
+ * hand-picked file. `maxRows` is required rather than optional so a fourth
+ * surface cannot re-open the hole by omitting it.
  */
 
 import { decodeDataFile } from "./decode";
+import { DataFileError } from "./errors";
+import { describeRowCapRefusal } from "./row-cap";
 import { parseDataFile, type ParsedDataFile } from "./index";
 
 /** A file re-read from disk, in the shape the pickers already hold. */
@@ -60,15 +70,28 @@ export function canReadDeclaredDataFile(): boolean {
 	return typeof window.electronAPI?.readDataFile === "function";
 }
 
+/** What a re-read has to be measured against, beyond parsing. */
+export interface DeclaredDataFileLimits {
+	/**
+	 * The live `maxScenarioDataRows`, from {@link useDataFileLimits}. Never a
+	 * constant: a user who raises the setting must get the file on the next
+	 * re-read, without restarting anything.
+	 */
+	maxRows: number;
+}
+
 /**
- * Read, decode and parse the file at `path`.
+ * Read, decode and parse the file at `path`, refusing a set over `maxRows`.
  *
  * Rejects with `NoDataFileBridgeError` outside Electron, and with
  * `DataFileError` (or whatever the bridge threw) when the file is gone, moved,
- * or no longer parses - all of which name the fault in a sentence a caller can
- * show as-is.
+ * no longer parses, or now carries more rows than a run may - all of which name
+ * the fault in a sentence a caller can show as-is.
  */
-export async function readDeclaredDataFile(path: string): Promise<DeclaredDataFile> {
+export async function readDeclaredDataFile(
+	path: string,
+	{ maxRows }: DeclaredDataFileLimits
+): Promise<DeclaredDataFile> {
 	const read = window.electronAPI?.readDataFile;
 	if (!read) throw new NoDataFileBridgeError();
 
@@ -76,5 +99,14 @@ export async function readDeclaredDataFile(path: string): Promise<DeclaredDataFi
 	// The same decode and the same parser the picker runs, so a file re-read
 	// here cannot disagree with the file as it was declared.
 	const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
-	return { fileName, parsed: parseDataFile(text, fileName), path };
+	const parsed = parseDataFile(text, fileName);
+
+	// The picker's own refusal, thrown rather than returned: every caller here
+	// already shows a failed re-read as a note beside a usable picker, which is
+	// the right shape for this too - picking the file again, or raising the
+	// setting, is the fix.
+	const refusal = describeRowCapRefusal(parsed.rows.length, maxRows);
+	if (refusal) throw new DataFileError(refusal);
+
+	return { fileName, parsed, path };
 }

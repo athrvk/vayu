@@ -52,6 +52,9 @@ vi.mock("@/queries", () => ({
 	useUpdateCollectionMutation: () => ({ mutate: mutateCollection }),
 	useUpdateEnvironmentMutation: () => ({ mutate: mutateEnvironment }),
 	useLastDesignRunQuery: () => ({ run: null, report: null, isLoading: false }),
+	// The provider reads the engine data caps for Send-with-row's row cap
+	// (`useDataFileLimits`); empty entries leave it on the seeds.
+	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 vi.mock("@/stores", async (importOriginal) => ({
 	// The real event-stream store, which the provider reads to know whether a
