@@ -1045,6 +1045,12 @@ scope - it cannot be read or written through `pm.variables` - and it is
 documented under
 [Scenario runs](api-reference.md#scenario-runs).
 
+The substitution is written for the place it lands in: a token inside a JSON or
+XML body is escaped for that document, and a cell carrying a line break bound
+into a **header** - a header name, a header value, or a credential written into
+a header line - is refused rather than allowed to end the header line and forge
+one of its own.
+
 ### It is read-only
 
 `set`, `unset` and `clear` are bound and **throw**. The rows are an input to the

@@ -21,9 +21,11 @@
 #include <string>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/encoding.hpp"
 
 using nlohmann::json;
 using vayu::core::bind_data_row;
@@ -209,6 +211,89 @@ TEST (ScenarioDataHeaderCollisionTest, HeadersThatStayDistinctStillBind) {
     EXPECT_EQ (request.headers.size (), 2u);
     EXPECT_EQ (request.headers.at ("X-Tenant"), "acme");
     EXPECT_EQ (request.headers.at ("X-Region"), "bound");
+}
+
+// ---------------------------------------------------------------------------
+// A cell that would end the header line it is bound into (issue #732)
+// ---------------------------------------------------------------------------
+
+TEST (ScenarioDataHeaderLineBreakTest, ACrlfCellBoundIntoAHeaderValueRefusesTheRow) {
+    // The failure the refusal exists for: a header line ends at CRLF, so this
+    // cell does not put its text in `X-Note` - it ends `X-Note` and makes
+    // `X-Admin: true` a header of its own, forged by a data file. Revert the
+    // Header-context check in the joiner and this reads `ok`, with
+    // `X-Note` holding the line break for libcurl to do as it likes with.
+    // JSONL rows keep native strings, so the cell is an ordinary one.
+    auto request              = request_with_url ("https://api.test/");
+    request.headers["X-Note"] = "{{data.note}}";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"note":"ok\r\nX-Admin: true"})"), 4);
+
+    EXPECT_FALSE (result.ok);
+    // Enough to fix the file without guessing which column: the token, and the
+    // row it came from.
+    EXPECT_NE (result.error.find ("{{data.note}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 4"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataHeaderLineBreakTest, ABareLineFeedIsRefusedToo) {
+    // Neither byte is the terminator on its own, and neither is safe: a lone LF
+    // ends the line for a lenient parser and a lone CR for another. The check
+    // is on both rather than on the CRLF pair.
+    auto request              = request_with_url ("https://api.test/");
+    request.headers["X-Note"] = "prefix {{data.note}}";
+    const auto lf = bind_data_row (request, json::parse (R"({"note":"a\nb"})"), 0);
+    EXPECT_FALSE (lf.ok) << lf.error;
+
+    auto with_cr              = request_with_url ("https://api.test/");
+    with_cr.headers["X-Note"] = "{{data.note}}";
+    const auto cr = bind_data_row (with_cr, json::parse (R"({"note":"a\rb"})"), 0);
+    EXPECT_FALSE (cr.ok) << cr.error;
+}
+
+TEST (ScenarioDataHeaderLineBreakTest, AHeaderNameIsCheckedAsWellAsItsValue) {
+    // Composition resolves header names too, so a name is as forgeable as a
+    // value - `X-a: x\r\nX-Admin: true` is one bound name away from the same
+    // request.
+    auto request                     = request_with_url ("https://api.test/");
+    request.headers["X-{{data.hn}}"] = "plain";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"hn":"a: x\r\nX-Admin"})"), 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.hn}}"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataHeaderLineBreakTest, TheSameCellIsFineEverywhereElse) {
+    // The refusal is a header rule, not a rule about the cell: the same bytes
+    // are ordinary content in a body and in a form field's value, where a JSON
+    // document escapes them and a text one carries them as written. Widen the
+    // check past the header context and this fails.
+    auto request         = request_with_url ("https://api.test/");
+    request.body.mode    = vayu::BodyMode::Json;
+    request.body.content = R"({"note":"{{data.note}}"})";
+    request.body.fields  = { { "note", "{{data.note}}", true } };
+
+    const auto result = bind_data_row (request, json::parse (R"({"note":"a\r\nb"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content, R"({"note":"a\r\nb"})");
+    ASSERT_EQ (request.body.fields.size (), 1u);
+    EXPECT_EQ (request.body.fields[0].value, "a\r\nb");
+}
+
+TEST (ScenarioDataHeaderLineBreakTest, AnOrdinaryHeaderCellStillBinds) {
+    // The refusal must not fire on a value that merely carries whitespace - a
+    // tab and a space are legal in a header value and always were.
+    auto request              = request_with_url ("https://api.test/");
+    request.headers["X-Note"] = "{{data.note}}";
+
+    const auto result = bind_data_row (request, json::parse (R"({"note":"a b\tc"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.headers.at ("X-Note"), "a b\tc");
 }
 
 TEST (ScenarioDataBindTest, TheRawBodyAndEveryFormFieldBind) {
@@ -802,6 +887,81 @@ TEST (ScenarioDataTemplateTest, AnAbsentColumnFailsTheJoinAndNamesTheRow) {
     << bound.error;
     EXPECT_NE (bound.error.find ("row 7"), std::string::npos) << bound.error;
     EXPECT_NE (bound.error.find ("id"), std::string::npos) << bound.error;
+}
+
+// ---------------------------------------------------------------------------
+// The same header rule reaches the credentials `apply_auth` writes into a
+// header line (issue #732)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Bind @p row into @p auth's credentials and apply the result, as a step or a
+/// send-with-row does - the sequence `bind_auth_row` exists to own.
+vayu::core::DataBindResult
+bind_auth (vayu::Request& request, const json& auth, const json& row, size_t row_index) {
+    const auto parsed = vayu::http::parse_auth (auth);
+    return vayu::core::bind_auth_row (
+    request, parsed, vayu::core::tokenize_auth_fields (parsed), row, row_index);
+}
+
+} // namespace
+
+TEST (ScenarioDataAuthLineBreakTest, ABearerTokenCarryingALineBreakIsRefused) {
+    // `Authorization: Bearer <token>` is a header line like any other, so a
+    // credential is as forgeable as `request.headers` - and it is the field a
+    // credentials file most often binds. Revert the credential destinations to
+    // a flat `FieldContext::Plain` and this reads `ok`, with the forged header
+    // sitting inside Authorization.
+    auto request = request_with_url ("https://api.test/");
+
+    const auto result = bind_auth (request,
+    json::parse (R"({"mode":"bearer","token":"{{data.token}}"})"),
+    json::parse (R"({"token":"t\r\nX-Admin: true"})"), 2);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{data.token}}"), std::string::npos)
+    << result.error;
+    EXPECT_NE (result.error.find ("row 2"), std::string::npos) << result.error;
+    EXPECT_EQ (request.headers.count ("Authorization"), 0u)
+    << "a refused bind must not have applied the auth";
+}
+
+TEST (ScenarioDataAuthLineBreakTest, AnApiKeySentInAHeaderIsRefusedOnEitherHalf) {
+    for (const char* field : { "key", "value" }) {
+        auto request = request_with_url ("https://api.test/");
+        json auth = json::parse (R"({"mode":"apikey","key":"X-Key","value":"v"})");
+        auth[field] = "{{data.cell}}";
+
+        const auto result = bind_auth (
+        request, auth, json::parse (R"({"cell":"a\r\nX-Admin: true"})"), 0);
+
+        EXPECT_FALSE (result.ok) << "api key " << field << ": " << result.error;
+    }
+}
+
+TEST (ScenarioDataAuthLineBreakTest, BasicCredentialsAndAQueryApiKeyStillBind) {
+    // The refusal follows the destination, not the mode's name: basic's pair is
+    // base64-encoded and a query api key percent-encoded before either reaches
+    // the wire, so no byte of the cell can end a line and refusing one would be
+    // a row rejected for a request it could not have forged.
+    auto basic              = request_with_url ("https://api.test/");
+    const auto basic_result = bind_auth (basic,
+    json::parse (R"({"mode":"basic","username":"u","password":"{{data.pw}}"})"),
+    json::parse (R"({"pw":"p\r\nq"})"), 0);
+
+    ASSERT_TRUE (basic_result.ok) << basic_result.error;
+    EXPECT_EQ (basic.headers.at ("Authorization"),
+    "Basic " + vayu::utils::base64_encode (std::string ("u:p\r\nq")));
+
+    auto query              = request_with_url ("https://api.test/");
+    const auto query_result = bind_auth (query,
+    json::parse (R"({"mode":"apikey","in":"query","key":"k","value":"{{data.v}}"})"),
+    json::parse (R"({"v":"a\r\nb"})"), 0);
+
+    ASSERT_TRUE (query_result.ok) << query_result.error;
+    EXPECT_EQ (query.url, "https://api.test/?k=a%0D%0Ab");
+    EXPECT_TRUE (query.headers.empty ());
 }
 
 TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
