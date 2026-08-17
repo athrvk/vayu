@@ -1032,15 +1032,19 @@ export interface RunResultTrace {
 	 */
 	events?: RunResultStreamEvents;
 	/**
-	 * What a **streaming** run's scripts produced (issue #575), under the same
-	 * four key names the live `/execute` body uses - one engine builder
+	 * What a design run's scripts produced (issue #575), under the same four key
+	 * names the live `/execute` body uses - one engine object
 	 * (`build_script_result_node`) fills both, so a restored Tests pane and a
 	 * live one cannot disagree about what a failed assertion looks like.
 	 *
-	 * Stored rather than returned because there is nobody left to return it to:
-	 * a streaming send is answered `202` before its post-request script has run.
-	 * A buffered send carries these in its response and stores none of them, so
-	 * this node is present on streaming traces only.
+	 * A streaming send has no alternative: it is answered `202` before its
+	 * post-request script has run, so the trace is the only route its results
+	 * take. A buffered send *also* stores the object it returns (issue #725) -
+	 * before that it stored none of them, and a restored ordinary send showed
+	 * the same empty Tests pane whether its assertions had passed or never run.
+	 *
+	 * Absent means the send ran no scripts, or predates #725 - never that
+	 * nothing passed.
 	 */
 	scripts?: RunResultScripts;
 	/**

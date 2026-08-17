@@ -95,13 +95,17 @@ export function eventsFromTrace(
 
 /**
  * The stored `scripts` node, as the response pane's four script fields
- * (issue #575).
+ * (issue #575, extended to every design send by #725).
  *
- * Only a **streaming** design run's trace carries it, and for a reason worth
- * knowing here: that send was answered `202` before its post-request script had
- * run, so the trace is the only route its test results ever take. A buffered
- * send's results arrive in the `/execute` body and are not stored, which is why
- * an ordinary restored run still shows no Tests pane.
+ * Both transports write it. A streaming send has no choice - it was answered
+ * `202` before its post-request script had run, so the trace is the only route
+ * its results ever take - and a buffered send stores the same object it also
+ * returns in the `/execute` body. Until #725 it stored nothing, so a restored
+ * ordinary send showed the Tests pane's empty state whether its assertions had
+ * passed or never run.
+ *
+ * A trace written before that fix carries no node, which is why an absent one
+ * is read as "no results" rather than as a failure.
  *
  * The keys are the engine's own (`build_script_result_node`), identical to the
  * live body's, so nothing is renamed on the way through - a rename here would

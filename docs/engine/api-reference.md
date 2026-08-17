@@ -2524,11 +2524,12 @@ one the runtime cannot have. See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output
-has nowhere to be *returned*: it is stored on the run's trace under `scripts`,
-with the same four keys the buffered response body uses (`testResults`,
-`consoleLogs`, `preScriptError`, `postScriptError`). One engine builder fills
-both, so a live pane and a restored one cannot disagree. A run whose scripts
-said nothing stores no node at all.
+has nowhere to be *returned*: the trace's `scripts` node is the only route it
+takes. That node is not a streaming feature - every design send stores it
+(issue #725), with the same four keys the buffered response body carries
+(`testResults`, `consoleLogs`, `preScriptError`, `postScriptError`). One engine
+object fills both, so a live pane and a restored one cannot disagree. A run
+whose scripts said nothing stores no node at all.
 
 Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
 `sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see
@@ -2749,6 +2750,16 @@ The same object is stored on the design run's `trace_data.validation`, so a
 restored response shows the verdict the live one did rather than recomputing it.
 A streaming send carries none - an event stream is not a document a response
 schema describes.
+
+**The four script keys are stored the same way** (issue #725). `testResults`,
+`consoleLogs`, `preScriptError` and `postScriptError` are returned in the body
+above *and* written to the design run's `trace_data.scripts` as one object, so a
+response restored from History carries the assertions the live one showed. This
+used to hold for a streaming send only, which made a restored ordinary send's
+Tests pane empty whether its assertions passed or never ran. A send whose
+scripts said nothing stores no `scripts` node at all - absent means no scripts,
+not no results - and a `transient` execution stores neither, as it stores
+nothing.
 
 | Field | Meaning |
 |---|---|

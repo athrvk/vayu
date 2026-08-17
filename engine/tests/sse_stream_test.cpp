@@ -995,6 +995,24 @@ class StreamExecuteTest : public ::testing::Test {
         return json::object ();
     }
 
+    /// The stored trace of the most recent design run. A buffered send answers
+    /// with the response rather than a run id, so its row is found by recency -
+    /// safe because each test gets its own database, and unpolled because the
+    /// buffered path stores before it answers.
+    json latest_design_trace () {
+        auto runs = db_->get_runs_paginated (vayu::db::RunFilter{}, 1, 0);
+        if (runs.empty ()) {
+            ADD_FAILURE () << "no run row was created for the buffered send";
+            return json::object ();
+        }
+        auto results = db_->get_results (runs[0].id);
+        if (results.empty ()) {
+            ADD_FAILURE () << "no result row was stored for " << runs[0].id;
+            return json::object ();
+        }
+        return json::parse (results[0].trace_data);
+    }
+
     void set_config (const char* key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
         ASSERT_TRUE (entry.has_value ()) << key;
@@ -1220,6 +1238,67 @@ TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
     << trace["scripts"]["testResults"][0].value ("error", "");
     EXPECT_EQ (trace["events"]["endReason"], "completed");
+}
+
+// ---------------------------------------------------------------------------
+// Scripts on the buffered send (issue #725)
+//
+// The transport that *has* somewhere to return its results stores them too.
+// Driven through the real `POST /execute` handler for the same reason the
+// streaming cases above are: the wiring is the thing under test, and a test
+// that called `record_design_result` directly would stay green with the route
+// still throwing the node away.
+// ---------------------------------------------------------------------------
+
+TEST_F (StreamExecuteTest, ABufferedSendStoresTheScriptResultsItAlsoReturns) {
+    serve (1);
+    const auto body = send_buffered (json{ { "postRequestScript", R"JS(
+        console.log('asserted');
+        pm.test('the origin answered', function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+        pm.test('and this one does not hold', function () {
+            pm.expect(pm.response.code).to.equal(418);
+        });
+    )JS" } });
+    ASSERT_TRUE (body.contains ("testResults")) << body.dump (2);
+
+    const auto trace = latest_design_trace ();
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+
+    // Key for key against the live body rather than field by field: the two
+    // panes are the pair this codebase keeps finding drifted, and the only
+    // assertion that cannot be satisfied by a subset is the whole object.
+    json returned = json::object ();
+    for (const char* key :
+    { "testResults", "consoleLogs", "preScriptError", "postScriptError" }) {
+        if (body.contains (key)) {
+            returned[key] = body[key];
+        }
+    }
+    EXPECT_EQ (trace["scripts"], returned) << trace["scripts"].dump (2);
+
+    // And that the stored node really carries the distinctions the pane draws -
+    // a restored run must tell passed from failed, and either from never-ran.
+    ASSERT_EQ (trace["scripts"]["testResults"].size (), 2u);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ());
+    EXPECT_FALSE (trace["scripts"]["testResults"][1]["passed"].get<bool> ());
+    EXPECT_FALSE (
+    trace["scripts"]["testResults"][1].value ("error", "").empty ());
+    EXPECT_EQ (trace["scripts"]["consoleLogs"][0]["message"], "asserted");
+}
+
+// The other half of the rule the streaming path holds: absent means the send
+// had no scripts, so an empty node must never be written. Without this,
+// "always store something" would pass the test above.
+TEST_F (StreamExecuteTest, ABufferedSendWithoutScriptsStoresNoScriptNode) {
+    serve (1);
+    const auto body = send_buffered (json::object ());
+    EXPECT_FALSE (body.contains ("testResults")) << body.dump (2);
+
+    const auto trace = latest_design_trace ();
+    EXPECT_FALSE (trace.contains ("scripts")) << trace.dump (2);
+    EXPECT_FALSE (trace.contains ("events")) << trace.dump (2);
 }
 
 // ---------------------------------------------------------------------------

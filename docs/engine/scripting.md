@@ -295,7 +295,9 @@ A streaming send is answered `202` before its script has run, so the results go
 to the run's trace rather than into a response body - the app's Tests and
 Console panes show them when the stream finishes, and
 [`GET /runs/:runId/report`](api-reference.md#get-runsrunidreport) carries them
-under the trace's `scripts` node.
+under the trace's `scripts` node. A buffered send returns them *and* stores the
+same object there (issue #725), so reopening either kind of run from History
+shows the assertions it made.
 
 ### Reading response headers
 

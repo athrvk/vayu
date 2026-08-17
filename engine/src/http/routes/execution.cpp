@@ -413,8 +413,7 @@ namespace {
 
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
-const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result,
+const nlohmann::json& scripts,
 const std::optional<vayu::core::ValidationVerdict>& validation) {
     nlohmann::json response_json = vayu::json::serialize (response);
     // The schema verdict (#628), on the same terms as the script keys below:
@@ -426,11 +425,11 @@ const std::optional<vayu::core::ValidationVerdict>& validation) {
         response_json["validation"] = vayu::core::build_validation_payload (*validation);
     }
     // Merged in at the top level, which is where every client has read these
-    // four keys since before there was a second placement for them. The
-    // streaming path stores the same object under the trace's `scripts` node -
-    // one builder, two homes, so a key can never mean one thing live and
-    // another restored.
-    response_json.update (build_script_result_node (pre_script_result, post_script_result));
+    // four keys since before there was a second placement for them. The node
+    // arrives built, because the caller hands the *same* object to
+    // `record_design_result` for the trace's `scripts` key - one object, two
+    // homes, so a key can never mean one thing live and another restored.
+    response_json.update (scripts);
     return response_json;
 }
 
@@ -585,7 +584,8 @@ const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
 const StreamRecord* stream,
-const std::optional<vayu::core::ValidationVerdict>& validation) {
+const std::optional<vayu::core::ValidationVerdict>& validation,
+const nlohmann::json& scripts) {
     if (!run_id) {
         return;
     }
@@ -622,13 +622,17 @@ const std::optional<vayu::core::ValidationVerdict>& validation) {
             trace["validation"] = vayu::core::build_validation_payload (*validation);
         }
 
+        // Every design send that ran scripts, not only a streaming one (#725):
+        // a buffered send's results used to reach the live body and stop there,
+        // so a restored Tests tab could not tell "passed" from "never ran".
+        // Only when the run had scripts at all - an empty node would put a
+        // Tests pane's worth of nothing on every stored send.
+        if (scripts.is_object () && !scripts.empty ()) {
+            trace["scripts"] = scripts;
+        }
+
         if (stream) {
             trace["events"] = stream->events;
-            // Only when the run had scripts at all: an empty node would put a
-            // Tests pane's worth of nothing on every stored stream.
-            if (stream->scripts.is_object () && !stream->scripts.empty ()) {
-                trace["scripts"] = stream->scripts;
-            }
         }
 
         // A capped body may split a UTF-8 sequence, and the raw response body can
@@ -1103,6 +1107,7 @@ void register_execution_routes (RouteContext& ctx) {
                                const vayu::Response& response,
                                const vayu::http::SseStreamContext& context) mutable {
                 StreamRecord record;
+                nlohmann::json scripts = nlohmann::json::object ();
                 record.events = vayu::http::stream_trace_node (context);
                 record.status =
                 context.end_reason () == vayu::http::SseEndReason::Stopped ?
@@ -1145,7 +1150,7 @@ void register_execution_routes (RouteContext& ctx) {
                             // already captured, exactly as on the buffered path.
                             jar.apply (cookie_scope, post_cookie_writes);
                         }
-                        record.scripts = build_script_result_node (
+                        scripts = build_script_result_node (
                         pre_script_result, post_script_result);
                     } catch (const std::exception& e) {
                         vayu::utils::log_error (
@@ -1157,7 +1162,11 @@ void register_execution_routes (RouteContext& ctx) {
                     scopes.globals, scopes.collection);
                 }
 
-                record_design_result (db, id, sent, response, &record);
+                // No verdict: a stream's body is an event stream, not a
+                // document any response schema describes (see the contract on
+                // the parameter).
+                record_design_result (
+                db, id, sent, response, &record, std::nullopt, scripts);
             };
 
             auto context = ctx.sse_manager.start (std::move (spec));
@@ -1223,11 +1232,18 @@ void register_execution_routes (RouteContext& ctx) {
         const auto validation =
         validate_design_response (ctx.db, run.request_id, exchange.response);
 
+        // Built once, then sent *and* stored (#725). The live body and the
+        // trace's `scripts` node are the same object, so a restored Tests tab
+        // shows the assertions this send actually made rather than the
+        // empty-state that used to make "passed" and "never ran" identical.
+        const nlohmann::json scripts = build_script_result_node (
+        exchange.pre_script_result, exchange.post_script_result);
+
         // Store result to database (non-blocking, errors logged). A transient
         // execution stops here: no trace row, so the post-auth headers this
-        // exchange carries never reach disk.
+        // exchange carries never reach disk - and neither do these results.
         record_design_result (ctx.db, run_id, exchange.request, exchange.response,
-        /*stream=*/nullptr, validation);
+        /*stream=*/nullptr, validation, scripts);
 
         // Persist script-set variables (design mode only; best-effort)
         persist_script_variables (
@@ -1236,9 +1252,8 @@ void register_execution_routes (RouteContext& ctx) {
         // Build and send response
         // Engine returns 200 - the server's status is in the response body
         res.status = 200;
-        res.set_content (build_response_json (exchange.response,
-        exchange.pre_script_result, exchange.post_script_result, validation)
-        .dump (2),
+        res.set_content (
+        build_response_json (exchange.response, scripts, validation).dump (2),
         "application/json");
     };
     ctx.server.Post ("/execute", execute_request);
