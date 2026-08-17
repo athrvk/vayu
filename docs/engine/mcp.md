@@ -272,7 +272,12 @@ Notes:
   `schema` verdict (issue #681) and folds it into `ok` the way `testResults`
   folds: a response the document declares a schema for and that does not match
   it fails the request, with the failing JSON Pointers listed so an agent need
-  not re-run to learn where. Only a *checked* verdict can fail a row -
+  not re-run to learn where. `failOnSchemaError: false` unfolds it (issue #720):
+  the verdict still rides every row, it just stops deciding `ok` - useful
+  against a document known to lag its API. It defaults to **true** here, where
+  the same-named flag on `POST /runs` defaults to false, because this tool has
+  folded since #681 and an agent reading its matrix would otherwise start seeing
+  contract failures pass. Only a *checked* verdict can fail a row -
   `checked: false` (no declared schema for the status or content type, a body
   that is not JSON) is reported and never counted against the run, and a
   collection bound to nothing carries no `schema` field at all.

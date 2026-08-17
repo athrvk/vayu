@@ -642,10 +642,25 @@ the row shows both facts. They are different claims - one is about your
 assertions, the other about the contract - and folding the second into the first
 would make every undocumented field look like a broken test.
 
-Set `failOnSchemaError` on the run to make the contract a gate. Then a step that
-passed everything else and whose response did not match is **failed**, with the
-first problem named in its error. A step that was already failing keeps the
-error that named it: that is the one to fix first.
+Turn on **Fail steps on schema errors** in the Run Collection dialog to make the
+contract a gate. Then a step that passed everything else and whose response did
+not match is **failed**, with the first problem named in its error. A step that
+was already failing keeps the error that named it: that is the one to fix first.
+
+The switch is design-mode only, because only the design-mode runner can honour
+it: a scenario *load* run validates its sampled responses once the run has
+drained, long after the step outcomes were decided, so the option is not offered
+there. Over the wire it is `failOnSchemaError` on `POST /runs`, sent only when
+it is on - and the report records it beside the tally, so the **Schema
+validation** block on a run started this way says the contract was a gate. A
+failure count means a different thing with the gate than without, and that line
+is where a reader coming back to an old run finds out which they are looking at.
+
+From MCP, `run_collection_smoke` is the same choice with the opposite default:
+it has folded a failed schema verdict into each row's pass/fail since it grew
+verdicts at all, so pass `failOnSchemaError: false` to keep the verdict on the
+row without letting it decide. Either way the row carries what the document
+said.
 
 | | Step outcome | Schema verdict |
 |---|---|---|

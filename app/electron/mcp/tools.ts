@@ -822,6 +822,25 @@ const dataRowInput = z
 		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers, body and auth credentials is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. A credential binds before it is encoded, so basic auth base64s the row\'s values; the exception is OAuth 2.0, whose token comes from the token endpoint rather than the request, so a {{data.*}} in an oauth2 config is refused by name. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
 	);
 
+/**
+ * Whether the bound contract is a gate for a smoke run (issue #720).
+ *
+ * **Defaults to `true` here, where the engine's `POST /runs` flag defaults to
+ * `false`**, and the divergence is deliberate rather than an oversight: this
+ * tool has folded a checked-and-failed schema verdict into `ok` since #681,
+ * says so in its own description, and an agent that has been reading its matrix
+ * would silently start seeing contract failures pass if the default moved. The
+ * flag means the same thing on both surfaces - does a schema failure fail the
+ * unit - and each keeps the default its readers already have. Off, the verdict
+ * still rides every row: it stops deciding `ok`, it is never withheld.
+ */
+const failOnSchemaErrorInput = z
+	.boolean()
+	.optional()
+	.describe(
+		"Whether a response that does not match the schema the collection's bound OpenAPI document declares fails its request (default true). Set false to report the schema verdict on each row without letting it decide pass/fail - useful against a document known to lag its API. Only a checked verdict is ever folded in: a status or content type the document declares no schema for is reported unchecked and never fails a request, with or without this."
+	);
+
 const streamInput = z
 	.boolean()
 	.optional()
@@ -1921,7 +1940,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -1934,11 +1953,16 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe("Environment for variable resolution during execution."),
+			failOnSchemaError: failOnSchemaErrorInput,
 		},
 		outputSchema: smokeResultSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const environmentId = str(args, "environmentId");
+			// Absent means the gate stays on - this tool's behaviour since #681.
+			// Read once, before any traffic: it decides how every row is judged,
+			// and a per-row read of one argument could only ever be wrong twice.
+			const failOnSchemaError = args.failOnSchemaError !== false;
 			let requests: unknown;
 			try {
 				requests = await ctx.client.listRequests(collectionId, signal);
@@ -2021,8 +2045,12 @@ export const TOOLS: McpTool[] = [
 					// says the response could not be judged, which is not the
 					// same as judged and wrong, and failing a smoke run on it
 					// would make an undocumented status look like a broken API.
+					//
+					// `failOnSchemaError: false` unfolds it (issue #720): the
+					// verdict still rides the row, it just stops deciding `ok`.
 					const schema = readSchemaVerdict(resp);
-					const schemaOk = !(schema?.checked === true && schema.valid === false);
+					const schemaOk =
+						!failOnSchemaError || !(schema?.checked === true && schema.valid === false);
 					const ok = code >= 200 && code < 400 && testsOk && schemaOk;
 					results.push({
 						name,

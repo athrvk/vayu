@@ -461,6 +461,14 @@ run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
 `400` with **no run row created** - a failed start leaves nothing to clean up.
 
+`failOnSchemaError` rides the design-mode payload beside `environmentId`, from
+the dialog's **Fail steps on schema errors** switch (issue #720), and is
+**omitted when off**: the engine defaults it to false, so absent already says
+what the user asked for, and only a run that wanted the gate carries the key
+into its stored snapshot - where `SampledSchemaValidation` reads it back to say
+so. It is never sent on a load payload, whose executor validates after the run
+has drained and cannot demote a step on it.
+
 Adding a load `mode` beside the block makes it a **scenario load run** (issue
 #357): the same plan, driven by `concurrency` virtual users on the event loop.
 The *presence* of `mode` is the whole discriminator, so a design-mode payload

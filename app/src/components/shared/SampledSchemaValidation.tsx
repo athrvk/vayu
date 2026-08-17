@@ -110,6 +110,22 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 						: "Checked at the end of the run, over the responses it kept. Coverage beside this is exact; these numbers describe the sample."}
 				</p>
 
+				{/*
+				 * Only when the gate was on (issue #720). The flag is stored beside
+				 * the tally precisely because "3 failed" in the step list means a
+				 * different thing with it than without, and a reader who cannot see
+				 * which run this was cannot tell the two apart. Rendered on `true`
+				 * alone: a load run carries no flag at all, and a collection run
+				 * that did not ask for the gate is the default this whole block
+				 * already describes.
+				 */}
+				{validation.failOnSchemaError === true && (
+					<p className="mb-3 text-[11px] text-muted-foreground">
+						This run made the contract a gate: a step that passed everything else and
+						did not match its declared schema was failed.
+					</p>
+				)}
+
 				{unchecked.length > 0 && (
 					<ul className="mb-3 space-y-1">
 						{unchecked.map(([reason, count]) => (
