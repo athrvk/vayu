@@ -95,31 +95,66 @@ const INVALIDATORS: Record<
 
 	/*
 	 * The history list polls on its own, so this is about immediacy there - but
-	 * `allRuns` (Settings' count), `lastDesign` (a request tab's restored
-	 * response) and `recentDesign` (its Recent sends section) are not polled at
-	 * all, and an MCP-run request left them stale indefinitely. Reports and time
-	 * series are keyed per run and describe runs that already existed, so they
-	 * are deliberately not touched.
+	 * `allRuns` (Settings' count) and the four small per-request/per-collection
+	 * families are not polled at all, and an MCP write left them stale
+	 * indefinitely. They are covered at their prefixes rather than per row: a
+	 * run write can change what any of them answers (a delete may have taken the
+	 * pin, or the newest send) and the event names at most one request, so the
+	 * narrow key would leave whichever list actually moved behind. Each is five
+	 * rows, and only the mounted ones refetch - the same trade
+	 * `useDeleteRunMutation` makes for the same reason: a run id gives no way
+	 * back to the request or collection it belonged to.
 	 *
-	 * That last sentence stopped being the whole story with `delete_run` and
-	 * `set_run_baseline` (issue #755): a run can now be removed or re-pinned from
-	 * MCP, and what this leaves stale is what `useDeleteRunMutation` /
-	 * `useSetRunBaselineMutation` clear for the same writes made in the UI - the
-	 * baseline family, the per-run report and series entries (`staleTime:
-	 * Infinity`), Recent sends and Last run. Tracked in issue #774 rather than
-	 * widened here, because dropping one run's caches needs a run-id scope hint
-	 * the event does not carry yet.
+	 * `lastDesign` has no prefix family of its own, so it stays per request and
+	 * is reached only when the call named one. Issue #776 tracks that gap, which
+	 * `useDeleteRunMutation` shares.
+	 *
+	 * Per-run *report* and series keys are still not invalidated wholesale, and
+	 * that exclusion is the point: a `run_request` creates a run and cannot have
+	 * changed an existing one's report, which is the expensive fetch in this
+	 * family. They are dropped only for the one run a call named - see below.
 	 */
 	run: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		if (event.requestId) {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.runs.lastDesign(event.requestId),
 			});
-			void queryClient.invalidateQueries({
-				queryKey: queryKeys.runs.recentDesign(event.requestId),
-			});
+		}
+		/*
+		 * A named run is one that already existed and was rewritten or removed
+		 * (`delete_run`, `stop_run`, `set_run_baseline` - the only tools that take
+		 * a `runId`). Its per-run caches are `staleTime: Infinity` for the series
+		 * and the samples, so invalidation alone would leave a deleted run's
+		 * report rendering under an open History tab until it was garbage
+		 * collected: they are removed, not marked stale.
+		 *
+		 * `detail` goes with them deliberately. It is what makes the deleted case
+		 * *correct* rather than merely fresh - dropping it lets `runDetailOptions`
+		 * refetch, take its 404 and hand `HistoryDetail` the `RunNotFoundError` it
+		 * already renders as "This run no longer exists", instead of a pane that
+		 * keeps describing a run the sidebar no longer lists.
+		 *
+		 * The hint says which run changed, not how, so this cannot tell a delete
+		 * from a re-pin. That is the accepted cost: after `stop_run` the report
+		 * and series genuinely did change (the run went terminal), and after
+		 * `set_run_baseline` an open detail pane pays one refetch of data it
+		 * already had. A stale answer is a lie; a refetch is a wait.
+		 */
+		if (event.runId) {
+			for (const key of [
+				queryKeys.runs.detail(event.runId),
+				queryKeys.runs.report(event.runId),
+				queryKeys.runs.samples(event.runId),
+				queryKeys.runs.timeSeries(event.runId),
+				queryKeys.runs.monitorSeries(event.runId),
+			]) {
+				queryClient.removeQueries({ queryKey: key });
+			}
 		}
 	},
 

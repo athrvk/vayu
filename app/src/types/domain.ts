@@ -2230,6 +2230,12 @@ export interface McpDataChangedEvent {
 	collectionId?: string;
 	/** The saved request the call named, when it named one. */
 	requestId?: string;
+	/**
+	 * The history run the call named, when it named one. Only the tools that
+	 * rewrite or remove an *existing* run spell this (`stop_run`,
+	 * `set_run_baseline`, `delete_run`).
+	 */
+	runId?: string;
 }
 
 export interface ScriptCompletion {

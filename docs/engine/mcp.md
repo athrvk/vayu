@@ -958,8 +958,15 @@ Each tool declares the data families it changes (`invalidates` in `tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
 (`request`, `environment`, `run`, `cookie`, `config`) plus the `collectionId` /
-`requestId` the call itself named; it carries no engine data, so the renderer
-still reads every row through its query layer. The renderer side, including
+`requestId` / `runId` the call itself named; it carries no engine data, so the
+renderer still reads every row through its query layer. The three hints are read
+off the call's own arguments at the dispatch chokepoint, which is what keeps a
+new write tool from having to remember an emit of its own - every tool in the
+registry spells them the same way. They are hints, not identity: `requestId` on
+a `run` event is the saved request a design run was linked to, while `runId` is
+the run itself, and only the tools that rewrite or remove an **existing** run
+(`stop_run`, `set_run_baseline`, `delete_run`) name one - a runner's new run has
+no per-run cache to drop yet. The renderer side, including
 which query keys each family maps to, is in
 [`docs/app/state-management.md`](../app/state-management.md).
 
