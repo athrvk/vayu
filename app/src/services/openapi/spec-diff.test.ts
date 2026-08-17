@@ -34,6 +34,7 @@ import type { Request } from "@/types";
 interface OperationSpec {
 	operationId?: string;
 	summary?: string;
+	description?: string;
 	parameters?: unknown[];
 	requestBody?: unknown;
 }
@@ -118,6 +119,95 @@ function diffAgainst(fetchedRaw: string, requests: Request[]) {
 }
 
 const fieldNames = (fields: { field: string }[]): string[] => fields.map((f) => f.field).sort();
+
+describe("a document that declares one operationId twice (issue #715)", () => {
+	/*
+	 * Invalid OpenAPI and ordinary in generated specs. Import now keeps a
+	 * repeated id on its first declaration only, so what the diff has to survive
+	 * is the shape an import *before* that fix left behind: two requests
+	 * claiming one id, plus a document whose id names an operation that
+	 * contradicts what the second request says it is.
+	 */
+	const DUP = doc({
+		"/a": { get: { operationId: "list", summary: "List A" } },
+		"/b": { post: { operationId: "list", summary: "Create B" } },
+	});
+	/** What an import before the fix stamped on the second declaration. */
+	const staleStamp = { operationId: "list", method: "POST", path: "/b" } as const;
+
+	const entries = () => readSpecOperations(DUP).requests;
+
+	/** Both requests, the second still carrying the id the first also claims. */
+	function collection(): Request[] {
+		const [a, b] = entries();
+		return [
+			requestFrom("req_a", a),
+			requestFrom("req_b", b, { specOperation: { ...staleStamp } }),
+		];
+	}
+
+	const diffDup = (fetchedRaw: string, requests: Request[]) =>
+		diffSpec({
+			bound: entries(),
+			fetched: readSpecOperations(fetchedRaw).requests,
+			requests,
+		});
+
+	it("leaves the second request on its own operation when the first one changes", () => {
+		const tweaked = doc({
+			"/a": {
+				get: { operationId: "list", summary: "List A", description: "Now documented" },
+			},
+			"/b": { post: { operationId: "list", summary: "Create B" } },
+		});
+
+		const diff = diffDup(tweaked, collection());
+
+		// The id two requests claim identifies neither, so each is followed by its
+		// own endpoint. Following the id instead pairs `req_b` with `GET /a` and
+		// reports its name, url and body as changed.
+		const b = diff.changed.find((c) => c.request.id === "req_b");
+		expect(b?.matchedBy).toBe("path");
+		expect(b?.operation).toEqual({ method: "POST", path: "/b" });
+		expect(b?.fields).toEqual([]);
+		const a = diff.changed.find((c) => c.request.id === "req_a");
+		expect(fieldNames(a?.fields ?? [])).toEqual(["description"]);
+		expect(diff.added).toEqual([]);
+		expect(diff.removed).toEqual([]);
+	});
+
+	it("prefers the request's own endpoint over an id naming a different one", () => {
+		// One claimant, so the id is not ambiguous among the requests - what
+		// refuses it here is the entry it names having a different method and
+		// path from the stamp, while the document still declares the stamp's own.
+		const orphaned = [requestFrom("req_b", entries()[1], { specOperation: { ...staleStamp } })];
+
+		const diff = diffDup(DUP, orphaned);
+
+		const b = diff.changed.find((c) => c.request.id === "req_b");
+		expect(b?.matchedBy).toBe("path");
+		expect(b?.operation).toEqual({ method: "POST", path: "/b" });
+		expect(b?.fields).toEqual([]);
+		expect(diff.removed).toEqual([]);
+		// Nothing claims `GET /a` now, which is an addition to offer and not a
+		// request to overwrite.
+		expect(diff.added.map((entry) => entry.operation.path)).toEqual(["/a"]);
+	});
+
+	it("reports a moved endpoint as gone rather than following the shared id to the other operation", () => {
+		const moved = doc({
+			"/a": { get: { operationId: "list", summary: "List A" } },
+			"/b2": { post: { operationId: "list", summary: "Create B" } },
+		});
+
+		const diff = diffDup(moved, collection());
+
+		expect(diff.removed.map((r) => r.id)).toEqual(["req_b"]);
+		expect(diff.added.map((entry) => entry.operation.path)).toEqual(["/b2"]);
+		expect(diff.changed).toEqual([]);
+		expect(diff.unchanged).toBe(1);
+	});
+});
 
 describe("diffSpec", () => {
 	it("reports nothing changed when the document is the same", () => {

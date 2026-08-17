@@ -55,8 +55,13 @@ export function createRefResolver(document: unknown): RefResolver {
  * bad key must not turn the whole import into a rejected payload. The request
  * still imports; it simply names no operation, which is exactly the state of a
  * request the spec never described.
+ *
+ * Deliberately not exported: a parser reaching for this one operation at a time
+ * cannot see that another operation already claimed the same `operationId`, and
+ * stamping that id twice is what {@link createOperationIdentifier} exists to
+ * prevent (issue #715). Parsers take the identifier; this is what it is built on.
  */
-export function specOperationOf(
+function specOperationOf(
 	method: string,
 	path: string,
 	operationId: unknown
@@ -144,6 +149,48 @@ export class SkipTally {
 	items(): SkippedItem[] {
 		return [...this.counts].map(([kind, count]) => ({ kind, count }));
 	}
+}
+
+/**
+ * {@link specOperationOf} for a whole document, with a **duplicated
+ * `operationId` kept on its first declaration only** (issue #715).
+ *
+ * A document declaring one id on two operations is invalid OpenAPI and common
+ * in generated specs, and stamping it verbatim on both requests is what turns
+ * that upstream sloppiness into local corruption: the sync diff follows an id
+ * before a path, so the second declaration's request resolves to the *first*
+ * declaration's operation, reads as renamed toward an operation it never was,
+ * and a default-ticked apply then rewrites its method, URL and identity. The
+ * same ambiguity reaches the engine's coverage index, which resolves by id
+ * first as well.
+ *
+ * So a repeated id is dropped rather than repeated: the later operation imports
+ * with the identity it can still state unambiguously - its method and templated
+ * path - which is what `spec-diff` then follows it by. First declaration wins
+ * because document order is stable across re-fetches of the same file, so two
+ * syncs of an unchanged document agree about which request holds the id. The
+ * drop is counted, because a request quietly missing the identity the document
+ * appeared to give it is the kind of loss the import preview exists to name.
+ *
+ * One call per operation: the count is per duplicate declaration, and calling
+ * it twice for the same operation would report a duplicate the document does
+ * not contain.
+ */
+export function createOperationIdentifier(
+	tally: SkipTally
+): (method: string, path: string, operationId: unknown) => SpecOperation | undefined {
+	const claimed = new Set<string>();
+	return (method, path, operationId) => {
+		const identity = specOperationOf(method, path, operationId);
+		const id = identity?.operationId;
+		if (!identity || !id) return identity;
+		if (!claimed.has(id)) {
+			claimed.add(id);
+			return identity;
+		}
+		tally.add("duplicate_operation_id");
+		return { method: identity.method, path: identity.path };
+	};
 }
 
 /**

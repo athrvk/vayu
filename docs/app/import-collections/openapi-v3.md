@@ -119,7 +119,7 @@ Built by `makeTagCollection(spec, tag)`.
 
 ### Request (per operation)
 
-Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
+Built by `buildOperation(method, path, op, resolveRef, pathParams, tally, specOperation)`. The identity is passed in rather than derived here - see [Operation identity](#operation-identity).
 
 | OpenAPI | Vayu `RequestDraft` | Notes |
 |---------|---------------------|-------|
@@ -133,6 +133,13 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.requestBody` | `body` | via `buildBody` (see [Request body](#request-body-generation)) |
 | (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
+| `op.operationId`, method, `path` | `specOperation` | the operation this request is, recorded for [sync](../openapi.md#checking-a-bound-spec-for-changes) - see [Operation identity](#operation-identity). Absent for a `paths` key that does not start with `/` |
+
+### Operation identity
+
+Every request records which operation it is - `{ operationId?, method, path }`, the templated path exactly as the document writes it (`/pets/{petId}`), never the `{{petId}}` rewrite that goes into the URL. `parse` claims one identity per operation through `createOperationIdentifier(tally)` (`openapi-shared.ts`) and hands that same value to both the request draft and the declared-operation index stored beside the document, so the requests and the coverage index cannot disagree about which operation is which.
+
+**A duplicated `operationId` is kept on its first declaration only** (issue #715). Declaring one id on two operations is invalid OpenAPI and common in generated specs, and stamping it on both requests is what let a later sync resolve the second request to the *first* operation - reporting it as renamed toward an operation it never was, and rewriting its method, URL and identity on an all-defaults apply. The second operation therefore imports identified by its method and path alone, which is what sync then follows it by, and each repeated declaration is counted as a `duplicate_operation_id` [`SkippedItem`](./README.md#draft-model-the-parser-output-contract) so the preview names the drop. First declaration wins because document order is stable across re-fetches of the same file. Nothing else is lost: the operation itself imports whole, and `op.operationId` still supplies the request name when there is no `summary`. A `paths` key that does not start with `/` records no identity at all - the engine refuses one.
 
 ### Parameter values & enabled state
 
@@ -257,6 +264,7 @@ Dropped / not represented:
 | `unsupported_method` | a path item carries a `trace` operation |
 | `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
 | `example_no_status` | a response key is not a three-digit status - `default`, or a `2XX` wildcard |
+| `duplicate_operation_id` | an `operationId` another operation in this document already declared (see [Operation identity](#operation-identity)) |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 

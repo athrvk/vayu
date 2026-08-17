@@ -131,6 +131,61 @@ function payload(
 	});
 }
 
+describe("a duplicated operationId is not corruption a default apply can commit (issue #715)", () => {
+	/*
+	 * The end-to-end shape of the failure: a generated document declares one id
+	 * on two operations, an import before the fix stamped it on both requests,
+	 * and upstream then tweaks the first operation. The user clicks Check for
+	 * changes and Apply with everything ticked as it came.
+	 *
+	 * What must not be in that payload is a write that moves the second request
+	 * onto the first one's operation - its method, its URL and its identity.
+	 */
+	const DUP = doc({
+		"/a": { get: { operationId: "list", summary: "List A" } },
+		"/b": { post: { operationId: "list", summary: "Create B" } },
+	});
+	const TWEAKED = doc({
+		"/a": { get: { operationId: "list", summary: "List A, now documented" } },
+		"/b": { post: { operationId: "list", summary: "Create B" } },
+	});
+
+	it("writes nothing of the first operation onto the second request", () => {
+		const entries = readSpecOperations(DUP).requests;
+		const requests = [
+			requestFrom("req_a", entries[0]),
+			// The stamp an import before the fix left on the second declaration.
+			requestFrom("req_b", entries[1], {
+				specOperation: { operationId: "list", method: "POST", path: "/b" },
+			}),
+		];
+		const diff = diffSpec({
+			bound: entries,
+			fetched: readSpecOperations(TWEAKED).requests,
+			requests,
+		});
+		const body = buildSyncPayload({
+			collectionId: "col_root",
+			diff,
+			selection: defaultSelection(diff),
+			content: TWEAKED,
+			sourceUrl: null,
+			collections: collections(),
+		});
+
+		const b = body.update.find((u) => u.id === "req_b");
+		expect(b?.method).toBe("POST");
+		expect(b?.specOperation).toEqual({ method: "POST", path: "/b" });
+		// Nothing the document produces for this request differs, so no field of
+		// it is written at all - the update exists only to drop the id the other
+		// operation kept, which is the ambiguity being repaired.
+		expect(b?.name).toBeUndefined();
+		expect(b?.url).toBeUndefined();
+		// The tweak lands where it belongs, on the request that operation is.
+		expect(body.update.find((u) => u.id === "req_a")?.name).toBe("List A, now documented");
+	});
+});
+
 describe("defaultSelection", () => {
 	it("ticks every added operation and no removal", () => {
 		const fetched = doc({

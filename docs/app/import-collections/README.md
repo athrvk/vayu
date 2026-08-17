@@ -283,7 +283,7 @@ than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
-"external_ref", count }`.
+"external_ref" | "duplicate_operation_id", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -298,7 +298,12 @@ pick, so it is counted rather than guessed at. `external_ref` is the fifth, and 
 kind no parser produces: a `$ref` naming another file that the bundling pass could not
 read (`ref-bundler.ts`, issue #649) is counted **before** parse and stamped into
 `meta.skipped` by `parseImport`, one per reference - because each one is an operation that
-imported without the schema it declared.
+imported without the schema it declared. `duplicate_operation_id` is the sixth, and the only
+one where nothing is dropped from the request itself: an `operationId` a document declares
+twice is kept on the first operation and left off the second, whose recorded identity then
+rests on its method and templated path alone (issue #715). Counted per repeated declaration,
+because a sync follows the identity a request records, and which of the two kept the id is
+not something the user should have to work out from a diff.
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`

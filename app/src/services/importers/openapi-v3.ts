@@ -37,7 +37,7 @@ import {
 	resolvePathItem,
 	responseExample,
 	SkipTally,
-	specOperationOf,
+	createOperationIdentifier,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
 import { buildResponseSchemaIndex, responseSchemasV3 } from "./response-schemas";
@@ -89,6 +89,10 @@ export class OpenApiV3Parser implements ImportParser {
 		const tagCollections = new Map<string, CollectionDraft>();
 		const rootRequests: RequestDraft[] = [];
 		const tally = new SkipTally();
+		// One identifier for the whole document: it is what keeps a repeated
+		// `operationId` off the second request that would otherwise claim it
+		// (issue #715), which needs the memory of every id already stamped.
+		const identify = createOperationIdentifier(tally);
 		let requestCount = 0;
 		// The declared-operation index stored beside the document (issue #629).
 		// Built in this same walk rather than by a second pass over `paths`: a
@@ -116,7 +120,7 @@ export class OpenApiV3Parser implements ImportParser {
 				const op = asRecord(pathItem[method]);
 				if (!op) continue;
 				requestCount += 1;
-				const identity = specOperationOf(method, path, op.operationId);
+				const identity = identify(method, path, op.operationId);
 				if (identity) {
 					declaredOperations.push({
 						...identity,
@@ -127,7 +131,15 @@ export class OpenApiV3Parser implements ImportParser {
 						responses: responseSchemasV3(op, resolveRef),
 					});
 				}
-				const req = buildOperation(method, path, op, resolveRef, pathParams, tally);
+				const req = buildOperation(
+					method,
+					path,
+					op,
+					resolveRef,
+					pathParams,
+					tally,
+					identity
+				);
 				const tag = asStr(asArray(op.tags)[0]);
 				if (tag) {
 					if (!tagCollections.has(tag))
@@ -216,7 +228,12 @@ function buildOperation(
 	op: JsonRecord,
 	resolveRef: (r: string) => unknown,
 	pathParams: unknown[],
-	tally: SkipTally
+	tally: SkipTally,
+	/** The identity `parse` claimed for this operation - passed rather than
+	 * re-derived, so the request and the declared-operation index can never
+	 * disagree about which of two operations kept a repeated `operationId`
+	 * (issue #715). */
+	specOperation: SpecOperation | undefined
 ): RequestDraft {
 	const params: KeyValueEntry[] = [];
 	const headers: KeyValueEntry[] = [];
@@ -251,7 +268,6 @@ function buildOperation(
 		}
 	}
 	const examples = buildExamples(op.responses, resolveRef, tally);
-	const specOperation = specOperationOf(method, path, op.operationId);
 	return {
 		name: asStr(op.summary) ?? asStr(op.operationId) ?? `${method.toUpperCase()} ${path}`,
 		description: asStr(op.description) ?? "",
