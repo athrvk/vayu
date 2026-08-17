@@ -8,16 +8,25 @@
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import {
+	DEFAULT_RUN_SAMPLE_LIMIT,
+	DEFAULT_RUN_SERIES_LIMIT,
 	dispatchTool,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_INLINE_BODY_BYTES,
 	MAX_REPORT_TRACE_BYTES,
+	MAX_RUN_SERIES_LIMIT,
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
 } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import { EngineRequestError, EngineTimeoutError, type EngineClient } from "./engine-client.js";
+import {
+	DEFAULT_RUN_PAGE_LIMIT,
+	EngineRequestError,
+	EngineTimeoutError,
+	MAX_ENGINE_PAGE_LIMIT,
+	type EngineClient,
+} from "./engine-client.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
 /**
@@ -40,6 +49,26 @@ function identityCompose() {
 	});
 }
 
+/**
+ * The `{data, pagination}` envelope every paginated engine read answers with.
+ * Written as a helper because the *pagination* block is what the bounded reads
+ * disclose from - a fake returning a bare array would let a disclosure bug pass.
+ */
+function page(data: unknown[], total = data.length, offset = 0) {
+	return {
+		data,
+		pagination: {
+			total,
+			limit: data.length,
+			offset,
+			returned: data.length,
+			hasMore: offset + data.length < total,
+		},
+	};
+}
+
+const emptyPage = () => page([]);
+
 /** Build a fake EngineClient with vi.fn()s for the methods under test. */
 function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
 	return {
@@ -47,9 +76,22 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		listCollections: vi.fn().mockResolvedValue([]),
 		listRequests: vi.fn().mockResolvedValue([]),
 		listEnvironments: vi.fn().mockResolvedValue([]),
-		listRuns: vi.fn().mockResolvedValue([]),
+		listRuns: vi.fn().mockResolvedValue(emptyPage()),
 		getRunReport: vi.fn().mockResolvedValue({ latency: {}, summary: {}, statusCodes: {} }),
-		getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: "req_1", baseline: false }),
+		getRun: vi.fn().mockResolvedValue({
+			id: "run_b",
+			requestId: "req_1",
+			baseline: false,
+			type: "load",
+			status: "completed",
+			startTime: 1_755_000_000_000,
+			configSnapshot: { url: "https://api.example.com/users", mode: "constant_rps" },
+		}),
+		deleteRun: vi.fn().mockResolvedValue({ message: "Run deleted successfully" }),
+		setRunBaseline: vi.fn().mockResolvedValue({ id: "run_b", baseline: true }),
+		getRunSamples: vi.fn().mockResolvedValue(emptyPage()),
+		getRunTimeSeries: vi.fn().mockResolvedValue(emptyPage()),
+		getRunMonitorSeries: vi.fn().mockResolvedValue(emptyPage()),
 		listBaselineRuns: vi
 			.fn()
 			.mockResolvedValue({ data: [{ id: "run_pinned", baseline: true }] }),
@@ -4003,5 +4045,370 @@ describe("mock issuer tools", () => {
 		);
 		expect(stopped.isError).toBeFalsy();
 		expect(client.stopMockIssuer).toHaveBeenCalledWith("issuer_1", undefined);
+	});
+});
+
+/*
+ * Run housekeeping (#755): the History surface an agent could not reach - find a
+ * run, page its stored series, pin a baseline, delete one.
+ */
+describe("run housekeeping tools", () => {
+	const forwarded = (client: EngineClient, method: keyof EngineClient) =>
+		(client[method] as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+
+	describe("list_runs", () => {
+		test("with no arguments it asks for the documented default page", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			expect(res.isError).toBeFalsy();
+			expect(forwarded(client, "listRuns")[0]).toEqual({
+				limit: DEFAULT_RUN_PAGE_LIMIT,
+				offset: 0,
+			});
+		});
+
+		test("every stated filter reaches the engine verbatim", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"list_runs",
+				{
+					limit: 10,
+					offset: 20,
+					type: "scenario",
+					status: "failed",
+					requestId: "req_1",
+					collectionId: "col_1",
+					q: "checkout",
+					baseline: true,
+				},
+				ctxWith(client)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(forwarded(client, "listRuns")[0]).toEqual({
+				limit: 10,
+				offset: 20,
+				type: "scenario",
+				status: "failed",
+				requestId: "req_1",
+				collectionId: "col_1",
+				q: "checkout",
+				baseline: true,
+			});
+		});
+
+		test("baseline: false is forwarded, not dropped as falsy", async () => {
+			// "only unpinned runs" is a filter the engine offers; reading `false`
+			// as "unset" would silently answer with the pinned ones included.
+			const client = fakeClient();
+			await dispatchTool("list_runs", { baseline: false }, ctxWith(client));
+			expect(forwarded(client, "listRuns")[0]).toMatchObject({ baseline: false });
+		});
+
+		test("a filter the caller did not state is absent, not undefined", async () => {
+			const client = fakeClient();
+			await dispatchTool("list_runs", { type: "design" }, ctxWith(client));
+			const query = forwarded(client, "listRuns")[0] as Record<string, unknown>;
+			expect("status" in query).toBe(false);
+			expect("q" in query).toBe(false);
+		});
+
+		test("a limit past the engine's cap is refused, not clamped", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"list_runs",
+				{ limit: MAX_ENGINE_PAGE_LIMIT + 1 },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain(String(MAX_ENGINE_PAGE_LIMIT));
+			expect(client.listRuns).not.toHaveBeenCalled();
+		});
+
+		test("a negative offset is refused", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool("list_runs", { offset: -1 }, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(client.listRuns).not.toHaveBeenCalled();
+		});
+
+		test("a page with more behind it says so, with the next offset", async () => {
+			const client = fakeClient({
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }, { id: "run_2" }], 57)),
+			});
+			const res = await dispatchTool("list_runs", { limit: 2 }, ctxWith(client));
+			const text = res.content.map((c) => c.text).join("\n");
+			expect(text).toMatch(/2 of 57 runs/);
+			expect(text).toMatch(/offset: 2/);
+		});
+
+		test("a complete page carries no caveat", async () => {
+			const client = fakeClient({
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }])),
+			});
+			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			expect(res.content).toHaveLength(1);
+			expect(firstText(res)).not.toMatch(/Bounded read/);
+		});
+	});
+
+	describe("the stored-series reads", () => {
+		test("each defaults to a page a context window can hold", async () => {
+			const client = fakeClient();
+			await dispatchTool("get_run_samples", { runId: "run_1" }, ctxWith(client));
+			await dispatchTool("get_run_timeseries", { runId: "run_1" }, ctxWith(client));
+			await dispatchTool("get_run_monitor", { runId: "run_1" }, ctxWith(client));
+			expect(forwarded(client, "getRunSamples")).toEqual([
+				"run_1",
+				DEFAULT_RUN_SAMPLE_LIMIT,
+				0,
+				undefined,
+			]);
+			expect(forwarded(client, "getRunTimeSeries")).toEqual([
+				"run_1",
+				DEFAULT_RUN_SERIES_LIMIT,
+				0,
+				undefined,
+			]);
+			expect(forwarded(client, "getRunMonitorSeries")).toEqual([
+				"run_1",
+				DEFAULT_RUN_SERIES_LIMIT,
+				0,
+				undefined,
+			]);
+		});
+
+		test("stated pagination is forwarded", async () => {
+			const client = fakeClient();
+			await dispatchTool(
+				"get_run_timeseries",
+				{ runId: "run_1", limit: 250, offset: 500 },
+				ctxWith(client)
+			);
+			expect(forwarded(client, "getRunTimeSeries")).toEqual(["run_1", 250, 500, undefined]);
+		});
+
+		test("the series cap is the tool's, well below the engine's 50000", async () => {
+			const client = fakeClient();
+			for (const tool of ["get_run_timeseries", "get_run_monitor"]) {
+				const res = await dispatchTool(
+					tool,
+					{ runId: "run_1", limit: MAX_RUN_SERIES_LIMIT + 1 },
+					ctxWith(client)
+				);
+				expect(res.isError, tool).toBe(true);
+				expect(firstText(res)).toContain(String(MAX_RUN_SERIES_LIMIT));
+			}
+			expect(client.getRunTimeSeries).not.toHaveBeenCalled();
+			expect(client.getRunMonitorSeries).not.toHaveBeenCalled();
+		});
+
+		test("samples stop at the engine's own cap", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"get_run_samples",
+				{ runId: "run_1", limit: MAX_ENGINE_PAGE_LIMIT + 1 },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(client.getRunSamples).not.toHaveBeenCalled();
+		});
+
+		test("non-positive pagination is refused on every read", async () => {
+			const client = fakeClient();
+			for (const [tool, args] of [
+				["get_run_samples", { runId: "run_1", limit: 0 }],
+				["get_run_timeseries", { runId: "run_1", offset: -5 }],
+				["get_run_monitor", { runId: "run_1", limit: 2.5 }],
+			] as const) {
+				const res = await dispatchTool(tool, args, ctxWith(client));
+				expect(res.isError, tool).toBe(true);
+			}
+			expect(client.getRunSamples).not.toHaveBeenCalled();
+			expect(client.getRunTimeSeries).not.toHaveBeenCalled();
+			expect(client.getRunMonitorSeries).not.toHaveBeenCalled();
+		});
+
+		test("a truncated page discloses what it left behind", async () => {
+			const client = fakeClient({
+				getRunSamples: vi.fn().mockResolvedValue(page([{ resultId: 1 }], 900, 25)),
+			});
+			const res = await dispatchTool(
+				"get_run_samples",
+				{ runId: "run_1", offset: 25 },
+				ctxWith(client)
+			);
+			const text = res.content.map((c) => c.text).join("\n");
+			expect(text).toMatch(/1 of 900 captured samples/);
+			expect(text).toMatch(/offset: 26/);
+		});
+
+		test("a run the engine does not know is an engine error, not an empty page", async () => {
+			const client = fakeClient({
+				getRunTimeSeries: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError("Engine responded 404", 404, "Run not found")
+					),
+			});
+			const res = await dispatchTool(
+				"get_run_timeseries",
+				{ runId: "gone" },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/404/);
+		});
+	});
+
+	describe("set_run_baseline", () => {
+		test("is refused while writes are off", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"set_run_baseline",
+				{ runId: "run_1", baseline: true },
+				ctxWith(client, { allowWrites: false })
+			);
+			expect(res.isError).toBe(true);
+			expect(client.setRunBaseline).not.toHaveBeenCalled();
+		});
+
+		test("pins and unpins through the one tool", async () => {
+			for (const baseline of [true, false]) {
+				const client = fakeClient();
+				const res = await dispatchTool(
+					"set_run_baseline",
+					{ runId: "run_1", baseline },
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(res.isError).toBeFalsy();
+				expect(client.setRunBaseline).toHaveBeenCalledWith("run_1", baseline, undefined);
+			}
+		});
+
+		test("a missing or non-boolean baseline is an argument error", async () => {
+			const client = fakeClient();
+			for (const args of [{ runId: "run_1" }, { runId: "run_1", baseline: "true" }]) {
+				const res = await dispatchTool(
+					"set_run_baseline",
+					args,
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).toMatch(/baseline/);
+			}
+			expect(client.setRunBaseline).not.toHaveBeenCalled();
+		});
+
+		test("a pin is what compare_runs then resolves with no baseRunId", async () => {
+			// The pair the issue is about: #472 built the resolution and never the
+			// write, so the only way to pin was the app's own sidebar.
+			let pinned: string | null = null;
+			const client = fakeClient({
+				setRunBaseline: vi.fn(async (runId: string, baseline: boolean) => {
+					pinned = baseline ? runId : null;
+					return { id: runId, baseline };
+				}),
+				listBaselineRuns: vi.fn(async () => ({ data: pinned ? [{ id: pinned }] : [] })),
+			});
+			const ctx = ctxWith(client, { allowWrites: true });
+
+			const unpinned = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctx);
+			expect(unpinned.isError).toBe(true);
+
+			await dispatchTool("set_run_baseline", { runId: "run_a", baseline: true }, ctx);
+			const compared = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctx);
+			expect(compared.isError).toBeFalsy();
+			expect(compared.structuredContent).toMatchObject({
+				baseRunId: "run_a",
+				targetRunId: "run_b",
+			});
+		});
+
+		test("is not hinted destructive - it is undone by calling it again", () => {
+			const tool = TOOLS.find((t) => t.name === "set_run_baseline");
+			expect(tool?.category).toBe("write");
+			expect(tool?.annotations.destructiveHint).toBe(false);
+			expect(tool?.annotations.idempotentHint).toBe(true);
+		});
+	});
+
+	describe("delete_run", () => {
+		test("is refused while writes are off, without even reading the run", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"delete_run",
+				{ runId: "run_1", confirmed: true },
+				ctxWith(client, { allowWrites: false })
+			);
+			expect(res.isError).toBe(true);
+			expect(client.getRun).not.toHaveBeenCalled();
+			expect(client.deleteRun).not.toHaveBeenCalled();
+		});
+
+		test("names the run in its preview and deletes nothing", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"delete_run",
+				{ runId: "run_b" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(firstText(res)).toMatch(/awaiting confirmation/i);
+			expect(firstText(res)).toContain("load run run_b");
+			expect(firstText(res)).toContain("https://api.example.com/users");
+			// Epoch milliseconds are rendered, not printed at a human.
+			expect(firstText(res)).toContain("2025-08-12T");
+			expect(client.deleteRun).not.toHaveBeenCalled();
+		});
+
+		test("deletes once confirmed", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"delete_run",
+				{ runId: "run_b", confirmed: true },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.deleteRun).toHaveBeenCalledWith("run_b", undefined);
+		});
+
+		test("answers a missing id as such, not as a transport failure", async () => {
+			const client = fakeClient({
+				getRun: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError("Engine responded 404", 404, "Run not found")
+					),
+			});
+			const res = await dispatchTool(
+				"delete_run",
+				{ runId: "run_gone", confirmed: true },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("run_gone");
+			expect(client.deleteRun).not.toHaveBeenCalled();
+		});
+
+		test("a run still stopping is reported as not deleted, with the retry", async () => {
+			// The engine refuses rather than half-deletes a run whose worker is
+			// still writing. Reported as a generic engine error, an agent would
+			// read "409" and could not tell whether the run survived.
+			const client = fakeClient({
+				deleteRun: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError("Engine responded 409", 409, "still stopping")
+					),
+			});
+			const res = await dispatchTool(
+				"delete_run",
+				{ runId: "run_b", confirmed: true },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/NOT deleted/);
+			expect(firstText(res)).toMatch(/again/i);
+		});
 	});
 });

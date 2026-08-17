@@ -100,6 +100,15 @@ const INVALIDATORS: Record<
 	 * all, and an MCP-run request left them stale indefinitely. Reports and time
 	 * series are keyed per run and describe runs that already existed, so they
 	 * are deliberately not touched.
+	 *
+	 * That last sentence stopped being the whole story with `delete_run` and
+	 * `set_run_baseline` (issue #755): a run can now be removed or re-pinned from
+	 * MCP, and what this leaves stale is what `useDeleteRunMutation` /
+	 * `useSetRunBaselineMutation` clear for the same writes made in the UI - the
+	 * baseline family, the per-run report and series entries (`staleTime:
+	 * Infinity`), Recent sends and Last run. Tracked in issue #774 rather than
+	 * widened here, because dropping one run's caches needs a run-id scope hint
+	 * the event does not carry yet.
 	 */
 	run: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });

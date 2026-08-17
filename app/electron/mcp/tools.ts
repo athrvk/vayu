@@ -18,8 +18,13 @@
 
 import { z } from "zod";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { EngineClient } from "./engine-client.js";
-import { EngineRequestError, EngineTimeoutError } from "./engine-client.js";
+import type { EngineClient, RunListQuery } from "./engine-client.js";
+import {
+	DEFAULT_RUN_PAGE_LIMIT,
+	EngineRequestError,
+	EngineTimeoutError,
+	MAX_ENGINE_PAGE_LIMIT,
+} from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
 import {
@@ -450,6 +455,129 @@ function boundRunReport(value: unknown): unknown {
 	};
 }
 
+// --- Run housekeeping bounds -------------------------------------------------
+
+/**
+ * Run types and statuses `list_runs` filters on, spelled as the engine parses
+ * them (`parse_run_type` / `parse_run_status`, engine `types.hpp`) and matching
+ * the renderer's own `Run` union in `app/src/types/domain.ts`.
+ *
+ * Restated here rather than imported because `electron/` shares no module graph
+ * with `app/src/` - the same reason `HTTP_VERSIONS` has its own copy. Declared
+ * as Zod enums so an unrecognised value is a refusal: `GET /runs` *ignores* a
+ * filter it cannot parse, so a typo would otherwise answer the unfiltered page
+ * and read as "nothing matched anywhere".
+ */
+const RUN_TYPES = ["design", "load", "scenario"] as const;
+const RUN_STATUSES = ["pending", "running", "completed", "failed", "stopped"] as const;
+
+/**
+ * Default page for `get_run_samples` - small, because a sample carries a real
+ * response body (bounded engine-side by `maxSampleBodyBytes`) and 500 of them is
+ * a context window, not a page. The engine's own default here is 50.
+ */
+export const DEFAULT_RUN_SAMPLE_LIMIT = 25;
+
+/**
+ * Default and ceiling for the two per-tick series reads.
+ *
+ * The engine defaults these to 5000 rows and caps them at 50000 - sized for the
+ * dashboard's charts, which draw every point and show a human the shape. An
+ * agent reads them as JSON through a context window, so both are far past what
+ * a tool result can carry, and the #319 lesson (`get_live_metrics` returning
+ * whatever a run had accumulated) is that the bound belongs on this side of the
+ * boundary. Refused rather than clamped, so an agent asking for more is told.
+ */
+export const DEFAULT_RUN_SERIES_LIMIT = 100;
+export const MAX_RUN_SERIES_LIMIT = 1_000;
+
+/**
+ * What a bounded page did *not* return, in words.
+ *
+ * The `{data, pagination}` envelope already carries `total` and `hasMore`, but a
+ * bound an agent has to reconstruct from two numbers is one it can miss - the
+ * same disclose-in-band rule the smoke matrix and the report's trace budget
+ * follow. Empty when the page is the whole answer: a caveat on a complete read
+ * is noise that teaches an agent to skip the caveats that matter.
+ */
+function pageCaveat(value: unknown, noun: string): string {
+	if (!isRecord(value)) return "";
+	const pagination = value.pagination;
+	if (!isRecord(pagination) || pagination.hasMore !== true) return "";
+	const offset = typeof pagination.offset === "number" ? pagination.offset : 0;
+	const returned = typeof pagination.returned === "number" ? pagination.returned : 0;
+	const total = typeof pagination.total === "number" ? String(pagination.total) : "more";
+	return (
+		`\n\nBounded read: ${returned} of ${total} ${noun}, starting at offset ${offset}. ` +
+		`Read the next page with offset: ${offset + returned}.`
+	);
+}
+
+/**
+ * A run named in words, for the prompt that asks a human to delete it.
+ *
+ * The same rule `delete_request` follows: a confirmation carrying only an opaque
+ * id is not one a person can answer. Every part is optional because a run row is
+ * only as descriptive as the snapshot it stored - a malformed one serializes to
+ * an empty summary engine-side rather than failing - so this degrades to the id
+ * instead of printing "undefined".
+ */
+function describeRun(runId: string, run: Record<string, unknown>): string {
+	const snapshot = isRecord(run.configSnapshot) ? run.configSnapshot : {};
+	const kind = typeof run.type === "string" && run.type !== "" ? `${run.type} run` : "run";
+	const parts: string[] = [];
+	if (typeof snapshot.url === "string" && snapshot.url !== "") parts.push(snapshot.url);
+	if (typeof snapshot.comment === "string" && snapshot.comment !== "") {
+		parts.push(`"${snapshot.comment}"`);
+	}
+	if (typeof run.status === "string" && run.status !== "") parts.push(run.status);
+	// `startTime` is epoch milliseconds (engine `Run::start_time`, an int64), so
+	// it is rendered rather than printed - a human confirming a delete cannot
+	// read 1755454800000 as "this morning".
+	if (typeof run.startTime === "number" && Number.isFinite(run.startTime) && run.startTime > 0) {
+		parts.push(`started ${new Date(run.startTime).toISOString()}`);
+	}
+	if (run.baseline === true) parts.push("pinned as a baseline");
+	return parts.length > 0 ? `the ${kind} ${runId} (${parts.join(", ")})` : `the ${kind} ${runId}`;
+}
+
+/**
+ * The `GET /runs` query a `list_runs` call describes.
+ *
+ * Only the filters the caller actually stated travel. An omitted one must not
+ * reach the URL as `type=undefined`: the engine ignores a filter it cannot
+ * parse, so that spelling happens to behave like "unfiltered" today - by way of
+ * the same rule that silently swallows a typo. Sending nothing is the honest
+ * form, and leaves the schema as the only thing rejecting a bad value.
+ */
+function runListQuery(args: Record<string, unknown>): RunListQuery {
+	const query: RunListQuery = {
+		limit: optionalPageLimit(args, "limit", DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT),
+		offset: optionalOffset(args, "offset"),
+	};
+	for (const key of ["type", "status", "requestId", "collectionId", "q"] as const) {
+		const value = str(args, key);
+		if (value !== undefined) query[key] = value;
+	}
+	if (typeof args.baseline === "boolean") query.baseline = args.baseline;
+	return query;
+}
+
+/**
+ * A paginated engine read whose result says what it left behind.
+ * {@link callEngine} with a `shape` cannot do this: the caveat is text beside
+ * the JSON, not a rewrite of it.
+ */
+async function pagedRead(fn: () => Promise<unknown>, noun: string): Promise<ToolResult> {
+	let answer: unknown;
+	try {
+		answer = await fn();
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	return withCaveat(jsonResult(answer), pageCaveat(answer, noun));
+}
+
 /** Result that carries both a text rendering and structured content. */
 function structuredResult(value: Record<string, unknown>): ToolResult {
 	return {
@@ -745,6 +873,37 @@ function optionalPositiveInt(args: Record<string, unknown>, key: string, fallbac
 	if (v === undefined || v === null) return fallback;
 	if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
 		throw new ToolArgError(`"${key}" must be a whole number greater than 0.`);
+	}
+	return v;
+}
+
+/**
+ * A page size, refused above @p max rather than clamped to it (the #319
+ * precedent): an agent that asked for 5000 rows and silently got 500 reads the
+ * short page as the whole answer, which is the one failure a bound must not
+ * produce.
+ */
+function optionalPageLimit(
+	args: Record<string, unknown>,
+	key: string,
+	fallback: number,
+	max: number
+): number {
+	const value = optionalPositiveInt(args, key, fallback);
+	if (value > max) {
+		throw new ToolArgError(
+			`"${key}" must be ${max} or less. Read further rows with "offset" instead.`
+		);
+	}
+	return value;
+}
+
+/** A row offset: whole and non-negative, since 0 is the first page. */
+function optionalOffset(args: Record<string, unknown>, key: string): number {
+	const v = args[key];
+	if (v === undefined || v === null) return 0;
+	if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+		throw new ToolArgError(`"${key}" must be a whole number of 0 or more.`);
 	}
 	return v;
 }
@@ -2007,18 +2166,71 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List recent past runs (both single Design-mode requests and load tests), " +
-			"newest first. Returns a {data, pagination} envelope bounded to the first " +
-			"100 runs; each row carries a compact summary (url/method/mode/duration/" +
-			"concurrency/comment), not the full config snapshot.",
+			"List past runs (single Design-mode requests, collection runs and load tests), " +
+			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (url/method/mode/duration/concurrency/comment), not the full config snapshot. ` +
+			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
+			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is.",
 		annotations: {
 			title: "List runs",
 			readOnlyHint: true,
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listRuns(signal)),
+		inputSchema: {
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_ENGINE_PAGE_LIMIT)
+				.optional()
+				.describe(
+					`How many runs to return (default ${DEFAULT_RUN_PAGE_LIMIT}, max ${MAX_ENGINE_PAGE_LIMIT}). A larger value is refused, not clamped.`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many runs to skip, for paging (default 0)."),
+			type: z
+				.enum(RUN_TYPES)
+				.optional()
+				.describe(
+					'Only runs of this kind: "design" (one request), "load" (a load test), "scenario" (a collection run).'
+				),
+			status: z
+				.enum(RUN_STATUSES)
+				.optional()
+				.describe(
+					'Only runs in this state: "pending", "running", "completed", "failed", "stopped".'
+				),
+			requestId: z.string().optional().describe("Only runs of this saved request."),
+			collectionId: z
+				.string()
+				.optional()
+				.describe(
+					"Only collection runs of this collection. Design and load runs record no collection, so they never match."
+				),
+			q: z
+				.string()
+				.optional()
+				.describe(
+					"Case-insensitive substring match over the run's stored configuration (url, comment, and the rest of the snapshot)."
+				),
+			baseline: z
+				.boolean()
+				.optional()
+				.describe(
+					"true lists only runs pinned as a baseline, false only unpinned ones. Omit for both."
+				),
+		},
+		handler: (args, ctx, signal) => {
+			// Built before the call, not inside it: an argument the caller got
+			// wrong must reach dispatch as a ToolArgError - inside `pagedRead`'s
+			// try it would be reported as an engine failure.
+			const query = runListQuery(args);
+			return pagedRead(() => ctx.client.listRuns(query, signal), "runs");
+		},
 	},
 	{
 		name: "get_run_report",
@@ -2041,6 +2253,144 @@ export const TOOLS: McpTool[] = [
 				() => ctx.client.getRunReport(requireStr(args, "runId"), signal),
 				boundRunReport
 			),
+	},
+	{
+		name: "get_run_samples",
+		category: "read",
+		invalidates: [],
+		description:
+			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. Only a run started with response capture on has any; a run that captured nothing returns an empty page, not an error. " +
+			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+		annotations: {
+			title: "Get run samples",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID whose captured samples to read."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_ENGINE_PAGE_LIMIT)
+				.optional()
+				.describe(
+					`How many samples to return (default ${DEFAULT_RUN_SAMPLE_LIMIT}, max ${MAX_ENGINE_PAGE_LIMIT}).`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many samples to skip, for paging (default 0)."),
+		},
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			const limit = optionalPageLimit(
+				args,
+				"limit",
+				DEFAULT_RUN_SAMPLE_LIMIT,
+				MAX_ENGINE_PAGE_LIMIT
+			);
+			const offset = optionalOffset(args, "offset");
+			return pagedRead(
+				() => ctx.client.getRunSamples(runId, limit, offset, signal),
+				"captured samples"
+			);
+		},
+	},
+	{
+		name: "get_run_timeseries",
+		category: "read",
+		invalidates: [],
+		description:
+			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. " +
+			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+		annotations: {
+			title: "Get run time series",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID whose time series to read."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_RUN_SERIES_LIMIT)
+				.optional()
+				.describe(
+					`How many ticks to return (default ${DEFAULT_RUN_SERIES_LIMIT}, max ${MAX_RUN_SERIES_LIMIT}).`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many ticks to skip, for paging (default 0)."),
+		},
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			const limit = optionalPageLimit(
+				args,
+				"limit",
+				DEFAULT_RUN_SERIES_LIMIT,
+				MAX_RUN_SERIES_LIMIT
+			);
+			const offset = optionalOffset(args, "offset");
+			return pagedRead(
+				() => ctx.client.getRunTimeSeries(runId, limit, offset, signal),
+				"ticks"
+			);
+		},
+	},
+	{
+		name: "get_run_monitor",
+		category: "read",
+		invalidates: [],
+		description:
+			"Get the server vitals scraped during a run - the target's own CPU, memory and load, sampled on the monitor's cadence rather than the tick cadence, so these rows do not line up with get_run_timeseries row for row. Answers 'was the target saturated?' beside the client-side latency the report shows. Only a run started with a `monitor` block has any; any other run returns an empty page, not an error. " +
+			`BOUNDED the same way as get_run_timeseries: ${DEFAULT_RUN_SERIES_LIMIT} samples by default, ${MAX_RUN_SERIES_LIMIT} at most, refused above that. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+		annotations: {
+			title: "Get run monitor series",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID whose monitor samples to read."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_RUN_SERIES_LIMIT)
+				.optional()
+				.describe(
+					`How many samples to return (default ${DEFAULT_RUN_SERIES_LIMIT}, max ${MAX_RUN_SERIES_LIMIT}).`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many samples to skip, for paging (default 0)."),
+		},
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			const limit = optionalPageLimit(
+				args,
+				"limit",
+				DEFAULT_RUN_SERIES_LIMIT,
+				MAX_RUN_SERIES_LIMIT
+			);
+			const offset = optionalOffset(args, "offset");
+			return pagedRead(
+				() => ctx.client.getRunMonitorSeries(runId, limit, offset, signal),
+				"monitor samples"
+			);
+		},
 	},
 	{
 		name: "get_engine_config",
@@ -3216,6 +3566,98 @@ export const TOOLS: McpTool[] = [
 		inputSchema: { runId: z.string().describe("Run ID to stop.") },
 		handler: (args, ctx, signal) =>
 			callEngine(() => ctx.client.stopRun(requireStr(args, "runId"), signal)),
+	},
+	{
+		name: "set_run_baseline",
+		category: "write",
+		invalidates: ["run"],
+		description:
+			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings.",
+		annotations: {
+			title: "Pin run as baseline",
+			readOnlyHint: false,
+			// It rewrites one flag on one row and is undone by calling it again
+			// with the opposite value - the opposite of the deletes this hint
+			// exists to warn about.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID to pin or unpin."),
+			baseline: z.boolean().describe("true pins this run as the baseline, false unpins it."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const runId = requireStr(args, "runId");
+			if (typeof args.baseline !== "boolean") {
+				throw new ToolArgError('"baseline" is required and must be true or false.');
+			}
+			const baseline = args.baseline;
+			return callEngine(() => ctx.client.setRunBaseline(runId, baseline, signal));
+		},
+	},
+	{
+		name: "delete_run",
+		category: "write",
+		invalidates: ["run"],
+		description:
+			"Delete a run and everything recorded against it - its report, metrics, captured samples and step traces. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with what the run was, otherwise call once for a preview and again with `confirmed: true`. There is no undo. A run still executing is stopped first and deleted once its worker has settled; if it does not settle in time nothing is deleted and the call says to retry.",
+		annotations: {
+			title: "Delete run",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID to delete."),
+			confirmed: confirmedInput("actually delete the run"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const runId = requireStr(args, "runId");
+			// Read it first so the person answering the prompt sees which run is
+			// about to go, not an id - the same reason delete_request does.
+			let stored: Record<string, unknown>;
+			try {
+				const value = await ctx.client.getRun(runId, signal);
+				if (!isRecord(value)) return errorResult(`No run with id "${runId}".`);
+				stored = value;
+			} catch (err) {
+				if (err instanceof EngineRequestError && err.status === 404) {
+					return errorResult(`No run with id "${runId}".`);
+				}
+				return engineErrorResult(err);
+			}
+			const subject = describeRun(runId, stored);
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete ${subject}?\n\nIts report, metrics and captured samples go with it. This cannot be undone.`,
+				acceptTitle: "Delete the run",
+				acceptDescription: "Confirm to delete this run and everything recorded against it.",
+				declined: "Run not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`This would delete ${subject}, along with its report, metrics and captured samples. This cannot be undone.\n\n` +
+					"This is a preview. To delete it, call delete_run again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			try {
+				return jsonResult(await ctx.client.deleteRun(runId, signal));
+			} catch (err) {
+				// The engine refuses rather than half-deletes a run whose worker is
+				// still writing (409). That is a "try again in a moment", not a
+				// failure of the request - say which one it is.
+				if (err instanceof EngineRequestError && err.status === 409) {
+					return errorResult(
+						`Run ${runId} is still stopping and was NOT deleted. It has been asked to stop - call delete_run again once it reports a terminal status (check with list_runs).`
+					);
+				}
+				return engineErrorResult(err);
+			}
+		},
 	},
 	{
 		name: "get_live_metrics",

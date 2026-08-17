@@ -90,6 +90,45 @@ const CONFIG_PROBE_TIMEOUT_MS = 2_000;
 export type MetricsTick = Record<string, unknown>;
 
 /**
+ * Page size `GET /runs` uses when a caller states none. The engine's own default
+ * is 50; 100 is what this client has always asked for and what the `vayu://runs`
+ * resource documents, so it stays the default rather than becoming a number that
+ * changes underneath a caller that never passed one.
+ */
+export const DEFAULT_RUN_PAGE_LIMIT = 100;
+
+/**
+ * The engine's page cap, shared by `GET /runs` and `GET /runs/:id/samples`
+ * (`std::min<int64_t> (limit, 500)` in both). The engine clamps silently; the
+ * tools refuse instead, so an agent that asked for more is told rather than
+ * handed a short page it thinks is the whole answer.
+ */
+export const MAX_ENGINE_PAGE_LIMIT = 500;
+
+/**
+ * The filters `GET /runs` accepts, as the engine spells them.
+ *
+ * Order is fixed newest-first - the route takes no sort parameter - and the
+ * engine *ignores* an unparseable `type`, `status` or `baseline` rather than
+ * refusing it, which is why the tool over this validates them first.
+ */
+export interface RunListQuery {
+	limit?: number;
+	offset?: number;
+	/** "design" | "load" | "scenario" (`parse_run_type`). */
+	type?: string;
+	/** "pending" | "running" | "completed" | "failed" | "stopped" (`parse_run_status`). */
+	status?: string;
+	requestId?: string;
+	/** Matches a scenario run's stored `scenario.collectionId` only. */
+	collectionId?: string;
+	/** Case-insensitive substring over the stored config snapshot. */
+	q?: string;
+	/** true lists only pinned baselines, false only unpinned ones. */
+	baseline?: boolean;
+}
+
+/**
  * What one budgeted read of a streaming run's events produced (issue #575).
  *
  * `completed` and `capReached` are the two ways a read can stop short, and they
@@ -250,12 +289,26 @@ export class EngineClient {
 	}
 
 	/**
-	 * First page of run history (newest first), bounded so an agent never pulls
+	 * A page of run history (newest first), bounded so a caller never pulls
 	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
 	 * carry the compact `summary`, not the full config_snapshot.
+	 *
+	 * `limit` and `offset` are always sent, including for an empty query: a
+	 * request carrying *no* recognised parameter takes the route's legacy path,
+	 * which answers a bare array of full-snapshot rows instead of the envelope.
 	 */
-	listRuns(signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", "/runs?limit=100&offset=0", undefined, signal);
+	listRuns(query: RunListQuery = {}, signal?: AbortSignal): Promise<unknown> {
+		const params = new URLSearchParams({
+			limit: String(query.limit ?? DEFAULT_RUN_PAGE_LIMIT),
+			offset: String(query.offset ?? 0),
+		});
+		if (query.type !== undefined) params.set("type", query.type);
+		if (query.status !== undefined) params.set("status", query.status);
+		if (query.requestId !== undefined) params.set("requestId", query.requestId);
+		if (query.collectionId !== undefined) params.set("collectionId", query.collectionId);
+		if (query.q !== undefined) params.set("q", query.q);
+		if (query.baseline !== undefined) params.set("baseline", String(query.baseline));
+		return this.request("GET", `/runs?${params.toString()}`, undefined, signal);
 	}
 
 	/**
@@ -273,16 +326,69 @@ export class EngineClient {
 	 * page is bounded to it rather than to the 100 `listRuns` allows.
 	 */
 	listBaselineRuns(requestId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request(
-			"GET",
-			`/runs?baseline=true&limit=1&offset=0&requestId=${encodeURIComponent(requestId)}`,
-			undefined,
-			signal
-		);
+		return this.listRuns({ baseline: true, limit: 1, requestId }, signal);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
+	}
+
+	/**
+	 * One page of a run's captured response samples (`GET /runs/:id/samples`), in
+	 * the same `{data, pagination}` envelope {@link listRuns} returns. A run that
+	 * captured nothing is an empty page; a run that does not exist is a 404.
+	 */
+	getRunSamples(
+		runId: string,
+		limit: number,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.pagedRunRead(runId, "samples", limit, offset, signal);
+	}
+
+	/**
+	 * One page of a run's per-tick time series (`GET /runs/:id/metrics`) - the
+	 * series the dashboard charts are drawn from.
+	 */
+	getRunTimeSeries(
+		runId: string,
+		limit: number,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.pagedRunRead(runId, "metrics", limit, offset, signal);
+	}
+
+	/**
+	 * One page of the server vitals scraped during a run
+	 * (`GET /runs/:id/monitor`). A run that configured no monitor is an empty
+	 * page, not a 404 - it exists and simply scraped nothing.
+	 */
+	getRunMonitorSeries(
+		runId: string,
+		limit: number,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.pagedRunRead(runId, "monitor", limit, offset, signal);
+	}
+
+	/** The three per-run paginated reads differ only in their path segment. */
+	private pagedRunRead(
+		runId: string,
+		segment: string,
+		limit: number,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+		return this.request(
+			"GET",
+			`/runs/${encodeURIComponent(runId)}/${segment}?${params.toString()}`,
+			undefined,
+			signal
+		);
 	}
 
 	// --- Engine configuration ------------------------------------------------
@@ -354,6 +460,32 @@ export class EngineClient {
 	/** Delete a saved request: `DELETE /requests/:id`. */
 	deleteRequest(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("DELETE", `/requests/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
+	/**
+	 * Delete a run and everything recorded against it: `DELETE /runs/:id`.
+	 *
+	 * A run still executing is stopped engine-side first and deleted only once
+	 * its worker has settled; a worker that does not settle in time answers 409
+	 * with the run **intact**, which the caller must report as "not deleted,
+	 * retry" rather than as a generic failure.
+	 */
+	deleteRun(runId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/runs/${encodeURIComponent(runId)}`, undefined, signal);
+	}
+
+	/**
+	 * Pin or unpin a run as its saved request's baseline:
+	 * `PUT /runs/:id/baseline`. Answers the updated row in the shape `GET /runs`
+	 * lists. The pin is also what retention will not expire.
+	 */
+	setRunBaseline(runId: string, baseline: boolean, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"PUT",
+			`/runs/${encodeURIComponent(runId)}/baseline`,
+			{ baseline },
+			signal
+		);
 	}
 
 	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
