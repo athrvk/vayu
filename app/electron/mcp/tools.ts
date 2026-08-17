@@ -176,6 +176,175 @@ function jsonResult(value: unknown): ToolResult {
 	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 
+// --- Inline body bounds ------------------------------------------------------
+
+/**
+ * How much of a body a tool result carries inline (issue #767).
+ *
+ * A tool-result budget, not an engine one. Neither engine cap fits: the config
+ * entry that bounds a single response, `maxResponseBodyBytes`, documents itself
+ * as load-only ("Design-mode sends are not affected"), and `maxTraceBodyBytes`
+ * (5MB) is a storage bound sized for a human opening one full trace in the UI.
+ * Between them a design send returns every byte it read - an ordinary page
+ * fetch came back as 1.3M characters and exceeded the tool-result token limit
+ * outright, with nothing in between the engine's answer and the agent.
+ *
+ * 32KB is not a new number: it is `maxSampleBodyBytes`
+ * (`DEFAULT_MAX_SAMPLE_BODY_BYTES`, engine `constants.hpp`), this codebase's own
+ * answer to "how much of a body does an automated reader get" for load-run
+ * captures. Fixed rather than read from live config: `run_request` has just
+ * sent a real request and should not pay a second round trip for a number that
+ * only has to be reasonable, and a constant is what the tests can pin.
+ */
+export const MAX_INLINE_BODY_BYTES = 32_768;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Cut a string to at most `maxBytes` UTF-8 bytes, reporting its true size.
+ *
+ * The cut steps back off a continuation byte rather than landing mid-character:
+ * a split code point comes back as a replacement glyph, which an agent reads as
+ * content the response never carried.
+ */
+function boundText(
+	text: string,
+	maxBytes = MAX_INLINE_BODY_BYTES
+): { text: string; truncated: boolean; bytes: number } {
+	const buf = Buffer.from(text, "utf8");
+	if (buf.byteLength <= maxBytes) return { text, truncated: false, bytes: buf.byteLength };
+	let end = maxBytes;
+	while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+	return { text: buf.subarray(0, end).toString("utf8"), truncated: true, bytes: buf.byteLength };
+}
+
+const HEADER_BODY_SEPARATOR = "\r\n\r\n";
+
+/**
+ * Bound a node's `rawRequest` wire message, cutting the body half only.
+ *
+ * The engine's rule for this field, kept rather than re-decided
+ * (`cap_node_raw_request`, `engine/src/utils/json.cpp`): the header block is the
+ * reason the field exists - it carries the `Cookie` line libcurl attached, which
+ * appears nowhere else - so a cut that ate the headers would take exactly what
+ * the reader opened it for. A message with no blank line has no body to cut.
+ *
+ * Unlike the engine, this records the cut explicitly. The engine can lean on the
+ * `bodyTruncated` pair beside it because both are capped at one limit at write
+ * time; a tool result has to say so on its own, since the field an agent reads
+ * here sits beside the *response*'s size fields, not the request body's.
+ *
+ * Returns the node unchanged (same reference) when nothing was cut, so callers
+ * can tell "bounded" from "untouched" without re-comparing content.
+ */
+function boundWireMessage(node: Record<string, unknown>): Record<string, unknown> {
+	const raw = node.rawRequest;
+	if (typeof raw !== "string") return node;
+	const separator = raw.indexOf(HEADER_BODY_SEPARATOR);
+	if (separator === -1) return node;
+	const bodyStart = separator + HEADER_BODY_SEPARATOR.length;
+	const bounded = boundText(raw.slice(bodyStart));
+	if (!bounded.truncated) return node;
+	return {
+		...node,
+		rawRequest: raw.slice(0, bodyStart) + bounded.text,
+		rawRequestTruncated: true,
+		rawRequestBytes: Buffer.byteLength(raw, "utf8"),
+	};
+}
+
+/**
+ * Bound one `POST /execute` response - what `run_request` hands back.
+ *
+ * `bodySize` is the engine's own byte count for this body and is exactly what a
+ * truncation flag refers to, so it is used rather than recomputed; it is only
+ * filled in when the engine sent no usable one.
+ */
+function boundExecuteResponse(value: unknown): unknown {
+	if (!isRecord(value)) return value;
+	let out = value;
+	const bodyRaw = value.bodyRaw;
+	if (typeof bodyRaw === "string") {
+		const bounded = boundText(bodyRaw);
+		if (bounded.truncated) {
+			out = {
+				...out,
+				bodyRaw: bounded.text,
+				// The parsed body holds the same payload verbatim, so leaving it
+				// would hand back in full the very bytes `bodyRaw` now says were
+				// cut - the JSON-doubling case. Null rather than deleted:
+				// `serialize(Response)` always emits this key, and null is already
+				// its "nothing parsed here" value, so a truncated response keeps
+				// the shape every reader of this tool already parses.
+				body: null,
+				bodyTruncated: true,
+				...(typeof value.bodySize === "number" ? {} : { bodySize: bounded.bytes }),
+			};
+		}
+	}
+	return boundWireMessage(out);
+}
+
+/**
+ * Bound one stored-trace node (`trace.request` or `trace.response`).
+ *
+ * Mirrors the engine's own disclosure pair for a cut body
+ * (`cap_node_body`): `bodyTruncated` plus `bodyBytes` holding the *original*
+ * size, so an agent that has read one convention recognises the other.
+ */
+function boundTraceNode(node: unknown): unknown {
+	if (!isRecord(node)) return node;
+	let out = node;
+	const body = node.body;
+	if (typeof body === "string") {
+		const bounded = boundText(body);
+		if (bounded.truncated) {
+			out = {
+				...out,
+				body: bounded.text,
+				bodyTruncated: true,
+				// Only when the engine recorded none. A trace it already cut at
+				// `maxTraceBodyBytes` carries the true original size here, and
+				// overwriting that with the size of the 5MB slice we re-cut would
+				// replace a real number with a smaller one that looks just as real.
+				...(typeof node.bodyBytes === "number" ? {} : { bodyBytes: bounded.bytes }),
+			};
+		}
+	}
+	return boundWireMessage(out);
+}
+
+/**
+ * Bound the stored traces in a run report - what `get_run_report` hands back.
+ *
+ * Design and scenario rows only: a load run's results never go through
+ * `build_result_trace` (it is called from `record_design_result` and the
+ * scenario runner, never the load hot path), so they carry no `trace` node and
+ * the walk leaves them untouched. Rebuilt rather than mutated so a report with
+ * nothing over the bound comes back as the object the engine returned.
+ */
+function boundRunReport(value: unknown): unknown {
+	if (!isRecord(value) || !Array.isArray(value.results)) return value;
+	let changed = false;
+	const results = value.results.map((row) => {
+		if (!isRecord(row) || !isRecord(row.trace)) return row;
+		const trace = row.trace;
+		const next: Record<string, unknown> = { ...trace };
+		let rowChanged = false;
+		for (const key of ["request", "response"] as const) {
+			if (!(key in trace)) continue;
+			next[key] = boundTraceNode(trace[key]);
+			if (next[key] !== trace[key]) rowChanged = true;
+		}
+		if (!rowChanged) return row;
+		changed = true;
+		return { ...row, trace: next };
+	});
+	return changed ? { ...value, results } : value;
+}
+
 /** Result that carries both a text rendering and structured content. */
 function structuredResult(value: Record<string, unknown>): ToolResult {
 	return {
@@ -235,10 +404,19 @@ function engineErrorResult(err: unknown): ToolResult {
 	return errorResult(`Unexpected error: ${msg}`);
 }
 
-/** Wrap an engine call so transport errors surface as tool errors, not crashes. */
-async function callEngine(fn: () => Promise<unknown>): Promise<ToolResult> {
+/**
+ * Wrap an engine call so transport errors surface as tool errors, not crashes.
+ *
+ * `shape` runs on the engine's answer before it becomes a result - the one seam
+ * where a passthrough tool can bound what it hands an agent (issue #767).
+ */
+async function callEngine(
+	fn: () => Promise<unknown>,
+	shape?: (value: unknown) => unknown
+): Promise<ToolResult> {
 	try {
-		return jsonResult(await fn());
+		const answer = await fn();
+		return jsonResult(shape ? shape(answer) : answer);
 	} catch (err) {
 		return engineErrorResult(err);
 	}
@@ -1352,7 +1530,8 @@ export const TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance. " +
-			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract.",
+			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
+			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history.`,
 		annotations: {
 			title: "Get run report",
 			readOnlyHint: true,
@@ -1361,7 +1540,10 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.getRunReport(requireStr(args, "runId"), signal)),
+			callEngine(
+				() => ctx.client.getRunReport(requireStr(args, "runId"), signal),
+				boundRunReport
+			),
 	},
 	{
 		name: "get_engine_config",
@@ -1383,7 +1565,8 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) " +
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`.`,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,
@@ -1479,7 +1662,10 @@ export const TOOLS: McpTool[] = [
 			const streaming = args.stream === true;
 			payload.stream = streaming;
 			if (!streaming) {
-				return callEngine(() => ctx.client.executeRequest(payload, signal));
+				return callEngine(
+					() => ctx.client.executeRequest(payload, signal),
+					boundExecuteResponse
+				);
 			}
 			return runStreamingRequest(args, payload, ctx, signal);
 		},
