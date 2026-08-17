@@ -180,4 +180,34 @@ describe("title-row drag regions", () => {
 			).toBe("no-drag");
 		}
 	});
+
+	/**
+	 * The test above passes against the defect it is paired with: it reads
+	 * `effectiveRegion`, which a *cluster* opting out satisfies, so a wrapper
+	 * marked `no-drag` in its entirety looks identical to a control that opted
+	 * out on itself. The difference is everything the wrapper covers and the
+	 * control does not - here the whole third `1fr` column, i.e. the row's slack
+	 * right of the search bar, which is what the window is dragged by.
+	 *
+	 * So this asserts the wrapper's own inherited value instead, and the button's
+	 * own declaration rather than an inherited one.
+	 */
+	it("keeps the slack around the env switcher draggable, opting out only the control", async () => {
+		// Every platform: the right column holds the switcher alone on Windows and
+		// macOS and the HTML window buttons too on Linux, and the slack has to
+		// drag on all three.
+		for (const platform of ["win32", "darwin", "linux"]) {
+			await renderFor(platform);
+			const envButton = screen.getByRole("button", { name: /switch environment/i });
+			// `DropdownMenuTrigger asChild` renders the button in place, so its DOM
+			// parent is the row's right-hand wrapper, not a Radix-inserted node.
+			const wrapper = envButton.parentElement;
+			expect(wrapper, `no right-hand wrapper on ${platform}`).not.toBeNull();
+			expect(effectiveRegion(wrapper), `right column is dead on ${platform}`).toBe("drag");
+			expect(appRegion(envButton), `env switcher not clickable on ${platform}`).toBe(
+				"no-drag"
+			);
+			cleanup();
+		}
+	});
 });
