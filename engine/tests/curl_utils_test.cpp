@@ -186,6 +186,113 @@ TEST (ValidateTransferable, SendableRequestsPass) {
 }
 
 // ============================================================================
+// validate_transferable - header text no header line can hold (#738)
+// ============================================================================
+//
+// The gate is where the rule holds for *every* origin: a composed variable, a
+// script's assignment to `pm.request.headers`, an auth credential, an import, a
+// raw POST /execute payload. `build_request_header_list` sees the same headers
+// one step later but can only drop, and a silent drop is the quiet wrong
+// request this refusal exists to prevent.
+//
+// Mutation-check for the four below: drop the `unsendable_header_text` call
+// from `validate_transferable` and the three refusals fail while
+// `OrdinaryHeaderTextStillPasses` keeps passing.
+
+TEST (ValidateTransferable, AHeaderCarryingALineBreakIsRefused) {
+    vayu::Request request;
+    request.url = "http://example.com/";
+
+    for (const char* forged :
+    { "ok\r\nX-Admin: true", "ok\nX-Admin: true", "ok\rX-Admin: true" }) {
+        request.headers = { { "X-Note", forged } };
+        auto error      = validate_transferable (request);
+        ASSERT_TRUE (error.has_value ()) << forged;
+        EXPECT_NE (error->message.find ("X-Note"), std::string::npos)
+        << "the refusal must name the header: " << error->message;
+        EXPECT_NE (error->message.find ("CR or LF"), std::string::npos) << error->message;
+    }
+
+    // A forged *name* is the same forgery, and is named as a name rather than
+    // quoted - quoting it would break the message the same way.
+    request.headers = { { "X-A\r\nX-Admin: true", "v" } };
+    auto error      = validate_transferable (request);
+    ASSERT_TRUE (error.has_value ());
+    EXPECT_NE (error->message.find ("header name"), std::string::npos) << error->message;
+    EXPECT_EQ (error->message.find ('\n'), std::string::npos)
+    << "the message must not carry the injected line break: " << error->message;
+}
+
+// The engine spells a header `key + ": " + value` and hands it to
+// `curl_slist_append`, which reads to the first NUL - so the rest of the line
+// went out missing rather than refused (#738 item 3).
+TEST (ValidateTransferable, AHeaderCarryingANulIsRefused) {
+    vayu::Request request;
+    request.url     = "http://example.com/";
+    request.headers = { { "X-Note", std::string ("ok\0dropped", 10) } };
+
+    auto error = validate_transferable (request);
+    ASSERT_TRUE (error.has_value ());
+    EXPECT_NE (error->message.find ("NUL"), std::string::npos) << error->message;
+}
+
+// A multipart part's name, declared filename and Content-Type are written into
+// that part's own header block (`Content-Disposition`, `Content-Type`), so the
+// same forgery lands one layer down. The part's *value* is content, where a
+// line break is ordinary text - PR #737 pinned that for the data-cell path and
+// this pins it here.
+TEST (ValidateTransferable, MultipartPartHeadersAreCheckedButPartContentIsNot) {
+    vayu::Request request;
+    request.method    = vayu::HttpMethod::POST;
+    request.url       = "http://example.com/";
+    request.body.mode = vayu::BodyMode::FormData;
+
+    const std::string forged = "a\r\nX-Admin: true";
+    vayu::FormField field ("field", "value");
+
+    field.key           = forged;
+    request.body.fields = { field };
+    EXPECT_TRUE (validate_transferable (request).has_value ()) << "part name";
+
+    field.key           = "field";
+    field.file_name     = forged;
+    request.body.fields = { field };
+    EXPECT_TRUE (validate_transferable (request).has_value ())
+    << "declared filename";
+
+    field.file_name     = "";
+    field.content_type  = forged;
+    request.body.fields = { field };
+    EXPECT_TRUE (validate_transferable (request).has_value ())
+    << "part content type";
+
+    // The value carries the same bytes as ordinary part content, and a
+    // disabled part is not sent at all.
+    field.content_type  = "";
+    field.value         = forged;
+    request.body.fields = { field };
+    EXPECT_FALSE (validate_transferable (request).has_value ()) << "part value";
+
+    vayu::FormField off (forged, "v", false);
+    request.body.fields = { off };
+    EXPECT_FALSE (validate_transferable (request).has_value ())
+    << "disabled part";
+}
+
+// The rule is about line terminators, not about whitespace or punctuation: a
+// header whose value has spaces, tabs and colons is ordinary header text and
+// must still pass, or the gate would refuse most real requests.
+TEST (ValidateTransferable, OrdinaryHeaderTextStillPasses) {
+    vayu::Request request;
+    request.url     = "http://example.com/";
+    request.headers = { { "Authorization", "Bearer abc.def-ghi" },
+        { "Accept", "text/html, application/xml;q=0.9" },
+        { "X-Tabbed", "a\tb" }, { "X-Empty", "" } };
+
+    EXPECT_FALSE (validate_transferable (request).has_value ());
+}
+
+// ============================================================================
 // apply_phase_timings - no stored or displayed phase may be negative
 // ============================================================================
 

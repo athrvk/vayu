@@ -273,6 +273,7 @@ add_library(vayu_core STATIC
     src/http/sse_stream.cpp
     src/http/cookie_jar.cpp
     src/http/form_body.cpp
+    src/http/header_text.cpp
     src/http/graphql_body.cpp
     src/http/jsonrpc_body.cpp
     src/utils/json.cpp

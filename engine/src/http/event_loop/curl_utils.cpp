@@ -24,6 +24,7 @@
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -169,6 +170,20 @@ std::optional<Error> validate_transferable (const Request& request) {
     // nothing, and an omitted part is the silence this feature exists to end.
     // Costs one open per transfer, and only for a body that has a file part.
     if (auto problem = vayu::http::unsendable_file_part (request.body)) {
+        Error error;
+        error.code    = ErrorCode::InternalError;
+        error.message = *problem;
+        return error;
+    }
+    // Header text that would end or truncate the line it is written into. Here
+    // rather than in `build_request_header_list` because that function has no
+    // error channel - `append` can only drop, and a silent drop is the quiet
+    // wrong request this refusal exists to prevent. This gate runs before any
+    // driver configures a handle, so it covers every origin at once: a composed
+    // variable, a script's assignment to `pm.request.headers`, an auth
+    // credential, an import, a raw `POST /execute` payload. See header_text.hpp
+    // for why the rule is a refusal and where its other layers live.
+    if (auto problem = vayu::http::unsendable_header_text (request)) {
         Error error;
         error.code    = ErrorCode::InternalError;
         error.message = *problem;

@@ -173,6 +173,13 @@ is percent-encoded, so a line break in either is harmless and binds as written.
 A JSON or JSONL file is where this turns up: those keep the cell as the string
 it is, while the CSV grammar has no way to carry a raw newline into one.
 
+The limit is the header's, not the data file's, so it holds for whatever put the
+bytes there: an environment variable substituted into a header is refused when
+the request is composed, naming the variable
+([variable resolution](./variable-resolution.md)), and anything else - a script,
+an import, a request sent by another client - is refused just before it would go
+on the wire, naming the header.
+
 ## How many iterations, and which row
 
 **One iteration per row** by default: leave Iterations empty and the row count

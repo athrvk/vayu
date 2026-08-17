@@ -75,10 +75,16 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Both clients call this before configuring a handle. Today the only such
- * request is HEAD with a body: `CURLOPT_NOBODY` resets curl's method back to
- * HEAD and drops the body, so honouring both is impossible and the caller is
- * told rather than having half its request silently discarded.
+ * Both clients call this before configuring a handle. Three such requests:
+ * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
+ * drops the body, so honouring both is impossible), a multipart body naming a
+ * file this process cannot read, and header text carrying a byte no header line
+ * can hold - see `vayu::http::unsendable_header_text`. In each case the caller
+ * is told rather than having half its request silently discarded.
+ *
+ * Being the one gate every driver passes through *before* configuring anything
+ * is what makes it the home for a rule that has to hold for every origin -
+ * `build_request_header_list` sees the same headers, but can only drop.
  *
  * @return The error to complete the request with, or nullopt when it is sendable.
  */
@@ -155,6 +161,10 @@ Response error_response (const Error& error);
  * request names none). All three drivers - the single-request client, the load
  * event loop and the SSE stream consumer - call this, so none of them can
  * disagree about what goes out.
+ *
+ * It has no error channel, deliberately: a header it cannot append it drops.
+ * Text that must be *refused* rather than dropped is caught one step earlier,
+ * by `validate_transferable`, which every one of those drivers already calls.
  *
  * @param sent When non-null, cleared and filled with exactly the headers
  *        appended to the returned list. That is `Response::request_headers`,

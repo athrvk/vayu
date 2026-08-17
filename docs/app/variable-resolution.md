@@ -244,6 +244,35 @@ disappears from the outgoing request. A `{{$name}}` is the exception; see
 below. Resolution is a **single pass**: a value that itself contains
 `{{other}}` stays literal, and there is no way to escape a literal `{{`.
 
+### One value composition refuses: a header a variable would forge (#738)
+
+Substitution is textual everywhere, which is exactly right for a URL, a body and
+a form field - and wrong for one field, because a header line ends at CRLF and
+has no escape for it. A variable holding `ok\r\nX-Admin: true` written into
+`X-Note: {{note}}` would not put that text in `X-Note`: it would end the line
+and make `X-Admin: true` a header nobody wrote.
+
+So a header is the one place `POST /compose` rejects a payload over a *value*
+rather than over its shape: a `400` with code `unsendable_header`, whose message
+names the variable - composition is the last layer that still knows which one
+carried the byte. A NUL is refused with it, because the engine hands the header
+line to `curl_slist_append`, which reads to the first NUL and would send the
+rest of it missing.
+
+Refusal rather than repair, for the same reason a `-->` in an XML comment is
+refused: there is no encoding for a line break in a header, so stripping the
+bytes would send a header holding something the author did not write. The rule
+is scoped to the field, not to the value - the same variable resolves unchanged
+into a URL, a body and a form field's value.
+
+Composition is one of three layers holding the same rule, one definition
+(`engine/include/vayu/http/header_text.hpp`): a bound `{{data.column}}` is
+refused earlier, at bind time, naming the column and the row
+([data-driven runs](./data-driven-runs.md)); everything else - a script
+assigning to `pm.request.headers`, an auth credential, an import, a payload
+posted straight to `POST /execute` - is refused before the transfer starts,
+naming the header instead of a variable.
+
 ---
 
 ## Dynamic variables
