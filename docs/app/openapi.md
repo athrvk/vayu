@@ -656,11 +656,15 @@ validation** block on a run started this way says the contract was a gate. A
 failure count means a different thing with the gate than without, and that line
 is where a reader coming back to an old run finds out which they are looking at.
 
-From MCP, `run_collection_smoke` is the same choice with the opposite default:
-it has folded a failed schema verdict into each row's pass/fail since it grew
-verdicts at all, so pass `failOnSchemaError: false` to keep the verdict on the
-row without letting it decide. Either way the row carries what the document
-said.
+From MCP, `run_collection` takes the same switch on the same terms (issue #766):
+`failOnSchemaError: true` runs the collection in design mode with the contract
+as a gate, and the key is sent only when asked for, so a run started without it
+is stored exactly as one started before the flag existed. `start_load_run`
+refuses it for the reason the dialog hides the switch in load mode.
+`run_collection_smoke` is the same choice with the opposite default: it has
+folded a failed schema verdict into each row's pass/fail since it grew verdicts
+at all, so pass `failOnSchemaError: false` to keep the verdict on the row
+without letting it decide. Either way the row carries what the document said.
 
 | | Step outcome | Schema verdict |
 |---|---|---|
