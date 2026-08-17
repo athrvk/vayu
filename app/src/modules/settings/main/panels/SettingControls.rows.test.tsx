@@ -79,6 +79,24 @@ describe("SelectSettingRow", () => {
 		expect(onChange).toHaveBeenCalledWith("http2");
 	});
 
+	it("keeps naming the trigger when the label is hidden", () => {
+		// `labelHidden` is for a host that already prints the setting's name (the
+		// engine cards' CardTitle). The label has to survive in the DOM anyway -
+		// it is what names the trigger - so it goes `sr-only` rather than away.
+		render(
+			<SelectSettingRow
+				label="Data Safety Mode"
+				labelHidden
+				value="auto"
+				onChange={vi.fn()}
+				options={OPTIONS}
+			/>
+		);
+
+		expect(screen.getByRole("combobox", { name: "Data Safety Mode" })).toBeTruthy();
+		expect(screen.getByText("Data Safety Mode").className).toContain("sr-only");
+	});
+
 	it("points the trigger at its description", () => {
 		render(
 			<SelectSettingRow
