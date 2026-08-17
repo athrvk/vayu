@@ -235,6 +235,11 @@ function EnvSwitcher() {
 								"bg-primary/10 text-primary-text border-primary/30 hover:bg-primary/20"
 							: "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
 					)}
+					// Per-control opt-out, the pattern AppIcon and CommandSearchBar's
+					// trigger follow. `DropdownMenuTrigger asChild` renders this button
+					// in place with no wrapper node, so the declaration lands on the
+					// real element.
+					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 					aria-label="Switch environment"
 				>
 					<Cloud className="w-3 h-3 shrink-0" />
@@ -299,15 +304,22 @@ export default function TitleBar() {
 			    remaining area stays draggable. */}
 			<CommandSearchBar className="w-[min(44vw,28rem)]" />
 
-			{/* Right controls */}
+			{/* Right controls.
+			    No `no-drag` here: this wrapper is the whole third 1fr column, so
+			    opting it out would take the row's slack right of the search bar with
+			    it - the largest drag surface on this side. Each control opts out on
+			    itself instead (EnvSwitcher's trigger, WindowControls' own root), the
+			    way AppIcon and CommandSearchBar already do. */}
 			<div
 				className="flex min-w-0 items-center justify-end gap-2 px-3 h-full"
 				style={
 					{
-						WebkitAppRegion: "no-drag",
 						// Windows paints native min/max/close as an overlay on top of the
 						// web content in the top-right corner. Reserve its width (exposed by
 						// the Window Controls Overlay API) so the env switcher isn't covered.
+						// The strip stays a drag region: the overlay rectangle is hit-tested
+						// by the OS before the DOM sees it, so what the page declares under
+						// it does not apply there.
 						...(isWindows && {
 							paddingRight: "calc(100vw - env(titlebar-area-width, 100vw) + 0.5rem)",
 						}),
