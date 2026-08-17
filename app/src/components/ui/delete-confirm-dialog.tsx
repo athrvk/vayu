@@ -91,7 +91,7 @@ export function DeleteConfirmDialog({
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogContent
-				className="sm:max-w-md"
+				className="sm:max-w-lg"
 				onOpenAutoFocus={(e) => {
 					e.preventDefault();
 					cancelRef.current?.focus();

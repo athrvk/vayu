@@ -1418,6 +1418,55 @@ shrink, after which there is no overflow to scroll.
 An element that is itself the scroller is exempt on that axis: `overflow: hidden`
 (which `truncate` sets) already gives a flex item an automatic minimum size of 0.
 
+**The exemption reaches exactly one box, though - the item itself.** A scroller
+nested a few blocks below a flex or grid item does not lend it that minimum, and
+`overflow-auto` bounds the box it is on without stopping the min-content width
+that box contributes upward. So "I made it scroll" is not the same claim as "it
+cannot widen its host", and the second is the one a fixed-width surface needs.
+
+### A grid track has the same default, and a panel cannot follow it
+
+`grid` gives an implicit track a sizing function of `auto`, whose minimum is its
+items' min-content - the same refusal to shrink, one box further out. On a
+surface whose width is capped this is worse than on the canvas, because the
+**track can outgrow the box that paints the background**: the panel stays at its
+`max-w` and every row inside it lays out at the track's width, so controls that
+have nothing to do with the wide content are the ones the user sees hanging over
+the backdrop. Issue #701 found this in the Run Collection dialog, where a
+seven-column data-file preview put the footer buttons 428px outside the painted
+panel.
+
+`DialogContent` therefore declares `grid-cols-1` - `repeat(1, minmax(0, 1fr))` -
+and that is the fix for any width-capped grid surface: the `0` lets the track be
+narrower than its content's min-content, which is what gives the scrollers
+inside it room to scroll. Prefer it on the surface over `min-w-0` sprinkled on
+the items - the items are written by every caller, and the cap is the surface's
+own promise.
+
+Write it as the stock utility, not as the arbitrary value that says it more
+directly. **Tailwind emits no rule for `grid-cols-[minmax(0,1fr)]`** (verified
+against the built CSS), so that spelling is a class that reads correctly, passes
+a `className` assertion, and styles nothing.
+
+### Dialog widths: two sizes
+
+| Size | Class | For |
+| ---- | ----- | --- |
+| Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
+| Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
+
+These had drifted to five values across eleven call sites, including two one-off
+pixel widths, so the same kind of dialog came out a different size depending on
+who wrote it. `dialog-width-scale.test.tsx` holds the set closed; a dialog that
+genuinely needs a third size should widen the scale here and in `dialog.tsx`
+rather than open a sixth one-off.
+
+Prefer a **cap** (`max-w-*`) over a fixed `w-[…]`: a fixed width is one the panel
+keeps on a viewport narrower than it, where `w-full` under a cap gives the same
+stable band and still fits. And widening is never the fix for content escaping
+the panel - a wider panel with an `auto` track spills exactly the same way, just
+further along. Clamp the track; widen only for the reading.
+
 ---
 
 ## Layout Structure

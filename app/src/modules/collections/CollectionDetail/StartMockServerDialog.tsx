@@ -84,7 +84,7 @@ export function StartMockServerDialog({
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Mock server options</DialogTitle>
 					<DialogDescription>

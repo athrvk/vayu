@@ -117,7 +117,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[560px]">
+			<DialogContent className="sm:max-w-xl">
 				<DialogHeader>
 					<DialogTitle>Export as OpenAPI</DialogTitle>
 					<DialogDescription>

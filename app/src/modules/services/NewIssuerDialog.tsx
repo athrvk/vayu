@@ -139,7 +139,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>New OAuth issuer</DialogTitle>
 					<DialogDescription>

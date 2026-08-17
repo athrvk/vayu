@@ -39,7 +39,7 @@ export function CollectionPicker({
 }: CollectionPickerProps) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Add request to</DialogTitle>
 					<DialogDescription>Pick the collection for the new request.</DialogDescription>

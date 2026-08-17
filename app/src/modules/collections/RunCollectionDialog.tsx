@@ -344,7 +344,7 @@ export default function RunCollectionDialog({
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-xl">
 				<DialogHeader>
 					<DialogTitle>Run {collection.name}</DialogTitle>
 					<DialogDescription>
