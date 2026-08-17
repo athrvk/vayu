@@ -158,6 +158,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
 | `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run |
 | `create_collection`    | write    | `POST /collections`                          | write toggle               |
 | `update_collection`    | write    | `PUT /collections/:id` (merge-patch)         | write toggle               |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
@@ -166,7 +167,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`               | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity` |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
 | `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
@@ -456,8 +457,10 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   allowlist gate reads the composed URL as always - a `{{data.*}}` in
   the *path* leaves the host knowable and is judged on that host, while a
   template in the authority is still "unknown host" and denied.
-  `run_collection_smoke` stays out of it: it has no scenario path at all, so
-  there is no row for it to bind.
+  `run_collection_smoke` stays out of it: it runs each request on its own, with
+  no sequence to iterate, so there is no row for it to bind. A whole *data set*
+  - many rows, one pass each - is the scenario tools' argument instead
+  (`run_collection` and `start_load_run`'s `scenario.data`, below).
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`
@@ -502,13 +505,55 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   has no such hook - so the composed `preRequestScripts` are stripped from the
   payload and the count of dropped scripts is reported in the tool's result
   rather than passing silently.
-- **Scenario runs are out of scope** - `start_load_run` loads a *single* target
-  (a URL, or one saved request). A scenario load run - a collection's ordered
-  sequence of requests, driven as one run - is started from the app's **Run
-  Collection** dialog only; no MCP tool starts one, and `collectionId` here
-  scopes variable resolution rather than naming a sequence to run. The tool's
-  own description says so, because a tool list that is silent about scenarios
-  reads as "scenarios do not exist" rather than "not from here".
+- **Scenario runs - a collection as the unit of work** (issue #754, reversing
+  #454's deferral). A collection's ordered sequence of requests can be run from
+  MCP in both of the engine's modes, over the one `POST /runs` route that takes
+  a `scenario` block:
+  - `run_collection` posts the block with **no** `mode`, which is what selects
+    the design-mode runner: steps execute one at a time, share the environment's
+    cookie jar, honour `pm.execution` flow control, run their stored
+    **pre-request** scripts, and repeat once per `data` row with
+    `{{data.column}}` bound and `pm.iterationData` set. It returns the run id
+    immediately - the run continues engine-side - along with the plan's step
+    count and the note that `get_run_report`'s `results` carries **at most 100**
+    step rows. Each of those rows carries that step's request and response
+    bodies inline, under `trace` (`build_result_trace`, the same node a
+    single design-mode send stores) - not behind `GET /runs/:id/samples`, which
+    is the load-run capture route - so a long plan against large responses
+    makes for a large report.
+  - `start_load_run` takes the same block as an optional `scenario` argument
+    and posts it **with** a mode, which hands the plan to the load executor:
+    `concurrency` is the number of virtual users, each walking the whole plan
+    with its own cookies. Only `constant_concurrency` (the default), `ramp_up`
+    and `iterations` can drive a sequence - `capacity` and `constant_rps` are
+    refused with the engine's own reasoning (a knee measured against which
+    step's p99? an arrival-rate executor Vayu does not implement), as is any
+    non-zero `targetRps`, which selects that path whatever the declared mode.
+  - The collection tree **is** the sequence: there is no step list to send, and
+    `recursive: true` walks sub-collections in the sidebar's order (each
+    subtree before that level's own requests, mirroring `collect_requests`).
+  - **Rows are inline** - the engine never opens a file - and its
+    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals are surfaced
+    verbatim rather than re-derived in the schema.
+  - `scenario.iterations` is offered on `run_collection` only. A load run reads
+    the **top-level** `iterations` (total passes across all virtual users); the
+    in-block count is the design runner's and the load executor never reads it,
+    so offering it there would be an argument written and never read.
+  - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
+    per-request skip: every step is composed by id and gated before the run is
+    created, and one step the allowlist does not cover refuses the whole run
+    with nothing sent, naming the step the way the engine names it
+    (`step 1 (request 'checkout', id 'r2')`). A step that will not compose
+    refuses it too - the engine resolves the same plan before creating the run
+    row and would refuse it for the same reason.
+  - Every argument that describes a *single* target (`url`, `requestId`,
+    `method`, `headers`, `body`, `auth`, `httpVersion`, `postRequestScript`,
+    `collectionId`) is **refused by name** beside a `scenario`, as are
+    `maxInFlight` (in-flight is bounded by the virtual-user count),
+    `sloMs`/`stepDuration` (capacity's own fields) and `stream` and its two caps
+    (run-level stream bounds are attached to a single-target run's request
+    only). Each would otherwise be an argument an agent believes shaped the run
+    that nothing on this path reads.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved
@@ -534,8 +579,11 @@ MCP a jar of its own would make the same saved request behave differently for
 an agent than in the UI - a surprise in the harder direction to debug. The
 state stays visible and resettable: Settings → General → Cookies lists every
 jar and clears it, and `GET /cookies` reports the same. An agent that must not
-inherit a session should run in an environment of its own. `start_load_run` is
-unaffected - load runs never touch the jar.
+inherit a session should run in an environment of its own. `run_collection`
+shares the jar too - the design-mode runner is the one executor handed it, which
+is what lets a login step authenticate the steps after it. `start_load_run` is
+unaffected either way: a single-target load run never touches the jar, and a
+scenario load run gives each virtual user cookies of its own.
 
 > **History.** Until issue #226 MCP carried `resolve.ts` - a full main-process
 > port of the renderer's composition pipeline - because the engine composed

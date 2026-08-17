@@ -29,10 +29,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   `enableDnsRebindingProtection` + `allowedHosts`), so a malicious web page
   cannot drive the endpoint through a forged `Host`.
 - **Target allowlist (empty by default).** The traffic-sending tools
-  (`run_request`, `run_collection_smoke`, `start_load_run`) refuse any host that
-  is not explicitly allowlisted. The check runs against the **resolved** host
-  (after `{{variable}}` substitution), so a variable-built URL cannot slip past
-  it. A fresh install cannot be used to send traffic anywhere until the user opts
+  (`run_request`, `run_collection_smoke`, `run_collection`, `start_load_run`)
+  refuse any host that is not explicitly allowlisted. The check runs against the
+  **resolved** host (after `{{variable}}` substitution), so a variable-built URL
+  cannot slip past it. A fresh install cannot be used to send traffic anywhere until the user opts
   in per host.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
@@ -46,8 +46,8 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 - **Data writes off by default.** The data-mutating tools (`create_request`,
   `update_environment`, `update_engine_config`) are refused unless the user
   enables write access in Settings. Traffic-sending tools (`run_request`,
-  `run_collection_smoke`) and load runs are not affected by this toggle - they
-  are governed by the allowlist and caps.
+  `run_collection_smoke`, `run_collection`) and load runs are not affected by
+  this toggle - they are governed by the allowlist and caps.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.

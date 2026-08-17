@@ -841,6 +841,40 @@ const failOnSchemaErrorInput = z
 		"Whether a response that does not match the schema the collection's bound OpenAPI document declares fails its request (default true). Set false to report the schema verdict on each row without letting it decide pass/fail - useful against a document known to lag its API. Only a checked verdict is ever folded in: a status or content type the document declares no schema for is reported unchecked and never fails a request, with or without this."
 	);
 
+/**
+ * The two fields a scenario block carries besides its collection id, declared
+ * here because both scenario surfaces take them and they must mean the same
+ * thing on each (issue #754): `run_collection` runs the plan once through the
+ * design runner, `start_load_run` drives the same plan with virtual users.
+ *
+ * `iterations` is deliberately not among them - see the scenario block on
+ * `start_load_run` for why a load run reads the top-level one instead.
+ *
+ * Whether to descend into sub-collections, and in which order that happens.
+ */
+const scenarioRecursiveInput = z
+	.boolean()
+	.optional()
+	.describe(
+		"Descend into sub-collections (default false). The order is the sidebar's: at every level each sub-collection's whole subtree runs before that level's own requests."
+	);
+
+/**
+ * The inline data set, in the shape `POST /runs` reads it.
+ *
+ * Inline because the engine never opens a file - the app parses CSV/TSV/JSON and
+ * sends rows, and a path an agent chose would be a trust boundary neither side
+ * wants. The engine's own `maxScenarioDataRows` / `maxScenarioDataBytes` bound
+ * the array and its 400 is surfaced verbatim rather than re-derived here, which
+ * would be a second copy of a limit the user can raise in Settings.
+ */
+const scenarioDataInput = z
+	.array(z.record(z.unknown()))
+	.optional()
+	.describe(
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. Rows are never persisted - only their count is recorded on the run.'
+	);
+
 const streamInput = z
 	.boolean()
 	.optional()
@@ -1098,6 +1132,363 @@ function smokeScopeCaveat(children: string[] | null): string {
 		`collection's direct requests only, and the counts above exclude every request nested ` +
 		`inside: ${children.join(", ")}. Call run_collection_smoke on each to cover them.`
 	);
+}
+
+// --- Scenario runs (a collection as the unit of work) ------------------------
+
+/** A step of a scenario plan, as much of it as the pre-flight walk needs. */
+interface ScenarioStepRow {
+	id: string;
+	name: string;
+}
+
+/**
+ * The saved requests a scenario run will execute, in the order the engine will
+ * execute them (issue #754).
+ *
+ * Mirrors `collect_requests` (`engine/src/core/scenario_plan.cpp`): without
+ * `recursive` a collection's direct requests are the whole plan; with it, every
+ * sub-collection's subtree is emitted **before** that level's own requests, which
+ * is the order the sidebar renders. The order matters here for one reason - the
+ * pre-flight refusal names the first step that fails - so a walk in some other
+ * order would name a different step than the run would have reached first.
+ *
+ * The `visited` set is the same guard the engine's walk carries: a corrupted
+ * `parentId` (a self-parent, an A -> B -> A loop) must terminate rather than
+ * enumerate forever.
+ */
+async function scenarioStepRows(
+	client: EngineClient,
+	collectionId: string,
+	recursive: boolean,
+	signal?: AbortSignal
+): Promise<ScenarioStepRow[]> {
+	const requestsIn = async (id: string): Promise<ScenarioStepRow[]> => {
+		const rows = await client.listRequests(id, signal);
+		return (Array.isArray(rows) ? rows : []).map((row) => {
+			const rec = (row ?? {}) as { id?: unknown; name?: unknown };
+			return {
+				id: typeof rec.id === "string" ? rec.id : "",
+				name: String(rec.name ?? rec.id ?? "request"),
+			};
+		});
+	};
+	if (!recursive) return requestsIn(collectionId);
+
+	const all = await client.listCollections(signal);
+	// One read, grouped by parent - `GET /collections` is ordered by `order`, so
+	// each parent's children keep that order without a sort here.
+	const childrenOf = new Map<string, string[]>();
+	for (const item of Array.isArray(all) ? all : []) {
+		if (!item || typeof item !== "object") continue;
+		const rec = item as { id?: unknown; parentId?: unknown };
+		if (typeof rec.id !== "string" || typeof rec.parentId !== "string" || !rec.parentId) {
+			continue;
+		}
+		childrenOf.set(rec.parentId, [...(childrenOf.get(rec.parentId) ?? []), rec.id]);
+	}
+
+	const ordered: ScenarioStepRow[] = [];
+	const visited = new Set<string>();
+	// Two entry kinds on one stack, exactly as the engine walks it: `emit` is
+	// pushed *under* the children, so a folder's own requests come last.
+	const stack: Array<{ step: "descend" | "emit"; id: string }> = [
+		{ step: "descend", id: collectionId },
+	];
+	while (stack.length > 0) {
+		const entry = stack.pop() as { step: "descend" | "emit"; id: string };
+		if (entry.step === "emit") {
+			ordered.push(...(await requestsIn(entry.id)));
+			continue;
+		}
+		if (visited.has(entry.id)) continue;
+		visited.add(entry.id);
+		stack.push({ step: "emit", id: entry.id });
+		const children = childrenOf.get(entry.id) ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			stack.push({ step: "descend", id: children[i] });
+		}
+	}
+	return ordered;
+}
+
+/**
+ * How a step is named in a refusal: the engine's own `describe_step` wording
+ * (`scenario_plan.cpp`), including its zero-based index, so a pre-flight refusal
+ * and the engine's own refusal for the same step read identically.
+ */
+function describeScenarioStep(index: number, row: ScenarioStepRow): string {
+	return `step ${index} (request '${row.name}', id '${row.id}')`;
+}
+
+/**
+ * Gate every step of a scenario against the allowlist *before* the run exists,
+ * and return how many steps the plan has.
+ *
+ * A scenario is one run: there is no per-step skip the way `run_collection_smoke`
+ * has one, because the engine starts the whole sequence or none of it. So a
+ * single un-allowlisted step refuses the run and **nothing is started** - the
+ * alternative would be an agent generating traffic against a host it was never
+ * pointed at, in the middle of a sequence it cannot stop selectively.
+ *
+ * Composition is the engine's, by id, with the caller's environment - the same
+ * call `resolve_scenario` makes for each step, which is what makes the URL this
+ * gate reads the URL the run would send to. A step that will not compose refuses
+ * here too: the engine resolves the identical plan before it creates the run row
+ * and would refuse it for the same reason, so failing early costs nothing and
+ * says so in the same words.
+ *
+ * Throws {@link ToolArgError} for a refusal; engine transport failures propagate
+ * to the caller's `engineErrorResult`.
+ */
+async function preflightScenarioSteps(
+	target: { collectionId: string; recursive: boolean; environmentId?: string },
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<number> {
+	const rows = await scenarioStepRows(ctx.client, target.collectionId, target.recursive, signal);
+	for (let index = 0; index < rows.length; index++) {
+		const row = rows[index];
+		const step = describeScenarioStep(index, row);
+		let composed: Record<string, unknown>;
+		try {
+			composed = await composeViaEngine(
+				ctx.client,
+				{ requestId: row.id, environmentId: target.environmentId },
+				signal
+			);
+		} catch (err) {
+			throw new ToolArgError(
+				`Cannot compose ${step}: ${err instanceof Error ? err.message : String(err)}. ` +
+					`Nothing was started - the engine resolves this same plan before it creates the ` +
+					`run, and would refuse it for this reason too.`
+			);
+		}
+		const url = String(composed.url ?? "");
+		const gate = checkAllowlist(url, ctx.config);
+		if (!gate.ok) {
+			throw new ToolArgError(
+				`Refusing to run this collection: ${step} sends to ${url}. ${gate.error} ` +
+					`Nothing was started - a scenario runs as one sequence, so a single step the ` +
+					`allowlist does not cover refuses all ${rows.length} of them.`
+			);
+		}
+	}
+	return rows.length;
+}
+
+/** The scenario block an agent passed to `start_load_run`, if it passed one. */
+function readScenarioArg(
+	args: Record<string, unknown>
+): { collectionId: string; recursive?: boolean; data?: unknown[] } | undefined {
+	const block = args.scenario;
+	if (!block || typeof block !== "object" || Array.isArray(block)) return undefined;
+	return block as { collectionId: string; recursive?: boolean; data?: unknown[] };
+}
+
+/**
+ * `start_load_run`'s arguments that describe a *single* target, which a scenario
+ * replaces wholesale, mapped to what an agent should do instead.
+ *
+ * Refused rather than ignored: each of these would otherwise be an argument an
+ * agent believes shaped the run and that nothing on the scenario path ever reads
+ * - the codebase's most-repeated defect, arriving through the front door. The
+ * steps are saved requests, so their method, body, auth, protocol and scripts
+ * are the stored ones, composed per step.
+ */
+const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
+	["url", "a scenario's targets are the collection's saved requests"],
+	["requestId", "a scenario runs a collection, not one saved request"],
+	["method", "each step keeps its own stored method"],
+	["headers", "each step keeps its own stored headers"],
+	["body", "each step keeps its own stored body"],
+	["bodyType", "each step keeps its own stored body"],
+	["auth", "each step's auth is resolved from the request and its collection chain"],
+	["httpVersion", "each step keeps its own stored protocol"],
+	["postRequestScript", "each step runs the scripts stored on it and its collection chain"],
+	["tests", "each step runs the scripts stored on it and its collection chain"],
+	[
+		"collectionId",
+		"the collection to run is `scenario.collectionId`; this argument only scopes variable resolution for a single ad-hoc target",
+	],
+	["maxInFlight", "in-flight requests are bounded by the virtual-user count (`concurrency`)"],
+	["sloMs", "that is `capacity` mode's field, and a scenario cannot run in capacity mode"],
+	["stepDuration", "that is `capacity` mode's field, and a scenario cannot run in capacity mode"],
+	["stream", "run-level stream bounds are applied to a single-target run's request only"],
+	[
+		"maxStreamDurationMs",
+		"run-level stream bounds are applied to a single-target run's request only",
+	],
+	[
+		"maxStreamEvents",
+		"run-level stream bounds are applied to a single-target run's request only",
+	],
+];
+
+/** The modes the engine will drive a scenario with (`validate_scenario_load_config`). */
+const SCENARIO_LOAD_MODES = ["constant_concurrency", "ramp_up", "iterations"] as const;
+
+/**
+ * Why the engine refuses the other two modes, in its own reasoning rather than a
+ * bare "unsupported": an agent told *why* `constant_rps` cannot drive a sequence
+ * picks `constant_concurrency`, and one told only "no" tries again.
+ */
+function scenarioModeRefusal(mode: string): string | null {
+	if ((SCENARIO_LOAD_MODES as readonly string[]).includes(mode)) return null;
+	const shared = `Scenario load runs accept ${SCENARIO_LOAD_MODES.join(", ")}.`;
+	if (mode === "capacity") {
+		return (
+			`"capacity" is not available for scenario runs: the search judges one windowed p99, ` +
+			`and a sequence has one per step - which of them is "the" latency the knee is measured ` +
+			`against is a question the mode does not answer. ${shared}`
+		);
+	}
+	if (mode === "constant_rps") {
+		return (
+			`"constant_rps" is not available for scenario runs: an open-loop arrival rate over a ` +
+			`multi-step sequence is an arrival-rate executor, which Vayu does not implement. ` +
+			`${shared} For a scenario, "concurrency" is the number of virtual users.`
+		);
+	}
+	return `Unknown load mode "${mode}" for a scenario run. ${shared}`;
+}
+
+/**
+ * Start a scenario **load** run: the collection's plan driven by virtual users
+ * (issue #754, reversing #454's deferral).
+ *
+ * Split from `start_load_run`'s single-target path rather than folded into it,
+ * because the two share only their gates: there is no request to compose here
+ * (every step composes engine-side at plan time), no url to check (the
+ * pre-flight walk checks every step's), and a different set of load fields
+ * applies. What they do share - the allowlist, `checkLoadCaps`, the duration
+ * default under the cap, and the confirmation - runs through the same helpers,
+ * so a cap raised in Settings binds both paths identically.
+ */
+async function startScenarioLoadRun(
+	args: Record<string, unknown>,
+	scenario: { collectionId: string; recursive?: boolean; data?: unknown[] },
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<ToolResult> {
+	const inapplicable = SINGLE_TARGET_LOAD_FIELDS.filter(([key]) => args[key] !== undefined);
+	if (inapplicable.length > 0) {
+		return errorResult(
+			`These arguments do not apply to a scenario load run: ` +
+				inapplicable.map(([key, why]) => `"${key}" (${why})`).join("; ") +
+				`. Nothing was started - each of them would have been read as shaping this run ` +
+				`while the scenario executor never looks at it. Remove them and retry.`
+		);
+	}
+
+	const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
+	const modeRefusal = scenarioModeRefusal(mode);
+	if (modeRefusal) return errorResult(modeRefusal);
+	// The engine refuses a rate on either spelling, because either one selects
+	// the open-loop path regardless of the declared mode.
+	if (typeof args.targetRps === "number" && args.targetRps > 0) {
+		return errorResult(
+			`"targetRps" is not available for scenario runs: it selects an open-loop arrival rate, ` +
+				`and a scenario run is closed-loop by design. Set "concurrency" - the number of ` +
+				`virtual users - instead.`
+		);
+	}
+
+	const monitor = args.monitor as { url?: unknown } | undefined;
+	if (monitor && typeof monitor === "object") {
+		const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config);
+		if (!monitorGate.ok) return errorResult(monitorGate.error!);
+	}
+
+	const loadParams: LoadRunParams = {
+		mode,
+		concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
+		startConcurrency:
+			typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
+		iterations: typeof args.iterations === "number" ? args.iterations : undefined,
+		duration: (args.duration as string | number | undefined) ?? undefined,
+		rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
+	};
+	const caps = checkLoadCaps(loadParams, ctx.config);
+	if (!caps.ok) return errorResult(caps.error!);
+
+	const environmentId = str(args, "environmentId");
+	const recursive = scenario.recursive === true;
+	let plannedSteps: number;
+	try {
+		plannedSteps = await preflightScenarioSteps(
+			{ collectionId: scenario.collectionId, recursive, environmentId },
+			ctx,
+			signal
+		);
+	} catch (err) {
+		if (err instanceof ToolArgError) return errorResult(err.message);
+		return engineErrorResult(err);
+	}
+
+	const payload: Record<string, unknown> = {
+		mode,
+		scenario: scenarioBlock(scenario, recursive),
+		...(environmentId !== undefined ? { environmentId } : {}),
+	};
+	for (const key of ["concurrency", "startConcurrency", "iterations"]) {
+		if (typeof args[key] === "number") payload[key] = args[key];
+	}
+	for (const key of ["duration", "rampUpDuration"]) {
+		const v = str(args, key);
+		if (v !== undefined) payload[key] = v;
+	}
+	// Both travel verbatim for the same reason they do on the single-target
+	// path: the keys are the engine's own and it is what judges the values.
+	// Neither is executor-specific - a scenario load run is a load run, with the
+	// same metrics thread, monitor scrape and end-of-run threshold evaluation.
+	if (args.thresholds && typeof args.thresholds === "object")
+		payload.thresholds = args.thresholds;
+	if (monitor && typeof monitor === "object") payload.monitor = monitor;
+	const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
+	if (cappedDuration !== null) payload.duration = cappedDuration;
+
+	const unconfirmed = await confirmDestructive(args, ctx, {
+		message:
+			`Start a scenario load test over collection ${scenario.collectionId} ` +
+			`(${plannedSteps} step(s) per iteration, mode: ${mode})?\n\n` +
+			`This generates real traffic within Vayu's caps.`,
+		acceptTitle: "Start the load test",
+		acceptDescription: "Confirm to generate load now.",
+		declined: "Load run not started - the user declined.",
+		preview:
+			"AWAITING CONFIRMATION - no run was started.\n\n" +
+			"This is a preview. To start the load test, call start_load_run again with " +
+			"confirmed: true and the same arguments.\n\n" +
+			`Planned run (${plannedSteps} step(s) per iteration):\n${JSON.stringify(payload, null, 2)}`,
+	});
+	if (unconfirmed) return unconfirmed;
+
+	return withCaveat(
+		await callEngine(() => ctx.client.startRun(payload, signal)),
+		`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
+			`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
+			`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
+			`user walks the plan the way the design runner does.`
+	);
+}
+
+/** The `scenario` block `POST /runs` reads, from the arguments an agent gave. */
+function scenarioBlock(
+	scenario: { collectionId: string; data?: unknown[] },
+	recursive: boolean,
+	iterations?: number
+): Record<string, unknown> {
+	return {
+		source: "collection",
+		collectionId: scenario.collectionId,
+		recursive,
+		// Omitted rather than defaulted: with `data` present and this absent the
+		// engine sets the pass count to the row count, and a client computing
+		// its own would be a second copy of a rule only one side enforces.
+		...(iterations !== undefined ? { iterations } : {}),
+		...(scenario.data !== undefined ? { data: scenario.data } : {}),
+	};
 }
 
 /** Convert a `{key: value}` header map to the engine's KeyValueEntry[] shape. */
@@ -2088,11 +2479,94 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "run_collection",
+		category: "execute",
+		invalidates: ["run", "cookie"],
+		description:
+			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
+		annotations: {
+			title: "Run collection",
+			readOnlyHint: false,
+			destructiveHint: true,
+			openWorldHint: true,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection whose requests make up the sequence."),
+			environmentId: z
+				.string()
+				.optional()
+				.describe(
+					"Environment whose variables resolve {{templates}} in every step, and whose cookie jar the run uses."
+				),
+			recursive: scenarioRecursiveInput,
+			// Positive: the engine reads the count as a pass total, so a zero is a
+			// run with nothing to do and a negative is not a count at all. Named
+			// rather than clamped, like every other count in this registry.
+			iterations: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe(
+					"How many passes over the sequence (default 1, or the row count when `data` is given). With more passes than rows the row index wraps."
+				),
+			data: scenarioDataInput,
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const environmentId = str(args, "environmentId");
+			const recursive = args.recursive === true;
+			const iterations = typeof args.iterations === "number" ? args.iterations : undefined;
+			const data = Array.isArray(args.data) ? (args.data as unknown[]) : undefined;
+
+			let plannedSteps: number;
+			try {
+				plannedSteps = await preflightScenarioSteps(
+					{ collectionId, recursive, environmentId },
+					ctx,
+					signal
+				);
+			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+
+			const payload: Record<string, unknown> = {
+				scenario: scenarioBlock({ collectionId, data }, recursive, iterations),
+				...(environmentId !== undefined ? { environmentId } : {}),
+			};
+
+			let started: unknown;
+			try {
+				started = await ctx.client.startRun(payload, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			// The engine's 202 body is the answer; anything else is handed back as
+			// it came rather than dressed up as a started run.
+			if (!started || typeof started !== "object" || Array.isArray(started)) {
+				return jsonResult(started);
+			}
+			return structuredResult({
+				...(started as Record<string, unknown>),
+				plannedSteps,
+				nextStep:
+					`The run executes engine-side. Read it with get_run_report(runId): the ` +
+					`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
+					`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
+					`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
+					`request and response bodies inline, so a long plan against large responses ` +
+					`makes for a large report - read the totals first and the rows when you need ` +
+					`them. stop_run ends the run early.`,
+			});
+		},
+	},
+	{
 		name: "start_load_run",
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here: the engine runs one on a single request only, never on a load run. This tool loads a single target - a scenario (collection) load run, which drives a sequence of saved requests, is started from the app's Run Collection dialog and cannot be started from here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		annotations: {
 			title: "Start load test",
 			readOnlyHint: false,
@@ -2294,9 +2768,36 @@ export const TOOLS: McpTool[] = [
 			collectionId: collectionIdInput,
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
+			// The other shape POST /runs accepts (issue #754). Mutually exclusive
+			// with every single-target argument, which the handler refuses by name
+			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
+			//
+			// No `iterations` inside the block, unlike the design-mode runner's:
+			// a load run reads the *top-level* `iterations` (`scenario_load.cpp`
+			// takes it from the run config), and `scenario.iterations` is the
+			// design runner's per-run pass count, which this executor never looks
+			// at. Offering it here would be an argument written and never read.
+			scenario: z
+				.object({
+					collectionId: z
+						.string()
+						.describe("Collection whose saved requests are the sequence."),
+					recursive: scenarioRecursiveInput,
+					data: scenarioDataInput,
+				})
+				.optional()
+				.describe(
+					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
+				),
 			confirmed: confirmedInput("actually start the run"),
 		},
 		handler: async (args, ctx, signal) => {
+			// A scenario replaces the single target wholesale - there is nothing to
+			// compose here, so the branch comes before composition rather than
+			// inside it.
+			const scenario = readScenarioArg(args);
+			if (scenario) return startScenarioLoadRun(args, scenario, ctx, signal);
+
 			let composed;
 			try {
 				composed = await composeLoadRunRequest(args, ctx, signal);
