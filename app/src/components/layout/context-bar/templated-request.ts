@@ -47,5 +47,6 @@ export function templatedRequest(
 		// `CodeSection` for why the resolved mode cannot read it from the
 		// composed payload.
 		stream: request.stream,
+		verifySSL: request.verifySSL,
 	};
 }

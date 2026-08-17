@@ -17,6 +17,7 @@ import {
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
 	DEFAULT_STREAM,
+	DEFAULT_VERIFY_SSL,
 	type HttpVersion,
 } from "@/constants/request";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
@@ -56,6 +57,7 @@ export const createDefaultRequestState = (
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
 		httpVersion,
+		verifySSL: DEFAULT_VERIFY_SSL,
 		stream: DEFAULT_STREAM,
 	};
 };
@@ -75,12 +77,16 @@ export const createDefaultRequestState = (
  * component (`react-refresh/only-export-components`).
  */
 export function isRequestSettingsNonDefault(
-	state: Pick<RequestState, "followRedirects" | "maxRedirects" | "httpVersion" | "stream">
+	state: Pick<
+		RequestState,
+		"followRedirects" | "maxRedirects" | "httpVersion" | "verifySSL" | "stream"
+	>
 ): boolean {
 	return (
 		state.followRedirects !== DEFAULT_FOLLOW_REDIRECTS ||
 		state.maxRedirects !== DEFAULT_MAX_REDIRECTS ||
 		state.httpVersion !== DEFAULT_HTTP_VERSION ||
+		state.verifySSL !== DEFAULT_VERIFY_SSL ||
 		state.stream !== DEFAULT_STREAM
 	);
 }

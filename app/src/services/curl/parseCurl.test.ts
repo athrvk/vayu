@@ -364,6 +364,42 @@ describe("parseCommand - failure modes", () => {
 });
 
 /**
+ * `-k` / `--insecure` says the host's certificate does not verify, which is a
+ * property of the request rather than an output nicety - so it maps onto the
+ * stored `verifySSL` instead of being skipped (issue #706). A command that
+ * turned verification off, imported as a verifying request, fails on its first
+ * send for the reason the command already named. `codegen.test.ts` holds the
+ * other half of the round trip.
+ */
+describe("parseCommand - curl -k is the verifySSL setting", () => {
+	test.each([["-k"], ["--insecure"]])("%s turns verification off", (flag) => {
+		const parsed = parseCommand(`curl ${flag} https://internal.example.com/health`);
+		expect(parsed?.verifySSL).toBe(false);
+	});
+
+	test("a command without it verifies, which is curl's own default", () => {
+		const parsed = parseCommand("curl https://api.example.com/health");
+		expect(parsed?.verifySSL).toBe(true);
+	});
+
+	test("wget's spelling of the same intent is honoured too", () => {
+		const parsed = parseCommand(
+			"wget --no-check-certificate https://internal.example.com/health"
+		);
+		expect(parsed?.verifySSL).toBe(false);
+	});
+
+	test("the flag is not mistaken for a value-taking one", () => {
+		// `-k` used to sit in the no-argument skip set; a mapping that consumed
+		// the next token instead would eat the URL and the parse would return
+		// null.
+		const parsed = parseCommand("curl -k -X POST https://internal.example.com/orders");
+		expect(parsed?.url).toBe("https://internal.example.com/orders");
+		expect(parsed?.method).toBe("POST");
+	});
+});
+
+/**
  * `-N` / `--no-buffer` is how a stream is consumed from a terminal, so it maps
  * onto the request's Event stream setting rather than being skipped as an
  * output nicety (issue #575). The generator emits it back, and

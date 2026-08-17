@@ -650,6 +650,43 @@ numeric values stored in existing traces are unchanged.
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
 
+#### TLS trust settings
+
+One more `network_performance` entry decides *who* the engine trusts, and it
+reaches the same six outbound paths the proxy settings do.
+
+| Key | Default | Values | Effect |
+|-----|---------|--------|--------|
+| `customCaCertificates` | `""` | PEM text (`text` entry) | Certificate authorities to trust **in addition** to the ones this platform already trusts. Pasted content, not a path: a path breaks when the file moves and cannot be shown back in Settings. `POST /config` refuses text that holds no `-----BEGIN CERTIFICATE-----` block, and names a pasted private key for what it is. |
+
+The engine materializes the bundle as `ca-bundle.pem` beside its database and
+points `CURLOPT_CAINFO` at it, rewriting the file only when the setting's
+content changes. **Native trust is preserved** - the mechanism differs by TLS
+backend, and each is stated rather than assumed:
+
+| Platform | Backend at the pinned vcpkg baseline | What the bundle does |
+|----------|--------------------------------------|----------------------|
+| Linux | OpenSSL (default paths + `CURL_CA_FALLBACK`) | `CURLOPT_CAINFO` **replaces** the default bundle, so the materialized file is the platform's own anchors **concatenated with** the pasted ones. The system bundle is located the way curl locates it: `CURL_CA_BUNDLE` / `SSL_CERT_FILE`, then libcurl's compiled-in `cainfo`, then the standard distribution paths. |
+| macOS | Apple SecTrust (`USE_APPLE_SECTRUST=ON`) | The OS trust store is the backend's own and is not a file to merge, so the bundle holds the pasted certificates alone and the store keeps applying. |
+| Windows | Schannel | Same as macOS: the certificate store stays in force and the bundle extends it. |
+
+Two things make that table checkable rather than a claim. `CURLOPT_CAINFO` is
+the one transport option a backend can refuse outright, so the engine checks
+the return code and logs an error naming the backend if it ever does - and the
+test suite asserts on every CI platform that this build's backend accepts it.
+Where a bundle is in force the engine also sets `CURLSSLOPT_NATIVE_CA`, which
+asks the backends that implement it to keep consulting the OS store; it is a
+no-op on the rest, and on Linux the merge above is what carries the guarantee.
+
+A certificate that still fails to verify fails at handshake time with libcurl's
+own `SSL_ERROR` - the validation on the way in is about the *shape* of the
+paste, deliberately, so a chain curl would accept is never refused by a parser
+of ours.
+
+Per-request, `verifySSL: false` turns verification off for one endpoint
+entirely (see [POST /execute](#post-execute)); trusting the authority here is
+the answer that keeps verification on everywhere else.
+
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
@@ -867,6 +904,7 @@ then `id` - the same contract `GET /collections` has for collections. See
     "followRedirects": true,
     "maxRedirects": 10,
     "httpVersion": "auto",
+    "verifySSL": true,
     "stream": false,
     "updatedAt": 1234567890,
     "createdAt": 1234567890
@@ -874,10 +912,11 @@ then `id` - the same contract `GET /collections` has for collections. See
 ]
 ```
 
-`followRedirects` / `maxRedirects` / `httpVersion` / `stream` are the request's
-stored execution options. They are always present in the response: a request
-saved before these columns existed reads back as the engine defaults
-(`true` / `10` / `"auto"` / `false`), which is the behaviour it already had.
+`followRedirects` / `maxRedirects` / `httpVersion` / `verifySSL` / `stream` are
+the request's stored execution options. They are always present in the response:
+a request saved before these columns existed reads back as the engine defaults
+(`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
+had.
 `httpVersion` is `"auto"` | `"http1.1"` | `"http2"` - what was *requested*, not
 what was negotiated; see [POST /execute](#post-execute) for the negotiated
 value on a response.
@@ -912,6 +951,7 @@ entry.
   "followRedirects": true,
   "maxRedirects": 10,
   "httpVersion": "auto",
+  "verifySSL": true,
   "stream": false,
   "createdAt": 1234567890,
   "updatedAt": 1234567890
@@ -948,6 +988,7 @@ the null-vs-absent rule.
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
                                       // from the "defaultHttpVersion" config entry
+  "verifySSL": true,                 // Optional, verify the TLS certificate. Default true
   "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
   "specOperation": null              // Optional, which spec operation this request is - see below
@@ -1016,10 +1057,10 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`stream` / `specOperation` leaves the stored values untouched; sending `null`
-resets them to `true` / `10` / `false` / "no operation". A non-boolean
-`followRedirects` or `stream`, or a non-integer `maxRedirects`, is ignored rather
-than rejected. `maxRedirects` is clamped to `0..100` on the way in.
+`verifySSL` / `stream` / `specOperation` leaves the stored values untouched;
+sending `null` resets them to `true` / `10` / `true` / `false` / "no operation".
+A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
+`maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored
@@ -2445,7 +2486,7 @@ payload that skips composition is sent byte-for-byte as supplied.
   headers (later duplicates win), body, auth (absent auth defaults to
   `inherit`), the ordered script-part lists (collection chain root→leaf, then
   the request's own), the stored execution options (`followRedirects` /
-  `maxRedirects` / `httpVersion`, always emitted) and its `requestName` (the
+  `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
   only a fallback for a request without one. An unknown id is a definitive
@@ -2532,7 +2573,8 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "allowScriptRequests": false,        // Optional, default false - see below
   "followRedirects": true,             // Optional, default true
   "maxRedirects": 10,                  // Optional, default 10
-  "verifySSL": true,                   // Optional, default true
+  "verifySSL": true,                   // Optional, default true - stored per request and
+                                       // settable in the request builder's Settings tab
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
   "stream": false,                     // Optional, default false - see below
@@ -2732,6 +2774,17 @@ clients send these explicitly for exactly that reason (see
 [api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
 the request was configured with.
+
+**TLS verification.** `verifySSL` defaults to **true** and is stored on the
+request (`requests.verify_ssl`, the Settings tab's *Verify TLS certificate*
+row). Both clients send it on every execute and every load test rather than
+eliding the default, for a stronger reason than the redirect policy above: an
+omitted `false` **verifies** the certificate the user turned verification off
+for, so the request fails against the one host the setting exists for. Off
+skips both the chain and the hostname check (`CURLOPT_SSL_VERIFYPEER` and
+`CURLOPT_SSL_VERIFYHOST`), which is why the app paints the state as a warning.
+To keep verification on for a host with an internal authority, add the CA under
+[TLS trust settings](#tls-trust-settings) instead.
 
 **A redirect that crosses origins drops the cookies the hop set.** Since
 **curl 8.21.0** (`http: don't pass on set cookies to new origins`, which the

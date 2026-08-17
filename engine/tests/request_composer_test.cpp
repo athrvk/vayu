@@ -256,6 +256,7 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     r.follow_redirects    = false;
     r.max_redirects       = 3;
     r.http_version        = "http2";
+    r.verify_ssl          = false;
     db_->save_request (r);
 
     auto [status, payload] = vayu::http::compose_request_core (
@@ -292,6 +293,12 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["followRedirects"], false);
     EXPECT_EQ (payload["maxRedirects"], 3);
     EXPECT_EQ (payload["httpVersion"], "http2");
+    // Never elided at the default, and this one for a stronger reason than the
+    // rest: the engine verifies unless told otherwise, so a dropped `false`
+    // would verify the certificate the user turned verification off for
+    // (issue #706).
+    ASSERT_TRUE (payload.contains ("verifySSL"));
+    EXPECT_EQ (payload["verifySSL"], false);
 
     // Ids echoed so the composed payload can be POSTed to /execute unchanged.
     EXPECT_EQ (payload["requestId"], "req_1");

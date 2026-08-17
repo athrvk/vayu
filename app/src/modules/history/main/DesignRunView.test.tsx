@@ -124,6 +124,7 @@ function designRun(overrides: Partial<Run> = {}): Run {
 			],
 			followRedirects: false,
 			maxRedirects: 3,
+			verifySSL: true,
 			httpVersion: "http2",
 			requestId: "req_1",
 		},

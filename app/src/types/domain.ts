@@ -596,6 +596,18 @@ export interface Request {
 	 */
 	httpVersion: HttpVersion;
 	/**
+	 * Verify the TLS certificate this endpoint presents. Engine default is
+	 * `true`, and it is sent on every payload rather than elided at the default
+	 * for exactly that reason: an omitted `false` verifies the certificate the
+	 * user asked the engine not to check (issue #706).
+	 *
+	 * Per-request, not app-wide: it describes the one internal host with the
+	 * self-signed certificate. Trusting an authority everywhere is the other
+	 * control, Settings > Network & connectivity > Custom CA Certificates, and
+	 * it is the one to reach for first.
+	 */
+	verifySSL: boolean;
+	/**
 	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
 	 * Stored on the request because it describes the *endpoint* rather than one
 	 * send, so the builder's Event stream toggle survives a tab switch and a
@@ -2054,7 +2066,12 @@ export interface EngineConfig {
 export interface ConfigEntry {
 	key: string;
 	value: string;
-	type: "integer" | "string" | "boolean" | "number" | "enum";
+	/**
+	 * `text` is a multi-line string (a pasted PEM bundle, issue #706) - the
+	 * same value space as `string`, rendered as a textarea rather than a
+	 * single-line input because the content has line breaks that matter.
+	 */
+	type: "integer" | "string" | "boolean" | "number" | "enum" | "text";
 	label: string;
 	description: string;
 	category: string;

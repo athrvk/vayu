@@ -53,6 +53,7 @@ function run(overrides: Partial<Run> = {}): Run {
 			],
 			followRedirects: false,
 			maxRedirects: 3,
+			verifySSL: true,
 			httpVersion: "http2",
 			requestId: "req_1",
 		},
@@ -417,6 +418,9 @@ describe("buildChangeset", () => {
 			followRedirects: false,
 			maxRedirects: 3,
 			httpVersion: "http2",
+			// The run's snapshot predates `verifySSL`, so the seed reads it as
+			// verifying - the live request has to match to stay "kept".
+			verifySSL: true,
 			auth: { mode: "bearer", token: "x" },
 		} as Partial<Request>);
 

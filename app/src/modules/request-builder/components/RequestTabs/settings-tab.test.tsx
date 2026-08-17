@@ -52,6 +52,7 @@ const settingsTab = () => screen.getByRole("tab", { name: /settings/i });
 const followToggle = () => screen.getByRole("switch", { name: /follow redirects/i });
 const hopLimit = () => screen.getByLabelText(/maximum redirects/i);
 const protocolPicker = () => screen.getByRole("combobox", { name: /protocol/i });
+const verifyToggle = () => screen.getByRole("switch", { name: /verify tls certificate/i });
 
 describe("Settings tab", () => {
 	it("is a member of the tab strip, so it joins arrow-key navigation", () => {
@@ -85,6 +86,14 @@ describe("Settings tab", () => {
 		expect(settingsTab().textContent).toContain("1");
 	});
 
+	it("badges when TLS verification is off, even with everything else default", () => {
+		// Issue #706: the state this badge matters most for. A request that
+		// accepts any certificate is indistinguishable from one that does not
+		// until a surface says so, and the tab strip is the first one visible.
+		renderTabs({ verifySSL: false });
+		expect(settingsTab().textContent).toContain("1");
+	});
+
 	it("badges when the protocol differs from the default, even with default redirects", () => {
 		// The badge predicate used to only look at followRedirects/maxRedirects
 		// (isRedirectPolicyNonDefault). Changing only the protocol must still
@@ -106,6 +115,34 @@ describe("Settings panel controls", () => {
 		const updateField = renderTabs({ followRedirects: false });
 		fireEvent.click(followToggle());
 		expect(updateField).toHaveBeenCalledWith("followRedirects", true);
+	});
+
+	it("writes the verify toggle through to the request", () => {
+		const updateField = renderTabs();
+		fireEvent.click(verifyToggle());
+		expect(updateField).toHaveBeenCalledWith("verifySSL", false);
+	});
+
+	it("turns verification back on from the off state", () => {
+		const updateField = renderTabs({ verifySSL: false });
+		fireEvent.click(verifyToggle());
+		expect(updateField).toHaveBeenCalledWith("verifySSL", true);
+	});
+
+	it("says nothing about certificates while verification is on", () => {
+		renderTabs();
+		expect(screen.queryByText(/accepts any certificate/i)).toBeNull();
+	});
+
+	it("warns, in the warning colour, once verification is off", () => {
+		// The whole answer to the #706 deferral ("exposing it weakens transport
+		// security") is that the off state is loud. Asserted by class rather
+		// than by looks: jsdom has no layout, and the token is the thing that
+		// makes this line read as a warning rather than as more description.
+		renderTabs({ verifySSL: false });
+		const warning = screen.getByText(/accepts any certificate/i);
+		const line = warning.closest("div");
+		expect(line?.className).toContain("text-status-warning-text");
 	});
 
 	it("keeps both controls in the keyboard tab order", () => {

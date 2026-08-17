@@ -144,6 +144,7 @@ describe("the Settings tab's hierarchy", () => {
 			"Protocol",
 			"Follow redirects",
 			"Maximum redirects",
+			"Verify TLS certificate",
 			"Event stream",
 		]);
 	});

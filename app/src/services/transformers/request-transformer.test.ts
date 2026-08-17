@@ -20,6 +20,7 @@ import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
+	DEFAULT_VERIFY_SSL,
 } from "@/constants/request";
 
 const base = {
@@ -47,6 +48,27 @@ describe("RequestTransformer redirect policy", () => {
 		});
 		expect(req.followRedirects).toBe(false);
 		expect(req.maxRedirects).toBe(2);
+	});
+
+	it("reads a row with no verifySSL as verifying", () => {
+		// The same hop, and the one where the wrong default is a security
+		// decision: every request stored before the column existed comes back
+		// without the key, and must not read as "accept any certificate"
+		// (issue #706).
+		expect(RequestTransformer.toFrontend({ ...base }).verifySSL).toBe(DEFAULT_VERIFY_SSL);
+	});
+
+	it("preserves a stored verifySSL of false", () => {
+		expect(RequestTransformer.toFrontend({ ...base, verifySSL: false }).verifySSL).toBe(false);
+	});
+
+	it("ignores a non-boolean verifySSL rather than coercing it", () => {
+		// `"false"` is truthy, so a coercing read would turn a corrupted row
+		// into a verifying one silently - the reason every field here checks
+		// the type rather than the value.
+		expect(RequestTransformer.toFrontend({ ...base, verifySSL: "false" }).verifySSL).toBe(
+			DEFAULT_VERIFY_SSL
+		);
 	});
 
 	it("keeps a stored maxRedirects of 0 rather than treating it as absent", () => {

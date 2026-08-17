@@ -229,6 +229,11 @@ bool is_create) {
     apply_int_field (json, "order", r.order, 0, is_create);
     apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
 
+    // TLS verification (issue #706). Through the shared applier like every
+    // other stored field, so `POST /requests`, `PUT /requests/:id` and
+    // `POST /import/apply` all carry it without three copies of the rule.
+    apply_bool_field (json, "verifySSL", r.verify_ssl, true, is_create);
+
     apply_int_field (json, "maxRedirects", r.max_redirects, 10, is_create);
     // Clamp to the range the UI offers; libcurl reads -1 as "unlimited", which
     // is not a policy we want a stray value to select.

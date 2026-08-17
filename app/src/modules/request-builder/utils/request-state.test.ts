@@ -38,6 +38,7 @@ describe("isRequestSettingsNonDefault", () => {
 		followRedirects: true,
 		maxRedirects: 10,
 		httpVersion: DEFAULT_HTTP_VERSION,
+		verifySSL: true,
 		stream: false,
 	} as const;
 
@@ -57,6 +58,13 @@ describe("isRequestSettingsNonDefault", () => {
 		// This is the case the rename exists for: a request that only changes
 		// its protocol must still badge the Settings tab.
 		expect(isRequestSettingsNonDefault({ ...defaults, httpVersion: "http2" })).toBe(true);
+	});
+
+	it("is true when TLS verification is off and nothing else differs", () => {
+		// The field whose non-default state is the one worth badging most:
+		// a request that accepts any certificate looks exactly like one that
+		// does not until this tab says so (issue #706).
+		expect(isRequestSettingsNonDefault({ ...defaults, verifySSL: false })).toBe(true);
 	});
 
 	it("is true when the event-stream flag is on and nothing else differs", () => {

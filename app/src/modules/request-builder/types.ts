@@ -154,6 +154,8 @@ export interface RequestState {
 	maxRedirects: number;
 	/** Protocol to negotiate. See `Request.httpVersion` for the full rationale. */
 	httpVersion: HttpVersion;
+	/** Verify the TLS certificate. See `Request.verifySSL` for the rationale. */
+	verifySSL: boolean;
 	/**
 	 * Consume this endpoint's response as a `text/event-stream` (issue #574).
 	 *

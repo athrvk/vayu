@@ -173,6 +173,8 @@ export interface CreateRequestRequest {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
+	/** Verify the TLS certificate - see {@link Request.verifySSL}. */
+	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
 	/** Which spec operation this request is - see {@link Request.specOperation}. */
@@ -202,6 +204,8 @@ export interface UpdateRequestRequest {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
+	/** Verify the TLS certificate - see {@link Request.verifySSL}. */
+	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
 	/**
@@ -342,6 +346,14 @@ export interface ExecuteRequestRequest {
 	 * section.
 	 */
 	httpVersion?: HttpVersion;
+	/**
+	 * Verify the TLS certificate. Sent on every execute for the reason above
+	 * and one more: the engine's default is `true`, so an omitted `false`
+	 * verifies the certificate the user turned verification off for - the
+	 * default winning silently is a security decision here, not a surprise
+	 * (issue #706).
+	 */
+	verifySSL?: boolean;
 	requestId?: string;
 	/**
 	 * The request's name, for the script sandbox to read as `pm.info.requestName`
@@ -487,6 +499,9 @@ export interface StartLoadTestRequest {
 
 	/** Protocol to negotiate - same rationale as `followRedirects` above. */
 	httpVersion?: HttpVersion;
+
+	/** TLS verification - same rationale, and see {@link Request.verifySSL}. */
+	verifySSL?: boolean;
 
 	// Load test strategy
 	mode: LoadTestMode;

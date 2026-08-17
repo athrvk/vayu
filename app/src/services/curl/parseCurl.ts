@@ -46,6 +46,7 @@ export type ParsedRequest = Pick<
 	| "urlEncoded"
 	| "auth"
 	| "stream"
+	| "verifySSL"
 >;
 
 type CommandKind = "curl" | "wget";
@@ -97,6 +98,7 @@ interface Builder {
 	basic: { username: string; password: string } | null;
 	bearer: string | null; // curl --oauth2-bearer
 	stream: boolean; // -N / --no-buffer
+	insecure: boolean; // curl -k / --insecure, wget --no-check-certificate
 }
 
 function newBuilder(): Builder {
@@ -113,6 +115,7 @@ function newBuilder(): Builder {
 		basic: null,
 		bearer: null,
 		stream: false,
+		insecure: false,
 	};
 }
 
@@ -316,6 +319,12 @@ function resolve(b: Builder): ParsedRequest {
 		urlEncoded,
 		auth,
 		stream: b.stream,
+		// `-k` says "do not verify", so the stored field is its inverse. Mapped
+		// rather than skipped (issue #706): a pasted command that turns
+		// verification off described a host whose certificate does not verify,
+		// and importing it as a verifying request means the paste fails on the
+		// first send for a reason the command already named.
+		verifySSL: !b.insecure,
 	};
 }
 
@@ -363,8 +372,6 @@ const CURL_NOARG = new Set([
 	"--verbose",
 	"-L",
 	"--location",
-	"-k",
-	"--insecure",
 	"-f",
 	"--fail",
 	"-S",
@@ -493,6 +500,10 @@ function parseCurl(args: string[]): ParsedRequest {
 				value();
 				b.uploadFile = true;
 				break;
+			case "-k":
+			case "--insecure":
+				b.insecure = true;
+				break;
 			case "-N":
 			case "--no-buffer":
 				// curl's unbuffered flag is how a streaming endpoint is consumed
@@ -528,7 +539,6 @@ function parseCurl(args: string[]): ParsedRequest {
 const WGET_NOARG = new Set([
 	"-q",
 	"--quiet",
-	"--no-check-certificate",
 	"--continue",
 	"-c",
 	"--no-verbose",
@@ -602,6 +612,13 @@ function parseWget(args: string[]): ParsedRequest {
 			// --post-file sends file contents as the body; can't read it → skip.
 			case "--post-file":
 				value();
+				break;
+			// wget's spelling of `-k`, mapped for the same reason and through
+			// the same builder field - the two commands resolve into one
+			// request, so honouring the intent on one path and eating it on the
+			// other is the drift this parser exists to avoid.
+			case "--no-check-certificate":
+				b.insecure = true;
 				break;
 			default:
 				if (WGET_SKIP_WITH_ARG.has(flag)) {

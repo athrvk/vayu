@@ -82,6 +82,7 @@ function requestFrom(
 		postRequestScript: "",
 		followRedirects: true,
 		maxRedirects: 10,
+		verifySSL: true,
 		httpVersion: "auto",
 		stream: false,
 		specOperation: operation,

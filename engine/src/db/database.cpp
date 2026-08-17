@@ -240,6 +240,10 @@ inline auto make_storage (const std::string& path) {
     // pre-existing rows backfill to the engine defaults (follow, cap at 10).
     make_column ("follow_redirects", &Request::follow_redirects, default_value (true)),
     make_column ("max_redirects", &Request::max_redirects, default_value (10)),
+    // Per-request TLS verification (issue #706). Same NOT NULL + default_value
+    // shape, and the default is the safe one: a row written before this column
+    // existed backfills to verifying, never to trusting whatever answers.
+    make_column ("verify_ssl", &Request::verify_ssl, default_value (true)),
     // Protocol selection. TEXT (not an ordinal) so a stored value survives a
     // reorder of the HttpVersion enum. NOT NULL with a default_value so
     // sync_schema can ALTER TABLE ADD COLUMN onto an existing requests table.
@@ -472,7 +476,10 @@ struct Database::Impl {
     /// size in force instead of the size requested.
     std::atomic<int> applied_cache_size_bytes{ 0 };
 
-    Impl (const std::string& path) : storage (make_storage (path)) {
+    /// The file `storage` was opened on, for `Database::path`.
+    std::string db_path;
+
+    Impl (const std::string& path) : storage (make_storage (path)), db_path (path) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
             std::filesystem::create_directories (db_path.parent_path ());
@@ -655,6 +662,10 @@ Database::Database (const std::string& db_path) {
 }
 
 Database::~Database () = default;
+
+const std::string& Database::path () const {
+    return impl_->db_path;
+}
 
 // Initialize database with optimized SQLite settings
 void Database::init () {
@@ -2247,6 +2258,24 @@ void Database::seed_default_config () {
     "rule, so an empty one means nothing is exempt and any no_proxy the engine "
     "was started with is ignored. Under From environment it overrides that "
     "variable when set, and defers to it when empty.",
+    "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    // Custom trust anchors (issue #706). `text` rather than `string` because
+    // what goes in it is a pasted PEM block: the single-line input every other
+    // string entry renders cannot show one, let alone several.
+    //
+    // Content, not a path - a path breaks the moment the file moves and cannot
+    // be shown back in Settings. The engine materializes the bundle beside the
+    // database, extending the platform's own anchors rather than replacing
+    // them; see `resolve_transport_policy`.
+    upsert_config (keywords ({ "firewall", "mitm", "zscaler", "ssl" }) (
+    ConfigEntry{ "customCaCertificates", "", "text", "Custom CA Certificates",
+    "Certificate authorities to trust in addition to the ones this platform "
+    "already trusts, pasted as PEM text (one or more -----BEGIN "
+    "CERTIFICATE----- blocks). This is what makes a corporate TLS-inspecting "
+    "proxy or an internal self-signed authority verifiable everywhere the "
+    "engine sends: requests, load runs, streams, OAuth token fetches and spec "
+    "imports alike. Paste certificates only - never a private key.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // =========================================================================

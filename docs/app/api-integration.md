@@ -877,6 +877,7 @@ await apiService.executeRequest({
   followRedirects: true,
   maxRedirects: 10,
   httpVersion: "auto",
+  verifySSL: true,
   requestId: "req_123",
   environmentId: "env_456"
 });
@@ -891,14 +892,17 @@ untouched - script text is never interpolated; the by-id compose path (used by
 MCP) builds the same list engine-side. The **engine** joins the parts and runs
 the result - see `docs/engine/architecture.md` → *Request composition boundary*.
 
-**Redirect policy and protocol are always sent, never elided.**
-`followRedirects`, `maxRedirects` and `httpVersion` all come from the request's
-**Settings** tab and are included on every execute even when they equal the
-defaults. The engine defaults `follow_redirects` to `true`, so omitting a
+**Redirect policy, protocol and TLS verification are always sent, never
+elided.** `followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all
+come from the request's **Settings** tab and are included on every execute even
+when they equal the defaults. The engine defaults `follow_redirects` to `true`, so omitting a
 `false` would follow the 3xx the user asked to inspect - a bug the app shipped
 with for a long time, when nothing in the renderer sent these fields at all.
-The same three fields go out with `startLoadTest()`, so a load test exercises
-the same policy and protocol the request was configured with - there is no
+`verifySSL` carries the same rule for a sharper reason: the engine verifies
+unless told otherwise, so an omitted `false` verifies the certificate the user
+turned verification off for, and the send fails against the one host the
+setting exists for. All four go out with `startLoadTest()`, so a load test
+exercises the same policy, protocol and trust the request was configured with - there is no
 separate, load-test-only protocol control; the Settings tab's picker is the
 only one, and it governs Send and load test alike. `httpVersion` is
 `"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
@@ -1005,6 +1009,7 @@ await apiService.startLoadTest({
   followRedirects: true,
   maxRedirects: 10,
   httpVersion: "auto",
+  verifySSL: true,
   mode: "constant_rps",
   duration: "30s",
   targetRps: 100,
