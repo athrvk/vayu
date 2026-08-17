@@ -49,6 +49,17 @@
  * that produce it - a file whose row 3 collides sends two good requests and
  * then one quietly missing its auth.
  *
+ * A cell carrying a **CR or LF bound into a header** is the same failure once
+ * more, on the same field (issue #732). A header line ends at CRLF, so a cell
+ * holding `ok\r\nX-Admin: true` does not put that text in the header - it ends
+ * the header and makes the remainder a header of its own, which is a request
+ * the file's author never wrote. There is no escape for a line break in a
+ * header, so unlike a quote in a JSON body this cannot be encoded around: the
+ * bind errors. It covers a header name, a header value, and a credential
+ * `apply_auth` writes into a header line (a bearer token, an api key sent in a
+ * header) - not basic auth's pair or an api key sent in the query, whose bytes
+ * are base64- and percent-encoded before they reach the wire.
+ *
  * ## A value is written for the document it lands in
  *
  * Substitution is textual, so a value carrying a `"` used to end the JSON
@@ -211,7 +222,8 @@ struct StepDataTemplate {
  * from the plan step @p request was copied from), because a field is addressed
  * by its position in the walk.
  *
- * Fails for a column @p row does not carry, a column whose cell is `null`, two
+ * Fails for a column @p row does not carry, a column whose cell is `null`, a
+ * cell whose value would end the header line it is bound into, two
  * header names that bound to one name, and a token placed where an `xml` body
  * has no encoding that would keep the document meaning what it says - inside a
  * comment or a processing instruction. That last one fails for every row alike,
@@ -240,6 +252,12 @@ size_t row_index);
  * (base64 for basic auth, percent-encoding for an api key in the query) is
  * `apply_auth`'s to add *after* the bind - which is the whole point of binding
  * before the auth is applied.
+ *
+ * Verbatim is not unchecked: a credential `apply_auth` writes into a header
+ * line takes the header rule above, so a cell holding a CR or LF is refused
+ * there too. `walk_auth_credentials` says which credential that is, per
+ * `http::CredentialDestination`, because the destination is a property of the
+ * auth mode rather than of the string.
  *
  * Empty for the ordinary step, whose credentials carry no token and whose auth
  * is therefore resolved into the plan once, as it always was.

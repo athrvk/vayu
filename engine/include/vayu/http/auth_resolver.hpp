@@ -10,6 +10,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -58,6 +59,25 @@ UnsupportedAuth>;
 Auth parse_auth (const nlohmann::json& auth);
 
 /**
+ * @brief Where a credential ends up once `apply_auth` has written it.
+ *
+ * A bind rule can depend on this - a value written into a header line must not
+ * carry the CR or LF that would end the line (issue #732) - and this walk is
+ * the only place that knows which credential is which, because the destination
+ * is a property of the *mode* rather than of the string. Saying it here is what
+ * stops each caller from re-deriving it from the variant and drifting.
+ */
+enum class CredentialDestination : std::uint8_t {
+    /// Written into a header line as it stands: a bearer token, and both halves
+    /// of an api key sent in a header.
+    HeaderLine,
+    /// Encoded before it reaches the wire, so no byte of it can end a line or a
+    /// field: basic auth's pair (base64) and an api key sent as a query
+    /// parameter (percent-encoded).
+    Encoded,
+};
+
+/**
  * @brief Visit every credential string a parsed auth carries, in a fixed order.
  *
  * The fields a user types a secret into, and so the fields a `{{data.column}}`
@@ -67,6 +87,8 @@ Auth parse_auth (const nlohmann::json& auth);
  * here as well, through the same static_assert.
  *
  * `@p auth` may be `const`; the visitor then receives `const std::string&`.
+ * Each credential is visited with the @ref CredentialDestination it is headed
+ * for, so a caller whose rule depends on that reads it rather than deducing it.
  *
  * **OAuth 2.0 is deliberately absent.** Its config is not a credential the
  * request carries but the input to a token acquisition that happens once, when
@@ -81,13 +103,18 @@ void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
         using T = std::decay_t<decltype (a)>;
 
         if constexpr (std::is_same_v<T, BearerAuth>) {
-            visit (a.token);
+            visit (a.token, CredentialDestination::HeaderLine);
         } else if constexpr (std::is_same_v<T, BasicAuth>) {
-            visit (a.username);
-            visit (a.password);
+            // Collapsed into one base64 `Authorization` value by `apply_auth`.
+            visit (a.username, CredentialDestination::Encoded);
+            visit (a.password, CredentialDestination::Encoded);
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
-            visit (a.key);
-            visit (a.value);
+            // Both halves go the same way: a header line, or a percent-encoded
+            // query parameter.
+            const CredentialDestination destination =
+            a.in_query ? CredentialDestination::Encoded : CredentialDestination::HeaderLine;
+            visit (a.key, destination);
+            visit (a.value, destination);
         } else if constexpr (std::is_same_v<T, NoAuth> || std::is_same_v<T, OAuth2Auth>) {
             // Nothing to bind: no credential at all, and an oauth2 config is
             // handled where it is refused rather than here.

@@ -3360,6 +3360,19 @@ columns the row does have. Substituting an empty string would send a request
 quietly pointing somewhere else, which is the failure this namespace exists to
 remove.
 
+A cell carrying a **CR or LF bound into a header** errors the same way. A
+header line ends at CRLF, so a cell holding `ok\r\nX-Admin: true` does not put
+that text in the header - it ends the header and makes the remainder a header of
+its own, forged by the data file. There is no escape for a line break in a
+header the way there is for a quote in a JSON body, so the row is refused rather
+than encoded around, naming the token and the row. The rule covers a header
+name, a header value, and a credential written into a header line (a bearer
+token, an api key sent in a header); basic auth's pair and an api key sent in
+the query are base64- and percent-encoded before they reach the wire, so they
+bind unchanged. JSON and JSONL rows keep native strings - there is no CSV
+grammar to have stripped the newline - so this is an ordinary cell, not an
+exotic one.
+
 **Two headers that bind to one name** error the same way. `X-{{data.h}}`
 resolving to `authorization` beside a literal `Authorization`, or two templated
 names resolving alike, would leave the request carrying one of the two - so the

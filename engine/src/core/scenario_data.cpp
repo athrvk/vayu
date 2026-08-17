@@ -40,10 +40,15 @@ std::string token_for (const std::string& column) {
     return "{{" + std::string (vayu::http::DATA_NAMESPACE_PREFIX) + column + "}}";
 }
 
-/// What kind of text a visited field is, for the one rule that depends on it.
+/// What kind of text a visited field is, for the rules that depend on it.
 enum class FieldContext : std::uint8_t {
-    /// A URL, a header, a form field, a text body: no quoting rule of its own.
+    /// A URL, a form field, a text body: no quoting rule of its own.
     Plain,
+    /// A header name or value, or a credential `apply_auth` writes into a
+    /// header line. Plain text like @ref Plain - a header has no quoting rule -
+    /// except that a CR or LF in a bound value ends the line rather than
+    /// sitting in it, so the join refuses one (issue #732).
+    Header,
     /// A body whose text is a JSON document, so a token may land inside a
     /// string literal and has to be escaped when it does.
     JsonDocument,
@@ -124,8 +129,8 @@ std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Vis
         for (const auto& [name, value] : request.headers) {
             std::string bound_name  = name;
             std::string bound_value = value;
-            visit (bound_name, FieldContext::Plain);
-            visit (bound_value, FieldContext::Plain);
+            visit (bound_name, FieldContext::Header);
+            visit (bound_value, FieldContext::Header);
             // A plain `emplace` is first-wins and silent, and a dropped header
             // is exactly the quiet wrong request this namespace exists to
             // remove - worse than most, because the collision belongs to the
@@ -169,6 +174,41 @@ std::string describe_header_collision (const HeaderCollision& collision, size_t 
     "\", which another header of this request already resolves to - one of the "
     "two would be dropped, so the row is refused rather than sent with a "
     "header missing";
+}
+
+/// Which `FieldContext` a credential headed for @p destination binds under.
+FieldContext credential_context (vayu::http::CredentialDestination destination) {
+    return destination == vayu::http::CredentialDestination::HeaderLine ?
+    FieldContext::Header :
+    FieldContext::Plain;
+}
+
+/**
+ * The refusal a value that would end the header line it is bound into reads as.
+ *
+ * A header line is `Key: value` terminated by CRLF, so a cell carrying either
+ * byte does not sit in the header - it ends it, and whatever follows is read as
+ * a header of its own. JSON and JSONL rows reach the binder as native strings,
+ * with no CSV grammar to have stripped a newline on the way in, so this is an
+ * ordinary cell rather than an exotic one.
+ *
+ * A refusal rather than an encoding, for the reason an XML comment is one: a
+ * header value has no escape for a line break, so every candidate encoding
+ * either changes the value or leaves the line ended. Stripping the bytes would
+ * be the quiet wrong request this namespace exists to remove - the header would
+ * arrive holding something the file does not say.
+ */
+std::string describe_header_line_break (const std::string& column, size_t row_index) {
+    return token_for (column) + " is bound into a header, and data row " +
+    std::to_string (row_index) +
+    " has a line break in that column - a CR or LF ends the header line rather "
+    "than sitting in it, so the rest of the value would be read as headers of "
+    "its own; the row is refused rather than sent forging a header";
+}
+
+/// Whether @p value carries a byte that ends the header line it is written into.
+bool ends_a_header_line (std::string_view value) {
+    return value.find_first_of ("\r\n") != std::string_view::npos;
 }
 
 /**
@@ -595,7 +635,7 @@ class TemplateJoiner {
     : template_ (tmpl), row_ (row), row_index_ (row_index) {
     }
 
-    void operator() (std::string& field, FieldContext /*context*/) {
+    void operator() (std::string& field, FieldContext context) {
         const size_t position = next_field_++;
         // The templates are in ascending walk order, so one cursor finds them
         // all without searching - every field between two of them is untouched.
@@ -640,7 +680,18 @@ class TemplateJoiner {
                 std::to_string (row_index_) + " - a data token substitutes a value, and this row has none for it";
                 return;
             }
-            out += encode_data_value (*cell, entry.encodings[i]);
+            std::string encoded = encode_data_value (*cell, entry.encodings[i]);
+            // Checked on the encoded text rather than the cell, because that is
+            // what the field ends up holding - and only in a header, where a
+            // line break is a line terminator. Everywhere else the same bytes
+            // are ordinary content: a JSON body escapes them, and a URL, a form
+            // field or a text body carries them as the cell wrote them.
+            if (context == FieldContext::Header && ends_a_header_line (encoded)) {
+                result_.ok = false;
+                result_.error = describe_header_line_break (entry.columns[i], row_index_);
+                return;
+            }
+            out += encoded;
             out += entry.literals[i + 1];
         }
         field = std::move (out);
@@ -696,8 +747,9 @@ StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
 
 StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth) {
     FieldSplitter splitter;
-    vayu::http::walk_auth_credentials (auth, [&splitter] (const std::string& field) {
-        splitter (field, FieldContext::Plain);
+    vayu::http::walk_auth_credentials (auth,
+    [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
+        splitter (field, credential_context (destination));
     });
     return splitter.take ();
 }
@@ -710,8 +762,14 @@ size_t row_index) {
         return DataBindResult{ true, {} };
     }
     TemplateJoiner joiner (tmpl, row, row_index);
+    // A bearer token and an api key sent in a header are header text, so a line
+    // break in the cell behind one forges a header exactly as it would in
+    // `request.headers` - the walk says which credential is which so this does
+    // not have to re-read the mode (issue #732).
     vayu::http::walk_auth_credentials (auth,
-    [&joiner] (std::string& field) { joiner (field, FieldContext::Plain); });
+    [&joiner] (std::string& field, vayu::http::CredentialDestination destination) {
+        joiner (field, credential_context (destination));
+    });
     return joiner.result ();
 }
 

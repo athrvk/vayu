@@ -161,6 +161,18 @@ Nothing else is escaped: a URL, a header, a form field and a plain-text body
 take the cell byte for byte - including a `text` body that happens to hold XML,
 because the mode you picked is what decides the rule.
 
+A **header** is the one of those with a limit. A header line ends at a line
+break, so a cell holding `ok` followed by a newline and `X-Admin: true` would
+not put that text in the header - it would end the header and send the rest as a
+header of its own, which is a request your file never described. There is no
+escape for a line break in a header, so the row is **refused**, naming the token
+and the row. It applies to a header name, a header value, and a credential that
+goes into a header line - a bearer token, or an api key sent in a header. Basic
+auth's username and password are base64-encoded and an api key sent in the query
+is percent-encoded, so a line break in either is harmless and binds as written.
+A JSON or JSONL file is where this turns up: those keep the cell as the string
+it is, while the CSV grammar has no way to carry a raw newline into one.
+
 ## How many iterations, and which row
 
 **One iteration per row** by default: leave Iterations empty and the row count
