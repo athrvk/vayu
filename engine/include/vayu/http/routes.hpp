@@ -763,11 +763,14 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row);
  * client already reads: `testResults`, `consoleLogs`, `preScriptError` and
  * `postScriptError`.
  *
- * One builder for two homes. A buffered send merges it into the `/execute`
- * response body; a streaming send has already answered `202`, so it stores the
- * same object in its trace (`StreamRecord::scripts`) and the app reads it back
- * from there. Building it twice is how the live pane and the restored one would
- * come to disagree about what a failed assertion looks like.
+ * One object, two homes - and every design send now uses both (issue #725). A
+ * buffered send merges it into the `/execute` response body *and* hands the
+ * same object to `record_design_result`; a streaming send has already answered
+ * `202`, so the trace is the only route it takes. Building it twice, or storing
+ * it on one transport only, is how the live pane and the restored one come to
+ * disagree about what a failed assertion looks like - the buffered half
+ * disagreed by omission until #725, and a restored Tests tab could not tell
+ * "passed" from "never ran".
  *
  * Each key is present only when it has something to say, so a request with no
  * scripts contributes an empty object and stores nothing.
@@ -788,17 +791,6 @@ const vayu::ScriptResult& post_script_result);
 struct StreamRecord {
     /// The bounded `events` node, from `stream_trace_node`.
     nlohmann::json events;
-    /**
-     * What the run's scripts produced, from `build_script_result_node`, or null
-     * when the request carried none (issue #575).
-     *
-     * Stored rather than returned, because there is nobody left to return it
-     * to: the route answered `202` the moment the stream started, so a
-     * streaming run's test results reach the app the same way its events do -
-     * through the trace. `restore-response.ts` maps this node onto the response
-     * pane's existing Tests and Console panes.
-     */
-    nlohmann::json scripts;
     /// The run's terminal status. A stream that was stopped is `Stopped`, which
     /// is neither the `Completed` nor the `Failed` the response alone implies.
     vayu::RunStatus status = vayu::RunStatus::Completed;
@@ -819,13 +811,22 @@ struct StreamRecord {
  *        stored verbatim on the trace. `std::nullopt` writes no node, which is
  *        what an unbound collection - and a stream, whose body is an event
  *        stream rather than a document any response schema describes - means.
+ * @param scripts What this send's scripts produced, from
+ *        `build_script_result_node` - the *same* object the buffered path also
+ *        returns in its `/execute` body (issue #725). A property of the
+ *        execution rather than of the transport, which is why it is a parameter
+ *        here and not a `StreamRecord` field: a send whose results were stored
+ *        only when it happened to stream is how a restored Tests tab came to be
+ *        empty for every ordinary send. An empty object writes no node, so a
+ *        request with no scripts stores nothing.
  */
 void record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
-const StreamRecord* stream                                        = nullptr,
-const std::optional<vayu::core::ValidationVerdict>& validation = std::nullopt);
+const StreamRecord* stream                                     = nullptr,
+const std::optional<vayu::core::ValidationVerdict>& validation = std::nullopt,
+const nlohmann::json& scripts = nlohmann::json::object ());
 
 /**
  * @brief Callback type for graceful shutdown
