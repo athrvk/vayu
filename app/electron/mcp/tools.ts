@@ -80,6 +80,12 @@ export const MCP_DATA_ENTITIES = [
 	"run",
 	"cookie",
 	"config",
+	// The local services the engine hosts for as long as its process lives -
+	// webhook inboxes today, mock servers and issuers as #757 reaches them. One
+	// family rather than one per service: the renderer reads them through the
+	// Services drawer and the Dock's running-services count, which ask "what is
+	// listening" and not "which kind".
+	"service",
 ] as const;
 
 export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
@@ -107,6 +113,17 @@ export interface McpDataChangedEvent {
 	 * collection it ran, and the run it created has no per-run cache yet.
 	 */
 	runId?: string;
+	/**
+	 * The webhook inbox the call named, when it named one. Only the tools that
+	 * act on an *existing* inbox spell it (`stop_webhook_inbox`,
+	 * `delete_webhook_inbox`, `clear_inbox_captures`, `update_inbox_response`);
+	 * `start_webhook_inbox` has no id to name until the engine has answered.
+	 *
+	 * The renderer needs it because a capture list is not merely stale after a
+	 * clear or a delete - it is *wrong*, and its cache entry has to be dropped
+	 * rather than refetched into (see `lib/mcp-invalidation.ts`).
+	 */
+	inboxId?: string;
 }
 
 export interface ToolContext {
@@ -549,6 +566,24 @@ function describeRun(runId: string, run: Record<string, unknown>): string {
 }
 
 /**
+ * A webhook inbox named in words, for the prompt that asks a human to delete it.
+ *
+ * The capture count is the part that has to be there: a stopped inbox holding
+ * 40 recorded webhooks and one holding none are the same call with very
+ * different consequences, and only this sentence tells them apart. It is stated
+ * even at zero, because "captures 0 requests" is the reassurance that makes the
+ * prompt answerable - an absent count reads as unknown, not as none.
+ */
+function describeInbox(inboxId: string, inbox: Record<string, unknown>): string {
+	const parts: string[] = [];
+	if (typeof inbox.url === "string" && inbox.url !== "") parts.push(inbox.url);
+	parts.push(inbox.running === true ? "running" : "stopped");
+	const captures = typeof inbox.captureCount === "number" ? inbox.captureCount : 0;
+	parts.push(`${captures} captured request${captures === 1 ? "" : "s"}`);
+	return `the webhook inbox ${inboxId} (${parts.join(", ")})`;
+}
+
+/**
  * The `GET /runs` query a `list_runs` call describes.
  *
  * Only the filters the caller actually stated travel. An omitted one must not
@@ -574,15 +609,25 @@ function runListQuery(args: Record<string, unknown>): RunListQuery {
  * A paginated engine read whose result says what it left behind.
  * {@link callEngine} with a `shape` cannot do this: the caveat is text beside
  * the JSON, not a rewrite of it.
+ *
+ * `shape` is the same seam {@link callEngine} offers, and it runs before the
+ * caveat is computed - a page whose rows carry bodies is bounded here, and the
+ * caveat still describes the page the engine answered rather than the cut one
+ * (it reads `pagination`, which a body bound does not touch).
  */
-async function pagedRead(fn: () => Promise<unknown>, noun: string): Promise<ToolResult> {
+async function pagedRead(
+	fn: () => Promise<unknown>,
+	noun: string,
+	shape?: (value: unknown) => unknown
+): Promise<ToolResult> {
 	let answer: unknown;
 	try {
 		answer = await fn();
 	} catch (err) {
 		return engineErrorResult(err);
 	}
-	return withCaveat(jsonResult(answer), pageCaveat(answer, noun));
+	const caveat = pageCaveat(answer, noun);
+	return withCaveat(jsonResult(shape ? shape(answer) : answer), caveat);
 }
 
 /** Result that carries both a text rendering and structured content. */
@@ -2087,6 +2132,80 @@ function mockIssuerStartPayload(args: Record<string, unknown>): Record<string, u
 		if (args[key] !== undefined) payload[key] = args[key];
 	}
 	return payload;
+}
+
+// --- Webhook inbox -----------------------------------------------------------
+
+/**
+ * The canned-response fields `POST /inbox/start` and `PUT /inbox/:id` read
+ * (`apply_response_fields`, engine/src/http/routes/inbox.cpp). Both routes take
+ * the same block - start applies it to the defaults, the PUT merge-patches the
+ * live one - so one list serves both payload builders.
+ */
+const INBOX_RESPONSE_KEYS = ["status", "body", "headers", "delayMs"] as const;
+
+/**
+ * The canned response a call described, carrying only the fields it named.
+ *
+ * An omitted field must stay omitted rather than travel as `null`: the PUT is a
+ * merge-patch, so a spelled-out `null` would be the caller saying "reset this"
+ * where they said nothing at all. Bounds (a 100-599 status, a delay under 30s)
+ * are the engine's and come back as a `400` naming them - the schema owns the
+ * shape, the same division `mockIssuerStartPayload` documents.
+ */
+function inboxResponsePayload(response: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const key of INBOX_RESPONSE_KEYS) {
+		if (response[key] !== undefined) out[key] = response[key];
+	}
+	return out;
+}
+
+/**
+ * The `POST /inbox/start` body for a `start_webhook_inbox` call.
+ *
+ * **`bind` and `confirmNonLoopback` are never emitted**, whatever the arguments
+ * carry. Binding a listener to a routable interface exposes it beyond this
+ * machine, which epic #753 records as a non-goal for every MCP-hosted service -
+ * so the guarantee lives here, in the one function that builds the body, rather
+ * than in a schema an agent could be tempted to route around. With no `bind`
+ * the engine uses its loopback default, and its non-loopback refusal never
+ * comes into play.
+ */
+function inboxStartPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload: Record<string, unknown> = {};
+	if (typeof args.port === "number") payload.port = args.port;
+	if (isRecord(args.response)) payload.response = inboxResponsePayload(args.response);
+	return payload;
+}
+
+/**
+ * Default page for `get_inbox_captures` - the same 25 `get_run_samples` uses
+ * and for the same reason: a capture is a whole recorded request, body
+ * included, so a page is measured in bodies rather than rows.
+ *
+ * The ceiling is this side's, not the engine's. `GET /inbox/:id/requests`
+ * clamps to the inbox's retention (500 by default, up to 10000 with
+ * `inboxMaxCaptures` raised), and a capture body is bounded by
+ * `inboxMaxBodyBytes` - 64 KB by default and configurable to 8 MB - so the
+ * engine's own bound says nothing about what a tool result can carry. 100 rows
+ * of bounded body is the largest page worth handing an agent; more is `offset`.
+ */
+export const DEFAULT_INBOX_CAPTURE_LIMIT = 25;
+export const MAX_INBOX_CAPTURE_LIMIT = 100;
+
+/**
+ * Bound the bodies in one capture page.
+ *
+ * A capture carries the engine's own `body` / `bodyTruncated` / `bodyBytes`
+ * disclosure trio - the shape {@link boundTraceNode} already speaks - so the
+ * page is bounded by the same function rather than by a copy of it: a webhook
+ * posting a 6 MB payload is exactly the #767 case, and the cut has to leave
+ * `bodyBytes` alone where the engine already recorded the true original size.
+ */
+function boundInboxCaptures(value: unknown): unknown {
+	if (!isRecord(value) || !Array.isArray(value.data)) return value;
+	return { ...value, data: value.data.map(boundTraceNode) };
 }
 
 // --- Tool definitions --------------------------------------------------------
@@ -3748,11 +3867,10 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "start_mock_issuer",
 		category: "execute",
-		// Nothing in the renderer reads issuers today (`rg -i issuer app/src` is
-		// empty), so there is no entity to invalidate: an `McpDataEntity` with no
-		// reader is the written-never-read defect that field exists to prevent.
-		// #502 adds the Services drawer that lists them - when it lands, an
-		// "issuer" entity belongs here and on its query.
+		// #502's Services drawer now reads the issuer list, and #756 added the
+		// `service` entity these belong on - but wiring the issuer tools to it,
+		// and to the mock-server tools beside them, is #757's half of the epic.
+		// Until then the drawer's poll is what shows an MCP-started issuer.
 		invalidates: [],
 		description:
 			"Start a local OAuth 2.0 mock issuer and return its id, token URL, authorize URL and signing key. Use it to test an auth flow offline: start an issuer, point a request's oauth2 auth at the returned tokenUrl, run it with run_request, and assert on what the target received - no real identity provider, so no 2FA prompts, provider rate limits or account lockouts in the loop. It needs no allowlist entry: the engine binds every issuer to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. The access token is an HS256 JWT signed with the returned signingKey - hand that key to the service under test and it can verify the mock's tokens. Set a short expiresInSeconds (with issueRefreshTokens) to exercise the 401-then-refresh path, and failureMode to exercise retry handling. At most 8 issuers run at once; stop yours with stop_mock_issuer when you are done.",
@@ -3841,7 +3959,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "stop_mock_issuer",
 		category: "execute",
-		// See start_mock_issuer - no renderer reader yet, #502 adds one.
+		// See start_mock_issuer - the `service` entity is #757's to take here.
 		invalidates: [],
 		description:
 			"Stop a running OAuth 2.0 mock issuer and free its port. Tokens it already minted stay valid until they expire - nothing verifies them against the issuer once it is gone. An unknown id is an error, not a silent success.",
@@ -3857,6 +3975,277 @@ export const TOOLS: McpTool[] = [
 		},
 		handler: (args, ctx, signal) =>
 			callEngine(() => ctx.client.stopMockIssuer(requireStr(args, "issuerId"), signal)),
+	},
+	{
+		name: "start_webhook_inbox",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Start a local webhook inbox and return its id and URL. It records every request sent to it - method, path, query, headers, body, caller address - so an agent can point a webhook at the URL, trigger it, and then assert on what actually arrived with get_inbox_captures. It needs no allowlist entry: the inbox listens on this machine's loopback interface only, which MCP does not let you change, so it is unreachable from off the machine. Give it a canned `response` to make the sender see a specific status, body, headers or delay - the reply every captured request gets, changeable later with update_inbox_response. Stop it with stop_webhook_inbox when you are done (the captures survive a stop), or delete_webhook_inbox to remove it and them.",
+		annotations: {
+			title: "Start webhook inbox",
+			readOnlyHint: false,
+			// It binds a loopback listener and records what arrives: it destroys
+			// no saved data and reaches nothing off the machine.
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			port: z
+				.number()
+				.int()
+				.min(0)
+				.max(65535)
+				.optional()
+				.describe(
+					"Port to listen on, on this machine's loopback interface. Default 0 - the engine picks a free one. The interface itself is not configurable over MCP."
+				),
+			response: z
+				.object({
+					status: z
+						.number()
+						.int()
+						.min(100)
+						.max(599)
+						.optional()
+						.describe("Status code the inbox answers with (default 200)."),
+					body: z.string().optional().describe("Response body the inbox answers with."),
+					headers: z
+						.record(z.string())
+						.optional()
+						.describe(
+							'Response headers, e.g. {"Content-Type": "application/json"}. Replaces the current set rather than merging into it.'
+						),
+					delayMs: z
+						.number()
+						.int()
+						.nonnegative()
+						.optional()
+						.describe(
+							"Milliseconds to wait before answering, for testing a sender's timeout handling. The engine caps this at 30000."
+						),
+				})
+				.optional()
+				.describe(
+					"The canned reply every request to this inbox receives. Omit for the engine's default (200, empty body)."
+				),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.startInbox(inboxStartPayload(args), signal)),
+	},
+	{
+		name: "list_webhook_inboxes",
+		category: "read",
+		invalidates: [],
+		description:
+			"List the webhook inboxes this engine has started, running and stopped alike, each with its id, URL, port, whether it is still listening, how many requests it has captured, and its canned response. A stopped inbox stays listed with its captures readable until it is deleted, so this is also how to find an inbox started earlier in the session.",
+		annotations: {
+			title: "List webhook inboxes",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listInboxes(signal)),
+	},
+	{
+		name: "stop_webhook_inbox",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Stop a webhook inbox's listener and free its port. This is NOT a delete: the inbox stays listed and everything it captured stays readable with get_inbox_captures - use delete_webhook_inbox to remove the record and its captures. Requests sent to the URL after this are refused by the machine, not recorded. An unknown id is an error, not a silent success.",
+		annotations: {
+			title: "Stop webhook inbox",
+			readOnlyHint: false,
+			// Nothing recorded is lost - the captures outlive the listener.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			inboxId: z.string().describe("Inbox ID to stop (from start_webhook_inbox)."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.stopInbox(requireStr(args, "inboxId"), signal)),
+	},
+	{
+		name: "delete_webhook_inbox",
+		category: "write",
+		invalidates: ["service"],
+		description:
+			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation - if the client supports elicitation the user is prompted with how many captures go with it, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and the captures are the part that cannot be recreated. To keep them, use stop_webhook_inbox instead.",
+		annotations: {
+			title: "Delete webhook inbox",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			inboxId: z.string().describe("Inbox ID to delete."),
+			confirmed: confirmedInput("actually delete the inbox and its captures"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const inboxId = requireStr(args, "inboxId");
+			// Read the list first so the prompt states the real capture count and
+			// the URL, not an id - the same read-before-prompt `delete_collection`
+			// and `delete_run` do. `GET /inbox` is the only read that answers for
+			// a single inbox: the engine has no `GET /inbox/:id`.
+			let inbox: Record<string, unknown>;
+			try {
+				const listed = await ctx.client.listInboxes(signal);
+				const rows = isRecord(listed) && Array.isArray(listed.data) ? listed.data : [];
+				const found = rows.find((row) => isRecord(row) && row.inboxId === inboxId);
+				if (!isRecord(found)) return errorResult(`No webhook inbox with id "${inboxId}".`);
+				inbox = found;
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const subject = describeInbox(inboxId, inbox);
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete ${subject}?\n\nEverything it captured is destroyed with it. This cannot be undone.`,
+				acceptTitle: "Delete the inbox",
+				acceptDescription: "Confirm to delete this inbox and every request it captured.",
+				declined: "Inbox not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`This would delete ${subject}, along with every request it captured. This cannot be undone; stop_webhook_inbox frees the port and keeps them.\n\n` +
+					"This is a preview. To delete it, call delete_webhook_inbox again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			return callEngine(() => ctx.client.deleteInbox(inboxId, signal));
+		},
+	},
+	{
+		name: "get_inbox_captures",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
+			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender.`,
+		annotations: {
+			title: "Get inbox captures",
+			readOnlyHint: true,
+			// The newest-first page moves as captures arrive, exactly as
+			// `get_live_metrics` does - the same reason that one is not idempotent.
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			inboxId: z.string().describe("Inbox ID whose captures to read."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_INBOX_CAPTURE_LIMIT)
+				.optional()
+				.describe(
+					`How many captures to return (default ${DEFAULT_INBOX_CAPTURE_LIMIT}, max ${MAX_INBOX_CAPTURE_LIMIT}).`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many captures to skip, for paging (default 0)."),
+		},
+		handler: (args, ctx, signal) => {
+			const inboxId = requireStr(args, "inboxId");
+			const limit = optionalPageLimit(
+				args,
+				"limit",
+				DEFAULT_INBOX_CAPTURE_LIMIT,
+				MAX_INBOX_CAPTURE_LIMIT
+			);
+			const offset = optionalOffset(args, "offset");
+			return pagedRead(
+				() => ctx.client.getInboxCaptures(inboxId, limit, offset, signal),
+				"captures",
+				boundInboxCaptures
+			);
+		},
+	},
+	{
+		name: "clear_inbox_captures",
+		category: "write",
+		invalidates: ["service"],
+		description:
+			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. GUARDED: requires write access to be enabled in Vayu Settings; unlike delete_webhook_inbox it needs no confirmation, because the inbox survives and the next trigger records again. The captures themselves do not come back.",
+		annotations: {
+			title: "Clear inbox captures",
+			readOnlyHint: false,
+			// It destroys recorded data, which is what this hint is for - the
+			// listener surviving does not make the captures recoverable.
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			inboxId: z.string().describe("Inbox ID whose captures to clear."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const inboxId = requireStr(args, "inboxId");
+			return callEngine(() => ctx.client.clearInboxCaptures(inboxId, signal));
+		},
+	},
+	{
+		name: "update_inbox_response",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Change what a running webhook inbox answers, live: status, body, headers or delay. The next request to arrive gets the new reply - nothing restarts and no captures are lost - so one inbox can answer 200 for the first trigger and 500 for the next, which is how a sender's retry or error handling gets exercised. This is a merge-patch: fields you omit keep their current value, and `headers` replaces the whole header set rather than merging into it.",
+		annotations: {
+			title: "Update inbox response",
+			readOnlyHint: false,
+			// It rewrites the canned reply of a listener and destroys nothing;
+			// calling it again with the same block is a no-op.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			inboxId: z.string().describe("Inbox ID whose canned response to change."),
+			status: z
+				.number()
+				.int()
+				.min(100)
+				.max(599)
+				.optional()
+				.describe("New status code. Omit to leave it unchanged."),
+			body: z.string().optional().describe("New response body. Omit to leave it unchanged."),
+			headers: z
+				.record(z.string())
+				.optional()
+				.describe(
+					"New response header set, replacing the current one entirely. Omit to leave it unchanged."
+				),
+			delayMs: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe(
+					"New delay before answering, in milliseconds (engine cap 30000). Omit to leave it unchanged."
+				),
+		},
+		handler: (args, ctx, signal) => {
+			const inboxId = requireStr(args, "inboxId");
+			const response = inboxResponsePayload(args);
+			if (Object.keys(response).length === 0) {
+				// An empty merge-patch is accepted by the engine and changes
+				// nothing, which would report success for a call that did not do
+				// what it was asked. Say which fields exist instead.
+				throw new ToolArgError(
+					'Name at least one of "status", "body", "headers" or "delayMs" to change.'
+				);
+			}
+			return callEngine(() => ctx.client.updateInboxResponse(inboxId, response, signal));
+		},
 	},
 ];
 
@@ -3929,6 +4318,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 	const collectionId = str(args, "collectionId");
 	const requestId = str(args, "requestId");
 	const runId = str(args, "runId");
+	const inboxId = str(args, "inboxId");
 	for (const entity of tool.invalidates) {
 		try {
 			ctx.onDataChanged({
@@ -3936,6 +4326,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 				...(collectionId !== undefined ? { collectionId } : {}),
 				...(requestId !== undefined ? { requestId } : {}),
 				...(runId !== undefined ? { runId } : {}),
+				...(inboxId !== undefined ? { inboxId } : {}),
 			});
 		} catch (err) {
 			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);

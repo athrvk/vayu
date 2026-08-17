@@ -166,6 +166,41 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toEqual([queryKeys.config.all]);
 	});
 
+	test("a service change invalidates the inbox list", () => {
+		const { handled, keys } = keysFor({ entity: "service" });
+		expect(handled).toBe(true);
+		expect(keys).toEqual([queryKeys.inbox.list()]);
+	});
+
+	test("a named inbox has its captures removed, not merely invalidated", () => {
+		// `useInboxCapturesQuery` merges a fetched page into what the cache holds,
+		// so an invalidation after a clear or a delete would union the destroyed
+		// rows straight back. Removal is what makes the refetch start from empty.
+		const { keys, removed } = keysFor({ entity: "service", inboxId: "inbox_1" });
+		expect(keys).toEqual([queryKeys.inbox.list()]);
+		expect(removed).toEqual([queryKeys.inbox.captures("inbox_1")]);
+	});
+
+	test("a service event that named no inbox leaves every capture list alone", () => {
+		const { removed } = keysFor({ entity: "service" });
+		expect(removed).toEqual([]);
+	});
+
+	test("cleared captures really are gone from a live cache", () => {
+		// Against a real QueryClient, since the point is the effect: another
+		// inbox's captures must survive, and the named one's must not.
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(queryKeys.inbox.captures("inbox_1"), { data: [{ id: 1 }] });
+		queryClient.setQueryData(queryKeys.inbox.captures("inbox_2"), { data: [{ id: 2 }] });
+
+		invalidateForMcpEvent(queryClient, { entity: "service", inboxId: "inbox_1" });
+
+		expect(queryClient.getQueryData(queryKeys.inbox.captures("inbox_1"))).toBeUndefined();
+		expect(queryClient.getQueryData(queryKeys.inbox.captures("inbox_2"))).toEqual({
+			data: [{ id: 2 }],
+		});
+	});
+
 	test("an unknown entity is reported, not thrown", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const { handled, keys } = keysFor({

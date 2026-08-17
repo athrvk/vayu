@@ -47,6 +47,16 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getRun: vi.fn().mockResolvedValue({ id: "run_1", type: "load", status: "completed" }),
 		deleteRun: vi.fn().mockResolvedValue({ message: "Run deleted successfully" }),
 		setRunBaseline: vi.fn().mockResolvedValue({ id: "run_1", baseline: true }),
+		startInbox: vi
+			.fn()
+			.mockResolvedValue({ inboxId: "inbox_1", url: "http://127.0.0.1:45001" }),
+		listInboxes: vi.fn().mockResolvedValue({
+			data: [{ inboxId: "inbox_1", url: "http://127.0.0.1:45001", captureCount: 2 }],
+		}),
+		stopInbox: vi.fn().mockResolvedValue({ inboxId: "inbox_1", running: false }),
+		deleteInbox: vi.fn().mockResolvedValue({ inboxId: "inbox_1", capturesDeleted: 2 }),
+		clearInboxCaptures: vi.fn().mockResolvedValue({ inboxId: "inbox_1", cleared: 2 }),
+		updateInboxResponse: vi.fn().mockResolvedValue({ inboxId: "inbox_1" }),
 		composeRequest: vi
 			.fn()
 			.mockImplementation((body: { request?: object }) =>
@@ -109,6 +119,14 @@ describe("the registry declares its effects", () => {
 			// lists, so both invalidate `run` exactly as the runners do.
 			set_run_baseline: ["run"],
 			delete_run: ["run"],
+			// Webhook inboxes (#756): every one of these changes what the Services
+			// drawer and the Dock's running-services count answer, and the two
+			// that touch captures change what an open inbox tab is showing.
+			start_webhook_inbox: ["service"],
+			stop_webhook_inbox: ["service"],
+			delete_webhook_inbox: ["service"],
+			clear_inbox_captures: ["service"],
+			update_inbox_response: ["service"],
 		};
 		for (const [name, entities] of Object.entries(expected)) {
 			const tool = TOOLS.find((t) => t.name === name);
@@ -330,6 +348,32 @@ describe("dispatch emits mcp:data-changed", () => {
 		// With the hint, because a stopped run's own report and series are what
 		// changed - it went terminal.
 		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run", runId: "run_1" });
+	});
+
+	test("an inbox call names the inbox it acted on, so the captures cache can be dropped", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("clear_inbox_captures", { inboxId: "inbox_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		// The hint is what makes a clear correct renderer-side: an invalidation
+		// alone refetches into a cache that still holds the cleared rows and
+		// unions them straight back (see `lib/mcp-invalidation.ts`).
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service", inboxId: "inbox_1" });
+	});
+
+	test("starting an inbox reports the family with no id to narrow by", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("start_webhook_inbox", { port: 0 }, ctx);
+		expect(res.isError).toBeFalsy();
+		// The engine assigns the id, so there is none in the arguments - and a new
+		// inbox has no capture cache to drop anyway.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service" });
+	});
+
+	test("an unconfirmed inbox delete emits nothing - nothing changed", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("delete_webhook_inbox", { inboxId: "inbox_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 
 	test("a context without a notifier dispatches normally", async () => {
