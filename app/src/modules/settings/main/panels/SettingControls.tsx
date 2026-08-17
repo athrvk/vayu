@@ -15,7 +15,17 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { CheckCircle2 } from "lucide-react";
-import { Button, Input, Switch, Label } from "@/components/ui";
+import {
+	Button,
+	Input,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	Switch,
+	Label,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export interface OptionButtonItem<T> {
@@ -136,6 +146,7 @@ export function ToggleRow({
 	className,
 }: ToggleRowProps) {
 	const name = ariaLabel ?? (typeof label === "string" ? label : undefined);
+	const switchId = useId();
 	return (
 		// `data-setting-row` names the row's box from the same string the switch
 		// is named by, as on {@link NumberSettingRow} - one writer, so a consumer
@@ -147,7 +158,14 @@ export function ToggleRow({
 		>
 			<div className="min-w-0">
 				{typeof label === "string" ? (
-					<Label className="text-sm font-medium">{label}</Label>
+					// `htmlFor` so clicking the words toggles the switch: a Radix
+					// Switch is a <button>, which is a labelable element, so the
+					// association is real rather than decorative. The aria-label
+					// below still names it - a node label (the MCP rows' counts
+					// and <code> spans) has no text for the association to use.
+					<Label htmlFor={switchId} className="text-sm font-medium">
+						{label}
+					</Label>
 				) : (
 					label
 				)}
@@ -156,12 +174,13 @@ export function ToggleRow({
 				)}
 			</div>
 			{/*
-			 * The visible <Label> is not associated with this control (Radix
+			 * The visible <Label> does not name this control on its own (Radix
 			 * renders a button, not an input), so without aria-label the switch
 			 * announced as an unnamed toggle. Naming it here fixes every
 			 * ToggleRow at once.
 			 */}
 			<Switch
+				id={switchId}
 				checked={checked}
 				onCheckedChange={onChange}
 				disabled={disabled}
@@ -169,6 +188,77 @@ export function ToggleRow({
 				aria-label={name}
 				className="shrink-0"
 			/>
+		</div>
+	);
+}
+
+interface SelectSettingRowProps {
+	label: string;
+	description?: ReactNode;
+	/** The stored value. Must be one of `options`, or the trigger renders empty. */
+	value: string;
+	/**
+	 * The chosen option's value, as a string: a `Select` cannot promise the
+	 * owner's union, so the owner narrows it (`isHttpVersion`) and decides what
+	 * an unknown value means. Widening it here would only move the cast.
+	 */
+	onChange: (value: string) => void;
+	options: readonly { readonly value: string; readonly label: string }[];
+}
+
+/**
+ * The pick-one row as a dropdown, for a set that reads as a list rather than a
+ * tile grid.
+ *
+ * {@link OptionButtons} is the other half of this shape and stays the default:
+ * three or four options a user browses (themes, accents, toast positions) are
+ * worth the space tiles take. A protocol or a codec is a value the user already
+ * knows the name of, and the answer is a line in a menu - which is also what
+ * keeps a request tab's row height the same as the rows around it.
+ *
+ * Label wiring matches {@link NumberSettingRow}: `useId` pairs the visible
+ * label with the trigger, and the same string names the trigger for a screen
+ * reader, because Radix renders a button whose text is the *chosen option*, not
+ * the setting.
+ */
+export function SelectSettingRow({
+	label,
+	description,
+	value,
+	onChange,
+	options,
+}: SelectSettingRowProps) {
+	const triggerId = useId();
+	const descriptionId = `${triggerId}-description`;
+	return (
+		// `data-setting-row` names the row's box from the same string the trigger
+		// is named by - the convention the other two rows already keep.
+		<div className="space-y-1.5" data-setting-row={label}>
+			<Label htmlFor={triggerId} className="text-sm font-medium">
+				{label}
+			</Label>
+			<Select value={value} onValueChange={onChange}>
+				<SelectTrigger
+					id={triggerId}
+					className="h-9 w-48 text-sm"
+					aria-label={label}
+					aria-describedby={description ? descriptionId : undefined}
+				>
+					<SelectValue />
+				</SelectTrigger>
+				<SelectContent>
+					{options.map((option) => (
+						<SelectItem key={option.value} value={option.value}>
+							{option.label}
+						</SelectItem>
+					))}
+				</SelectContent>
+			</Select>
+			{description && (
+				<p id={descriptionId} className="text-xs text-muted-foreground">
+					{description}
+				</p>
+			)}
 		</div>
 	);
 }
@@ -306,6 +396,7 @@ export function NumberSettingRow({
 	const [focused, setFocused] = useState(false);
 	const inputId = useId();
 	const errorId = `${inputId}-error`;
+	const descriptionId = `${inputId}-description`;
 
 	/*
 	 * A value that changes from outside while the field is not being typed in -
@@ -389,7 +480,20 @@ export function NumberSettingRow({
 						 * aria-invalid="false" on every row on the screen.
 						 */
 						aria-invalid={error ? true : undefined}
-						aria-describedby={error ? errorId : undefined}
+						/*
+						 * The description is part of the field's name-and-purpose,
+						 * not decoration beside it: "Only applies while Follow
+						 * redirects is on" is the whole reason the field is
+						 * disabled. Pointed at rather than merely rendered, so a
+						 * screen reader gets it with the field instead of only
+						 * when the reader walks past it. Both ids when both are
+						 * present, in reading order.
+						 */
+						aria-describedby={
+							[error ? errorId : null, description ? descriptionId : null]
+								.filter(Boolean)
+								.join(" ") || undefined
+						}
 					/>
 					{unit && (
 						<span
@@ -409,7 +513,11 @@ export function NumberSettingRow({
 					{error}
 				</p>
 			)}
-			{description && <p className="text-xs text-muted-foreground">{description}</p>}
+			{description && (
+				<p id={descriptionId} className="text-xs text-muted-foreground">
+					{description}
+				</p>
+			)}
 			{defaultValue !== undefined && (
 				<DefaultValueLine
 					defaultValue={defaultValue}
