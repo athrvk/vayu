@@ -140,6 +140,22 @@ struct SpecBinding {
     std::string spec_id;
     std::string spec_hash;
     /**
+     * Whether the binding came from an **ancestor** of the collection this run
+     * names, rather than from that collection itself (issue #716).
+     *
+     * Stamped into the manifest, and through it into `metadata.openapi`, because
+     * it changes what the coverage numbers beside it mean. An import binds the
+     * root and files requests under tag sub-collections, so running one tag
+     * folder is measured against the *whole* document: most of its operations
+     * are honestly uncovered, and "4 of 618 covered" reads as a catastrophe
+     * unless the report says the contract is the ancestor's. The reader is the
+     * app's coverage block, which prints one line when this is set.
+     *
+     * False for an unbound run as well as for a collection carrying its own
+     * binding - neither has anything to disclose.
+     */
+    bool inherited = false;
+    /**
      * The bound document's declared operations, read once here (issue #629).
      *
      * Read at resolution rather than at run end for the reason the whole plan

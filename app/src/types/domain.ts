@@ -1577,6 +1577,30 @@ export interface RunReport {
 			/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
 			maxRedirects?: number;
 		};
+		/**
+		 * The document this run was measured against (issue #637), echoed from
+		 * the snapshot its plan stamped - not what the collection binds today.
+		 *
+		 * Absent for a run of an unbound collection, and for a single-request
+		 * run: a run nobody measured against a contract is not a run measured
+		 * against nothing.
+		 */
+		openapi?: {
+			specId: string;
+			specHash: string;
+			/**
+			 * Whether the binding came from an **ancestor** of the collection
+			 * this run named (issue #716).
+			 *
+			 * An OpenAPI import binds the root and files every request under tag
+			 * sub-collections, so running one tag folder is measured against the
+			 * whole document - most of its operations honestly uncovered. Absent
+			 * means the run's own collection carries the binding and there is
+			 * nothing to disclose; {@link RunReport.coverage}'s block is the
+			 * reader, and prints one line when it is set.
+			 */
+			inherited?: boolean;
+		};
 	};
 	summary: {
 		totalRequests: number;

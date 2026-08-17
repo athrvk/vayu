@@ -16,6 +16,7 @@
 #include <variant>
 
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -295,19 +296,19 @@ const ScenarioResolveOptions& options) {
 
     // The spec this run is measured against, read once here and stamped into the
     // snapshot by `build_scenario_manifest` (issue #637). Read from the
-    // collection rather than looked up in `spec_documents`: the hash *stored on
+    // collection chain rather than looked up in `spec_documents`: the hash *on
     // the binding* is what the collection was last synced to, and that - not
     // whatever the document says today - is what the run was planned against.
-    // An unparseable blob binds nothing, the same reading every other reader of
-    // this column gives it.
-    try {
-        const auto binding = nlohmann::json::parse (collection->openapi);
-        if (binding.is_object ()) {
-            resolution.spec.spec_id   = binding.value ("specId", std::string ());
-            resolution.spec.spec_hash = binding.value ("specHash", std::string ());
-        }
-    } catch (const std::exception&) {
-        // Leaves the binding unbound; a malformed column must not fail a run.
+    //
+    // Resolved through `nearest_spec_binding`, the same walk design-mode
+    // validation uses, because an import binds the root and files every request
+    // under tag sub-collections: reading only the named collection's own column
+    // left the natural "run this tag folder" measuring nothing at all, silently
+    // (issue #716).
+    if (const auto bound = nearest_spec_binding (db, request.collection_id)) {
+        resolution.spec.spec_id   = bound->spec_id;
+        resolution.spec.spec_hash = bound->spec_hash;
+        resolution.spec.inherited = bound->collection_id != request.collection_id;
     }
 
     // The document's declared operations, read once here so contract coverage
@@ -518,6 +519,11 @@ const SpecBinding& spec) {
     if (spec.bound ()) {
         manifest["openapi"] =
         nlohmann::json{ { "specId", spec.spec_id }, { "specHash", spec.spec_hash } };
+        // Carried only when it happened, like every other finding in the report:
+        // absent means the run's own collection binds the document (issue #716).
+        if (spec.inherited) {
+            manifest["openapi"]["inherited"] = true;
+        }
     }
     return manifest;
 }

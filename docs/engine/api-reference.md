@@ -4406,6 +4406,18 @@ has to say what the run was measured against, and the binding is free to have
 moved since. An unbound run carries **no `openapi` key at all** - absent rather
 than an empty object, so "not measured against a spec" has one spelling.
 
+The binding is resolved by walking from the run's collection up to the root and
+taking the **nearest bound ancestor**, the same walk a single request's
+design-mode validation uses (issue #716). An import binds the root and files
+every request under tag sub-collections, so running one tag folder is measured
+against the document its root binds. When the binding came from an ancestor
+rather than from the collection the run named, the node carries
+`"inherited": true` - absent otherwise, like every other finding here. The run
+still enumerates only its own subtree, so the coverage below is **partial by
+construction**: most of the contract's operations are honestly uncovered, and
+that flag is what lets a reader tell scoped-run truth from a collection that has
+stopped calling its API.
+
 **`coverage`** says which of that spec's operations the run exercised and which
 of their declared responses it saw (issue #629). It is present only for a
 scenario run - design or load - of a collection bound to a document that carries
