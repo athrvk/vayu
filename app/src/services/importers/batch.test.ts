@@ -248,6 +248,46 @@ describe("reparseBatch", () => {
 	});
 });
 
+describe("detectBatch - a document the engine could not store", () => {
+	/**
+	 * Issue #719: the refusal has to land here, on the entry, because that is what
+	 * keeps it out of `applicableEntries` - and so out of `POST /import/apply`,
+	 * where it used to arrive as a 400 that rolled back a transaction the user had
+	 * already confirmed from a healthy-looking preview.
+	 */
+	it("refuses an over-cap spec as a row with no result, so nothing is applied", async () => {
+		const oversized = fixture("openapi-v3.json").padEnd(4096);
+		const entries = await detectBatch(
+			[{ fileName: "big.json", relativePath: "big.json", text: oversized }],
+			OPTS,
+			intake({ maxBytes: 2048 })
+		);
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0].result).toBeNull();
+		expect(entries[0].error).toMatch(/over the 2048.*maxSpecDocumentBytes/s);
+		expect(applicableEntries(entries)).toEqual([]);
+	});
+
+	it("leaves a smaller spec in the same batch importable", async () => {
+		const entries = await detectBatch(
+			[
+				{ fileName: "big.json", relativePath: "big.json", text: postman.padEnd(4096) },
+				{ fileName: "ok.json", relativePath: "ok.json", text: fixture("openapi-v3.json") },
+			],
+			OPTS,
+			intake({ maxBytes: 2048 })
+		);
+
+		// The Postman file is over the same number and imports anyway: the cap is
+		// the spec-document cap, and a collection is not stored as one.
+		expect(entries.map((e) => e.result?.meta.format)).toEqual([
+			"Postman Collection v2.1",
+			"OpenAPI 3.0",
+		]);
+	});
+});
+
 describe("isImportableFileName", () => {
 	it("takes the spec extensions and nothing else", () => {
 		expect(["a.json", "b.yaml", "c.yml", "D.JSON"].every(isImportableFileName)).toBe(true);

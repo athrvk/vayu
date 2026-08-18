@@ -76,10 +76,20 @@ Built inline in `parse`.
 |---------|------------------------|-------|
 | `info.title` | `name` | fallback `"Imported API"` |
 | `info.description` | `description` | fallback `""` |
-| `servers[0].url` | `variables.baseUrl` | only added when a base URL exists: `{ baseUrl: { value, enabled: true } }`; otherwise `variables` is `{}`. Additional `servers[]` are ignored. |
+| `servers[0].url` | `variables.baseUrl` | resolved first (see [The base URL](#the-base-url)); only added when a base URL exists: `{ baseUrl: { value, enabled: true } }`; otherwise `variables` is `{}`. Additional `servers[]` are ignored. |
 | `security` / `components.securitySchemes` | `auth` | via `pickPrimaryScheme` + `schemeToAuth` (see [Auth](#auth--security)). Collections never inherit. |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 | `op.responses` | `examples` | via `buildExamples` (see [Documented responses](#documented-responses)); **absent** when nothing was representable |
+
+### The base URL
+
+`servers[0].url` is not always an address (issue #719). A Server Object may **template** its URL, and the URL may be **relative**, so the field is resolved by `resolveServerUrl` before it becomes `{{baseUrl}}`:
+
+1. **Server variables are substituted** from the defaults the document declares - `{protocol}://{hostname}/api/v3` with `variables: { protocol: { default: "https" }, hostname: { default: "api.acme.dev" } }` becomes `https://api.acme.dev/api/v3`. The specification **requires** a default on every server variable, so a complete document always resolves. Single braces are not Vayu variables - only the path goes through [`normalizeVars`](./README.md#normalizevars) - so before this the literal `{protocol}` survived into every request line and failed at connect with nothing said.
+2. **A relative URL is resolved against the URL the document was fetched from**, which is what OpenAPI says it is relative to. `/api/v3` fetched from `https://acme.dev/specs/openapi.yaml` becomes `https://acme.dev/api/v3`. The source URL reaches the parser as the fourth argument to `parse` - the factory has always known it (it is also `spec_documents.source_url`) and now hands it over.
+3. **Anything still unresolvable is kept exactly as written and counted** as an `unresolved_base_url` `SkippedItem`: a variable with no declared default, or a relative URL in a pasted or file-picked document, which has no location to be relative to. A base URL the user can see is unfinished beats a host Vayu invented.
+
+An absolute URL is passed through untouched - not re-serialized through `URL`, so a stored document's own spelling survives.
 
 **Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
 
@@ -255,7 +265,8 @@ Dropped / not represented:
 - **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 - **Form-field property schemas:** only field **names** and whether the field is a file (`format: binary`) are imported; `required`, other types, and nested structure are not.
-- **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and nothing is counted - unlike a multipart file part, which imports (see [File parts](#file-parts)).
+- **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and the operation is counted as `unmapped_body` (issue #719) - unlike a multipart file part, which imports (see [File parts](#file-parts)). An operation that declares no `requestBody` at all is **not** counted: it lost nothing, and the two used to be indistinguishable.
+- **Cookie parameters** (`in: "cookie"`): dropped and counted as `cookie_param` (issue #719). Vayu has no cookie-parameter row - a request's cookies come from the jar - and mapping them onto a `Cookie` header is a recorded non-goal: the header is one joined value while a spec declares these one at a time, so building it would mean inventing a merge the document never wrote. `in: "path"` is neither dropped nor counted; it is already carried, as the `{{param}}` the URL template holds.
 
 `meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
 
@@ -265,6 +276,9 @@ Dropped / not represented:
 | `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
 | `example_no_status` | a response key is not a three-digit status - `default`, or a `2XX` wildcard |
 | `duplicate_operation_id` | an `operationId` another operation in this document already declared (see [Operation identity](#operation-identity)) |
+| `cookie_param` | a parameter declared `in: "cookie"` - one per distinct cookie parameter per operation |
+| `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode - one per operation, however many such media types it listed |
+| `unresolved_base_url` | `servers[0].url` still carries a `{variable}` with no declared default, or is relative in a document with no source URL (see [The base URL](#the-base-url)) |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 

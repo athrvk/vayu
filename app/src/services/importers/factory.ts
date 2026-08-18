@@ -5,7 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { CollectionDraft, ImportOptions, ImportParser, ImportResult } from "./types";
+import type {
+	CollectionDraft,
+	ImportOptions,
+	ImportParser,
+	ImportResult,
+	ImportSource,
+} from "./types";
 import { UnrecognisedFormatError } from "./types";
 import { parseRaw } from "./parse-raw";
 import { appendParamsToUrl } from "@/modules/request-builder/utils/url";
@@ -54,24 +60,11 @@ function joinParamsIntoUrls(result: ImportResult): void {
 }
 
 /**
- * Where the raw text came from, for the two facts a parser cannot know.
- *
- * `fileName` is display only (the preview names the file). `sourceUrl` is
- * persisted: it becomes `spec_documents.source_url`, which is what makes a
- * re-fetch possible at all - before this it lived in the import dialog's local
- * state and was discarded when the dialog closed (issue #638).
+ * Where the raw text came from. Declared beside `ImportParser` in `./types`,
+ * since `parse` now takes it, and re-exported here because this is where every
+ * caller already reaches for it.
  */
-export interface ImportSource {
-	fileName?: string;
-	sourceUrl?: string;
-	/**
-	 * External `$ref`s the bundling pass could not reach (issue #649). Stamped
-	 * into `meta.skipped` here for the same reason the two above are stamped
-	 * here: bundling happens before parse, so no parser can know the count, and a
-	 * loss the preview never names is the defect bundling exists to fix.
-	 */
-	unresolvedRefs?: number;
-}
+export type { ImportSource };
 
 /**
  * Parse a raw import string. Parses once (JSON then YAML fallback), then runs detectors in order.
@@ -85,12 +78,16 @@ export function parseImport(
 	const parsed = parseRaw(raw);
 	for (const parser of PARSERS) {
 		if (parser.detect(parsed, raw)) {
-			const result = parser.parse(parsed, raw, opts);
+			// `source` reaches `parse` because a relative `servers[0].url` is
+			// relative to where the document was fetched from, and only the parser
+			// knows it has one (issue #719).
+			const result = parser.parse(parsed, raw, opts, source);
 			if (source.fileName) result.meta.fileName = source.fileName;
-			// Stamped here rather than passed into `parse`, for the same reason
-			// `fileName` is: where the bytes came from is the caller's knowledge,
-			// and only a format that produced a spec document has anywhere to put
-			// it. A non-OpenAPI import carries no `spec`, so this is a no-op.
+			// Stamped here rather than read inside `parse`, for the same reason
+			// `fileName` is: what a spec document records about its own origin is
+			// the caller's knowledge, and only a format that produced one has
+			// anywhere to put it. A non-OpenAPI import carries no `spec`, so this is
+			// a no-op.
 			if (source.sourceUrl) {
 				for (const collection of result.collections) {
 					if (collection.spec) collection.spec.sourceUrl = source.sourceUrl;

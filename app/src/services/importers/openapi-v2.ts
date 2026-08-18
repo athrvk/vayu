@@ -73,8 +73,25 @@ export class OpenApiV2Parser implements ImportParser {
 	readonly formatName = "OpenAPI 2.0 (Swagger)";
 	readonly formatKey = "openapi-v2";
 
+	/**
+	 * The version claim, as either of the two shapes a real file writes it in
+	 * (issue #719).
+	 *
+	 * `swagger: "2.0"` is what the specification says and what every JSON export
+	 * produces - JSON has no other option, since the key is quoted or it is not
+	 * valid. Hand-written YAML routinely leaves it unquoted, and YAML then loads
+	 * `2.0` as the **number** 2, so a string comparison alone rejected a perfectly
+	 * ordinary Swagger file as "Unrecognised format". The v3 side never had this
+	 * problem for a reason that does not generalise: `3.0.3` has two dots, so it
+	 * is a string whatever the quoting.
+	 *
+	 * Only detection needs this. Nothing in `parse` reads the field, and the
+	 * document is stored as the bytes it arrived as - so there is no normalized
+	 * copy to keep, and nothing downstream that could disagree about the version.
+	 */
 	detect(parsed: unknown, _raw: string): boolean {
-		return prop(parsed, "swagger") === "2.0";
+		const claimed = prop(parsed, "swagger");
+		return claimed === "2.0" || claimed === 2;
 	}
 
 	parse(parsed: unknown, raw: string, _opts: ImportOptions): ImportResult {

@@ -88,14 +88,25 @@ export interface BundleResult {
 }
 
 /**
- * A bundle that outgrew the engine's cap. Fatal rather than tallied: the engine
- * would refuse to store the document, so continuing would import a collection
+ * A document that outgrew the engine's cap. Fatal rather than tallied: the
+ * engine would refuse to store it, so continuing would import a collection
  * bound to nothing.
+ *
+ * Thrown for the document **on its own** as well as for a bundle (issue #719).
+ * Only the bundle was checked before, so a single over-cap file - the common
+ * shape, since the specs that reach this size are generated single files - was
+ * fetched, parsed and previewed in full, and first refused by the engine at
+ * apply, 400ing the whole transaction after the user had confirmed a preview
+ * that looked healthy. The wording says which of the two happened, because the
+ * remedy differs: a bundle can be imported pre-bundled, a single file can only
+ * be met by raising the setting.
  */
 export class SpecBundleTooLargeError extends Error {
-	constructor(bytes: number, maxBytes: number) {
+	constructor(bytes: number, maxBytes: number, bundled = true) {
 		super(
-			`The spec and the files it references come to ${bytes} bytes, over the ${maxBytes} one document may hold. Raise the maxSpecDocumentBytes engine setting, or import a bundled spec.`
+			bundled
+				? `The spec and the files it references come to ${bytes} bytes, over the ${maxBytes} one document may hold. Raise the maxSpecDocumentBytes engine setting, or import a bundled spec.`
+				: `The spec is ${bytes} bytes, over the ${maxBytes} one document may hold. Raise the maxSpecDocumentBytes engine setting.`
 		);
 		this.name = "SpecBundleTooLargeError";
 	}
@@ -356,6 +367,12 @@ export async function bundleExternalRefs(
 	/** Targets seen but not yet loaded, with the base that named them. */
 	const pending: { key: string; base: DocumentBase }[] = [];
 	let bytes = byteLength(raw);
+	// The document by itself, before a single ref is followed. The loop below
+	// checks the running total, which never runs for a spec that references
+	// nothing - so an over-cap single file used to reach the engine's own refusal
+	// at apply instead (issue #719). Here it is refused before parse, in front of
+	// the preview, naming the setting that would allow it.
+	if (bytes > intake.maxBytes) throw new SpecBundleTooLargeError(bytes, intake.maxBytes, false);
 
 	const enqueue = (value: unknown, base: DocumentBase): void => {
 		for (const ref of collectRefs(value)) {

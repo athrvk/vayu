@@ -65,7 +65,34 @@ export interface SkippedItem {
 		 * records, so which request kept the id is not a detail the user should
 		 * have to discover from a diff.
 		 */
-		| "duplicate_operation_id";
+		| "duplicate_operation_id"
+		/**
+		 * A parameter declared `in: "cookie"` (issue #719). Vayu's request model
+		 * has no cookie-parameter row - cookies are the jar's, not a request
+		 * field - so the declaration is dropped. Counted rather than mapped onto a
+		 * `Cookie` header row: a spec declares one cookie per parameter and the
+		 * header is a single joined value, so building it would mean inventing a
+		 * merge the document never wrote. Naming the loss is the honest half.
+		 */
+		| "cookie_param"
+		/**
+		 * A `requestBody` declaring only media types the importer has no mode for -
+		 * `application/octet-stream`, `application/xml`, `image/*` (issue #719).
+		 * The operation imports; what it loses is the body, which without this
+		 * counter left a bodyless request that looked complete. Only a body that
+		 * declared *something* counts: an operation with no `requestBody` at all
+		 * lost nothing.
+		 */
+		| "unmapped_body"
+		/**
+		 * A server URL that cannot be turned into one a request could reach
+		 * (issue #719) - a `{variable}` the document declares no default for, or a
+		 * relative URL in a document that arrived with no URL to resolve it
+		 * against. The URL imports exactly as written, because guessing a host is
+		 * worse than a base the user can see is unfinished, and is counted so the
+		 * preview says which of the two happened.
+		 */
+		| "unresolved_base_url";
 	count: number;
 }
 
@@ -244,13 +271,42 @@ export interface ImportResult {
 	meta: ImportMeta;
 }
 
+/**
+ * Where the raw text came from, for the two facts a parser cannot know.
+ *
+ * `fileName` is display only (the preview names the file). `sourceUrl` is
+ * persisted: it becomes `spec_documents.source_url`, which is what makes a
+ * re-fetch possible at all - before this it lived in the import dialog's local
+ * state and was discarded when the dialog closed (issue #638). It is also what
+ * a relative `servers[0].url` resolves against, which is why it reaches `parse`
+ * rather than only being stamped onto the result afterwards (issue #719).
+ */
+export interface ImportSource {
+	fileName?: string;
+	sourceUrl?: string;
+	/**
+	 * External `$ref`s the bundling pass could not reach (issue #649). Stamped
+	 * into `meta.skipped` by the factory for the same reason the two above are
+	 * stamped there: bundling happens before parse, so no parser can know the
+	 * count, and a loss the preview never names is the defect bundling exists to
+	 * fix.
+	 */
+	unresolvedRefs?: number;
+}
+
 export interface ImportParser {
 	readonly formatName: string; // "Postman Collection v2.1"
 	readonly formatKey: string; // "postman-v21"
 	// Factory parses raw once (JSON, then YAML fallback) and passes the parsed object.
 	// Conscious divergence from the PRD's detect(raw: string).
 	detect(parsed: unknown, raw: string): boolean;
-	parse(parsed: unknown, raw: string, opts: ImportOptions): ImportResult;
+	/**
+	 * @param source where the bytes came from. Optional because only the OpenAPI 3
+	 * parser has anything to do with it - a relative `servers[0].url` is relative
+	 * to the document's own location (issue #719) - and a parser that ignores it
+	 * should not have to name it.
+	 */
+	parse(parsed: unknown, raw: string, opts: ImportOptions, source?: ImportSource): ImportResult;
 }
 
 export class UnrecognisedFormatError extends Error {

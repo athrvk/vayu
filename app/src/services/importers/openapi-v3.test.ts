@@ -673,5 +673,179 @@ describe("OpenApiV3Parser", () => {
 				])
 			).toEqual([{ key: "X-Keep", value: "", enabled: true }]);
 		});
+
+		/**
+		 * Issue #719. A cookie parameter has no row to import into - Vayu's cookies
+		 * come from the jar - so the only question is whether the drop is named.
+		 */
+		it("drops a cookie parameter and counts it, leaving path parameters uncounted", () => {
+			const spec = {
+				openapi: "3.0.0",
+				info: { title: "Cookie API" },
+				paths: {
+					"/items/{id}": {
+						get: {
+							summary: "Get item",
+							parameters: [
+								{ name: "session", in: "cookie", schema: { type: "string" } },
+								{ name: "csrf", in: "cookie", schema: { type: "string" } },
+								{ name: "id", in: "path", required: true },
+								{ name: "q", in: "query" },
+							],
+						},
+					},
+				},
+			};
+			const result = p.parse(spec, JSON.stringify(spec), opts);
+			const request = result.collections[0].requests[0];
+			expect(request.headers).toEqual([]);
+			expect(request.params).toEqual([{ key: "q", value: "", enabled: false }]);
+			// The path parameter is carried, as the URL template - so it is a drop
+			// that never happened and must not be counted as one.
+			expect(request.url).toBe("{{baseUrl}}/items/{{id}}");
+			expect(result.meta.skipped).toEqual([{ kind: "cookie_param", count: 2 }]);
+		});
+	});
+
+	/**
+	 * Issue #719: a `requestBody` declaring only media types with no Vayu mode
+	 * returned `{mode: "none"}` on the same path as *no body at all*, so a binary
+	 * upload imported as a bodyless POST reporting nothing skipped.
+	 */
+	describe("request bodies with no Vayu mode", () => {
+		const parseWithBody = (requestBody: unknown) => {
+			const spec = {
+				openapi: "3.0.0",
+				info: { title: "Body API" },
+				paths: { "/upload": { post: { summary: "Upload", requestBody } } },
+			};
+			return p.parse(spec, JSON.stringify(spec), opts);
+		};
+
+		it("counts a binary body, and still imports the operation", () => {
+			const result = parseWithBody({
+				content: {
+					"application/octet-stream": { schema: { type: "string", format: "binary" } },
+				},
+			});
+			expect(result.collections[0].requests[0].body).toEqual({ mode: "none" });
+			expect(result.meta.requestCount).toBe(1);
+			expect(result.meta.skipped).toEqual([{ kind: "unmapped_body", count: 1 }]);
+		});
+
+		it("counts an XML body once, however many unmapped media types declared it", () => {
+			const result = parseWithBody({
+				content: { "application/xml": {}, "image/png": {} },
+			});
+			expect(result.meta.skipped).toEqual([{ kind: "unmapped_body", count: 1 }]);
+		});
+
+		it("counts nothing for an operation that declared no body at all", () => {
+			expect(parseWithBody(undefined).meta.skipped).toEqual([]);
+		});
+
+		it("counts nothing when a mode was found", () => {
+			const json = parseWithBody({
+				content: { "application/json": { schema: { type: "object" } } },
+			});
+			expect(json.meta.skipped).toEqual([]);
+			const text = parseWithBody({ content: { "text/plain": {} } });
+			expect(text.collections[0].requests[0].body).toEqual({ mode: "text", content: "" });
+			expect(text.meta.skipped).toEqual([]);
+		});
+	});
+
+	/**
+	 * Issue #719: `servers[0].url` was taken verbatim, so a templated or relative
+	 * server URL produced a `{{baseUrl}}` no request could ever reach - with
+	 * nothing in the preview to say so.
+	 */
+	describe("server URL resolution", () => {
+		const baseUrlOf = (servers: unknown, sourceUrl?: string) => {
+			const spec = {
+				openapi: "3.0.0",
+				info: { title: "Server API" },
+				servers,
+				paths: { "/items": { get: { summary: "List" } } },
+			};
+			const result = p.parse(
+				spec,
+				JSON.stringify(spec),
+				opts,
+				sourceUrl ? { sourceUrl } : {}
+			);
+			return {
+				baseUrl: result.collections[0].variables.baseUrl?.value,
+				skipped: result.meta.skipped,
+			};
+		};
+
+		it("substitutes the declared defaults of every server variable", () => {
+			expect(
+				baseUrlOf([
+					{
+						url: "{protocol}://{hostname}/api/v3",
+						variables: {
+							protocol: { default: "https", enum: ["http", "https"] },
+							hostname: { default: "api.acme.dev" },
+						},
+					},
+				])
+			).toEqual({ baseUrl: "https://api.acme.dev/api/v3", skipped: [] });
+		});
+
+		it("substitutes a numeric default, which hand-written YAML produces", () => {
+			expect(
+				baseUrlOf([
+					{
+						url: "https://api.acme.dev:{port}/v1",
+						variables: { port: { default: 8443 } },
+					},
+				])
+			).toEqual({ baseUrl: "https://api.acme.dev:8443/v1", skipped: [] });
+		});
+
+		it("resolves a relative server URL against the URL the document came from", () => {
+			expect(baseUrlOf([{ url: "/api/v3" }], "https://acme.dev/specs/openapi.yaml")).toEqual({
+				baseUrl: "https://acme.dev/api/v3",
+				skipped: [],
+			});
+			expect(baseUrlOf([{ url: "v3" }], "https://acme.dev/specs/openapi.yaml")).toEqual({
+				baseUrl: "https://acme.dev/specs/v3",
+				skipped: [],
+			});
+		});
+
+		it("counts a relative URL that has nothing to resolve against, keeping it verbatim", () => {
+			expect(baseUrlOf([{ url: "/api/v3" }])).toEqual({
+				baseUrl: "/api/v3",
+				skipped: [{ kind: "unresolved_base_url", count: 1 }],
+			});
+		});
+
+		it("counts a variable the document declares no default for, keeping it verbatim", () => {
+			expect(
+				baseUrlOf(
+					[{ url: "https://{tenant}.acme.dev", variables: { tenant: { enum: ["a"] } } }],
+					"https://acme.dev/openapi.yaml"
+				)
+			).toEqual({
+				baseUrl: "https://{tenant}.acme.dev",
+				skipped: [{ kind: "unresolved_base_url", count: 1 }],
+			});
+		});
+
+		it("leaves an absolute URL exactly as written, and counts nothing", () => {
+			expect(
+				baseUrlOf([{ url: "https://api.acme.dev/v1" }], "https://acme.dev/spec.json")
+			).toEqual({ baseUrl: "https://api.acme.dev/v1", skipped: [] });
+		});
+
+		it("adds no baseUrl variable, and counts nothing, when the document declares no server", () => {
+			expect(baseUrlOf(undefined, "https://acme.dev/spec.json")).toEqual({
+				baseUrl: undefined,
+				skipped: [],
+			});
+		});
 	});
 });

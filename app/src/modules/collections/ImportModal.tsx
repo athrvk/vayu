@@ -1026,6 +1026,22 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 		"operation whose operationId was already used (identified by path instead)",
 		"operations whose operationId was already used (identified by path instead)",
 	],
+	// The three below name what the *request* lost rather than the spec construct
+	// that was skipped (issue #719): a reader of this line is deciding what to
+	// finish by hand after the import, and "cookie parameter" alone does not say
+	// that nothing carries it.
+	cookie_param: [
+		"cookie parameter (not imported - use the cookie jar)",
+		"cookie parameters (not imported - use the cookie jar)",
+	],
+	unmapped_body: [
+		"request body in a format Vayu cannot fill in (binary, XML, image)",
+		"request bodies in a format Vayu cannot fill in (binary, XML, image)",
+	],
+	unresolved_base_url: [
+		"server URL that could not be resolved to a real address",
+		"server URLs that could not be resolved to a real address",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {
