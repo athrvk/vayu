@@ -123,6 +123,18 @@ describe("the registry declares its effects", () => {
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],
+			// Document CRUD (#759). The example tools take the `request` family
+			// because that is where their rows live: the examples query key is
+			// nested under `requests.detail(id)`, so invalidating the request the
+			// call named reaches the open Examples panel too.
+			create_request_example: ["request"],
+			update_request_example: ["request"],
+			delete_request_example: ["request"],
+			// A move changes both trees at once - the row leaves one parent's
+			// list and joins another's - and a moved collection takes its
+			// requests with it, which is why it declares the pair rather than
+			// the family of the thing moved.
+			move_item: ["collection", "request"],
 			update_environment: ["environment"],
 			// State CRUD (#758). The globals writer takes the `environment` family
 			// rather than one of its own: same resolution order, same blob shape,
