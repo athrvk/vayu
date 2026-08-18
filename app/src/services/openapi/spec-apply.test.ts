@@ -175,11 +175,14 @@ describe("a duplicated operationId is not corruption a default apply can commit 
 		});
 
 		const b = body.update.find((u) => u.id === "req_b");
-		expect(b?.method).toBe("POST");
 		expect(b?.specOperation).toEqual({ method: "POST", path: "/b" });
 		// Nothing the document produces for this request differs, so no field of
 		// it is written at all - the update exists only to drop the id the other
-		// operation kept, which is the ambiguity being repaired.
+		// operation kept, which is the ambiguity being repaired. `method` is one of
+		// those fields since #717, so it is absent rather than re-asserted as
+		// "POST" - a stronger form of the same claim, because the first operation's
+		// `GET` cannot reach this request through a key that is not there.
+		expect(b?.method).toBeUndefined();
 		expect(b?.name).toBeUndefined();
 		expect(b?.url).toBeUndefined();
 		// The tweak lands where it belongs, on the request that operation is.
@@ -331,7 +334,9 @@ describe("buildSyncPayload", () => {
 			method: "GET",
 			path: "/pets",
 		});
-		expect(patch.method).toBe("GET");
+		// `request.method` does not, since #717: it is a ticked field like `url`,
+		// and this selection ticked only `name`.
+		expect(patch.method).toBeUndefined();
 		expect(patch.examples).toEqual([]);
 	});
 

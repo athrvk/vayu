@@ -191,12 +191,32 @@ bound:
   still claims them. Those requests are not going anywhere; they are simply no
   longer described by the contract.
 - **Changed** - the request is still that operation, and one or more of the
-  fields an import writes (name, description, URL, params, headers, body) is no
-  longer what the document produces.
+  fields an import writes (name, description, method, URL, params, headers,
+  body) is no longer what the document produces.
 
 Everything else is counted as unchanged, and requests carrying no operation at
 all are counted separately: the contract never described them, so the comparison
 leaves them out and says how many it left out.
+
+### The fourth kind: a change no request row can carry
+
+The three buckets describe operations, and plenty of contract changes are not
+about an operation's request shape at all - a tightened response schema, a newly
+documented `429`, an edited `servers` block. Those move the document without
+moving a single request, so all three buckets come back empty and the summary
+reads `0 new · 0 gone · 0 changed · N unchanged`.
+
+That is a real change, and it is applyable. The section names it
+**document-level changes only** and offers **Update the stored document**, which
+stores the new document, moves the binding to it, and rebuilds the
+response-schema and coverage indexes - without touching one request row. It is
+the same single transaction as any other apply, with an empty set of rows.
+
+This is also what you get when a diff *does* offer rows and you untick them all:
+the apply is always available while the bytes differ, and it always says which of
+the two it is about to be. Response validation and coverage read the document
+they were stored against, so a collection that can never take the new document is
+a collection judging every run against a contract that has moved on.
 
 ### Renames, and what is never guessed
 
@@ -259,6 +279,18 @@ stored, the collection's binding moves to it, and every created, updated and
 deleted request lands with it - or none of it does and the collection stays
 bound to the document it was bound to before. There is no half-applied sync to
 find and repair.
+
+**Every apply stores the document; the ticks decide which requests ride along.**
+That is why an apply is offered whenever the bytes differ, and why the button
+names which of the two it is - *Apply selected*, or *Update the stored document*
+when no request row is ticked.
+
+**Your method edit is a tickable field like any other.** The HTTP method is one
+of the fields an import writes, so a document that moves an operation's verb
+offers it as a row you can take, and a verb *you* changed is marked **edited
+here** and left for you to decide. Leaving it unticked means the request keeps
+sending what you set while its recorded identity says what the document declares
+- a difference the next check shows you again rather than silently resolving.
 
 Deleting is behind a confirmation that names the count, and the deletions ride
 in the same apply as everything else you ticked.

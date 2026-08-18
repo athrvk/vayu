@@ -465,4 +465,84 @@ describe("diffSpec", () => {
 			expect(diff.changed[0].renamed).toBe(false);
 		});
 	});
+
+	/**
+	 * `method` is a compared field (issue #717).
+	 *
+	 * It was the one field an import writes that the comparison did not read,
+	 * while `spec-apply` wrote it on every update anyway - so a user's edit was
+	 * reverted by a change to any other field, with no row, no flag and no tick
+	 * to show it happening. Everything here is the ordinary treatment `url` has
+	 * always had, asserted for `method` because the asymmetry was the bug.
+	 */
+	describe("method", () => {
+		it("reports the user's edit as theirs, so an apply cannot take it back silently", () => {
+			// Mutation check: drop "method" from `SpecField`/`FIELDS` and the field
+			// list is `["description"]` - the exact blindness that let the apply
+			// revert a HEAD back to GET.
+			const editedToHead = requestFrom("req_0", draftOf(BOUND, "listPets"), {
+				method: "HEAD",
+			});
+
+			const diff = diffAgainst(
+				doc({
+					"/pets": {
+						get: {
+							operationId: "listPets",
+							summary: "List pets",
+							description: "Paged.",
+						},
+						post: {
+							operationId: "createPet",
+							summary: "Create a pet",
+							requestBody: jsonBody({ name: { type: "string" } }),
+						},
+					},
+					"/pets/{petId}": { get: { operationId: "getPet", summary: "Get a pet" } },
+				}),
+				[editedToHead]
+			);
+
+			const fields = diff.changed[0].fields;
+			expect(fieldNames(fields)).toEqual(["description", "method"]);
+			const method = fields.find((field) => field.field === "method");
+			expect(method?.userTouched).toBe(true);
+			expect(method?.current).toBe("HEAD");
+			expect(method?.next).toBe("GET");
+			// The document's own change is not confused with the user's.
+			expect(fields.find((field) => field.field === "description")?.userTouched).toBe(false);
+		});
+
+		it("reports a method the document itself moved as the document's", () => {
+			// Same operationId, different verb: the request is still followed (the
+			// id leads), and the verb it should now send is offered like any other
+			// field the document moved.
+			const moved = doc({
+				"/pets": {
+					post: {
+						operationId: "listPets",
+						summary: "List pets",
+					},
+				},
+			});
+
+			const diff = diffAgainst(moved, [requestFrom("req_0", draftOf(BOUND, "listPets"))]);
+
+			expect(diff.changed).toHaveLength(1);
+			expect(diff.changed[0].matchedBy).toBe("operationId");
+			const method = diff.changed[0].fields.find((field) => field.field === "method");
+			expect(method?.userTouched).toBe(false);
+			expect(method?.current).toBe("GET");
+			expect(method?.next).toBe("POST");
+		});
+
+		it("leaves a request alone when the document agrees with the verb it holds", () => {
+			// The other direction of the same field: adding `method` to the compared
+			// set must not make every unchanged request report one.
+			const diff = diffAgainst(BOUND, [requestFrom("req_0", draftOf(BOUND, "listPets"))]);
+
+			expect(diff.changed).toHaveLength(0);
+			expect(diff.unchanged).toBe(1);
+		});
+	});
 });

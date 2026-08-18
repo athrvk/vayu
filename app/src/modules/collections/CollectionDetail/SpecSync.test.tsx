@@ -300,9 +300,12 @@ describe("SpecSync", () => {
 
 		check();
 		await screen.findByText(/the document has changed/i);
-		expect(
-			screen.getByRole("button", { name: /apply selected/i }).hasAttribute("disabled")
-		).toBe(true);
+		// Nothing is ticked, so the apply on offer is the document-level one and
+		// says so - it is no longer a disabled button, because a document that
+		// moved must always be applyable (#717); what it must not do is carry the
+		// user's field. Both halves are asserted below.
+		expect(screen.queryByRole("button", { name: /apply selected/i })).toBeNull();
+		expect(screen.getByRole("button", { name: /update the stored document/i })).toBeTruthy();
 
 		fireEvent.click(screen.getByRole("checkbox", { name: /apply changes to my pets call/i }));
 		apply();
@@ -357,6 +360,147 @@ describe("SpecSync", () => {
 
 		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));
 		expect((syncSpec.mock.calls[1][0] as SpecSyncRequest).delete).toEqual(["req_1"]);
+	});
+
+	/**
+	 * The document-level tier (issue #717).
+	 *
+	 * `spec-diff` compares request-shaped fields, so a document that tightens a
+	 * response schema or documents a new status produces three empty buckets -
+	 * and Apply used to be disabled on exactly those, permanently, while the
+	 * summary truthfully said the document had changed. The stored document, the
+	 * response-schema index and the coverage index then stayed stale forever.
+	 * These pin the tier that replaces the dead end.
+	 */
+	describe("a change no request row can carry", () => {
+		const withResponses = (
+			properties: Record<string, unknown>,
+			extraStatuses: Record<string, unknown> = {}
+		): string =>
+			doc("List pets", {
+				responses: {
+					"200": {
+						description: "OK",
+						content: {
+							"application/json": { schema: { type: "object", properties } },
+						},
+					},
+					...extraStatuses,
+				},
+			});
+
+		/** The contract as bound, and the same contract with a tighter 200 and a new 429. */
+		const BOUND_SCHEMA = withResponses({ id: { type: "string" } });
+		const TIGHTENED = withResponses(
+			{ id: { type: "string" }, name: { type: "string" } },
+			{ "429": { description: "Too many requests" } }
+		);
+
+		it("says the change is document-level instead of dead-ending on three zeros", async () => {
+			importFetch.mockResolvedValue({ content: TIGHTENED });
+			renderSync({ spec: spec(BOUND_SCHEMA) });
+
+			check();
+
+			expect(await screen.findByText(/the document has changed/i)).toBeTruthy();
+			// The counts are still stated in full, and now they are explained.
+			expect(
+				screen.getByText(
+					/0 new operations · 0 requests whose operation is gone · 0 changed · 1 unchanged/i
+				)
+			).toBeTruthy();
+			expect(screen.getByText(/document-level changes only/i)).toBeTruthy();
+		});
+
+		it("applies it - the new bytes and both indexes, with no request row touched", async () => {
+			// Mutation check: restore `isEmptySelection(...)` to the Apply button's
+			// `disabled` and this reddens at the click - `syncSpec` is never called,
+			// which is the dead end this issue is.
+			importFetch.mockResolvedValue({ content: TIGHTENED });
+			syncSpec.mockResolvedValue({
+				idMap: {},
+				specId: "spec_2",
+				specHash: "def456",
+				syncedAt: 1_700_000_100_000,
+				created: 0,
+				updated: 0,
+				deleted: 0,
+			});
+			renderSync({ spec: spec(BOUND_SCHEMA) });
+
+			check();
+			await screen.findByText(/the document has changed/i);
+
+			fireEvent.click(screen.getByRole("button", { name: /update the stored document/i }));
+
+			await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+			const payload = syncSpec.mock.calls[0][0] as SpecSyncRequest;
+			// The document moves, so the binding the engine writes moves with it.
+			expect(payload.spec.content).toBe(TIGHTENED);
+			// Not one request row is named - the whole point of the tier.
+			expect(payload.create).toEqual([]);
+			expect(payload.update).toEqual([]);
+			expect(payload.delete).toEqual([]);
+			expect(payload.collections).toEqual([]);
+			// The indexes ride along, which is what makes validation and coverage
+			// read the *new* contract rather than the one they were stale against.
+			expect(JSON.stringify(payload.spec.responseSchemas)).toContain("name");
+			expect(payload.spec.operations?.length).toBeGreaterThan(0);
+			expect(
+				await screen.findByText(/no request changed.*now bound to the document/i)
+			).toBeTruthy();
+		});
+
+		it("stays applyable when every offered row is unticked", async () => {
+			// The same dead end one step over: a diff that *does* have rows, all of
+			// which the user declines, must still let them onto the new document.
+			importFetch.mockResolvedValue({ content: doc("List all the pets") });
+			renderSync({ spec: spec(BOUND), requests: [request({ name: "My pets call" })] });
+
+			check();
+			await screen.findByText(/the document has changed/i);
+			// Nothing is ticked (the one changed field is the user's own name).
+			expect(
+				screen.getByRole("button", { name: /update the stored document/i })
+			).toBeTruthy();
+			expect(screen.getByText(/no request rows change/i)).toBeTruthy();
+		});
+	});
+
+	it("never takes back a method the user edited, and offers it as its own row", async () => {
+		// Issue #717's problem B, end to end: the document only rewords a summary,
+		// but the apply used to write `method` unconditionally - reverting a HEAD
+		// to GET with no row, no flag and nothing ticked. Mutation check: restore
+		// `patch.method = draft.method` in `updateItem` and the first assertion
+		// reddens; drop "method" from `SpecField` and the second does.
+		importFetch.mockResolvedValue({ content: doc("List all the pets") });
+		renderSync({ spec: spec(BOUND), requests: [request({ method: "HEAD" })] });
+
+		check();
+		await screen.findByText(/the document has changed/i);
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		const patch = (syncSpec.mock.calls[0][0] as SpecSyncRequest).update[0];
+		expect(patch.method).toBeUndefined();
+		// The identity still travels, and still records what the operation is.
+		expect(patch.specOperation).toEqual({
+			operationId: "listPets",
+			method: "GET",
+			path: "/pets",
+		});
+
+		// It is a row the user can see and take, flagged as theirs - the treatment
+		// `url` always had and `method` never did.
+		check();
+		await screen.findByText(/the document has changed/i);
+		expect(screen.getByText("method")).toBeTruthy();
+		expect(screen.getAllByText(/edited here/i)).toHaveLength(1);
+		fireEvent.click(screen.getByRole("checkbox", { name: /apply method to list pets/i }));
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));
+		expect((syncSpec.mock.calls[1][0] as SpecSyncRequest).update[0].method).toBe("GET");
 	});
 
 	it("surfaces a failed apply and keeps the selection", async () => {
