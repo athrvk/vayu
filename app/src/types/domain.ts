@@ -1499,13 +1499,28 @@ export interface TestResult {
 	name: string;
 	passed: boolean;
 	error?: string;
+	/**
+	 * Which script called `pm.test` (issue #810).
+	 *
+	 * Optional because a trace stored - or an engine sidecar answering - before
+	 * that issue listed the post-request script's assertions and nothing else,
+	 * so an absent source is a `"test"` one rather than an unknown phase. A
+	 * pre-request assertion used to fail its scenario step and appear in no
+	 * list; it is listed now, and the phase is what keeps "asserted before the
+	 * request went out" from reading as an assertion about the response.
+	 */
+	source?: ScriptSource;
 }
 
 /** Which `console.*` method a script line came from. Engine spellings. */
 export type ConsoleLevel = "log" | "info" | "warn" | "error";
 
-/** Which of a request's two scripts wrote a line. */
-export type ConsoleLogSource = "pre" | "test";
+/**
+ * Which of a request's two scripts produced something - a console line, or an
+ * assertion. One type rather than one per payload: it is the same pair of
+ * scripts, and the engine spells them these two ways everywhere.
+ */
+export type ScriptSource = "pre" | "test";
 
 /**
  * One line of script console output.
@@ -1516,7 +1531,7 @@ export type ConsoleLogSource = "pre" | "test";
  * tab drew `console.error` exactly like `console.log`. Both are fields now.
  */
 export interface ConsoleLogEntry {
-	source: ConsoleLogSource;
+	source: ScriptSource;
 	level: ConsoleLevel;
 	message: string;
 }

@@ -139,8 +139,12 @@ const vayu::Response& response);
  * core rather than a route; the definition stays in `execution.cpp` with the
  * design path it was written for.
  *
- * The **test script's** assertions alone: a pre-request script runs before
- * there is anything to assert about.
+ * **Both** scripts' assertions, each entry naming the script that made it in
+ * `source` (`"pre"` / `"test"`, the spellings `consoleLogs` uses). The
+ * post-request script's alone until issue #810: `pm.test` is bound in both
+ * phases, so a pre-request assertion - typically about a `pm.sendRequest` the
+ * script made - failed its scenario step through `describe_failed_tests` while
+ * appearing in no list any surface could render.
  *
  * Each key is present only when it has something to say, so a request with no
  * scripts contributes an empty object and stores nothing.

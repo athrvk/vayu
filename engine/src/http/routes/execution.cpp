@@ -519,19 +519,42 @@ nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_re
 const vayu::ScriptResult& post_script_result) {
     nlohmann::json node = nlohmann::json::object ();
 
-    // Test results come from the post-request script alone: a pre-request
-    // script runs before there is anything to assert about.
-    if (!post_script_result.tests.empty ()) {
-        nlohmann::json test_results = nlohmann::json::array ();
-        for (const auto& test : post_script_result.tests) {
+    /*
+     * Both scripts' assertions, each carrying the script that made it.
+     *
+     * This listed the post-request script's alone, on the reading that "a
+     * pre-request script runs before there is anything to assert about". That
+     * is true of the *response* and not of everything a script asserts: a
+     * pre-request script may call `pm.sendRequest`, and asserting on what came
+     * back - a token fetch that failed, a fixture that is not there - is the
+     * one place to catch it before the request goes out. `pm.test` is bound in
+     * both phases and has always recorded there, and `describe_failed_tests`
+     * fails a scenario step on a pre-request assertion, so listing the post
+     * phase alone left a step failed by an assertion no surface could name
+     * (issue #810).
+     *
+     * `source` is the same field `consoleLogs` carries below, spelled the same
+     * two ways, because it answers the same question about the same pair of
+     * scripts. Order is execution order - pre before test - so the list reads
+     * as the run happened.
+     */
+    nlohmann::json test_results = nlohmann::json::array ();
+    const auto append_tests = [&test_results] (const char* source,
+                              const std::vector<vayu::TestResult>& tests) {
+        for (const auto& test : tests) {
             nlohmann::json test_json;
             test_json["name"]   = test.name;
             test_json["passed"] = test.passed;
+            test_json["source"] = source;
             if (!test.error_message.empty ()) {
                 test_json["error"] = test.error_message;
             }
             test_results.push_back (test_json);
         }
+    };
+    append_tests ("pre", pre_script_result.tests);
+    append_tests ("test", post_script_result.tests);
+    if (!test_results.empty ()) {
         node["testResults"] = test_results;
     }
 

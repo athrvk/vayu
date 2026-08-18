@@ -21,7 +21,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
-| Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
+| Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
@@ -230,6 +230,26 @@ bytes verifies nowhere.
 Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, MD5,
 SHA-1, and any asymmetric algorithm. The engine-side detail is in
 [scripting.md](../engine/scripting.md#what-a-script-can-compute).
+
+### `pm.test` runs in either script, and every result says which
+
+Postman's does, and so does Vayu's: a pre-request script may assert, and the
+usual reason is a
+[`pm.sendRequest`](#pmsendrequest-is-synchronous-callback-only-and-not-available-to-agents)
+it just made - a token fetch that answered `401`, a fixture that is not there -
+which is worth catching before the request goes out.
+
+Both phases' assertions are reported together, in execution order, each entry
+carrying `source: "pre" | "test"` (issue #810). The Tests pane groups the list
+under the script's name, because an assertion made *before* the request is a
+different claim from one about the response. A failing assertion fails its
+collection-run step whichever script made it, which was already true while the
+list showed the test script's alone - the step was failed by an assertion
+nothing named. A result restored from a run stored before that carries no
+`source` and reads as the test script's.
+
+**A load test runs no pre-request script** (only the `tests` one), so there is
+nothing to assert there before the request.
 
 ### Assertion chains (`pm.expect`)
 

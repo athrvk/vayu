@@ -183,8 +183,9 @@ export default function ScenarioStepCard({
 			{validation && <SchemaValidation validation={validation} />}
 
 			{/*
-			 * Every assertion the step's test script made (issue #724), from the
-			 * stored trace. The same component the response pane's Tests tab
+			 * Every assertion the step's scripts made (issue #724), from the
+			 * stored trace - both phases, grouped by script (issue #810). The
+			 * same component the response pane's Tests tab
 			 * renders, stacked under the schema verdict the way that tab stacks
 			 * them - `inset={false}` because this expansion owns the padding,
 			 * exactly as the tab does for the pair.
