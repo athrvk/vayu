@@ -274,7 +274,7 @@ ctest -V
 ./vayu_tests
 ```
 
-The Linux and macOS **test presets** run the suite multi-process (`ctest -j4`,
+The Linux and macOS **test presets** run the suite multi-process (`ctest -j8`,
 wired once into the hidden `test-base` test preset in
 `engine/CMakePresets.json`); a bare `ctest` or `./vayu_tests` runs serially.
 Parallelism is safe because the test binary enters a private per-process scratch
@@ -283,12 +283,24 @@ collide between concurrently scheduled tests (see `engine/tests/main.cpp` and
 `engine/tests/temp_database.hpp`). Override the job count with an explicit
 `ctest --preset linux-dev -jN`.
 
+8 is **twice** a hosted runner's four cores, deliberately. Most of the suite's
+wall time is spent waiting - on localhost mock servers, and on the sleeps the
+pacing and shutdown tests measure - not on CPU, so oversubscription keeps paying
+well past the core count. Measured on a 4-core runner-sized box, all green:
+278s serial, 78s at `-j4`, 55s at `-j8`, 47s at `-j12`, 42s at `-j16`, 40s at
+`-j24`. It stops at 8 because the curve is flattening by then and a hosted
+runner is noisier than an idle machine, with the wall-clock-budget tests
+(`run_stop_test.cpp`, `run_shutdown_test.cpp`, `load_pacing_test.cpp`,
+`rate_limit_test.cpp`, `monitor_test.cpp`) the ones that would pay for a wrong
+guess - and widening a timing budget to afford a bigger number is not on the
+table.
+
 **The Windows presets run serially, on purpose.** At `-j4` the Windows CI leg
 took ~37 min against a ~6 min serial run. The per-test durations say why: they
 split into a fast band (pure-logic suites) and a slow band that is exactly the
 fixtures which open a scratch `Database` - concurrent SQLite file I/O costs more
-there than the concurrency returns. The same `-j4` cuts ubuntu from 3-5 min to
-1m12s and macOS from ~4 min to 1m50s, so the job count is per-OS rather than
+there than the concurrency returns. The same `-j4` cut ubuntu from 3-5 min to
+1m15s and macOS from ~4 min to 1m06s, so the job count is per-OS rather than
 one number. Moving the scratch directories between volumes was tried and made no
 difference, so do not re-litigate that part without new measurements.
 

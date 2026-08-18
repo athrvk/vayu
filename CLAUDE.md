@@ -103,7 +103,7 @@ behaviour change needs the covering tests, and the full suite belongs once
 before committing a substantial piece of work, not after every edit.
 
 The engine suite now runs multi-process on Linux and macOS - those test presets
-pass `ctest -j4`, cutting its wall time to roughly a quarter (each ctest test
+pass `ctest -j8`, cutting its wall time to roughly a fifth (each ctest test
 runs in its own process under a private scratch directory, so `-j` is safe;
 `ctest -jN` overrides). **The Windows presets stay serial deliberately** -
 parallelism measured ~6x *slower* there; see `docs/engine/building.md`. A
