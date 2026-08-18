@@ -274,14 +274,32 @@ ctest -V
 ./vayu_tests
 ```
 
-The `*-dev` and `*-prod` **test presets** run the suite multi-process
-(`ctest -j4`, wired once into the hidden `test-base` test preset in
+The Linux and macOS **test presets** run the suite multi-process (`ctest -j4`,
+wired once into the hidden `test-base` test preset in
 `engine/CMakePresets.json`); a bare `ctest` or `./vayu_tests` runs serially.
 Parallelism is safe because the test binary enters a private per-process scratch
 directory before running, so the relative `test_*.db` files fixtures open never
 collide between concurrently scheduled tests (see `engine/tests/main.cpp` and
 `engine/tests/temp_database.hpp`). Override the job count with an explicit
 `ctest --preset linux-dev -jN`.
+
+**The Windows presets run serially, on purpose.** At `-j4` the Windows CI leg
+took ~37 min against a ~6 min serial run. The per-test durations say why: they
+split into a fast band (pure-logic suites) and a slow band that is exactly the
+fixtures which open a scratch `Database` - concurrent SQLite file I/O costs more
+there than the concurrency returns. The same `-j4` cuts ubuntu from 3-5 min to
+1m12s and macOS from ~4 min to 1m50s, so the job count is per-OS rather than
+one number. Moving the scratch directories between volumes was tried and made no
+difference, so do not re-litigate that part without new measurements.
+
+Because a serial run has nothing to isolate from, the Windows presets also set
+`VAYU_TEST_SCRATCH_ISOLATION=0`, which skips the scratch directory entirely.
+Isolation is the **default** everywhere else - including a hand-run
+`ctest -j` on Windows, which is still safe.
+
+**Do not "improve" the job count to `"jobs": 0`.** Only CMake 3.29+ reads 0 as
+"one job per processor"; this project's floor is 3.25, where `ctest -j 0`
+silently runs the suite *serially* - a config that looks parallel and is not.
 
 ### Test files are registered, and the build checks it
 
