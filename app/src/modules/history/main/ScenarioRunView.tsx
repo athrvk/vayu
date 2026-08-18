@@ -40,6 +40,7 @@ import {
 	Callout,
 	SampledSchemaValidation,
 	StopRunButton,
+	StoredExchangeWarning,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
@@ -148,6 +149,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	// more than one and which pass a step belongs to is the whole point.
 	const showIteration = steps.some((s) => s.iteration > 0);
 
+	// A run bound a data set if any step says which row it took. Read off the
+	// steps rather than the report so the sentence is right for a live run too -
+	// the `step` events carry `dataRowIndex` exactly as the stored rows do.
+	const dataBound = steps.some((s) => s.dataRowIndex !== undefined);
+
 	const [expanded, setExpanded] = useState<string | null>(null);
 	const toggle = (step: ScenarioStepRow) => {
 		const key = stepKey(step);
@@ -216,6 +222,15 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						in Settings to keep more.
 					</Callout>
 				)}
+
+				{/* What the rows below are, before a reader starts opening them:
+				    each one holds its request and response as they went over the
+				    wire. The load-mode sibling of this notice sits over the
+				    Samples tab, and a collection run's steps are the surface that
+				    had none - which let the Data tab's "rows are never saved
+				    anywhere" be read as covering the cells those rows bound
+				    (issue #731). */}
+				<StoredExchangeWarning steps={steps.length} dataBound={dataBound} />
 
 				{/* Above the steps rather than after them: "which of the contract
 				    did this run exercise" is a whole-run answer, and a reader

@@ -19,6 +19,10 @@
  * Silent when the run captured nothing, and silent on runs recorded before
  * capture existed (the field is absent, not zero). Both surfaces that show
  * captured samples render it, so the wording lives here once.
+ *
+ * `StoredExchangeWarning` is the design-mode half of the same disclosure, over
+ * a collection run's stored step exchanges. They are a pair - change the claim
+ * in one and read the other.
  */
 
 import { Callout } from "./Callout";

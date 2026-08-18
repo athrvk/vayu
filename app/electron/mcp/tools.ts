@@ -1747,7 +1747,7 @@ const scenarioDataInput = z
 	.array(z.record(z.unknown()))
 	.optional()
 	.describe(
-		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. Rows are never persisted - only their count is recorded on the run.'
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
 	);
 
 const streamInput = z
