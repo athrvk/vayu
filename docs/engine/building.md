@@ -274,6 +274,15 @@ ctest -V
 ./vayu_tests
 ```
 
+The `*-dev` and `*-prod` **test presets** run the suite multi-process
+(`ctest -j4`, wired once into the hidden `test-base` test preset in
+`engine/CMakePresets.json`); a bare `ctest` or `./vayu_tests` runs serially.
+Parallelism is safe because the test binary enters a private per-process scratch
+directory before running, so the relative `test_*.db` files fixtures open never
+collide between concurrently scheduled tests (see `engine/tests/main.cpp` and
+`engine/tests/temp_database.hpp`). Override the job count with an explicit
+`ctest --preset linux-dev -jN`.
+
 ### Test files are registered, and the build checks it
 
 The `vayu_tests` sources are listed one by one in `engine/CMakeLists.txt`

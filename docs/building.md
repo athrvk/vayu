@@ -236,6 +236,9 @@ cmake --build --preset macos-prod
 ctest --preset macos-prod
 ```
 
+The test presets run the suite multi-process (`ctest -j4`); pass `-jN` to
+override. See [Engine build guide](engine/building.md#running-tests) for details.
+
 ## Data Directories
 
 ### Development
