@@ -217,6 +217,55 @@ TEST_F (SpecSyncRouteTest, AnEmptySelectionStillMovesTheBindingAndNothingElse) {
     EXPECT_NE (binding ()["specId"].get<std::string> (), bound_spec_);
 }
 
+// A sync moves the binding off the document it named, and nothing owns what is
+// left - which is how a weekly sync of a 12 MB document stranded a 12 MB row a
+// week, unreachable by any route (issue #718).
+TEST_F (SpecSyncRouteTest, SyncingReclaimsTheDocumentTheBindingLeftBehind) {
+    // Age the seeded document past the sweep's grace window: it was stored a
+    // moment ago, and a document that new is treated as a bind in flight.
+    auto seeded = db_->get_spec_document (bound_spec_);
+    ASSERT_TRUE (seeded.has_value ());
+    seeded->fetched_at -= vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
+    db_->save_spec_document (*seeded);
+
+    auto [status, response] = routes::spec_sync_response (*db_, body ());
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_FALSE (db_->get_spec_document (bound_spec_).has_value ())
+    << "the superseded document outlived the sync that moved the binding off it";
+    // What the binding names now is untouched, which is the half that would make
+    // a too-eager sweep catastrophic rather than merely wasteful.
+    auto live = db_->get_spec_document (response["specId"].get<std::string> ());
+    EXPECT_TRUE (live.has_value ());
+}
+
+// The same sync, with a run still naming the document it supersedes: coverage
+// on that run's report describes a contract, so its source outlives the binding
+// by exactly the run's own retention.
+TEST_F (SpecSyncRouteTest, SyncingKeepsASupersededDocumentARunStillNames) {
+    auto seeded = db_->get_spec_document (bound_spec_);
+    ASSERT_TRUE (seeded.has_value ());
+    seeded->fetched_at -= vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
+    db_->save_spec_document (*seeded);
+
+    // The shape a scenario run's manifest stamps into its snapshot.
+    vayu::db::Run run;
+    run.id              = "run_pins_it";
+    run.type            = vayu::RunType::Scenario;
+    run.status          = vayu::RunStatus::Completed;
+    run.start_time      = 1000;
+    run.config_snapshot = json{ { "scenario",
+    json{ { "collectionId", root_ }, { "openapi", json{ { "specId", bound_spec_ } } } } } }
+                          .dump ();
+    db_->create_run (run);
+
+    auto [status, response] = routes::spec_sync_response (*db_, body ());
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_TRUE (db_->get_spec_document (bound_spec_).has_value ())
+    << "a sync reclaimed the document a retained run was measured against";
+}
+
 TEST_F (SpecSyncRouteTest, CreatedRequestsAppendAfterTheCollectionsExistingOnes) {
     create_request (root_); // order 0
 

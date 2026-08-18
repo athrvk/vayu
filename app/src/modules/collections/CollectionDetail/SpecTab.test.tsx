@@ -42,7 +42,7 @@ const bindSpec = {
 	isPending: false,
 	isError: false,
 	error: null as Error | null,
-	data: undefined as { failedStamps: string[] } | undefined,
+	data: undefined as { failedStamps: string[]; failedClears: string[] } | undefined,
 };
 
 const syncSpec = {
@@ -169,7 +169,7 @@ async function pickFile(name: string, text: string) {
 /** Resolve the bind the way TanStack would, running the caller's onSuccess. */
 function bindSucceeds() {
 	const [, options] = bindSpec.mutate.mock.calls[bindSpec.mutate.mock.calls.length - 1];
-	options?.onSuccess?.({ stamped: 0, failedStamps: [] });
+	options?.onSuccess?.({ stamped: 0, failedStamps: [], failedClears: [] });
 }
 
 beforeEach(() => {
@@ -256,6 +256,67 @@ describe("binding a collection that already has requests", () => {
 		expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
 	});
 
+	/*
+	 * Re-binding to a different document (issue #718). Nothing writes null to a
+	 * request's `specOperation` anywhere else in the app, so a stamp the new
+	 * document does not account for would otherwise be permanent - and coverage
+	 * resolves stamps by `operationId` first, so it would claim whichever
+	 * operation of the new document shares the id rather than simply going
+	 * unread.
+	 */
+	it("clears identity recorded against a document this one is not", async () => {
+		requests = [
+			request("r1", "{{baseUrl}}/pets"),
+			// Matched the *old* document, matches nothing here: its URL is not a
+			// path this spec declares.
+			request("r2", "{{baseUrl}}/v1/legacy", {
+				operationId: "legacyPing",
+				method: "GET",
+				path: "/v1/legacy",
+			}),
+			// No stamp to clear - an unmatched request that never had identity is
+			// left exactly as it was.
+			request("r3", "{{baseUrl}}/health"),
+		];
+		render(<SpecTab collection={collection()} />);
+		await pickFile("petstore.json", OPENAPI);
+
+		fireEvent.click(screen.getByRole("button", { name: /bind this spec/i }));
+
+		const [payload] = bindSpec.mutate.mock.calls[0];
+		expect(payload.clearStamps).toEqual(["r2"]);
+		// The matched request is stamped, not cleared - the two lists are disjoint,
+		// which is what lets the mutation write both at once.
+		expect(payload.stamps.map((s: { requestId: string }) => s.requestId)).toEqual(["r1"]);
+	});
+
+	it("discloses the clearing before it happens, and stays silent when there is none", async () => {
+		requests = [
+			request("r1", "{{baseUrl}}/pets"),
+			request("r2", "{{baseUrl}}/v1/legacy", {
+				operationId: "legacyPing",
+				method: "GET",
+				path: "/v1/legacy",
+			}),
+		];
+		const { unmount } = render(<SpecTab collection={collection()} />);
+		await pickFile("petstore.json", OPENAPI);
+
+		// The one line on this screen that describes a write to something already
+		// there, so the user reads it before pressing Bind.
+		expect(
+			screen.getByText(/1 request records an operation this document does not have/i)
+		).toBeTruthy();
+		unmount();
+
+		// A collection with nothing stale says nothing - a zero here would read as
+		// a warning about a bind that rewrites nothing.
+		requests = [request("r1", "{{baseUrl}}/pets"), request("r3", "{{baseUrl}}/health")];
+		render(<SpecTab collection={collection()} />);
+		await pickFile("petstore.json", OPENAPI);
+		expect(screen.queryByText(/does not have/i)).toBeNull();
+	});
+
 	it("refuses a document that is not a spec, by name, and offers no bind", async () => {
 		render(<SpecTab collection={collection()} />);
 
@@ -325,8 +386,18 @@ describe("a bound collection", () => {
 	});
 
 	it("says which requests kept no identity when some stamps failed", async () => {
-		bindSpec.data = { failedStamps: ["req_9"] };
+		bindSpec.data = { failedStamps: ["req_9"], failedClears: [] };
 		render(<SpecTab collection={bound()} />);
 		expect(screen.getByText(/1 request kept no operation identity/i)).toBeTruthy();
+	});
+
+	// The other half of the same report, and the worse state of the two: a stamp
+	// that survived still reads as identity, in a document nothing is bound to.
+	it("says which requests still record another document's operation", async () => {
+		bindSpec.data = { failedStamps: [], failedClears: ["req_9"] };
+		render(<SpecTab collection={bound()} />);
+		expect(
+			screen.getByText(/1 request still records an operation of another document/i)
+		).toBeTruthy();
 	});
 });

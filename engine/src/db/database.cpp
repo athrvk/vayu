@@ -862,6 +862,15 @@ void Database::delete_collection (const std::string& id) {
         }
         return true; // Commit
     });
+
+    // 3. The cascade above is still deliberately not a cascade *to* the document
+    //    a deleted collection was bound to - several collections may bind one,
+    //    so the binding going away is not the document going away. It is the
+    //    moment to ask whether anything still holds it, though, and that is what
+    //    the sweep answers (issue #718). Outside the transaction: the subtree is
+    //    gone either way, and this must not be able to roll it back. Never
+    //    throws; see the declaration.
+    sweep_orphaned_spec_documents ();
 }
 
 // ============================================================================
@@ -991,6 +1000,127 @@ void Database::delete_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting spec document: id=" + id);
     impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
+}
+
+namespace {
+
+/**
+ * The `specId` a JSON blob names at @p path, or "" when it names none.
+ *
+ * One reader for both halves of the sweep's reference set, because the two
+ * blobs disagree about where the id sits and about nothing else: a collection
+ * writes `{specId, specHash, syncedAt}` at the root, a run's snapshot writes
+ * the same identity under `scenario.openapi`. Unparseable text references
+ * nothing - the reading every other reader of these two columns gives it, and
+ * the one that cannot make a corrupt row pin a document forever.
+ */
+std::string spec_id_at (const std::string& blob, std::initializer_list<const char*> path) {
+    try {
+        auto node = nlohmann::json::parse (blob);
+        for (const char* key : path) {
+            if (!node.is_object ()) {
+                return {};
+            }
+            const auto it = node.find (key);
+            if (it == node.end ()) {
+                return {};
+            }
+            node = *it;
+        }
+        if (!node.is_object ()) {
+            return {};
+        }
+        return node.value ("specId", std::string ());
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+} // namespace
+
+size_t Database::sweep_orphaned_spec_documents () {
+    try {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+        // Cheapest question first, and each of the three below is asked only
+        // when the one before it left something at stake. This pass rides on
+        // every run completion, so what it costs when there is nothing to
+        // reclaim - the ordinary case - is what it costs.
+        //
+        // 1. Which documents are even old enough to consider? Two columns and
+        //    never `content`: that is the one column here that reaches
+        //    `maxSpecDocumentBytes` (10 MiB by default), and this pass reads no
+        //    byte of a document whose fate it is only deciding.
+        const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                            .count ();
+        const int64_t cutoff = now - vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS;
+
+        std::vector<std::string> candidates;
+        for (const auto& [id, fetched_at] : impl_->storage.select (
+             columns (&SpecDocument::id, &SpecDocument::fetched_at))) {
+            // A bind stores the document before the binding that names it, so a
+            // document inside the window is a bind in flight - see the grace
+            // constant.
+            if (fetched_at <= cutoff) {
+                candidates.push_back (id);
+            }
+        }
+        if (candidates.empty ()) {
+            return 0;
+        }
+
+        // 2. Which of those does a collection still bind? The same parse
+        //    `get_collections_bound_to_spec` makes, once over the sidebar-sized
+        //    table rather than once per candidate.
+        std::unordered_set<std::string> referenced;
+        for (const auto& binding : impl_->storage.select (&Collection::openapi)) {
+            auto spec_id = spec_id_at (binding, {});
+            if (!spec_id.empty ()) {
+                referenced.insert (std::move (spec_id));
+            }
+        }
+        std::erase_if (candidates,
+        [&] (const std::string& id) { return referenced.count (id) > 0; });
+        if (candidates.empty ()) {
+            return 0;
+        }
+
+        // 3. And which does a retained run still name? Last, because it is the
+        //    expensive read: `config_snapshot` is wide and there are up to
+        //    `maxRunsRetained` of them.
+        std::unordered_set<std::string> pinned;
+        for (const auto& snapshot : impl_->storage.select (&Run::config_snapshot)) {
+            auto spec_id = spec_id_at (snapshot, { "scenario", "openapi" });
+            if (!spec_id.empty ()) {
+                pinned.insert (std::move (spec_id));
+            }
+        }
+        std::erase_if (candidates,
+        [&] (const std::string& id) { return pinned.count (id) > 0; });
+        if (candidates.empty ()) {
+            return 0;
+        }
+
+        // What survived all three questions is unreachable by definition.
+        impl_->storage.transaction ([&] {
+            for (const auto& id : candidates) {
+                impl_->storage.remove_all<SpecDocument> (
+                where (c (&SpecDocument::id) == id));
+            }
+            return true; // Commit
+        });
+
+        vayu::utils::log_info ("Swept " + std::to_string (candidates.size ()) +
+        " OpenAPI document(s) no collection binds and no retained run names");
+        return candidates.size ();
+    } catch (const std::exception& e) {
+        // Best-effort by contract - see the header for why a caller must not
+        // fail over this.
+        vayu::utils::log_warning (
+        "OpenAPI document sweep failed: " + std::string (e.what ()));
+        return 0;
+    }
 }
 
 int64_t Database::stamp_hashless_spec_bindings () {
@@ -1180,6 +1310,14 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
             return true; // Commit
         });
     });
+
+    // The binding moved off whatever it named before, and a sync is the one
+    // operation that does that on a schedule - weekly, for a document that may
+    // be 12 MB (issue #718). Reclaimed here rather than left to the next
+    // startup, and outside the retried transaction because the sync has already
+    // succeeded and must not be undone by housekeeping. Never throws; see the
+    // declaration.
+    sweep_orphaned_spec_documents ();
 }
 
 // The one place a caller can scope the DB mutex around more than a single call.
@@ -1570,6 +1708,12 @@ void Database::prune_runs_configured () {
     const int max_age_days =
     get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
     prune_runs (max_runs, max_age_days);
+    // A run that has just been pruned may have been the last thing naming an
+    // OpenAPI document (issue #718). Retention is where that reference is
+    // released, so it is where the release is noticed - and this is what puts
+    // the sweep on both a startup and the end of every run without a schedule
+    // of its own. Never throws; see the declaration.
+    sweep_orphaned_spec_documents ();
 }
 
 // ============================================================================

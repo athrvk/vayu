@@ -1217,7 +1217,8 @@ OpenAPI documents, stored once and bound to collections by
 [`collections.openapi`](#post-collections) (issue #637). A spec is not owned by a
 collection: several may bind the same document, and unbinding one must leave it
 there for the others - so it is a top-level resource with no cascade reaching it,
-and the rule that keeps that safe is the delete refusal below.
+and the rule that keeps that safe is the delete refusal below. What it is *not*
+is immortal: see the reclamation rule further down.
 
 The document is stored **verbatim** and its `hash` is computed engine-side on
 every write, never taken from the caller. A scenario run of a bound collection
@@ -1229,6 +1230,25 @@ There is deliberately **no `PUT /specs/:id`**: a document that changed is a
 different document, and rewriting one in place would invalidate the hash every
 run of every bound collection was stamped with. A re-fetch stores a new document
 and moves the binding.
+
+**A document nothing can reach is reclaimed** (issue #718). Having no owner is
+what let these rows accumulate with no way to die - every sync mints one and
+moves the binding off the last, and `DELETE /specs/:id` needs an id no route
+hands out for an unbound document. So the engine sweeps on one rule:
+
+> A document lives while a collection binds it, **or** while a retained run names
+> it in its snapshot under `scenario.openapi.specId`.
+
+Run-referenced documents live exactly as long as the runs do, so a report's
+coverage never describes a contract whose source is gone. The sweep runs as part
+of ordinary housekeeping - at startup, after each run's retention pass, after a
+`POST /specs/sync`, and after a `DELETE /collections/:id` - and **spares any
+document written in the last 10 minutes**, because storing a document is the
+first of the three writes that bind one and a caller may not have sent the
+`PUT /collections/:id` yet. A client that stores a document it does not intend to
+bind should therefore expect it to go: `GET /specs/:id` will answer `404` once it
+is unreachable by that rule. Nothing here changes what `DELETE /specs/:id`
+refuses, and no cascade was added - a bound document is untouched.
 
 ### POST /specs
 

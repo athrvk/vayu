@@ -38,6 +38,16 @@ Several collections may bind the same document. It is not owned by any of them,
 which is why unbinding one leaves it in place, and why the engine refuses to
 delete a document while a collection still binds it.
 
+Because nothing owns a document, nothing deletes one on your behalf either -
+until it can no longer be reached at all. **A stored document lives while a
+collection binds it, or while a run you still have names it**; once neither is
+true, the engine reclaims it during its ordinary housekeeping (on startup, after
+a run, after a sync, after a collection is deleted). That is what keeps a year of
+weekly syncs of a 12 MB document from leaving a year of 12 MB rows behind: a run
+pins the document it was measured against for exactly as long as the run itself
+is retained, so its [coverage](#contract-coverage) always has a source, and the
+superseded copies go.
+
 ## Binding on import
 
 Import an OpenAPI 3.x or Swagger 2.0 document the usual way -
@@ -158,8 +168,27 @@ already there:
 
 The result is stated before anything is written - how many matched, how many
 requests carry no operation, how many operations have no request - and only the
-matches are stamped. **Nothing is created, deleted or rewritten**: acting on the
-difference is what applying a sync will do.
+matches are stamped. **Nothing is created or deleted**: acting on the difference
+is what applying a sync will do.
+
+### Identity from another document is cleared
+
+One thing a bind does rewrite, and it says so before it does: a request that
+records an operation the document being bound does not account for has that
+identity **cleared**. The rule after any bind is one sentence - *a request's
+operation is the one it matched in the bound document, or nothing.*
+
+This is the re-bind case, and only that case. Unbinding leaves every recorded
+operation exactly as it is, so unbind and bind the same document again and
+nothing is lost. Bind a *different* one, though, and without this the requests
+that do not match it would keep identity from the old document - which is worse
+than no identity, because [coverage](#contract-coverage) resolves a stamp by its
+`operationId` first, so a stale stamp claims whichever operation of the new
+document happens to share that id.
+
+The summary counts them before you press Bind, and if a clear fails to land the
+tab names how many requests still record another document's operation - binding
+again retries them.
 
 ## Checking a bound spec for changes
 

@@ -116,6 +116,17 @@ export interface BindSpecInput {
 	/** Identity to stamp on the requests that matched. May be empty. */
 	stamps: SpecOperationStamp[];
 	/**
+	 * Requests whose recorded identity must be *cleared*, by id (issue #718).
+	 *
+	 * The other half of stamping, and required rather than optional because a
+	 * caller that forgets it leaves the bug this exists for: nothing else in the
+	 * app ever writes `null` here, so a request stamped against a document this
+	 * collection is no longer bound to keeps that stamp forever - and coverage
+	 * resolves a stamp by `operationId` first, so one whose id happens to exist
+	 * in the new document claims the wrong operation rather than none.
+	 */
+	clearStamps: string[];
+	/**
 	 * What the document declares, stored beside it so a run of this collection
 	 * can report its contract coverage (issue #629). Absent for a document the
 	 * parsers produced no index for, which is stored as "no index".
@@ -139,10 +150,18 @@ export interface BindSpecResult {
 	 * routes and an unstamped request is a request the next bind can stamp.
 	 */
 	failedStamps: string[];
+	/**
+	 * Requests whose *clear* failed, by id - reported for the same reason and
+	 * separately, because the state it leaves is the worse of the two: a stamp
+	 * naming an operation of a document this collection is not bound to, which
+	 * reads as identity rather than as a gap.
+	 */
+	failedClears: string[];
 }
 
 /**
- * Store a document, bind the collection to it, and stamp the matched requests.
+ * Store a document, bind the collection to it, and make every request's
+ * recorded identity agree with what it matched.
  *
  * Three writes in a fixed order, because each depends on the one before: the
  * document has no id until it is stored, the binding is what makes the identity
@@ -150,6 +169,14 @@ export interface BindSpecResult {
  * bind did not happen. A stamp failing does not: the collection *is* bound, and
  * saying so while naming what did not land is more useful than reporting a
  * failure for a binding the user can see worked.
+ *
+ * **The third write goes both ways** (issue #718). A bind used to write only
+ * the matches, which held while a collection was bound once and never again -
+ * but re-binding to a *different* document stamps the requests that match it
+ * and says nothing about the rest, so every non-matcher kept identity from the
+ * old document. The invariant now is one sentence: after a bind, a request's
+ * `specOperation` is the operation it matched in the bound document, or
+ * nothing. That the two sets are disjoint is what lets both batches go at once.
  *
  * A spec stored by a bind that then failed is left where it is. Documents are
  * not owned by collections (several may bind one), so there is nothing to
@@ -165,6 +192,7 @@ export function useBindSpecMutation() {
 			content,
 			sourceUrl,
 			stamps,
+			clearStamps,
 			operations,
 			responseSchemas,
 		}: BindSpecInput): Promise<BindSpecResult> => {
@@ -180,19 +208,39 @@ export function useBindSpecMutation() {
 				openapi: { specId: spec.id, specHash: spec.hash, syncedAt: Date.now() },
 			});
 
+			// `null`, not an absent key: the engine reads absent as "keep" and
+			// null as "reset to the default", and the default is no operation.
+			// The same rule an unbind follows for the collection binding, which
+			// is why stamping and un-stamping are one verb rather than two.
+			const writes = [
+				...stamps.map((stamp) => ({
+					requestId: stamp.requestId,
+					specOperation: stamp.specOperation as SpecOperation | null,
+				})),
+				...clearStamps.map((requestId) => ({ requestId, specOperation: null })),
+			];
 			const results = await Promise.allSettled(
-				stamps.map((stamp) =>
+				writes.map((write) =>
 					apiService.updateRequest({
-						id: stamp.requestId,
-						specOperation: stamp.specOperation,
+						id: write.requestId,
+						specOperation: write.specOperation,
 					})
 				)
 			);
+			const rejected = new Set(
+				writes.filter((_, i) => results[i].status === "rejected").map((w) => w.requestId)
+			);
 			const failedStamps = stamps
-				.filter((_, i) => results[i].status === "rejected")
-				.map((stamp) => stamp.requestId);
+				.map((stamp) => stamp.requestId)
+				.filter((id) => rejected.has(id));
+			const failedClears = clearStamps.filter((id) => rejected.has(id));
 
-			return { spec, stamped: stamps.length - failedStamps.length, failedStamps };
+			return {
+				spec,
+				stamped: stamps.length - failedStamps.length,
+				failedStamps,
+				failedClears,
+			};
 		},
 		// Settled, not success: a stamp that landed before a later one failed is
 		// already on the engine, and the counts the tab shows are read from the

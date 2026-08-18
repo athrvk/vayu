@@ -176,6 +176,47 @@ class Database {
     void delete_spec_document (const std::string& id);
 
     /**
+     * @brief Reclaim documents nothing can reach any more, returning how many
+     *        went (issue #718).
+     *
+     * Nothing owns a `spec_documents` row, which is what leaves it with no
+     * cascade to die by: every sync mints a new document and moves the binding
+     * off the old one, unbinding leaves it, re-binding mints another, and
+     * deleting the bound collection takes its requests and not the document. A
+     * year of weekly syncs of a 12 MB document therefore strands ~600 MB of
+     * rows no route can even enumerate, since `DELETE /specs/:id` needs an id
+     * and there is no list route to get one from.
+     *
+     * **The lifetime rule this implements**, and the only one: a document lives
+     * while a collection binds it, or while a *retained run* names it in
+     * `runs.config_snapshot`. The second half is what makes the sweep safe to
+     * run beside retention rather than instead of it - a scenario run stamps
+     * the `specId` it planned against, and its report's coverage describes a
+     * contract the reader may still want to see the source of. So a document
+     * outlives the binding that made it by exactly as long as the runs that
+     * used it, and goes with the last of them. That is also why the first of
+     * the three callers is `prune_runs_configured`: the pass that *releases*
+     * run references is the one that should look for what they were holding,
+     * and hanging the sweep there puts it on a startup and on the end of every
+     * run without a schedule of its own. The other two are `spec_sync_apply`
+     * (the accretion source) and `delete_collection` (a binder going away).
+     *
+     * A document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` is spared
+     * whatever else it looks like - see that constant for the bind-in-flight
+     * window it exists for.
+     *
+     * **Never throws.** All three callers reach it as the tail of an operation
+     * whose success does not depend on it (a startup, a sync, a collection
+     * delete), so a failure here is logged and swallowed rather than turned
+     * into a failed sync. Cheap when there is nothing to do, which is what
+     * riding on every run completion requires: it asks the three questions
+     * cheapest-first and stops at the first that leaves nothing at stake, so
+     * the ordinary case never reads the runs table - and no path reads
+     * `content`.
+     */
+    size_t sweep_orphaned_spec_documents ();
+
+    /**
      * @brief Repair bindings stored without the document version they name
      *        (issue #709), returning how many were stamped.
      *
