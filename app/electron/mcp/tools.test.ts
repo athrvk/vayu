@@ -15,8 +15,11 @@ import {
 	MAX_INBOX_CAPTURE_LIMIT,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_INLINE_BODY_BYTES,
+	MAX_REDIRECTS_BOUND,
 	MAX_REPORT_TRACE_BYTES,
 	MAX_RUN_SERIES_LIMIT,
+	MAX_SLOW_THRESHOLD_MS,
+	MAX_SUCCESS_SAMPLE_PERIOD,
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
@@ -70,6 +73,23 @@ function page(data: unknown[], total = data.length, offset = 0) {
 }
 
 const emptyPage = () => page([]);
+
+/**
+ * `serialize_token`'s shape (`engine/src/http/oauth_client.cpp`), bearer bytes
+ * included - the fakes serve what the engine serves, so the tools' redaction
+ * has something real to remove.
+ */
+const OAUTH2_TOKEN_RECORD = {
+	// Unit-separated, as `cache_key(config)` builds it engine-side.
+	cacheKey: "https://id.example.com/oauth/token\u001fclient_a\u001fdefault\u001f",
+	accessToken: "eyJhbGciOiJIUzI1NiJ9.thebearer.sig",
+	tokenType: "Bearer",
+	scope: "orders:read",
+	expiresIn: 3600,
+	createdAt: 1_755_000_000_000,
+	expiresAt: 1_755_003_600_000,
+	hasRefreshToken: true,
+};
 
 /** Build a fake EngineClient with vi.fn()s for the methods under test. */
 function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
@@ -137,6 +157,11 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		saveGlobals: vi.fn().mockResolvedValue({ id: "globals", updatedAt: 2, variables: {} }),
 		getCookies: vi.fn().mockResolvedValue({ scopes: [] }),
 		clearCookies: vi.fn().mockResolvedValue({ cleared: 4 }),
+		fetchOAuth2Token: vi.fn().mockResolvedValue(OAUTH2_TOKEN_RECORD),
+		getOAuth2TokenStatus: vi
+			.fn()
+			.mockResolvedValue({ found: true, expired: false, token: OAUTH2_TOKEN_RECORD }),
+		clearOAuth2Token: vi.fn().mockResolvedValue({ deleted: true }),
 		startMockIssuer: vi.fn().mockResolvedValue({
 			issuerId: "issuer_1",
 			issuerUrl: "http://127.0.0.1:41234",
@@ -5783,5 +5808,330 @@ describe("webhook inbox tools", () => {
 			).toEqual([]);
 			expect(byName().get("get_inbox_captures")?.description).toMatch(/no live stream/i);
 		});
+	});
+});
+
+/**
+ * The run-recording knobs the app's load dialog has always sent, reachable over
+ * MCP for the first time (issue #760).
+ *
+ * The load-bearing assertions are the payload *keys*: these three are the only
+ * snake_case fields on `POST /runs`, and a camelCase spelling reaches the engine
+ * as an unread key rather than an error - a knob an agent believes it set and no
+ * run ever reads.
+ */
+describe("start_load_run recording knobs", () => {
+	const allow = { allowlist: ["api.example.com"] };
+	const started = (client: EngineClient) =>
+		(client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+
+	async function start(args: Record<string, unknown>, client = fakeClient()) {
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/users", confirmed: true, ...args },
+			ctxWith(client, allow)
+		);
+		return { res, client };
+	}
+
+	test("each knob travels under the engine's own key", async () => {
+		const { res, client } = await start({
+			successSamplePeriod: 5,
+			slowRequestThresholdMs: 750,
+			saveTimingBreakdown: true,
+			comment: "nightly baseline",
+		});
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({
+			success_sample_rate: 5,
+			slow_threshold_ms: 750,
+			save_timing_breakdown: true,
+			comment: "nightly baseline",
+		});
+		// The camelCase argument names must not also reach the engine: it reads
+		// the snake_case ones and would ignore these in silence.
+		for (const camel of [
+			"successSamplePeriod",
+			"slowRequestThresholdMs",
+			"saveTimingBreakdown",
+		]) {
+			expect(started(client)).not.toHaveProperty(camel);
+		}
+	});
+
+	test("a knob the caller did not name is absent, not defaulted", async () => {
+		const { client } = await start({ comment: "just a note" });
+		const payload = started(client);
+
+		// Each has an engine-side default a stated value would overwrite; a
+		// defaulted `save_timing_breakdown: false` here would switch off tracing
+		// for a caller that never mentioned it.
+		for (const key of ["success_sample_rate", "slow_threshold_ms", "save_timing_breakdown"]) {
+			expect(payload).not.toHaveProperty(key);
+		}
+	});
+
+	test("a sampling period of 0 is refused at the schema, not sent as a divide by zero", () => {
+		const schema = z.object(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as z.ZodRawShape
+		);
+		expect(schema.safeParse({ successSamplePeriod: 0 }).success).toBe(false);
+		expect(schema.safeParse({ successSamplePeriod: 1 }).success).toBe(true);
+		expect(
+			schema.safeParse({ successSamplePeriod: MAX_SUCCESS_SAMPLE_PERIOD + 1 }).success
+		).toBe(false);
+		// 0 disables outlier capture and is legal; a negative would mark every
+		// completion an outlier.
+		expect(schema.safeParse({ slowRequestThresholdMs: 0 }).success).toBe(true);
+		expect(schema.safeParse({ slowRequestThresholdMs: -1 }).success).toBe(false);
+		expect(
+			schema.safeParse({ slowRequestThresholdMs: MAX_SLOW_THRESHOLD_MS + 1 }).success
+		).toBe(false);
+	});
+
+	/**
+	 * `POST /runs` has no guard on `maxRedirects` - it reaches
+	 * `CURLOPT_MAXREDIRS`, where a negative means *unlimited* - so this schema is
+	 * the only thing between `-1` and a run that follows chains forever.
+	 */
+	test("the redirect policy reaches composition, and a negative ceiling is refused", async () => {
+		const { client } = await start({ followRedirects: false, maxRedirects: 3 });
+		const composed = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+			request: Record<string, unknown>;
+		};
+
+		expect(composed.request).toMatchObject({ followRedirects: false, maxRedirects: 3 });
+
+		const schema = z.object(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as z.ZodRawShape
+		);
+		expect(schema.safeParse({ maxRedirects: -1 }).success).toBe(false);
+		expect(schema.safeParse({ maxRedirects: 0 }).success).toBe(true);
+		expect(schema.safeParse({ maxRedirects: MAX_REDIRECTS_BOUND + 1 }).success).toBe(false);
+	});
+
+	/**
+	 * Both executors read them off the same `RunContext`, so forwarding on one
+	 * path only would be a knob that silently does nothing on the other.
+	 */
+	test("a scenario load run carries the same knobs", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "req_1", name: "Step", order: 0 }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/step" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "col_1" },
+				confirmed: true,
+				successSamplePeriod: 2,
+				slowRequestThresholdMs: 900,
+				saveTimingBreakdown: true,
+				comment: "scenario soak",
+			},
+			ctxWith(client, allow)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({
+			success_sample_rate: 2,
+			slow_threshold_ms: 900,
+			save_timing_breakdown: true,
+			comment: "scenario soak",
+		});
+	});
+
+	test("a scenario run refuses the redirect policy by name - each step keeps its own", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "col_1" }, confirmed: true, followRedirects: true },
+			ctxWith(client, allow)
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/followRedirects/);
+		expect(firstText(res)).toMatch(/stored redirect policy/i);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The OAuth 2.0 token-cache tools (issue #760).
+ *
+ * Two rules carry the weight here and both are security-shaped: the interactive
+ * grant is refused *before* the engine is called, and no tool ever returns the
+ * access token's bytes.
+ */
+describe("OAuth 2.0 token tools", () => {
+	const config = {
+		grantType: "client_credentials",
+		accessTokenUrl: "https://id.example.com/oauth/token",
+		clientId: "client_a",
+		clientSecret: "s3cret",
+	};
+	const allow = { allowlist: ["id.example.com"] };
+
+	test("the three tools sit in the categories their effects call for", () => {
+		const tools = new Map(TOOLS.map((t) => [t.name, t]));
+		// It contacts a third party; it does not mutate saved documents.
+		expect(tools.get("fetch_oauth2_token")?.category).toBe("execute");
+		expect(tools.get("fetch_oauth2_token")?.annotations.openWorldHint).toBe(true);
+		expect(tools.get("get_oauth2_token_status")?.category).toBe("read");
+		// It destroys a stored credential, so it sits behind the write toggle -
+		// the same place `clear_cookies` sits for the same reason.
+		expect(tools.get("clear_oauth2_token")?.category).toBe("write");
+	});
+
+	test("fetch acquires the token and never hands back the bearer", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("fetch_oauth2_token", { config }, ctxWith(client, allow));
+
+		expect(res.isError).toBeFalsy();
+		expect(client.fetchOAuth2Token).toHaveBeenCalledTimes(1);
+		expect((client.fetchOAuth2Token as ReturnType<typeof vi.fn>).mock.calls[0][0]).toEqual({
+			config,
+		});
+		const text = firstText(res);
+		expect(text).not.toContain(OAUTH2_TOKEN_RECORD.accessToken);
+		// What an agent legitimately needs from the cache is its shape - the key
+		// it can inspect and clear by, and when it expires.
+		expect(JSON.parse(text)).toEqual({
+			cacheKey: OAUTH2_TOKEN_RECORD.cacheKey,
+			tokenType: "Bearer",
+			scope: "orders:read",
+			expiresIn: 3600,
+			createdAt: OAUTH2_TOKEN_RECORD.createdAt,
+			expiresAt: OAUTH2_TOKEN_RECORD.expiresAt,
+			hasRefreshToken: true,
+			// Stated rather than silently omitted: an agent that finds no token
+			// and is not told why concludes the acquisition half-failed.
+			accessTokenWithheld: true,
+		});
+	});
+
+	test("force is forwarded only when asked for", async () => {
+		const forced = fakeClient();
+		await dispatchTool("fetch_oauth2_token", { config, force: true }, ctxWith(forced, allow));
+		expect(
+			(forced.fetchOAuth2Token as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		).toMatchObject({ force: true });
+
+		const plain = fakeClient();
+		await dispatchTool("fetch_oauth2_token", { config, force: false }, ctxWith(plain, allow));
+		// A stated `false` is the engine's own default, and sending it would make
+		// "the caller said no" indistinguishable from "the caller said nothing".
+		expect(
+			(plain.fetchOAuth2Token as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		).not.toHaveProperty("force");
+	});
+
+	/**
+	 * The refusal is not merely "it cannot work". `acquire_token` answers a cache
+	 * hit *before* it looks at the grant, so a call naming a config that matches
+	 * an entry the user authorized in a browser would otherwise reach into it.
+	 */
+	test("the authorization_code grant is refused before the engine is called", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"fetch_oauth2_token",
+			{ config: { ...config, grantType: "authorization_code" } },
+			ctxWith(client, allow)
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/authorization_code/);
+		// The refusal names where the user can do it instead.
+		expect(firstText(res)).toMatch(/Auth tab|in Vayu/i);
+		expect(client.fetchOAuth2Token).not.toHaveBeenCalled();
+	});
+
+	test("the token endpoint is gated by the allowlist, and so is a different refresh host", async () => {
+		const blocked = fakeClient();
+		const off = await dispatchTool("fetch_oauth2_token", { config }, ctxWith(blocked));
+		expect(off.isError).toBe(true);
+		expect(firstText(off)).toMatch(/accessTokenUrl/);
+		expect(blocked.fetchOAuth2Token).not.toHaveBeenCalled();
+
+		// A config whose refresh URL points somewhere else must not walk around
+		// the gate the token URL passed.
+		const sneaky = fakeClient();
+		const res = await dispatchTool(
+			"fetch_oauth2_token",
+			{ config: { ...config, refreshTokenUrl: "https://elsewhere.example.net/refresh" } },
+			ctxWith(sneaky, allow)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/refreshTokenUrl/);
+		expect(sneaky.fetchOAuth2Token).not.toHaveBeenCalled();
+	});
+
+	test("status reports presence and expiry without the bearer", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"get_oauth2_token_status",
+			{ cacheKey: OAUTH2_TOKEN_RECORD.cacheKey },
+			ctxWith(client)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(client.getOAuth2TokenStatus).toHaveBeenCalledWith(
+			OAUTH2_TOKEN_RECORD.cacheKey,
+			undefined
+		);
+		const text = firstText(res);
+		expect(text).toContain('"found": true');
+		expect(text).toContain('"expired": false');
+		expect(text).not.toContain(OAUTH2_TOKEN_RECORD.accessToken);
+	});
+
+	test("an absent entry is an answer, not an error", async () => {
+		const client = fakeClient({
+			getOAuth2TokenStatus: vi.fn().mockResolvedValue({ found: false }),
+		});
+		const res = await dispatchTool(
+			"get_oauth2_token_status",
+			{ cacheKey: "nothing-here" },
+			ctxWith(client)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain('"found": false');
+	});
+
+	test("clearing is refused while writes are off, and reports what it removed when on", async () => {
+		const gated = fakeClient();
+		const refused = await dispatchTool(
+			"clear_oauth2_token",
+			{ cacheKey: OAUTH2_TOKEN_RECORD.cacheKey },
+			ctxWith(gated)
+		);
+		expect(refused.isError).toBe(true);
+		expect(firstText(refused)).toMatch(/writes are disabled/i);
+		expect(gated.clearOAuth2Token).not.toHaveBeenCalled();
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"clear_oauth2_token",
+			{ cacheKey: OAUTH2_TOKEN_RECORD.cacheKey },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.clearOAuth2Token).toHaveBeenCalledWith(
+			OAUTH2_TOKEN_RECORD.cacheKey,
+			undefined
+		);
+		expect(firstText(res)).toContain('"deleted": true');
+	});
+
+	test("the cache families the renderer must refetch are declared", () => {
+		const tools = new Map(TOOLS.map((t) => [t.name, t]));
+		// Both change what the auth tab's status row shows; a read changes nothing.
+		expect(tools.get("fetch_oauth2_token")?.invalidates).toEqual(["oauth"]);
+		expect(tools.get("clear_oauth2_token")?.invalidates).toEqual(["oauth"]);
+		expect(tools.get("get_oauth2_token_status")?.invalidates).toEqual([]);
 	});
 });

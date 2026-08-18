@@ -232,6 +232,25 @@ const INVALIDATORS: Record<
 			queryClient.removeQueries({ queryKey: queryKeys.mockServer.routes(event.mockId) });
 		}
 	},
+
+	/*
+	 * The engine's OAuth 2.0 token cache (issue #760). Invalidated at
+	 * `oauth.all` rather than at the one key the call named, because the event
+	 * carries no cache key: the key an agent clears is an argument, but the key
+	 * a `fetch_oauth2_token` writes is derived engine-side and only appears in
+	 * the answer, so a per-key hint would be present for one tool and absent for
+	 * the other - the shape that leaves a stale row exactly when it matters.
+	 * The prefix costs a refetch of every mounted status query, and only an open
+	 * Auth tab mounts one.
+	 *
+	 * The query polls at 30s on its own (`useOAuth2TokenStatusQuery`), so this
+	 * is about immediacy in the same way the `service` family is: an agent that
+	 * clears a token and says so must not leave the row that shows it valid
+	 * standing for another half minute.
+	 */
+	oauth: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.oauth.all });
+	},
 };
 
 /**

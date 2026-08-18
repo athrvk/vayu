@@ -430,6 +430,18 @@ export class EngineClient {
 		return this.request("GET", "/scripting/completions", undefined, signal);
 	}
 
+	/**
+	 * The same surface as TypeScript declarations: `GET /scripting/types` answers
+	 * `{version, engine, libUri, typeDefinitions}`, the `.d.ts` text generated
+	 * from the completion table by `script_types.cpp`. The app feeds it to
+	 * Monaco's TypeScript worker; MCP serves it as a resource, because a
+	 * signature an agent can read is what turns a name into a call it gets right
+	 * the first time.
+	 */
+	getScriptTypeDefinitions(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/scripting/types", undefined, signal);
+	}
+
 	updateConfig(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/config", payload, signal);
 	}
@@ -769,6 +781,57 @@ export class EngineClient {
 			clearTimeout(timer);
 		}
 		return out;
+	}
+
+	// --- OAuth 2.0 token cache -----------------------------------------------
+	//
+	// The three routes the app's auth tab drives (`engine/src/http/routes/
+	// oauth.cpp`). The engine owns the cache key - `cache_key(config)` over
+	// accessTokenUrl / clientId / credentialsId / username - so callers name a
+	// config to acquire and the returned `cacheKey` to inspect or clear. The
+	// interactive `authorization_code` exchange (`/oauth2/authorize/*`) is
+	// deliberately absent: it needs a browser and a loopback listener the app
+	// owns, and agent-driven browser auth is a non-goal of epic #753.
+
+	/**
+	 * Acquire or return a cached token: `POST /oauth2/token` `{config, force?}`.
+	 *
+	 * This is the one call here that waits on a third-party server, so it takes
+	 * the derived budget for the reason {@link executeRequest} does - a token
+	 * endpoint is as slow as any other host. A `409 oauth2_interactive_required`
+	 * is the engine's answer for a config whose grant needs a browser.
+	 */
+	async fetchOAuth2Token(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		const timeoutMs = await this.proxiedTimeoutMs(payload, signal);
+		return this.request("POST", "/oauth2/token", payload, signal, timeoutMs);
+	}
+
+	/**
+	 * Cache status for one key: `GET /oauth2/token?key=`. Always `200` - presence
+	 * and expiry are in the body (`{found, expired?, token?}`), so a missing
+	 * entry is an answer rather than an error.
+	 */
+	getOAuth2TokenStatus(cacheKey: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/oauth2/token?key=${encodeURIComponent(cacheKey)}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Drop one cached token: `DELETE /oauth2/token?key=`. Idempotent, and the
+	 * body's `deleted` reports whether a row existed - which is what lets a tool
+	 * tell "cleared it" from "there was nothing there".
+	 */
+	clearOAuth2Token(cacheKey: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"DELETE",
+			`/oauth2/token?key=${encodeURIComponent(cacheKey)}`,
+			undefined,
+			signal
+		);
 	}
 
 	// --- Local services: the OAuth 2.0 mock issuer ---------------------------

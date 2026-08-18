@@ -2234,7 +2234,9 @@ export type McpDataEntity =
 	| "cookie"
 	| "config"
 	/** Engine-hosted local services: webhook inboxes, mock servers and mock issuers. */
-	| "service";
+	| "service"
+	/** The engine's OAuth 2.0 token cache - fetched, refreshed or cleared. */
+	| "oauth";
 
 /**
  * What the main process sends over `mcp:data-changed`. Invalidation only - the

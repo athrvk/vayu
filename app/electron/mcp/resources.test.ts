@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { STATIC_RESOURCES, projectScriptingSurface } from "./resources.js";
+import { STATIC_RESOURCES, projectScriptingSurface, projectScriptingTypes } from "./resources.js";
 import type { ToolContext } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -172,6 +172,84 @@ describe("vayu://scripting/completions resource", () => {
 		} as ToolContext;
 
 		await expect(scriptingResource().read(ctx)).rejects.toThrow("engine is down");
+	});
+});
+
+/**
+ * The declarations half of the same surface (issue #760). The completions
+ * resource answers "what is there"; this one answers "what does it take", and
+ * the same anti-drift rule applies - the text must be the engine's, not a copy
+ * kept here.
+ */
+describe("vayu://scripting/types resource", () => {
+	const typesResource = () => {
+		const r = STATIC_RESOURCES.find((s) => s.uri === "vayu://scripting/types");
+		if (!r) throw new Error("scripting types resource is not registered");
+		return r;
+	};
+
+	function typesContext(payload: unknown, getScriptTypeDefinitions = vi.fn()) {
+		getScriptTypeDefinitions.mockResolvedValue(payload);
+		return {
+			ctx: {
+				client: { getScriptTypeDefinitions } as unknown as EngineClient,
+			} as ToolContext,
+			getScriptTypeDefinitions,
+		};
+	}
+
+	test("serves the declarations the engine generated, with its version stamps", async () => {
+		// A declaration the app has never heard of: only a resource that reads
+		// the engine can produce it, so a hardcoded .d.ts here fails.
+		const { ctx, getScriptTypeDefinitions } = typesContext({
+			version: "1.0.0",
+			engine: "quickjs",
+			libUri: "ts:vayu/pm.d.ts",
+			typeDefinitions: "declare function somethingTheAppHasNeverHeardOf(): void;",
+		});
+
+		const types = await typesResource().read(ctx);
+
+		expect(getScriptTypeDefinitions).toHaveBeenCalledTimes(1);
+		expect(types).toEqual({
+			version: "1.0.0",
+			engine: "quickjs",
+			libUri: "ts:vayu/pm.d.ts",
+			typeDefinitions: "declare function somethingTheAppHasNeverHeardOf(): void;",
+		});
+	});
+
+	test("forwards the cancellation signal to the engine client", async () => {
+		const { ctx, getScriptTypeDefinitions } = typesContext({
+			typeDefinitions: "declare var pm;",
+		});
+		const controller = new AbortController();
+
+		await typesResource().read(ctx, controller.signal);
+
+		expect(getScriptTypeDefinitions).toHaveBeenCalledWith(controller.signal);
+	});
+
+	// Same rule as the completions resource: an agent reading a missing
+	// declaration concludes the sandbox has no such call.
+	test.each([
+		["a payload that is not an object", "declare var pm;"],
+		["a payload with no typeDefinitions key", { version: "1.0.0" }],
+		["typeDefinitions that is not a string", { typeDefinitions: { pm: true } }],
+		["an empty declaration text", { typeDefinitions: "" }],
+		["null", null],
+	])("throws loudly on %s", (_label, payload) => {
+		expect(() => projectScriptingTypes(payload)).toThrow(/scripting\/types/);
+	});
+
+	test("propagates an engine failure rather than serving an empty surface", async () => {
+		const ctx = {
+			client: {
+				getScriptTypeDefinitions: vi.fn().mockRejectedValue(new Error("engine is down")),
+			} as unknown as EngineClient,
+		} as ToolContext;
+
+		await expect(typesResource().read(ctx)).rejects.toThrow("engine is down");
 	});
 });
 
