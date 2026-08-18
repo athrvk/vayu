@@ -183,6 +183,38 @@ export function countOutcomes(steps: readonly ScenarioStepRow[]): OutcomeCounts 
 }
 
 /**
+ * The run's four outcome totals as the engine counted them, or `null` when the
+ * report cannot say (a live run before its report arrives, or a sidecar older
+ * than these fields).
+ *
+ * These are the **whole-run** counts - `report.scenario.passed/failed/...`,
+ * written from every step the runner executed - not a tally of the stored rows.
+ * The rows are thinned by `maxScenarioStoredSteps` and thinning drops only
+ * passes, so `countOutcomes(steps)` undercounts `passed` on any run that filled
+ * its store: a 6,000-step run keeping 5,000 rows would read "4,990 passed"
+ * beside a header claiming 6,000 steps. The stored-row count stays the list's
+ * own disclosure line (`thinningDisclosure`); the chips read the truth here.
+ *
+ * All four are read defensively: an older report typed as carrying them may
+ * omit one at runtime, and a partial read is worse than falling back to the
+ * rows wholesale.
+ */
+export function outcomeCountsFromReport(report: RunReport | undefined): OutcomeCounts | null {
+	const scenario = report?.scenario;
+	if (!scenario) return null;
+	const { passed, failed, skipped, errored } = scenario;
+	if (
+		typeof passed !== "number" ||
+		typeof failed !== "number" ||
+		typeof skipped !== "number" ||
+		typeof errored !== "number"
+	) {
+		return null;
+	}
+	return { passed, failed, skipped, errored };
+}
+
+/**
  * What the report says the run's own store thinned away, or `null` when it
  * dropped nothing (or is too old to say).
  *

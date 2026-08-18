@@ -232,6 +232,58 @@ describe("outcomes", () => {
 		}
 	});
 
+	/**
+	 * Issue #726. Thinning drops passing rows only, so tallying the rows makes
+	 * the `passed` chip mean something different per run size - and disagree
+	 * with the step total in the same header strip.
+	 */
+	it("counts the whole run on a thinned run, not the rows that survived", () => {
+		reportQuery.data = report({
+			// One row kept out of 6,000 executed - the failure, as thinning
+			// guarantees.
+			results: [storedStep(0, 0, "failed", { name: "Kept" })],
+			scenario: {
+				iterations: 1,
+				iterationsCompleted: 1,
+				stepsExecuted: 6_000,
+				passed: 5_990,
+				failed: 10,
+				skipped: 0,
+				errored: 0,
+				stepsStored: 1,
+				stepsDropped: 5_999,
+			},
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		// Tally the rows and this reads "0 passed" beside a header claiming
+		// 6,000 steps.
+		expect(outcomeCount("passed")).toContain("5990");
+		expect(outcomeCount("failed")).toContain("10");
+	});
+
+	it("falls back to the streaming rows while the run has no report yet", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.addStep({
+				iteration: 0,
+				stepIndex: 0,
+				name: "Log in",
+				outcome: "passed",
+				statusCode: 200,
+				latencyMs: 40,
+			});
+		});
+
+		// The report's totals are the truth once it exists; until then the only
+		// evidence is what has streamed, and four zeros would be wrong.
+		expect(outcomeCount("passed")).toContain("1");
+	});
+
 	it("gives a skipped step a different row treatment than a passed one", () => {
 		reportQuery.data = report({
 			results: [

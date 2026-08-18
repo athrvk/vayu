@@ -19,15 +19,22 @@ import {
 	CapacitySummary,
 	ContractCoverage,
 	SampledSchemaValidation,
+	TestValidationSummary,
 	ThresholdVerdict,
 } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
+import { extractTestFailures } from "../test-validation";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 export default function OverviewTab({ report, derived, anomalies }: TabProps) {
+	// The named failures live on a synthetic result row, not on `testValidation`;
+	// lifted here so the Overview says which assertions failed while the Samples
+	// tab drops the row rather than drawing it as a request that never ran.
+	const testFailures = extractTestFailures(report.results);
+
 	return (
 		<>
 			{/* Mode-adaptive summary - same hero cards + stat row the live dashboard shows.
@@ -60,6 +67,18 @@ export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 			    same document - what was exercised, and what it returned. Absent
 			    for a run that checked nothing. */}
 			<SampledSchemaValidation validation={report.schemaValidation} />
+
+			{/* Whether the run's own assertions passed, and which failed. The
+			    schema block above judges the response against a contract; this
+			    judges it against the run's pm.test scripts - the same distinction
+			    the live dashboard draws. Absent for a run that asserted nothing,
+			    so a run without tests reads exactly as it did before this block. */}
+			<TestValidationSummary
+				testValidation={report.testValidation}
+				sampling={report.sampling}
+				failures={testFailures?.messages}
+				failuresTotal={testFailures?.total}
+			/>
 
 			{/* When the run went wrong, in words. Above the status/error totals
 			    because those are cumulative and this is the thing they hide: a
