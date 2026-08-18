@@ -171,10 +171,17 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * The engine's local services (issue #756). The inbox list is polled, so this
-	 * is about immediacy in the Services drawer and the Dock's running-services
-	 * count - an agent that starts an inbox and reports its URL should not be
-	 * describing a listener the window will not show for another poll interval.
+	 * The engine's local services (issues #756, #757). Every list here is polled,
+	 * so this is about immediacy in the Services drawer and the Dock's
+	 * running-services count - an agent that starts an inbox or a mock and
+	 * reports its URL should not be describing a listener the window will not
+	 * show for another poll interval.
+	 *
+	 * All three lists are invalidated on every `service` event rather than one
+	 * per kind, because the entity is deliberately one family: the drawer and
+	 * the Dock count ask "what is listening", not "which kind" (see
+	 * `MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`). Three refetches of a
+	 * short list is the price of not carrying a discriminator no reader wants.
 	 *
 	 * The captures are the half that cannot be handled by invalidation.
 	 * `useInboxCapturesQuery` *merges* its fetched page into whatever the cache
@@ -193,11 +200,24 @@ const INVALIDATORS: Record<
 	 * already had (and any "load more" pages beyond the first). That is the
 	 * `run` family's trade taken again and for the same reason: a stale answer
 	 * is a lie, a refetch is a wait.
+	 *
+	 * A mock's route table needs the same drop for the other half of that
+	 * reason. `useMockServerRoutesQuery` holds it at `staleTime: Infinity`
+	 * because it is a start-time snapshot, so an invalidation would not refetch
+	 * it - and after a `stop_mock_server` there is nothing to refetch anyway:
+	 * the record dies with the listener and the id now 404s. Dropping the entry
+	 * is what `useStopMockServerMutation` already does app-side, for the same
+	 * reason `useDeleteInboxMutation` removes rather than invalidates.
 	 */
 	service: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.list() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.mockServer.list() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.mockIssuer.list() });
 		if (event.inboxId) {
 			queryClient.removeQueries({ queryKey: queryKeys.inbox.captures(event.inboxId) });
+		}
+		if (event.mockId) {
+			queryClient.removeQueries({ queryKey: queryKeys.mockServer.routes(event.mockId) });
 		}
 	},
 };

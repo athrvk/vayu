@@ -195,22 +195,36 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toEqual([queryKeys.config.all]);
 	});
 
-	test("a service change invalidates the inbox list", () => {
+	test("a service change invalidates every service list", () => {
+		// One family, three lists: the Services drawer and the Dock count ask
+		// "what is listening", not "which kind", so a `service` event has to
+		// reach the mock and issuer lists as well as the inbox one (#757).
 		const { handled, keys } = keysFor({ entity: "service" });
 		expect(handled).toBe(true);
-		expect(keys).toEqual([queryKeys.inbox.list()]);
+		expect(keys).toEqual([
+			queryKeys.inbox.list(),
+			queryKeys.mockServer.list(),
+			queryKeys.mockIssuer.list(),
+		]);
 	});
 
 	test("a named inbox has its captures removed, not merely invalidated", () => {
 		// `useInboxCapturesQuery` merges a fetched page into what the cache holds,
 		// so an invalidation after a clear or a delete would union the destroyed
 		// rows straight back. Removal is what makes the refetch start from empty.
-		const { keys, removed } = keysFor({ entity: "service", inboxId: "inbox_1" });
-		expect(keys).toEqual([queryKeys.inbox.list()]);
+		const { removed } = keysFor({ entity: "service", inboxId: "inbox_1" });
 		expect(removed).toEqual([queryKeys.inbox.captures("inbox_1")]);
 	});
 
-	test("a service event that named no inbox leaves every capture list alone", () => {
+	test("a named mock has its route table removed, not merely invalidated", () => {
+		// The table is held at `staleTime: Infinity` (it is a start-time snapshot),
+		// so an invalidation would not refetch it - and after a stop the mock's id
+		// 404s, so a refetch would leave an error state describing a dead table.
+		const { removed } = keysFor({ entity: "service", mockId: "mock_1" });
+		expect(removed).toEqual([queryKeys.mockServer.routes("mock_1")]);
+	});
+
+	test("a service event that named neither leaves both per-id caches alone", () => {
 		const { removed } = keysFor({ entity: "service" });
 		expect(removed).toEqual([]);
 	});
@@ -227,6 +241,21 @@ describe("invalidateForMcpEvent", () => {
 		expect(queryClient.getQueryData(queryKeys.inbox.captures("inbox_1"))).toBeUndefined();
 		expect(queryClient.getQueryData(queryKeys.inbox.captures("inbox_2"))).toEqual({
 			data: [{ id: 2 }],
+		});
+	});
+
+	test("a stopped mock's route table really is gone from a live cache", () => {
+		// Same shape as the capture check above, and for the mirror reason: the
+		// stopped mock's table must go, another running mock's must survive.
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(queryKeys.mockServer.routes("mock_1"), { data: [{ path: "/a" }] });
+		queryClient.setQueryData(queryKeys.mockServer.routes("mock_2"), { data: [{ path: "/b" }] });
+
+		invalidateForMcpEvent(queryClient, { entity: "service", mockId: "mock_1" });
+
+		expect(queryClient.getQueryData(queryKeys.mockServer.routes("mock_1"))).toBeUndefined();
+		expect(queryClient.getQueryData(queryKeys.mockServer.routes("mock_2"))).toEqual({
+			data: [{ path: "/b" }],
 		});
 	});
 

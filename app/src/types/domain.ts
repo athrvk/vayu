@@ -2233,7 +2233,7 @@ export type McpDataEntity =
 	| "run"
 	| "cookie"
 	| "config"
-	/** Engine-hosted local services: webhook inboxes today, more as #757 lands. */
+	/** Engine-hosted local services: webhook inboxes, mock servers and mock issuers. */
 	| "service";
 
 /**
@@ -2259,6 +2259,12 @@ export interface McpDataChangedEvent {
 	 * `delete_webhook_inbox`, `clear_inbox_captures`, `update_inbox_response`).
 	 */
 	inboxId?: string;
+	/**
+	 * The collection mock server the call named, when it named one - only
+	 * `stop_mock_server` among the mutating tools, since `start_mock_server` has
+	 * no id until the engine answers.
+	 */
+	mockId?: string;
 }
 
 export interface ScriptCompletion {

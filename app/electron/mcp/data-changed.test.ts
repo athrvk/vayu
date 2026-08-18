@@ -57,6 +57,16 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		deleteInbox: vi.fn().mockResolvedValue({ inboxId: "inbox_1", capturesDeleted: 2 }),
 		clearInboxCaptures: vi.fn().mockResolvedValue({ inboxId: "inbox_1", cleared: 2 }),
 		updateInboxResponse: vi.fn().mockResolvedValue({ inboxId: "inbox_1" }),
+		startMockServer: vi.fn().mockResolvedValue({
+			mockId: "mock_1",
+			url: "http://127.0.0.1:45010",
+			routeCount: 3,
+			routesWithoutExample: 0,
+		}),
+		stopMockServer: vi.fn().mockResolvedValue({ mockId: "mock_1", stopped: true }),
+		startMockIssuer: vi.fn().mockResolvedValue({ issuerId: "issuer_1" }),
+		stopMockIssuer: vi.fn().mockResolvedValue({ stopped: true }),
+		updateMockIssuer: vi.fn().mockResolvedValue({ issuerId: "issuer_1", failureMode: "slow" }),
 		composeRequest: vi
 			.fn()
 			.mockImplementation((body: { request?: object }) =>
@@ -127,6 +137,14 @@ describe("the registry declares its effects", () => {
 			delete_webhook_inbox: ["service"],
 			clear_inbox_captures: ["service"],
 			update_inbox_response: ["service"],
+			// Mock servers and issuers (#757): the same drawer and the same count,
+			// so the same family. The issuer tools shipped with `invalidates: []`
+			// and a note saying #757 would take it - this is that.
+			start_mock_server: ["service"],
+			stop_mock_server: ["service"],
+			start_mock_issuer: ["service"],
+			stop_mock_issuer: ["service"],
+			update_mock_issuer: ["service"],
 		};
 		for (const [name, entities] of Object.entries(expected)) {
 			const tool = TOOLS.find((t) => t.name === name);
@@ -367,6 +385,47 @@ describe("dispatch emits mcp:data-changed", () => {
 		// The engine assigns the id, so there is none in the arguments - and a new
 		// inbox has no capture cache to drop anyway.
 		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service" });
+	});
+
+	test("stopping a mock names it, so its route-table cache can be dropped", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient());
+		const res = await dispatchTool("stop_mock_server", { mockId: "mock_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		// The hint is what makes a stop correct renderer-side: the route table is
+		// held at `staleTime: Infinity`, so an invalidation would not refetch it,
+		// and the id it belongs to no longer exists to refetch from.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service", mockId: "mock_1" });
+	});
+
+	test("starting a mock reports the family with no id to narrow by", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient());
+		const res = await dispatchTool("start_mock_server", { collectionId: "col_1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		// The engine assigns the mock id, so the arguments carry only the
+		// collection - and a mock that just started has no cached table to drop.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service", collectionId: "col_1" });
+	});
+
+	test("a live issuer edit reports the services family", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient());
+		const res = await dispatchTool(
+			"update_mock_issuer",
+			{ issuerId: "issuer_1", failureMode: "slow" },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		// `issuerId` is not a scope hint: the drawer lists issuers together and
+		// has no per-issuer cache to narrow to, so the family alone is the event.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "service" });
+	});
+
+	test("an issuer edit that named no field emits nothing - it never reached the engine", async () => {
+		const client = fakeClient();
+		const { ctx, onDataChanged } = ctxWithNotifier(client);
+		const res = await dispatchTool("update_mock_issuer", { issuerId: "issuer_1" }, ctx);
+		expect(res.isError).toBe(true);
+		expect(client.updateMockIssuer).not.toHaveBeenCalled();
+		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 
 	test("an unconfirmed inbox delete emits nothing - nothing changed", async () => {

@@ -177,6 +177,11 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
 | `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
 | `stop_mock_issuer`     | execute  | `POST /mock-issuer/:id/stop`                 | - (unknown id is a `404`, surfaced as a tool error) |
+| `update_mock_issuer`   | execute  | `PUT /mock-issuer/:id` (merge-patch)         | - (live edit of `failureMode` / `slowMs`; an empty patch is refused before the engine sees it) |
+| `start_mock_server`    | execute  | `POST /mock/start`                           | - (loopback-only listener, so no allowlist entry applies); the `latencyMs` ceiling is the engine's |
+| `list_mock_servers`    | read     | `GET /mock`                                  | - (running mocks only - a stopped one has no record) |
+| `get_mock_routes`      | read     | `GET /mock/:id/routes`                       | - (a start-time snapshot, constant under a running mock) |
+| `stop_mock_server`     | execute  | `POST /mock/:id/stop`                        | - (unknown id is a `404`, surfaced as a tool error) |
 | `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent) |
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
 | `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
@@ -400,11 +405,40 @@ Notes:
   engine accepts the moment either side moves. The schema owns the *shape*: a
   claims object, an integer port, a `failureMode` from the closed set. Stopping
   an issuer frees its port; tokens it already minted stay valid until they
-  expire, since nothing verifies them against a live issuer. These tools emit no
-  `mcp:data-changed` event yet: #502's Services drawer does read issuers now, and
-  wiring them to the `service` entity the inbox tools introduced is #757's half
-  of epic #753 - until then the drawer's own poll is what shows an MCP-started
-  issuer.
+  expire, since nothing verifies them against a live issuer. **A running issuer
+  is edited, not recreated**: `update_mock_issuer` merge-patches `failureMode`
+  and `slowMs` live (issue #757), so an agent can mint a token against a healthy
+  issuer, flip it to `server_error` to watch the client retry, and flip it back
+  without the token URL under test moving or the signing key changing. Those two
+  are the only settings a bound listener will take - the engine refuses `port`,
+  `clients`, `claims` and `issueRefreshTokens` with "stop it and start a new
+  one", so the tool does not offer them at all rather than offering a call that
+  always fails. `expiresInSeconds` is mutable engine-side and is also left out:
+  a token's lifetime is fixed when it is minted, so changing it says nothing
+  about the tokens an agent already holds. An empty patch is refused here rather
+  than forwarded, because the engine accepts one and answers `200` - which would
+  report a change that did not happen (the `update_inbox_response` precedent).
+- **The mock-server tools** are how an agent stands up the API a client under
+  test expects, out of the collection's own saved examples (issue #757, over the
+  engine's [mock server](api-reference.md#mock-server) from #481):
+  `start_mock_server` binds a listener that answers each request's example -
+  status, headers, body - and returns its `mockId` and base URL,
+  `get_mock_routes` lists what it will serve, and `stop_mock_server` frees the
+  port. `latencyMs` and `errorRatePct` are how a client's timeout and retry
+  handling get exercised; `0` and `100` percent are exact by construction, in
+  between it is a per-request roll. **A started mock is not necessarily a usable
+  one**, which is why the result carries a caveat rather than leaving the counts
+  in the JSON: a route whose request has no saved example answers `501`, a path
+  matching nothing answers `404`, and a collection with no mappable requests
+  serves nothing at all. **Loopback-only** for the same engine-side reason as an
+  issuer - `mock_server.cpp` starts every listener on `127.0.0.1` with no host
+  to configure - so no allowlist entry is needed or checked. **A stop is a
+  delete here**, unlike an inbox: a mock records nothing, so its record dies
+  with its listener and it simply leaves `list_mock_servers`. The route table is
+  a snapshot taken at start and cannot change under a running mock (editing the
+  collection means restarting), which is why the renderer holds it at
+  `staleTime: Infinity` and a `stop_mock_server` event carries the `mockId` so
+  that cache entry is *dropped* rather than refetched into a `404`.
 - **The webhook-inbox tools** are the assertion half an agent testing a webhook
   needs (issue #756): `start_webhook_inbox` stands up a
   [local inbox](api-reference.md#webhook-inbox) and returns its URL,
@@ -905,15 +939,18 @@ configurable in **Settings → MCP** and persisted.
   save a request, which is not consent to destroy a subtree or a run's stored
   history.
 - **Loopback services carry no gate of their own** - `start_mock_issuer`,
-  `stop_mock_issuer`, `start_webhook_inbox`, `stop_webhook_inbox` and
+  `stop_mock_issuer`, `update_mock_issuer`, `start_mock_server`,
+  `stop_mock_server`, `start_webhook_inbox`, `stop_webhook_inbox` and
   `update_inbox_response` are `execute` tools that neither the allowlist nor the
   write toggle governs. (The two that destroy recorded data,
   `delete_webhook_inbox` and `clear_inbox_captures`, are `write` tools and do
   take the toggle - what they end is not the listener but the captures.) The allowlist exists to stop an agent generating traffic
   against third parties it was never pointed at, and a mock issuer is bound to
-  `127.0.0.1` by the engine with no host to configure - as is an inbox, whose
+  `127.0.0.1` by the engine with no host to configure - as is a mock server, and
+  as is an inbox, whose
   `bind` these tools never send; the write toggle gates saved data, which an
-  ephemeral listener is not. Nor would a gate here withhold
+  ephemeral listener is not (a mock server only *reads* the examples it serves).
+  Nor would a gate here withhold
   anything: an agent with `localhost` allowlisted can already reach
   `POST /mock-issuer/start` through `run_request`, for the same reason the
   endpoint needs no auth token. The bounds that do apply are the engine's own -
@@ -1022,18 +1059,24 @@ Each tool declares the data families it changes (`invalidates` in `tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
 (`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`)
-plus the `collectionId` / `requestId` / `runId` / `inboxId` the call itself
-named; it carries no engine data, so the
-renderer still reads every row through its query layer. The four hints are read
+plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
+itself named; it carries no engine data, so the
+renderer still reads every row through its query layer. The five hints are read
 off the call's own arguments at the dispatch chokepoint, which is what keeps a
 new write tool from having to remember an emit of its own - every tool in the
 registry spells them the same way. They are hints, not identity: `requestId` on
 a `run` event is the saved request a design run was linked to, while `runId` is
 the run itself, and only the tools that rewrite or remove an **existing** run
 (`stop_run`, `set_run_baseline`, `delete_run`) name one - a runner's new run has
-no per-run cache to drop yet. `inboxId` is the same shape for the `service`
-family: the inbox tools that act on an existing listener name it, and
-`start_webhook_inbox` cannot, since the engine assigns the id. The renderer side, including
+no per-run cache to drop yet. `inboxId` and `mockId` are the same shape for the
+`service` family: the tools that act on an existing listener name one, and
+`start_webhook_inbox` / `start_mock_server` cannot, since the engine assigns the
+id. Both exist because their per-id cache has to be **dropped** rather than
+refetched - a cleared capture list would union its destroyed rows straight back,
+and a stopped mock's route table has no live id left to refetch from. `service`
+is deliberately one family covering inboxes, mock servers and issuers, because
+the surfaces that read them - the Services drawer and the Dock's
+running-services count - ask "what is listening" rather than "which kind". The renderer side, including
 which query keys each family maps to, is in
 [`docs/app/state-management.md`](../app/state-management.md).
 
