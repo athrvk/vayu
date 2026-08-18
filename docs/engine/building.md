@@ -293,7 +293,7 @@ one number. Moving the scratch directories between volumes was tried and made no
 difference, so do not re-litigate that part without new measurements.
 
 Because a serial run has nothing to isolate from, the Windows presets also set
-`VAYU_TEST_SCRATCH_ISOLATION=0`, which skips the scratch directory entirely.
+`VAYU_TEST_NO_SCRATCH_ISOLATION`, which skips the scratch directory entirely.
 Isolation is the **default** everywhere else - including a hand-run
 `ctest -j` on Windows, which is still safe.
 

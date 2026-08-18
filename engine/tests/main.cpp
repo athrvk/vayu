@@ -3,9 +3,7 @@
  * @brief Google Test main entry point
  */
 
-#include <cstdlib>
 #include <filesystem>
-#include <string_view>
 #include <system_error>
 
 #include <gtest/gtest.h>
@@ -25,16 +23,13 @@ int main (int argc, char** argv) {
     // per-test here.
     //
     // Isolating is the default, so a hand-run `ctest -j` is safe wherever it
-    // happens. `VAYU_TEST_SCRATCH_ISOLATION=0` opts out, and the Windows test
-    // presets set it because they run serially: there the scratch directories
-    // are pure cost. Measured on CI, the Windows ctest leg goes from ~6 min
-    // serial to over 30 min at `-j4` - the tests that open a database each pay
-    // seconds, the ones that do not are untouched - while the same change cuts
-    // ubuntu from 3-5 min to 1m12s and macOS from ~4 min to 1m50s.
-    const bool isolate = [] {
-        const char* opt_out = std::getenv ("VAYU_TEST_SCRATCH_ISOLATION");
-        return opt_out == nullptr || std::string_view (opt_out) != "0";
-    }();
+    // happens; `VAYU_TEST_NO_SCRATCH_ISOLATION` opts out, and the Windows test
+    // presets set it because they run serially. Measured on CI, the Windows
+    // ctest leg goes from ~6 min serial to over 30 min at `-j4` - the tests
+    // that open a database each pay seconds, the ones that do not are
+    // untouched - while the same `-j4` cuts ubuntu from 3-5 min to 1m12s and
+    // macOS from ~4 min to 1m50s.
+    const bool isolate = !vayu::tests::scratch_isolation_disabled ();
     const std::filesystem::path scratch =
     isolate ? vayu::tests::enter_process_scratch_dir () : std::filesystem::path{};
 

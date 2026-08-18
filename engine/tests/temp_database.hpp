@@ -17,12 +17,42 @@
  */
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 
 namespace vayu::tests {
+
+/**
+ * @brief Whether the per-process scratch directory below has been switched off.
+ *
+ * Set `VAYU_TEST_NO_SCRATCH_ISOLATION` (to anything) to skip it. The Windows
+ * test presets do, because they run the suite serially: with one process there
+ * is nothing to isolate from, so the directories would be pure cost - and on
+ * Windows that cost is large (see `docs/engine/building.md`). Isolating is the
+ * default everywhere else, so a hand-run `ctest -j` is safe on any platform.
+ *
+ * Presence, not value, so this cannot be got wrong by writing `=0` and meaning
+ * "off". MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996) and
+ * this suite is built `/W4 /WX`, so the deprecation is followed rather than
+ * suppressed - the same shape, and for the same reason, as `env_is_set` in
+ * `script_types_test.cpp`.
+ */
+inline bool scratch_isolation_disabled () {
+#ifdef _WIN32
+    char* value   = nullptr;
+    size_t length = 0;
+    if (_dupenv_s (&value, &length, "VAYU_TEST_NO_SCRATCH_ISOLATION") != 0 || value == nullptr) {
+        return false;
+    }
+    std::free (value);
+    return true;
+#else
+    return std::getenv ("VAYU_TEST_NO_SCRATCH_ISOLATION") != nullptr;
+#endif
+}
 
 /**
  * Creates a fresh, process-private scratch directory beneath the current
