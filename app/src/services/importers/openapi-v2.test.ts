@@ -42,6 +42,18 @@ describe("OpenApiV2Parser", () => {
 		expect(p.detect({ openapi: "3.0.0" }, "")).toBe(false);
 	});
 
+	/**
+	 * Issue #719. `swagger: 2.0` written without quotes is loaded by js-yaml as
+	 * the number 2 - a shape JSON cannot produce and hand-written YAML routinely
+	 * does - and the file was reported as "Unrecognised format".
+	 */
+	it("detects an unquoted YAML version claim, which loads as a number", () => {
+		expect(p.detect({ swagger: 2 }, "")).toBe(true);
+		expect(p.detect({ swagger: 3 }, "")).toBe(false);
+		expect(p.detect({ swagger: "3.0" }, "")).toBe(false);
+		expect(p.detect({}, "")).toBe(false);
+	});
+
 	it("constructs baseUrl from scheme+host+basePath and maps apiKey scheme", () => {
 		const root = p.parse(parsed, raw, opts).collections[0];
 		expect(root.variables.baseUrl.value).toBe("https://api.store.com/v2");

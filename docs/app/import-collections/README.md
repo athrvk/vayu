@@ -283,7 +283,8 @@ than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
-"external_ref" | "duplicate_operation_id", count }`.
+"external_ref" | "duplicate_operation_id" | "cookie_param" | "unmapped_body" |
+"unresolved_base_url", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -304,6 +305,20 @@ twice is kept on the first operation and left off the second, whose recorded ide
 rests on its method and templated path alone (issue #715). Counted per repeated declaration,
 because a sync follows the identity a request records, and which of the two kept the id is
 not something the user should have to work out from a diff.
+
+The last three are OpenAPI 3 kinds added by issue #719, each closing a drop that had no
+counter at all. `cookie_param` is a parameter declared `in: "cookie"`: Vayu's cookies come
+from the jar, and folding one declaration at a time into a single joined `Cookie` header
+would mean inventing a merge the document never wrote, so mapping them is a recorded
+non-goal and naming the loss is the honest half. `unmapped_body` is a `requestBody`
+declaring only media types with no Vayu mode - `application/octet-stream`,
+`application/xml`, `image/*` - which used to return `{ mode: "none" }` on the same path as
+*no body at all*, so a binary upload imported as a bodyless POST reporting nothing skipped;
+an operation that declared no body is still not counted, because it lost nothing.
+`unresolved_base_url` is a `servers[0].url` that could not be made into an address a request
+could reach - a `{variable}` the document declares no default for, or a relative URL in a
+document that arrived with no URL to resolve it against (see
+[OpenAPI 3.0](./openapi-v3.md#the-base-url)).
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`

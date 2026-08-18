@@ -271,6 +271,42 @@ describe("bundleExternalRefs - the engine's cap", () => {
 		);
 	});
 
+	/**
+	 * Issue #719. The running total was only ever compared after an external
+	 * document had been loaded, so a spec that references nothing - which is what
+	 * the generated multi-megabyte documents are - passed bundling whatever its
+	 * size and was first refused by the engine at apply, after the user had
+	 * confirmed a preview built from it.
+	 */
+	it("refuses a single over-cap document before it is parsed, naming the setting", async () => {
+		const oversized = singleFileRaw.padEnd(4096);
+		const readSibling = vi.fn(async () => "{}");
+		await expect(
+			bundleExternalRefs(oversized, { maxBytes: 2048, readSibling })
+		).rejects.toThrow(SpecBundleTooLargeError);
+		await expect(
+			bundleExternalRefs(oversized, { maxBytes: 2048, readSibling })
+		).rejects.toThrow(/The spec is 4096 bytes, over the 2048.*maxSpecDocumentBytes/s);
+		// Before parse, and before a single ref is followed: the point of moving
+		// the check is that nothing downstream runs on a document that cannot be
+		// stored.
+		expect(readSibling).not.toHaveBeenCalled();
+	});
+
+	it("leaves a document that is not a spec alone, whatever its size", async () => {
+		// The cap is the *spec document* cap. A Postman collection is stored as
+		// collections and requests, so it has no such limit to be measured against.
+		const collection = JSON.stringify({
+			info: { name: "Big", schema: "https://schema.getpostman.com/json/collection/v2.1.0/" },
+			item: [],
+		}).padEnd(4096);
+		await expect(bundleExternalRefs(collection, { maxBytes: 2048 })).resolves.toEqual({
+			text: collection,
+			bundled: 0,
+			unresolvedRefs: 0,
+		});
+	});
+
 	it("follows the setting rather than a hard-coded copy", async () => {
 		const readSibling = vi.fn(async () =>
 			JSON.stringify({ Pet: { type: "object" } }).padEnd(4000)

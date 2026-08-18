@@ -127,7 +127,14 @@ the same spec always produces the same bytes and the same hash. A single-file
 spec is untouched.
 
 If the whole bundle would exceed `maxSpecDocumentBytes`, the import stops and
-says so rather than storing a truncated contract.
+says so rather than storing a truncated contract. **So does a single document
+over the same limit**, before it is parsed and before the preview is built
+(issue #719) - the check used to run only while following references, so a
+generated single-file spec too large to store was fetched, parsed and previewed
+in full, and refused by the engine only once you pressed Import, which failed
+the whole transaction. The message names the size, the limit and the setting.
+The limit is the *spec document* one: a Postman or Insomnia export is stored as
+collections and requests, so it is not measured against it.
 
 ## The Spec tab
 

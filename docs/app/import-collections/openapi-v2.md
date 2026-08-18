@@ -28,11 +28,12 @@ collection's Spec tab does with it.
 
 ```ts
 detect(parsed) {
-  return parsed?.swagger === "2.0";
+  const claimed = parsed?.swagger;
+  return claimed === "2.0" || claimed === 2;
 }
 ```
 
-The top-level `swagger` field must equal the exact string `"2.0"`. OpenAPI 3.x (the `openapi` field, no `swagger`) is handled by a separate parser - see [OpenAPI v3](./openapi-v3.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
+The top-level `swagger` field must be the string `"2.0"` or the **number** `2` (issue #719). The string is what the specification says and what every JSON export writes - JSON has no other option, since the key is quoted or the file is not valid. Hand-written YAML routinely leaves it unquoted, and js-yaml then loads `2.0` as the number `2`, so a string comparison alone reported an ordinary Swagger file as "Unrecognised format". The v3 side never had this problem for a reason that does not generalise: `3.0.3` has two dots, so it stays a string whatever the quoting. Only detection needs the widening - nothing in `parse` reads the field, and the document is stored as the bytes it arrived as, so there is no normalized copy to keep in step. OpenAPI 3.x (the `openapi` field, no `swagger`) is handled by a separate parser - see [OpenAPI v3](./openapi-v3.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
 
 ## Tree structure
 
@@ -303,7 +304,7 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec`, `example_no_status` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec`, `example_no_status` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). The three kinds issue #719 added are v3-only for the same kind of reason: Swagger 2.0 has no `in: "cookie"` parameter, no Server Object to template or leave relative - `host` is a host - and every declared body maps to one, so `cookie_param`, `unresolved_base_url` and `unmapped_body` have no case here either. Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 
@@ -311,7 +312,7 @@ See [OpenAPI v3](./openapi-v3.md) for the v3 reference. Key contrasts:
 
 | Aspect | v2 (Swagger) | v3 (OpenAPI 3.0) |
 |--------|--------------|------------------|
-| Detection | `swagger === "2.0"` (exact) | `openapi` is a string starting with `"3."` |
+| Detection | `swagger === "2.0"`, or the number `2` from unquoted YAML | `openapi` is a string starting with `"3."` |
 | Base URL | `schemes[0]` + `host` + `basePath` | `servers[0].url` |
 | Request body | `in: "body"` / `in: "formData"` parameters | dedicated `op.requestBody` with `content` map |
 | Body content-type decision | `consumes` (op → spec → JSON default) | media-type keys of `requestBody.content` |

@@ -184,4 +184,31 @@ describe("parseImport joins enabled params into the request URL", () => {
 		const req = parseImport(spec, opts).collections[0].requests[0];
 		expect(req.url).toBe("{{baseUrl}}/items?tenant&limit=25");
 	});
+
+	/**
+	 * Issue #719. The two halves of the fix that only exist once the whole
+	 * pipeline runs: the factory knows where the bytes came from, and the raw
+	 * text is parsed as YAML before any detector sees it.
+	 */
+	it("hands the source URL to the parser, so a relative server URL resolves", () => {
+		const spec = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Relative API" },
+			servers: [{ url: "/api/v3" }],
+			paths: { "/items": { get: { summary: "List" } } },
+		});
+		const result = parseImport(spec, opts, {
+			sourceUrl: "https://acme.dev/specs/openapi.json",
+		});
+		expect(result.collections[0].variables.baseUrl.value).toBe("https://acme.dev/api/v3");
+		expect(result.meta.skipped).toEqual([]);
+		// And the source URL still reaches the stored document, which is what a
+		// re-fetch follows (#638) - the two uses are independent.
+		expect(result.collections[0].spec?.sourceUrl).toBe("https://acme.dev/specs/openapi.json");
+	});
+
+	it("routes unquoted YAML `swagger: 2.0`, which loads as a number", () => {
+		const yaml = ["swagger: 2.0", "info:", "  title: Store API", "paths: {}"].join("\n");
+		expect(parseImport(yaml, opts).meta.format).toBe("OpenAPI 2.0 (Swagger)");
+	});
 });

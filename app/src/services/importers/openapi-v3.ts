@@ -20,6 +20,7 @@ import type {
 	ImportOptions,
 	ImportParser,
 	ImportResult,
+	ImportSource,
 	RequestDraft,
 } from "./types";
 import { asArray, asRecord, asStr, prop, type JsonRecord } from "@/lib/json-node";
@@ -79,16 +80,21 @@ export class OpenApiV3Parser implements ImportParser {
 		return !!v && v.startsWith("3.");
 	}
 
-	parse(parsed: unknown, raw: string, _opts: ImportOptions): ImportResult {
+	parse(
+		parsed: unknown,
+		raw: string,
+		_opts: ImportOptions,
+		source: ImportSource = {}
+	): ImportResult {
 		const spec = asRecord(parsed) ?? {};
 		const resolveRef = createRefResolver(spec);
 
-		const baseUrl = asStr(prop(asArray(spec.servers)[0], "url")) ?? "";
 		const primaryScheme = pickPrimaryScheme(spec);
 
 		const tagCollections = new Map<string, CollectionDraft>();
 		const rootRequests: RequestDraft[] = [];
 		const tally = new SkipTally();
+		const baseUrl = resolveServerUrl(asArray(spec.servers)[0], source.sourceUrl, tally);
 		// One identifier for the whole document: it is what keeps a repeated
 		// `operationId` off the second request that would otherwise claim it
 		// (issue #715), which needs the memory of every id already stamped.
@@ -200,6 +206,68 @@ export class OpenApiV3Parser implements ImportParser {
 	}
 }
 
+/** A URL that already names its own scheme - `https:`, and any other. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/** What is left of a `{token}` after substitution, which is what cannot resolve. */
+const SERVER_TEMPLATE = /\{[^{}/]+\}/;
+
+/**
+ * `servers[0]` → the `{{baseUrl}}` every imported request is written against
+ * (issue #719).
+ *
+ * Taken verbatim, that field produces a URL a request can never reach in two
+ * ways, both silently. A Server Object may template its URL -
+ * `{protocol}://{hostname}/api/v3` - and those single braces are **not** Vayu
+ * variables (only the path goes through `normalizeVars`), so the literal
+ * survived into every request line and failed at connect with nothing said. And
+ * a server URL is allowed to be relative, in which case OpenAPI says it is
+ * relative to where the document itself lives - which the parser knows only
+ * because the factory now hands it over.
+ *
+ * So: substitute the defaults the document declares (the spec **requires** a
+ * default on every server variable, so a complete document always resolves),
+ * then resolve what is left against the source URL when it needs one. Anything
+ * still unresolvable is kept exactly as written and counted - a base the user
+ * can see is unfinished beats a host Vayu invented.
+ */
+export function resolveServerUrl(
+	server: unknown,
+	sourceUrl: string | undefined,
+	tally: SkipTally
+): string {
+	const raw = asStr(prop(server, "url")) ?? "";
+	if (!raw) return "";
+
+	const variables = asRecord(prop(server, "variables")) ?? {};
+	const substituted = raw.replace(/\{([^{}/]+)\}/g, (token, name: string) => {
+		const declared = asRecord(variables[name]);
+		if (declared?.default === undefined) return token;
+		// A default is `string` per the spec; a number or boolean is what a
+		// hand-written document produces and reads the same on the wire.
+		const value = declared.default;
+		return typeof value === "object" || value === null ? token : String(value);
+	});
+
+	if (SERVER_TEMPLATE.test(substituted)) {
+		tally.add("unresolved_base_url");
+		return substituted;
+	}
+	if (HAS_SCHEME.test(substituted)) return substituted;
+	if (!sourceUrl) {
+		// A pasted or file-picked document: there is no location to be relative
+		// to, so the URL stays as written rather than being guessed at.
+		tally.add("unresolved_base_url");
+		return substituted;
+	}
+	try {
+		return new URL(substituted, sourceUrl).toString();
+	} catch {
+		tally.add("unresolved_base_url");
+		return substituted;
+	}
+}
+
 function pickPrimaryScheme(spec: JsonRecord): unknown {
 	const required = asRecord(asArray(spec.security)[0]);
 	const reqName = required ? Object.keys(required)[0] : undefined;
@@ -265,7 +333,17 @@ function buildOperation(
 			headers.push(
 				declaredParamRow(name, declaredParamValue(resolved, resolveRef), resolved.required)
 			);
+		} else if (resolved.in === "cookie") {
+			// Vayu has no cookie-parameter row - a request's cookies come from the
+			// jar - so the declaration is dropped. Counted rather than folded into a
+			// `Cookie` header: the header is one joined value and a spec declares
+			// these one at a time, so building it means inventing a merge the
+			// document never wrote. Mapping them is a recorded non-goal (#719), and
+			// the count is what keeps the drop out of the silent category.
+			tally.add("cookie_param");
 		}
+		// `in: "path"` is deliberately not here and not counted: a path parameter is
+		// already carried, as the `{{var}}` `normalizeVars` wrote into the URL.
 	}
 	const examples = buildExamples(op.responses, resolveRef, tally);
 	return {
@@ -275,7 +353,7 @@ function buildOperation(
 		url: `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}`,
 		params,
 		headers,
-		body: buildBody(op.requestBody, resolveRef),
+		body: buildBody(op.requestBody, resolveRef, tally),
 		auth: { mode: "inherit" },
 		preRequestScript: "",
 		postRequestScript: "",
@@ -350,10 +428,28 @@ function findJsonMedia(content: JsonRecord): JsonRecord | undefined {
 	return key ? asRecord(content[key]) : undefined;
 }
 
-function buildBody(requestBody: unknown, resolveRef: (r: string) => unknown): RequestBody {
+/**
+ * An operation's `requestBody` → the request's body.
+ *
+ * @param tally counts a body the importer has no mode for (issue #719). An
+ * `application/octet-stream`, `application/xml` or `image/*` body used to return
+ * `{mode: "none"}` on the same path as *no body at all*, so GitHub's "Upload a
+ * release asset" imported as a bodyless POST reporting 0 skipped. The two cases
+ * are told apart by whether the document declared any media type: an operation
+ * with no `requestBody` lost nothing and is not counted.
+ */
+function buildBody(
+	requestBody: unknown,
+	resolveRef: (r: string) => unknown,
+	tally: SkipTally
+): RequestBody {
 	const ref = asStr(prop(requestBody, "$ref"));
 	const content = asRecord(prop(ref ? resolveRef(ref) : requestBody, "content"));
 	if (!content) return { mode: "none" };
+	const unmapped = (): RequestBody => {
+		if (Object.keys(content).length > 0) tally.add("unmapped_body");
+		return { mode: "none" };
+	};
 	const jsonMedia = findJsonMedia(content);
 	if (jsonMedia) {
 		const sample =
@@ -377,5 +473,5 @@ function buildBody(requestBody: unknown, resolveRef: (r: string) => unknown): Re
 			return { mode: multipart ? "form-data" : "x-www-form-urlencoded", fields };
 		}
 	}
-	return { mode: "none" };
+	return unmapped();
 }
