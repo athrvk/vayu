@@ -720,10 +720,11 @@ both activate it.
   beside a greyed-out Start says something is wrong and never which field or why, and `aria-invalid`
   alone announces "invalid" with no correction. Mounted only while open, so the mount is the reset.
 - `useRunningServices.ts` - `useRunningServiceCount()`, shared by the drawer and the Dock. One place
-  because the two lists disagree on their own terms: a stopped inbox stays listed with
-  `running: false`, while a stopped issuer is gone from the engine's list entirely - and because a
-  **disconnected engine is running none of them**, which is the gate this hook holds so that no
-  caller renders a green count off a stale cache (issue #555).
+  because the three lists disagree on their own terms: a stopped inbox stays listed with
+  `running: false`, while a stopped issuer or mock server is gone from the engine's list entirely -
+  and because a **disconnected engine is running none of them**, which is the gate this hook holds
+  so that no caller renders a green count off a stale cache (issue #555). The mock-server list was
+  missing from the sum until issue #792, so a mock holding a port counted as nothing.
 - `failure-modes.ts` - the four `failureMode` labels, the engine's bounds, and the row's
   one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
   differently.
