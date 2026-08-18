@@ -871,6 +871,7 @@ void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
+void register_client_certificate_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);
 void register_run_routes (RouteContext& ctx);
 void register_execution_routes (RouteContext& ctx);

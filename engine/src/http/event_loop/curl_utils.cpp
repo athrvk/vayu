@@ -517,7 +517,10 @@ Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
     return error;
 }
 
-void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool verify_ssl) {
+const ClientCertRule* apply_transport_policy (CURL* curl,
+const TransportPolicy& policy,
+bool verify_ssl,
+const std::string& url) {
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, verify_ssl ? 1L : 0L);
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, verify_ssl ? 2L : 0L);
 
@@ -608,6 +611,31 @@ void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool ver
     // *origin* host, never the proxy hop, and curl 8.21's cross-origin
     // redirect-cookie rule keys on origin too. A proxy changes which socket
     // the bytes leave by and nothing about which jar lines apply.
+
+    // The client certificate for this target (issue #707). Written on every
+    // handle, null included, for the reason every option above is: handles are
+    // reused, and a certificate left behind by a previous transfer would be
+    // presented to a host that never registered one.
+    //
+    // The lookup is skipped entirely - URL parse included - when the registry
+    // is empty, which is every user who has not opted into mTLS.
+    const ClientCertRule* matched = nullptr;
+    if (!policy.client_certificates.empty ()) {
+        const UrlAuthority authority = parse_authority (url);
+        matched = match_client_certificate (policy, authority.host, authority.port);
+    }
+    curl_easy_setopt (curl, CURLOPT_SSLCERT,
+    matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
+    curl_easy_setopt (curl, CURLOPT_SSLKEY,
+    matched != nullptr ? matched->key_path.c_str () : static_cast<const char*> (nullptr));
+    // Null rather than "" when there is no passphrase: an empty string is a
+    // passphrase attempt, and on a key that has none the backend answers by
+    // failing the load.
+    curl_easy_setopt (curl, CURLOPT_KEYPASSWD,
+    matched != nullptr && !matched->passphrase.empty () ?
+    matched->passphrase.c_str () :
+    static_cast<const char*> (nullptr));
+    return matched;
 }
 
 CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& config, DnsCache* dns_cache) {
@@ -735,7 +763,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // connection when its proxy and TLS config match, so varying either per
     // transfer would partition every worker's pool and multiply handshakes
     // (epic decision 3 of #704).
-    apply_transport_policy (curl, config.transport, request.verify_ssl);
+    apply_transport_policy (curl, config.transport, request.verify_ssl, request.url);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)

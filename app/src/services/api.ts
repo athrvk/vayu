@@ -55,6 +55,8 @@ import type {
 	GetHealthResponse,
 	GetCookiesResponse,
 	ClearCookiesResponse,
+	ClientCertificate,
+	ClientCertificateInput,
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
@@ -367,6 +369,34 @@ export const apiService = {
 			API_ENDPOINTS.COOKIES,
 			scope === undefined ? undefined : { environmentId: scope.environmentId ?? "" }
 		);
+	},
+
+	// Client-certificate registry (issue #707)
+	async getClientCertificates(): Promise<ClientCertificate[]> {
+		return await httpClient.get<ClientCertificate[]>(API_ENDPOINTS.CLIENT_CERTIFICATES);
+	},
+
+	async createClientCertificate(input: ClientCertificateInput): Promise<ClientCertificate> {
+		return await httpClient.post<ClientCertificate>(API_ENDPOINTS.CLIENT_CERTIFICATES, input);
+	},
+
+	/**
+	 * Merge-patch, like every other update here: an absent field keeps its
+	 * value, `port: null` widens the entry to every port and `passphrase: null`
+	 * clears a stored one. `id` is stripped because the engine owns it (#97).
+	 */
+	async updateClientCertificate(
+		id: string,
+		patch: Partial<ClientCertificateInput>
+	): Promise<ClientCertificate> {
+		return await httpClient.put<ClientCertificate>(
+			API_ENDPOINTS.CLIENT_CERTIFICATE_BY_ID(id),
+			patch
+		);
+	},
+
+	async deleteClientCertificate(id: string): Promise<void> {
+		await httpClient.delete(API_ENDPOINTS.CLIENT_CERTIFICATE_BY_ID(id));
 	},
 
 	// Webhook inbox (issue #480)

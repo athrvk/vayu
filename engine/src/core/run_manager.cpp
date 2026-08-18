@@ -1004,7 +1004,15 @@ RunManager& manager) {
         loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
         vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
         // Read once for the run and held for it - see EventLoopConfig::transport
-        // for why a per-request policy would cost the connection pool.
+        // for why a per-request policy would cost the connection pool. The
+        // client-certificate registry (#707) rides inside the policy and is
+        // therefore read once here too, which is the whole of "load runs
+        // resolve certificates at run start": libcurl reuses a pooled
+        // connection only when its TLS identity matches, so a certificate that
+        // could change mid-run would partition each worker's pool
+        // (`event_loop_worker.cpp`, `FORBID_REUSE=0`) and pay a fresh handshake
+        // per change. Matching per transfer stays cheap because it reads this
+        // snapshot, never the database.
         loop_config.transport = vayu::http::resolve_transport_policy (db);
         loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
         db.get_config_int ("maxResponseBodyBytes",

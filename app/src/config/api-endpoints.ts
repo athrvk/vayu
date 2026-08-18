@@ -78,6 +78,12 @@ export const API_ENDPOINTS = {
 	// by requests with no environment selected.
 	COOKIES: `/cookies`,
 
+	// Client-certificate registry (issue #707). A registry rather than a
+	// per-request field: a certificate belongs to the host being called, so the
+	// engine matches it per transfer and no request has to name one.
+	CLIENT_CERTIFICATES: `/client-certificates`,
+	CLIENT_CERTIFICATE_BY_ID: (id: string) => `/client-certificates/${id}`,
+
 	// Scripting
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 	SCRIPT_TYPES: `/scripting/types`,

@@ -450,7 +450,25 @@ inline auto make_storage (const std::string& path) {
     make_column ("scope", &OAuthToken::scope),
     make_column ("expires_in", &OAuthToken::expires_in),
     make_column ("created_at", &OAuthToken::created_at),
-    make_column ("raw_response", &OAuthToken::raw_response)));
+    make_column ("raw_response", &OAuthToken::raw_response)),
+
+    // Client certificates: which certificate is presented to which host
+    // (issue #707). A new table, so sync_schema() creates it outright and there
+    // is no migration - the `spec_documents` precedent above.
+    //
+    // `cert_path` / `key_path` are paths: the private key never enters this
+    // file. `passphrase` does, in plaintext, which is the repo's existing
+    // credential precedent and is disclosed in docs/engine/db-schema.md rather
+    // than left for a reader of the schema to discover.
+    make_table ("client_certificates",
+    make_column ("id", &ClientCertificate::id, primary_key ()),
+    make_column ("host", &ClientCertificate::host),
+    make_column ("port", &ClientCertificate::port), // NULL = every port
+    make_column ("cert_path", &ClientCertificate::cert_path),
+    make_column ("key_path", &ClientCertificate::key_path),
+    make_column ("passphrase", &ClientCertificate::passphrase),
+    make_column ("created_at", &ClientCertificate::created_at),
+    make_column ("updated_at", &ClientCertificate::updated_at)));
 }
 
 using Storage = decltype (make_storage (""));
@@ -1374,6 +1392,40 @@ void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting environment: id=" + id);
     impl_->storage.remove_all<Environment> (where (c (&Environment::id) == id));
+}
+
+// ---------------------------------------------------------------------------
+// Client certificates (issue #707)
+// ---------------------------------------------------------------------------
+//
+// Nothing here logs a path, let alone a passphrase: the registry is credential
+// material and the log file is not, which is why the debug lines below name the
+// row and its host and stop there.
+
+void Database::save_client_certificate (const ClientCertificate& c) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Saving client certificate: id=" + c.id + ", host=" + c.host);
+    impl_->storage.replace (c);
+}
+
+std::vector<ClientCertificate> Database::get_client_certificates () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<ClientCertificate> ();
+}
+
+std::optional<ClientCertificate> Database::get_client_certificate (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows =
+    impl_->storage.get_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
+    if (rows.empty ())
+        return std::nullopt;
+    return rows.front ();
+}
+
+void Database::delete_client_certificate (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Deleting client certificate: id=" + id);
+    impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
 }
 
 // ============================================================================

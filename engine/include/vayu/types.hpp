@@ -458,6 +458,25 @@ struct Response {
      * Counted by `SseFrameCounter` on the write callback, which agrees with
      * `SseParser` on what an event is - see that header.
      */
+    /**
+     * @brief The client-certificate registry entry this transfer presented,
+     *        as `host` or `host:port`; empty when none matched (issue #707).
+     *
+     * On the *response* rather than left to be re-derived, because "why did
+     * this work here and fail there" is the question a per-host certificate
+     * registry creates, and neither the request nor the settings can answer it
+     * after the fact: the registry may have changed, and the URL alone does not
+     * say which entry won. Both design funnels carry it (the live `/execute`
+     * body and the stored trace), so a restored response says what the live one
+     * said.
+     *
+     * Not populated on the load path: it is a per-transfer string on a hot path
+     * for a fact that is constant for the whole run - the policy is resolved
+     * once at run start (#704 decision 3), so one host means one certificate
+     * for every transfer in it.
+     */
+    std::string client_certificate;
+
     std::optional<std::size_t> stream_events;
 
     /**
@@ -1363,6 +1382,35 @@ struct OAuthToken {
     int64_t expires_in;   // seconds; 0 = non-expiring
     int64_t created_at;   // ms epoch
     std::string raw_response; // provider JSON (truncated); debugging only, never logged
+};
+
+/**
+ * @brief A client certificate and the host it is presented to (issue #707).
+ *
+ * The registry row behind `vayu::http::ClientCertRule` - that struct is what
+ * the transport policy carries onto the wire, this one is what SQLite holds.
+ * They are separate because the http layer must not depend on the db layer to
+ * apply a certificate, which is the same split `TransportPolicy` already has
+ * from the config table.
+ *
+ * `cert_path` / `key_path` are *paths*: the key never enters the database.
+ * `passphrase` is the exception and is stored plaintext, on the precedent every
+ * stored auth credential already sets - see docs/engine/db-schema.md, which
+ * discloses it.
+ */
+struct ClientCertificate {
+    std::string id;   // PK, engine-assigned ("cert_...")
+    std::string host; // lower-cased hostname, no scheme/port/path
+    // NULL = this entry answers for the host on every port, which is a
+    // different fact from "port 0" and is spelled as the absence it is - the
+    // `result_bodies.stream_events` precedent. A new table needs no
+    // ALTER-friendly default, so nothing pushes this towards a sentinel.
+    std::optional<int> port;
+    std::string cert_path;
+    std::string key_path;
+    std::string passphrase; // "" = the key has none
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
 };
 } // namespace db
 

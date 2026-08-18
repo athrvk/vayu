@@ -406,6 +406,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/spec_sync.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
+        src/http/routes/client_certificates.cpp
         src/http/routes/globals.cpp
         src/http/routes/runs.cpp
         src/http/routes/execution.cpp
@@ -468,6 +469,7 @@ if(VAYU_BUILD_TESTS)
         tests/load_stream_events_test.cpp
         tests/sse_stream_test.cpp
         tests/transport_policy_test.cpp
+        tests/client_certificates_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp
         tests/specs_route_test.cpp
@@ -550,6 +552,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
         src/http/routes/environments.cpp
+        src/http/routes/client_certificates.cpp
         src/http/routes/globals.cpp
         src/http/routes/metrics.cpp
         src/http/routes/oauth.cpp

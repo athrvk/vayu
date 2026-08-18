@@ -250,6 +250,20 @@ Three things worth knowing before you design around them:
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
   `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no.
+- **A client certificate belongs to a host, not to a request** (#707,
+  `client_certificates`). The registry rides *inside* the `TransportPolicy`, so
+  it reaches every outbound path with no per-site wiring and is read once per
+  run on the load and collection paths - `match_client_certificate` then picks
+  the entry per transfer from that snapshot, exact host, port-specific beating
+  catch-all, no wildcards. Only file **paths** are stored (the key never enters
+  the database); the passphrase is stored plaintext on the existing credential
+  precedent and is **never echoed** - reads answer `hasPassphrase`. Both paths
+  are checked at write time, because an unreadable file otherwise surfaces as an
+  `SslError` against the endpoint and reads as "the API is broken". A matched
+  entry is recorded on `Response::client_certificate` and travels both design
+  funnels (live body and stored trace) under `clientCertificate`, deliberately
+  *not* on the load path: it is a per-transfer string for a fact that is
+  constant for the run.
 
 ## Request composition (engine-owned - POST /compose)
 

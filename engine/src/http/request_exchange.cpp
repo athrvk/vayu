@@ -111,6 +111,19 @@ const vayu::Response& response) {
         trace["error_message"] = response.error_message;
     }
 
+    // The client-certificate entry this exchange presented (issue #707). Top
+    // level rather than inside `response`, because it is a property of the
+    // *transfer*: the exchange that most needs to say which certificate it used
+    // is the one that failed the handshake, and that one has no response node
+    // at all.
+    //
+    // Omitted when empty, unlike the live body's always-present key: every row
+    // stored before this feature would otherwise have to be told apart from one
+    // that matched nothing, and both mean the same thing here - no certificate.
+    if (!response.client_certificate.empty ()) {
+        trace["clientCertificate"] = response.client_certificate;
+    }
+
     const auto& timing   = response.timing;
     trace["totalMs"]     = timing.total_ms;
     trace["wireMs"]      = timing.wire_ms;

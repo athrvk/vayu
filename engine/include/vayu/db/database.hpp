@@ -319,6 +319,20 @@ class Database {
     std::optional<Environment> get_environment (const std::string& id);
     void delete_environment (const std::string& id);
 
+    /**
+     * Client-certificate registry (issue #707). Plain CRUD: the routes own
+     * validation and the uniqueness rule, because both belong to the one place
+     * that can answer with a status code.
+     *
+     * `get_client_certificates` is read once per resolved transport policy -
+     * per design send, and *once per run* on the load and collection paths -
+     * never per transfer; see `vayu::http::resolve_transport_policy`.
+     */
+    void save_client_certificate (const ClientCertificate& c);
+    std::vector<ClientCertificate> get_client_certificates ();
+    std::optional<ClientCertificate> get_client_certificate (const std::string& id);
+    void delete_client_certificate (const std::string& id);
+
     // Globals (singleton)
     void save_globals (const Globals& g);
     std::optional<Globals> get_globals ();

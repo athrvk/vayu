@@ -228,6 +228,16 @@ export interface ResponseState {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
+	 * The client-certificate registry entry this exchange presented, as `host`
+	 * or `host:port` (issue #707); absent when none matched.
+	 *
+	 * Read by the response status bar. A per-host certificate registry makes
+	 * "why does this call work here and fail there" a question the request
+	 * itself cannot answer - nothing on it names a certificate - so the
+	 * exchange has to say which entry it used.
+	 */
+	clientCertificate?: string;
+	/**
 	 * What checking this response against its declared schema found (issue
 	 * #628), or absent when the request's collection is bound to no document -
 	 * "never judged against a contract" and "judged and failed" being different

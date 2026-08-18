@@ -1964,6 +1964,114 @@ a mistake.
 `cleared` counts the cookies dropped; clearing a scope that holds nothing is a
 `200` with `0`, not an error.
 
+## Client certificates
+
+An mTLS endpoint asks the client to present a certificate, and a certificate is
+a property of **where you are calling**, not of one request - the transfer that
+needs it is as often an OAuth token fetch, a redirect or a script's
+`pm.sendRequest` as it is the request you are looking at. So the engine keeps a
+registry of host to certificate and applies the matching entry itself, on every
+outbound path: design sends, load runs, SSE streams, `pm.sendRequest`, the
+OAuth token endpoint, `POST /import/fetch` and the monitor scrape. Nothing on a
+request names a certificate.
+
+Rows are read into the [transport policy](#proxy-settings) at the point of use,
+so a change reaches the next transfer without a restart - and, exactly like the
+proxy, a load run and a collection run read the registry **once at run start**
+and hold it, because libcurl reuses a pooled connection only when its TLS
+identity matches.
+
+**Matching is by exact host, and most specific wins.** An entry naming a port
+answers only that port; an entry with `port: null` answers the host on every
+port; an entry naming this exact port beats the catch-all beside it. There are
+no wildcards in v1 - `*.example.com` is not a pattern, it is a hostname that
+matches nothing. Host comparison is case-insensitive (rows are stored
+lower-cased), and an IPv6 host is registered without its brackets (`::1`).
+
+**Paths, not contents.** The row holds the *paths* of the certificate and key
+files and the engine opens them at send time, so the private key never enters
+the database. The passphrase is the one exception - it is stored, in plaintext,
+the same as every other saved credential (see
+[db-schema.md](db-schema.md#client_certificates)) - and it is **never sent
+back**: reads carry `hasPassphrase` instead.
+
+Both file paths are checked when the entry is written, and an unreadable one is
+a `400` naming the file. That is deliberate: a path that is not there otherwise
+fails at handshake time as an SSL error against the endpoint, which reads as
+"the API is broken" rather than "this setting is wrong".
+
+A cert-authenticated exchange says so. `POST /execute` returns
+`clientCertificate` on the response (`""` when none matched) and the stored
+trace carries the same value under the same name, so a restored response names
+the entry a live one named. The format the certificate files must be in is the
+TLS backend's business, and the backends differ - OpenSSL (Linux) takes a PEM
+certificate and key pair; Schannel (Windows) expects a PKCS#12 file or a
+certificate store reference; Apple SecTrust (macOS) takes PKCS#12 or PEM. The
+engine passes the paths through unchanged, and a format a backend rejects fails
+at handshake time with libcurl's own error.
+
+### GET /client-certificates
+
+Every registered entry.
+
+**Response:**
+```json
+[
+  {
+    "id": "cert_7f3c1a2b",
+    "host": "api.example.com",
+    "port": 8443,
+    "certPath": "/home/ada/certs/client.pem",
+    "keyPath": "/home/ada/certs/client.key",
+    "hasPassphrase": true,
+    "createdAt": 1767225600000,
+    "updatedAt": 1767225600000
+  }
+]
+```
+
+`port` is `null` - not `0` and not omitted - for an entry that answers on every
+port.
+
+### POST /client-certificates
+
+Register a certificate for a host. **Create only** - the engine owns the id, so
+a body carrying one is a `400` (see [the engine owns every
+id](#the-engine-owns-every-id)).
+
+**Body:**
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `host` | yes | Hostname, no scheme, port or path. Stored lower-cased. |
+| `port` | no | The port this entry is specific to; `null` or absent means every port. |
+| `certPath` | yes | Path to the certificate file. Must be readable now. |
+| `keyPath` | yes | Path to the private key file. Must be readable now. |
+| `passphrase` | no | The key's passphrase. Write-only. |
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `400` | A host that could never match (carries a scheme, a path, a port, or brackets), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath` / `keyPath`, a file that is not readable, or a body `id`. |
+| `409` | Another entry already claims this `host` + `port`. Two rows for one target would make the certificate presented depend on row order, so the second is refused with the id of the first rather than silently shadowing it. |
+
+### PUT /client-certificates/:id
+
+Update an entry. **Update only** - a missing id is a `404`, never a silent
+create. Merge-patch under the [null-vs-absent
+rule](#the-null-vs-absent-rule): an absent field keeps its value, `port: null`
+widens the entry to every port, and `passphrase: null` clears a stored one.
+
+Validation runs on the **merged** row, not on the body, so a `PUT` that moves
+only `keyPath` still proves the pair works together.
+
+### DELETE /client-certificates/:id
+
+Remove an entry; `404` if it does not exist. The certificate and key files
+themselves are never touched - the registry only ever held the way to find
+them.
+
 ## Webhook Inbox
 
 An **inbox** is a second HTTP listener the engine opens on request. It accepts

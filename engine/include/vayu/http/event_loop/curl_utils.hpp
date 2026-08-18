@@ -52,8 +52,18 @@ Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer);
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
+ * @param url The target this transfer dials, for the client-certificate lookup
+ *            (issue #707). Parsed only when the registry is non-empty, so the
+ *            load path pays nothing for a feature it is not using.
+ * @return The registry entry whose certificate was put on the handle, or null
+ *         when none matched. Points into @p policy and lives exactly as long -
+ *         a caller that keeps it (both design funnels record the label on the
+ *         response) must copy what it needs before the policy goes away.
  */
-void apply_transport_policy (CURL* curl, const TransportPolicy& policy, bool verify_ssl);
+const ClientCertRule* apply_transport_policy (CURL* curl,
+const TransportPolicy& policy,
+bool verify_ssl,
+const std::string& url);
 
 /**
  * @brief Get HTTP status text from status code

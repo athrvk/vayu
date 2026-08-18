@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Clock, FileText, History } from "lucide-react";
+import { AlertTriangle, Clock, FileText, History, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
@@ -55,6 +55,15 @@ export interface ResponseStatusBarProps {
 	 * nothing on this bar changed (issue #215).
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * The client-certificate registry entry this exchange presented, as `host`
+	 * or `host:port` (issue #707); absent when none matched.
+	 *
+	 * Shown because a per-host registry decides this without the request
+	 * mentioning it: two calls to what looks like the same API can differ only
+	 * in which entry matched, and nothing else on screen would say so.
+	 */
+	clientCertificate?: string;
 	/** ISO time this response arrived. Live sends only. */
 	receivedAt?: string;
 	/**
@@ -90,6 +99,7 @@ export function ResponseStatusBar({
 	size,
 	httpVersion,
 	httpVersionDowngraded,
+	clientCertificate,
 	receivedAt,
 	restoredFrom,
 	streaming,
@@ -219,6 +229,25 @@ export function ResponseStatusBar({
 				>
 					<AlertTriangle className="w-3.5 h-3.5" />
 					<span>{httpVersion || "HTTP/1.1"}, not HTTP/2</span>
+				</div>
+			)}
+
+			{/*
+			 * The client certificate this exchange presented (issue #707).
+			 * Shown only when one matched, on the same rule as the downgrade
+			 * above: a chip on every response is a chip nobody reads. Text, no
+			 * background - see the variant="chip" rule in badge-hover.test.tsx.
+			 */}
+			{clientCertificate && (
+				<div
+					className="flex items-center gap-1.5 text-xs text-muted-foreground"
+					title={
+						`Sent with the client certificate registered for ${clientCertificate} ` +
+						`(Settings > Network & connectivity).`
+					}
+				>
+					<ShieldCheck className="w-3.5 h-3.5" />
+					<span>mTLS: {clientCertificate}</span>
 				</div>
 			)}
 

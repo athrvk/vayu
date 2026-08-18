@@ -1072,6 +1072,12 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
   `CookiesCard` in Settings. The mutation invalidates rather than patching the
   cache: a clear that raced a request in flight would otherwise leave the panel
   claiming an empty jar the engine has already refilled
+- **`useClientCertificatesQuery()`** and the create / update / delete mutations
+  (`queries/client-certificates.ts`) - the engine's host-to-certificate registry
+  for mTLS endpoints (issue #707), read and edited by `ClientCertificatesCard`
+  in Settings > Network & connectivity. The mutations invalidate rather than
+  patching: the engine refuses a second entry for a host+port pair already
+  taken, so the list is the authority on what a new entry may claim
 
 **Mutations:**
 - **`useCreateEnvironmentMutation()`**

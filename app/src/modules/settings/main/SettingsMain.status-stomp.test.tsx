@@ -54,6 +54,11 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutateAsync, isPending: false }),
 }));
 
+// The registry card the Network category mounts above its entries (issue
+// #707) reads the engine over its own queries, which is not what this file is
+// about - stubbed on the `CookiesCard` precedent in the save-model test.
+vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
+
 vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: () => ({ selectedCategory: "network_performance", restartRequiredKeys: [] }),
 }));

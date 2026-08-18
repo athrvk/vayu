@@ -27,9 +27,11 @@
  * it was the only thing that made the seam visible.
  */
 
+import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Server, Code, Network, Activity, Database, Radio, Gauge } from "lucide-react";
 import type { EngineSettingsCategory } from "@/types";
+import { ClientCertificatesCard } from "./main/panels/ClientCertificatesCard";
 
 export interface EngineSettingsCategoryMeta {
 	id: EngineSettingsCategory;
@@ -37,6 +39,19 @@ export interface EngineSettingsCategoryMeta {
 	/** Shown under the category title in the settings view header. */
 	description: string;
 	icon: LucideIcon;
+	/**
+	 * A card rendered above this category's config entries, for engine state
+	 * that is *data* rather than a setting - a registry with its own CRUD
+	 * routes, which `GET /config` does not describe and the generic entry
+	 * renderer therefore cannot draw (issue #707).
+	 *
+	 * Declared here rather than branched on in `SettingsMain`, for the reason
+	 * `app-panels.ts` exists on the client side: the view looks a component up,
+	 * it does not carry a list of category names it treats specially. It saves
+	 * on its own - the Save bar above belongs to the config entries - which is
+	 * the same split `CookiesCard` has inside the General panel.
+	 */
+	Card?: ComponentType;
 }
 
 export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] = [
@@ -59,6 +74,10 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,
+		// The client-certificate registry (#707) lands here rather than in a
+		// category of its own: it is one half of how a request leaves this
+		// machine, and the proxy and trust settings it belongs beside are here.
+		Card: ClientCertificatesCard,
 	},
 	{
 		id: "services",

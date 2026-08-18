@@ -255,6 +255,18 @@ warning while it is off. See
 [TLS trust settings](engine/api-reference.md#tls-trust-settings) for the
 per-backend behaviour on each platform.
 
+It also carries **what the engine proves it is**. An mTLS endpoint asks the
+client for a certificate, and a certificate belongs to the host being called
+rather than to one request - the transfer that needs it is as often a token
+fetch, a redirect or a script's `pm.sendRequest`. So the engine keeps a
+registry of host to certificate (Settings > Network & connectivity), matches an
+entry per transfer by exact host and optional port, and presents it on every one
+of the paths above without any request naming it. Only the file *paths* are
+stored, so the private key stays where the user's own tooling put it; a
+cert-authenticated exchange reports which entry it used, live and from History
+alike. See [Client
+certificates](engine/api-reference.md#client-certificates).
+
 ### Variable Resolution
 
 Variables are resolved with priority: **Environment > Collection > Global**
@@ -274,6 +286,11 @@ Variables are resolved with priority: **Environment > Collection > Global**
   SQLite, the same way every other stored credential is. libcurl derives the
   `Proxy-Authorization` header from the URL, and that header is on the
   redaction list, so credentials never reach a stored trace or a debug log.
+- **Client-certificate keys**: never stored. The `client_certificates` table
+  holds the *paths* of the certificate and key files and the engine opens them
+  at send time. The key's passphrase is the one part that is stored, plaintext,
+  on the same precedent as every other credential above - and the API never
+  echoes it back, answering `hasPassphrase` instead.
 
 ## Performance Characteristics
 
