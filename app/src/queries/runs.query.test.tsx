@@ -38,6 +38,7 @@ import {
 	runsPollInterval,
 	runDetailOptions,
 	useDeleteRunMutation,
+	useInvalidateRuns,
 	RunNotFoundError,
 	isRunNotFound,
 } from "./runs";
@@ -356,6 +357,29 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 		const lastDesign = queryKeys.runs.lastDesign("req_1") as readonly unknown[];
 		// Not a prefix match: `setQueriesData({queryKey: lists()})` must not reach it.
 		expect(lastDesign.slice(0, lists.length)).not.toEqual([...lists]);
+		// ...but inside its own family, so a delete or a history clear reaches
+		// it. The prefix is load-bearing only while this holds: a `lastDesign`
+		// built at the root again would silently stop being invalidated.
+		const family = queryKeys.runs.lastDesigns() as readonly unknown[];
+		expect(lastDesign.slice(0, family.length)).toEqual([...family]);
+	});
+
+	it("invalidates the last-design family, so an open tab stops restoring the deleted run", async () => {
+		// A run id gives no way back to the request the run belonged to, so the
+		// prefix is the only reach a delete has - and every open request tab
+		// mounts `useLastDesignRunQuery` on the row that just went away.
+		const client = seededClient();
+		client.setQueryData(queryKeys.runs.lastDesign("req_1"), page([runRow("r1")]));
+		deleteRun.mockResolvedValue(undefined);
+
+		const { result } = renderHook(() => useDeleteRunMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync("r1");
+
+		await waitFor(() =>
+			expect(client.getQueryState(queryKeys.runs.lastDesign("req_1"))?.isInvalidated).toBe(
+				true
+			)
+		);
 	});
 
 	it("deletes cleanly with a last-design-run cache present, and patches every cache", async () => {
@@ -404,6 +428,34 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 		await expect(result.current.mutateAsync("r1")).resolves.toBeUndefined();
 		// Untouched - the updater does not know this shape and says so by refusing it.
 		expect(client.getQueryData(strayKey)).toEqual(page([runRow("r1")]));
+	});
+});
+
+/**
+ * Clearing the history removes every run at once, so each family keyed outside
+ * `runs.lists()` has to be named here or it survives the clear - which is the
+ * same hole a delete leaves, one scale up.
+ */
+describe("useInvalidateRuns", () => {
+	it("names every run family that lives outside the list prefix", () => {
+		const client = makeClient();
+		const spy = vi.spyOn(client, "invalidateQueries").mockReturnValue(Promise.resolve());
+
+		const { result } = renderHook(() => useInvalidateRuns(), { wrapper: wrapper(client) });
+		result.current();
+
+		const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
+		for (const key of [
+			queryKeys.runs.lists(),
+			queryKeys.runs.allRuns(),
+			queryKeys.runs.recentDesigns(),
+			queryKeys.runs.lastCollectionRuns(),
+			queryKeys.runs.baselines(),
+			queryKeys.runs.lastDesigns(),
+		]) {
+			expect(keys).toContainEqual(key);
+		}
+		spy.mockRestore();
 	});
 });
 
