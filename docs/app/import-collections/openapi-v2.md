@@ -37,24 +37,27 @@ The top-level `swagger` field must be the string `"2.0"` or the **number** `2` (
 
 ## Tree structure
 
-The spec maps to a single root collection, with operations grouped into child collections by their first tag.
+The spec maps to a single root collection, with operations grouped into child collections by their first tag - or, for an operation that declares no tag, by the first meaningful segment of its path (issue #710).
 
 - **Root collection** ← the whole spec (named from `info.title`). It directly holds:
-  - `requests`: every **untagged** operation (`rootRequests`).
-  - `children`: one child collection per distinct first-tag, in first-encounter order.
-- **Tag child collections** ← created lazily, inline in `parse`, the first time a tag is seen, keyed in a `Map<string, CollectionDraft>` (`tagCollections`). Description comes from the matching entry in the top-level `tags[]` array (if any).
+  - `requests`: every operation that has neither a tag nor a groupable path.
+  - `children`: one child collection per distinct folder name, in first-encounter order.
+- **Child collections** ← created lazily by `OperationFolders` (`openapi-shared.ts`), the first time a name is seen. A tag-named folder takes its description from the matching entry in the top-level `tags[]` array (if any); a path-named folder has none.
 
 Iteration order: `parse` loops over `spec.paths` entries, and for each path item over the fixed `HTTP_METHODS` list (`get, post, put, patch, delete, head, options`). For each present operation it calls `buildSwaggerOp(...)`, then routes by tag:
 
 ```ts
-const tag = op.tags?.[0];   // ONLY the first tag is used
-if (tag) tagCollections.get(tag).requests.push(req);
-else     rootRequests.push(req);
+const tag  = op.tags?.[0];              // ONLY the first tag is used
+const name = tag ?? pathFolderName(path);  // the fallback, per operation
+if (name) folders.get(name).requests.push(req);
+else      rootRequests.push(req);
 ```
 
-**Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder). An operation with no `tags` (or `tags: []`) becomes a root request.
+**Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder).
 
-Unlike v3 (which has dedicated `makeTagCollection` / `buildBody` helpers), v2 builds the root and tag collections inline in `parse` and delegates only the per-operation draft to `buildSwaggerOp`. `$ref` resolution comes from `createRefResolver` (`openapi-shared.ts`), the same one the v3 parser uses - both had built it by hand, identically, until issue #649.
+**Untagged operations** take the same path fallback the v3 parser does, from the same `OperationFolders` - the rule, its version/`api`/`{template}` skips and `meta.folderStrategy` are written out once, in [OpenAPI 3.0](./openapi-v3.md#tree-structure).
+
+Unlike v3 (which has a dedicated `buildBody` helper), v2 builds the root collection inline in `parse` and delegates only the per-operation draft to `buildSwaggerOp`. `$ref` resolution comes from `createRefResolver` (`openapi-shared.ts`), the same one the v3 parser uses - both had built it by hand, identically, until issue #649.
 
 References naming **other files** (`./definitions/pet.yaml#/Pet`) are resolved before this parser runs, by `ref-bundler.ts`; what could not be reached is counted as an `external_ref` `SkippedItem`. The rules are the same for both OpenAPI parsers and are written out in [OpenAPI 3.0](./openapi-v3.md#external-refs) and [OpenAPI Collections](../openapi.md#specs-written-across-several-files).
 
@@ -71,12 +74,12 @@ Built inline in `parse`.
 | `schemes` + `host` + `basePath` | `variables.baseUrl` | only added when `host` is present: `{ baseUrl: { value: baseUrl, enabled: true } }`; otherwise `variables` is `{}`. See [Base URL](#base-url-construction). |
 | `security` / `securityDefinitions` | `auth` | via the picked primary scheme + `swaggerSchemeToAuth` (see [Auth](#auth--security)). Collections never inherit. |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
-| tag groups | `children` | `[...tagCollections.values()]` |
-| untagged operations | `requests` | |
+| tag and path groups | `children` | `folders.children()` |
+| operations with neither | `requests` | |
 
-### Collection (per tag)
+### Collection (per folder)
 
-Built inline when a tag is first encountered.
+Built by `OperationFolders` (`openapi-shared.ts`), shared with the v3 parser.
 
 | Swagger | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
@@ -124,7 +127,7 @@ Saved example responses (issue #481), from the half of the spec that says what c
 | `examples[<media type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
 | `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json` |
 
-A response that documents no body still imports (`204` is a real answer), and a key that is not a numeric status - `default`, or a wildcard - is skipped and counted as `example_no_status`.
+A response that documents no body still imports (`204` is a real answer), and a key that is not a numeric status is skipped and counted: `default` as `default_response`, a wildcard or junk key as `example_no_status` - counted apart for the reason [OpenAPI 3.0](./openapi-v3.md#documented-responses) gives.
 
 ## Base URL construction
 
@@ -304,7 +307,7 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec`, `example_no_status` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). The three kinds issue #719 added are v3-only for the same kind of reason: Swagger 2.0 has no `in: "cookie"` parameter, no Server Object to template or leave relative - `host` is a host - and every declared body maps to one, so `cookie_param`, `unresolved_base_url` and `unmapped_body` have no case here either. Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the shared `SkipTally` - `malformed_spec`, `example_no_status`, `default_response` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). The three kinds issue #719 added are v3-only for the same kind of reason: Swagger 2.0 has no `in: "cookie"` parameter, no Server Object to template or leave relative - `host` is a host - and every declared body maps to one, so `cookie_param`, `unresolved_base_url` and `unmapped_body` have no case here either. Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 
@@ -323,9 +326,9 @@ See [OpenAPI v3](./openapi-v3.md) for the v3 reference. Key contrasts:
 | `$ref` namespace | `#/definitions/...` | `#/components/schemas/...` (resolver is generic in both) |
 | Auth schemes | `securityDefinitions` (`basic`, `apiKey`, `oauth2`) | `components.securitySchemes` (`http`/bearer/basic, `apiKey`, `oauth2`) |
 | Auth helper | `swaggerSchemeToAuth` | `schemeToAuth` |
-| Collection build | inline in `parse` | helper `makeTagCollection` |
+| Collection build | root inline in `parse`; folders from the shared `OperationFolders` | root inline in `parse`; folders from the shared `OperationFolders` |
 
-Shared between both: tree-by-first-tag, `{{baseUrl}}`-prefixed URLs, `normalizeVars` path conversion, `sampleSchema`, request `auth: inherit`, `ImportOptions` ignored, and the `openapi-shared.ts` helpers (`resolvePathItem`, `SkipTally`) - so a `$ref`'d path item, a malformed `parameters` list, and `meta.skipped` behave identically in both.
+Shared between both: the folder routing (`OperationFolders` - first tag, else path segment), `{{baseUrl}}`-prefixed URLs, `normalizeVars` path conversion, `sampleSchema`, request `auth: inherit`, `ImportOptions` ignored, and the `openapi-shared.ts` helpers (`resolvePathItem`, `SkipTally`) - so a `$ref`'d path item, a malformed `parameters` list, and `meta.skipped` behave identically in both.
 
 ## Shared helpers used
 

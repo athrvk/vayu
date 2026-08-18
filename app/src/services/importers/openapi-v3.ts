@@ -37,6 +37,7 @@ import {
 	firstNamedExample,
 	resolvePathItem,
 	responseExample,
+	OperationFolders,
 	SkipTally,
 	createOperationIdentifier,
 } from "./openapi-shared";
@@ -91,8 +92,7 @@ export class OpenApiV3Parser implements ImportParser {
 
 		const primaryScheme = pickPrimaryScheme(spec);
 
-		const tagCollections = new Map<string, CollectionDraft>();
-		const rootRequests: RequestDraft[] = [];
+		const folders = new OperationFolders(spec.tags);
 		const tally = new SkipTally();
 		const baseUrl = resolveServerUrl(asArray(spec.servers)[0], source.sourceUrl, tally);
 		// One identifier for the whole document: it is what keeps a repeated
@@ -146,14 +146,7 @@ export class OpenApiV3Parser implements ImportParser {
 					tally,
 					identity
 				);
-				const tag = asStr(asArray(op.tags)[0]);
-				if (tag) {
-					if (!tagCollections.has(tag))
-						tagCollections.set(tag, makeTagCollection(spec, tag));
-					tagCollections.get(tag)!.requests.push(req);
-				} else {
-					rootRequests.push(req);
-				}
+				folders.place(req, path, op.tags);
 			}
 		}
 
@@ -166,8 +159,8 @@ export class OpenApiV3Parser implements ImportParser {
 			auth: schemeToAuth(primaryScheme),
 			preRequestScript: "",
 			postRequestScript: "",
-			children: [...tagCollections.values()],
-			requests: rootRequests,
+			children: folders.children(),
+			requests: folders.rootRequests(),
 			// The document itself, so the import can store it and bind this
 			// collection to it in the same atomic call (issue #637). `raw` and not
 			// a re-serialization: the engine hashes the bytes it stores, and a
@@ -194,7 +187,8 @@ export class OpenApiV3Parser implements ImportParser {
 			meta: {
 				format: this.formatName,
 				requestCount,
-				folderCount: tagCollections.size,
+				folderCount: folders.count(),
+				...(folders.strategy() ? { folderStrategy: folders.strategy() } : {}),
 				environmentCount: 0,
 				globalCount: 0,
 				exampleCount: countExamples([root]),
@@ -274,20 +268,6 @@ function pickPrimaryScheme(spec: JsonRecord): unknown {
 	const schemes = asRecord(prop(spec.components, "securitySchemes")) ?? {};
 	if (reqName && schemes[reqName]) return schemes[reqName];
 	return Object.values(schemes)[0];
-}
-
-function makeTagCollection(spec: JsonRecord, tag: string): CollectionDraft {
-	const def = asArray(spec.tags).find((t) => prop(t, "name") === tag);
-	return {
-		name: tag,
-		description: asStr(prop(def, "description")) ?? "",
-		variables: {},
-		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
-		children: [],
-		requests: [],
-	};
 }
 
 function buildOperation(

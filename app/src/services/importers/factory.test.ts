@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseImport } from "./factory";
 import { UnrecognisedFormatError } from "./types";
+import { requestsOf } from "@/test/import-drafts";
 
 const opts = { importEnvironments: true, importScripts: true };
 const fx = (name: string) => readFileSync(join(__dirname, "__fixtures__", name), "utf8");
@@ -101,7 +102,7 @@ describe("parseImport joins enabled params into the request URL", () => {
 	});
 
 	it("Postman: a request with no query is untouched", () => {
-		const req = parseImport(fx("postman-v21.json"), opts).collections[0].requests[0];
+		const req = requestsOf(parseImport(fx("postman-v21.json"), opts))[0];
 		expect(req.url).toBe("{{baseUrl}}/users");
 	});
 
@@ -140,7 +141,7 @@ describe("parseImport joins enabled params into the request URL", () => {
 				},
 			],
 		});
-		expect(parseImport(doc, opts).collections[0].requests[0].url).toBe("https://x/y?a=1&b=2");
+		expect(requestsOf(parseImport(doc, opts))[0].url).toBe("https://x/y?a=1&b=2");
 	});
 
 	it("OpenAPI: an optional value-less parameter stays off the URL", () => {
@@ -181,7 +182,7 @@ describe("parseImport joins enabled params into the request URL", () => {
 				},
 			},
 		});
-		const req = parseImport(spec, opts).collections[0].requests[0];
+		const req = requestsOf(parseImport(spec, opts))[0];
 		expect(req.url).toBe("{{baseUrl}}/items?tenant&limit=25");
 	});
 

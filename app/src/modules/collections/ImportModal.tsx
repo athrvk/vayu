@@ -17,6 +17,7 @@ import {
 	AlertTriangle,
 	FileWarning,
 	Link2,
+	Info,
 } from "lucide-react";
 import {
 	Button,
@@ -839,9 +840,27 @@ function PreviewView({
 					{lossSummary(meta)}
 				</p>
 			)}
+			{noticeSummary(meta) && (
+				<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+					<Info className="h-3.5 w-3.5 shrink-0" />
+					{noticeSummary(meta)}
+				</p>
+			)}
 		</div>
 	);
 }
+
+/**
+ * Skip kinds that describe what a conformant document *is*, not what the import
+ * lost (issue #710).
+ *
+ * `default` is the only one so far: every major vendor spec declares a catch-all
+ * response on every operation, so counting it as damage put "568 example
+ * responses with no numeric status" in destructive red beside the single warning
+ * the user could act on ("1 file part needs a file"). It is still counted and
+ * still named - nothing is dropped silently - but at the severity it deserves.
+ */
+const INFORMATIONAL_KINDS: ReadonlySet<SkippedItem["kind"]> = new Set(["default_response"]);
 
 /**
  * What this file lost, in words - or `""` when it lost nothing.
@@ -853,7 +872,9 @@ function PreviewView({
  */
 function lossSummary(meta: ImportResult["meta"]): string {
 	return [
-		...meta.skipped.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
+		...meta.skipped
+			.filter((s) => !INFORMATIONAL_KINDS.has(s.kind))
+			.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
 		...(meta.nonExecutableAuth > 0 ? [`${meta.nonExecutableAuth} auth not executed`] : []),
 		// An OpenAPI upload imports as a file row with nothing attached - the user
 		// has to pick the file before the request can be sent, so the preview says
@@ -868,6 +889,40 @@ function lossSummary(meta: ImportResult["meta"]): string {
 			: []),
 	].join(" · ");
 }
+
+/**
+ * What this file is worth knowing about but did not lose - or `""` when there is
+ * nothing to say (issue #710).
+ *
+ * The counterpart to {@link lossSummary}, rendered in muted type rather than
+ * destructive, and shared by the same two callers for the same reason. Two things
+ * land here: a spec-conformant construct that has no place in Vayu's model
+ * (`default` responses), and a grouping decision the import made that the
+ * document did not spell out.
+ */
+function noticeSummary(meta: ImportResult["meta"]): string {
+	return [
+		...meta.skipped
+			.filter((s) => INFORMATIONAL_KINDS.has(s.kind))
+			.map((s) => `${s.count} ${skippedLabel(s.kind, s.count)}`),
+		...(meta.folderStrategy && meta.folderStrategy !== "tags"
+			? [FOLDER_STRATEGY_NOTES[meta.folderStrategy]]
+			: []),
+	].join(" · ");
+}
+
+/**
+ * How a folder tree the user is about to accept came to exist (issue #710).
+ *
+ * Only the two path-involving strategies say anything: folders from an
+ * operation's own `tags` are the document's own structure and need no
+ * explanation, while folders derived from paths are Vayu's doing and would
+ * otherwise read as something the spec contained.
+ */
+const FOLDER_STRATEGY_NOTES: Record<"paths" | "mixed", string> = {
+	paths: "Folders from paths - this spec declares no operation tags",
+	mixed: "Folders from tags, and from paths where an operation declared none",
+};
 
 /**
  * The batch ledger: one row per picked file (issue #666).
@@ -933,6 +988,7 @@ function BatchRow({
 	// wherever it is named.
 	const name = entryLabel(entry);
 	const loss = result ? lossSummary(result.meta) : "";
+	const notices = result ? noticeSummary(result.meta) : "";
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
 			<input
@@ -980,6 +1036,12 @@ function BatchRow({
 						{loss}
 					</span>
 				)}
+				{notices && (
+					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+						<Info className="h-3 w-3 shrink-0" />
+						{notices}
+					</span>
+				)}
 				{outcome && (
 					<span
 						className={`flex items-center gap-1.5 text-[11px] ${
@@ -1025,6 +1087,14 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 	example_no_status: [
 		"example response with no numeric status",
 		"example responses with no numeric status",
+	],
+	// Named as the construct rather than as a loss (issue #710): `default` is
+	// valid OpenAPI on every operation of most vendor specs, so the line has to
+	// read as "here is what happened to them", not as a tally of damage. The
+	// severity comes from INFORMATIONAL_KINDS; the wording has to match it.
+	default_response: [
+		"`default` (catch-all) response - no status to serve under, not imported as an example",
+		"`default` (catch-all) responses - no status to serve under, not imported as examples",
 	],
 	// Not "external ref": the count is what the user lost, and what they lost is
 	// a schema the spec pointed at in another file (issue #649). The wording says

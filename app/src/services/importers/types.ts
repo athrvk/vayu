@@ -41,12 +41,23 @@ export interface SkippedItem {
 		| "unsupported_method"
 		| "malformed_spec"
 		/**
-		 * An OpenAPI response whose key is not a numeric status - `default`, or a
-		 * `2XX` wildcard. It documents a real response, but a saved example is
-		 * served under one status line and there is no honest value to pick, so it
-		 * is dropped and counted rather than guessed at (issue #481).
+		 * An OpenAPI response whose key is not a numeric status and is not
+		 * `default` - a `2XX` wildcard, or junk. It documents a real response, but
+		 * a saved example is served under one status line and there is no honest
+		 * value to pick, so it is dropped and counted rather than guessed at
+		 * (issue #481).
 		 */
 		| "example_no_status"
+		/**
+		 * An OpenAPI response keyed `default` (issue #710). Dropped for exactly the
+		 * reason above - a catch-all has no status line to be served under - but
+		 * counted apart from it, because it is not a defect: `default` is
+		 * spec-conformant and near-universal (all 568 of Stripe's operations
+		 * declare one), so folded in with malformed keys it painted a valid
+		 * document as hundreds of losses and buried the warnings that could be
+		 * acted on. The preview ranks it as information, not damage.
+		 */
+		| "default_response"
 		/**
 		 * A `$ref` naming a file the import could not reach - unfetchable,
 		 * unparseable, or relative in a pasted document that has no directory and
@@ -96,11 +107,30 @@ export interface SkippedItem {
 	count: number;
 }
 
+/**
+ * Which rule an OpenAPI import grouped its folders by (issue #710): the
+ * operations' own `tags`, the first meaningful segment of their paths for
+ * operations that declare none, or both in one document.
+ */
+export type FolderStrategy = "tags" | "paths" | "mixed";
+
 export interface ImportMeta {
 	format: string;
 	fileName?: string;
 	requestCount: number;
 	folderCount: number;
+	/**
+	 * How the folders above came to exist (issue #710), disclosed in the preview.
+	 * Path grouping builds a tree the document never spelled out, so a user
+	 * looking at ~150 folders for a spec with no tags in it has to be able to see
+	 * why they are there.
+	 *
+	 * Optional, and only the two OpenAPI parsers set it: a format that carries its
+	 * own folders (Postman, Insomnia) makes no such choice, and one that says
+	 * nothing must not look like one that said "tags". Absent too when a document
+	 * produced no folders at all - there is no rule to explain.
+	 */
+	folderStrategy?: FolderStrategy;
 	environmentCount: number;
 	/** Variables destined for Vayu's globals scope. Only a Postman globals export produces any. */
 	globalCount: number;

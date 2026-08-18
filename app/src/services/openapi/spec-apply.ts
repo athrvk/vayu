@@ -145,7 +145,7 @@ export interface BuildSyncPayloadInput {
 	 * it would silently turn validation off for a collection that had it.
 	 */
 	responseSchemas?: ResponseSchemaIndex;
-	/** Every stored collection, to find the tag folder an added operation lands in. */
+	/** Every stored collection, to find the folder an added operation lands in. */
 	collections: readonly Collection[];
 }
 
@@ -153,9 +153,10 @@ export interface BuildSyncPayloadInput {
  * The `POST /specs/sync` body for one selection.
  *
  * Added operations land where an import would have put them - the sub-collection
- * named after the operation's first tag, created here when the bound collection
- * does not have one yet, and the bound collection itself for an untagged
- * operation. Matching an existing folder by name rather than creating one per
+ * named after the operation's first tag, else the one its path names (issue
+ * #710), created here when the bound collection does not have one yet, and the
+ * bound collection itself for an operation that gets neither. Matching an
+ * existing folder by name rather than creating one per
  * sync is what keeps a collection that has been synced five times shaped like
  * one that was imported once.
  */
@@ -258,7 +259,7 @@ class FolderResolver {
 		collections: readonly Collection[]
 	) {
 		for (const collection of collections) {
-			// Direct children only: an import files its tag folders on the bound
+			// Direct children only: an import files its folders on the bound
 			// collection itself, so a same-named folder two levels down is somebody
 			// else's and matching it would move the operation out of the shape the
 			// document describes.
