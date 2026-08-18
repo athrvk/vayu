@@ -29,7 +29,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const importFetch = vi.fn();
-vi.mock("@/services/api", () => ({ apiService: { importFetch: (u: string) => importFetch(u) } }));
+vi.mock("@/services/api", () => ({
+	apiService: {
+		importFetch: (u: string, maxBytes?: number) => importFetch(u, maxBytes),
+	},
+}));
 
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
@@ -124,5 +128,24 @@ describe("ImportModal URL fetch while in flight", () => {
 
 		release({ content: postman });
 		await waitFor(() => expect(screen.getByText(/Postman Collection v2\.1/i)).toBeVisible());
+	});
+
+	// Issue #784. This box takes any format, and the document it just fetched is
+	// a Postman export - which is never stored as a spec document, so bounding
+	// the fetch by `maxSpecDocumentBytes` would refuse an export that imports
+	// today, naming a setting that does not apply to it. The engine's transport
+	// ceiling is what stands behind this one.
+	it("states no spec bound on a fetch that may be any format", async () => {
+		importFetch.mockResolvedValue({ content: postman });
+
+		renderModal();
+		selectTab(/URL/i);
+		fireEvent.change(screen.getByPlaceholderText(/petstore/i), {
+			target: { value: "https://example.com/collection.json" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Fetch$/i }));
+
+		await waitFor(() => expect(screen.getByText(/Postman Collection v2\.1/i)).toBeVisible());
+		expect(importFetch).toHaveBeenCalledWith("https://example.com/collection.json", undefined);
 	});
 });

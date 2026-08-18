@@ -721,6 +721,29 @@ constexpr size_t MAX_STATUSES_PER_OPERATION = 50;
 } // namespace spec_document
 
 /**
+ * @brief The URL-import proxy's bounds (issue #784).
+ */
+namespace import_fetch {
+/// Bytes `POST /import/fetch` will read from a remote URL when the caller
+/// states no `maxBytes` of its own - and the ceiling a stated one is clamped to.
+///
+/// A transport ceiling, deliberately not the document cap. The route is one
+/// shared proxy for *every* URL import - Postman and Insomnia exports ride it
+/// as well as OpenAPI documents - and a Postman collection is never stored as a
+/// `spec_documents` row, so `maxSpecDocumentBytes` governs nothing about it;
+/// capping the fetch there would refuse a collection that imports today with a
+/// message naming a setting that has nothing to do with it. So the *caller*
+/// states the bound it knows (the spec paths pass the live
+/// `maxSpecDocumentBytes`), and this stands behind it, because a bound the
+/// caller chooses is not a bound against a hostile URL.
+///
+/// Set above the largest `maxSpecDocumentBytes` a user can configure (100 MiB,
+/// the config entry's own maximum) so that raising that setting to its limit
+/// can never be silently narrowed by this one.
+constexpr size_t MAX_BYTES = 256ULL * 1024 * 1024;
+} // namespace import_fetch
+
+/**
  * @brief Response schema validation bounds (issue #628).
  *
  * Every value here bounds what one *response* can make the engine do or store,

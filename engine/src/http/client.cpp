@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -101,13 +102,99 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
 }
 
 /**
- * @brief Callback for writing response body
+ * @brief What one transfer buffers, and the bound it may not pass (issue #784).
+ */
+struct BodySink {
+    std::string body;
+    /// Largest body this transfer may buffer, 0 = unbounded - copied from
+    /// `ClientConfig::max_response_bytes`.
+    size_t max_bytes = 0;
+    /// Set by write_callback when it refused to buffer more, so the completion
+    /// can name the bound instead of reporting curl's generic write failure.
+    bool limit_exceeded = false;
+};
+
+/**
+ * @brief Callback for writing response body, bounded by the sink's cap.
+ *
+ * The same short-count refusal the load loop's callback uses
+ * (`curl_callbacks.cpp`): keep the prefix that fits, then hand curl fewer bytes
+ * than it offered, which fails the transfer. That is what makes the bound a
+ * bound on what is *read* rather than a check run after a whole hostile
+ * response has already been buffered.
+ *
+ * Deliberately the only enforcement, rather than a belt to `CURLOPT_MAXFILESIZE`:
+ * curl 8.21 refuses an over-bound `Content-Length` at header time *and* aborts a
+ * length-less transfer that grows past the value, so setting both left whichever
+ * fired first deciding how the failure was reported - and one of the two branches
+ * dead in every case. This one is version-independent and is the idiom the engine
+ * already enforces a body cap with.
  */
 size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* response_body = static_cast<std::string*> (userdata);
-    size_t total_size   = size * nmemb;
-    response_body->append (ptr, total_size);
+    auto* sink        = static_cast<BodySink*> (userdata);
+    size_t total_size = size * nmemb;
+
+    if (sink->max_bytes > 0) {
+        const size_t remaining =
+        sink->max_bytes - std::min (sink->max_bytes, sink->body.size ());
+        if (total_size > remaining) {
+            sink->body.append (ptr, remaining);
+            sink->limit_exceeded = true;
+            return remaining; // Short count: abort with CURLE_WRITE_ERROR.
+        }
+    }
+
+    sink->body.append (ptr, total_size);
     return total_size;
+}
+
+/**
+ * @brief The size the server declared for this response, if it declared one.
+ *
+ * Read off the headers the header callback already collected rather than from
+ * `CURLINFO_CONTENT_LENGTH_DOWNLOAD_T`: a transfer aborted at the bound never
+ * finished, and libcurl's progress info for one that did not run is `-1`
+ * whether the server declared a length or not. The header block is there
+ * either way, because headers arrive before the first byte of body.
+ */
+std::optional<unsigned long long> declared_content_length (const Headers& headers) {
+    for (const auto& [key, value] : headers) {
+        std::string lower = key;
+        std::transform (lower.begin (), lower.end (), lower.begin (),
+        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+        if (lower != "content-length") {
+            continue;
+        }
+        try {
+            size_t consumed                   = 0;
+            const unsigned long long declared = std::stoull (value, &consumed);
+            // A trailing-garbage or empty value is no declaration at all; the
+            // caller says so rather than reporting a number the server did not.
+            return consumed == value.size () ? std::optional{ declared } : std::nullopt;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * @brief Why a bounded transfer was refused, in the terms the caller set it.
+ *
+ * Names the count when there is an honest one to name - the length the server
+ * declared - and says so plainly when there is not, because a body cut off at
+ * the bound is only known to be *at least* that large and reporting the bound
+ * as the size would be a measurement the engine never made.
+ */
+std::string too_large_message (const Headers& headers, size_t max_bytes) {
+    const std::string bound = std::to_string (max_bytes) + " byte limit";
+    const auto declared     = declared_content_length (headers);
+    if (declared && *declared > max_bytes) {
+        return "Response is " + std::to_string (*declared) + " bytes, over the " + bound;
+    }
+    // No claim about the header here: this branch also covers a server whose
+    // declared length was under the bound and whose body was not.
+    return "Response grew past the " + bound + " and the transfer was cut off there";
 }
 
 /**
@@ -331,7 +418,8 @@ Result<Response> Client::send (const Request& request) {
 
     // Response data
     Response response;
-    std::string response_body;
+    BodySink sink;
+    sink.max_bytes = impl_->config.max_response_bytes;
 
     // `request_headers` is the *sent* record and is filled by
     // build_request_header_list below, from the very appends that build the
@@ -360,7 +448,7 @@ Result<Response> Client::send (const Request& request) {
 
     // Set callbacks
     curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &sink);
     curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
 
@@ -479,8 +567,15 @@ Result<Response> Client::send (const Request& request) {
 
     // Check for errors
     if (res != CURLE_OK) {
-        // Convert curl error to ErrorCode and message
-        Error error = detail::curl_to_error (curl, res, impl_->error_buffer);
+        // A refused body is not a network failure, and curl's own word for it
+        // says nothing a caller can act on: the write callback's short count
+        // surfaces as a generic CURLE_WRITE_ERROR. So it is recognized here and
+        // reported as the condition it is, which `/import/fetch` answers with a
+        // 413 rather than a 502.
+        Error error = sink.limit_exceeded ?
+        Error{ ErrorCode::ResponseTooLarge,
+            too_large_message (response.headers, sink.max_bytes) } :
+        detail::curl_to_error (curl, res, impl_->error_buffer);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)
@@ -507,7 +602,7 @@ Result<Response> Client::send (const Request& request) {
     response.error_code = ErrorCode::None; // Explicitly set to None for successful requests
 
     // Set body
-    response.body      = std::move (response_body);
+    response.body      = std::move (sink.body);
     response.body_size = response.body.size ();
 
     return response;

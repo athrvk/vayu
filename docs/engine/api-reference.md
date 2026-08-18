@@ -1557,10 +1557,30 @@ via libcurl and returns the raw body and content type.
 
 **Request:**
 ```json
-{ "url": "https://example.com/collection.json" }
+{ "url": "https://example.com/collection.json", "maxBytes": 10485760 }
 ```
 
 The `url` must be a string starting with `http://` or `https://`.
+
+**`maxBytes` is the caller's bound on the response, and the caller states it**
+because this route is one proxy for *every* import format - a Postman or
+Insomnia export rides it exactly as an OpenAPI document does. Bounding it by
+`maxSpecDocumentBytes` would refuse a collection that imports today with a
+message naming a setting that governs nothing about it, so the callers that
+*are* fetching a spec (`$ref` bundling and spec re-fetch) pass that live cap
+themselves and the rest pass nothing.
+
+- Absent or `null` means the engine's **transport ceiling**, 256 MiB. So does a
+  larger value: a bound over the ceiling is clamped to it rather than refused,
+  because `maxSpecDocumentBytes` can be raised to 100 MiB and an import the
+  setting allows must not be turned into a `400`.
+- Anything that is not a positive integer - `0`, a negative, a string, a
+  fraction - is a `400`. It is not rounded into a bound the caller did not ask
+  for.
+- The bound is on what is **read**, not on what is returned: the transfer is cut
+  off as soon as the body grows past it, whether the server declared a length or
+  not, so nothing buffers the whole document first. A declared length is what the
+  refusal names as the size.
 
 **Response:** `200`
 ```json
@@ -1579,6 +1599,10 @@ never turn into a `500`.
 - `400` `Invalid JSON body` - the request body did not parse.
 - `400` `Invalid URL` - `url` is missing, not a string, or does
   not start with `http://` / `https://`.
+- `400` `Invalid 'maxBytes': must be a positive integer`.
+- `413` `Refused to fetch: <detail>` - the response was over the bound in force.
+  The detail names the bound that was applied (the clamped one, not the one
+  asked for) and the size when the upstream declared one.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
   (connection error, transport failure).
 

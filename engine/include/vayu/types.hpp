@@ -344,7 +344,19 @@ enum class ErrorCode {
     /// because reporting these as `ConnectionFailed` or `InternalError` sent
     /// users debugging an endpoint that was never reached (issue #705).
     /// Appended for the same reason `DataBindingFailed` was.
-    ProxyError
+    ProxyError,
+    /// The response was refused because it was larger than the bound the caller
+    /// set for this transfer (`ClientConfig::max_response_bytes`, issue #784) -
+    /// either the advertised `Content-Length` was already over it, or the body
+    /// grew past it mid-transfer and the write was cut short. Distinct because
+    /// the caller has to answer it differently from a network failure: the
+    /// `/import/fetch` proxy turns this into a `413` naming the bound, where a
+    /// `ConnectionFailed` is a `502`. Appended for the same reason `ProxyError`
+    /// was. The load path's `maxResponseBodyBytes` overrun keeps reporting
+    /// `InternalError`: that number is an engine memory guard rather than a
+    /// bound a client asked for, and it is what every stored load trace already
+    /// carries.
+    ResponseTooLarge
 };
 
 /**
@@ -365,6 +377,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
     case ErrorCode::DataBindingFailed: return "DATA_BINDING_FAILED";
     case ErrorCode::ProxyError: return "PROXY_ERROR";
+    case ErrorCode::ResponseTooLarge: return "RESPONSE_TOO_LARGE";
     }
     return "UNKNOWN";
 }

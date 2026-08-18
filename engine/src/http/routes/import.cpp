@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -31,7 +32,18 @@
 namespace vayu::http::routes {
 
 /**
- * Fetch the URL in `request_body` ({"url": "..."}) via libcurl.
+ * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345}) via libcurl.
+ *
+ * The caller states the bound (issue #784). This route is one shared proxy for
+ * every URL import - a Postman or Insomnia export comes through it exactly as an
+ * OpenAPI document does - so it has no format to derive a cap from, and
+ * `maxSpecDocumentBytes` governs nothing about an export that is never stored as
+ * a `spec_documents` row. The callers that *are* fetching a spec pass that live
+ * cap themselves; a stated bound over
+ * `constants::import_fetch::MAX_BYTES` is clamped to it, and an absent one is
+ * that ceiling, because a bound the caller chooses is not a bound against a
+ * hostile URL. An over-bound response is a `413` naming what was refused,
+ * without the whole body ever being buffered - see `ClientConfig::max_response_bytes`.
  *
  * @param transport How to reach the network. Passed in rather than resolved
  *                  here because this function is deliberately `Database`-free
@@ -59,8 +71,24 @@ const vayu::http::TransportPolicy& transport) {
         return { 400, error_body (400, "Invalid URL") };
     }
 
+    // The caller's bound, clamped to the transport ceiling. Absent or null is
+    // the ceiling; anything that is not a positive integer is refused rather
+    // than rounded into one, because a client that sent `0` or `-1` meant
+    // something, and guessing which would be the silent bound this whole change
+    // exists to remove.
+    size_t max_bytes = vayu::core::constants::import_fetch::MAX_BYTES;
+    if (req.contains ("maxBytes") && !req["maxBytes"].is_null ()) {
+        const auto& stated = req["maxBytes"];
+        if (!stated.is_number_unsigned () || stated.get<uint64_t> () == 0) {
+            return { 400, error_body (400, "Invalid 'maxBytes': must be a positive integer") };
+        }
+        max_bytes = static_cast<size_t> (
+        std::min (stated.get<uint64_t> (), static_cast<uint64_t> (max_bytes)));
+    }
+
     vayu::http::ClientConfig client_config;
-    client_config.transport = transport;
+    client_config.transport          = transport;
+    client_config.max_response_bytes = max_bytes;
     vayu::http::Client client (client_config);
     auto result = client.get (url);
     if (!result.is_ok ()) {
@@ -68,6 +96,13 @@ const vayu::http::TransportPolicy& transport) {
     }
 
     const auto& resp = result.value ();
+    if (resp.error_code == ErrorCode::ResponseTooLarge) {
+        // Not a 502: the upstream answered fine, this engine refused what it
+        // was answering with. The message carries the bound that was applied -
+        // the clamped one, not the one the caller asked for - so a client whose
+        // request was narrowed reads the number that actually stopped it.
+        return { 413, error_body (413, "Refused to fetch: " + resp.error_message) };
+    }
     if (resp.has_error ()) {
         const std::string detail =
         resp.error_message.empty () ? "connection error" : resp.error_message;
@@ -759,6 +794,16 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
 }
 
 void register_import_routes (RouteContext& ctx) {
+    /**
+     * POST /import/fetch
+     * Fetches a remote collection or spec past the renderer's CORS, for every
+     * import format alike.
+     * Body params: url (required, http/https), maxBytes (optional - the largest
+     * response this fetch may read, clamped to the engine's transport ceiling;
+     * absent means that ceiling).
+     * Returns: 200 `{"content", "contentType"}`, 400 on a bad url or maxBytes,
+     * 413 when the response is over the bound, 502 when the fetch itself failed.
+     */
     ctx.server.Post ("/import/fetch",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         vayu::utils::log_info ("POST /import/fetch");
