@@ -365,6 +365,30 @@ get_spec_document_response (vayu::db::Database& db, const std::string& id) {
 }
 
 /**
+ * Testable core of GET /specs/:id/meta - what the document *is*, without the
+ * document (issue #712).
+ *
+ * Exists because the Spec tab's card needs `sourceUrl` and `fetchedAt` and
+ * nothing else, and those live on the row rather than on the collection's
+ * binding - so painting a URL and a date cost a transfer of the whole document
+ * (12 MB for Stripe's spec) on every first open. Readers that need the text -
+ * export, the sync comparison, `$ref` resolution - still read the full route,
+ * on an action rather than on a tab opening.
+ *
+ * A missing id answers the **same** 404 body as the full read: the two are one
+ * resource seen two ways, and a client that fell back from one to the other
+ * must not have to know two shapes of "not found".
+ */
+std::pair<int, nlohmann::json>
+get_spec_document_meta_response (vayu::db::Database& db, const std::string& id) {
+    auto spec = db.get_spec_document (id);
+    if (!spec) {
+        return { 404, error_body (404, "Spec not found") };
+    }
+    return { 200, vayu::json::serialize_meta (*spec) };
+}
+
+/**
  * Testable core of DELETE /specs/:id.
  *
  * A spec still bound by a collection is a **409 naming the collection**, never a
@@ -434,6 +458,31 @@ void register_spec_routes (RouteContext& ctx) {
         } catch (const std::exception& e) {
             vayu::utils::log_error ("POST /specs - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
+        }
+    });
+
+    /**
+     * GET /specs/:id/meta
+     * Returns everything about the document except the document: id, sourceUrl,
+     * fetchedAt, hash and contentBytes. `content` and the two app-extracted
+     * indexes are **absent**, not empty - see `serialize_meta`.
+     * Registered before the read below because both are `GET /specs/...`; the
+     * one-segment pattern cannot match this path, and the order says so anyway.
+     * Returns: the metadata, or 404 (the same body the full read answers with).
+     */
+    ctx.server.Get (R"(/specs/([^/]+)/meta)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const std::string spec_id = req.matches[1];
+        try {
+            auto [status, body] = get_spec_document_meta_response (ctx.db, spec_id);
+            if (status != 200) {
+                vayu::utils::log_warning ("GET /specs/:id/meta - Spec not found: " + spec_id);
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("GET /specs/:id/meta - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
         }
     });
 

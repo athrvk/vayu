@@ -44,6 +44,8 @@ export {
 // Bound OpenAPI documents (issues #637, #638)
 export {
 	useSpecQuery,
+	useSpecMetaQuery,
+	useSpecContentReader,
 	useBindSpecMutation,
 	type BindSpecInput,
 	type BindSpecResult,

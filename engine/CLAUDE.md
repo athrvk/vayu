@@ -56,7 +56,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/health` | Health check |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
-| POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it |
+| POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |

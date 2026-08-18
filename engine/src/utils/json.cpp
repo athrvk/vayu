@@ -346,6 +346,28 @@ Json serialize (const vayu::db::SpecDocument& s) {
     return json;
 }
 
+Json serialize_meta (const vayu::db::SpecDocument& s) {
+    // Built from the full serialization and *narrowed*, never spelled a second
+    // time: two hand-written shapes of one row is how `sourceUrl` comes to be
+    // `null` on one read and `""` on the other. A field added above therefore
+    // reaches this read too unless it is named here - which is what the erase
+    // list is, and what `SpecMetaCarriesTheSameValuesAsTheFullDocument` pins.
+    Json json = serialize (s);
+    // The three heavy fields, and the only reason this route exists: the
+    // document is up to `maxSpecDocumentBytes` and both indexes are extracted
+    // from it, so a "metadata" read carrying any of them would transfer what
+    // the caller asked not to be sent.
+    json.erase ("content");
+    json.erase ("operations");
+    json.erase ("responseSchemas");
+    // Bytes as the engine counts them - `content.size()`, the same measure
+    // `spec_size_cap` refuses a write by, so a size shown beside a document and
+    // the limit it was stored under are the same unit. SQLite's `length()`
+    // would count characters and quietly disagree on any non-ASCII document.
+    json["contentBytes"] = s.content.size ();
+    return json;
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;

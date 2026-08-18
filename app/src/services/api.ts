@@ -67,6 +67,7 @@ import type {
 	SpecSyncRequest,
 	SpecSyncResponse,
 	SpecDocument,
+	SpecDocumentMeta,
 	OAuth2TokenRequest,
 	OAuth2TokenResponse,
 	OAuth2TokenStatusResponse,
@@ -245,12 +246,27 @@ export const apiService = {
 	},
 
 	/**
-	 * One stored document, `content` included - the engine has no metadata-only
-	 * read, and the Spec tab needs `sourceUrl` and `fetchedAt`, which live on the
-	 * document rather than on the collection's binding.
+	 * One stored document, `content` included - for the readers that need the
+	 * text: export, the sync comparison, and `$ref` resolution. Each of those
+	 * runs on a user action, so the transfer is paid when it buys something.
+	 *
+	 * Describing a document rather than reading it is `getSpecMeta` below.
 	 */
 	async getSpec(id: string): Promise<SpecDocument> {
 		return await httpClient.get<SpecDocument>(API_ENDPOINTS.SPEC_BY_ID(id));
+	},
+
+	/**
+	 * What a stored document *is*, without the document (issue #712).
+	 *
+	 * The Spec tab's card wants `sourceUrl` and `fetchedAt`, which live on the
+	 * document rather than on the collection's binding - and pulling the whole
+	 * document for them cost 12 MB on a first open of a Stripe-sized spec. The
+	 * fields here are the document's own values, so a card painted from this
+	 * read says exactly what one painted from `getSpec` would.
+	 */
+	async getSpecMeta(id: string): Promise<SpecDocumentMeta> {
+		return await httpClient.get<SpecDocumentMeta>(API_ENDPOINTS.SPEC_META(id));
 	},
 
 	/**

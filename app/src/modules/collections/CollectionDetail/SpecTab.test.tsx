@@ -52,26 +52,35 @@ const syncSpec = {
 	error: null as Error | null,
 };
 
-const specQuery = {
-	data: undefined as { sourceUrl: string | null; fetchedAt: number } | undefined,
+const specMetaQuery = {
+	data: undefined as
+		| { sourceUrl: string | null; fetchedAt: number; contentBytes: number }
+		| undefined,
 	isLoading: false,
 	isError: false,
 };
 
 let requests: Request[] = [];
+/** Whether the subtree's request lists have answered - the mapped count's input. */
+let requestsLoading = false;
 
 vi.mock("@/queries/collections", () => ({
 	useCollectionsQuery: () => ({ data: [{ id: "col_1", name: "Pets", parentId: undefined }] }),
 	useMultipleCollectionRequests: () => ({
 		requestsByCollection: new Map([["col_1", requests]]),
-		isLoading: false,
+		isLoading: requestsLoading,
 	}),
 	useUpdateCollectionMutation: () => updateCollection,
 }));
 
 vi.mock("@/queries/specs", () => ({
-	useSpecQuery: () => specQuery,
+	// The card describes the document rather than reading it (issue #712).
+	useSpecMetaQuery: () => specMetaQuery,
 	useBindSpecMutation: () => bindSpec,
+	// The Sync section reads the stored bytes when Check is pressed. Stubbed
+	// like the queries above - what a check does with them is asserted in
+	// SpecSync.test.tsx.
+	useSpecContentReader: () => () => new Promise(() => {}),
 	// The Sync section's apply half (issue #655). Stubbed like the two above:
 	// this file renders the tab without a QueryClient, and what a sync writes is
 	// asserted in SpecSync.test.tsx.
@@ -183,8 +192,10 @@ beforeEach(() => {
 	syncSpec.mutate.mockClear();
 	syncSpec.isPending = false;
 	syncSpec.isError = false;
-	specQuery.data = undefined;
-	specQuery.isError = false;
+	specMetaQuery.data = undefined;
+	specMetaQuery.isLoading = false;
+	specMetaQuery.isError = false;
+	requestsLoading = false;
 	importFetch.mockReset();
 	requests = [];
 	useSpecFileStore.setState({ locations: {} });
@@ -357,7 +368,11 @@ describe("a bound collection", () => {
 		collection({ specId: "spec_1", specHash: "9f86d081884c7d659a2feaa0c55ad015", syncedAt: 0 });
 
 	it("shows where the document came from, its hash and how much of the tree it covers", () => {
-		specQuery.data = { sourceUrl: "https://api.example.com/openapi.json", fetchedAt: 0 };
+		specMetaQuery.data = {
+			sourceUrl: "https://api.example.com/openapi.json",
+			fetchedAt: 0,
+			contentBytes: 2048,
+		};
 		requests = [
 			request("r1", "{{baseUrl}}/pets", {
 				operationId: "listPets",
@@ -376,7 +391,7 @@ describe("a bound collection", () => {
 	});
 
 	it("names the picked file when the document has no URL", () => {
-		specQuery.data = { sourceUrl: null, fetchedAt: 0 };
+		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 2048 };
 		useSpecFileStore.setState({
 			locations: { col_1: { path: "/home/u/petstore.json", fileName: "petstore.json" } },
 		});
@@ -399,6 +414,56 @@ describe("a bound collection", () => {
 		expect(payload).toEqual({ id: "col_1", openapi: null });
 		options?.onSuccess?.({});
 		expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
+	});
+
+	/*
+	 * Issue #712. The card used to render blanks while the whole document
+	 * downloaded: the source line printed the "stored with this collection"
+	 * fallback - which is a *claim*, not a blank - and the mapped count flashed
+	 * 0 of 0 before the request lists answered. Both are now skeletons, and the
+	 * mutation check is that the fallback markup is unreachable while pending.
+	 */
+	it("renders a skeleton card while the document is being described, never a fallback source", () => {
+		specMetaQuery.isLoading = true;
+		specMetaQuery.data = undefined;
+		requests = [request("r1", "{{baseUrl}}/pets")];
+
+		render(<SpecTab collection={bound()} />);
+
+		expect(screen.getByTestId("spec-source-skeleton")).toBeTruthy();
+		expect(screen.getByTestId("spec-fetched-skeleton")).toBeTruthy();
+		expect(screen.getByTestId("spec-size-skeleton")).toBeTruthy();
+		// The false statement this replaced: a URL-imported spec claiming to have
+		// come from nowhere in particular, right up until the read landed.
+		expect(screen.queryByText(/a document stored with this collection/i)).toBeNull();
+		// And the pending treatment the card used to have for its one covered
+		// cell, which said nothing about the rest of it.
+		expect(screen.queryByText("…")).toBeNull();
+
+		// The binding's own facts are known before any read - hiding them would be
+		// a second way of describing the document wrongly.
+		expect(screen.getByText("9f86d081884c")).toBeTruthy();
+	});
+
+	it("skeletons the mapped count until the request lists answer, so it cannot flash 0 of 0", () => {
+		requestsLoading = true;
+		requests = [];
+		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 2048 };
+
+		render(<SpecTab collection={bound()} />);
+
+		expect(screen.getByTestId("spec-mapped-skeleton")).toBeTruthy();
+		expect(screen.queryByText(/0 of 0 requests/i)).toBeNull();
+	});
+
+	it("shows the document's size once it is described", () => {
+		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 12 * 1024 * 1024 };
+
+		render(<SpecTab collection={bound()} />);
+
+		// Through the settings formatter, so the size beside a document and the
+		// limit it is stored under read in the same unit.
+		expect(screen.getByText("12.0 MB")).toBeTruthy();
 	});
 
 	it("offers no picker while a spec is bound - re-binding is sync's job", () => {

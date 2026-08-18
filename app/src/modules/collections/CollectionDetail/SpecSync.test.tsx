@@ -37,6 +37,7 @@ const createRequest = vi.fn();
 const deleteRequest = vi.fn();
 const createSpec = vi.fn();
 const syncSpec = vi.fn();
+const getSpec = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
@@ -47,6 +48,8 @@ vi.mock("@/services/api", () => ({
 		deleteRequest,
 		createSpec,
 		syncSpec: (payload: SpecSyncRequest) => syncSpec(payload),
+		// The stored document is read by the check, not by the tab (issue #712).
+		getSpec: (id: string) => getSpec(id),
 	},
 }));
 
@@ -129,11 +132,14 @@ function renderSync(props: {
 	const wrapper = ({ children }: { children: ReactNode }) => (
 		<QueryClientProvider client={client}>{children}</QueryClientProvider>
 	);
+	// The section is given the binding's id and reads the document itself, so a
+	// test supplies the document by answering that read.
+	if (props.spec) getSpec.mockResolvedValue(props.spec);
 	return render(
 		<SpecSync
 			collection={collection()}
 			collections={props.collections ?? [collection()]}
-			spec={props.spec}
+			specId="spec_1"
 			specFile={undefined}
 			requests={props.requests ?? [request()]}
 		/>,
@@ -260,14 +266,45 @@ describe("SpecSync", () => {
 		}
 	});
 
-	it("cannot be checked until the stored document has loaded", async () => {
-		renderSync({ spec: undefined });
+	/*
+	 * Issue #712. The section used to be gated on a document the tab preloaded -
+	 * so Check was unpressable until a transfer of up to `maxSpecDocumentBytes`
+	 * had finished, for a comparison the user had not asked for yet. It now reads
+	 * the stored bytes when it needs them, which is when Check is pressed.
+	 */
+	it("is pressable before the stored document has been read, and reads it on the click", async () => {
+		let answer: (spec: SpecDocument) => void = () => {};
+		getSpec.mockReturnValue(
+			new Promise<SpecDocument>((resolve) => {
+				answer = resolve;
+			})
+		);
+		importFetch.mockResolvedValue({ content: BOUND });
+		renderSync({});
 
 		const button = screen.getByRole("button", { name: /check for changes/i });
-		expect(button.hasAttribute("disabled")).toBe(true);
-		await waitFor(() => {
-			expect(screen.getByText(/has to load before it can be compared/i)).toBeTruthy();
-		});
+		expect(button.hasAttribute("disabled")).toBe(false);
+		// Nothing is transferred until it is asked for: rendering the section
+		// reads no document at all.
+		expect(getSpec).not.toHaveBeenCalled();
+
+		check();
+
+		await waitFor(() => expect(getSpec).toHaveBeenCalledWith("spec_1"));
+		answer(spec(BOUND));
+		expect(await screen.findByText(/up to date/i)).toBeTruthy();
+	});
+
+	it("says the check failed when the stored document cannot be read", async () => {
+		getSpec.mockRejectedValue(new Error("Spec not found"));
+		renderSync({});
+
+		check();
+
+		expect(await screen.findByText(/couldn't check this document/i)).toBeTruthy();
+		expect(screen.getByText(/spec not found/i)).toBeTruthy();
+		// The comparison never started, so nothing was re-fetched either.
+		expect(importFetch).not.toHaveBeenCalled();
 	});
 	it("applies the whole selection in one call, and stores the bytes it diffed", async () => {
 		const next = doc("List all the pets");

@@ -1353,6 +1353,44 @@ names the count, the cap and the setting.
 validating it is what every reader wants it for. `404` (message `Spec not found`)
 when it does not exist.
 
+Read it for the *text*: an export, a re-fetch comparison, a `$ref` resolution.
+A client that only needs to describe the document should read the metadata route
+below instead - `content` here is up to `maxSpecDocumentBytes` (12 MB for
+Stripe's published spec), and it is sent in full on every read.
+
+### GET /specs/:id/meta
+
+Everything about a stored document except the document (issue #712).
+
+**Response:**
+```json
+{
+  "id": "spec_3f2b1c9a-...",
+  "sourceUrl": "https://api.example.com/openapi.json",
+  "fetchedAt": 1730000000000,
+  "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "contentBytes": 12058329
+}
+```
+
+Every field carries the same value `GET /specs/:id` would give it - the two are
+one row seen two ways - and `404` is the same body, so a client that falls back
+from one to the other does not need two shapes of "not found".
+
+**`content`, `operations` and `responseSchemas` are absent, not empty.** All
+three are the fields that make a document big (both indexes are extracted from
+it and grow with it), and an empty one would be indistinguishable from a
+document that genuinely has none - the distinction `operations: null` exists to
+draw. A reader that needs any of them reads the full route.
+
+`contentBytes` is the document's size as the engine counts it - the same measure
+`maxSpecDocumentBytes` refuses a write by, so a size reported here and the limit
+it was stored under are in one unit.
+
+This route exists because binding metadata lives on the *document*: the app's
+Spec tab paints a source and a fetch date, and getting them used to cost a
+transfer of the whole spec on every first open of the tab.
+
 ### DELETE /specs/:id
 
 Delete a stored document.

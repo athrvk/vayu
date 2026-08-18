@@ -41,7 +41,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
-import { Button, Input } from "@/components/ui";
+import { Button, Input, Skeleton } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
@@ -49,13 +49,14 @@ import {
 	useMultipleCollectionRequests,
 	useUpdateCollectionMutation,
 } from "@/queries/collections";
-import { useBindSpecMutation, useSpecQuery } from "@/queries/specs";
+import { useBindSpecMutation, useSpecMetaQuery } from "@/queries/specs";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { useSpecFileStore } from "@/stores";
 import { matchOperations } from "@/services/openapi/operation-match";
 import { readSpecOperations } from "@/services/openapi/spec-operations";
 import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
+import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
 import { formatRelative } from "./format";
@@ -79,6 +80,10 @@ interface PickedSpec {
 export default function SpecTab({ collection }: SpecTabProps) {
 	const binding = collection.openapi;
 	const bound = hasSpecBinding(binding);
+	// The same condition as `bound`, in the form the Sync section needs: it reads
+	// the document by id, and `hasSpecBinding` answers a question rather than
+	// narrowing the field it asked about.
+	const boundSpecId = binding?.specId;
 
 	const { data: collections = [] } = useCollectionsQuery();
 	/*
@@ -91,17 +96,25 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		() => collectSubtreeIds(collection.id, collections),
 		[collection.id, collections]
 	);
-	const { requestsByCollection } = useMultipleCollectionRequests(subtreeIds);
+	const { requestsByCollection, isLoading: requestsLoading } =
+		useMultipleCollectionRequests(subtreeIds);
 	const requests = useMemo(
 		() => [...requestsByCollection.values()].flat(),
 		[requestsByCollection]
 	);
 
+	/*
+	 * The card describes the document; it does not read it (issue #712). A first
+	 * open used to transfer the whole stored spec - 12 MB for Stripe's - to paint
+	 * a source line and a date, because both live on the document rather than on
+	 * the collection's binding. The readers that genuinely need the text (export,
+	 * and the Sync section's comparison) fetch it on the action that needs it.
+	 */
 	const {
-		data: spec,
+		data: specMeta,
 		isLoading: specLoading,
 		isError: specFailed,
-	} = useSpecQuery(binding?.specId);
+	} = useSpecMetaQuery(binding?.specId);
 	const specFile = useSpecFileStore((s) => s.locations[collection.id]);
 	const clearSpecFile = useSpecFileStore((s) => s.clearSpecFile);
 	const setSpecFile = useSpecFileStore((s) => s.setSpecFile);
@@ -255,12 +268,14 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 			{bound ? (
 				<BoundSpec
-					sourceUrl={spec?.sourceUrl ?? null}
+					sourceUrl={specMeta?.sourceUrl ?? null}
 					fileName={specFile?.fileName}
 					specHash={binding?.specHash}
-					fetchedAt={spec?.fetchedAt}
+					fetchedAt={specMeta?.fetchedAt}
+					contentBytes={specMeta?.contentBytes}
 					syncedAt={binding?.syncedAt}
 					loading={specLoading}
+					requestsLoading={requestsLoading}
 					failed={specFailed}
 					mappedCount={mappedCount}
 					requestCount={requests.length}
@@ -366,11 +381,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 			{bound && <SpecCoverageLine collectionId={collection.id} />}
 
-			{bound && (
+			{boundSpecId && (
 				<SpecSync
 					collection={collection}
 					collections={collections}
-					spec={spec}
+					// The binding's id, not the document: the section reads the stored
+					// bytes itself, when Check is pressed (issue #712).
+					specId={boundSpecId}
 					specFile={specFile}
 					requests={requests}
 				/>
@@ -455,8 +472,10 @@ function BoundSpec({
 	fileName,
 	specHash,
 	fetchedAt,
+	contentBytes,
 	syncedAt,
 	loading,
+	requestsLoading,
 	failed,
 	mappedCount,
 	requestCount,
@@ -465,8 +484,12 @@ function BoundSpec({
 	fileName: string | undefined;
 	specHash: string | undefined;
 	fetchedAt: number | undefined;
+	contentBytes: number | undefined;
 	syncedAt: number | undefined;
+	/** The document's own description is still in flight. */
 	loading: boolean;
+	/** The subtree's request lists are still in flight - the mapped count's input. */
+	requestsLoading: boolean;
 	failed: boolean;
 	mappedCount: number;
 	requestCount: number;
@@ -477,6 +500,12 @@ function BoundSpec({
 	 * only known if this machine is the one that picked it. Neither means the
 	 * document was pasted - so the third line says where it came from as
 	 * precisely as it can rather than inventing a filename.
+	 *
+	 * It is the *settled* answer, and only that (issue #712). While the document
+	 * is being described, all three are unknown, and rendering the fallback then
+	 * is not a blank - it is a false statement: a URL-imported spec would claim
+	 * to have come from nowhere in particular right up until the read lands. So
+	 * a pending card renders a skeleton here, never this string.
 	 */
 	const source = sourceUrl ?? fileName ?? "a document stored with this collection";
 
@@ -485,13 +514,28 @@ function BoundSpec({
 			<SectionLabel>Bound spec</SectionLabel>
 			<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-2">
 				<div className="flex items-center gap-2 text-xs">
-					{sourceUrl ? (
-						<Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+					{/* The icon is part of the claim - a link icon beside a skeleton would
+					    already be saying the document came from a URL. */}
+					{loading ? (
+						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-64" />
 					) : (
-						<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+						<>
+							{sourceUrl ? (
+								<Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+							) : (
+								<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+							)}
+							<span className="font-mono break-all">{source}</span>
+						</>
 					)}
-					<span className="font-mono break-all">{source}</span>
 				</div>
+				{/*
+				 * A cell is a skeleton while *its own* input is unknown, rather than the
+				 * grid going blank as a block: Hash and Bound are read off the
+				 * collection's binding, which this tab has before it renders, and
+				 * hiding a value that is already known would be a second way of
+				 * describing the document wrongly.
+				 */}
 				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
 					<div className="flex gap-1.5">
 						<dt>Hash</dt>
@@ -500,18 +544,42 @@ function BoundSpec({
 					<div className="flex gap-1.5">
 						<dt>Operations mapped</dt>
 						<dd className="text-foreground">
-							{mappedCount} of {requestCount} request{requestCount === 1 ? "" : "s"}
+							{requestsLoading ? (
+								<Skeleton data-testid="spec-mapped-skeleton" className="h-3 w-28" />
+							) : (
+								<>
+									{mappedCount} of {requestCount} request
+									{requestCount === 1 ? "" : "s"}
+								</>
+							)}
 						</dd>
 					</div>
 					<div className="flex gap-1.5">
 						<dt>Fetched</dt>
 						<dd className="text-foreground">
-							{loading ? "…" : formatRelative(epochToIso(fetchedAt))}
+							{loading ? (
+								<Skeleton
+									data-testid="spec-fetched-skeleton"
+									className="h-3 w-20"
+								/>
+							) : (
+								formatRelative(epochToIso(fetchedAt))
+							)}
 						</dd>
 					</div>
 					<div className="flex gap-1.5">
 						<dt>Bound</dt>
 						<dd className="text-foreground">{formatRelative(epochToIso(syncedAt))}</dd>
+					</div>
+					<div className="flex gap-1.5">
+						<dt>Size</dt>
+						<dd className="text-foreground">
+							{loading ? (
+								<Skeleton data-testid="spec-size-skeleton" className="h-3 w-16" />
+							) : (
+								formatDocumentSize(contentBytes)
+							)}
+						</dd>
 					</div>
 				</dl>
 				{failed && (
@@ -576,6 +644,18 @@ function MatchSummary({
 			)}
 		</div>
 	);
+}
+
+/**
+ * The document's size, or `-` for a card whose description could not be read.
+ *
+ * Through the settings formatter rather than a second rounding of the same
+ * number: the size shown here and the `maxSpecDocumentBytes` limit shown in
+ * Settings are the same quantity, and two spellings of "1.5 MB" would be one
+ * more thing to keep in step.
+ */
+function formatDocumentSize(bytes: number | undefined): string {
+	return bytes === undefined ? "-" : formatBytes(bytes);
 }
 
 /** The first 12 hex characters - enough to compare two by eye, and it fits. */
