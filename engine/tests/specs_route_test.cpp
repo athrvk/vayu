@@ -50,6 +50,8 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
 std::pair<int, nlohmann::json>
 get_spec_document_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json>
+get_spec_document_meta_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json>
 delete_spec_document_response (vayu::db::Database& db, const std::string& id);
 std::string spec_content_hash (const std::string& content);
 // Defined in collections.cpp / requests.cpp / import.cpp.
@@ -221,6 +223,69 @@ TEST_F (SpecsRouteTest, ReadsBackTheStoredDocumentAndAnswers404ForAMissingOne) {
 
     auto [missing, missing_body] = routes::get_spec_document_response (*db_, "spec_nope");
     EXPECT_EQ (missing, 404) << missing_body.dump ();
+}
+
+TEST_F (SpecsRouteTest, SpecMetaCarriesTheSameValuesAsTheFullDocumentWithoutTheHeavyFields) {
+    // A document with *both* app-extracted indexes, because they are the two
+    // fields that make a "metadata" read expensive if they ride along: they are
+    // extracted from the document and grow with it.
+    const json operations =
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    const json response_schemas = { { "refRoots", json::object () },
+        { "operations",
+        json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
+        { "responses",
+        json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
+        { "schema", json{ { "type", "array" } } } } }) } } }) } };
+    auto [create_status, created] = routes::create_spec_document_response (*db_,
+    json{ { "content", PETSTORE }, { "sourceUrl", "https://example.test/openapi.json" },
+    { "operations", operations }, { "responseSchemas", response_schemas } });
+    ASSERT_EQ (create_status, 200) << created.dump ();
+    const std::string id = created.value ("id", std::string{});
+
+    auto [status, meta] = routes::get_spec_document_meta_response (*db_, id);
+    ASSERT_EQ (status, 200) << meta.dump ();
+
+    // Absent, not empty. `"content": ""` would read as a document with no text
+    // and `"operations": []` as one that declares nothing - both of which are
+    // states a document can genuinely be in, so an unread field must not spell
+    // itself the same way (the repo's absent-not-empty rule).
+    EXPECT_FALSE (meta.contains ("content")) << meta.dump ();
+    EXPECT_FALSE (meta.contains ("operations")) << meta.dump ();
+    EXPECT_FALSE (meta.contains ("responseSchemas")) << meta.dump ();
+
+    // Bytes as the engine counts them - the same measure the write cap refuses
+    // by, so the number beside a document is in the unit of its limit.
+    EXPECT_EQ (meta["contentBytes"].get<size_t> (), std::string (PETSTORE).size ());
+
+    // Every other key is the full read's answer, value for value: the two are
+    // one row seen two ways, and a client that reads `sourceUrl` from the cheap
+    // route must get exactly what the expensive one would have said. This is
+    // what stops the meta shape drifting when a field is added above.
+    auto [full_status, full] = routes::get_spec_document_response (*db_, id);
+    ASSERT_EQ (full_status, 200) << full.dump ();
+    for (const auto& [key, value] : meta.items ()) {
+        if (key == "contentBytes") {
+            continue; // derived here; the full read carries no such field
+        }
+        ASSERT_TRUE (full.contains (key)) << key << " is not a field of the document";
+        EXPECT_EQ (value, full[key]) << key;
+    }
+    EXPECT_EQ (meta["sourceUrl"].get<std::string> (), "https://example.test/openapi.json");
+    EXPECT_EQ (meta["hash"].get<std::string> (), routes::spec_content_hash (PETSTORE));
+    EXPECT_GT (meta["fetchedAt"].get<int64_t> (), 0);
+}
+
+TEST_F (SpecsRouteTest, SpecMetaAnswersTheSame404AsTheFullReadForAMissingDocument) {
+    auto [meta_status, meta] = routes::get_spec_document_meta_response (*db_, "spec_nope");
+    auto [full_status, full] = routes::get_spec_document_response (*db_, "spec_nope");
+
+    EXPECT_EQ (meta_status, 404) << meta.dump ();
+    // One resource, two reads: a client falling back from one to the other must
+    // not have to know two shapes of "not found".
+    EXPECT_EQ (meta_status, full_status);
+    EXPECT_EQ (meta, full) << meta.dump () << " vs " << full.dump ();
 }
 
 TEST_F (SpecsRouteTest, DeletesAnUnboundDocument) {

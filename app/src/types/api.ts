@@ -1189,6 +1189,27 @@ export interface SpecDocument {
 	responseSchemas: ResponseSchemaIndex | null;
 }
 
+/**
+ * A stored document described rather than transferred (issue #712).
+ *
+ * `GET /specs/:id/meta` - what the Spec tab's card needs to paint a source, a
+ * date and a size, without the up-to-`maxSpecDocumentBytes` document behind it
+ * (12 MB for Stripe's spec) riding along on a tab opening. The fields it does
+ * carry are the document's own, value for value; `content`, `operations` and
+ * `responseSchemas` are **absent**, not empty, so "not read here" cannot be
+ * mistaken for "this document has none".
+ */
+export interface SpecDocumentMeta {
+	id: string;
+	/** `null` - not `""` - when the document did not come from a URL. */
+	sourceUrl: string | null;
+	fetchedAt: number;
+	/** Hex sha256, computed engine-side on every write. */
+	hash: string;
+	/** The document's size in bytes - the unit `maxSpecDocumentBytes` caps. */
+	contentBytes: number;
+}
+
 export interface CreateSpecRequest {
 	/** Engine-assigned - see CreateCollectionRequest.id. */
 	id?: never;

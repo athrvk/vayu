@@ -333,6 +333,7 @@ and then unbound holds `{}`. On `updateCollection` the field is
 ```typescript
 apiService.createSpec(data): Promise<SpecDocument>       // POST /specs
 apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
+apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 ```
 
@@ -356,9 +357,25 @@ A document is immutable - a changed spec is a new
 document and a moved binding, which is what keeps a run's `specHash` stamp
 meaningful - and the **hash is computed engine-side** on the bytes it stored,
 never here. There is no delete call: unbinding is a `PUT /collections/:id`, and
-the document stays for whatever else binds it. `getSpec` returns `content` too
-(the engine has no metadata-only read), so `useSpecQuery` caches it with
-`staleTime: Infinity` rather than refetching a whole document to redraw a tab.
+the document stays for whatever else binds it. Both reads are cached with
+`staleTime: Infinity`, because the row behind a given id cannot change.
+
+**Describing a document and reading one are two calls** (issue #712).
+`getSpecMeta` answers `sourceUrl`, `fetchedAt`, `hash` and `contentBytes` and
+nothing else; `getSpec` sends `content` and both extracted indexes with it - up
+to `maxSpecDocumentBytes`, which is 12 MB for Stripe's published spec. The rule
+for choosing is what the caller does with the answer:
+
+| Caller | Read | Why |
+|--------|------|-----|
+| The Spec tab's card (`useSpecMetaQuery`) | meta | It paints a source, a date and a size; it never renders the document |
+| The Sync section's Check (`useSpecContentReader`) | full, on the click | It compares bytes, and the click is when a comparison was asked for |
+| Export (`useOpenApiExportSource`), the import dialog's bound-spec match | full, on the action | They rewrite or diff the document itself |
+
+Reading the full document *on tab open* is the thing this split removed: a first
+open of a bound tab transferred the whole spec to paint two fields, on a query
+that then sat in cache forever. A reader that needs the text still asks for it -
+on the action that needs it, where the wait is something the user started.
 
 #### Requests
 

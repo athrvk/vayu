@@ -1280,6 +1280,15 @@ patched in place from the mutation's response, the same way a delete patches
 them, because the sidebar polls only its first page and a refetch would leave a
 pin invisible on any page the user had scrolled to.
 
+`specs.detail(id)` and `specs.meta(id)` are the same document under two keys
+(issue #712): the full read carries `content` and both extracted indexes, the
+meta read describes the row and nothing else. They are kept apart rather than
+merged so a cached description can never satisfy a reader that needs the text -
+and holding one row twice is safe here precisely because a document is immutable,
+which is also why both carry `staleTime: Infinity`. The Spec tab's card reads
+meta; export, the import dialog's bound-spec match and the Sync section's Check
+read the full document, each on the action that needs it.
+
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
 - Some mutations use optimistic updates and cache updates for instant UI feedback

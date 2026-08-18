@@ -33,6 +33,14 @@
  * the two it is about to be, because an unlabelled one would be a write nobody
  * asked for.
  *
+ * **The stored document is read when Check is pressed, not before** (issue
+ * #712). This section is the only reader here that needs the document's *bytes*
+ * - to compare them - and it needs them at the moment a comparison is asked
+ * for. It used to be handed the document the tab had preloaded, which meant
+ * Check stayed disabled until a transfer of up to `maxSpecDocumentBytes` had
+ * finished for a comparison nobody had requested yet; the tab now describes the
+ * document instead of reading it.
+ *
  * The counts are stated in full, zeros included, for the reason `MatchSummary`
  * states its three: "4 changed" alone reads as the whole answer, while "4
  * changed, 0 added, 0 removed, 12 unchanged" is the answer.
@@ -45,7 +53,7 @@ import { Button, DeleteConfirmDialog } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
-import { useSyncSpecMutation } from "@/queries/specs";
+import { useSpecContentReader, useSyncSpecMutation } from "@/queries/specs";
 import {
 	diffSpec,
 	type ChangedRequest,
@@ -62,13 +70,7 @@ import {
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type {
-	Collection,
-	DeclaredOperation,
-	Request,
-	ResponseSchemaIndex,
-	SpecDocument,
-} from "@/types";
+import type { Collection, DeclaredOperation, Request, ResponseSchemaIndex } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -76,8 +78,15 @@ interface SpecSyncProps {
 	collection: Collection;
 	/** Every stored collection, to find the tag folder an added operation lands in. */
 	collections: readonly Collection[];
-	/** The bound document, or `undefined` while the engine has not answered. */
-	spec: SpecDocument | undefined;
+	/**
+	 * The bound document's id, from the collection's own binding (issue #712).
+	 *
+	 * The id rather than the document: this section is the one reader that needs
+	 * the *bytes*, and it needs them on a click, not on a tab opening. It used to
+	 * take the document the tab had preloaded, which made Check unpressable until
+	 * a 12 MB transfer nobody asked for had finished.
+	 */
+	specId: string;
 	/** Where this machine keeps the picked file, when it was this machine that picked it. */
 	specFile: SpecFileLocation | undefined;
 	/** Every request beneath the bound collection - the same set the counts describe. */
@@ -95,6 +104,15 @@ type CheckState =
 			unresolvedRefs: number;
 			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
 			content: string;
+			/**
+			 * Where the bound document said it came from, read with it (issue #712).
+			 *
+			 * Carried from the check to the apply rather than held beside this state:
+			 * an apply stores a row that records the same origin, and a second piece
+			 * of state for it would go stale the moment a sync moved the binding to a
+			 * new document.
+			 */
+			sourceUrl: string | null;
 			/** The re-fetched document's declared-operation index (issue #629). */
 			operations: DeclaredOperation[];
 			/** And its response schema index (issue #628), carried the same way. */
@@ -106,7 +124,7 @@ type CheckState =
 export default function SpecSync({
 	collection,
 	collections,
-	spec,
+	specId,
 	specFile,
 	requests,
 }: SpecSyncProps) {
@@ -114,14 +132,26 @@ export default function SpecSync({
 	const [state, setState] = useState<CheckState>({ phase: "idle" });
 	const [confirmingDeletes, setConfirmingDeletes] = useState(false);
 	const syncSpec = useSyncSpecMutation();
+	const readSpecContent = useSpecContentReader();
 
 	const handleCheck = async () => {
-		if (!spec || state.phase === "checking") return;
+		if (state.phase === "checking") return;
 		setState({ phase: "checking" });
 		try {
+			/*
+			 * The bound bytes first, and here rather than on mount (issue #712): a
+			 * comparison needs the document this collection is bound to, and this is
+			 * the moment a comparison was asked for. Serial rather than concurrent
+			 * with the re-fetch below, so a stored document that cannot be read says
+			 * *that* instead of racing a network error for which message the user
+			 * gets. Cached by spec id, so a second check - or an export in the same
+			 * session - costs one read, not two.
+			 */
+			const storedDocument = await readSpecContent(specId);
+
 			const { text, unresolvedRefs } = await refetchSpec(
 				{
-					sourceUrl: spec.sourceUrl,
+					sourceUrl: storedDocument.sourceUrl,
 					...(specFile ? { file: specFile } : {}),
 				},
 				{
@@ -139,14 +169,14 @@ export default function SpecSync({
 			// stores (`spec_content_hash`), this holds exactly those bytes, and a
 			// SHA-256 in the renderer would be a copy of that rule with its own
 			// way of being wrong.
-			if (text === spec.content) {
+			if (text === storedDocument.content) {
 				setState({ phase: "unchanged" });
 				return;
 			}
 
 			const read = readSpecOperations(text);
 			const diff = diffSpec({
-				bound: boundDrafts(spec.content),
+				bound: boundDrafts(storedDocument.content),
 				fetched: read.requests,
 				requests,
 			});
@@ -155,6 +185,7 @@ export default function SpecSync({
 				diff,
 				unresolvedRefs,
 				content: text,
+				sourceUrl: storedDocument.sourceUrl,
 				// Carried from the check to the apply so the new document is
 				// stored with its own index (issue #629): the sync writes a new
 				// `spec_documents` row, and one without an index would silently
@@ -174,7 +205,7 @@ export default function SpecSync({
 		);
 
 	const handleApply = () => {
-		if (state.phase !== "diff" || !spec) return;
+		if (state.phase !== "diff") return;
 		const payload = buildSyncPayload({
 			collectionId: collection.id,
 			diff: state.diff,
@@ -185,7 +216,7 @@ export default function SpecSync({
 			// The document is re-fetched from the source the binding recorded, so
 			// the new row records the same one - a file-sourced document keeps
 			// having no URL rather than acquiring one.
-			sourceUrl: spec.sourceUrl,
+			sourceUrl: state.sourceUrl,
 			collections,
 		});
 		syncSpec.mutate(payload, {
@@ -213,7 +244,11 @@ export default function SpecSync({
 					<Button
 						variant="outline"
 						onClick={() => void handleCheck()}
-						disabled={!spec || state.phase === "checking" || syncSpec.isPending}
+						// Pressable as soon as the collection names a document (issue
+						// #712): what it needs is fetched by the click, and the checking
+						// spinner covers that wait honestly. The old gate waited on a
+						// preloaded document the tab no longer transfers.
+						disabled={state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -226,12 +261,6 @@ export default function SpecSync({
 						Re-reads the document and compares it. Nothing is written until you apply.
 					</span>
 				</div>
-
-				{!spec && (
-					<p className="text-[11px] text-muted-foreground">
-						The stored document has to load before it can be compared.
-					</p>
-				)}
 
 				{state.phase === "error" && (
 					<Callout severity="blocking" title="Couldn't check this document">

@@ -145,6 +145,12 @@ export const queryKeys = {
 	specs: {
 		all: ["specs"] as const,
 		detail: (id: string) => [...queryKeys.specs.all, "detail", id] as const,
+		// The same document described rather than transferred (issue #712), under
+		// its own key because it is a different shape of answer: a cached `meta`
+		// must never satisfy a reader that needs `content`, and one document in
+		// two caches is safe precisely because both are immutable - a changed
+		// document is a new id.
+		meta: (id: string) => [...queryKeys.specs.all, "meta", id] as const,
 	},
 
 	// Environments

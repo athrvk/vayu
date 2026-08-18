@@ -28,21 +28,77 @@ import type {
 } from "@/types";
 
 /**
- * The document a collection is bound to, or nothing while it is bound to none.
+ * The one description of a full-document read, shared by the query and the two
+ * readers below.
  *
- * The engine has no metadata-only read, so this pulls `content` too - the whole
- * document, capped engine-side at `maxSpecDocumentBytes`. That is the cost of
- * showing where a binding came from, and it is paid once per spec: the response
- * is immutable (a changed document is a *new* document with a new id), so it is
- * cached indefinitely rather than refetched on every visit to the tab.
+ * A document is **immutable** - a changed one is a new document with a new id -
+ * so every reader of it wants the same thing: cached indefinitely, fetched once.
+ * Written once here because three copies of `staleTime: Infinity` beside three
+ * copies of the same `queryFn` is how one of them comes to refetch a 12 MB
+ * document on a window focus.
+ */
+function specDocumentQuery(specId: string) {
+	return {
+		queryKey: queryKeys.specs.detail(specId),
+		queryFn: () => apiService.getSpec(specId),
+		staleTime: Infinity,
+	};
+}
+
+/**
+ * The whole document a collection is bound to - `content` included.
+ *
+ * For the readers that need the text: export (`useOpenApiExportSource`) and the
+ * bound-spec matching the import dialog does. Both run on a user action, which
+ * is the rule this read follows - the Spec tab's card describes the document
+ * with `useSpecMetaQuery` below rather than transferring it (issue #712).
  */
 export function useSpecQuery(specId: string | null | undefined) {
 	return useQuery({
-		queryKey: queryKeys.specs.detail(specId ?? ""),
-		queryFn: () => apiService.getSpec(specId as string),
+		// `""` for a collection that binds nothing, so the disabled query has one
+		// key rather than one per falsy spelling.
+		...specDocumentQuery(specId ?? ""),
+		enabled: !!specId,
+	});
+}
+
+/**
+ * What the bound document *is* - where it came from, when, its hash and size -
+ * without the document (issue #712).
+ *
+ * Opening the Spec tab used to transfer the whole stored document to paint a
+ * source line and a date: 12 MB for Stripe's spec, 9.7 MB for GitHub's, on
+ * every first open, because those two fields live on the document rather than
+ * on the collection's binding. `GET /specs/:id/meta` answers them directly.
+ *
+ * Cached on the same terms as the document itself, and for the same reason: the
+ * row it describes cannot change under a given id.
+ */
+export function useSpecMetaQuery(specId: string | null | undefined) {
+	return useQuery({
+		queryKey: queryKeys.specs.meta(specId ?? ""),
+		queryFn: () => apiService.getSpecMeta(specId as string),
 		enabled: !!specId,
 		staleTime: Infinity,
 	});
+}
+
+/**
+ * Read a stored document's text on demand (issue #712).
+ *
+ * A reader rather than a query, for `useBoundSpecReader`'s reason: the caller is
+ * an event handler. The Sync section needs the bound bytes to compare a
+ * re-fetched document against, and needs them *when Check is pressed* - holding
+ * the button hostage to a background transfer is what this replaced. Going
+ * through `fetchQuery` on the document's own key means a document the tab, the
+ * export dialog or the import dialog has already read is answered from cache.
+ */
+export function useSpecContentReader(): (specId: string) => Promise<SpecDocument> {
+	const queryClient = useQueryClient();
+	return useCallback(
+		(specId) => queryClient.fetchQuery(specDocumentQuery(specId)),
+		[queryClient]
+	);
 }
 
 /**
@@ -74,13 +130,7 @@ export function useBoundSpecReader(): (collections: readonly Collection[]) => Pr
 				if (documents.has(specId)) continue;
 				documents.set(
 					specId,
-					queryClient
-						.fetchQuery({
-							queryKey: queryKeys.specs.detail(specId),
-							queryFn: () => apiService.getSpec(specId),
-							staleTime: Infinity,
-						})
-						.catch(() => null)
+					queryClient.fetchQuery(specDocumentQuery(specId)).catch(() => null)
 				);
 			}
 			const read = new Map(

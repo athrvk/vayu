@@ -57,6 +57,17 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::SpecDocument& spec);
 
 /**
+ * @brief The same document without the parts that make it big (issue #712).
+ *
+ * What `GET /specs/:id/meta` answers: the fields describing the document -
+ * where it came from, when, its hash and how many bytes it is - with `content`
+ * and both app-extracted indexes left out entirely rather than emptied, because
+ * an empty index is a document that declares nothing and this is a document
+ * whose index was not read.
+ */
+[[nodiscard]] Json serialize_meta (const vayu::db::SpecDocument& spec);
+
+/**
  * @brief Serialize an Environment to JSON
  */
 [[nodiscard]] Json serialize (const vayu::db::Environment& environment);

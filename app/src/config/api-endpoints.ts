@@ -55,6 +55,10 @@ export const API_ENDPOINTS = {
 	// whoever else binds it.
 	SPECS: `/specs`,
 	SPEC_BY_ID: (id: string) => `/specs/${id}`,
+	// The same document without the document (issue #712): what the Spec tab's
+	// card needs, so opening the tab does not transfer a 12 MB spec to paint a
+	// URL and a date. The full read above still backs export, sync and matching.
+	SPEC_META: (id: string) => `/specs/${id}/meta`,
 	// Applying a re-fetched document to the collection bound to it (issue #655):
 	// the new document, the moved binding and the created/updated/deleted
 	// requests in one engine transaction.
