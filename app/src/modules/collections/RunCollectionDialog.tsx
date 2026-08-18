@@ -23,7 +23,12 @@
  * has to go and fix.
  *
  * A data file is the third option (issue #402), and it changes what Iterations
- * means: with rows and no explicit count, the run is one pass per row. The rows
+ * means: with rows and no explicit count, the run is one pass per row. Which
+ * file it pre-fills, and which columns that file is diffed against, come from
+ * the contract *in scope* - the nearest declared ancestor, as everywhere else
+ * in the feature (issue #729): running a sub-collection under a declaring
+ * parent binds the parent's rows, so reading the sub-collection's own id left
+ * exactly that run with no pre-fill and no diff. The rows
  * ride the payload and are dropped when this dialog unmounts - they are user
  * data of unknown sensitivity, so neither side stores the set. What a bound
  * cell reaches is the request it was substituted into, which the run stores
@@ -57,7 +62,7 @@
  * arrival-rate executor, which Vayu does not implement - so it is not offered.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -73,7 +78,8 @@ import {
 	Switch,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
-import { useStartScenarioRunMutation } from "@/queries";
+import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
+import { resolveDataContract } from "@/lib/data-contract";
 import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
@@ -154,7 +160,31 @@ export default function RunCollectionDialog({
 	 */
 	const [prefillNote, setPrefillNote] = useState<string | null>(null);
 
-	const rememberedFile = useDataFileStore((s) => s.locations[collection.id]);
+	/*
+	 * The contract this run is measured against, resolved through the chain
+	 * rather than read off the collection being run (issue #729).
+	 *
+	 * Nearest declared ancestor, the documented rule
+	 * (`docs/app/variable-resolution.md`) and the one the engine applies at plan
+	 * time: running a sub-collection under a declaring parent binds the parent's
+	 * rows, so the file to pre-fill and the columns to diff against are the
+	 * parent's too. Keyed the way `useSendWithRow` keys its own read - by the
+	 * collection that *declared* the contract, since that is whose Data tab the
+	 * file was picked in - and falling back to this collection's own id, which
+	 * is what the store holds when no contract is in scope at all.
+	 */
+	const { data: collections = [] } = useCollectionsQuery();
+	// The collection being run stands ahead of the query's copy of itself: it is
+	// the row the caller opened this dialog with, and the walk must find a
+	// contract it declares even on a render where the query has not answered.
+	// Ancestors can only come from the query, which is the half that is new here.
+	const chain = useMemo(
+		() => [collection, ...collections.filter((row) => row.id !== collection.id)],
+		[collection, collections]
+	);
+	const contract = resolveDataContract(collection.id, chain);
+	const declaringCollectionId = contract?.collectionId ?? collection.id;
+	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
 	/*
 	 * The row cap the pre-filled file has to fit inside, same as a hand-picked
 	 * one (issue #751). Read here as well as in the picker below because the
@@ -165,19 +195,31 @@ export default function RunCollectionDialog({
 	const { maxRows } = useDataFileLimits();
 
 	/**
-	 * Pre-fill from the file this collection was last run with (issue #599).
+	 * Whether the pre-fill has had its one turn.
 	 *
-	 * Part of mount, which is what preserves the dialog's mount-is-reset
-	 * contract: the options still start at their defaults every time this
-	 * component appears, and one of those defaults is now "the file you
-	 * declared", rather than a value carried over from a previous open.
+	 * The effect below used to key off mount alone. It cannot any more: which
+	 * file is remembered now depends on the resolved contract, and the
+	 * collections query behind it may answer a render *after* this dialog
+	 * mounts - a mount-only effect would read an empty chain, find no file and
+	 * never look again. The ref keeps the one property the mount-only spelling
+	 * was there for: writing the store while the dialog is open must not yank
+	 * the user's selection back to what was remembered.
+	 */
+	const prefillAttempted = useRef(false);
+
+	/**
+	 * Pre-fill from the file this collection's contract was last run with
+	 * (issue #599; through the chain since #729).
 	 *
-	 * Deliberately runs once and not on `rememberedFile` changes: writing the
-	 * store while the dialog is open (the user picks a different file) must not
-	 * yank the selection back to what was remembered.
+	 * Still part of the dialog's mount-is-reset contract: the options start at
+	 * their defaults every time this component appears, and one of those
+	 * defaults is "the file you declared" rather than a value carried over from
+	 * a previous open.
 	 */
 	useEffect(() => {
+		if (prefillAttempted.current) return;
 		if (!rememberedFile?.path) return;
+		prefillAttempted.current = true;
 		let cancelled = false;
 		// No Electron, no path to re-read - the picker stands.
 		if (!canReadDeclaredDataFile()) return;
@@ -204,8 +246,7 @@ export default function RunCollectionDialog({
 		return () => {
 			cancelled = true;
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design; see above.
-	}, []);
+	}, [rememberedFile, maxRows]);
 
 	/*
 	 * Empty is a meaningful value only with a data file: it means "one pass per
@@ -244,7 +285,7 @@ export default function RunCollectionDialog({
 	 * than at iteration 1.
 	 */
 	const schemaDiff = dataFile
-		? describeDataSchemaDiff(collection.dataSchema?.columns ?? [], dataFile.parsed.columns)
+		? describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns)
 		: [];
 
 	/*

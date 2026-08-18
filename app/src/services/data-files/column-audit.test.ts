@@ -16,6 +16,9 @@ function request(overrides: Partial<AuditableRequest> = {}): AuditableRequest {
 		body: { mode: "none" },
 		preRequestScript: "",
 		postRequestScript: "",
+		// Already walked through the collection chain by the caller - `inherit` is
+		// not a value this function can be handed.
+		resolvedAuth: { mode: "none" },
 		...overrides,
 	};
 }
@@ -124,6 +127,78 @@ describe("auditDataColumns", () => {
 		);
 		expect(audit.inScripts).toEqual([]);
 		expect(audit.unreferenced).toEqual(["plan"]);
+	});
+
+	/*
+	 * Auth credentials (issue #729).
+	 *
+	 * The engine has bound rows into credentials since #591, and the walk here
+	 * has to be the same set `walk_auth_credentials` visits - no wider, or the
+	 * panel claims a binding the engine refuses; no narrower, and it reports a
+	 * column bound on every iteration as referenced by nothing.
+	 */
+	it("walks the credentials a row binds, in every mode that carries one", () => {
+		const audit = auditDataColumns(
+			["token", "user", "password", "keyName", "keyValue"],
+			[
+				request({ resolvedAuth: { mode: "bearer", token: "{{data.token}}" } }),
+				request({
+					resolvedAuth: {
+						mode: "basic",
+						username: "{{data.user}}",
+						password: "{{data.password}}",
+					},
+				}),
+				request({
+					resolvedAuth: {
+						mode: "apikey",
+						key: "{{data.keyName}}",
+						value: "{{data.keyValue}}",
+						in: "header",
+					},
+				}),
+			]
+		);
+		expect(audit.referenced).toEqual(["token", "user", "password", "keyName", "keyValue"]);
+		expect(audit.unreferenced).toEqual([]);
+	});
+
+	it("does not count a token in an OAuth 2.0 config, which nothing binds", () => {
+		// The config is the input to a token acquisition that happens once per
+		// plan, so a data token there is refused rather than bound (#591).
+		// Reporting it as referenced would promise a binding that never happens.
+		const audit = auditDataColumns(
+			["clientId"],
+			[
+				request({
+					resolvedAuth: {
+						mode: "oauth2",
+						config: {
+							grantType: "client_credentials",
+							accessTokenUrl: "https://auth.example.com/token",
+							clientId: "{{data.clientId}}",
+						},
+					},
+				}),
+			]
+		);
+		expect(audit.referenced).toEqual([]);
+		expect(audit.undeclared).toEqual([]);
+		expect(audit.unreferenced).toEqual(["clientId"]);
+	});
+
+	it("scans a collection's scripts, which run around every step", () => {
+		// Root-to-leaf ahead of the request's own (`compose_script_parts`), so a
+		// column read once on a parent is read on every step beneath it.
+		const audit = auditDataColumns(
+			["plan"],
+			[request()],
+			['pm.iterationData.get("plan");', ""]
+		);
+		expect(audit.inScripts).toEqual(["plan"]);
+		// The conservative direction, same as a request's own script scan.
+		expect(audit.unreferenced).toEqual([]);
+		expect(audit.referenced).toEqual([]);
 	});
 
 	it("ignores a name outside the namespace", () => {

@@ -231,7 +231,10 @@ run:
 - **The Run dialog pre-fills.** If the declared file is still where you left it,
   opening **Run collection** re-reads it and previews it, ready to start. Move
   or rename the file and the dialog says so and offers the picker - it is a
-  note, not a refusal.
+  note, not a refusal. Which file that is follows the chain rule like everything
+  else here: running a sub-collection that declares nothing offers the file its
+  nearest declaring ancestor was given, because that is the contract the run
+  binds against.
 - **The Data tab re-opens it too.** Coming back to the tab reads the declared
   file again and lines it up against the contract with no re-pick: comparing
   them is what the tab is for, so it does not wait to be handed the same file a
@@ -269,9 +272,16 @@ run:
   the declared columns into the ones your requests use, the ones your requests
   name but the contract does not declare, and the ones nothing references -
   across this collection and every sub-collection that does not declare a
-  contract of its own. Scripts are scanned for literal
-  `pm.iterationData.get("column")` arguments only, and the panel says so: a
-  column name a script computes at run time cannot be seen from here.
+  contract of its own. What counts as a use is what a run actually binds: the
+  URL, params, headers and body, and the **credentials** a step sends - a
+  bearer token, a basic username and password, an api key's name and value -
+  including the ones a request inherits from a collection. An OAuth 2.0 config
+  is not among them: its token is fetched once when the run's plan is resolved,
+  before any row exists, so a `{{data.*}}` there binds nothing. Scripts are
+  scanned for literal `pm.iterationData.get("column")` arguments only - the
+  request's own and the collection chain's, which run around every step - and
+  the panel says so: a column name a script computes at run time cannot be seen
+  from here.
 
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
