@@ -1562,6 +1562,44 @@ const environmentIdInput = z
 	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
 
 /**
+ * The refusal an ad-hoc send gets for `verifySSL: false`, and with it the
+ * answer to the per-call TLS question issue #795 posed.
+ *
+ * The stored field is writable (`create_request` / `update_request`) and a
+ * per-call one is not, because the two differ in what survives the call. A
+ * stored `verifySSL: false` is a document: the app's Settings tab shows the box
+ * unticked and prints a warning under it, `list_requests` reads it back, and a
+ * user can undo it. An argument on one send is visible only inside the agent's
+ * own transcript - nothing in Vayu records that a certificate went unchecked,
+ * so nobody can find it afterwards or take it back.
+ *
+ * The alternative considered was the `allowInsecureTls` safety toggle #795
+ * sketched. Rejected: it would be a *global* permission - every allowlisted host
+ * for the rest of the session, granted once for one dev box and then forgotten -
+ * where the stored field is per request, and it would need a Settings control of
+ * its own to be reachable at all, which is a second way to weaken TLS for a case
+ * the first one already covers.
+ *
+ * `true` is accepted rather than refused alongside it: it is what the composed
+ * payload already carries, so an agent restating the safe default should not be
+ * argued with.
+ */
+export const INSECURE_TLS_REFUSAL =
+	"verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to add the internal authority under Vayu Settings > Network & connectivity, which keeps verification on for every request; or save the request with create_request/update_request `verifySSL: false` and run it (run_collection_smoke composes a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.";
+
+/**
+ * `run_request`'s TLS argument: declared so that asking for the downgrade gets
+ * {@link INSECURE_TLS_REFUSAL} - naming the two supported routes - rather than a
+ * stripped unknown key and a handshake failure the agent has to guess at.
+ */
+const verifySSLSendInput = z
+	.boolean()
+	.optional()
+	.describe(
+		"Verify the server's TLS certificate (default true). Only `true` is accepted here: `false` is refused, because skipping the certificate check for one agent-issued send leaves no trace in Vayu afterwards. Save the request with `verifySSL: false` (create_request / update_request) if the user wants an internal or self-signed host reachable, or have them trust that authority under Vayu Settings > Network & connectivity."
+	);
+
+/**
  * The post-response validation script, declared identically on `run_request` and
  * `start_load_run` so one script an agent writes carries between them - the way
  * the app's single **Tests** tab drives both Send and a load run. See
@@ -1823,19 +1861,25 @@ function storedAuthInput(subject: string, extra: string) {
 }
 
 /**
- * The **Settings** tab's four per-request fields, as the engine stores them on
- * the row (issue #759).
+ * The **Settings** tab's five per-request fields, as the engine stores them on
+ * the row (issues #759, #795).
  *
  * One definition spread into both `create_request` and `update_request`: the
  * fields mean the same thing on either verb, and the merge-patch difference is
- * carried by the surrounding tool description rather than by two copies of four
+ * carried by the surrounding tool description rather than by two copies of five
  * schemas. Ranges are the engine's own (`apply_request_fields`) rather than new
  * numbers - `maxRedirects` is clamped to 0-100 there, and an unrecognized
  * `httpVersion` is a 400 rather than a coercion, which is why the enum is
  * closed here too.
  *
- * `verifySSL` is deliberately **not** among them: it is stored beside these
- * (issue #706) and belongs to the transport epic's own CRUD pass - see #795.
+ * `verifySSL` is the one whose description has to say what the field *means*
+ * rather than what it sets: it is the only setting here whose off position is a
+ * security downgrade, and an agent that reads "certificate verification" as a
+ * strictness knob would turn it off to make a handshake stop failing. The
+ * merge-patch rule matters more for it than for the other four for the same
+ * reason - a defaulted `true` on an unrelated update would silently re-enable
+ * verification a user turned off, and the request would then fail against the
+ * host it was written for.
  */
 function requestSettingsInput() {
 	return {
@@ -1866,11 +1910,29 @@ function requestSettingsInput() {
 			.describe(
 				"Consume the response as a text/event-stream rather than buffering it (default false). Stored on the request, so a later send - from the app or from run_request - streams without being told to."
 			),
+		verifySSL: z
+			.boolean()
+			.optional()
+			.describe(
+				"Verify the server's TLS certificate when this request is sent (default true). Setting it false skips the certificate check entirely, hostname included, so an internal or self-signed host answers instead of failing - and anything on the network path can then read and rewrite the request. It is stored on the request and applies to every later send of it: the app's Send, a load run and a stream alike. Prefer keeping it on and having the user add the internal authority under Vayu Settings > Network & connectivity; turn it off only when they have asked for exactly that, and say so in your reply, because the app shows this request as accepting any certificate from then on."
+			),
 	};
 }
 
-/** The stored settings a call named, forwarded verbatim; an unnamed one is absent. */
-const REQUEST_SETTINGS_KEYS = ["followRedirects", "maxRedirects", "httpVersion", "stream"] as const;
+/**
+ * The stored settings a call named, forwarded verbatim; an unnamed one is absent.
+ *
+ * Every key {@link requestSettingsInput} declares appears here - the schema
+ * declares the shape, this list is what the payload builder actually reads, so a
+ * field added to one and not the other is an argument the engine never sees.
+ */
+export const REQUEST_SETTINGS_KEYS = [
+	"followRedirects",
+	"maxRedirects",
+	"httpVersion",
+	"stream",
+	"verifySSL",
+] as const;
 
 /**
  * Lay the caller's stored-settings fields onto a request payload.
@@ -3422,7 +3484,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) " +
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`.`,
 		annotations: {
 			title: "Send a request",
@@ -3448,6 +3510,7 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s Settings tab picker.'
 				),
+			verifySSL: verifySSLSendInput,
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
@@ -3465,6 +3528,10 @@ export const TOOLS: McpTool[] = [
 			streamBudgetMs: streamBudgetMsInput,
 		},
 		handler: async (args, ctx, signal) => {
+			// Before anything is composed, let alone sent: a refusal that arrived
+			// after the exchange would be a request already made insecurely. `true`
+			// falls through - it restates the composed default (issue #795).
+			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL);
 			const request: Record<string, unknown> = {
 				...readRequestOverrides(args),
 				url: requireStr(args, "url"),
@@ -3775,7 +3842,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol and stream flag, and its pre-request and test scripts - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
+			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag and certificate-verification setting, and its pre-request and test scripts - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -3842,7 +3909,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing a script replaces that script, and an empty string clears it.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing a script replaces that script, and an empty string clears it.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -3902,7 +3969,7 @@ export const TOOLS: McpTool[] = [
 			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
-			// Auth and the four Settings fields ride the same rule as the strings
+			// Auth and the five Settings fields ride the same rule as the strings
 			// above: stated is written, absent is left alone. The block replaces
 			// the stored one wholesale because the engine stores it as one JSON
 			// column - there is no per-credential patch to offer.

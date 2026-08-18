@@ -159,13 +159,13 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB |
+| `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and both collection scripts |
 | `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
-| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream`, both scripts - minus file body parts |
+| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list) |
@@ -382,20 +382,37 @@ Notes:
   subtree - or an id no collection has - is a refusal, never a prompt carrying
   a number nobody verified. `delete_request` reads the row the same way, so the
   prompt names the request and its URL rather than an opaque id.
-- **A saved request an agent writes is the one the builder writes** (issue
-  #759). `create_request` / `update_request` carry the request's `auth` block and
-  the four **Settings** tab fields (`followRedirects`, `maxRedirects`,
-  `httpVersion`, `stream`) as well as its url, headers, body and both scripts, so
-  an agent that can send an authenticated request can now save one. The `auth`
-  input is the *same schema* `run_request` takes rather than a copy of it - one
-  definition, four descriptions - which is what lets an agent read a request's
-  `auth` over `list_requests` and write it back verbatim. Both the auth block and
-  each setting follow the merge-patch rule the strings already did: named is
-  written, absent is left alone, so an update that mentions only `maxRedirects`
-  cannot hand a stored `followRedirects: false` back to the engine's default. The
-  two exclusions are deliberate: **file body parts**, which name a path on the
-  user's machine an agent cannot choose for them, and **`verifySSL`** (issue
-  #706), which belongs to the transport epic's own CRUD pass - see #795.
+- **A saved request an agent writes is the one the builder writes** (issues
+  #759, #795). `create_request` / `update_request` carry the request's `auth`
+  block and the five **Settings** tab fields (`followRedirects`, `maxRedirects`,
+  `httpVersion`, `stream`, `verifySSL`) as well as its url, headers, body and
+  both scripts, so an agent that can send an authenticated request can now save
+  one. The `auth` input is the *same schema* `run_request` takes rather than a
+  copy of it - one definition, four descriptions - which is what lets an agent
+  read a request's `auth` over `list_requests` and write it back verbatim. Both
+  the auth block and each setting follow the merge-patch rule the strings already
+  did: named is written, absent is left alone, so an update that mentions only
+  `maxRedirects` cannot hand a stored `followRedirects: false` back to the
+  engine's default. For `verifySSL` that rule is a *security* rule rather than a
+  convenience: a defaulted `true` on an unrelated update would silently re-enable
+  a certificate check the user turned off. The one exclusion left is deliberate:
+  **file body parts**, which name a path on the user's machine an agent cannot
+  choose for them.
+- **A skipped certificate check has to leave a record** (issue #795). The
+  *stored* `verifySSL: false` is writable over MCP; a *per-call* one is not.
+  `run_request` declares `verifySSL` only so that `false` is refused by name -
+  the refusal points at the two supported routes, adding the internal authority
+  under **Vayu Settings > Network & connectivity** (verification stays on) or
+  saving the request with `verifySSL: false` and running that. `start_load_run`,
+  `run_collection` and `run_collection_smoke` take no such argument at all; they
+  compose saved requests, so the stored field is what they honour. The difference
+  is what survives the call: a stored value is a document the app's Settings tab
+  shows unticked with a warning under it, `list_requests` reads back and the user
+  can undo, while an argument on one send is visible only inside the agent's own
+  transcript. The `allowInsecureTls` safety toggle #795 sketched was rejected for
+  the same reason it would have been convenient - it is a global permission,
+  granted once for one dev host and then in force for every allowlisted host,
+  where the stored field is per request.
 - **Examples are writable, and where one came from is not** (issue #759).
   `list_request_examples` reads what a request has saved beside it - what a mock
   server for its collection answers with - and the three write tools author it,
@@ -760,8 +777,11 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   never-elided rule, so an agent's value has to be laid over the composed
   payload the same way a URL override is. A URL-only run has no stored row
   behind it, which makes this the only way its redirect policy gets stated at
-  all. `verifySSL` is the one transport field neither tool writes yet -
-  [#795](https://github.com/athrvk/vayu/issues/795).
+  all. `verifySSL` is the one transport field that deliberately does **not** ride
+  the overlay: `run_request` refuses `verifySSL: false` and `start_load_run`
+  takes no such argument, because a certificate check skipped for one call is
+  recorded nowhere afterwards. It is written onto the saved request instead
+  (issue #795), and every by-id compose then carries it.
 - **Streaming** - `run_request` takes `stream: true` for a `text/event-stream`
   endpoint (issue #575). `tools/call` is request/response, so the tool does not
   stream to the agent: it starts the run, reads the relay for at most

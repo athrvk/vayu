@@ -12,6 +12,7 @@ import {
 	DEFAULT_RUN_SAMPLE_LIMIT,
 	DEFAULT_RUN_SERIES_LIMIT,
 	dispatchTool,
+	INSECURE_TLS_REFUSAL,
 	MAX_EXAMPLES_BODY_BYTES,
 	MAX_INBOX_CAPTURE_LIMIT,
 	MAX_IN_FLIGHT_BOUND,
@@ -21,6 +22,7 @@ import {
 	MAX_RUN_SERIES_LIMIT,
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SUCCESS_SAMPLE_PERIOD,
+	REQUEST_SETTINGS_KEYS,
 	toolCatalog,
 	TOOLS,
 	type ToolContext,
@@ -1557,6 +1559,134 @@ describe("document CRUD parity", () => {
 			// with four descriptions rather than four schemas.
 			expect(run.safeParse({ token: "t" }).success).toBe(false);
 			expect(run.safeParse({ mode: "bearer", token: "t" }).success).toBe(true);
+		});
+	});
+
+	/**
+	 * Certificate verification (#795). The stored field was written by the engine
+	 * and the app and by no MCP tool, so an agent could neither save a request
+	 * against a self-signed host nor restate what `list_requests` showed it. What
+	 * these hold is the pair of answers that closes it: the stored field is
+	 * writable under the merge-patch rule, and a *per-call* downgrade is refused.
+	 */
+	describe("certificate verification", () => {
+		const allow = { allowlist: ["api.example.com"] };
+
+		test("create_request stores verification off when the caller asks for it", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "Internal health",
+					url: "https://internal.example.test/health",
+					verifySSL: false,
+				},
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(callArgs(client.createRequest)[0]).toMatchObject({ verifySSL: false });
+		});
+
+		test("update_request patches verifySSL alone", async () => {
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", verifySSL: false },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.updateRequest)[1]).toEqual({ verifySSL: false });
+		});
+
+		test("an update that does not name it leaves the stored value alone", async () => {
+			// The one field where the merge-patch rule is a security rule: a
+			// defaulted `true` here would silently re-enable a check the user
+			// turned off, and the request would then fail against the host it was
+			// written for.
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", name: "Internal health", httpVersion: "http2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			const payload = callArgs(client.updateRequest)[1] as Record<string, unknown>;
+			expect(Object.keys(payload)).not.toContain("verifySSL");
+		});
+
+		test("every declared setting is a setting the payload builder reads", () => {
+			// The wiring rule, not a restatement of the list: a field added to
+			// `requestSettingsInput` and not to `REQUEST_SETTINGS_KEYS` parses
+			// happily and reaches the engine never - this repo's most repeated
+			// defect. Driven through both verbs because both spread the schema.
+			for (const key of REQUEST_SETTINGS_KEYS) {
+				expect(schemaOf("create_request", key), key).toBeDefined();
+				expect(schemaOf("update_request", key), key).toBeDefined();
+			}
+		});
+
+		test.each([
+			["followRedirects", false],
+			["maxRedirects", 3],
+			["httpVersion", "http2"],
+			["stream", true],
+			["verifySSL", false],
+		] as const)("update_request forwards %s on its own", async (key, value) => {
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", [key]: value },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.updateRequest)[1]).toEqual({ [key]: value });
+		});
+
+		test("run_request refuses a per-call downgrade before anything is sent", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x", verifySSL: false },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe(INSECURE_TLS_REFUSAL);
+			// Refused *before* composition, so nothing was even resolved - a
+			// refusal after the exchange would be a request already sent.
+			expect(client.composeRequest).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+			// The refusal names both supported routes, which is the whole point of
+			// answering here rather than dropping an unknown argument.
+			expect(firstText(res)).toContain("update_request");
+			expect(firstText(res)).toContain("Network & connectivity");
+		});
+
+		test("run_request accepts the safe default and forwards nothing for it", async () => {
+			// `true` is what the composed payload already carries, so an agent
+			// restating it is not argued with - and not echoed into the request
+			// overlay either, where it would be a second source for one value.
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x", verifySSL: true },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			const composed = callArgs(client.composeRequest)[0] as {
+				request: Record<string, unknown>;
+			};
+			expect(Object.keys(composed.request)).not.toContain("verifySSL");
+			const executed = callArgs(client.executeRequest)[0] as Record<string, unknown>;
+			expect(Object.keys(executed)).not.toContain("verifySSL");
+		});
+
+		test("the load and collection runners take no TLS argument at all", () => {
+			// One answer, not three: the stored field is the only way a Vayu run
+			// skips a certificate check, so no execute/load tool may grow an
+			// argument that bypasses the record the app shows.
+			for (const name of ["start_load_run", "run_collection", "run_collection_smoke"]) {
+				const tool = TOOLS.find((t) => t.name === name);
+				expect(tool, name).toBeDefined();
+				expect(Object.keys(tool!.inputSchema), name).not.toContain("verifySSL");
+			}
 		});
 	});
 
