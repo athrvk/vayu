@@ -52,6 +52,11 @@ lerna-debug.log*
 # Testing
 coverage/
 .nyc_output/
+# Written by a sharded run (`pnpm test --shard=1/2 --reporter=json ...`) and by
+# the manifest step that reads it; CI keeps them only as an artifact.
+vitest-shard.json
+shard-*.txt
+full-suite-*.txt
 
 # Temporary files
 *.tmp
