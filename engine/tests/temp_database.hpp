@@ -25,8 +25,8 @@
 namespace vayu::tests {
 
 /**
- * Creates a fresh, process-private scratch directory under the system temp
- * location and makes it the current working directory.
+ * Creates a fresh, process-private scratch directory beneath the current
+ * working directory and moves into it.
  *
  * Every fixture opens its scratch `Database` by a *relative* filename
  * (`test_*.db`), so its files - the SQLite trio and the open-time `.bak` backup
@@ -41,9 +41,7 @@ namespace vayu::tests {
  * scheduled *test*. Entering one here, once, isolates every relative path the
  * process then writes without touching a single fixture, and keeps the
  * bare-filename semantics fixtures and a real CLI invocation both rely on (a
- * database opened by name sits in the working directory). It also moves the
- * scratch files out of the source/build tree entirely, which is the leak
- * `remove_database_files` and `.gitignore` were guarding against.
+ * database opened by name sits in the working directory).
  *
  * Returns the directory so the caller can remove it on exit. Directory creation
  * is atomic, so two processes that derive the same candidate name do not both
@@ -51,8 +49,15 @@ namespace vayu::tests {
  * silent fall-back to a shared directory is exactly the collision this prevents.
  */
 inline std::filesystem::path enter_process_scratch_dir () {
-    namespace fs        = std::filesystem;
-    const fs::path base = fs::temp_directory_path ();
+    namespace fs = std::filesystem;
+    // Deliberately the *working* directory, not `temp_directory_path()`: these
+    // files already lived here (the build directory under `ctest --preset`),
+    // and on a Windows CI runner the workspace and the system temp sit on
+    // different volumes - the workspace on the fast ephemeral disk, the temp on
+    // the OS one. Sending 2000 processes' worth of small SQLite writes across
+    // that boundary made the Windows ctest leg several times slower while Linux
+    // and macOS, which have no such split, showed nothing.
+    const fs::path base = fs::current_path ();
     for (unsigned attempt = 0; attempt < 10000; ++attempt) {
         const auto ticks =
         std::chrono::high_resolution_clock::now ().time_since_epoch ().count ();

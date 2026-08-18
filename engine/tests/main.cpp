@@ -30,7 +30,7 @@ int main (int argc, char** argv) {
     // that failed before its own cleanup ran. Step out of it first - a directory
     // cannot be removed while it is the working directory on every platform.
     std::error_code ec;
-    std::filesystem::current_path (std::filesystem::temp_directory_path (), ec);
+    std::filesystem::current_path (scratch.parent_path (), ec);
     std::filesystem::remove_all (scratch, ec);
 
     vayu::http::global_cleanup ();

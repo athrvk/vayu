@@ -51,17 +51,20 @@ coverage/
 # DB
 db/vayu.*
 
-# Scratch databases the test suite writes. The suite now enters a private
-# per-process directory under the system temp location before running (so
-# `ctest -j` cannot collide two tests on one filename - see tests/main.cpp and
-# tests/temp_database.hpp), which is where these normally land. These patterns
-# remain as a safety net for any path that still resolves to the tree. Every
-# fixture names its file test_*.db; SQLite leaves -wal/-shm beside it and
-# Database's open-time backup leaves .bak.
+# Scratch databases the test suite writes into the working directory of the
+# test binary: build/ under `ctest --preset <os>-dev`, and engine/ itself when
+# the binary is run by hand from here. Every fixture names its file test_*.db;
+# SQLite leaves -wal/-shm beside it and Database's open-time backup leaves .bak.
 test_*.db
 test_*.db-wal
 test_*.db-shm
 test_*.db.bak
+
+# Each test *process* now runs inside its own vayu-tests-* subdirectory of that
+# working directory, so `ctest -j` cannot collide two tests on one filename (see
+# tests/main.cpp and tests/temp_database.hpp). The process removes its own on
+# exit; this catches the ones a killed run leaves behind.
+vayu-tests-*/
 
 
 # Logs
