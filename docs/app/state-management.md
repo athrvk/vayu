@@ -1317,6 +1317,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
 | `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |
+| `oauth` | `oauth.all` | The whole prefix, not the one key: `useOAuth2TokenStatusQuery` is keyed per cache key, and the key a `fetch_oauth2_token` writes under is derived engine-side and appears only in the answer, so the event carries no hint to narrow by. The query polls at 30s on its own, so this is immediacy - an agent that clears a token must not leave the row saying it is valid |
 
 The event carries no engine data, only which family went stale, so a row still
 reaches the UI by exactly one path: the query layer. Per-run reports and time

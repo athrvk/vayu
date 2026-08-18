@@ -266,8 +266,14 @@ export interface LoadRunParams {
  * Modes the engine recognises (`parse_load_test_type`, `vayu/types.hpp`).
  * Anything else falls through `LoadStrategy::create`, so the guard mirrors that
  * fallback rather than trusting the string it was given.
+ *
+ * Exported for the prompt test rather than for production use: this is the one
+ * list in the MCP layer that has to track the engine's modes (a mode missing
+ * here reaches the wrong cap), which makes it the thing to measure the
+ * `suggest_load_profile` prompt's enumeration against - that prompt named four
+ * of five for as long as `capacity` had existed.
  */
-const KNOWN_LOAD_MODES = new Set([
+export const KNOWN_LOAD_MODES = new Set([
 	"constant_rps",
 	"constant_concurrency",
 	"ramp_up",

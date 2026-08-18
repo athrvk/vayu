@@ -63,6 +63,15 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 				},
 			],
 		}),
+		// The same surface as declarations (issue #760), in the envelope
+		// `GET /scripting/types` answers with.
+		getScriptTypeDefinitions: async () => ({
+			version: "1.0.0",
+			engine: "quickjs",
+			libUri: "ts:vayu/pm.d.ts",
+			typeDefinitions:
+				"declare namespace pm {\n  function test(name: string, fn: () => void): void;\n}\n",
+		}),
 		// Identity composition: the request echoed back, as the engine's
 		// POST /compose returns for an inline request with nothing to resolve.
 		composeRequest: async (body: { request?: object; environmentId?: string }) => ({
@@ -230,6 +239,7 @@ describe("resources", () => {
 		expect(uris).toContain("vayu://environments");
 		expect(uris).toContain("vayu://config");
 		expect(uris).toContain("vayu://scripting/completions");
+		expect(uris).toContain("vayu://scripting/types");
 		await server.close();
 	});
 
@@ -243,6 +253,17 @@ describe("resources", () => {
 		expect(text).toContain("Synchronous");
 		expect(text).not.toContain("insertText");
 		expect(text).not.toContain("sortText");
+		await server.close();
+	});
+
+	// The other half of the same surface (issue #760): the names come from the
+	// completions resource, the signatures from the engine's own declarations.
+	it("serves the sandbox's type declarations from the engine", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.readResource({ uri: "vayu://scripting/types" });
+		const text = String((res.contents[0] as { text?: string }).text);
+		expect(text).toContain("declare namespace pm");
+		expect(text).toContain("ts:vayu/pm.d.ts");
 		await server.close();
 	});
 

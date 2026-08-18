@@ -14,7 +14,9 @@
  *        callback (enumerate recent runs) and a completion callback (autocomplete
  *        run IDs). `vayu://scripting/completions` re-serves the engine's own
  *        script-sandbox surface so an agent discovers it the way the editor does,
- *        instead of from a prose copy that drifts (issue #233).
+ *        instead of from a prose copy that drifts (issue #233), and
+ *        `vayu://scripting/types` serves that same surface's TypeScript
+ *        declarations - the signatures the names alone do not carry.
  *        All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
  */
 
@@ -86,6 +88,25 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		read: async (ctx, signal) =>
 			projectScriptingSurface(await ctx.client.getScriptCompletions(signal)),
 	},
+	{
+		name: "scripting-types",
+		uri: "vayu://scripting/types",
+		title: "Script sandbox type declarations",
+		// Beside the completion list rather than instead of it: the completions
+		// answer "what is there", these answer "what does it take and what does
+		// it return". An agent writing `pm.expect(...)` chains or reading
+		// `pm.response.to.have` needs the signature, and the alternative to
+		// serving the engine's own `.d.ts` is prose that drifts - the drift
+		// issue #233 recorded for the completion list.
+		description:
+			"The engine's TypeScript declarations (.d.ts) for the pre-request / test script " +
+			"sandbox - the same text the app's editor feeds to its TypeScript worker, so every " +
+			"pm.* signature, parameter and return type is the running engine's. Read this " +
+			"beside vayu://scripting/completions when you need the shape of a call rather " +
+			"than its name.",
+		read: async (ctx, signal) =>
+			projectScriptingTypes(await ctx.client.getScriptTypeDefinitions(signal)),
+	},
 ];
 
 /** One sandbox name as an agent sees it - the engine's own keys, minus Monaco's. */
@@ -134,6 +155,46 @@ export function projectScriptingSurface(payload: unknown): ScriptingSurface {
 		});
 	}
 	return { version: root.version, engine: root.engine, completions };
+}
+
+/** The sandbox's type declarations as an agent sees them. */
+export interface ScriptingTypes {
+	version?: unknown;
+	engine?: unknown;
+	/** Monaco's library URI for the declarations - kept so the two halves of the
+	 *  surface are recognisably the same document the editor loads. */
+	libUri?: unknown;
+	typeDefinitions: string;
+}
+
+/**
+ * Reduce `GET /scripting/types` to the declarations and the version stamps
+ * around them.
+ *
+ * Throws on anything but a non-empty `typeDefinitions` string, for the reason
+ * {@link projectScriptingSurface} throws: half a type surface is worse than
+ * none, because an agent reads a missing declaration as "the sandbox has no
+ * such call" and writes around a capability that is there. An empty string is
+ * one of those failures rather than an empty sandbox - the engine generates
+ * these from the same table the completions come from, so it never legitimately
+ * produces nothing.
+ */
+export function projectScriptingTypes(payload: unknown): ScriptingTypes {
+	const root =
+		payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+	const declarations =
+		root && typeof root.typeDefinitions === "string" ? root.typeDefinitions : "";
+	if (!declarations) {
+		throw new Error(
+			"GET /scripting/types returned no `typeDefinitions` text - cannot describe the script sandbox"
+		);
+	}
+	return {
+		version: root!.version,
+		engine: root!.engine,
+		libUri: root!.libUri,
+		typeDefinitions: declarations,
+	};
 }
 
 /** Templated per-run report resource. */

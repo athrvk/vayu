@@ -291,6 +291,33 @@ describe("invalidateForMcpEvent", () => {
 		});
 	});
 
+	test("an oauth change invalidates the token-status family", () => {
+		const { handled, keys } = keysFor({ entity: "oauth" });
+		expect(handled).toBe(true);
+		expect(keys).toEqual([queryKeys.oauth.all]);
+	});
+
+	test("the prefix reaches a status query cached under any key", () => {
+		// The event carries no cache key - a fetch's key is derived engine-side
+		// and appears only in the answer - so the prefix has to cover an entry
+		// stored under a key this side never saw.
+		const queryClient = new QueryClient();
+		const spy = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+		queryClient.setQueryData(queryKeys.oauth.token("some-engine-derived-key"), {
+			found: true,
+		});
+
+		invalidateForMcpEvent(queryClient, { entity: "oauth" });
+
+		const [filters] = spy.mock.calls[0];
+		expect(
+			queryClient
+				.getQueryCache()
+				.findAll(filters)
+				.map((q) => q.queryKey)
+		).toContainEqual(queryKeys.oauth.token("some-engine-derived-key"));
+	});
+
 	test("an unknown entity is reported, not thrown", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const { handled, keys } = keysFor({

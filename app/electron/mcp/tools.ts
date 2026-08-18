@@ -86,6 +86,12 @@ export const MCP_DATA_ENTITIES = [
 	// Services drawer and the Dock's running-services count, which ask "what is
 	// listening" and not "which kind".
 	"service",
+	// The engine's OAuth 2.0 token cache (issue #760). Its own family rather
+	// than a fold into `config`: it has one reader of its own
+	// (`queryKeys.oauth`), and the auth tab's token-status row polls at 30s -
+	// long enough for an agent to clear a token, say so, and leave the window
+	// showing the entry it just destroyed.
+	"oauth",
 ] as const;
 
 export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
@@ -757,7 +763,11 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
 
 /**
  * The run pinned as baseline for whatever saved request @p targetRunId ran -
- * `compare_runs`'s answer when the caller named no base.
+ * `compare_runs`'s answer when the caller named no base, tool and prompt alike:
+ * the prompt asked for both ids while the tool resolved one, so the same
+ * question reached the agent two ways (issue #760). Exported for the prompt
+ * rather than copied into it, since a second resolution rule would be a second
+ * definition of "the baseline".
  *
  * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&
  * requestId=...` is ordered newest-first, so "the baseline" is its first row.
@@ -770,7 +780,7 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
  * (an ad-hoc load run) has nothing to resolve *through*, which is a different
  * problem from a request with no pin, and says so.
  */
-async function resolveBaseline(
+export async function resolveBaseline(
 	targetRunId: string,
 	ctx: ToolContext,
 	signal?: AbortSignal
@@ -1213,6 +1223,15 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
 	// `start_load_run` Zod schemas restrict the value to a known protocol.
 	const httpVersion = str(args, "httpVersion");
 	if (httpVersion !== undefined) out.httpVersion = httpVersion;
+	// Redirect policy is part of the request half, not the load shape: the app
+	// sends both fields through `POST /compose` beside the method and the body
+	// (`request-builder/index.tsx`), and the engine emits them on every composed
+	// payload under the never-elided rule. Only `start_load_run` declares them -
+	// `run_request` has no such argument, so nothing can arrive here from it -
+	// because an ad-hoc load target has no saved request whose stored policy the
+	// run could inherit.
+	if (typeof args.followRedirects === "boolean") out.followRedirects = args.followRedirects;
+	if (typeof args.maxRedirects === "number") out.maxRedirects = args.maxRedirects;
 	return out;
 }
 
@@ -1453,6 +1472,79 @@ const DEFAULT_LOAD_MODE = "constant_concurrency";
  * `src/constants/load-test.engine-parity.test.ts` ties that to this header.
  */
 export const MAX_IN_FLIGHT_BOUND = 1_000_000;
+
+/**
+ * The engine's guards on the two numeric recording knobs
+ * (`validate_run_config`, `engine/src/http/routes/execution.cpp`), mirrored for
+ * the reason {@link MAX_IN_FLIGHT_BOUND} is: the schema refuses an
+ * out-of-range value by name instead of surfacing a `400`.
+ *
+ * Deliberately *not* the load dialog's own ceilings - `LOAD_TEST_LIMITS`
+ * narrows the slow threshold to a minute because that is a sensible thing to
+ * put on a slider, not because the engine refuses more. A tool that copied the
+ * slider's bound would refuse runs the engine accepts and the app cannot
+ * compose.
+ */
+export const MAX_SUCCESS_SAMPLE_PERIOD = 100_000;
+export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
+
+/**
+ * The redirect ceiling `apply_request_fields` clamps a stored request to
+ * (`std::clamp (r.max_redirects, 0, 100)`). `POST /runs` has no guard of its
+ * own - the field reaches `CURLOPT_MAXREDIRS` as an `int`, where a negative
+ * means *unlimited* - so this schema is the only thing between an agent's
+ * `maxRedirects: -1` and a run that follows redirect chains forever. Refused
+ * rather than clamped, like every other bound here: a value silently changed is
+ * a run measuring something the agent did not ask for.
+ *
+ * Read by both surfaces that take the field - `requestSettingsInput`, which
+ * writes it onto a saved request (issue #759), and `start_load_run`, which lays
+ * it over a composed payload (#760) - so the two cannot come to disagree about
+ * what the engine accepts.
+ */
+export const MAX_REDIRECTS_BOUND = 100;
+
+/**
+ * The recording knobs the app's load dialog sends, as `{tool argument: run
+ * config key}`. Two spellings because the engine's are snake_case here and only
+ * here - `success_sample_rate` is not a rate but a *period* (keep 1 in N), and
+ * the app's own `StartLoadTestRequest` carries a comment saying so. The
+ * argument is named for what the value means; the payload key stays the
+ * engine's, so `get_run_report`'s echo of the config snapshot matches what a
+ * run was started with.
+ */
+const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]> = [
+	["successSamplePeriod", "success_sample_rate"],
+	["slowRequestThresholdMs", "slow_threshold_ms"],
+	["saveTimingBreakdown", "save_timing_breakdown"],
+];
+
+/**
+ * Copy the recording knobs and the run comment onto a `POST /runs` payload.
+ *
+ * Shared by both load paths because both read them: a scenario load run is
+ * driven by the same `RunContext`, whose constructor is the one place
+ * `success_sample_rate` / `save_timing_breakdown` / `slow_threshold_ms` are
+ * read (`core/run_manager.cpp`), and `comment` is lifted into the run summary
+ * and the report's `metadata.configuration` by `routes/runs.cpp` whichever
+ * executor produced the run. Forwarding them on one path only would have been a
+ * knob that silently did nothing on the other.
+ *
+ * Absent stays absent - never defaulted - because each of these has an engine
+ * default a stated value would overwrite, and "the caller said nothing" and
+ * "the caller asked for the default" are the same run only by accident.
+ */
+function applyRecordingKnobs(
+	args: Record<string, unknown>,
+	payload: Record<string, unknown>
+): void {
+	for (const [argument, configKey] of LOAD_RECORDING_FIELDS) {
+		const value = args[argument];
+		if (typeof value === "number" || typeof value === "boolean") payload[configKey] = value;
+	}
+	const comment = str(args, "comment");
+	if (comment !== undefined) payload.comment = comment;
+}
 
 // --- Shared input schema fragments ------------------------------------------
 
@@ -1757,9 +1849,11 @@ function requestSettingsInput() {
 			.number()
 			.int()
 			.min(0)
-			.max(100)
+			.max(MAX_REDIRECTS_BOUND)
 			.optional()
-			.describe("How many redirects to follow before giving up (default 10, 0-100)."),
+			.describe(
+				`How many redirects to follow before giving up (default 10, 0-${MAX_REDIRECTS_BOUND}).`
+			),
 		httpVersion: z
 			.enum(HTTP_VERSIONS)
 			.optional()
@@ -1795,6 +1889,86 @@ function applyRequestSettings(
 	for (const key of REQUEST_SETTINGS_KEYS) {
 		if (args[key] !== undefined) payload[key] = args[key];
 	}
+}
+
+// --- OAuth 2.0 token cache ---------------------------------------------------
+
+/**
+ * The `oauth2` config block, shaped as the engine reads it (`oauth_client.cpp`)
+ * and as a saved request's `auth` already carries it - so an agent can lift the
+ * block out of `list_requests` and hand it to `fetch_oauth2_token` unchanged.
+ *
+ * `passthrough` rather than an enumerated object for the same reason
+ * {@link authInput} is: the engine owns which fields a grant needs, and a
+ * closed schema here would refuse a config the engine accepts the day a field
+ * is added. What is enumerated is the one field this layer decides on -
+ * `grantType`, because the interactive grant is refused before the call.
+ */
+const oauth2ConfigInput = z
+	.object({
+		grantType: z
+			.string()
+			.describe(
+				"client_credentials | password. `authorization_code` is refused here - it needs a browser, so authorize it in the app."
+			),
+		accessTokenUrl: z.string().describe("The provider's token endpoint (http(s))."),
+		clientId: z.string().describe("OAuth 2.0 client id."),
+	})
+	.passthrough()
+	.describe(
+		"The OAuth 2.0 config to acquire a token for - the same block a saved request's `auth` carries, so it can be copied from list_requests verbatim. Beyond the three required fields the engine reads clientSecret, username/password (password grant), scope, audience, resource, refreshTokenUrl, autoRefreshToken, clientAuthentication and credentialsId. The cache key is derived from accessTokenUrl + clientId + credentialsId + username: configs differing only in scope share one cached token, so set a distinct `credentialsId` to keep them apart."
+	);
+
+/** The engine-derived key one cache entry lives under. */
+const oauth2CacheKeyInput = z
+	.string()
+	.describe(
+		"The cache key, as returned in `cacheKey` by fetch_oauth2_token (or shown by the app's auth tab). Derived engine-side from the config; there is no way to compose one here that would be guaranteed to match."
+	);
+
+/**
+ * Why the interactive grant is refused rather than attempted.
+ *
+ * Two reasons, and the second is the load-bearing one. It cannot work: the
+ * exchange needs a browser and the loopback listener `oauth_authorize.cpp`
+ * binds, which the app drives and MCP has no place in. And it must not be
+ * *attempted*, because `acquire_token` answers a cache hit before it ever looks
+ * at the grant - so a call naming a config whose accessTokenUrl / clientId /
+ * credentialsId happen to match an entry the user authorized interactively
+ * would return that entry without proving anything. Refusing on `grantType`
+ * closes the shape of that call rather than trusting the redaction below to
+ * make it harmless.
+ */
+const OAUTH2_INTERACTIVE_REFUSAL =
+	'The `authorization_code` grant is not available over MCP: it redirects through a browser to a loopback listener the app owns, and an agent cannot complete that exchange. Authorize it once in Vayu (the request\'s Auth tab -> "Get New Access Token"); the token lands in the same engine cache these tools read, so get_oauth2_token_status and clear_oauth2_token work on it afterwards. For a machine-to-machine flow use `client_credentials`.';
+
+/**
+ * The engine's token record with the bearer removed.
+ *
+ * **The decision, stated rather than implied:** no MCP tool returns access
+ * token bytes. The engine is what applies a token to a request - an agent names
+ * a config and the run authenticates - so the bytes buy an agent nothing it can
+ * use through Vayu, while handing them over turns a token the *user* acquired
+ * (including through a browser flow no agent could complete) into something an
+ * agent can carry off this machine. Everything an agent legitimately needs from
+ * the cache is its shape: which key, what type, which scopes, when it expires,
+ * whether a refresh token came with it.
+ *
+ * `accessTokenWithheld` is stated rather than left as a silent omission,
+ * because an agent that finds no `accessToken` and is not told why concludes
+ * the acquisition half-failed and retries with `force`.
+ */
+export function projectOAuth2Token(token: unknown): unknown {
+	if (!isRecord(token)) return token;
+	const { accessToken: _withheld, ...rest } = token;
+	return { ...rest, accessTokenWithheld: true };
+}
+
+/** `GET /oauth2/token`'s answer, with the nested token record projected. */
+export function projectOAuth2Status(status: unknown): unknown {
+	if (!isRecord(status)) return status;
+	if (!isRecord(status.token)) return status;
+	return { ...status, token: projectOAuth2Token(status.token) };
 }
 
 // --- Structured output schemas ----------------------------------------------
@@ -2211,6 +2385,14 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 	["bodyType", "each step keeps its own stored body"],
 	["auth", "each step's auth is resolved from the request and its collection chain"],
 	["httpVersion", "each step keeps its own stored protocol"],
+	[
+		"followRedirects",
+		"each step keeps its own stored redirect policy - set it on the saved request",
+	],
+	[
+		"maxRedirects",
+		"each step keeps its own stored redirect policy - set it on the saved request",
+	],
 	["postRequestScript", "each step runs the scripts stored on it and its collection chain"],
 	["tests", "each step runs the scripts stored on it and its collection chain"],
 	[
@@ -2351,6 +2533,10 @@ async function startScenarioLoadRun(
 	if (args.thresholds && typeof args.thresholds === "object")
 		payload.thresholds = args.thresholds;
 	if (monitor && typeof monitor === "object") payload.monitor = monitor;
+	// And for the same reason again: the recording knobs are read by the
+	// `RunContext` both executors share, so a scenario run keeps traces on the
+	// terms an agent stated exactly as a single-target run does.
+	applyRecordingKnobs(args, payload);
 	const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
 	if (cappedDuration !== null) payload.duration = cappedDuration;
 
@@ -4679,7 +4865,7 @@ export const TOOLS: McpTool[] = [
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		annotations: {
 			title: "Start load test",
 			readOnlyHint: false,
@@ -4871,6 +5057,59 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus the sample and failed-scrape counts. Omit for a run that measures only the client side."
 				),
+			// The redirect policy of the request being load-tested. A saved
+			// request carries its own (composed in, never elided), so these are
+			// the override; an ad-hoc target has none, so they are the only way to
+			// state one at all. Load-shape arguments they are not - which is why a
+			// scenario run refuses them by name rather than ignoring them.
+			followRedirects: z
+				.boolean()
+				.optional()
+				.describe(
+					"Whether a 3xx is followed (engine default: true). With `requestId`, overrides the policy stored on that request; on an ad-hoc target this is how the policy is stated at all. A load test that follows redirects measures the whole chain, so its latency is the chain's, not the first hop's."
+				),
+			maxRedirects: z
+				.number()
+				.int()
+				.min(0)
+				.max(MAX_REDIRECTS_BOUND)
+				.optional()
+				.describe(
+					`How many redirects may be followed, 0-${MAX_REDIRECTS_BOUND} (engine default: 10; 0 means a 3xx is returned as the response). Requires \`followRedirects\` to be on to have any effect.`
+				),
+			// The recording knobs the app's load dialog sets. None of them changes
+			// what the run *sends* - they decide what it keeps - so none takes a
+			// gate of its own beyond the ones the run already passed.
+			comment: z
+				.string()
+				.optional()
+				.describe(
+					"A note stamped on the run, shown beside it in History and in the report's `metadata.configuration`. Use it to say what the run was for - the reason a report is worth keeping is rarely recoverable from its numbers."
+				),
+			successSamplePeriod: z
+				.number()
+				.int()
+				.min(1)
+				.max(MAX_SUCCESS_SAMPLE_PERIOD)
+				.optional()
+				.describe(
+					`Keep 1 in N successful responses (the engine's \`success_sample_rate\`, which is a period and not a percentage): 1 keeps every one, 100 keeps 1%. Default 100. Only sampled responses carry a timing breakdown, and only if \`saveTimingBreakdown\` is on. Range 1-${MAX_SUCCESS_SAMPLE_PERIOD}; 0 is a division by zero engine-side and is refused here.`
+				),
+			slowRequestThresholdMs: z
+				.number()
+				.int()
+				.min(0)
+				.max(MAX_SLOW_THRESHOLD_MS)
+				.optional()
+				.describe(
+					'Capture any completion at or above this many milliseconds as an outlier, whatever the sampling period keeps. 0 disables outlier capture. This is the knob that answers "what did the slow 1% look like" - the sampled subset is uniform and will not contain them.'
+				),
+			saveTimingBreakdown: z
+				.boolean()
+				.optional()
+				.describe(
+					"Store the per-phase timing (DNS, connect, TLS, TTFB) of each sampled success, which is what fills the report's timing-breakdown section. Off by default - a breakdown is stored per retained record, so it is the knob that decides whether the run keeps traces at all."
+				),
 			requestId: z
 				.string()
 				.optional()
@@ -5007,6 +5246,7 @@ export const TOOLS: McpTool[] = [
 			if (monitor && typeof monitor === "object") {
 				payload.monitor = monitor;
 			}
+			applyRecordingKnobs(args, payload);
 			// An omitted duration is 60s engine-side, not "unbounded" and not
 			// "capped" - so a cap under 60s has to be sent as an explicit field
 			// or it never reaches the run.
@@ -5223,6 +5463,95 @@ export const TOOLS: McpTool[] = [
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
+		},
+	},
+	{
+		name: "fetch_oauth2_token",
+		category: "execute",
+		invalidates: ["oauth"],
+		description:
+			"Acquire an OAuth 2.0 token for a client_credentials or password config and cache it engine-side, so the next run_request / start_load_run carrying the same config authenticates without a round trip - and so a token problem surfaces here, named, instead of as a wall of 401s inside a run. Pass `force: true` to refresh a token that is cached but stale. The interactive authorization_code grant is refused: it needs a browser and a loopback redirect the app owns, so authorize it there once and the cache this tool reads is the same one. GUARDED: the token endpoint's host must be on Vayu's MCP allowlist. The access token itself is never returned - what comes back is the cache entry's shape (key, type, scope, expiry, whether a refresh token came with it), because the engine applies the token to requests and nothing an agent does with the bearer needs its bytes.",
+		annotations: {
+			title: "Fetch OAuth 2.0 token",
+			readOnlyHint: false,
+			// It contacts a third party and writes a credential into the engine's
+			// cache, replacing whatever was there for that key.
+			destructiveHint: true,
+			openWorldHint: true,
+		},
+		inputSchema: {
+			config: oauth2ConfigInput,
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Refresh even when a valid token is cached. The engine uses the stored refresh token when the config allows it and falls back to a fresh grant. Default false - a cached, unexpired token is returned as-is."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const config = isRecord(args.config) ? args.config : undefined;
+			if (!config) return errorResult('"config" must be an OAuth 2.0 config object.');
+			const grantType = str(config, "grantType");
+			if (grantType === "authorization_code") {
+				return errorResult(OAUTH2_INTERACTIVE_REFUSAL);
+			}
+			// Both URLs the engine may post to. The refresh URL defaults to the
+			// token URL engine-side, so it is only checked when it names a
+			// different host - a gate that read one of the two would be a gate a
+			// config can walk around.
+			for (const key of ["accessTokenUrl", "refreshTokenUrl"]) {
+				const url = str(config, key);
+				if (url === undefined || url === "") continue;
+				const gate = checkAllowlist(url, ctx.config);
+				if (!gate.ok) return errorResult(`${key}: ${gate.error!}`);
+			}
+			const payload: Record<string, unknown> = { config };
+			if (args.force === true) payload.force = true;
+			return callEngine(
+				() => ctx.client.fetchOAuth2Token(payload, signal),
+				(answer) => projectOAuth2Token(answer)
+			);
+		},
+	},
+	{
+		name: "get_oauth2_token_status",
+		category: "read",
+		invalidates: [],
+		description:
+			"Ask whether a token is cached for a cache key, and whether it has expired - the read behind 'is this flow failing because the token went stale?'. The cache key is the `cacheKey` fetch_oauth2_token returned; the engine derives it from the token URL, client id, credentials id and (for password grants) the username, so configs differing only in scope share one entry. An absent entry is an answer (`found: false`), not an error. The access token is never returned, only the shape of the entry - see fetch_oauth2_token.",
+		annotations: {
+			title: "OAuth 2.0 token status",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: { cacheKey: oauth2CacheKeyInput },
+		handler: (args, ctx, signal) =>
+			callEngine(
+				() => ctx.client.getOAuth2TokenStatus(requireStr(args, "cacheKey"), signal),
+				(answer) => projectOAuth2Status(answer)
+			),
+	},
+	{
+		name: "clear_oauth2_token",
+		category: "write",
+		invalidates: ["oauth"],
+		description:
+			"Drop the cached token for a cache key, so the next request that uses that config acquires a fresh one - the tool equivalent of the auth tab's Clear button. Use it when a provider has revoked or rotated credentials and the cache is still serving the old token. Idempotent: clearing a key nothing is cached under reports `deleted: false` rather than failing. No confirmation - nothing saved is lost, only a credential a re-fetch restores. GUARDED: requires write access to be enabled in Vayu Settings.",
+		annotations: {
+			title: "Clear OAuth 2.0 token",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: { cacheKey: oauth2CacheKeyInput },
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			return callEngine(() =>
+				ctx.client.clearOAuth2Token(requireStr(args, "cacheKey"), signal)
+			);
 		},
 	},
 	{

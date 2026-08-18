@@ -184,8 +184,11 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
+| `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
+| `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
+| `clear_oauth2_token`   | write    | `DELETE /oauth2/token?key=`                  | write toggle; idempotent - `deleted: false` when nothing was cached |
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
 | `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
 | `stop_mock_issuer`     | execute  | `POST /mock-issuer/:id/stop`                 | - (unknown id is a `404`, surfaced as a tool error) |
@@ -215,6 +218,29 @@ Notes:
   the 60s other modes fall back to), so a cap between those two values still
   injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+- **What a load run *keeps* is settable too** (issue #760), which is what the
+  MCP surface was missing rather than any part of the load shape:
+  `successSamplePeriod` (the engine's `success_sample_rate` - a **period**, keep
+  1 in N, not a percentage; the argument is named for what the value means and
+  the payload key stays the engine's), `slowRequestThresholdMs`,
+  `saveTimingBreakdown` and `comment`. All four reach a **scenario** run too:
+  both executors read them off the one `RunContext`, and `comment` is lifted
+  into the run summary and the report's `metadata.configuration` whichever
+  produced the run. Bounds mirror `validate_run_config`, so a value the schema
+  accepts is one `POST /runs` accepts, and an absent knob stays absent - each has
+  an engine default a stated value would overwrite.
+  The **redirect policy** (`followRedirects` / `maxRedirects`) belongs to the
+  request half instead: it rides through `POST /compose` beside the method and
+  the body, overriding a saved request's stored policy or supplying the only one
+  an ad-hoc target has. A scenario run refuses both by name, as it does every
+  other single-target field - each step keeps the policy stored on it.
+  `maxRedirects` is bounded 0-100 here because `POST /runs` has no guard of its
+  own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
+  *unlimited*.
+  **There is no per-run timeout, and that is not an omission**: the engine has
+  no such field - every transfer is bounded by the `defaultTimeout` setting
+  (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
+  here so it is not re-derived as a gap each time the schema is read.
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the
@@ -506,6 +532,33 @@ Notes:
   could not be read), because a matrix whose `total` silently excludes nested
   folders reads as a whole-collection pass. Requests run serially, so a large
   collection takes as long as its requests do added together.
+- **The OAuth 2.0 token tools** (issue #760) are how an agent gets a token
+  problem named instead of discovering it as a wall of 401s inside a run:
+  `fetch_oauth2_token` acquires (or force-refreshes) a token for a config and
+  caches it engine-side, `get_oauth2_token_status` says whether an entry exists
+  and whether it has expired, and `clear_oauth2_token` drops one. The config is
+  the same block a saved request's `auth` carries, so it can be copied out of
+  `list_requests` verbatim; the **cache key is the engine's**
+  (`accessTokenUrl` + `clientId` + `credentialsId` + username), so configs
+  differing only in scope share an entry and a distinct `credentialsId` is what
+  separates them.
+  Two rules here are security decisions rather than plumbing, and both are
+  stated in the tool descriptions so an agent reads them before it reads a
+  refusal. **No tool returns access-token bytes.** The engine is what applies a
+  token to a request, so the bytes buy an agent nothing it can use through Vayu,
+  while handing them over would turn a credential the *user* acquired into
+  something an agent can carry off the machine; what comes back is the entry's
+  shape - key, type, scope, expiry, whether a refresh token came with it - plus
+  an explicit `accessTokenWithheld`, because an agent that finds no token and is
+  not told why concludes the acquisition half-failed. And **the
+  `authorization_code` grant is refused before the engine is called**, not
+  merely because the browser exchange is one MCP cannot drive: `acquire_token`
+  answers a cache hit *before* it looks at the grant, so a call naming a config
+  that happened to match an entry the user authorized interactively would
+  otherwise reach into it. The refusal names the app's Auth tab as the place to
+  authorize, and the entry that lands there is the one these tools then read.
+  The allowlist gate covers `refreshTokenUrl` as well as `accessTokenUrl` - a
+  gate that read one of two URLs is a gate a config can walk around.
 - **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
   own tokens: `start_mock_issuer` stands up a
   [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
@@ -700,6 +753,15 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   request the call sent. A `postRequestScript` reads the same set as
   `pm.request.headers` (see
   [scripting.md](scripting.md#request-object-pmrequest)).
+- **Transport fields** - `httpVersion` rides the inline overlay for both tools,
+  and `start_load_run` adds `followRedirects` / `maxRedirects` (issue #760).
+  They belong here rather than beside the load shape because they describe the
+  *request*: `POST /compose` emits all three on a stored request under the
+  never-elided rule, so an agent's value has to be laid over the composed
+  payload the same way a URL override is. A URL-only run has no stored row
+  behind it, which makes this the only way its redirect policy gets stated at
+  all. `verifySSL` is the one transport field neither tool writes yet -
+  [#795](https://github.com/athrvk/vayu/issues/795).
 - **Streaming** - `run_request` takes `stream: true` for a `text/event-stream`
   endpoint (issue #575). `tools/call` is request/response, so the tool does not
   stream to the agent: it starts the run, reads the relay for at most
@@ -896,6 +958,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
+| `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
 | `vayu://run/{runId}/report` | A run's full report (templated). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
@@ -912,6 +975,16 @@ anything else a script in the app can. What an agent lacked was any way to
 sentences in those fields' descriptions, so `pm.expect` chains,
 `pm.response.to.*`, the variable scopes and `pm.crypto` were invisible and
 simply never attempted.
+
+Two resources, because a name and a signature are different questions.
+`vayu://scripting/completions` re-serves `GET /scripting/completions` (Monaco's
+own fields projected away) and answers *what exists*;
+`vayu://scripting/types` re-serves `GET /scripting/types`, the `.d.ts` the
+engine generates from the same table, and answers *what it takes and returns*
+(issue #760). Both throw rather than serve a partial surface - an agent reading
+a truncated API list concludes the sandbox cannot do what it can - and neither
+holds a copy of the surface here, which is the whole point: the app's own
+quick-reference panel had gone stale before #233 and this is what replaced it.
 
 #### `pm.sendRequest` is refused for MCP-started runs
 
@@ -978,7 +1051,7 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
 | `summarize_run`        | `runId`                  | The run report + a "summarize p50/p95/p99, errors, health". |
-| `compare_runs`         | `baseRunId, targetRunId` | The computed delta + "did this regress?".                   |
+| `compare_runs`         | `baseRunId?, targetRunId` | The computed delta + "did this regress?". An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
 | `diagnose_errors`      | `runId`                  | The report + an error-focused diagnosis prompt.             |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
 
@@ -1187,7 +1260,8 @@ collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
-(`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`)
+(`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`,
+`oauth`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
 itself named; it carries no engine data, so the
 renderer still reads every row through its query layer. The five hints are read
@@ -1205,7 +1279,13 @@ refetched - a cleared capture list would union its destroyed rows straight back,
 and a stopped mock's route table has no live id left to refetch from. `service`
 is deliberately one family covering inboxes, mock servers and issuers, because
 the surfaces that read them - the Services drawer and the Dock's
-running-services count - ask "what is listening" rather than "which kind". The renderer side, including
+running-services count - ask "what is listening" rather than "which kind".
+`oauth` (issue #760) carries **no** hint of its own even though a cache key
+exists: an agent names the key it clears, but the key a `fetch_oauth2_token`
+writes under is derived engine-side and appears only in the answer, so a hint
+would be present for one tool and absent for the other - the shape that leaves
+a stale row exactly when it matters. The family is invalidated at its prefix
+instead. The renderer side, including
 which query keys each family maps to, is in
 [`docs/app/state-management.md`](../app/state-management.md).
 

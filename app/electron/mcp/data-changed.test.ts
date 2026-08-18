@@ -74,6 +74,11 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		startMockIssuer: vi.fn().mockResolvedValue({ issuerId: "issuer_1" }),
 		stopMockIssuer: vi.fn().mockResolvedValue({ stopped: true }),
 		updateMockIssuer: vi.fn().mockResolvedValue({ issuerId: "issuer_1", failureMode: "slow" }),
+		fetchOAuth2Token: vi
+			.fn()
+			.mockResolvedValue({ cacheKey: "key_1", accessToken: "bearer", expiresIn: 3600 }),
+		getOAuth2TokenStatus: vi.fn().mockResolvedValue({ found: true, expired: false }),
+		clearOAuth2Token: vi.fn().mockResolvedValue({ deleted: true }),
 		composeRequest: vi
 			.fn()
 			.mockImplementation((body: { request?: object }) =>
@@ -174,6 +179,11 @@ describe("the registry declares its effects", () => {
 			start_mock_issuer: ["service"],
 			stop_mock_issuer: ["service"],
 			update_mock_issuer: ["service"],
+			// The OAuth 2.0 token cache (#760): both change what the auth tab's
+			// token-status row reports, and it polls at 30s - long enough to keep
+			// showing an entry an agent has already cleared.
+			fetch_oauth2_token: ["oauth"],
+			clear_oauth2_token: ["oauth"],
 		};
 		for (const [name, entities] of Object.entries(expected)) {
 			const tool = TOOLS.find((t) => t.name === name);
@@ -468,6 +478,37 @@ describe("dispatch emits mcp:data-changed", () => {
 		const res = await dispatchTool("update_mock_issuer", { issuerId: "issuer_1" }, ctx);
 		expect(res.isError).toBe(true);
 		expect(client.updateMockIssuer).not.toHaveBeenCalled();
+		expect(onDataChanged).not.toHaveBeenCalled();
+	});
+
+	test("a token fetch and a token clear report the oauth family", async () => {
+		const acquired = ctxWithNotifier(fakeClient(), { allowlist: ["id.example.com"] });
+		const fetched = await dispatchTool(
+			"fetch_oauth2_token",
+			{
+				config: {
+					grantType: "client_credentials",
+					accessTokenUrl: "https://id.example.com/token",
+					clientId: "client_a",
+				},
+			},
+			acquired.ctx
+		);
+		expect(fetched.isError).toBeFalsy();
+		// No scope hint: the key a fetch writes under is derived engine-side and
+		// appears only in the answer, so the family is invalidated at its prefix.
+		expect(acquired.onDataChanged).toHaveBeenCalledWith({ entity: "oauth" });
+
+		const cleared = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
+		const res = await dispatchTool("clear_oauth2_token", { cacheKey: "key_1" }, cleared.ctx);
+		expect(res.isError).toBeFalsy();
+		expect(cleared.onDataChanged).toHaveBeenCalledWith({ entity: "oauth" });
+	});
+
+	test("reading a token's status emits nothing", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient());
+		const res = await dispatchTool("get_oauth2_token_status", { cacheKey: "key_1" }, ctx);
+		expect(res.isError).toBeFalsy();
 		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 

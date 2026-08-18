@@ -15,6 +15,7 @@
 
 import { z } from "zod";
 import type { ToolContext } from "./tools.js";
+import { resolveBaseline } from "./tools.js";
 import { compareReports } from "./compare.js";
 
 export interface PromptMessage {
@@ -72,12 +73,26 @@ export const PROMPTS: McpPromptDef[] = [
 		title: "Compare two runs",
 		description: "Compare two runs and assess whether performance regressed.",
 		argsSchema: {
-			baseRunId: z.string().describe("Baseline run ID (e.g. main)."),
+			// Optional, matching the `compare_runs` *tool*: it has resolved the
+			// target's pinned baseline since it shipped, and a prompt that
+			// demanded both ids described a capability narrower than the one
+			// behind it - the user was asked for a run id Vayu already knew.
+			baseRunId: z
+				.string()
+				.optional()
+				.describe(
+					"Baseline run ID (e.g. main). Leave it out to compare against the run pinned as baseline for whatever saved request the target ran."
+				),
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},
 		build: async (args, ctx, signal) => {
-			const baseRunId = arg(args, "baseRunId");
 			const targetRunId = arg(args, "targetRunId");
+			// Resolution failures throw with the fix named ("pin one, or pass
+			// baseRunId"), which is the answer the user needs - a prompt built
+			// against some other run would read as a regression report about a
+			// comparison nobody asked for.
+			const baseRunId =
+				arg(args, "baseRunId") || (await resolveBaseline(targetRunId, ctx, signal));
 			const [base, target] = await Promise.all([
 				ctx.client.getRunReport(baseRunId, signal),
 				ctx.client.getRunReport(targetRunId, signal),
@@ -136,7 +151,10 @@ export const PROMPTS: McpPromptDef[] = [
 				messages: [
 					userText(
 						`Design a load test with Vayu's start_load_run tool for ${url}. Goal: ${goal}.\n\n` +
-							"Recommend a mode (constant_rps, constant_concurrency, ramp_up, or iterations), a " +
+							"Recommend a mode - constant_rps, constant_concurrency, ramp_up, iterations, or " +
+							"capacity, which searches for the highest concurrency that still holds a p99 " +
+							"budget (`sloMs`) and is the mode to reach for when the goal is a number for " +
+							"'how much can it take' rather than a verdict at one load level. Then a " +
 							"starting RPS/concurrency, a duration, and how to iterate (e.g. ramp until p99 " +
 							"exceeds an SLO). Explain the reasoning, then propose the exact start_load_run " +
 							"arguments. Respect Vayu's configured caps and the host allowlist."
