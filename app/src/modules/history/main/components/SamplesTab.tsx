@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui
 import { EmptyState, SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import SampleRequestCard from "./SampleRequestCard";
+import { sampleResultsWithoutValidationRow } from "../test-validation";
 import type { TabProps, SampleResult } from "../../types";
 
 export default function SamplesTab({ report }: TabProps) {
@@ -29,7 +30,12 @@ export default function SamplesTab({ report }: TabProps) {
 		expandedIndex !== null
 	);
 
-	if (!report.results || report.results.length === 0) {
+	// The synthetic test-validation row is not a captured request - it carries no
+	// response, so this tab would draw it as a status-0 card with nothing behind
+	// it. Its failures are named in the Overview instead (issue #726).
+	const samples = sampleResultsWithoutValidationRow(report.results);
+
+	if (samples.length === 0) {
 		return (
 			<Card>
 				{/* The card supplies the frame; EmptyState brings its own padding, so
@@ -51,18 +57,18 @@ export default function SamplesTab({ report }: TabProps) {
 				<div className="flex items-center justify-between">
 					<CardTitle className="text-base">Sampled Request Details</CardTitle>
 					<Badge variant="secondary" className="text-xs">
-						{report.results.length} samples shown
+						{samples.length} samples shown
 					</Badge>
 				</div>
 			</CardHeader>
 			<CardContent className="space-y-2">
 				<SampleRetentionNote
 					sampling={report.sampling}
-					shown={report.results.length}
+					shown={samples.length}
 					budget="traces"
 				/>
 				<CapturedDataWarning sampling={report.sampling} />
-				{report.results.map((sample: SampleResult, idx: number) => (
+				{samples.map((sample: SampleResult, idx: number) => (
 					<SampleRequestCard
 						key={idx}
 						sample={sample}

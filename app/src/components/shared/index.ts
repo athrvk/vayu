@@ -35,6 +35,9 @@ export * from "./ContractCoverage";
 // "30 of 36 sampled responses matched their schema" - beside the coverage block
 export * from "./SampledSchemaValidation";
 
+// "982 of 1,000 assertions passed" - a load run's test outcome, live and stored
+export * from "./TestValidationSummary";
+
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";
 

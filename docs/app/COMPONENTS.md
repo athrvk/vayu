@@ -430,6 +430,7 @@ Three rules the list holds, each pinned by a mutation-checked test:
 - **Rows key on `(iteration, stepIndex)`, never arrival order.** The SSE ring replays from `Last-Event-ID` on reconnect, so a client that resumed mid-run receives events it has already rendered; appending would double every row it re-saw. A malformed `step` payload is dropped by `parseStepEvent` rather than defaulted, because a defaulted `0:0` would *collide* with the real first step.
 - **`skipped` is never `passed`.** It has its own count and its own row treatment (`SampledExchange`'s `state` prop, below). Nothing produces `skipped` until flow control lands, so it is built to render correctly before it can occur.
 - **Thinned results say so.** A run that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every non-passing step among the ones kept - so a non-zero `stepsDropped` means *successes* are missing. `ScenarioRunView` discloses the three numbers rather than letting `results[]` read as the whole run.
+- **The four chips count the run, not the rows** (issue #726). `outcomeCountsFromReport` reads `report.scenario.passed/failed/skipped/errored` - the engine's exact whole-run totals - and `countOutcomes(steps)` is only the fallback for a live run whose report has not landed yet. Counting rows would undercount `passed` on any thinned run, since thinning drops passes alone: a 6,000-step run keeping 5,000 rows read "4,990 passed" beside a header claiming 6,000 steps, so the chip silently changed meaning with run size. The stored-row count stays the list's own disclosure line above.
 
 A live run can be **stopped** from this tab (`StopRunButton`, below), which matters most for a data-driven run of hundreds of iterations. The control is shown while `isStreaming || run.status is running|pending` - two signals rather than one, because a tab reopened onto a run that is still executing (after a relaunch, or from History) has no stream at all, and is exactly the case where waiting the run out hurts most. It calls `POST /runs/:id/stop`, which needs nothing new engine-side: the scenario runner already checks `should_stop` per *step*, settles the run to `Stopped` and closes the SSE topic, so the streaming tab flips to the stored rows through the same `complete` a normal finish takes. The handler also invalidates the run and its report itself, because a tab that is not the streaming one never receives that event.
 
@@ -481,10 +482,10 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
+| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `ContractCoverage`, `SampledSchemaValidation` and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`); silent for a clean run |
 | `PerformanceTab.tsx` | Latency/throughput detail |
-| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
+| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
@@ -931,9 +932,11 @@ retry is the reason for saying anything.
 
 One sentence, wherever a sampled set is displayed: how many records the run's
 bounded stores displaced, and that what is on screen is drawn uniformly from
-the whole run rather than its opening. Three surfaces show such a set - the
-dashboard's Sampled Requests and Test Validation cards, and the history Samples
-tab - so the wording lives here once instead of being written out three times.
+the whole run rather than its opening. Several surfaces show such a set - the
+dashboard's Sampled Requests card, the history Samples tab, and the shared
+`TestValidationSummary` (itself rendered in both the dashboard and the history
+Overview) - so the wording lives here once instead of being written out per
+surface and drifting.
 
 Renders nothing when the run displaced nothing, and nothing when the run
 reported no counts at all (an older summary): "nothing was dropped" and "we
@@ -1055,6 +1058,41 @@ failure; a run that checked nothing stays neutral rather than borrowing the
 vocabulary of a failed budget.
 
 The file keeps the name it was given for the load-mode block it was written for.
+
+## Test Validation Summary (`components/shared/TestValidationSummary.tsx`)
+
+Whether a load run's own `pm.test` assertions passed (`RunReport.testValidation`,
+issue #726): samples tested, assertions passed and failed, the success rate, and
+- for the surfaces that have nowhere else to put them - the named failures.
+
+It is the **assertion** counterpart of `SampledSchemaValidation` above it: that
+one judges a response against the contract the run was planned with, this one
+judges it against the scripts the run carries. `ThresholdVerdict` is the third
+reading of the same run and the aggregate of both, since a script sees one
+response at a time and cannot assert a p99.
+
+Two surfaces render it - the live dashboard's `RequestResponseView` and the
+history detail's Overview - and until #726 only the first did. The dashboard is
+mounted **only while a run is being watched**, so a run reopened from History
+showed thresholds, status codes and schema verdicts and never said whether its
+assertions had run at all: a run that failed 13 of 100 sampled test executions
+read exactly like one that asserted nothing, precisely where someone audits
+results.
+
+**The named failures are the History half only.** The engine records them on a
+*synthetic* result row - `run_manager.cpp` appends one `Result` whose
+`trace_data` is `{failures[], totalFailed, totalPassed}`, with `statusCode 0` and
+the error "Script validation failures" - which rides in `report.results` beside
+the real samples. The dashboard lists each failure inline beside that row, so it
+passes the aggregate alone. History cannot: its Samples tab would draw the row as
+a status-0 card with no request behind it, so `main/test-validation.ts` lifts the
+failures out for the Overview to name and filters the row out of the samples
+list. `trace.failures` is what identifies the row - no captured request carries
+it, and the status-0 code alone would also match a real connection failure.
+
+Absent-vs-zero, as everywhere in this family: a run that asserted nothing has no
+`testValidation` at all and renders **nothing**. A shorter failure list than
+`totalFailed` says "Showing N of M" rather than reading as the whole set.
 
 ## Captured Data Warning (`components/shared/CapturedDataWarning.tsx`)
 

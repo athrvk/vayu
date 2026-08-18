@@ -24,31 +24,50 @@ name: Warm build cache
 # platforms. `restore-keys` does not help: it is a key-prefix fallback *within*
 # the scopes a run can already read, not a way out of the scope boundary.
 #
-# Deliberately **not** here: an engine compile to warm sccache. It would not
-# help a release. `engine/include/vayu/core/constants.hpp` builds
-# `DEFAULT_USER_AGENT` from `VAYU_VERSION_STRING`, and 46 files include that
-# header (transitively, near enough all 68 translation units), so the version
-# bump in a release commit changes the preprocessed text of essentially every
-# object file. sccache is content-addressed on exactly that text, so a release
-# commit misses by construction no matter how warm master is. The one time it
-# ever hit - 98.42% on the v0.16.0 retry - the *same tag* had already compiled
-# the *same commit* in a failed attempt an hour earlier. Until that include is
-# narrowed (move `DEFAULT_USER_AGENT` out of `constants.hpp` so a version bump
-# touches ~5 translation units instead of ~68), warming sccache here would burn
-# ~25 minutes of runner time per merge to speed up nothing.
+# Also warmed here: an engine compile that writes sccache entries to the
+# **default-branch scope**, the same store the release build reads. This used to
+# be excluded on purpose, and the reasoning is worth keeping because it explains
+# exactly when the warming pays off. sccache is content-addressed on the
+# preprocessed text of each translation unit plus its compile flags, so a warm
+# entry only serves a build that preprocesses to the same bytes. A version bump
+# changes `VAYU_VERSION_STRING`, so while that string reached ~68 translation
+# units - `engine/include/vayu/core/constants.hpp` built `DEFAULT_USER_AGENT`
+# from it and ~46 files included that header - a release commit missed by
+# construction no matter how warm master was. The one time it ever hit, 98.42%
+# on the v0.16.0 retry, the *same tag* had already compiled the *same commit* in
+# a failed attempt an hour earlier - which is precisely the warm-same-commit
+# scope this job now recreates on purpose.
+#
+# The narrowing shipped in a672f79 (#659 item 5, released in 0.18.0): the version
+# now sits behind a declaration in `core/user_agent.hpp`, so only
+# `user_agent.cpp` re-preprocesses on a bump and the rest of the tree is
+# byte-identical across releases. Warming triggered by the `VERSION` change on
+# master therefore fills the master scope with the same preprocessed text the tag
+# build asks for. It also serves the first push of every pull request, which can
+# read the default-branch scope but not another pull request's. sccache uses the
+# GHA backend (`SCCACHE_GHA_ENABLED`), which is ref-scoped just like the vcpkg
+# archives, and is separate from the vcpkg files backend used below.
 #
 # vcpkg, by contrast, is pure win: its ABI hash covers the ports, the triplet
 # and the compiler, and *not* the top-level manifest, so the dependency
 # archives stay valid across every release forever.
 
 on:
-  # The cache key changes only when the dependency set or the vcpkg baseline
-  # changes, so that is exactly when the archives need rebuilding.
+  # vcpkg archives need rebuilding when the dependency set or the vcpkg baseline
+  # changes; the engine sccache scope needs rewarming when `VERSION` changes,
+  # because that is the one edit a release makes to the engine's preprocessed
+  # text (see the top-of-file note). `VERSION` is the high-value, low-cost
+  # trigger: the release PR's merge commit is byte-identical to the tree the tag
+  # build compiles, so a warm run on the bump fills exactly the keys the release
+  # asks for. `engine/**` would additionally keep the scope warm between releases
+  # and serve first-push PR builds, at ~25 min of runner time per engine merge;
+  # left out for now as the optional half of the trade.
   push:
     branches: [master]
     paths:
       - 'engine/vcpkg.json'
       - 'app/pnpm-lock.yaml'
+      - 'VERSION'
       - '.github/workflows/cache-warm.yml'
   # The guard below is cheap and catches the regressions that would quietly
   # switch this workflow off, so it runs before they can merge.
@@ -202,8 +221,66 @@ jobs:
           fi
           echo "engine/vcpkg.json has no version field."
 
+      - name: Assert the warm engine compile matches release.yml's
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The warm job now compiles the engine to fill the master sccache
+          # scope, and that only helps a release if it compiles the SAME presets
+          # release.yml compiles, through the same compiler launcher and the same
+          # sccache backend. sccache is content-addressed on preprocessed text
+          # plus compile flags, so a preset or launcher drift produces disjoint
+          # keys that look warm and hit nothing. Asserted here rather than
+          # trusted, exactly like the vcpkg key above.
+          rel=".github/workflows/release.yml"
+          warm=".github/workflows/cache-warm.yml"
+
+          # 1. Same set of production presets. Extracted only from YAML preset
+          #    keys, so this guard grades the workflows and not its own prose -
+          #    the same self-grading trap the vcpkg checks avoid (my own lines
+          #    start with `grep`/`for`, never with a `preset:` key). The
+          #    `${{ matrix.preset }}` lines carry no literal token and drop out;
+          #    the concrete tokens come from the matrix `include` blocks and the
+          #    per-arch macOS steps.
+          extract_presets() {
+            grep -oE '^[[:space:]]*(configurePreset|buildPreset|preset): [a-z0-9-]+' "$1" \
+              | grep -oE '[a-z]+-prod(-[a-z0-9]+)?' | sort -u
+          }
+          rel_presets=$(extract_presets "$rel")
+          warm_presets=$(extract_presets "$warm")
+          if [ -z "$rel_presets" ] || [ -z "$warm_presets" ]; then
+            echo "::error::Found no production presets in $rel or $warm - this guard just stopped guarding them." >&2
+            exit 1
+          fi
+          if [ "$rel_presets" != "$warm_presets" ]; then
+            echo "::error::$warm warms a different production preset set than $rel compiles, so the warmed sccache keys are unreachable from the release build." >&2
+            echo "release.yml presets:"    >&2; echo "$rel_presets"  >&2
+            echo "cache-warm.yml presets:" >&2; echo "$warm_presets" >&2
+            exit 1
+          fi
+          echo "Production presets agree: $(echo "$rel_presets" | tr '\n' ' ')"
+
+          # 2. Same sccache backend and compiler launcher in both workflows.
+          #    Each pattern is anchored to the real YAML/`run:` line it matches;
+          #    the pattern strings in this array start with a quote, not with the
+          #    token, so grepping cache-warm.yml for them cannot match this step.
+          patterns=(
+            "^[[:space:]]*SCCACHE_GHA_ENABLED:[[:space:]]*.true."
+            '^[[:space:]]*echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache"'
+            '^[[:space:]]*echo "CMAKE_C_COMPILER_LAUNCHER=sccache"'
+          )
+          for f in "$rel" "$warm"; do
+            for p in "${patterns[@]}"; do
+              if ! grep -qE "$p" "$f"; then
+                echo "::error::$f is missing a line matching /$p/ - the warm compile and the release build must share one sccache backend and launcher, or they key differently." >&2
+                exit 1
+              fi
+            done
+          done
+          echo "sccache backend and compiler launcher agree across both workflows."
+
   warm:
-    name: Warm vcpkg cache on ${{ matrix.os }}
+    name: Warm vcpkg + engine cache on ${{ matrix.os }}
     # Guard first: if the keys disagree, warming the wrong key helps nobody.
     needs: guard
     if: github.event_name != 'pull_request'
@@ -220,16 +297,19 @@ jobs:
           # macOS is the one platform where the release matrix is not the same
           # shape as the pull-request matrix: release.yml builds arm64 and x64
           # separately and lipos them together, so both triplets' dependencies
-          # have to be in the archive for a release to be warm. Handled by the
-          # second configure step below.
+          # and object files have to be warm for a release to be warm. Handled by
+          # the second build step below.
           - os: macos-latest
             preset: macos-prod-arm64
     timeout-minutes: 90
     env:
-      # Keep these three byte-identical to release.yml and pr-tests.yml. The
-      # `guard` job above fails the build if they drift.
+      # Keep these byte-identical to release.yml and pr-tests.yml. The `guard`
+      # job above fails the build if they drift. `SCCACHE_GHA_ENABLED` selects
+      # the ref-scoped GHA backend, so the entries this compile produces land in
+      # the master scope a tag build reads - the whole point of warming here.
       VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
 
     steps:
       - uses: actions/checkout@v7
@@ -274,31 +354,67 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      # Configure only - no `buildPreset`. Configuring runs vcpkg in manifest
-      # mode, which is what populates `.vcpkg-archives`; compiling the engine
-      # afterwards would add nothing this cache can carry (see the note at the
-      # top about sccache and the version header).
-      #
-      # No sccache here either, on purpose: nothing in this job compiles engine
-      # sources, and vcpkg's own dependency builds are already cached by the
-      # archives themselves.
-      - name: Resolve dependencies
+      # sccache, set up exactly as release.yml and pr-tests.yml do (the guard job
+      # asserts the launcher and backend stay in step). The compile below runs
+      # through it and its entries land in the master GHA scope, so a tag build -
+      # and the first push of every pull request - reads them back.
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Configure sccache compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      # Configure AND build. Configuring runs vcpkg in manifest mode, which
+      # populates `.vcpkg-archives`; building compiles the engine through sccache,
+      # which is what fills the master scope the release reads (see the
+      # top-of-file note). Both presets carry `buildPreset` so the same object
+      # files a release compiles are the ones warmed here - the guard asserts the
+      # preset set matches release.yml's.
+      - name: Warm vcpkg archives and the engine sccache scope
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
+          buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
       # The second macOS triplet. release.yml builds x64 through Rosetta and
       # lipos it with arm64; without this the x64 half of every release still
-      # compiles its dependencies from source and macOS stays the long pole.
-      - name: Resolve dependencies (macOS x64)
+      # compiles its dependencies and its sources from cold, and macOS stays the
+      # long pole.
+      - name: Warm vcpkg archives and the engine sccache scope (macOS x64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
+          buildPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Assert the warm compile fed sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          sccache --show-stats
+          # A warm run that compiled nothing wrote nothing to the scope a release
+          # reads, and would otherwise look exactly like success - the same
+          # non-empty-scan discipline the vcpkg archive count enforces below. The
+          # text field is parsed rather than the JSON so a stats-format change on
+          # a future sccache cannot silently break the check.
+          requests=$(sccache --show-stats \
+            | awk '$1=="Compile" && $2=="requests" && $3 ~ /^[0-9]+$/ {print $3; exit}')
+          if [ -z "${requests:-}" ]; then
+            echo "::error::Could not read sccache's compile-request count from --show-stats." >&2
+            exit 1
+          fi
+          echo "sccache handled $requests compile request(s)."
+          if [ "$requests" -eq 0 ]; then
+            echo "::error::sccache processed zero compile requests - the engine did not compile through it, so the master scope was not warmed." >&2
+            exit 1
+          fi
 
       - name: Report what the cache now holds
         shell: bash
