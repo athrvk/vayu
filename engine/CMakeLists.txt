@@ -469,6 +469,7 @@ if(VAYU_BUILD_TESTS)
         tests/load_stream_events_test.cpp
         tests/sse_stream_test.cpp
         tests/transport_policy_test.cpp
+        tests/tls_verification_test.cpp
         tests/client_certificates_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp

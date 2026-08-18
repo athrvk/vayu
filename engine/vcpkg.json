@@ -13,7 +13,12 @@
     "libsodium",
     "nlohmann-json",
     "valijson",
-    "cpp-httplib",
+    {
+      "name": "cpp-httplib",
+      "features": [
+        "openssl"
+      ]
+    },
     "gtest",
     {
       "name": "sqlite3",

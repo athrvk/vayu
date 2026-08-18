@@ -3,12 +3,15 @@
  * @brief The client-certificate registry (issue #707): what a row may say, how
  *        a target picks one, and that the pick reaches every driver.
  *
- * **What is not here, and why.** There is no live mTLS handshake. This suite
- * has no TLS server at all - `cpp-httplib` is built without OpenSSL support in
- * `engine/vcpkg.json`, deliberately - and the certificate *formats* the three
- * CI backends accept differ (Schannel wants a PKCS#12 or a store thumbprint
- * where OpenSSL wants a PEM pair), so a fixture built on checked-in PEMs would
- * fail on Windows while proving nothing about the code under test. What that
+ * **What is not here, and why.** There is no live mTLS handshake. A TLS server
+ * exists in the suite now - #812 added `tests/tls_server.hpp` and the
+ * `cpp-httplib[openssl]` feature it needs - so the first of the two reasons
+ * this was deferred is gone, and what remains is the second and harder one:
+ * the certificate *formats* the CI backends accept differ (Schannel wants a
+ * PKCS#12 or a store thumbprint where OpenSSL wants a PEM pair), so a fixture
+ * that presents one identity everywhere would fail on Windows while proving
+ * nothing about the code under test. #802 owns that matrix, and is expected to
+ * extend `TlsServer` rather than stand up a second listener. What that
  * leaves is covered three ways instead: the lookup is unit-tested at the
  * boundary, the *outcome* of the lookup is asserted end-to-end through the
  * design and stream drivers (both record the entry they matched on the
