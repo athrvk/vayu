@@ -54,10 +54,11 @@ vi.mock("@/queries", () => ({
 		enabled: false,
 	}),
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
-	// The Dock's running-services indicator reads both service lists; with none
-	// running it renders nothing, which is the state this file wants anyway.
+	// The Dock's running-services indicator reads all three service lists; with
+	// none running it renders nothing, which is the state this file wants anyway.
 	useInboxesQuery: () => ({ data: [] }),
 	useMockIssuersQuery: () => ({ data: [] }),
+	useMockServersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({

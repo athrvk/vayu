@@ -60,8 +60,8 @@ Some modules have components displayed in both the sidebar and main content area
 - **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers):
   status, copy-URL, start/stop, and the issuer's start dialog
 - **Also exports** `useRunningServiceCount()`, which the Dock's ambient indicator reads - one
-  count, because the two lists disagree on their own terms (a stopped inbox stays listed, a
-  stopped issuer does not)
+  count over all three lists, because they disagree on their own terms (a stopped inbox stays
+  listed, a stopped issuer or mock server does not)
 - **Usage:**
     ```tsx
     import { ServicesPanel, useRunningServiceCount } from "@/modules/services";

@@ -9,16 +9,16 @@
  * How many local services are running, for the Dock's ambient indicator.
  *
  * One hook rather than each surface counting for itself: the drawer and the
- * indicator have to agree about what "running" means, and they disagree on the
- * two lists' own terms. An inbox keeps its record after it is stopped (`running`
- * is the flag that says so); a stopped issuer is *gone* from the engine's list,
- * so every issuer listed is a running one.
+ * indicator have to agree about what "running" means, and the three lists
+ * disagree on their own terms. An inbox keeps its record after it is stopped
+ * (`running` is the flag that says so); a stopped issuer or mock server is
+ * *gone* from the engine's list, so every one of those listed is a running one.
  *
- * Both reads go through the same query keys the drawer uses, so mounting this
- * in the Dock costs one shared poll, not a second set of requests.
+ * All three reads go through the same query keys the drawer uses, so mounting
+ * this in the Dock costs one shared poll, not a second set of requests.
  *
- * **A dead engine is running nothing, whatever the cache still holds.** Both
- * lists are engine-*process* state, so when the engine goes down every service
+ * **A dead engine is running nothing, whatever the cache still holds.** All
+ * three lists are engine-*process* state, so when the engine goes down every service
  * it was holding went down with it - but TanStack keeps the last good data
  * through failed refetches, which is right for a list the user can still read
  * and wrong for a count that claims something is listening. The Dock said "2
@@ -27,14 +27,15 @@
  * later reader inherits the answer instead of re-deriving the caveat.
  */
 
-import { useInboxesQuery, useMockIssuersQuery } from "@/queries";
+import { useInboxesQuery, useMockIssuersQuery, useMockServersQuery } from "@/queries";
 import { useEngineStore } from "@/stores";
 
 export function useRunningServiceCount(): number {
 	const isEngineConnected = useEngineStore((s) => s.isEngineConnected);
 	const { data: inboxes = [] } = useInboxesQuery();
 	const { data: issuers = [] } = useMockIssuersQuery();
+	const { data: mocks = [] } = useMockServersQuery();
 
 	if (!isEngineConnected) return 0;
-	return inboxes.filter((inbox) => inbox.running).length + issuers.length;
+	return inboxes.filter((inbox) => inbox.running).length + issuers.length + mocks.length;
 }
