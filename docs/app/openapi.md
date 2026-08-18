@@ -479,6 +479,23 @@ Requests whose operation the document does not declare are counted too, as
 collection that has drifted off its contract, which is exactly what the block
 exists to notice.
 
+### Reading a row
+
+Each row lists the statuses that operation answered with. A status the document
+declares **no** response for carries a warning tint behind it and reads as
+`undeclared` to a screen reader - so the header's "N undeclared statuses
+observed" is answerable from the rows below it, not just a total. The status
+keeps its own colour either way: an undeclared 503 is still a server error.
+
+Two further findings appear on a row only when they happened, because they are
+zero on almost every one:
+
+| On the row | What it means |
+|---|---|
+| `+N more` | The per-operation status list is capped, and N entries were dropped |
+| `N off-range` | Responses whose status fell outside 100-599, which no status class describes |
+| `N failed` | Sends that never got a response at all |
+
 ### What is exact and what is sampled
 
 **Every number in a coverage block is exact.** It is counted as each request is

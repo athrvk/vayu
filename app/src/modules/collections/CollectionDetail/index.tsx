@@ -16,7 +16,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
-import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
+import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries/collections";
+import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import DataTab from "./DataTab";
@@ -88,7 +89,30 @@ export default function CollectionDetail() {
 		error: collectionsError,
 		refetch: refetchCollections,
 	} = useCollectionsQuery();
-	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);
+	/*
+	 * The whole subtree, not this collection's own requests (issue #723).
+	 *
+	 * An OpenAPI import files its requests under one sub-collection per tag, so
+	 * a spec-bound root owns none directly - and this header read "GitHub v3
+	 * REST API - 0 requests" above a mock serving a thousand routes. Every other
+	 * surface on this screen already means the subtree when it says "this
+	 * collection": the mock toggle beside the count serves it, the Run dialog
+	 * runs it, the export walks it, and the Spec tab counts it with that
+	 * rationale written out. The count says the same thing they do rather than
+	 * describing a narrower set by the same name.
+	 *
+	 * Free of extra fetches in practice: `CollectionTree` already holds a query
+	 * per collection, so these resolve from the cache the sidebar filled.
+	 */
+	const subtreeIds = useMemo(
+		() => (selectedCollectionId ? collectSubtreeIds(selectedCollectionId, collections) : []),
+		[selectedCollectionId, collections]
+	);
+	const { requestsByCollection } = useMultipleCollectionRequests(subtreeIds);
+	const requestCount = useMemo(
+		() => [...requestsByCollection.values()].reduce((total, r) => total + r.length, 0),
+		[requestsByCollection]
+	);
 
 	const collection = useMemo(
 		() => collections.find((c) => c.id === selectedCollectionId) ?? null,
@@ -165,7 +189,7 @@ export default function CollectionDetail() {
 				<Folder className="w-[15px] h-[15px] text-primary shrink-0" />
 				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
-					- {requests.length} request{requests.length !== 1 ? "s" : ""}
+					- {requestCount} request{requestCount !== 1 ? "s" : ""}
 				</span>
 				{/* Right-aligned, because it is an action on the collection rather
 				    than part of its identity. It knows nothing about the tabs
@@ -230,7 +254,7 @@ export default function CollectionDetail() {
 						{t.id === "info" && (
 							<InfoTab
 								collection={collection}
-								requestCount={requests.length}
+								requestCount={requestCount}
 								active={tab === "info"}
 							/>
 						)}
