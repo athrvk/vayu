@@ -702,10 +702,22 @@ export const apiService = {
 	},
 
 	// Import
-	async importFetch(url: string): Promise<ImportFetchResponse> {
+	/**
+	 * Fetch a URL through the engine, past the renderer's CORS.
+	 *
+	 * @param maxBytes the largest response this fetch may read (issue #784).
+	 * The route is one proxy for every import format, so the engine has no
+	 * format to derive a bound from: a caller that knows it is fetching an
+	 * OpenAPI document passes the live `maxSpecDocumentBytes`
+	 * ({@link useSpecDocumentLimit}), and a format-agnostic caller passes
+	 * nothing and gets the engine's transport ceiling - a number no import may
+	 * exceed, deliberately not restated here so the two cannot drift. Over the
+	 * bound is a `413` whose message names it.
+	 */
+	async importFetch(url: string, maxBytes?: number): Promise<ImportFetchResponse> {
 		return await httpClient.post<ImportFetchResponse>(
 			API_ENDPOINTS.IMPORT_FETCH,
-			{ url },
+			maxBytes === undefined ? { url } : { url, maxBytes },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
 	},

@@ -50,6 +50,7 @@ import {
 	useUpdateCollectionMutation,
 } from "@/queries/collections";
 import { useBindSpecMutation, useSpecQuery } from "@/queries/specs";
+import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { useSpecFileStore } from "@/stores";
 import { matchOperations } from "@/services/openapi/operation-match";
 import { readSpecOperations } from "@/services/openapi/spec-operations";
@@ -113,6 +114,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const [url, setUrl] = useState("");
 	const [exporting, setExporting] = useState(false);
 	const [fetching, setFetching] = useState(false);
+	// The bound the fetch below carries: this tab only ever fetches a document
+	// it is about to bind, so it is the same cap the engine will store it under
+	// (issue #784).
+	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	// Parsed on every render of a picked document rather than stored in state:
@@ -178,7 +183,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		setFetching(true);
 		setPickError(null);
 		try {
-			const { content } = await apiService.importFetch(url);
+			const { content } = await apiService.importFetch(url, specMaxBytes);
 			setPicked({ content, sourceUrl: url });
 		} catch (e) {
 			setPickError((e as Error).message);

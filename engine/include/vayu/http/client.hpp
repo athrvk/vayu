@@ -69,6 +69,24 @@ struct ClientConfig {
      * directly. Read only when `cookie_jar` is set.
      */
     std::vector<CookieWrite> cookie_writes;
+
+    /**
+     * @brief Largest response body this client will buffer, 0 = unbounded
+     *        (issue #784).
+     *
+     * Zero, and therefore unbounded, for every caller that does not set it -
+     * which is what "Design-mode sends are not affected" by
+     * `maxResponseBodyBytes` has always meant, and this must not change it. The
+     * `/import/fetch` proxy sets it, because that route buffers a response from
+     * a URL a user typed with nothing behind it at all.
+     *
+     * Enforced by the write callback, which cuts the transfer short as soon as
+     * the body grows past the bound - whether the server declared a length or
+     * not - and fails it with `ErrorCode::ResponseTooLarge` rather than
+     * buffering to the end. The declared length, when there is one, is what the
+     * error message names as the count.
+     */
+    size_t max_response_bytes = 0;
 };
 
 /**

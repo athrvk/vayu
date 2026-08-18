@@ -40,7 +40,7 @@ const syncSpec = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
-		importFetch: (url: string) => importFetch(url),
+		importFetch: (url: string, maxBytes?: number) => importFetch(url, maxBytes),
 		updateRequest,
 		updateCollection,
 		createRequest,
@@ -166,6 +166,10 @@ describe("SpecSync", () => {
 
 		expect(await screen.findByText(/up to date/i)).toBeTruthy();
 		expect(screen.queryByText(/the document has changed/i)).toBeNull();
+		// The re-fetch is spec-only, so it states the document's own live cap as
+		// the fetch's byte bound (issue #784) rather than leaving the engine to
+		// buffer whatever the URL now serves.
+		expect(importFetch).toHaveBeenCalledWith(expect.any(String), 10 * 1024 * 1024);
 	});
 
 	it("states every count, zeros included, when the document has changed", async () => {

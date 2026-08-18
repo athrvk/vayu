@@ -89,7 +89,7 @@ vi.mock("@/queries/runs", () => ({
 
 const importFetch = vi.fn();
 vi.mock("@/services/api", () => ({
-	apiService: { importFetch: (url: string) => importFetch(url) },
+	apiService: { importFetch: (url: string, maxBytes?: number) => importFetch(url, maxBytes) },
 }));
 
 // The bound half of the tab renders the Sync section (issue #654), which reads
@@ -233,6 +233,27 @@ describe("binding a collection that already has requests", () => {
 			path: "/home/u/petstore.json",
 			fileName: "petstore.json",
 		});
+	});
+
+	// Issue #784. This tab only ever fetches a document it is about to bind, so
+	// the fetch carries the cap the engine will store it under - the refusal
+	// then happens while the bytes arrive, rather than after a document the
+	// engine was never going to accept has been buffered whole.
+	it("fetches under the engine's live document cap", async () => {
+		importFetch.mockResolvedValue({ content: OPENAPI });
+		render(<SpecTab collection={collection()} />);
+
+		fireEvent.change(screen.getByPlaceholderText(/openapi.json/i), {
+			target: { value: "https://api.example.com/openapi.json" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+
+		await waitFor(() =>
+			expect(importFetch).toHaveBeenCalledWith(
+				"https://api.example.com/openapi.json",
+				10 * 1024 * 1024
+			)
+		);
 	});
 
 	it("sends the fetched URL as the document's origin, and remembers no path", async () => {

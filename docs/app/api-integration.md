@@ -419,9 +419,18 @@ apiService.updateGlobals(variables): Promise<GlobalVariables>
 #### Import
 
 ```typescript
-apiService.importFetch(url): Promise<ImportFetchResponse>          // POST /import/fetch
+apiService.importFetch(url, maxBytes?): Promise<ImportFetchResponse> // POST /import/fetch
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
 ```
+
+`importFetch`'s `maxBytes` is the largest response that fetch may read. The
+engine has no format to derive one from - the route proxies Postman and Insomnia
+exports as well as OpenAPI documents - so the caller states it: the spec paths
+(`$ref` bundling, spec re-fetch, the Spec tab's URL box) pass the live
+`maxSpecDocumentBytes` from `useSpecDocumentLimit`, and the format-agnostic
+import URL box passes nothing, leaving the engine's transport ceiling. Over the
+bound is a `413` whose message names it, raised while the body is arriving
+rather than after it has been buffered whole.
 
 `applyImport` sends a whole parsed import - collections, requests, environments
 and **spec documents** - in one atomic call. Items reference each other by

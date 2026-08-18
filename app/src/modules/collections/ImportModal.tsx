@@ -145,7 +145,13 @@ export function ImportModal() {
 			{ importEnvironments, importScripts },
 			{
 				maxBytes: specMaxBytes,
-				fetchUrl: async (target) => (await apiService.importFetch(target)).content,
+				// A `$ref` target is part of the document being bundled, so the
+				// bound is the same one the bundle has to fit - and stating it
+				// moves the refusal to where the bytes arrive, instead of after
+				// a file the engine was never going to store has been buffered
+				// whole (issue #784).
+				fetchUrl: async (target) =>
+					(await apiService.importFetch(target, specMaxBytes)).content,
 				...(readSpecFile
 					? {
 							readSibling: async (specPath, refPath) => {
@@ -252,6 +258,13 @@ export function ImportModal() {
 		if (isFetching) return;
 		setPhase("detecting");
 		try {
+			// No `maxBytes`: this box takes any format, and a Postman or
+			// Insomnia export is never stored as a spec document, so bounding it
+			// by `maxSpecDocumentBytes` would refuse an export that imports
+			// today with a message naming a setting that does not apply to it.
+			// The engine's transport ceiling stands behind the fetch instead
+			// (issue #784), and the bundler's own check still refuses an
+			// over-cap OpenAPI document once the format is known.
 			const { content } = await apiService.importFetch(url);
 			await runBatch([{ text: content, sourceUrl: url }]);
 		} catch (e) {
