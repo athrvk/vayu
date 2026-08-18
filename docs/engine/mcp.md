@@ -351,6 +351,12 @@ Notes:
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).
+  A request whose scripts asserted anything carries a `tests` node - `total`,
+  `failed`, and the failing `name: message` lines (issue #733) - so a row that
+  fails on its tests says which, rather than leaving an agent with `ok: false`
+  beside a `200`. The list is cut at ten, the number the engine caps a schema
+  verdict's failures at, while `failed` stays the true count. A response that
+  ran no assertions carries no `tests` node: none ran is not all passed.
   For a collection **bound to an OpenAPI document** each row also carries a
   `schema` verdict (issue #681) and folds it into `ok` the way `testResults`
   folds: a response the document declares a schema for and that does not match

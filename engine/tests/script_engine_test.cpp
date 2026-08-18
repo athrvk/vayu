@@ -3991,6 +3991,27 @@ TEST_F (ScriptEngineTest, AStashedIterationDataRefusesOnceTheRowIsGone) {
     << second_result.error_message;
 }
 
+// A row is bound by three surfaces, and the refusal has to name all three
+// (issue #733). It named only "a collection run with a data set", stale since
+// #402 made send-with-row and #599 made a scenario load run's deferred per-step
+// script first-class row binders - so a user who stashed the object during
+// either of those was told to look for a data set that was never the point.
+TEST_F (ScriptEngineTest, AStashedIterationDataNamesEverySurfaceThatBindsARow) {
+    const nlohmann::json row{ { "username", "ada" } };
+    auto first        = data_test (request, response, env, row);
+    auto first_result = engine.execute ("globalThis.stashed = pm.iterationData;", first);
+    ASSERT_TRUE (first_result.success) << first_result.error_message;
+
+    auto second_result = engine.execute_test (
+    "globalThis.stashed.toObject();", request, response, env);
+
+    ASSERT_FALSE (second_result.success);
+    for (const char* surface : { "collection run", "send-with-row", "load run" }) {
+        EXPECT_NE (second_result.error_message.find (surface), std::string::npos)
+        << "message does not name " << surface << ": " << second_result.error_message;
+    }
+}
+
 // ============================================================================
 // pm.response.events - a streamed run's buffered event list (issue #575)
 // ============================================================================
