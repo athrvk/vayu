@@ -19,6 +19,7 @@ import { describe, it, expect } from "vitest";
 import {
 	appendStepEvent,
 	countOutcomes,
+	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
 	thinningDisclosure,
@@ -188,6 +189,61 @@ describe("countOutcomes", () => {
 
 	it("is all zeros for an empty list", () => {
 		expect(countOutcomes([])).toEqual({ passed: 0, failed: 0, skipped: 0, errored: 0 });
+	});
+});
+
+/**
+ * Issue #726. Counting the stored rows undercounts `passed` on any run that
+ * filled `maxScenarioStoredSteps`, because thinning drops passes alone - so the
+ * chips read the engine's exact whole-run totals instead, and fall back to the
+ * rows only when the report cannot say.
+ */
+describe("outcomeCountsFromReport", () => {
+	it("reads the engine's whole-run totals, not the surviving rows", () => {
+		const counts = outcomeCountsFromReport(
+			report({
+				scenario: {
+					iterations: 1,
+					iterationsCompleted: 1,
+					stepsExecuted: 6_000,
+					passed: 5_990,
+					failed: 10,
+					skipped: 0,
+					errored: 0,
+					stepsStored: 5_000,
+					stepsDropped: 1_000,
+				},
+			})
+		);
+
+		// 5,990, not the 4,990 the 5,000 kept rows would tally.
+		expect(counts).toEqual({ passed: 5_990, failed: 10, skipped: 0, errored: 0 });
+	});
+
+	it("is null for a report that carries no scenario summary", () => {
+		// A live run before its report lands, and a load run's report. Both must
+		// leave the caller on the row tally rather than on four zeros.
+		expect(outcomeCountsFromReport(report({}))).toBeNull();
+		expect(outcomeCountsFromReport(undefined)).toBeNull();
+	});
+
+	it("is null when the summary is missing any of the four", () => {
+		// An older sidecar's summary types as complete and is not. A partial read
+		// would report a real count beside a fabricated zero.
+		const partial = report({
+			scenario: {
+				iterations: 1,
+				iterationsCompleted: 1,
+				stepsExecuted: 2,
+				passed: 2,
+				failed: 0,
+				skipped: 0,
+				stepsStored: 2,
+				stepsDropped: 0,
+			} as never,
+		});
+
+		expect(outcomeCountsFromReport(partial)).toBeNull();
 	});
 });
 

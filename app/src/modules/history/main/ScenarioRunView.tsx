@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
 	countOutcomes,
+	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
 	thinningDisclosure,
@@ -90,7 +91,15 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const storedSteps = useMemo(() => stepRowsFromReport(report), [report]);
 	const steps = storedSteps.length > 0 ? storedSteps : liveSteps;
 
-	const counts = useMemo(() => countOutcomes(steps), [steps]);
+	// The report's exact whole-run totals when it can give them, the stored rows
+	// only as a fallback. A thinned run keeps every non-passing row but drops
+	// passes, so counting rows would undercount `passed` against the header's own
+	// step total - the report is the one source that agrees with it (issue #726).
+	// A live run has no report yet and reads its streaming rows until one lands.
+	const counts = useMemo(
+		() => outcomeCountsFromReport(report) ?? countOutcomes(steps),
+		[report, steps]
+	);
 	const thinned = thinningDisclosure(report);
 	const scenario = report?.scenario;
 

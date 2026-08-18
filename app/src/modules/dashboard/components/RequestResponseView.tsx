@@ -28,7 +28,12 @@ import {
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
-import { SampleRetentionNote, CapturedDataWarning, ThresholdVerdict } from "@/components/shared";
+import {
+	SampleRetentionNote,
+	CapturedDataWarning,
+	ThresholdVerdict,
+	TestValidationSummary,
+} from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
@@ -226,46 +231,13 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			    every assertion and still miss the budget it was run to check. */}
 			<ThresholdVerdict verdict={report.thresholdValidation} />
 
-			{/* Test Validation Results */}
-			{report.testValidation && (
-				<Card>
-					<CardHeader>
-						<CardTitle className="text-lg">Test Validation</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
-							<div>
-								<p className="text-sm text-muted-foreground">Samples Tested</p>
-								<p className="font-bold">{report.testValidation.samplesTested}</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">Passed</p>
-								<p className="font-bold text-status-success-text">
-									{report.testValidation.testsPassed}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">Failed</p>
-								<p className="font-bold text-destructive-text">
-									{report.testValidation.testsFailed}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">Success Rate</p>
-								<p className="font-bold">
-									{report.testValidation.successRate.toFixed(1)}%
-								</p>
-							</div>
-						</div>
-						<SampleRetentionNote
-							sampling={report.sampling}
-							shown={report.testValidation.samplesTested}
-							budget="responses"
-							className="mt-3"
-						/>
-					</CardContent>
-				</Card>
-			)}
+			{/* Test Validation Results - the aggregate card, shared with History's
+			    Overview so the numbers cannot drift. This view names each failure
+			    beside its own sample below, so it passes no failure list here. */}
+			<TestValidationSummary
+				testValidation={report.testValidation}
+				sampling={report.sampling}
+			/>
 
 			{/* Sampled Request/Response Results */}
 			{report.results && report.results.length > 0 && (
