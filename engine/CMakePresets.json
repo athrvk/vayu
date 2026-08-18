@@ -269,13 +269,25 @@
       "name": "windows-dev",
       "displayName": "Test Windows Debug",
       "configurePreset": "windows-dev",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 1
+      },
+      "environment": {
+        "VAYU_TEST_SCRATCH_ISOLATION": "0"
+      }
     },
     {
       "name": "windows-prod",
       "displayName": "Test Windows Release",
       "configurePreset": "windows-prod",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 1
+      },
+      "environment": {
+        "VAYU_TEST_SCRATCH_ISOLATION": "0"
+      }
     },
     {
       "name": "linux-dev",
