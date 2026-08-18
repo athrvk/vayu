@@ -22,6 +22,17 @@
  * document its requests do not reflect, which is the state binding exists to
  * make impossible.
  *
+ * **Every apply stores the document; the ticks decide which rows ride along**
+ * (issue #717). That one rule is what makes the dead end structurally
+ * impossible: `spec-diff` compares request-shaped fields, so a document that
+ * only moved a response schema, a status, or its `servers` block produces three
+ * empty buckets - and gating Apply on those buckets left the commonest contract
+ * change of all permanently unapplyable, with the stored document, the
+ * response-schema index and the coverage index stale forever while the UI
+ * truthfully said the document had changed. The apply is labelled for which of
+ * the two it is about to be, because an unlabelled one would be a write nobody
+ * asked for.
+ *
  * The counts are stated in full, zeros included, for the reason `MatchSummary`
  * states its three: "4 changed" alone reads as the whole answer, while "4
  * changed, 0 added, 0 removed, 12 unchanged" is the answer.
@@ -189,6 +200,8 @@ export default function SpecSync({
 	};
 
 	const pendingDeletes = state.phase === "diff" ? state.selection.removed.size : 0;
+	/** No rows ticked - the apply is the document-level one, and says so. */
+	const documentOnly = state.phase === "diff" && isEmptySelection(state.selection);
 
 	return (
 		<div>
@@ -235,9 +248,19 @@ export default function SpecSync({
 				{state.phase === "applied" && (
 					<p className="flex items-center gap-2 text-xs text-status-success-text">
 						<Check className="h-3.5 w-3.5 shrink-0" />
-						Applied - {state.created} request{state.created === 1 ? "" : "s"} created,{" "}
-						{state.updated} updated, {state.deleted} deleted. This collection is now
-						bound to the document you just synced.
+						{state.created + state.updated + state.deleted === 0 ? (
+							<>
+								Applied - the stored document, its response schemas and its coverage
+								index are updated, and no request changed. This collection is now
+								bound to the document you just synced.
+							</>
+						) : (
+							<>
+								Applied - {state.created} request{state.created === 1 ? "" : "s"}{" "}
+								created, {state.updated} updated, {state.deleted} deleted. This
+								collection is now bound to the document you just synced.
+							</>
+						)}
 					</p>
 				)}
 
@@ -254,14 +277,14 @@ export default function SpecSync({
 								onClick={() =>
 									pendingDeletes > 0 ? setConfirmingDeletes(true) : handleApply()
 								}
-								disabled={isEmptySelection(state.selection) || syncSpec.isPending}
+								disabled={syncSpec.isPending}
 							>
 								{syncSpec.isPending ? (
 									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 								) : (
 									<Upload className="mr-2 h-4 w-4" />
 								)}
-								Apply selected
+								{documentOnly ? "Update the stored document" : "Apply selected"}
 							</Button>
 							<span className="text-[11px] text-muted-foreground">
 								{applySummary(state.selection)}
@@ -313,13 +336,31 @@ function boundDrafts(content: string): SpecRequestDraft[] | null {
 	}
 }
 
-/** "3 to create, 1 to update, 0 to delete" - what the button is about to do. */
+/**
+ * "3 to create, 1 to update, 0 to delete" - what the button is about to do.
+ *
+ * The document is named on both branches because it is written on both: with
+ * nothing ticked it is the whole of the change, and with rows ticked it still
+ * rides along, which is what makes the collection bound to what it just synced.
+ */
 function applySummary(selection: SpecApplySelection): string {
-	if (isEmptySelection(selection)) return "Nothing selected.";
+	if (isEmptySelection(selection))
+		return "Stores the new document, response schemas and coverage index - no request rows change.";
 	return (
 		`${selection.added.size} to create · ${selection.changed.size} to update · ` +
-		`${selection.removed.size} to delete`
+		`${selection.removed.size} to delete, and the new document`
 	);
+}
+
+/**
+ * The document moved, but nothing it says about *this collection's* operations
+ * did - the shape `spec-diff` renders as three empty buckets.
+ *
+ * Named rather than inferred from the summary, because "0 · 0 · 0 · N" is the
+ * one reading a user cannot act on without being told what it means (#717).
+ */
+function documentLevelOnly(diff: SpecDiff): boolean {
+	return diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
 }
 
 interface SelectionProps {
@@ -363,6 +404,14 @@ function DiffReport({
 					{diff.removed.length} request{diff.removed.length === 1 ? "" : "s"} whose
 					operation is gone · {diff.changed.length} changed · {diff.unchanged} unchanged
 				</p>
+				{documentLevelOnly(diff) && (
+					<p className="text-[11px] text-muted-foreground">
+						Document-level changes only - no operation this collection maps has moved.
+						Response schemas, statuses and <code>servers</code> live on the document
+						rather than on a request, so applying stores the new document and rebuilds
+						the response-schema and coverage indexes.
+					</p>
+				)}
 				{diff.unmapped > 0 && (
 					<p className="text-[11px] text-muted-foreground">
 						{diff.unmapped} request{diff.unmapped === 1 ? "" : "s"} carry no operation

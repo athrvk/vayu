@@ -61,11 +61,25 @@ import { operationShapeKey, specPathShape } from "./operation-match";
  * any claim on. `auth` and the scripts are absent on purpose: an import sets
  * auth to `inherit` and the scripts to empty for every operation, so a
  * difference there is always the user's and never the document's.
+ *
+ * **`method` is one of them** (issue #717). It was left out while `spec-apply`
+ * wrote it on every update regardless, so a user who changed an imported `GET`
+ * to `HEAD` had that edit reverted by any applied change - invisibly, because a
+ * field nobody compares is a field nobody can flag or tick. It belongs here by
+ * this list's own definition: an import writes it.
  */
-export type SpecField = "name" | "description" | "url" | "params" | "headers" | "body";
+export type SpecField = "name" | "description" | "method" | "url" | "params" | "headers" | "body";
 
 /** Field order for display - the request builder's own top-to-bottom order. */
-const FIELDS: readonly SpecField[] = ["name", "description", "url", "params", "headers", "body"];
+const FIELDS: readonly SpecField[] = [
+	"name",
+	"description",
+	"method",
+	"url",
+	"params",
+	"headers",
+	"body",
+];
 
 /** One field of one request that no longer matches the document. */
 export interface SpecFieldDiff {
@@ -347,6 +361,7 @@ interface FieldValue {
 interface SpecShaped {
 	name: string;
 	description: string;
+	method: string;
 	url: string;
 	params: KeyValueEntry[];
 	headers: KeyValueEntry[];
@@ -357,6 +372,13 @@ function fieldValues(source: SpecShaped): Record<SpecField, FieldValue> {
 	return {
 		name: text(source.name),
 		description: text(source.description),
+		// Compared as written, unlike `sameOperation`'s uppercasing of the
+		// identity: both sides here are an `HttpMethod`, and the engine parses
+		// that field case-sensitively (`parse_method` 400s on `get`) and
+		// serialises it from an enum - so a stored lowercase verb is a state no
+		// write can reach, and normalising for it would be a guard against
+		// nothing.
+		method: text(source.method),
 		url: text(source.url),
 		params: rows(source.params),
 		headers: rows(source.headers),

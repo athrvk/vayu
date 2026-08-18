@@ -28,11 +28,21 @@
  * or sync wrote, and an example saved from a live response is never touched -
  * the engine keeps that promise by `origin`, not this payload.
  *
- * **The identity travels with the request, always.** An applied change writes
- * `specOperation` and `method` even when neither is a ticked field: an
- * operation *is* its method and path template, so a request that recorded the
- * old identity after a rename would be diffed against the wrong operation next
- * time - the exact failure `operation-match.ts` warns about.
+ * **The identity travels with the request, always - and it is `specOperation`,
+ * not `method`.** An applied change writes `specOperation` whether or not
+ * anything was ticked: an operation *is* its method and path template, so a
+ * request that recorded the old identity after a rename would be diffed against
+ * the wrong operation next time - the exact failure `operation-match.ts` warns
+ * about. `request.method` used to ride along on that reasoning and does not
+ * anymore (issue #717): it is what the request *sends*, protects no lookup, and
+ * writing it unconditionally silently reverted a user's `GET` -> `HEAD` edit on
+ * any applied change. It is now a compared, flaggable, tickable `SpecField`
+ * like `url`, which is what an import-written field is owed.
+ *
+ * A method left unticked therefore leaves `request.method` disagreeing with the
+ * `specOperation.method` beside it. That is a state the user chose and it stays
+ * visible: the next check compares the two again and offers the field again,
+ * where writing it for them would be the silent revert this fixes.
  */
 
 import type {
@@ -99,7 +109,15 @@ export function defaultSelection(diff: SpecDiff): SpecApplySelection {
 	};
 }
 
-/** Whether a selection would write anything at all. */
+/**
+ * Whether a selection would write any request *rows*.
+ *
+ * Not "would write anything at all" (issue #717): every apply stores the
+ * re-fetched document and moves the binding to it, so an empty selection is a
+ * document-level update rather than a no-op. This answers which of the two an
+ * apply would be - what the button says it is about to do - and never whether
+ * one is worth making.
+ */
 export function isEmptySelection(selection: SpecApplySelection): boolean {
 	return (
 		selection.added.size === 0 && selection.removed.size === 0 && selection.changed.size === 0
@@ -205,6 +223,7 @@ function updateItem(item: ChangedRequest, fields: ReadonlySet<SpecField>): SpecS
 	const patch: SpecSyncUpdate = { id: item.request.id };
 	if (fields.has("name")) patch.name = draft.name;
 	if (fields.has("description")) patch.description = draft.description;
+	if (fields.has("method")) patch.method = draft.method;
 	if (fields.has("url")) patch.url = draft.url;
 	if (fields.has("params")) patch.params = draft.params;
 	if (fields.has("headers")) patch.headers = draft.headers;
@@ -212,10 +231,9 @@ function updateItem(item: ChangedRequest, fields: ReadonlySet<SpecField>): SpecS
 		patch.body = draft.body;
 		patch.bodyType = draft.body.mode; // the engine never derives this
 	}
-	// Both halves of the identity, whether or not anything else was ticked - see
-	// the file comment for why the method rides with it rather than as a field.
+	// The recorded identity, whether or not anything else was ticked - see the
+	// file comment for why this rides along and `request.method` no longer does.
 	patch.specOperation = item.operation;
-	patch.method = draft.method;
 	// Present, `[]` included: an operation whose documented responses were
 	// removed must lose the examples the last import wrote for them, and an
 	// absent key means "leave every example alone".
