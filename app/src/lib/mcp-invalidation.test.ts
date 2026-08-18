@@ -56,6 +56,28 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.requests.detail("req_3"));
 	});
 
+	test("a named request reaches its examples, which have no key of their own", () => {
+		/*
+		 * The MCP example tools (#759) declare the `request` family and name the
+		 * request they wrote to. `queryKeys.requests.examples(id)` is nested under
+		 * `requests.detail(id)`, so invalidating the detail key covers the open
+		 * Examples panel by prefix - no second entity, and no key here that only
+		 * these three tools would use. Asserted because the coverage is a
+		 * *consequence* of how the key is built: flatten `examples` out from under
+		 * `detail` and an example an agent created would never appear in a panel
+		 * that was already open.
+		 */
+		const { keys } = keysFor({ entity: "request", requestId: "req_3" });
+		const examples = queryKeys.requests.examples("req_3");
+		const detail = keys.find(
+			(key) =>
+				Array.isArray(key) &&
+				key.length <= examples.length &&
+				key.every((part, index) => part === examples[index])
+		);
+		expect(detail).toEqual(queryKeys.requests.detail("req_3"));
+	});
+
 	test("a created request touches no detail cache", () => {
 		// A create names no request id, and the row it made has no detail entry to
 		// invalidate - the narrowing exists for the tools that name one row.

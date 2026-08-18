@@ -162,12 +162,17 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run |
-| `create_collection`    | write    | `POST /collections`                          | write toggle               |
-| `update_collection`    | write    | `PUT /collections/:id` (merge-patch)         | write toggle               |
+| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and both collection scripts |
+| `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
-| `create_request`       | write    | `POST /requests`                             | write toggle               |
-| `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle               |
+| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream`, both scripts - minus file body parts |
+| `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
+| `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list) |
+| `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import |
+| `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable |
+| `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
+| `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive) |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction |
@@ -366,8 +371,10 @@ Notes:
   script. A patch naming nothing is refused rather than sent as a write that
   changes nothing, and `bodyType` without `body` is refused too (the blob and
   its denormalized column move together or the two disagree about what the
-  request sends). `update_collection` renames and re-describes only: reparenting
-  is `POST /reorder`'s job and is not exposed here.
+  request sends). `update_collection` carries a collection's own state - name,
+  description, variables, auth, both scripts - and never its position:
+  re-parenting is `move_item`'s job (below), because `POST /reorder` is the only
+  write path that is atomic against a concurrent one.
 - **`delete_collection` cascades**, so it reads the subtree first: `GET
   /collections` gives it every descendant through `parentId`, one `GET
   /requests?collectionId=` per collection in that subtree gives the request
@@ -375,6 +382,70 @@ Notes:
   subtree - or an id no collection has - is a refusal, never a prompt carrying
   a number nobody verified. `delete_request` reads the row the same way, so the
   prompt names the request and its URL rather than an opaque id.
+- **A saved request an agent writes is the one the builder writes** (issue
+  #759). `create_request` / `update_request` carry the request's `auth` block and
+  the four **Settings** tab fields (`followRedirects`, `maxRedirects`,
+  `httpVersion`, `stream`) as well as its url, headers, body and both scripts, so
+  an agent that can send an authenticated request can now save one. The `auth`
+  input is the *same schema* `run_request` takes rather than a copy of it - one
+  definition, four descriptions - which is what lets an agent read a request's
+  `auth` over `list_requests` and write it back verbatim. Both the auth block and
+  each setting follow the merge-patch rule the strings already did: named is
+  written, absent is left alone, so an update that mentions only `maxRedirects`
+  cannot hand a stored `followRedirects: false` back to the engine's default. The
+  two exclusions are deliberate: **file body parts**, which name a path on the
+  user's machine an agent cannot choose for them, and **`verifySSL`** (issue
+  #706), which belongs to the transport epic's own CRUD pass - see #795.
+- **Examples are writable, and where one came from is not** (issue #759).
+  `list_request_examples` reads what a request has saved beside it - what a mock
+  server for its collection answers with - and the three write tools author it,
+  so an agent that can start a mock (`start_mock_server`) can now author what it
+  serves. The `origin` column is the one field no tool accepts: it says whether a
+  row came from an importer (`import`) or from a person (`user`), and an OpenAPI
+  sync replaces the first kind while leaving the second alone (#588, #655). An
+  agent that could claim `import` would hand its own example to the next sync to
+  overwrite, and one that could claim `user` could pin a stale imported row
+  against the document it came from - neither is the agent's call, so
+  `create_request_example` always stores `user` and the update tool cannot
+  restate it. Bodies are bounded on the way out for the reason
+  `get_run_report`'s traces are (#767, #769): an example body is capped
+  engine-side at 1 MB and a request may hold 100 of them. One over 32 KB comes
+  back cut, flagged `bodyClipped` with its stored size in `bodyBytes`; once the
+  list has spent 96 KB the remaining bodies are dropped with `bodyOmitted` and
+  counted in `bodiesOmitted`, every row's scalars kept. `bodyClipped` is not the
+  engine's `bodyTruncated`, which says the response was already cut when it was
+  *captured* - two different facts, so two different names.
+- **Collection-level state is writable, and merges the way an environment's
+  does** (issue #759). `create_collection` / `update_collection` take the
+  `variables`, `auth` and pre/post-request scripts that shape every request
+  below them - the same three the composer walks (`compose_script_parts` runs the
+  chain's scripts before the request's own). `variables` uses
+  `update_environment`'s input and its rules unchanged, including
+  `removeVariables` and the "a new variable carries a value" refusal, because it
+  is the same blob shape and a second dialect would be a second thing to learn.
+  The read that makes it a merge is only done when variables are actually
+  changing: a rename sends one `PUT` and nothing else. A collection is the root
+  of an auth chain and never inherits, which the engine enforces - `{mode:
+  "none"}` is how a collection stops being an auth source.
+- **`move_item` is a bounded move, not a reorder** (issue #759). It maps to
+  `POST /reorder`, whose batch validates and commits under one acquisition of the
+  engine's DB mutex (#386) - which is why re-parenting goes here rather than
+  through `PUT /collections/:id`'s own `parentId`, where two concurrent moves can
+  each pass an acyclicity check neither one's commit was visible to. What the
+  tool offers is the row menu's "Move to...": a destination, and `first` or
+  `last` among its new siblings. Positions in between stay a UI gesture on
+  purpose - naming one means reproducing the app's ordering arithmetic
+  (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong
+  is a folder that visibly reshuffles. The batch states the destination block's
+  whole arrangement rather than leaning on the engine's `normalize` pass, because
+  normalization runs *before* the moves and would leave a row moved to the end of
+  a block it is already in tied with the sibling it displaced; only the rows whose
+  stored `order` actually changes get an entry. A collection may move to the top
+  level (`parentId: null`) and a request always belongs to a collection. Moving a
+  collection into itself or into its own subtree is refused here, walking the
+  same tree the app's "Move to..." dialog walks, so the answer names the problem -
+  the engine refuses the same batch under its lock, and that check stays the
+  authority.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
   partial updates preserve untouched variables and the name. Overwriting an
@@ -753,7 +824,10 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   an agent could already run arbitrary scripts through `run_request`, and a
   stored one runs only when the request is later sent. Both tools already
   declare `invalidates: ["request"]`, so the renderer refetches the row and
-  picks the scripts up without a further entity.
+  picks the scripts up without a further entity. A collection's own scripts -
+  the ones that run around *every* request below it - are
+  `create_collection` / `update_collection`'s fields of the same two names
+  (issue #759), and carry the same clearing rule.
 - **Load-testing a saved request** - `start_load_run` with a `requestId`
   composes it by id, exactly as `run_collection_smoke` and the app do:
   variables resolved, stored auth applied through the collection chain, and the
@@ -1046,20 +1120,22 @@ configurable in **Settings → MCP** and persisted.
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side
   (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Six tools carry it - `start_load_run`,
-  `delete_collection`, `delete_request`, `delete_run`, `delete_environment` and
-  `delete_webhook_inbox` - through one implementation, so the elicitation path
-  cannot drift between them. A preview is a *successful* result
+  prompt where supported. Seven tools carry it - `start_load_run`,
+  `delete_collection`, `delete_request`, `delete_request_example`,
+  `delete_run`, `delete_environment` and `delete_webhook_inbox` - through one
+  implementation, so the elicitation path cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category: `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
+  `create_request_example`, `update_request_example`,
+  `delete_request_example`, `move_item`,
   `create_environment`, `update_environment`, `activate_environment`,
   `delete_environment`, `update_globals`, `clear_cookies`,
   `update_engine_config`, `set_run_baseline`,
   `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`. Does not gate
   `run_request` / `run_collection_smoke` / load runs
-  (allowlist + caps). The five deletes need the toggle **and** confirmation:
+  (allowlist + caps). The six deletes need the toggle **and** confirmation:
   the toggle is a single session-wide switch a user flips once to let an agent
   save a request, which is not consent to destroy a subtree or a run's stored
   history. `clear_cookies` takes the toggle without a confirmation, because

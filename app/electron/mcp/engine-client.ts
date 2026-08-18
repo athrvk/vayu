@@ -252,6 +252,19 @@ export class EngineClient {
 		return this.request("GET", "/collections", undefined, signal);
 	}
 
+	/**
+	 * Fetch a single collection by id. There is no `GET /collections/:id` route
+	 * either (see {@link getEnvironment}), and the list already answers each
+	 * collection in full - its variables, auth and scripts included, which is
+	 * what a merge-patch write has to read first. Returns `null` when no
+	 * collection matches.
+	 */
+	async getCollection(id: string, signal?: AbortSignal): Promise<unknown> {
+		const list = await this.request<unknown>("GET", "/collections", undefined, signal);
+		const arr = Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+		return arr.find((c) => c && typeof c === "object" && c.id === id) ?? null;
+	}
+
 	listRequests(collectionId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request(
 			"GET",
@@ -492,6 +505,86 @@ export class EngineClient {
 	/** Delete a saved request: `DELETE /requests/:id`. */
 	deleteRequest(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("DELETE", `/requests/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
+	/*
+	 * Saved example responses. Every path is nested under the owning request
+	 * (issue #481) because one request owns them: the engine checks the owner
+	 * before the example, so an example reached through the wrong request is a
+	 * 404 rather than a cross-request write. That ownership is why these take a
+	 * `requestId` rather than an example id alone.
+	 */
+
+	/** A request's saved examples, in stored order: `GET /requests/:id/examples`. */
+	listRequestExamples(requestId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/requests/${encodeURIComponent(requestId)}/examples`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Create one saved example: `POST /requests/:id/examples` (the engine assigns
+	 * the id). A request already holding the per-request maximum answers `409`.
+	 */
+	createRequestExample(
+		requestId: string,
+		payload: unknown,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request(
+			"POST",
+			`/requests/${encodeURIComponent(requestId)}/examples`,
+			payload,
+			signal
+		);
+	}
+
+	/**
+	 * Update one saved example: `PUT /requests/:id/examples/:exampleId`,
+	 * merge-patch like every other update here - a missing example is a `404`,
+	 * never a silent create.
+	 */
+	updateRequestExample(
+		requestId: string,
+		exampleId: string,
+		payload: unknown,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request(
+			"PUT",
+			`/requests/${encodeURIComponent(requestId)}/examples/${encodeURIComponent(exampleId)}`,
+			payload,
+			signal
+		);
+	}
+
+	/** Delete one saved example: `DELETE /requests/:id/examples/:exampleId`. */
+	deleteRequestExample(
+		requestId: string,
+		exampleId: string,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request(
+			"DELETE",
+			`/requests/${encodeURIComponent(requestId)}/examples/${encodeURIComponent(exampleId)}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Reposition collections and requests in one atomic batch: `POST /reorder`
+	 * (issue #365). The whole batch validates and commits under one acquisition
+	 * of the engine's DB mutex, which is why a move goes through here rather than
+	 * through `PUT /collections/:id`'s own `parentId`: two concurrent reparents
+	 * cannot both pass an acyclicity check neither one's commit was visible to.
+	 * A rejected batch writes nothing at all.
+	 */
+	reorder(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/reorder", payload, signal);
 	}
 
 	/**

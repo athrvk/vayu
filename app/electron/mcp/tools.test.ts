@@ -12,6 +12,7 @@ import {
 	DEFAULT_RUN_SAMPLE_LIMIT,
 	DEFAULT_RUN_SERIES_LIMIT,
 	dispatchTool,
+	MAX_EXAMPLES_BODY_BYTES,
 	MAX_INBOX_CAPTURE_LIMIT,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_INLINE_BODY_BYTES,
@@ -139,6 +140,25 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		createCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "API" }),
 		updateCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "Renamed" }),
 		deleteCollection: vi.fn().mockResolvedValue({ message: "Collection deleted successfully" }),
+		getCollection: vi.fn().mockResolvedValue({
+			id: "col_1",
+			name: "API",
+			variables: { baseUrl: { value: "https://api.example.com", enabled: true } },
+			auth: { mode: "none" },
+			preRequestScript: "",
+			postRequestScript: "",
+		}),
+		listRequestExamples: vi.fn().mockResolvedValue([]),
+		createRequestExample: vi
+			.fn()
+			.mockResolvedValue({ id: "exa_1", requestId: "req_1", name: "200 OK" }),
+		updateRequestExample: vi
+			.fn()
+			.mockResolvedValue({ id: "exa_1", requestId: "req_1", name: "200 OK" }),
+		deleteRequestExample: vi
+			.fn()
+			.mockResolvedValue({ message: "Example deleted successfully", id: "exa_1" }),
+		reorder: vi.fn().mockResolvedValue({ collections: [], requests: [] }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
 			name: "Dev",
@@ -1413,6 +1433,622 @@ describe("an agent can round-trip its own work", () => {
 		);
 		expect(removedCollection.isError).toBeFalsy();
 		expect(client.deleteCollection).toHaveBeenCalledWith(collectionId, undefined);
+	});
+});
+
+/*
+ * Document CRUD parity (#759). What an agent could *write* onto a saved
+ * document used to be a fraction of what the app stores: no auth, none of the
+ * Settings tab, no examples at all, and a collection's variables, auth and
+ * scripts unreachable. These cover the four things that closes, and the two
+ * rules that keep it safe to hand an agent - a patch carries only what the
+ * caller named, and where a row came from is never the caller's to claim.
+ */
+describe("document CRUD parity", () => {
+	/** The arguments one engine-client fake was called with. */
+	function callArgs(fn: unknown, index = 0): unknown[] {
+		return (fn as ReturnType<typeof vi.fn>).mock.calls[index];
+	}
+
+	/** The zod schema one tool declares for `field`. */
+	function schemaOf(tool: string, field: string) {
+		const found = TOOLS.find((t) => t.name === tool);
+		expect(found, tool).toBeDefined();
+		return found!.inputSchema[field] as z.ZodTypeAny;
+	}
+
+	describe("saved-request auth and settings", () => {
+		const auth = { mode: "bearer", token: "{{apiToken}}" };
+
+		test("create_request stores auth and the four Settings fields", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "Get users",
+					url: "https://api.example.com/users",
+					auth,
+					followRedirects: false,
+					maxRedirects: 3,
+					httpVersion: "http2",
+					stream: true,
+				},
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(callArgs(client.createRequest)[0]).toMatchObject({
+				auth,
+				followRedirects: false,
+				maxRedirects: 3,
+				httpVersion: "http2",
+				stream: true,
+			});
+		});
+
+		test("a create that names none of them sends none of them", async () => {
+			// The engine's own defaults are the answer for a caller that said
+			// nothing; a filler here would store a policy nobody chose.
+			const client = fakeClient();
+			await dispatchTool(
+				"create_request",
+				{ collectionId: "col_1", name: "Get users", url: "https://api.example.com/users" },
+				ctxWith(client, { allowWrites: true })
+			);
+			const payload = callArgs(client.createRequest)[0] as Record<string, unknown>;
+			for (const key of [
+				"auth",
+				"followRedirects",
+				"maxRedirects",
+				"httpVersion",
+				"stream",
+			]) {
+				expect(Object.keys(payload), key).not.toContain(key);
+			}
+		});
+
+		test("update_request patches only the settings it names", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", maxRedirects: 0 },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			// Exactly one key: `PUT /requests/:id` merge-patches, so a defaulted
+			// `followRedirects: true` beside it would silently rewrite a policy
+			// the user set in the app.
+			expect(callArgs(client.updateRequest)[1]).toEqual({ maxRedirects: 0 });
+		});
+
+		test("update_request replaces the auth block whole", async () => {
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", auth: { mode: "none" } },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.updateRequest)[1]).toEqual({ auth: { mode: "none" } });
+		});
+
+		test("the stored auth input is the run tools' schema, refusals included", () => {
+			const run = schemaOf("run_request", "auth");
+			const created = schemaOf("create_request", "auth");
+			const updated = schemaOf("update_request", "auth");
+			const collection = schemaOf("update_collection", "auth");
+			const cases: unknown[] = [
+				undefined,
+				{ mode: "bearer", token: "t" },
+				{ mode: "oauth2", clientId: "id", clientSecret: "s" },
+				// The refusals: a block with no mode, a bare string, a number, an
+				// array. One shared schema means one answer to each.
+				{ token: "t" },
+				"bearer",
+				7,
+				[],
+			];
+			for (const value of cases) {
+				const expected = run.safeParse(value).success;
+				expect(created.safeParse(value).success, JSON.stringify(value)).toBe(expected);
+				expect(updated.safeParse(value).success, JSON.stringify(value)).toBe(expected);
+				expect(collection.safeParse(value).success, JSON.stringify(value)).toBe(expected);
+			}
+			// The four differ only in wording, which is what makes them one schema
+			// with four descriptions rather than four schemas.
+			expect(run.safeParse({ token: "t" }).success).toBe(false);
+			expect(run.safeParse({ mode: "bearer", token: "t" }).success).toBe(true);
+		});
+	});
+
+	describe("saved examples", () => {
+		test("create_request_example marks the row as user-written, whatever the caller claims", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request_example",
+				{
+					requestId: "req_1",
+					name: "200 OK",
+					status: 201,
+					headers: { "content-type": "application/json" },
+					body: '{"ok":true}',
+					contentType: "application/json",
+					// The engine accepts this field; the tool must not forward it.
+					origin: "import",
+				},
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			const [requestId, payload] = callArgs(client.createRequestExample) as [
+				string,
+				Record<string, unknown>,
+			];
+			expect(requestId).toBe("req_1");
+			expect(payload).toEqual({
+				name: "200 OK",
+				status: 201,
+				contentType: "application/json",
+				headers: [{ key: "content-type", value: "application/json", enabled: true }],
+				body: '{"ok":true}',
+				// Forwarding the caller's "import" would hand an agent's row to the
+				// next OpenAPI sync to overwrite - the omission is the point.
+				origin: "user",
+			});
+		});
+
+		test("update_request_example patches only what it names, and never the origin", async () => {
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request_example",
+				{ requestId: "req_1", exampleId: "exa_1", status: 500, origin: "user" },
+				ctxWith(client, { allowWrites: true })
+			);
+			const [requestId, exampleId, payload] = callArgs(client.updateRequestExample) as [
+				string,
+				string,
+				Record<string, unknown>,
+			];
+			expect(requestId).toBe("req_1");
+			expect(exampleId).toBe("exa_1");
+			expect(payload).toEqual({ status: 500 });
+		});
+
+		test("an update naming no field is refused rather than sent", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"update_request_example",
+				{ requestId: "req_1", exampleId: "exa_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(client.updateRequestExample).not.toHaveBeenCalled();
+		});
+
+		test("list_request_examples clips one oversized body and says so", async () => {
+			const body = "x".repeat(MAX_INLINE_BODY_BYTES + 500);
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([
+						{ id: "exa_1", name: "big", status: 200, body, bodyTruncated: false },
+					]),
+			});
+			const res = await dispatchTool(
+				"list_request_examples",
+				{ requestId: "req_1" },
+				ctxWith(client)
+			);
+			expect(res.isError).toBeFalsy();
+			const parsed = JSON.parse(firstText(res)) as {
+				examples: Array<Record<string, unknown>>;
+				bodiesOmitted: number;
+			};
+			expect(parsed.examples[0]).toMatchObject({
+				name: "big",
+				bodyClipped: true,
+				bodyBytes: body.length,
+				// The engine's own flag is a different fact and is left as it was.
+				bodyTruncated: false,
+			});
+			expect((parsed.examples[0].body as string).length).toBe(MAX_INLINE_BODY_BYTES);
+			expect(parsed.bodiesOmitted).toBe(0);
+		});
+
+		test("the list has a budget: bodies past it are dropped, their rows kept", async () => {
+			const body = "x".repeat(MAX_INLINE_BODY_BYTES);
+			const rows = [1, 2, 3, 4].map((n) => ({
+				id: `exa_${n}`,
+				name: `example ${n}`,
+				status: 200,
+				body,
+			}));
+			const client = fakeClient({
+				listRequestExamples: vi.fn().mockResolvedValue(rows),
+			});
+			const res = await dispatchTool(
+				"list_request_examples",
+				{ requestId: "req_1" },
+				ctxWith(client)
+			);
+			const parsed = JSON.parse(firstText(res)) as {
+				examples: Array<Record<string, unknown>>;
+				bodiesOmitted: number;
+				bodyBudgetBytes: number;
+			};
+			expect(parsed.bodyBudgetBytes).toBe(MAX_EXAMPLES_BODY_BYTES);
+			expect(parsed.bodiesOmitted).toBe(1);
+			// The scalars survive: a row an agent cannot read the body of is
+			// still a row it has to know exists.
+			expect(parsed.examples[3]).toMatchObject({
+				id: "exa_4",
+				name: "example 4",
+				status: 200,
+				bodyOmitted: true,
+				bodyBytes: body.length,
+			});
+			expect(parsed.examples[3].body).toBe("");
+			expect(parsed.examples[0].bodyOmitted).toBeUndefined();
+		});
+
+		test("a small body is passed through untouched", async () => {
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([{ id: "exa_1", name: "ok", status: 200, body: "{}" }]),
+			});
+			const res = await dispatchTool(
+				"list_request_examples",
+				{ requestId: "req_1" },
+				ctxWith(client)
+			);
+			const parsed = JSON.parse(firstText(res)) as {
+				examples: Array<Record<string, unknown>>;
+			};
+			expect(parsed.examples[0]).toEqual({
+				id: "exa_1",
+				name: "ok",
+				status: 200,
+				body: "{}",
+			});
+		});
+
+		test("delete_request_example previews the example and its mock consequence", async () => {
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([{ id: "exa_1", name: "200 OK", status: 200 }]),
+			});
+			const res = await dispatchTool(
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(firstText(res)).toMatch(/awaiting confirmation/i);
+			expect(firstText(res)).toContain("200 OK");
+			expect(firstText(res)).toMatch(/mock server/i);
+			expect(client.deleteRequestExample).not.toHaveBeenCalled();
+		});
+
+		test("confirmed, it deletes; unknown, it says so and deletes nothing", async () => {
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([{ id: "exa_1", name: "200 OK", status: 200 }]),
+			});
+			const ctx = ctxWith(client, { allowWrites: true });
+			const done = await dispatchTool(
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_1", confirmed: true },
+				ctx
+			);
+			expect(done.isError).toBeFalsy();
+			expect(client.deleteRequestExample).toHaveBeenCalledWith("req_1", "exa_1", undefined);
+
+			const missing = await dispatchTool(
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_gone", confirmed: true },
+				ctx
+			);
+			expect(missing.isError).toBe(true);
+			expect(firstText(missing)).toContain("exa_gone");
+			expect(client.deleteRequestExample).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("collection-level state", () => {
+		test("create_collection stores variables, auth and both scripts", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_collection",
+				{
+					name: "API",
+					variables: {
+						baseUrl: "https://api.example.com",
+						token: { value: "t", secret: true },
+					},
+					auth: { mode: "apikey", key: "X-Key", value: "{{token}}" },
+					preRequestScript: "pm.request.headers.add('x-run', '1')",
+					postRequestScript: "pm.test('ok', () => {})",
+				},
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(callArgs(client.createCollection)[0]).toEqual({
+				name: "API",
+				auth: { mode: "apikey", key: "X-Key", value: "{{token}}" },
+				preRequestScript: "pm.request.headers.add('x-run', '1')",
+				postRequestScript: "pm.test('ok', () => {})",
+				variables: {
+					baseUrl: { enabled: true, value: "https://api.example.com" },
+					token: { enabled: true, value: "t", secret: true },
+				},
+			});
+		});
+
+		test("update_collection merges variables against the stored blob", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1", variables: { token: "t" } },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			// The read is what makes it a merge: `PUT /collections/:id` replaces
+			// the whole blob, so without it setting `token` would drop `baseUrl`.
+			expect(client.getCollection).toHaveBeenCalledWith("col_1", undefined);
+			expect(callArgs(client.updateCollection)[1]).toEqual({
+				variables: {
+					baseUrl: { value: "https://api.example.com", enabled: true },
+					token: { enabled: true, value: "t" },
+				},
+			});
+		});
+
+		test("removeVariables deletes a name, and an absent one is reported", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1", removeVariables: ["baseUrl", "nope"] },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(callArgs(client.updateCollection)[1]).toEqual({ variables: {} });
+			// A name that was not there is a caveat beside the result, not an
+			// error - the same disclosure update_environment makes.
+			expect(res.content.map((c) => c.text).join("\n")).toContain("nope");
+		});
+
+		test("a rename still needs no read, and an empty patch is refused", async () => {
+			const client = fakeClient();
+			const renamed = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1", name: "Renamed", preRequestScript: "" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(renamed.isError).toBeFalsy();
+			expect(client.getCollection).not.toHaveBeenCalled();
+			// An empty string is a value: it is how a collection script is cleared.
+			expect(callArgs(client.updateCollection)[1]).toEqual({
+				name: "Renamed",
+				preRequestScript: "",
+			});
+
+			const nothing = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(nothing.isError).toBe(true);
+			expect(client.updateCollection).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("move_item", () => {
+		/** Two collections at the root, one nested, and a request list per collection. */
+		const TREE = [
+			{ id: "col_1", name: "API", parentId: "", order: 0 },
+			{ id: "col_2", name: "Internal", parentId: "", order: 1 },
+			{ id: "col_1a", name: "v1", parentId: "col_1", order: 0 },
+		];
+
+		function moveClient(requests: Record<string, unknown[]> = {}) {
+			return fakeClient({
+				listCollections: vi.fn().mockResolvedValue(TREE),
+				listRequests: vi
+					.fn()
+					.mockImplementation((id: string) => Promise.resolve(requests[id] ?? [])),
+			});
+		}
+
+		test("a request lands after the collection's current requests", async () => {
+			const client = moveClient({
+				col_2: [
+					{ id: "r1", order: 0 },
+					{ id: "r2", order: 1 },
+				],
+			});
+			const res = await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			// A dense destination needs no sibling rewritten - only the row that
+			// moved, carrying its new owner.
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "request", id: "req_1", order: 2, collectionId: "col_2" }],
+			});
+		});
+
+		test("position 'first' shifts exactly the siblings whose slot changes", async () => {
+			const client = moveClient({
+				col_2: [
+					{ id: "r1", order: 0 },
+					{ id: "r2", order: 2 },
+				],
+			});
+			await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2", position: "first" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [
+					{ type: "request", id: "req_1", order: 0, collectionId: "col_2" },
+					{ type: "request", id: "r1", order: 1 },
+					// r2 already sits at 2, which is where it belongs after the
+					// insert - a batch that rewrote it would be writing nothing.
+				],
+			});
+		});
+
+		test("repositioning inside the same collection does not leave the row tied", async () => {
+			// The bug this shape exists to prevent: state the whole arrangement,
+			// and the moved row cannot land level with the sibling it displaced.
+			const client = moveClient({
+				col_2: [
+					{ id: "r1", order: 0 },
+					{ id: "req_1", order: 1 },
+					{ id: "r2", order: 2 },
+				],
+			});
+			await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			const batch = callArgs(client.reorder)[0] as { moves: Array<Record<string, unknown>> };
+			expect(batch.moves).toEqual([
+				{ type: "request", id: "req_1", order: 2, collectionId: "col_2" },
+				{ type: "request", id: "r2", order: 1 },
+			]);
+			const orders = batch.moves.map((m) => m.order);
+			expect(new Set(orders).size).toBe(orders.length);
+		});
+
+		test("a legacy collection whose rows all sit at 0 gets real positions", async () => {
+			const client = moveClient({
+				col_2: [
+					{ id: "r1", order: 0 },
+					{ id: "r2", order: 0 },
+				],
+			});
+			await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [
+					{ type: "request", id: "req_1", order: 2, collectionId: "col_2" },
+					{ type: "request", id: "r2", order: 1 },
+				],
+			});
+		});
+
+		test("a collection moves to the top level, and among its new siblings", async () => {
+			const client = moveClient();
+			await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_1a", parentId: null },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "collection", id: "col_1a", order: 2, parentId: null }],
+			});
+		});
+
+		test("a collection cannot move into itself or its own subtree", async () => {
+			const client = moveClient();
+			const ctx = ctxWith(client, { allowWrites: true });
+			const intoSelf = await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_1", parentId: "col_1" },
+				ctx
+			);
+			expect(intoSelf.isError).toBe(true);
+			expect(firstText(intoSelf)).toMatch(/itself/i);
+
+			const intoChild = await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_1", parentId: "col_1a" },
+				ctx
+			);
+			expect(intoChild.isError).toBe(true);
+			expect(firstText(intoChild)).toContain("col_1a");
+			// The engine would refuse the same batch under its lock; refusing here
+			// is about naming the problem, so nothing may reach it.
+			expect(client.reorder).not.toHaveBeenCalled();
+		});
+
+		test("a collection move states its destination or is refused", async () => {
+			const client = moveClient();
+			const res = await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_1a" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("parentId");
+			expect(client.reorder).not.toHaveBeenCalled();
+		});
+
+		test("an unknown collection is named rather than sent", async () => {
+			const client = moveClient();
+			const res = await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_gone", parentId: null },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("col_gone");
+			expect(client.reorder).not.toHaveBeenCalled();
+		});
+	});
+
+	test("every new write verb refuses before touching the engine when writes are off", async () => {
+		const client = fakeClient();
+		const calls: Array<[string, Record<string, unknown>, keyof EngineClient]> = [
+			[
+				"create_request_example",
+				{ requestId: "req_1", name: "200 OK" },
+				"createRequestExample",
+			],
+			[
+				"update_request_example",
+				{ requestId: "req_1", exampleId: "exa_1", status: 500 },
+				"updateRequestExample",
+			],
+			[
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_1", confirmed: true },
+				"deleteRequestExample",
+			],
+			["move_item", { type: "request", id: "req_1", collectionId: "col_2" }, "reorder"],
+		];
+		for (const [tool, args, method] of calls) {
+			const res = await dispatchTool(tool, args, ctxWith(client, { allowWrites: false }));
+			expect(res.isError, tool).toBe(true);
+			expect(client[method], tool).not.toHaveBeenCalled();
+		}
+		// Nor may one read what it would change while writes are off.
+		expect(client.listRequestExamples).not.toHaveBeenCalled();
+		expect(client.listRequests).not.toHaveBeenCalled();
+	});
+
+	test("the new tools carry the categories and hints their gates imply", () => {
+		const byName = new Map(TOOLS.map((t) => [t.name, t]));
+		expect(byName.get("list_request_examples")?.category).toBe("read");
+		for (const name of [
+			"create_request_example",
+			"update_request_example",
+			"delete_request_example",
+			"move_item",
+		]) {
+			expect(byName.get(name)?.category, name).toBe("write");
+		}
+		expect(byName.get("delete_request_example")?.annotations.destructiveHint).toBe(true);
+		expect(byName.get("list_request_examples")?.annotations.readOnlyHint).toBe(true);
 	});
 });
 
