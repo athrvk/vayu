@@ -24,12 +24,18 @@
  *   `spec-file-store` and never reaches the engine. A URL-sourced spec keeps its
  *   origin portably instead, in `spec_documents.source_url`.
  *
- * **Binding** deliberately creates, deletes and edits nothing: it matches what
- * is already there and stamps identity on the matches - the operations with no
+ * **Binding** deliberately creates and deletes nothing: it matches what is
+ * already there and stamps identity on the matches - the operations with no
  * request, and the requests with no operation, are *reported* and left alone.
- * The one place this tab writes requests is the Sync section, and only for the
- * items the user ticks: it re-reads the document and says what moved (#654),
- * and applies the selection in one engine transaction (#655).
+ * The one field it does rewrite is a request's own `specOperation`, and only to
+ * clear one recorded against a **different** document (#718): after a bind, a
+ * request's identity is the operation it matched here, or nothing. Unbinding
+ * still leaves stamps exactly as they are, so unbind-then-bind-the-same-document
+ * costs nothing - it is re-binding to a different one that would otherwise leave
+ * a request claiming an operation of a document nothing is bound to.
+ * The one place this tab writes *other* request fields is the Sync section, and
+ * only for the items the user ticks: it re-reads the document and says what
+ * moved (#654), and applies the selection in one engine transaction (#655).
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -135,6 +141,22 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 	const mappedCount = requests.filter((r) => r.specOperation).length;
 
+	/*
+	 * Requests carrying identity the document about to be bound does not account
+	 * for (issue #718). Binding is the only moment the app can tell: unbinding
+	 * deliberately leaves stamps alone - so unbind-then-bind-the-same-document is
+	 * lossless - and it is re-binding to a *different* one that would otherwise
+	 * leave a request stamped as an operation of a document this collection is
+	 * no longer bound to. Coverage resolves stamps by `operationId` first, so
+	 * such a stamp does not merely go unread; it claims whatever operation of the
+	 * new document happens to share the id.
+	 */
+	const staleStamps = useMemo(
+		() =>
+			match ? match.unmatchedRequests.filter((r) => r.specOperation).map((r) => r.id) : [],
+		[match]
+	);
+
 	const handleFile = (file: File) => {
 		const reader = new FileReader();
 		reader.onload = () => {
@@ -176,6 +198,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					requestId: request.id,
 					specOperation: operation,
 				})),
+				clearStamps: staleStamps,
 				// Stored with the document so a run of this collection can report
 				// its contract coverage (issue #629).
 				operations: parsed?.declaredOperations ?? [],
@@ -243,7 +266,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					<p className="text-xs text-muted-foreground">
 						Pick a document below. Vayu matches its operations to the requests already
 						here by method and path, and records the identity of the ones that match -
-						nothing is created, deleted or rewritten.
+						nothing is created or deleted. The only thing rewritten is identity recorded
+						against a different document, which is cleared.
 					</p>
 				</div>
 			)}
@@ -318,6 +342,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							matched={match.matched.length}
 							unmatchedRequests={match.unmatchedRequests.length}
 							unmatchedOperations={match.unmatchedOperations.length}
+							staleStamps={staleStamps.length}
 						/>
 					)}
 
@@ -349,13 +374,31 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			<SaveFailed mutation={bindSpec} what="the spec binding" />
 			<SaveFailed mutation={updateCollection} what="the spec binding" />
 
-			{bindSpec.data && bindSpec.data.failedStamps.length > 0 && (
-				<Callout severity="warning" title="Bound, but some requests were not stamped">
-					{bindSpec.data.failedStamps.length} request
-					{bindSpec.data.failedStamps.length === 1 ? "" : "s"} kept no operation identity.
-					Bind again to retry those.
-				</Callout>
-			)}
+			{bindSpec.data &&
+				(bindSpec.data.failedStamps.length > 0 ||
+					bindSpec.data.failedClears.length > 0) && (
+					<Callout severity="warning" title="Bound, but some identities did not land">
+						{bindSpec.data.failedStamps.length > 0 && (
+							<>
+								{bindSpec.data.failedStamps.length} request
+								{bindSpec.data.failedStamps.length === 1 ? "" : "s"} kept no
+								operation identity.{" "}
+							</>
+						)}
+						{/* Named apart from the line above because it is the worse state:
+						    a stamp that survived still *reads* as identity, and it is
+						    identity in a document this collection is not bound to. */}
+						{bindSpec.data.failedClears.length > 0 && (
+							<>
+								{bindSpec.data.failedClears.length} request
+								{bindSpec.data.failedClears.length === 1 ? "" : "s"} still record
+								{bindSpec.data.failedClears.length === 1 ? "s" : ""} an operation of
+								another document.{" "}
+							</>
+						)}
+						Bind again to retry those.
+					</Callout>
+				)}
 
 			{bound && (
 				<div>
@@ -484,6 +527,7 @@ function MatchSummary({
 	matched,
 	unmatchedRequests,
 	unmatchedOperations,
+	staleStamps,
 }: {
 	title: string;
 	format: string;
@@ -491,6 +535,7 @@ function MatchSummary({
 	matched: number;
 	unmatchedRequests: number;
 	unmatchedOperations: number;
+	staleStamps: number;
 }) {
 	return (
 		<div className="rounded-md border border-rule surface-sunken p-3 space-y-1">
@@ -511,6 +556,19 @@ function MatchSummary({
 				operation
 				{unmatchedOperations === 1 ? "" : "s"} with no request
 			</p>
+			{/*
+			 * The one line here that describes a *write* to something that already
+			 * exists, so it is stated separately and only when it applies. Nothing
+			 * else about a bind touches a request that did not match; this does,
+			 * and the user is agreeing to it (issue #718).
+			 */}
+			{staleStamps > 0 && (
+				<p className="text-[11px] text-muted-foreground">
+					{staleStamps} request{staleStamps === 1 ? "" : "s"} record
+					{staleStamps === 1 ? "s" : ""} an operation this document does not have - that
+					identity is cleared, because it names another document.
+				</p>
+			)}
 		</div>
 	);
 }

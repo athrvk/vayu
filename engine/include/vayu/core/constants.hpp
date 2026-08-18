@@ -790,6 +790,18 @@ constexpr int SYNCHRONOUS = 0;
 constexpr int MAX_RUNS_RETAINED = 200;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
+/**
+ * How recently a stored OpenAPI document must have arrived to be spared by the
+ * orphan sweep, whatever else says nothing references it (issue #718).
+ *
+ * Binding a collection is three writes over three requests, and the *document*
+ * is the first of them: between `POST /specs` and the `PUT /collections/:id`
+ * that names it, a document is bound by nobody and pinned by no run - exactly
+ * the shape of an orphan. Ten minutes is far longer than that window and far
+ * shorter than the interval between the passes that sweep, so a document this
+ * spares is reclaimed by the next one rather than kept.
+ */
+constexpr int64_t SPEC_DOCUMENT_SWEEP_GRACE_MS = 600'000;
 } // namespace database
 } // namespace vayu::core::constants
 

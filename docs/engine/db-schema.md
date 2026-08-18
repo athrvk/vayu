@@ -355,11 +355,36 @@ same code on the same bytes.
 
 **Ownership, and why there is no cascade.** A spec is bound *by* collections
 rather than owned by one: several may bind the same row, and unbinding one must
-leave it there for the others. So nothing deletes a document implicitly -
+leave it there for the others. So no cascade deletes a document -
 `DELETE /specs/:id` is refused with a `409` naming the binder while any
 collection still names it. There is likewise no `PUT /specs/:id`: a document that
 changed is a different document, and rewriting one in place would invalidate the
 hash every run of every bound collection was stamped with.
+
+**Lifetime, and the sweep that enforces it** (issue #718). Having no owner left
+these rows with no way to die: every `POST /specs/sync` mints a new document and
+moves the binding off the old one, unbinding leaves it, re-binding mints another,
+and deleting a bound collection takes its requests and not the document - while
+`DELETE /specs/:id` needs an id and there is no list route to get an unreachable
+one from. Weekly syncs of a 12 MB document therefore stranded ~600 MB a year that
+nothing could read or reclaim. The rule now, and the only one:
+
+> A document lives while a collection binds it, **or** while a retained run names
+> it in [`runs.config_snapshot`](#runs) under `scenario.openapi.specId`.
+
+`Database::sweep_orphaned_spec_documents()` applies it and returns how many rows
+went. Run-referenced documents live as long as the runs do, deliberately: a
+scenario run stamps the `specId` it was planned against and its report describes
+that contract, so the source has to outlive the binding by exactly the retention
+window - which is why the sweep is the tail of `prune_runs_configured()`, the
+pass that *releases* those references, and thereby runs on startup and at the end
+of every run. It also runs after `spec_sync_apply` (the accretion source) and
+after `delete_collection` (the last binder going away). Two rules keep it honest:
+a document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` (10 min) is always
+spared, because binding stores the document *before* the `PUT /collections/:id`
+that names it and a document in that window is a bind in flight, not an orphan;
+and the pass never throws or reads `content`, so no caller can fail over
+housekeeping and no 10 MiB blob is loaded to decide its fate.
 
 **Cap.** A document over the live `maxSpecDocumentBytes`
 [`config_entries`](#config_entries) value (default 10 MiB, aligned with

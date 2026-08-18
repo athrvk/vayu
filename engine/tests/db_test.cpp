@@ -4,6 +4,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
 #include <chrono>
@@ -996,6 +997,189 @@ TEST_F (DatabaseTest, PruneRunsByAgeSparesABaselineRun) {
     auto ids = run_ids (db);
     EXPECT_TRUE (ids.count ("pinned_stale"));
     EXPECT_FALSE (ids.count ("stale"));
+}
+
+// ============================================================================
+// OpenAPI document reclamation (sweep_orphaned_spec_documents, issue #718)
+// ============================================================================
+
+namespace {
+
+/** Long enough ago to be outside the grace window, whatever the clock says. */
+int64_t long_ago () {
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    return now - vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS - 1000;
+}
+
+/** A stored document old enough for the sweep to consider it. */
+void seed_spec (Database& db, const std::string& id, int64_t fetched_at) {
+    SpecDocument spec;
+    spec.id         = id;
+    spec.content    = R"({"openapi":"3.0.0"})";
+    spec.hash       = "hash_" + id;
+    spec.fetched_at = fetched_at;
+    db.save_spec_document (spec);
+}
+
+/** A collection bound to @p spec_id, or to nothing when it is empty. */
+void seed_bound_collection (Database& db, const std::string& id, const std::string& spec_id) {
+    Collection col;
+    col.id      = id;
+    col.name    = id;
+    col.openapi = spec_id.empty () ?
+    "{}" :
+    nlohmann::json{ { "specId", spec_id }, { "specHash", "hash_" + spec_id },
+        { "syncedAt", 1 } }
+    .dump ();
+    db.create_collection (col);
+}
+
+/** A terminal scenario run whose snapshot pins @p spec_id, as a real one does. */
+void seed_run_pinning_spec (Database& db, const std::string& id, const std::string& spec_id) {
+    vayu::db::Run run;
+    run.id         = id;
+    run.type       = vayu::RunType::Scenario;
+    run.status     = vayu::RunStatus::Completed;
+    run.start_time = 1000;
+    // The shape `build_scenario_manifest` writes into `config_snapshot`: the
+    // identity sits under `scenario.openapi`, not at the root.
+    run.config_snapshot = nlohmann::json{
+        { "scenario",
+        nlohmann::json{ { "collectionId", "col_x" },
+        { "openapi", nlohmann::json{ { "specId", spec_id }, { "specHash", "hash_" + spec_id } } } } }
+    }.dump ();
+    db.create_run (run);
+}
+
+} // namespace
+
+// The accretion the sweep exists for: every sync mints a document and moves the
+// binding off the last one, and nothing owned the one left behind.
+TEST_F (DatabaseTest, SweepsADocumentNoCollectionBindsAndNoRunNames) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_old", long_ago ());
+    seed_spec (db, "spec_live", long_ago ());
+    seed_bound_collection (db, "col_1", "spec_live");
+
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 1u);
+    EXPECT_FALSE (db.get_spec_document ("spec_old").has_value ());
+    EXPECT_TRUE (db.get_spec_document ("spec_live").has_value ())
+    << "the sweep took the document a collection is bound to";
+}
+
+// The other half of the lifetime rule: a run's report describes a contract, and
+// the document that contract came from outlives the binding by exactly as long
+// as the run that used it.
+TEST_F (DatabaseTest, SweepKeepsADocumentARetainedRunNames) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_old", long_ago ());
+    seed_run_pinning_spec (db, "run_1", "spec_old");
+
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 0u);
+    EXPECT_TRUE (db.get_spec_document ("spec_old").has_value ());
+
+    // ...and goes with the last run that named it. Retention is what releases
+    // the reference, which is why the sweep rides along with it.
+    db.delete_run ("run_1");
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 1u);
+    EXPECT_FALSE (db.get_spec_document ("spec_old").has_value ());
+}
+
+// A run that names a *different* document must not shield this one - the pin is
+// read by id, not by "some run mentions a spec".
+TEST_F (DatabaseTest, SweepReadsTheRunsOwnSpecIdRatherThanAnyRunAtAll) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_orphan", long_ago ());
+    seed_spec (db, "spec_pinned", long_ago ());
+    seed_run_pinning_spec (db, "run_1", "spec_pinned");
+
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 1u);
+    EXPECT_FALSE (db.get_spec_document ("spec_orphan").has_value ());
+    EXPECT_TRUE (db.get_spec_document ("spec_pinned").has_value ());
+}
+
+// Binding is three writes over three requests and the document is the first of
+// them, so a document seconds old that nothing names is a bind in flight.
+TEST_F (DatabaseTest, SweepSparesADocumentInsideTheGraceWindow) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    seed_spec (db, "spec_just_stored", now);
+
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 0u);
+    EXPECT_TRUE (db.get_spec_document ("spec_just_stored").has_value ())
+    << "a document stored between POST /specs and the binding that names it "
+       "was swept";
+}
+
+// Retention is the pass that releases run references, so it is the pass that
+// notices what they were holding - and that is what puts the sweep on a startup
+// and on the end of every run without a schedule of its own.
+TEST_F (DatabaseTest, PruningRunsReclaimsTheDocumentTheLastPrunedRunHeld) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_old", long_ago ());
+    seed_run_pinning_spec (db, "run_1", "spec_old");
+
+    // Age cap disabled, count cap of zero would disable both - so drop the run
+    // by age, the way a month-old run goes.
+    db.prune_runs (0, 30);
+    ASSERT_TRUE (db.get_all_runs ().empty ());
+    // Still there: prune_runs is the primitive, prune_runs_configured is the
+    // pass. Only the pass sweeps.
+    EXPECT_TRUE (db.get_spec_document ("spec_old").has_value ());
+
+    db.prune_runs_configured ();
+    EXPECT_FALSE (db.get_spec_document ("spec_old").has_value ());
+}
+
+// Deleting a bound collection still does not cascade to the document - several
+// collections may bind one - but it is the moment to ask whether anything else
+// still does.
+TEST_F (DatabaseTest, DeletingTheLastBinderReclaimsTheDocument) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_1", long_ago ());
+    seed_bound_collection (db, "col_1", "spec_1");
+    seed_bound_collection (db, "col_2", "spec_1");
+
+    db.delete_collection ("col_1");
+    EXPECT_TRUE (db.get_spec_document ("spec_1").has_value ())
+    << "a document a second collection still binds was swept";
+
+    db.delete_collection ("col_2");
+    EXPECT_FALSE (db.get_spec_document ("spec_1").has_value ());
+}
+
+// A binding that is not JSON references nothing - the reading every other
+// reader of this column gives it, and the one that cannot make a corrupt row
+// pin a document forever.
+TEST_F (DatabaseTest, SweepTreatsAnUnparseableBindingAsBindingNothing) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_spec (db, "spec_1", long_ago ());
+    Collection col;
+    col.id      = "col_1";
+    col.name    = "Broken";
+    col.openapi = "not json at all";
+    db.create_collection (col);
+
+    EXPECT_EQ (db.sweep_orphaned_spec_documents (), 1u);
+    EXPECT_FALSE (db.get_spec_document ("spec_1").has_value ());
 }
 
 TEST_F (DatabaseTest, SetRunBaselineTogglesAndPersists) {
