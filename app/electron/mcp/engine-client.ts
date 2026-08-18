@@ -278,6 +278,26 @@ export class EngineClient {
 	}
 
 	/**
+	 * The global variables singleton (`GET /globals`).
+	 *
+	 * Always answers a row: an engine that has never had one returns
+	 * `{id: "globals", variables: {}, updatedAt: 0}` rather than a 404, so a
+	 * caller merging into it never has to tell "empty" from "absent".
+	 */
+	getGlobals(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/globals", undefined, signal);
+	}
+
+	/**
+	 * Every design-mode cookie jar the engine holds (`GET /cookies`), one entry
+	 * per scope that holds anything - values included, exactly as the Settings
+	 * card shows them.
+	 */
+	getCookies(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/cookies", undefined, signal);
+	}
+
+	/**
 	 * Fetch a single saved request by id (`GET /requests/:id`). Used to name what
 	 * a delete is about to destroy before the user is asked to confirm it - a
 	 * confirmation prompt carrying only an opaque id is not one a human can
@@ -488,9 +508,53 @@ export class EngineClient {
 		);
 	}
 
+	/** Create an environment: `POST /environments` (the engine assigns the id). */
+	createEnvironment(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/environments", payload, signal);
+	}
+
 	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
 	updateEnvironment(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("PUT", `/environments/${encodeURIComponent(id)}`, payload, signal);
+	}
+
+	/**
+	 * Delete an environment: `DELETE /environments/:id`. Does **not** cascade -
+	 * an environment owns only its own variables - so this destroys exactly the
+	 * variables the caller was shown before confirming.
+	 */
+	deleteEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/environments/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
+	/**
+	 * Write the global variables singleton: `POST /globals`.
+	 *
+	 * POST, and a **replace** rather than a merge - globals is one row addressed
+	 * by one id, so the engine has no create/update split for it and saves the
+	 * blob whole (`save_globals_response`). A caller preserving anything must
+	 * read first and send the merged result, which is what `update_globals`
+	 * does.
+	 */
+	saveGlobals(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/globals", payload, signal);
+	}
+
+	/**
+	 * Clear cookie jars: `DELETE /cookies[?environmentId=]`.
+	 *
+	 * Three cases, spelled the way the engine reads them and the renderer's
+	 * `apiService.clearCookies` already sends them: `undefined` omits the
+	 * parameter and clears every jar, `null` sends it empty and clears the
+	 * no-environment jar, and an id clears that environment's. Passing `null` is
+	 * therefore not the same call as passing nothing.
+	 */
+	clearCookies(environmentId?: string | null, signal?: AbortSignal): Promise<unknown> {
+		const query =
+			environmentId === undefined
+				? ""
+				: `?environmentId=${encodeURIComponent(environmentId ?? "")}`;
+		return this.request("DELETE", `/cookies${query}`, undefined, signal);
 	}
 
 	// --- Execute -------------------------------------------------------------

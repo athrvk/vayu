@@ -168,7 +168,14 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle               |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
-| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle |
+| `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive) |
+| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names |
+| `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction |
+| `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
+| `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404) |
+| `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge |
+| `get_cookies`          | read     | `GET /cookies`                               | - (values included, as the Settings card shows them) |
+| `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
@@ -349,10 +356,51 @@ Notes:
   and enabled/disabled state are preserved, so a rotated secret stays masked and
   a disabled variable stays disabled. It is a `PUT`, not
   a `POST`: since #95 the engine's `POST /environments` is create-only, and since
-  #97 it rejects a body carrying an `id` outright. `create_request` stays a
-  `POST` for the same reason - it creates, and lets the engine assign the id.
-  Neither tool sends an `id` in a body: on the `PUT` the path is the identity,
-  and a body `id` disagreeing with it is a `400`.
+  #97 it rejects a body carrying an `id` outright. `create_request` and
+  `create_environment` stay `POST`s for the same reason - they create, and let
+  the engine assign the id. No tool here sends an `id` in a body: on the `PUT`
+  the path is the identity, a body `id` disagreeing with it is a `400`, and on
+  the `POST` any `id` at all is one.
+- **The variables an agent writes are the flags it did not state** (issue #758).
+  `update_environment` and `update_globals` take each variable either as a
+  string - set the value, keep every flag - or as an object
+  `{value, secret, type, enabled}` whose *omitted* fields keep their stored
+  setting, which is what makes `secret` and `enabled` reachable at all without
+  a read-modify-write dance on the agent's side. Two rules make that safe rather
+  than merely convenient: a variable the blob does not already hold (or holds
+  malformed) must carry a `value`, so `{secret: true}` against a mistyped name
+  is an error instead of a new empty secret variable; and a name in both
+  `variables` and `removeVariables` is refused, because "set it and delete it"
+  has no correct order and guessing one would apply half the call and report
+  success. `removeVariables` is the delete a blank value cannot express - `""`
+  leaves the name resolving to an empty string - and a name that was not there
+  comes back as a note on the result rather than an error, so a retried call
+  does not fail on its own success. `secret` is app-side masking only: MCP reads
+  (`list_environments`, `vayu://environments`) still return every value in full,
+  which is a recorded pre-1.0 security item, not something these tools changed.
+- **Activation is one write, and `"none"` is the other direction.**
+  `activate_environment` sends `isActive: true` and nothing else: the DB layer
+  clears the previously active row in the same transaction
+  (`deactivate_other_environments_locked`), so a companion deactivate would be a
+  second definition of the same rule. There is no "no environment" row to write
+  `true` to, so `"none"` reads the list to find the row holding the flag and
+  writes `isActive: false` to it - and when nothing is active it writes nothing,
+  says so, and emits no data-changed event. The app follows either direction:
+  `useActiveEnvironmentRestore` adopts whatever the engine reports, including a
+  clear it has seen the engine hold a selection before.
+- **`update_globals` has to read first.** Globals is the one resource with no
+  create/update split - one row, one id - so `POST /globals` saves the blob
+  whole and an absent `variables` means `{}`, not "keep". The tool reads
+  `GET /globals` and posts the merged result, which is the same read-merge-write
+  `update_environment` does for the same blob-replacement reason.
+- **`clear_cookies` has three scopes, not two.** Omitting `environmentId`
+  clears every jar, passing an id clears that environment's, and passing `null`
+  clears the jar used when no environment is selected - the engine reads an
+  absent query parameter and a present-but-empty one differently, so omitting
+  and passing null are genuinely different calls (the renderer's
+  `apiService.clearCookies` sends the same three). No confirmation gate: nothing
+  saved is lost, only session state a re-login restores - which is why it is a
+  `write` tool for the toggle and not one of the confirm-gated deletes.
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).
@@ -746,9 +794,11 @@ on its next call, and on the user's next Send in the same environment. That is
 deliberate: the jar belongs to the environment, not to the caller, and giving
 MCP a jar of its own would make the same saved request behave differently for
 an agent than in the UI - a surprise in the harder direction to debug. The
-state stays visible and resettable: Settings → General → Cookies lists every
-jar and clears it, and `GET /cookies` reports the same. An agent that must not
-inherit a session should run in an environment of its own. `run_collection`
+state stays visible and resettable from either side: Settings → General →
+Cookies lists every jar and clears it, and `get_cookies` / `clear_cookies`
+(issue #758) read and clear the same jars over MCP - so an agent can see the
+session it inherited and drop it rather than only being told it exists. An agent
+that must not inherit one at all should run in an environment of its own. `run_collection`
 shares the jar too - the design-mode runner is the one executor handed it, which
 is what lets a login step authenticate the steps after it. `start_load_run` is
 unaffected either way: a single-target load run never touches the jar, and a
@@ -923,21 +973,24 @@ configurable in **Settings → MCP** and persisted.
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side
   (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Five tools carry it - `start_load_run`,
-  `delete_collection`, `delete_request`, `delete_run` and
+  prompt where supported. Six tools carry it - `start_load_run`,
+  `delete_collection`, `delete_request`, `delete_run`, `delete_environment` and
   `delete_webhook_inbox` - through one implementation, so the elicitation path
   cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category: `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
-  `update_environment`, `update_engine_config`, `set_run_baseline`,
+  `create_environment`, `update_environment`, `activate_environment`,
+  `delete_environment`, `update_globals`, `clear_cookies`,
+  `update_engine_config`, `set_run_baseline`,
   `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`. Does not gate
   `run_request` / `run_collection_smoke` / load runs
-  (allowlist + caps). The four deletes need the toggle **and** confirmation:
+  (allowlist + caps). The five deletes need the toggle **and** confirmation:
   the toggle is a single session-wide switch a user flips once to let an agent
   save a request, which is not consent to destroy a subtree or a run's stored
-  history.
+  history. `clear_cookies` takes the toggle without a confirmation, because
+  what it ends is a session rather than anything saved.
 - **Loopback services carry no gate of their own** - `start_mock_issuer`,
   `stop_mock_issuer`, `update_mock_issuer`, `start_mock_server`,
   `stop_mock_server`, `start_webhook_inbox`, `stop_webhook_inbox` and

@@ -41,7 +41,14 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		updateConfig: vi.fn().mockResolvedValue({ entries: [] }),
 		getConfig: vi.fn().mockResolvedValue({ entries: [] }),
 		getEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev", variables: {} }),
+		listEnvironments: vi.fn().mockResolvedValue([{ id: "env_1", name: "Dev", isActive: true }]),
+		createEnvironment: vi.fn().mockResolvedValue({ id: "env_2", name: "Staging" }),
 		updateEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
+		deleteEnvironment: vi.fn().mockResolvedValue({ success: true }),
+		getGlobals: vi.fn().mockResolvedValue({ id: "globals", variables: {} }),
+		saveGlobals: vi.fn().mockResolvedValue({ id: "globals", variables: {} }),
+		getCookies: vi.fn().mockResolvedValue({ scopes: [] }),
+		clearCookies: vi.fn().mockResolvedValue({ cleared: 3 }),
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
 		getRun: vi.fn().mockResolvedValue({ id: "run_1", type: "load", status: "completed" }),
@@ -117,6 +124,16 @@ describe("the registry declares its effects", () => {
 			update_request: ["request"],
 			delete_request: ["request"],
 			update_environment: ["environment"],
+			// State CRUD (#758). The globals writer takes the `environment` family
+			// rather than one of its own: same resolution order, same blob shape,
+			// and the renderer's invalidator takes the globals key with it.
+			create_environment: ["environment"],
+			activate_environment: ["environment"],
+			delete_environment: ["environment"],
+			update_globals: ["environment"],
+			// The jar has always been its own family - `run_request` refills it -
+			// and clearing one is the same family read from the other end.
+			clear_cookies: ["cookie"],
 			update_engine_config: ["config"],
 			run_request: ["run", "cookie"],
 			run_collection_smoke: ["run", "cookie"],
@@ -206,6 +223,20 @@ describe("dispatch emits mcp:data-changed", () => {
 		const res = await dispatchTool("delete_collection", { collectionId: "col_1" }, ctx);
 		expect(res.isError).toBeFalsy();
 		expect(client.deleteCollection).not.toHaveBeenCalled();
+		expect(onDataChanged).not.toHaveBeenCalled();
+	});
+
+	test("deactivating when nothing was active emits nothing", async () => {
+		// The third `unchanged` shape (#758): a successful call that found nothing
+		// to write. Emitting here would refetch the environment list, the globals
+		// and every composition to report a change no row records.
+		const client = fakeClient({
+			listEnvironments: vi.fn().mockResolvedValue([{ id: "env_1", isActive: false }]),
+		});
+		const { ctx, onDataChanged } = ctxWithNotifier(client, WRITES_ENABLED);
+		const res = await dispatchTool("activate_environment", { environmentId: "none" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
 		expect(onDataChanged).not.toHaveBeenCalled();
 	});
 

@@ -25,6 +25,13 @@
  *   push it to the engine, once. That is the upgrade path - every user whose
  *   choice predates the engine storing it would otherwise silently lose it on
  *   first launch - and it is also self-healing after a write that failed.
+ * - The engine had one this session and now has none: adopt the clear. Someone
+ *   deactivated it deliberately - the MCP `activate_environment` tool with
+ *   "none", or a write through another client - and pushing the stale copy back
+ *   would undo their write with the app's own memory of it. The upgrade push
+ *   above is for an engine that has *never* held a selection, which is why the
+ *   two are told apart by what this session has already seen the engine answer
+ *   rather than by the value alone.
  *
  * Deliberately not merged with `useActiveEnvironmentGuard` (clearing a
  * persisted id whose environment is gone): that guard answers "does this id
@@ -54,6 +61,13 @@ export function useActiveEnvironmentRestore(): void {
 	 * every refetch of the list, turning a failed write into a request loop.
 	 */
 	const hasPushedPersistedSelection = useRef(false);
+	/*
+	 * Whether the engine has answered with an active environment at any point
+	 * this session. It is what separates "the engine has never been told" - the
+	 * upgrade path, which pushes - from "the engine was told and has since been
+	 * cleared", which adopts.
+	 */
+	const hasSeenEngineSelection = useRef(false);
 
 	useEffect(() => {
 		/*
@@ -71,9 +85,22 @@ export function useActiveEnvironmentRestore(): void {
 		const engineActiveId = environments.find((e) => e.isActive)?.id ?? null;
 
 		if (engineActiveId) {
+			hasSeenEngineSelection.current = true;
 			if (engineActiveId !== activeEnvironmentId) {
 				setActiveEnvironmentId(engineActiveId);
 			}
+			return;
+		}
+
+		/*
+		 * The engine held a selection this session and holds none now, so the
+		 * clear is the newer fact and the store follows it. Without this the
+		 * push below would fire on the very next refetch and put the deactivated
+		 * id straight back - an MCP or CLI "no environment" write undone by the
+		 * window that was only meant to be watching.
+		 */
+		if (hasSeenEngineSelection.current) {
+			if (activeEnvironmentId) setActiveEnvironmentId(null);
 			return;
 		}
 

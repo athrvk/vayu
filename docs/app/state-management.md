@@ -234,6 +234,13 @@ and two pieces of wiring keep the two in step:
   loop. Both directions wait on `isSuccess`; an unreachable engine returns an
   empty list that is indistinguishable from "no environments exist", and
   adopting from that would clear a good selection on every cold start.
+  A third direction was added with the MCP state tools (#758): once this
+  session has *seen* the engine hold a selection, an engine that reports none
+  is adopted as a clear rather than pushed back at. Otherwise an
+  `activate_environment` with `"none"` - or any other client's deactivate -
+  would be undone on the very next refetch by this window's memory of the id
+  it used to hold. The upgrade push stays for the case it was written for: an
+  engine that has never held a selection at all.
 
 It composes with `useActiveEnvironmentGuard` above rather than replacing it, and
 is mounted after it: the guard answers "does this id still exist", this hook
@@ -1305,7 +1312,7 @@ to keys through `lib/mcp-invalidation.ts`:
 |--------|-------------|--------------|
 | `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
-| `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
+| `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own. `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
 | `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The four prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |

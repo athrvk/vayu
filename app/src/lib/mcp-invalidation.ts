@@ -87,9 +87,21 @@ const INVALIDATORS: Record<
 	 * *different* environment still reads the globals this write may have
 	 * shadowed. Nothing refetches compose on its own, so a miss here is stale
 	 * until the tab is reopened.
+	 *
+	 * `globals` rides on this family rather than getting one of its own (issue
+	 * #758): globals are the bottom of the same resolution order the
+	 * environments sit in, `update_globals` is the same read-merge-write against
+	 * the same variable shape, and the Variables drawer shows them as one more
+	 * scope in the same tree. The cost of the pairing is that an
+	 * `update_environment` also refetches one small singleton; the cost of
+	 * *not* pairing them would have been an entity whose only reader is one
+	 * query key, or - worse - an `update_globals` that declared `environment`
+	 * and left the globals card showing the pre-write values, which is exactly
+	 * the "written but never read" wiring bug this map exists to prevent.
 	 */
 	environment: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
 	},
 
