@@ -20,21 +20,21 @@
  * label's own white, which bottoms out at 3.6:1 on `sunset` and is the fill's
  * own ceiling - a hint cannot beat the text it is secondary to - and far above
  * the canvas token, which fails the bar on every scheme. Both halves are
- * asserted:
- * a test that only checks the new value passes just as happily on a bar so low
- * the old one would have cleared it.
+ * asserted: a test that only checks the new value passes just as happily on a
+ * bar so low the old one would have cleared it.
  *
  * Values are parsed out of `index.css` rather than restated, so a retuned
  * accent is measured rather than assumed.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const uiDir = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(uiDir, "..", "..", "index.css"), "utf8");
+const SRC = join(uiDir, "..", "..");
+const css = readFileSync(join(SRC, "index.css"), "utf8");
 const tooltip = readFileSync(join(uiDir, "tooltip.tsx"), "utf8");
 
 type Hsl = [number, number, number];
@@ -120,4 +120,57 @@ describe("a tooltip hint on the tooltip's own fill", () => {
 			}
 		}
 	);
+});
+
+/*
+ * Fixing three call sites does not fix the app: the next hand-written tooltip
+ * can reach for `text-muted-foreground` exactly as this one did, and every
+ * assertion above would stay green. So the rule is made **enumerable rather
+ * than impossible**, the way the border rules are - the mistake is one shape,
+ * a canvas-tuned foreground inside a `TooltipContent`, and every block in the
+ * app is read.
+ *
+ * A scan cannot see a class that arrives in a variable, which is why the
+ * rendered-class guard in `tooltip-icon-button.test.tsx` exists alongside it.
+ * The two catch different halves and neither is sufficient.
+ */
+function tsxFiles(dir: string): string[] {
+	const out: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (entry.name === "node_modules" || entry.name === "dist") continue;
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) out.push(...tsxFiles(full));
+		else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) out.push(full);
+	}
+	return out;
+}
+
+/** `<TooltipContent …>…</TooltipContent>`, comments stripped so prose about the
+ *  rule does not read as a violation of it. */
+const TOOLTIP_BLOCK = /<TooltipContent\b[^>]*>[\s\S]*?<\/TooltipContent>/g;
+
+/** The foregrounds tuned for the canvas: muted, plain, and the `-text` tier. */
+const CANVAS_FOREGROUND = /\btext-(?:muted-foreground|foreground|[a-z]+-text)\b/;
+
+const blocks = tsxFiles(SRC).flatMap((file) =>
+	[
+		...readFileSync(file, "utf8")
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.matchAll(TOOLTIP_BLOCK),
+	].map((m) => ({ file, source: m[0] }))
+);
+
+describe("every tooltip in the app, not only the three this fix touched", () => {
+	it("found the tooltips to scan", () => {
+		// A regex that stopped matching would make the next case vacuous - this
+		// repo has had a guard pass for weeks while reading an empty string.
+		expect(blocks.length).toBeGreaterThan(12);
+	});
+
+	it("paints no canvas-tuned foreground on the tooltip's fill", () => {
+		const offenders = blocks
+			.filter((b) => CANVAS_FOREGROUND.test(b.source))
+			.map((b) => `${b.file}: ${CANVAS_FOREGROUND.exec(b.source)?.[0]}`);
+		expect(offenders).toEqual([]);
+	});
 });

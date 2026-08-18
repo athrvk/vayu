@@ -101,6 +101,14 @@ white-on-`--primary` never occurs because fills use `--primary-fill`).
   between them. → `drawer-row-hit-area.test.tsx`. Assert the height as a
   `className`, not `offsetHeight`: jsdom has no layout and reports 0 for
   everything, so an `offsetHeight` guard passes while measuring nothing.
+- **Inside a tooltip, every colour is a tint of `--primary-foreground`.**
+  `TooltipContent` paints `bg-primary-fill`, where the canvas-tuned
+  `--muted-foreground` measures 1.04–2.27:1 - a disappearance, not a
+  de-emphasis, and it hid a URL the tooltip existed to show. Secondary lines use
+  the `TooltipHint` primitive, which holds the one tint.
+  → `tooltip-hint-contrast.test.ts` (ratios per scheme, plus a scan of every
+  tooltip block in `src`), `tooltip-icon-button.test.tsx` (the rendered class,
+  which the scan cannot see)
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other
