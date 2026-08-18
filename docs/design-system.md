@@ -783,6 +783,17 @@ Pinning `--primary` to its light value would look like a contrast fix and is in
 fact a regression: accent *text* on the dark card would fall from APCA Lc 44–69
 to Lc 22–37.
 
+**Secondary text on the fill is a tint of `--primary-foreground`, never
+`--muted-foreground`.** The muted token is tuned against the canvas, so on the
+accent fills it measures 1.04–2.27:1 - on `ocean`, the default, it is 1.04,
+which is not a de-emphasis but a disappearance. A tooltip's second line (a
+shortcut, a URL, the source of a value) therefore uses the `TooltipHint`
+primitive, which holds the one tint; the same argument `surface-sunken` makes
+for its `--rule`, on a filled surface instead of a raised one. The hint cannot
+out-read the label it is secondary to - white on `sunset` is the ceiling at
+3.6:1 - so the bar is 2.5:1 on every scheme, checked in
+`tooltip-hint-contrast.test.ts`.
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |

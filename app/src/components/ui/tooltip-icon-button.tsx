@@ -27,7 +27,7 @@
 
 import * as React from "react";
 import { Button, type ButtonProps } from "./button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from "./tooltip";
 
 export interface TooltipIconButtonProps extends Omit<ButtonProps, "aria-label" | "children"> {
 	/** Names the button (aria-label) and fills the tooltip. Required. */
@@ -61,7 +61,7 @@ export function TooltipIconButton({
 				{tooltipHint ? (
 					<span className="flex items-center gap-1.5">
 						{label}
-						<span className="text-muted-foreground">{tooltipHint}</span>
+						<TooltipHint>{tooltipHint}</TooltipHint>
 					</span>
 				) : (
 					label

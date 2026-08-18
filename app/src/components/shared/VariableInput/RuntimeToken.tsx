@@ -30,7 +30,7 @@
  * tooltip that says where the value will come from.
  */
 
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { DataTokenTone } from "@/lib/data-contract";
 import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
@@ -72,7 +72,7 @@ export default function RuntimeToken({
 			<TooltipContent side="bottom" className="max-w-xs">
 				<span className="flex items-baseline gap-2">
 					<span className="break-all">{description}</span>
-					<span className="shrink-0 text-primary-foreground/70">{note}</span>
+					<TooltipHint className="shrink-0">{note}</TooltipHint>
 				</span>
 			</TooltipContent>
 		</Tooltip>
