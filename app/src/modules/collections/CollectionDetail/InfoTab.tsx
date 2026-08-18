@@ -33,6 +33,11 @@ import { formatRelative } from "./format";
 
 interface InfoTabProps {
 	collection: Collection;
+	/**
+	 * Requests in the collection's whole subtree, not the ones it owns directly
+	 * (issue #723) - the count the shell computes for its header, so the two
+	 * cannot disagree about what "Requests" names. See the rationale there.
+	 */
 	requestCount: number;
 	/** Whether this is the tab on screen - see `useDraftSaveContext`. */
 	active?: boolean;

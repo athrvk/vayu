@@ -312,9 +312,16 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 
 Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count, and - right-aligned - the mock-server control; seven tabs:
 
+The **request count is the whole subtree**, not the requests the collection owns
+directly, and the shell computes it once for both the header and the Info tab. A
+spec-bound root usually owns none directly - an OpenAPI import files them under
+one sub-collection per tag - and every other surface on this screen already means
+the subtree: the mock serves it, the Run dialog runs it, the export walks it, the
+Spec tab counts it.
+
 | Tab | Component | Notes |
 |---|---|---|
-| Info | `InfoTab.tsx` | Name, description, request count. **Autosaves** - no Save/Cancel |
+| Info | `InfoTab.tsx` | Name, description, request count (the shell's subtree count, handed down). **Autosaves** - no Save/Cancel |
 | Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields). **The one tab with a Save button**, and it says so above the fields |
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save |

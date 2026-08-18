@@ -138,6 +138,18 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 
 function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 	const covered = operation.sent > 0;
+	/*
+	 * `undeclaredSeen` repeats the codes from `statusesSeen` that answered to no
+	 * declared pattern, so the row can paint them apart rather than leaving the
+	 * header's "N undeclared statuses observed" unanswerable from the list below
+	 * it (issue #723). A Set because a row carries up to 50 of each.
+	 *
+	 * Both lists are capped independently by the engine, so an undeclared code
+	 * past the cap can be absent from `statusesSeen` and go unpainted here. That
+	 * is what `statusesTruncated` discloses; it is not a case this lookup can
+	 * recover.
+	 */
+	const undeclared = new Set(operation.undeclaredSeen);
 
 	return (
 		<li className="flex items-baseline justify-between gap-3 text-sm">
@@ -152,17 +164,61 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 			</span>
 			<span className="flex shrink-0 items-baseline gap-1.5">
 				{!covered && <span className="text-xs text-muted-foreground">never called</span>}
-				{operation.statusesSeen.map((status) => (
+				{operation.statusesSeen.map((status) => {
+					const isUndeclared = undeclared.has(status);
+					return (
+						<span
+							key={status}
+							/*
+							 * The warning *tint* behind the status's own text
+							 * colour, never a fill under it: an undeclared 200
+							 * is still a 200, and repainting the code itself
+							 * would trade one fact for the other. Tint plus
+							 * `--status-*-text` is the pairing the status-token
+							 * rules allow (app/CLAUDE.md); a background makes it
+							 * a box, so it takes a radius token rather than
+							 * pinning square.
+							 */
+							className={cn(
+								"font-mono text-xs",
+								STATUS_CLASS_STYLE[httpStatusClass(status)].text,
+								isUndeclared && "rounded-md bg-status-warning/10 px-1"
+							)}
+							title={
+								isUndeclared
+									? `${status} - this document declares no response for it`
+									: undefined
+							}
+						>
+							{status}
+							{/* The tint is the only visual difference, and colour
+							    alone is not a difference for every reader. */}
+							{isUndeclared && <span className="sr-only"> undeclared</span>}
+						</span>
+					);
+				})}
+				{/*
+				 * Dropped by the engine's per-operation cap on the two status
+				 * lists. A list shorter than the count it belongs to, rendered as
+				 * though complete, is the shape the truncation-disclosure
+				 * discipline exists to forbid.
+				 */}
+				{operation.statusesTruncated !== undefined && (
 					<span
-						key={status}
-						className={cn(
-							"font-mono text-xs",
-							STATUS_CLASS_STYLE[httpStatusClass(status)].text
-						)}
+						className="text-xs text-muted-foreground"
+						title={`${operation.statusesTruncated} more not shown - the per-operation status list is capped`}
 					>
-						{status}
+						+{operation.statusesTruncated} more
 					</span>
-				))}
+				)}
+				{operation.otherStatusResponses !== undefined && (
+					<span
+						className="text-xs text-muted-foreground"
+						title="Responses whose status fell outside 100-599, so no status class describes them"
+					>
+						{operation.otherStatusResponses} off-range
+					</span>
+				)}
 				{operation.transportErrors !== undefined && (
 					<span className="text-xs text-destructive-text">
 						{operation.transportErrors} failed

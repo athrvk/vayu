@@ -43,6 +43,9 @@ const state = {
 vi.mock("@/queries/collections", () => ({
 	useCollectionsQuery: () => state.collections,
 	useRequestsQuery: () => ({ data: [], isLoading: false }),
+	// The shell counts the whole subtree for its header (issue #723); an empty
+	// map is "no requests anywhere", which is what these cases are about.
+	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 }));
 
 vi.mock("@/stores", () => ({
