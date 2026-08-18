@@ -67,6 +67,28 @@ describe("parseStepEvent", () => {
 		expect(parseStepEvent({ ...base, validation: "nope" })).not.toHaveProperty("validation");
 	});
 
+	it("carries the assertion tally when the step made any, and no key when it did not", () => {
+		const base = {
+			iteration: 0,
+			stepIndex: 0,
+			name: "Get pet",
+			outcome: "failed",
+			statusCode: 200,
+			latencyMs: 12,
+		};
+
+		expect(parseStepEvent({ ...base, tests: { passed: 2, failed: 1 } })?.tests).toEqual({
+			passed: 2,
+			failed: 1,
+		});
+		// Absent stays absent: a step whose script asserted nothing has no
+		// tally, and `0 passed` would read as a result rather than as silence.
+		expect(parseStepEvent(base)).not.toHaveProperty("tests");
+		// Half a tally is not a tally - the chip would render `NaN passed`.
+		expect(parseStepEvent({ ...base, tests: { passed: 2 } })).not.toHaveProperty("tests");
+		expect(parseStepEvent({ ...base, tests: "nope" })).not.toHaveProperty("tests");
+	});
+
 	it("reads a scenario run's step event", () => {
 		expect(
 			parseStepEvent({

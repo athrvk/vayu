@@ -841,6 +841,28 @@ export interface ScenarioStepEvent {
 	 * a response nobody made was not judged against a contract.
 	 */
 	validation?: ResponseValidation;
+	/**
+	 * What this step's assertions came to (issue #724) - two numbers, because
+	 * the frame is replayed from a fixed-size ring and a script may make
+	 * hundreds of them. The list itself rides the stored row, which is the only
+	 * route a collection run's results ever take.
+	 *
+	 * Absent for a step whose test script asserted nothing, on the same terms as
+	 * the verdict above: `0 passed` would read as a result.
+	 */
+	tests?: StepTestTally;
+}
+
+/**
+ * How many of one step's assertions held, as the `step` event reports them.
+ *
+ * The test script's alone, which is exactly what the stored `scripts` node
+ * lists - so the tally a step shows live and the list it shows after a reload
+ * count the same assertions rather than disagreeing by one script's worth.
+ */
+export interface StepTestTally {
+	passed: number;
+	failed: number;
 }
 
 /**

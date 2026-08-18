@@ -759,28 +759,6 @@ struct SendRowAuth {
 SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row);
 
 /**
- * What a design execution's two scripts produced, as the four keys every
- * client already reads: `testResults`, `consoleLogs`, `preScriptError` and
- * `postScriptError`.
- *
- * One object, two homes - and every design send now uses both (issue #725). A
- * buffered send merges it into the `/execute` response body *and* hands the
- * same object to `record_design_result`; a streaming send has already answered
- * `202`, so the trace is the only route it takes. Building it twice, or storing
- * it on one transport only, is how the live pane and the restored one come to
- * disagree about what a failed assertion looks like - the buffered half
- * disagreed by omission until #725, and a restored Tests tab could not tell
- * "passed" from "never ran".
- *
- * Each key is present only when it has something to say, so a request with no
- * scripts contributes an empty object and stores nothing.
- *
- * Non-static: execution_trace_test.cpp drives it directly.
- */
-[[nodiscard]] nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result);
-
-/**
  * The stream-only half of a recorded design result (issue #573).
  *
  * Passed to `record_design_result` rather than written by the stream worker

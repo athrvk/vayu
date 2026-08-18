@@ -299,6 +299,16 @@ under the trace's `scripts` node. A buffered send returns them *and* stores the
 same object there (issue #725), so reopening either kind of run from History
 shows the assertions it made.
 
+A **collection run's step** is the same story with no live half at all: the run
+was answered `202` when it started, so each step's results reach the app only on
+its stored trace, under the same `scripts` node (issue #724). What a step
+publishes while the run is still going is the count - `tests: {passed, failed}`
+on its [`step` event](api-reference.md#get-runsrunidlive) - because the event
+ring is fixed-size and a script may make hundreds of assertions. Both count the
+**test script's** assertions; a `pm.test` called from a pre-request script fails
+its step and is named in the step's error line, but is not listed - issue #810
+is where that disagreement gets settled.
+
 ### Reading response headers
 
 ```javascript
