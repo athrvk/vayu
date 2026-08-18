@@ -169,6 +169,37 @@ const INVALIDATORS: Record<
 	config: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.config.all });
 	},
+
+	/*
+	 * The engine's local services (issue #756). The inbox list is polled, so this
+	 * is about immediacy in the Services drawer and the Dock's running-services
+	 * count - an agent that starts an inbox and reports its URL should not be
+	 * describing a listener the window will not show for another poll interval.
+	 *
+	 * The captures are the half that cannot be handled by invalidation.
+	 * `useInboxCapturesQuery` *merges* its fetched page into whatever the cache
+	 * holds - three writers feed one entry, so union-by-id is what keeps the SSE
+	 * stream and the fetch from overwriting each other - and a union with the
+	 * rows a `clear_inbox_captures` just destroyed puts every one of them back.
+	 * The app's own clear mutation writes an empty page before refetching for
+	 * exactly this reason; from here the equivalent is to drop the entry, so the
+	 * merge starts from nothing. A delete needs the same drop for a different
+	 * reason: `useDeleteInboxMutation` removes rather than invalidates, because
+	 * refetching an id the engine now 404s leaves an error state describing a
+	 * list that no longer exists.
+	 *
+	 * The hint says which inbox a call named, not what it did to it, so a
+	 * `update_inbox_response` costs its open tab one refetch of captures it
+	 * already had (and any "load more" pages beyond the first). That is the
+	 * `run` family's trade taken again and for the same reason: a stale answer
+	 * is a lie, a refetch is a wait.
+	 */
+	service: (queryClient, event) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.list() });
+		if (event.inboxId) {
+			queryClient.removeQueries({ queryKey: queryKeys.inbox.captures(event.inboxId) });
+		}
+	},
 };
 
 /**

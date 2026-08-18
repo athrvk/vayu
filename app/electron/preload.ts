@@ -35,9 +35,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// this file is a CommonJS script and must not grow imports.
 	onMcpDataChanged: (
 		callback: (event: {
-			entity: "request" | "environment" | "run" | "cookie" | "config";
+			entity:
+				| "collection"
+				| "request"
+				| "environment"
+				| "run"
+				| "cookie"
+				| "config"
+				| "service";
 			collectionId?: string;
 			requestId?: string;
+			runId?: string;
+			inboxId?: string;
 		}) => void
 	) => {
 		const handler = (_event: unknown, change: unknown) =>

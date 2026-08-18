@@ -741,6 +741,100 @@ export class EngineClient {
 			signal
 		);
 	}
+
+	// --- Local services: the webhook inbox -----------------------------------
+	//
+	// The inbox routes take a `bind` and a `confirmNonLoopback` flag; nothing
+	// here sends either, so every inbox an MCP call starts listens on the
+	// engine's loopback default. That is a stated non-goal of epic #753 rather
+	// than an omission, and it is enforced by the payload builder in `tools.ts`
+	// (`inboxStartPayload`) - this client takes the payload it is given.
+
+	/**
+	 * Start an inbox: `POST /inbox/start`. Every field of the body is optional;
+	 * the engine assigns the id and, for `port: 0` or no port at all, the port.
+	 * The reply is the inbox record (`inboxId`, `url`, `bind`, `port`,
+	 * `running`, `loopback`, `captureCount`, `response`).
+	 */
+	startInbox(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/inbox/start", payload, signal);
+	}
+
+	/** Every inbox this engine process has started, running or stopped: `GET /inbox`. */
+	listInboxes(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/inbox", undefined, signal);
+	}
+
+	/**
+	 * Free the listener, keep the record and its captures:
+	 * `POST /inbox/:id/stop`. Answers the stopped record; an unknown id is a 404.
+	 */
+	stopInbox(inboxId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"POST",
+			`/inbox/${encodeURIComponent(inboxId)}/stop`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Stop the listener, drop the record and its captures: `DELETE /inbox/:id`.
+	 * Answers `{inboxId, capturesDeleted}` - the count is what makes a delete
+	 * confirmable in terms of what is actually lost.
+	 */
+	deleteInbox(inboxId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/inbox/${encodeURIComponent(inboxId)}`, undefined, signal);
+	}
+
+	/**
+	 * One inbox's captures, newest first: `GET /inbox/:id/requests?limit=&offset=`
+	 * in the `{data, pagination}` envelope. The rows are the whole captures -
+	 * the engine has no per-capture detail route, so a list read is a full read.
+	 *
+	 * The engine clamps `limit` to the inbox's own retention silently; the tool
+	 * over this refuses above its bound instead, for the #319 reason.
+	 */
+	getInboxCaptures(
+		inboxId: string,
+		limit: number,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+		return this.request(
+			"GET",
+			`/inbox/${encodeURIComponent(inboxId)}/requests?${params.toString()}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Drop the captures, keep the listener: `DELETE /inbox/:id/requests`.
+	 * Answers `{inboxId, cleared}`.
+	 */
+	clearInboxCaptures(inboxId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"DELETE",
+			`/inbox/${encodeURIComponent(inboxId)}/requests`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * Merge-patch the canned response, live: `PUT /inbox/:id`. Absent fields
+	 * keep their current value engine-side, so a caller changing the status does
+	 * not have to restate the body and headers. Answers the updated record.
+	 */
+	updateInboxResponse(
+		inboxId: string,
+		response: unknown,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request("PUT", `/inbox/${encodeURIComponent(inboxId)}`, response, signal);
+	}
 }
 
 /** True for the rejection a fetch produces when its signal aborts. */

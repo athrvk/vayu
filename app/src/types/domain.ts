@@ -2217,7 +2217,15 @@ export interface McpConnectResult {
  * there cannot import from here (see `tsconfig.node.json`), so the duplication
  * is deliberate and pinned by `electron/mcp/data-changed.conformance.test.ts`.
  */
-export type McpDataEntity = "collection" | "request" | "environment" | "run" | "cookie" | "config";
+export type McpDataEntity =
+	| "collection"
+	| "request"
+	| "environment"
+	| "run"
+	| "cookie"
+	| "config"
+	/** Engine-hosted local services: webhook inboxes today, more as #757 lands. */
+	| "service";
 
 /**
  * What the main process sends over `mcp:data-changed`. Invalidation only - the
@@ -2236,6 +2244,12 @@ export interface McpDataChangedEvent {
 	 * `set_run_baseline`, `delete_run`).
 	 */
 	runId?: string;
+	/**
+	 * The webhook inbox the call named, when it named one. Only the tools that
+	 * act on an existing inbox spell it (`stop_webhook_inbox`,
+	 * `delete_webhook_inbox`, `clear_inbox_captures`, `update_inbox_response`).
+	 */
+	inboxId?: string;
 }
 
 export interface ScriptCompletion {

@@ -177,6 +177,13 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
 | `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
 | `stop_mock_issuer`     | execute  | `POST /mock-issuer/:id/stop`                 | - (unknown id is a `404`, surfaced as a tool error) |
+| `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent) |
+| `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
+| `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
+| `delete_webhook_inbox` | write    | `GET /inbox` + `DELETE /inbox/:id`           | write toggle + confirm (the prompt names the capture count) |
+| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max; each body capped at 32 KB |
+| `clear_inbox_captures` | write    | `DELETE /inbox/:id/requests`                 | write toggle               |
+| `update_inbox_response`| execute  | `PUT /inbox/:id` (merge-patch)               | - (live edit of the canned reply) |
 
 Notes:
 
@@ -388,8 +395,34 @@ Notes:
   claims object, an integer port, a `failureMode` from the closed set. Stopping
   an issuer frees its port; tokens it already minted stay valid until they
   expire, since nothing verifies them against a live issuer. These tools emit no
-  `mcp:data-changed` event because no renderer surface reads issuers yet -
-  #502's Services drawer is what adds one.
+  `mcp:data-changed` event yet: #502's Services drawer does read issuers now, and
+  wiring them to the `service` entity the inbox tools introduced is #757's half
+  of epic #753 - until then the drawer's own poll is what shows an MCP-started
+  issuer.
+- **The webhook-inbox tools** are the assertion half an agent testing a webhook
+  needs (issue #756): `start_webhook_inbox` stands up a
+  [local inbox](api-reference.md#webhook-inbox) and returns its URL,
+  `get_inbox_captures` reads back what arrived - method, path, query, headers,
+  body, caller address - and `update_inbox_response` changes what the sender
+  sees, live, so one inbox can answer `200` for the first trigger and `503` for
+  the next. **Loopback-only, and not by policy alone**: the engine's
+  `bind` / `confirmNonLoopback` pair is never emitted by
+  `inboxStartPayload`, whatever arguments a call carries, so an inbox MCP
+  started cannot be reached off this machine - a stated non-goal of epic #753,
+  guarded in the one function that builds the body and mutation-checked in
+  `tools.test.ts`. **A stop is not a delete**: `stop_webhook_inbox` frees the
+  port and leaves every capture readable, while `delete_webhook_inbox` destroys
+  them and therefore takes the write toggle *and* a confirmation whose prompt
+  names how many captures go with it (read from `GET /inbox` first, the way
+  `delete_run` reads the run). `clear_inbox_captures` is the middle case -
+  recorded data destroyed, listener kept - so it takes the toggle without the
+  confirmation. **No live stream**: `GET /inbox/:id/live` is single-watcher
+  (a second is a `409`) and the app's own inbox tab may hold it, so MCP polls
+  `get_inbox_captures` instead - the same bounded-snapshot posture
+  `get_live_metrics` takes. Capture bodies are cut to 32 KB for the result with
+  the engine's own `bodyTruncated` / `bodyBytes` disclosure kept intact, since
+  `inboxMaxBodyBytes` reaches 8 MB and a webhook payload is whatever the sender
+  sent.
 - **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
   is threaded into the engine `fetch` for every tool call, resource read,
   template list and prompt, so a client cancelling an in-flight call actually
@@ -850,25 +883,31 @@ configurable in **Settings → MCP** and persisted.
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side
   (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Four tools carry it - `start_load_run`,
-  `delete_collection`, `delete_request` and `delete_run` - through one
-  implementation, so the elicitation path cannot drift between them. A preview is a *successful* result
+  prompt where supported. Five tools carry it - `start_load_run`,
+  `delete_collection`, `delete_request`, `delete_run` and
+  `delete_webhook_inbox` - through one implementation, so the elicitation path
+  cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category: `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
   `update_environment`, `update_engine_config`, `set_run_baseline`,
-  `delete_run`. Does not gate `run_request` / `run_collection_smoke` / load runs
-  (allowlist + caps). The three deletes need the toggle **and** confirmation:
+  `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`. Does not gate
+  `run_request` / `run_collection_smoke` / load runs
+  (allowlist + caps). The four deletes need the toggle **and** confirmation:
   the toggle is a single session-wide switch a user flips once to let an agent
   save a request, which is not consent to destroy a subtree or a run's stored
   history.
-- **Loopback services carry no gate of their own** - `start_mock_issuer` and
-  `stop_mock_issuer` are `execute` tools that neither the allowlist nor the
-  write toggle governs. The allowlist exists to stop an agent generating traffic
+- **Loopback services carry no gate of their own** - `start_mock_issuer`,
+  `stop_mock_issuer`, `start_webhook_inbox`, `stop_webhook_inbox` and
+  `update_inbox_response` are `execute` tools that neither the allowlist nor the
+  write toggle governs. (The two that destroy recorded data,
+  `delete_webhook_inbox` and `clear_inbox_captures`, are `write` tools and do
+  take the toggle - what they end is not the listener but the captures.) The allowlist exists to stop an agent generating traffic
   against third parties it was never pointed at, and a mock issuer is bound to
-  `127.0.0.1` by the engine with no host to configure; the write toggle gates
-  saved data, which an ephemeral listener is not. Nor would a gate here withhold
+  `127.0.0.1` by the engine with no host to configure - as is an inbox, whose
+  `bind` these tools never send; the write toggle gates saved data, which an
+  ephemeral listener is not. Nor would a gate here withhold
   anything: an agent with `localhost` allowlisted can already reach
   `POST /mock-issuer/start` through `run_request`, for the same reason the
   endpoint needs no auth token. The bounds that do apply are the engine's own -
@@ -976,16 +1015,19 @@ collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
-(`request`, `environment`, `run`, `cookie`, `config`) plus the `collectionId` /
-`requestId` / `runId` the call itself named; it carries no engine data, so the
-renderer still reads every row through its query layer. The three hints are read
+(`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`)
+plus the `collectionId` / `requestId` / `runId` / `inboxId` the call itself
+named; it carries no engine data, so the
+renderer still reads every row through its query layer. The four hints are read
 off the call's own arguments at the dispatch chokepoint, which is what keeps a
 new write tool from having to remember an emit of its own - every tool in the
 registry spells them the same way. They are hints, not identity: `requestId` on
 a `run` event is the saved request a design run was linked to, while `runId` is
 the run itself, and only the tools that rewrite or remove an **existing** run
 (`stop_run`, `set_run_baseline`, `delete_run`) name one - a runner's new run has
-no per-run cache to drop yet. The renderer side, including
+no per-run cache to drop yet. `inboxId` is the same shape for the `service`
+family: the inbox tools that act on an existing listener name it, and
+`start_webhook_inbox` cannot, since the engine assigns the id. The renderer side, including
 which query keys each family maps to, is in
 [`docs/app/state-management.md`](../app/state-management.md).
 

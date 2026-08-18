@@ -37,6 +37,7 @@ const RENDERER_ENTITIES: Record<McpDataEntity, true> = {
 	run: true,
 	cookie: true,
 	config: true,
+	service: true,
 };
 
 describe("McpDataEntity mirror", () => {
