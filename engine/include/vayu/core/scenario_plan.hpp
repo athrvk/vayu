@@ -103,9 +103,15 @@ struct ScenarioPlan {
  * `data` rows themselves are deliberately absent, and their absence here is
  * structural rather than a convention to remember: this is the object
  * `build_scenario_manifest` serializes into `runs.config_snapshot`, and the
- * rows are user data of unknown sensitivity that is never persisted. They live
- * on `ScenarioExecution`, which nothing writes to disk; only their count
- * survives into the snapshot.
+ * rows are user data of unknown sensitivity that the snapshot never records.
+ * They live on `ScenarioExecution`, which nothing writes to disk; only their
+ * count survives into the snapshot.
+ *
+ * That is a statement about the row *set*, not about every value in it: a cell
+ * bound into a request is stored with that request in the step's trace, the
+ * same way any other request material is (`build_result_trace`, issue #731).
+ * The step view discloses it; do not read this comment as a promise that a
+ * credentials file leaves nothing behind.
  */
 struct ScenarioRequest {
     /// Only `"collection"` today. The discriminator exists so a future stored

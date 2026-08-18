@@ -666,8 +666,10 @@ export interface StartScenarioRunRequest {
 		 * would be a new trust boundary. The app parses CSV/TSV/JSON/JSONL
 		 * (`services/data-files`) and sends the rows; the engine bounds them
 		 * with `maxScenarioDataRows` and `maxScenarioDataBytes` and rejects a
-		 * present-but-empty array. Rows are never persisted on either side -
-		 * the run snapshot records their count alone.
+		 * present-but-empty array. The row *set* is never persisted on either
+		 * side - the run snapshot records its count alone - but a cell bound
+		 * into a request is stored with that request, in the step trace the run
+		 * keeps (issue #731).
 		 */
 		data?: Record<string, unknown>[];
 	};

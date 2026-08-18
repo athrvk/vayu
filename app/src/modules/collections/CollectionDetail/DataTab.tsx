@@ -199,7 +199,9 @@ export default function DataTab({ collection }: DataTabProps) {
 					pm.iterationData
 				</code>{" "}
 				can be checked before a run. The columns are saved with the collection; the file
-				stays on this machine and its rows are never saved anywhere.
+				stays on this machine, and the contract keeps its shape - never a cell of it. A cell
+				that binds into a request is part of that request, so a run stores it in the step it
+				was sent with, for as long as the run is kept.
 			</InfoBanner>
 
 			<div>

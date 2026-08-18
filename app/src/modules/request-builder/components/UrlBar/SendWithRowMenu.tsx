@@ -27,8 +27,10 @@
  * blocked state is a declared file that has moved, which is repairable and says
  * so - the same rule the Run dialog's pre-fill follows.
  *
- * The rows are read when this opens and are never persisted, held only for as
- * long as the popover and the send that follows it (see `data-file-store`).
+ * The rows are read when this opens and the set is not persisted, held only for
+ * as long as the popover and the send that follows it (see `data-file-store`).
+ * The send itself is stored like any other design send, so the values the
+ * chosen row bound are in its History trace (issue #731).
  */
 
 import { useState } from "react";

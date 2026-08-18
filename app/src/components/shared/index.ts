@@ -38,6 +38,9 @@ export * from "./SampledSchemaValidation";
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";
 
+// The same disclosure for a collection run's stored step exchanges
+export * from "./StoredExchangeWarning";
+
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
 

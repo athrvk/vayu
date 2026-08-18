@@ -410,6 +410,71 @@ describe("thinned results", () => {
 	});
 });
 
+describe("stored-exchange disclosure", () => {
+	// Issue #731. The Data tab says a data file's "rows are never saved
+	// anywhere", which is true of the file and the contract and false of every
+	// cell that reached a request - the step rows below hold those requests.
+	it("discloses that the listed steps hold their exchanges", () => {
+		reportQuery.data = report({ results: [storedStep(0, 0, "passed", { name: "Log in" })] });
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText(/stored step data/i)).toBeTruthy();
+	});
+
+	it("names the bound rows when the run had a data file", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed", { name: "Log in", dataRowIndex: 0 })],
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		const notice = screen.getByText(/stored step data/i).closest("div")!;
+		expect(notice.textContent).toContain("bound a data file");
+	});
+
+	it("says nothing about a data file for a run that bound none", () => {
+		reportQuery.data = report({ results: [storedStep(0, 0, "passed", { name: "Log in" })] });
+
+		render(<ScenarioRunView run={RUN} />);
+
+		const notice = screen.getByText(/stored step data/i).closest("div")!;
+		expect(notice.textContent).not.toContain("bound a data file");
+	});
+
+	it("discloses a live run's steps before its rows are written", () => {
+		// The engine batches step rows to SQLite when the run ends, so a reader
+		// watching a run stream is exactly the reader who has not yet seen what
+		// gets kept. Reading the flag off the report instead of the steps would
+		// leave this case silent.
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.addStep({
+				iteration: 0,
+				stepIndex: 0,
+				name: "In flight",
+				outcome: "passed",
+				statusCode: 200,
+				latencyMs: 5,
+				dataRowIndex: 0,
+			});
+		});
+
+		const notice = screen.getByText(/stored step data/i).closest("div")!;
+		expect(notice.textContent).toContain("bound a data file");
+	});
+
+	it("stays silent on a run with no steps to disclose", () => {
+		reportQuery.data = report({ results: [] });
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/stored step data/i)).toBeNull();
+	});
+});
+
 describe("stopping a live run", () => {
 	it("stops the run this tab is streaming", async () => {
 		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);

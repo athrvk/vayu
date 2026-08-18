@@ -25,7 +25,9 @@
  * A data file is the third option (issue #402), and it changes what Iterations
  * means: with rows and no explicit count, the run is one pass per row. The rows
  * ride the payload and are dropped when this dialog unmounts - they are user
- * data of unknown sensitivity, so nothing persists them, here or engine-side.
+ * data of unknown sensitivity, so neither side stores the set. What a bound
+ * cell reaches is the request it was substituted into, which the run stores
+ * with the rest of that step's exchange (issue #731).
  * A **load** run binds the same rows differently - one per iteration, from a
  * cursor every virtual user shares, wrapping for as long as the duration lasts
  * (issue #449) - which is why the picker is told which run it is for rather

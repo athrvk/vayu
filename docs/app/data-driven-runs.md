@@ -115,8 +115,10 @@ a file.
 
 The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
-and handing the daemon a user-supplied path would be a new trust boundary. Rows
-are never persisted on either side - a run's snapshot records their count alone.
+and handing the daemon a user-supplied path would be a new trust boundary. The
+row set itself is never stored on either side - a run's snapshot records its
+count alone - but a cell bound into a request travels with that request, and a
+run stores the requests it sent. See [What is stored](#what-is-stored).
 
 ## Reading a row: `{{data.column}}` vs `pm.iterationData`
 
@@ -323,15 +325,37 @@ Send-with-row or a collection run. A `{{data.*}}` in an OAuth 2.0 config is
 refused by name rather than sent wrong - use a static credential there, or move
 the token into the request itself.
 
-The rows read for the picker are held for that send and nothing more - the same
-rule the rest of this page describes.
+The rows read for the picker are held for that send and nothing more. The send
+itself is stored like any other design send, bound values included - see
+[What is stored](#what-is-stored).
 
-## Nothing is stored
+## What is stored
 
-The rows ride the run payload and are dropped when the dialog closes. They are
-user data of unknown sensitivity - credentials, customer records - so neither
-the app nor the engine persists them, and the file itself is read fresh every
-time - whether you pick it or the dialog pre-fills it from the declared path.
+**The row set is not.** The rows ride the run payload and are dropped when the
+dialog closes. They are user data of unknown sensitivity - credentials,
+customer records - so neither the app nor the engine keeps the set, and the file
+itself is read fresh every time - whether you pick it or the dialog pre-fills it
+from the declared path. Declaring a contract does not change this: what is saved
+with the collection is the _shape_ of the file - its column names, and its name
+for display - never a cell of it. A run's stored snapshot records the row count
+and nothing else.
 
-Declaring a contract does not change this. What is saved is the _shape_ of the
-file - its column names, and its name for display - never a cell of it.
+**A cell that binds into a request is stored with that request.** A collection
+run keeps one row per step execution, and each holds the exchange as it
+happened: the URL, the request headers as sent - including the `Authorization`
+header that binding-before-encoding builds out of the row's own values - the
+request body, and the response. A load run keeps the same material for the
+completions it samples, and a single [Send with a row](#send-with-a-row) lands
+in History like any other send. So a run driven by a credentials file has each
+bound iteration's credentials in its history, in SQLite, and on screen in its
+step cards.
+
+That is the design-mode trace rule, not an oversight of this feature: a trace
+records what was **sent** rather than a redacted account of it, since a
+redaction guess is wrong in both directions and reassuring when it is wrong.
+The run's step view carries that disclosure where the steps are listed, and
+names the data file when one was bound.
+
+The expiry is the run's: step rows are deleted when their run is, so
+`maxRunsRetained` and `runRetentionDays` (Settings, Data & retention) are what
+bound how long a bound cell lives. Deleting the run deletes them immediately.

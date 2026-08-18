@@ -220,8 +220,8 @@ export default function DataFilePicker({
 						{mode === "declare" ? (
 							<>
 								The file the contract is read from. Its columns become the declared{" "}
-								{"{{data.column}}"} names; its rows stay on this machine and are
-								never saved.
+								{"{{data.column}}"} names; the file stays on this machine, and the
+								contract records the shape of its rows rather than their values.
 							</>
 						) : loadTest ? (
 							<>
