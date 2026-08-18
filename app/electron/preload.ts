@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			requestId?: string;
 			runId?: string;
 			inboxId?: string;
+			mockId?: string;
 		}) => void
 	) => {
 		const handler = (_event: unknown, change: unknown) =>

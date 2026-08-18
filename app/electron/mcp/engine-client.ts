@@ -742,6 +742,58 @@ export class EngineClient {
 		);
 	}
 
+	/**
+	 * Merge-patch a running issuer: `PUT /mock-issuer/:id`. The engine refuses
+	 * `port`, `clients`, `claims` and `issueRefreshTokens` outright on a bound
+	 * listener (`apply_mock_issuer_patch`) - the settings a live issuer can
+	 * change are the timing ones. Answers the updated description; an unknown id
+	 * is a 404, an out-of-range value a `400 mock_issuer_invalid_config`.
+	 */
+	updateMockIssuer(issuerId: string, patch: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("PUT", `/mock-issuer/${encodeURIComponent(issuerId)}`, patch, signal);
+	}
+
+	// --- Local services: the collection mock server --------------------------
+	//
+	// A mock binds `127.0.0.1` with no host to configure
+	// (`mock_server.cpp`: `listener.start ("127.0.0.1", ...)`), so - as with the
+	// issuer - nothing here reaches off the machine and the tools over it carry
+	// no allowlist check.
+
+	/**
+	 * Start a mock: `POST /mock/start`. `collectionId` is required; the engine
+	 * assigns the id and, for `port: 0`, the port. The reply is the mock record
+	 * (`mockId`, `collectionId`, `collectionName`, `url`, `port`, `latencyMs`,
+	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `createdAt`).
+	 */
+	startMockServer(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/mock/start", payload, signal);
+	}
+
+	/** Every mock running right now: `GET /mock` → `{data: [...]}`. A stopped one is gone, not listed. */
+	listMockServers(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/mock", undefined, signal);
+	}
+
+	/**
+	 * One mock's route table: `GET /mock/:id/routes` → `{data: [...]}`, each row
+	 * `{requestId, requestName, method, path, hasExample, status}`. Taken when
+	 * the mock started and constant under it, so a second read answers the same.
+	 */
+	getMockServerRoutes(mockId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/mock/${encodeURIComponent(mockId)}/routes`, undefined, signal);
+	}
+
+	/**
+	 * Stop one: `POST /mock/:id/stop`. The record goes with the listener - a mock
+	 * holds nothing that outlives it - so there is no stopped state to read
+	 * afterwards. An unknown id is a 404, surfaced rather than swallowed for the
+	 * reason {@link stopMockIssuer} records.
+	 */
+	stopMockServer(mockId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", `/mock/${encodeURIComponent(mockId)}/stop`, undefined, signal);
+	}
+
 	// --- Local services: the webhook inbox -----------------------------------
 	//
 	// The inbox routes take a `bind` and a `confirmNonLoopback` flag; nothing

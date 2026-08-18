@@ -1309,7 +1309,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The four prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
-| `service` | `inbox.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox | The drawer and the Dock's count poll, so the list is about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed |
+| `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |
 
 The event carries no engine data, only which family went stale, so a row still
 reaches the UI by exactly one path: the query layer. Per-run reports and time
@@ -1328,15 +1328,22 @@ a lie and a refetch is a wait. `runs.lastDesigns()` is taken at its prefix and
 never per request (#776): `delete_run` and `set_run_baseline` name a `runId` and
 no request, so the narrow key could not reach the tab whose run went away, and
 the cost of the prefix is that a `run_request` refetches one filtered row per
-*mounted* tab instead of one. The `service` family (issue #756) takes the same
-shape one level down: `inboxId` is its scope hint, and a named inbox has its
-capture list *removed* rather than invalidated for a reason the run family does
-not have - three writers share that one cache entry (the fetch, the load-more
-pages and the live SSE stream), so every write to it is a union by capture id,
-and a refetch into a cache still holding cleared rows puts them straight back.
-The app's own clear mutation writes an empty page first for exactly this; from
-the main process the equivalent is to drop the entry. Only inboxes are wired
-today - mock servers and the OAuth issuers join the family in #757.
+*mounted* tab instead of one. The `service` family (issues #756, #757) takes the
+same shape one level down, with two scope hints instead of one. `inboxId`: a
+named inbox has its capture list *removed* rather than invalidated for a reason
+the run family does not have - three writers share that one cache entry (the
+fetch, the load-more pages and the live SSE stream), so every write to it is a
+union by capture id, and a refetch into a cache still holding cleared rows puts
+them straight back. The app's own clear mutation writes an empty page first for
+exactly this; from the main process the equivalent is to drop the entry.
+`mockId`: a named mock has its route table removed for the mirror reason - the
+table is a start-time snapshot held at `staleTime: Infinity`, so an invalidation
+would not refetch it, and after a `stop_mock_server` there is nothing to refetch
+from, since a mock's record dies with its listener. Both are what
+`useDeleteInboxMutation` and `useStopMockServerMutation` already do app-side.
+All three lists are invalidated on every `service` event rather than one per
+kind, because the entity is deliberately one family: the drawer and the Dock's
+count ask "what is listening", not "which kind".
 The entity list is duplicated across the process boundary
 (`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
 `types/domain.ts`) because production code under `electron/` cannot import from

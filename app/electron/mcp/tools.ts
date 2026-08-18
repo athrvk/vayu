@@ -94,13 +94,14 @@ export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
  * One thing changed. Invalidation only - no data rides across, the renderer
  * refetches through its normal query layer.
  *
- * The four scope hints are read from the call's own arguments and narrow the
+ * The five scope hints are read from the call's own arguments and narrow the
  * invalidation to the caches that can have gone stale; each is absent when the
  * call did not name it. They are hints, not identity: `requestId` on a
  * `run` event is the saved request a design run was linked to, not the run's
  * own id - `runId` is that. The renderer narrows on `collectionId` (the
- * `request` family's list key), on `runId` (the per-run caches it removes) and
- * on `inboxId` (the capture list it removes); a run event's `requestId` is
+ * `request` family's list key), on `runId` (the per-run caches it removes), on
+ * `inboxId` (the capture list it removes) and on `mockId` (the route table it
+ * removes); a run event's `requestId` is
  * emitted because every hint is read off the same
  * arguments, and the run families it could narrow are invalidated at their
  * prefixes instead - a `delete_run` names no request, so a per-request key
@@ -130,6 +131,18 @@ export interface McpDataChangedEvent {
 	 * rather than refetched into (see `lib/mcp-invalidation.ts`).
 	 */
 	inboxId?: string;
+	/**
+	 * The collection mock server the call named, when it named one. Among the
+	 * tools that emit at all that is only `stop_mock_server`;
+	 * `start_mock_server` has no id to name until the engine has answered.
+	 *
+	 * Read for the same reason `inboxId` is - a cache that has to be *dropped*
+	 * rather than refetched - though the reason it cannot be refetched is the
+	 * mirror one: a stopped mock's record dies with its listener, so refetching
+	 * its route table would 404 and leave an error state describing a table that
+	 * no longer exists. `useStopMockServerMutation` already drops it app-side.
+	 */
+	mockId?: string;
 }
 
 export interface ToolContext {
@@ -2229,6 +2242,93 @@ function mockIssuerStartPayload(args: Record<string, unknown>): Record<string, u
 	return payload;
 }
 
+/**
+ * The settings `PUT /mock-issuer/:id` will change under a bound listener.
+ *
+ * Deliberately a subset of the start keys rather than the same list: the engine
+ * refuses `port`, `clients`, `claims` and `issueRefreshTokens` on a running
+ * issuer with "stop it and start a new one" (`apply_mock_issuer_patch`), so
+ * offering them here would be offering a call that always fails. It is also a
+ * subset of what the PUT accepts - `expiresInSeconds` is mutable engine-side
+ * and is not offered, because a token's lifetime is fixed when it is minted, so
+ * changing it mid-session changes nothing about the tokens already in the
+ * agent's hands and only the *next* mint. #757 scoped this tool to the two
+ * knobs the UI's own live edit exposes; widening it belongs to whoever finds a
+ * use for it.
+ */
+const MOCK_ISSUER_PATCH_KEYS = ["failureMode", "slowMs"] as const;
+
+/**
+ * The merge-patch body for `update_mock_issuer`, carrying only what the caller
+ * named - an omitted field keeps its current value engine-side, which is the
+ * whole point of patching a live issuer rather than restarting it.
+ */
+function mockIssuerPatchPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const patch: Record<string, unknown> = {};
+	for (const key of MOCK_ISSUER_PATCH_KEYS) {
+		if (args[key] !== undefined) patch[key] = args[key];
+	}
+	return patch;
+}
+
+// --- Collection mock server --------------------------------------------------
+
+/**
+ * The fields `POST /mock/start` accepts (`parse_mock_start`,
+ * engine/src/http/routes/mock_server.cpp). `collectionId` is required and is
+ * validated by {@link requireStr} before the body is built; the other three are
+ * optional knobs.
+ */
+const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct"] as const;
+
+/**
+ * The start body. `collectionId` always travels; a knob the caller did not name
+ * stays absent, for the reason {@link mockIssuerStartPayload} records - the
+ * engine reads a present field with a bad value as a 400 rather than falling
+ * back to its default.
+ *
+ * The engine's `latencyMs` ceiling is not restated in the schema (the same
+ * division of labour the issuer tools document): it lives in
+ * `core/constants.hpp`, an out-of-range value comes back as a 400 naming the
+ * bound, and a copy here would refuse values the engine accepts the moment
+ * either side moves. `port` and `errorRatePct` are bounded in the schema
+ * because their bounds are the *shape* - a port is 0-65535 everywhere and a
+ * percentage is 0-100 by definition, not by an engine constant.
+ */
+function mockServerStartPayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload: Record<string, unknown> = { collectionId: requireStr(args, "collectionId") };
+	for (const key of MOCK_SERVER_START_KEYS) {
+		if (args[key] !== undefined) payload[key] = args[key];
+	}
+	return payload;
+}
+
+/**
+ * What a started mock could not serve, or "" when every route has an example.
+ *
+ * A mock with routes but no examples answers `501` to each of them, which reads
+ * as a broken mock rather than as an empty collection - so the count the engine
+ * already reports (`routesWithoutExample`) is turned into a sentence instead of
+ * being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
+ * case and gets its own line: there is nothing to point a client at.
+ */
+function mockServerCaveat(started: unknown): string {
+	if (!isRecord(started)) return "";
+	const routes = Number(started.routeCount);
+	const without = Number(started.routesWithoutExample);
+	if (Number.isFinite(routes) && routes === 0) {
+		return (
+			"\nThis mock serves no routes: the collection has no requests the mock could map. " +
+			"Every path answers 404."
+		);
+	}
+	if (!Number.isFinite(without) || without <= 0) return "";
+	return (
+		`\n${without} of ${routes} route(s) have no saved example, and answer 501 rather than a body. ` +
+		"Save an example on those requests (or check get_mock_routes for which they are) before pointing a client at them."
+	);
+}
+
 // --- Webhook inbox -----------------------------------------------------------
 
 /**
@@ -4001,11 +4101,10 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "start_mock_issuer",
 		category: "execute",
-		// #502's Services drawer now reads the issuer list, and #756 added the
-		// `service` entity these belong on - but wiring the issuer tools to it,
-		// and to the mock-server tools beside them, is #757's half of the epic.
-		// Until then the drawer's poll is what shows an MCP-started issuer.
-		invalidates: [],
+		// #502's Services drawer reads the issuer list and #756 added the
+		// `service` entity; #757 is where the issuer tools take it, so an
+		// MCP-started issuer appears without waiting out the drawer's poll.
+		invalidates: ["service"],
 		description:
 			"Start a local OAuth 2.0 mock issuer and return its id, token URL, authorize URL and signing key. Use it to test an auth flow offline: start an issuer, point a request's oauth2 auth at the returned tokenUrl, run it with run_request, and assert on what the target received - no real identity provider, so no 2FA prompts, provider rate limits or account lockouts in the loop. It needs no allowlist entry: the engine binds every issuer to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. The access token is an HS256 JWT signed with the returned signingKey - hand that key to the service under test and it can verify the mock's tokens. Set a short expiresInSeconds (with issueRefreshTokens) to exercise the 401-then-refresh path, and failureMode to exercise retry handling. At most 8 issuers run at once; stop yours with stop_mock_issuer when you are done.",
 		annotations: {
@@ -4093,8 +4192,7 @@ export const TOOLS: McpTool[] = [
 	{
 		name: "stop_mock_issuer",
 		category: "execute",
-		// See start_mock_issuer - the `service` entity is #757's to take here.
-		invalidates: [],
+		invalidates: ["service"],
 		description:
 			"Stop a running OAuth 2.0 mock issuer and free its port. Tokens it already minted stay valid until they expire - nothing verifies them against the issuer once it is gone. An unknown id is an error, not a silent success.",
 		annotations: {
@@ -4109,6 +4207,166 @@ export const TOOLS: McpTool[] = [
 		},
 		handler: (args, ctx, signal) =>
 			callEngine(() => ctx.client.stopMockIssuer(requireStr(args, "issuerId"), signal)),
+	},
+	{
+		name: "update_mock_issuer",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Change how a running OAuth 2.0 mock issuer's /token endpoint behaves, live: its failure mode and its slow-mode delay. Use it to walk a client through a sequence - mint a token against a healthy issuer, flip it to server_error to see the retry, flip it back - without stopping the issuer, which would invalidate the token URL the request under test is already pointed at and change the signing key. This is a merge-patch: a field you omit keeps its current value. Only these two settings can change under a running issuer; the port, client list, claims and refresh-token setting are fixed when it starts, and asking to change one is an error telling you to start a new issuer.",
+		annotations: {
+			title: "Update mock OAuth issuer",
+			readOnlyHint: false,
+			// It rewrites two settings of a loopback listener; nothing recorded is
+			// lost and the same patch applied twice is the same issuer.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			issuerId: z.string().describe("Issuer ID to update (from start_mock_issuer)."),
+			failureMode: z
+				.enum(MOCK_ISSUER_FAILURE_MODES)
+				.optional()
+				.describe(
+					'How /token should misbehave from now on: "none" (healthy), "slow" (answers after slowMs), "server_error" (500), "invalid_client" (401). Omit to leave it unchanged.'
+				),
+			slowMs: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe(
+					'New delay before /token answers, in milliseconds (engine cap 60000). Only "slow" reads it. Omit to leave it unchanged.'
+				),
+		},
+		handler: (args, ctx, signal) => {
+			const issuerId = requireStr(args, "issuerId");
+			const patch = mockIssuerPatchPayload(args);
+			if (Object.keys(patch).length === 0) {
+				// The engine accepts an empty patch and changes nothing, so a
+				// success here would report a call that did not do what it was
+				// asked - the `update_inbox_response` precedent.
+				throw new ToolArgError('Name at least one of "failureMode" or "slowMs" to change.');
+			}
+			return callEngine(() => ctx.client.updateMockIssuer(issuerId, patch, signal));
+		},
+	},
+	{
+		name: "start_mock_server",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Start a local mock server that answers a collection's saved examples, and return its id and base URL. Use it to stand up the API a client under test expects without that API existing: point the client at the returned url and every request whose method and path match a saved request in the collection gets that request's example back - status, headers and body. A route whose request has no saved example answers 501, and a path that matches nothing answers 404, so the returned routeCount and routesWithoutExample are what say whether the mock is usable; get_mock_routes lists them. latencyMs and errorRatePct are how a client's timeout and retry handling get exercised - errorRatePct injects synthesized 500s at that rate. It needs no allowlist entry: the engine binds every mock to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. Stop it with stop_mock_server when you are done; a mock keeps its port until then.",
+		annotations: {
+			title: "Start mock server",
+			readOnlyHint: false,
+			// A loopback listener over data it only reads: it destroys nothing and
+			// reaches nothing off the machine.
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection whose saved examples the mock serves (from list_collections). Its sub-collections are included."
+				),
+			port: z
+				.number()
+				.int()
+				.min(0)
+				.max(65535)
+				.optional()
+				.describe("Port to bind on 127.0.0.1. Default 0 - the engine picks a free one."),
+			latencyMs: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe(
+					"Artificial delay before every answer, in milliseconds (default 0). Use it to make a client's timeout handling fire."
+				),
+			errorRatePct: z
+				.number()
+				.int()
+				.min(0)
+				.max(100)
+				.optional()
+				.describe(
+					"Percentage of answers replaced with a synthesized 500 (default 0). 0 and 100 are exact; in between it is a per-request roll."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const payload = mockServerStartPayload(args);
+			let started: unknown;
+			try {
+				started = await ctx.client.startMockServer(payload, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			// The caveat rides on the result rather than being left in the JSON:
+			// "the mock started" and "the mock can answer" are different answers,
+			// and only the second one is what the agent asked for. Read off the
+			// engine's reply, which is why this is `pagedRead`'s shape rather
+			// than a plain `callEngine`.
+			return withCaveat(jsonResult(started), mockServerCaveat(started));
+		},
+	},
+	{
+		name: "list_mock_servers",
+		category: "read",
+		invalidates: [],
+		description:
+			"List the mock servers running right now, each with its id, the collection it serves and that collection's name, its base URL and port, its latency and error-rate knobs, and how many routes it has. A stopped mock is gone rather than listed - its record dies with its listener - so this is also how to confirm one stopped.",
+		annotations: {
+			title: "List mock servers",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listMockServers(signal)),
+	},
+	{
+		name: "get_mock_routes",
+		category: "read",
+		invalidates: [],
+		description:
+			"List the routes one mock server is serving: method, path template, the saved request behind each, and whether that request has an example (hasExample false means the route answers 501). This is how 'the mock answers 404' gets diagnosed without sending a request per guess. The table is a snapshot taken when the mock started and cannot change under it - editing the collection means restarting the mock - so a second read answers the same thing.",
+		annotations: {
+			title: "Get mock server routes",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			mockId: z.string().describe("Mock server ID (from start_mock_server)."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.getMockServerRoutes(requireStr(args, "mockId"), signal)),
+	},
+	{
+		name: "stop_mock_server",
+		category: "execute",
+		invalidates: ["service"],
+		description:
+			"Stop a running mock server and free its port. Unlike a webhook inbox there is nothing left to read afterwards - a mock records nothing, so its record goes with its listener and it disappears from list_mock_servers. Requests sent to the URL after this are refused by the machine. An unknown id is an error, not a silent success.",
+		annotations: {
+			title: "Stop mock server",
+			readOnlyHint: false,
+			// Nothing recorded is lost: a mock serves stored examples and keeps no
+			// state of its own.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			mockId: z.string().describe("Mock server ID to stop (from start_mock_server)."),
+		},
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.stopMockServer(requireStr(args, "mockId"), signal)),
 	},
 	{
 		name: "start_webhook_inbox",
@@ -4453,6 +4711,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 	const requestId = str(args, "requestId");
 	const runId = str(args, "runId");
 	const inboxId = str(args, "inboxId");
+	const mockId = str(args, "mockId");
 	for (const entity of tool.invalidates) {
 		try {
 			ctx.onDataChanged({
@@ -4461,6 +4720,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 				...(requestId !== undefined ? { requestId } : {}),
 				...(runId !== undefined ? { runId } : {}),
 				...(inboxId !== undefined ? { inboxId } : {}),
+				...(mockId !== undefined ? { mockId } : {}),
 			});
 		} catch (err) {
 			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);

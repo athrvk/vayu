@@ -265,7 +265,7 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**24 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+**42 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections and saved requests, plus `update_environment`) -
@@ -357,7 +357,7 @@ persists.
 ??? question "Can my coding agent use it?"
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
-    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 24 tools
+    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 42 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off. See the
     [MCP reference](engine/mcp.md).
