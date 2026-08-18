@@ -143,13 +143,18 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 	 * declared pattern, so the row can paint them apart rather than leaving the
 	 * header's "N undeclared statuses observed" unanswerable from the list below
 	 * it (issue #723). A Set because a row carries up to 50 of each.
-	 *
-	 * Both lists are capped independently by the engine, so an undeclared code
-	 * past the cap can be absent from `statusesSeen` and go unpainted here. That
-	 * is what `statusesTruncated` discloses; it is not a case this lookup can
-	 * recover.
 	 */
 	const undeclared = new Set(operation.undeclaredSeen);
+	/*
+	 * The two lists are capped independently by the engine, so an undeclared code
+	 * past the seen cap can be absent from `statusesSeen` while `undeclaredSeen`
+	 * still carries it. Painting their union rather than `statusesSeen` alone
+	 * shows every code the row discloses, which is what makes `statusesTruncated`
+	 * - the distinct statuses in neither list - the count of what is *not* shown
+	 * beside it (issue #786). Identical to `statusesSeen` on every row under the
+	 * cap, which is every row in practice.
+	 */
+	const statuses = [...new Set([...operation.statusesSeen, ...undeclared])].sort((a, b) => a - b);
 
 	return (
 		<li className="flex items-baseline justify-between gap-3 text-sm">
@@ -164,7 +169,7 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 			</span>
 			<span className="flex shrink-0 items-baseline gap-1.5">
 				{!covered && <span className="text-xs text-muted-foreground">never called</span>}
-				{operation.statusesSeen.map((status) => {
+				{statuses.map((status) => {
 					const isUndeclared = undeclared.has(status);
 					return (
 						<span
@@ -198,15 +203,17 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 					);
 				})}
 				{/*
-				 * Dropped by the engine's per-operation cap on the two status
-				 * lists. A list shorter than the count it belongs to, rendered as
-				 * though complete, is the shape the truncation-disclosure
-				 * discipline exists to forbid.
+				 * Statuses this operation answered with that the engine's
+				 * per-operation cap left out of both lists. A list shorter than
+				 * the count it belongs to, rendered as though complete, is the
+				 * shape the truncation-disclosure discipline exists to forbid.
 				 */}
 				{operation.statusesTruncated !== undefined && (
 					<span
 						className="text-xs text-muted-foreground"
-						title={`${operation.statusesTruncated} more not shown - the per-operation status list is capped`}
+						title={`${operation.statusesTruncated} more status${
+							operation.statusesTruncated === 1 ? "" : "es"
+						} observed and not shown - the per-operation status list is capped`}
 					>
 						+{operation.statusesTruncated} more
 					</span>

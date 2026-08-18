@@ -20,7 +20,15 @@
 
 #include "vayu/core/spec_coverage.hpp"
 
+#include "vayu/core/constants.hpp"
+
 #include <gtest/gtest.h>
+
+#include <set>
+#include <string>
+#include <vector>
+
+namespace limits = vayu::core::constants::spec_document;
 
 using vayu::core::build_coverage_payload;
 using vayu::core::CoverageTally;
@@ -229,6 +237,58 @@ TEST (SpecCoverage, FindingsThatDidNotHappenAreAbsentRatherThanZero) {
     EXPECT_FALSE (coverage.contains ("undeclaredOperationRequests"));
     EXPECT_FALSE (row_for (coverage, "/pets").contains ("transportErrors"));
     EXPECT_FALSE (row_for (coverage, "/pets").contains ("statusesTruncated"));
+}
+
+TEST (SpecCoverage, TheTruncationCountIsDistinctStatusesHiddenNotEntriesTwoListsDropped) {
+    // The two lists are capped separately and `undeclaredSeen` repeats codes
+    // from `statusesSeen`, so a code past both caps used to be counted twice and
+    // a code the undeclared list still carries counted as hidden (issue #786).
+    const std::vector<DeclaredOperation> declared{ op ("listPets", "GET", "/pets", { "200" }) };
+    OperationObservation seen;
+    seen.statuses[200] = 1;
+    // 60 undeclared codes above the declared one, so both lists overflow the
+    // cap of 50 and their shown halves are different sets.
+    for (int status = 400; status < 460; ++status) {
+        seen.statuses[status] = 1;
+    }
+    seen.sent = seen.statuses.size ();
+
+    const auto row = row_for (build_coverage_payload (declared, { seen }, 0), "/pets");
+    ASSERT_EQ (row["statusesSeen"].size (), limits::MAX_STATUSES_PER_OPERATION);
+    ASSERT_EQ (row["undeclaredSeen"].size (), limits::MAX_STATUSES_PER_OPERATION);
+
+    // What the row shows, counted the way a reader of the payload sees it:
+    // either list carrying a code is that code disclosed.
+    std::set<int> shown;
+    for (const char* list : { "statusesSeen", "undeclaredSeen" }) {
+        for (const auto& status : row[list]) {
+            shown.insert (status.get<int> ());
+        }
+    }
+    ASSERT_EQ (shown.size (), 51u);
+    // 61 observed, 51 named: the shared counter reported 21 for this row, which
+    // is entries dropped across the two lists rather than statuses hidden.
+    const size_t hidden = row["statusesTruncated"].get<size_t> ();
+    EXPECT_EQ (hidden, seen.statuses.size () - shown.size ());
+    EXPECT_EQ (hidden, 10u);
+}
+
+TEST (SpecCoverage, ACodeOverTheCapInOnlyOneListIsStillCountedOnce) {
+    // Every code declared, so `undeclaredSeen` is empty and only the seen list
+    // truncates - the ordinary shape, which the subtraction must not change.
+    std::vector<std::string> responses;
+    responses.reserve (60);
+    OperationObservation seen;
+    for (int status = 400; status < 460; ++status) {
+        responses.push_back (std::to_string (status));
+        seen.statuses[status] = 1;
+    }
+    seen.sent = seen.statuses.size ();
+    const std::vector<DeclaredOperation> declared{ op ("listPets", "GET", "/pets", responses) };
+
+    const auto row = row_for (build_coverage_payload (declared, { seen }, 0), "/pets");
+    EXPECT_EQ (row["undeclaredSeen"], nlohmann::json::array ());
+    EXPECT_EQ (row["statusesTruncated"].get<size_t> (), 10u);
 }
 
 TEST (SpecCoverage, ADocumentThatDeclaresNothingProducesNoBlockAtAll) {

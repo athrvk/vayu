@@ -173,11 +173,40 @@ describe("ContractCoverage", () => {
 			expect(statusSpan(200).textContent).not.toMatch(/undeclared/);
 		});
 
+		it("paints an undeclared status that only the second list carries", () => {
+			// The engine caps the two lists separately, so an undeclared code past
+			// the `statusesSeen` cap arrives in `undeclaredSeen` alone. Rendering
+			// `statusesSeen` by itself dropped it from the row while
+			// `statusesTruncated` - which counts the codes *neither* list carries -
+			// did not account for it, so the row showed fewer statuses than it
+			// claimed to be hiding (issue #786).
+			render(
+				<ContractCoverage
+					coverage={withStatuses({
+						statusesSeen: [200, 503],
+						undeclaredSeen: [503, 599],
+					})}
+				/>
+			);
+			expect(statusSpan(599).textContent).toMatch(/undeclared/);
+			// One span per code, in ascending order, however the two lists split.
+			expect(screen.getAllByText(/^503\b/)).toHaveLength(1);
+			expect(screen.getByRole("listitem").textContent).toMatch(/200.*503.*599/);
+		});
+
 		it("discloses statuses the engine's per-row cap dropped", () => {
 			// A list shorter than the count it belongs to, rendered as complete,
-			// is what the truncation-disclosure discipline forbids.
+			// is what the truncation-disclosure discipline forbids. The number is
+			// distinct statuses hidden, and the label has to say so (issue #786).
 			render(<ContractCoverage coverage={withStatuses({ statusesTruncated: 7 })} />);
-			expect(screen.getByText("+7 more")).toBeTruthy();
+			expect(screen.getByText("+7 more").getAttribute("title")).toBe(
+				"7 more statuses observed and not shown - the per-operation status list is capped"
+			);
+		});
+
+		it("counts one hidden status in the singular", () => {
+			render(<ContractCoverage coverage={withStatuses({ statusesTruncated: 1 })} />);
+			expect(screen.getByText("+1 more").getAttribute("title")).toMatch(/1 more status /);
 		});
 
 		it("counts responses whose status no class describes", () => {

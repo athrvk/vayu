@@ -716,7 +716,9 @@ constexpr size_t MAX_OPERATIONS = 2000;
 
 /// Status codes one coverage row may list under `statusesSeen`/`undeclaredSeen`.
 /// A misconfigured target can answer one operation with hundreds of distinct
-/// codes; the row stays readable and says how many it dropped.
+/// codes; the row stays readable and says how many distinct codes it hides -
+/// `statusesTruncated` counts what *neither* list carries, since the two are
+/// capped separately and the undeclared one repeats codes from the other.
 constexpr size_t MAX_STATUSES_PER_OPERATION = 50;
 } // namespace spec_document
 

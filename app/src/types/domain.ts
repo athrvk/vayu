@@ -328,7 +328,16 @@ export interface RunCoverageOperation {
 	transportErrors?: number;
 	/** Responses whose status fell outside 100-599. Absent when there were none. */
 	otherStatusResponses?: number;
-	/** Codes dropped from the two lists above by the per-row cap. */
+	/**
+	 * Distinct statuses this operation answered with that appear in *neither*
+	 * list above, dropped by the per-row cap. Absent when both lists are
+	 * complete.
+	 *
+	 * Counted across the two lists together rather than per list (issue #786):
+	 * `undeclaredSeen` repeats codes from `statusesSeen`, so a code past both
+	 * caps would otherwise be counted twice, and a code the undeclared list
+	 * still carries is not hidden at all.
+	 */
 	statusesTruncated?: number;
 }
 
