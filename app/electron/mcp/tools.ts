@@ -1277,23 +1277,59 @@ const dataRowInput = z
 	);
 
 /**
- * Whether the bound contract is a gate for a smoke run (issue #720).
+ * Whether the bound contract is a gate, worded for the surface asking (issues
+ * #720, #766).
  *
- * **Defaults to `true` here, where the engine's `POST /runs` flag defaults to
- * `false`**, and the divergence is deliberate rather than an oversight: this
- * tool has folded a checked-and-failed schema verdict into `ok` since #681,
- * says so in its own description, and an agent that has been reading its matrix
- * would silently start seeing contract failures pass if the default moved. The
- * flag means the same thing on both surfaces - does a schema failure fail the
- * unit - and each keeps the default its readers already have. Off, the verdict
- * still rides every row: it stops deciding `ok`, it is never withheld.
+ * One fragment rather than a copy per tool, because the flag means the same
+ * thing wherever it is offered - does a schema failure fail the unit - while
+ * two things about it are genuinely per-surface: which unit one verdict
+ * decides, and which way it defaults.
+ *
+ * **`run_collection_smoke` defaults to `true`, where the engine's `POST /runs`
+ * flag defaults to `false`**, and the divergence is deliberate rather than an
+ * oversight: that tool has folded a checked-and-failed schema verdict into `ok`
+ * since #681, says so in its own description, and an agent that has been
+ * reading its matrix would silently start seeing contract failures pass if the
+ * default moved. Each surface keeps the default its readers already have. Off,
+ * the verdict still rides every row: it stops deciding pass/fail, it is never
+ * withheld.
  */
-const failOnSchemaErrorInput = z
-	.boolean()
-	.optional()
-	.describe(
-		"Whether a response that does not match the schema the collection's bound OpenAPI document declares fails its request (default true). Set false to report the schema verdict on each row without letting it decide pass/fail - useful against a document known to lag its API. Only a checked verdict is ever folded in: a status or content type the document declares no schema for is reported unchecked and never fails a request, with or without this."
-	);
+function failOnSchemaErrorInput(surface: {
+	/** What one verdict decides here: a smoke row's request, or a run's step. */
+	unit: string;
+	/** This surface's default, stated in the description rather than implied. */
+	defaultsOn: boolean;
+	/** What the non-default setting buys, in this surface's own terms. */
+	guidance: string;
+}) {
+	return z
+		.boolean()
+		.optional()
+		.describe(
+			`Whether a response that does not match the schema the collection's bound OpenAPI document declares fails its ${surface.unit} (default ${surface.defaultsOn}). ${surface.guidance} Only a checked verdict is ever folded in: a status or content type the document declares no schema for is reported unchecked and never fails a ${surface.unit}, with or without this.`
+		);
+}
+
+/**
+ * Why a schema gate cannot ride a load run, in the executor's own terms rather
+ * than a bare "unsupported" (issue #766).
+ *
+ * `failOnSchemaError` is *declared* on `start_load_run` so this refusal can
+ * reach an agent at all: the MCP SDK validates a call against the tool's schema
+ * and **strips** what the schema does not declare, so an undeclared key would
+ * be dropped before the handler ran and the run would start with the agent
+ * believing a gate applied. Declared and refused, the answer names the flag and
+ * the surface that honours it. It is refused on both of this tool's paths - a
+ * scenario is not the reason, the executor is: `read_fail_on_schema_error` is
+ * the scenario *runner*'s, and no load path reads it.
+ */
+const LOAD_RUN_SCHEMA_GATE_REFUSAL =
+	`"failOnSchemaError" does not apply to a load run: the load executor validates sampled ` +
+	`responses once the run has drained and never demotes a step, so a gate here would decide ` +
+	`nothing. Nothing was started - the flag would have been read as shaping this run while ` +
+	`no load path looks at it. The schema verdict rides the report's \`schemaValidation\` ` +
+	`block either way. Remove it, or run the same collection in design mode with ` +
+	`run_collection, which is where the gate takes effect.`;
 
 /**
  * The two fields a scenario block carries besides its collection id, declared
@@ -2998,7 +3034,12 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe("Environment for variable resolution during execution."),
-			failOnSchemaError: failOnSchemaErrorInput,
+			failOnSchemaError: failOnSchemaErrorInput({
+				unit: "request",
+				defaultsOn: true,
+				guidance:
+					"Set false to report the schema verdict on each row without letting it decide pass/fail - useful against a document known to lag its API.",
+			}),
 		},
 		outputSchema: smokeResultSchema,
 		handler: async (args, ctx, signal) => {
@@ -3137,7 +3178,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
+			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
 		annotations: {
 			title: "Run collection",
 			readOnlyHint: false,
@@ -3165,6 +3206,15 @@ export const TOOLS: McpTool[] = [
 					"How many passes over the sequence (default 1, or the row count when `data` is given). With more passes than rows the row index wraps."
 				),
 			data: scenarioDataInput,
+			// The Run Collection dialog's checkbox, which had no MCP writer at all
+			// (issue #766). Design-mode only, because only this runner demotes a
+			// step on a schema failure - see the refusal on `start_load_run`.
+			failOnSchemaError: failOnSchemaErrorInput({
+				unit: "step",
+				defaultsOn: false,
+				guidance:
+					"Set true to make the bound contract a gate, the way the app's Run Collection checkbox does: a step whose response does not match its schema fails, and the run's report records that it was judged that way. Only a step that passed everything else is demoted - one already failing keeps the error that named it. Left off, the verdict still rides every step and the report's schemaValidation totals; it just does not decide pass/fail.",
+			}),
 		},
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
@@ -3188,6 +3238,13 @@ export const TOOLS: McpTool[] = [
 			const payload: Record<string, unknown> = {
 				scenario: scenarioBlock({ collectionId, data }, recursive, iterations),
 				...(environmentId !== undefined ? { environmentId } : {}),
+				// Top-level, beside `scenario` rather than inside it: that is where
+				// `read_fail_on_schema_error` looks, and where the app's dialog puts
+				// it. Omitted when off - the engine's default - so a run snapshot
+				// carries the key exactly when it changed what "failed" meant, which
+				// is what keeps a payload written before the flag existed reading the
+				// way it always did.
+				...(args.failOnSchemaError === true ? { failOnSchemaError: true } : {}),
 			};
 
 			let started: unknown;
@@ -3443,9 +3500,25 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
 				),
+			// Declared only so it can be refused by name - see
+			// LOAD_RUN_SCHEMA_GATE_REFUSAL for why an undeclared key would be
+			// dropped in silence instead.
+			failOnSchemaError: z
+				.boolean()
+				.optional()
+				.describe(
+					"Not available on a load run, and refused rather than ignored: the load executor validates sampled responses once the run has drained and never demotes a step, so this gate would decide nothing. Use run_collection to run the same collection in design mode with the contract as a gate. The schema verdict is reported either way, in the report's schemaValidation block."
+				),
 			confirmed: confirmedInput("actually start the run"),
 		},
 		handler: async (args, ctx, signal) => {
+			// Before the branch, because the reason is the executor rather than the
+			// shape of the target: no load path reads the flag, so a single-target
+			// run would swallow it exactly as a scenario one would.
+			if (args.failOnSchemaError !== undefined) {
+				return errorResult(LOAD_RUN_SCHEMA_GATE_REFUSAL);
+			}
+
 			// A scenario replaces the single target wholesale - there is nothing to
 			// compose here, so the branch comes before composition rather than
 			// inside it.

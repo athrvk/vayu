@@ -1584,6 +1584,57 @@ describe("run_collection", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/over the limit of 1000/);
 	});
+
+	/**
+	 * The contract as a gate (issue #766). `failOnSchemaError` is **run-scoped
+	 * and top-level**, beside `scenario` rather than inside it, because that is
+	 * where `read_fail_on_schema_error` looks - and it is sent only when the
+	 * caller asked for it, so a stored payload carries the key exactly when it
+	 * changed what "failed" meant for that run.
+	 */
+	describe("failOnSchemaError", () => {
+		async function payloadFor(args: Record<string, unknown>) {
+			const client = scenarioClient();
+			const res = await dispatchTool(
+				"run_collection",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				unknown
+			>;
+		}
+
+		test("reaches POST /runs top-level, not inside the scenario block", async () => {
+			const payload = await payloadFor({ failOnSchemaError: true });
+			expect(payload.failOnSchemaError).toBe(true);
+			expect(payload.scenario).not.toHaveProperty("failOnSchemaError");
+		});
+
+		test.each([
+			["omitted", {}],
+			["false", { failOnSchemaError: false }],
+		])("is absent from the payload when the caller passed %s", async (_label, args) => {
+			const payload = await payloadFor(args);
+			expect(payload).not.toHaveProperty("failOnSchemaError");
+		});
+
+		/**
+		 * The two surfaces share one fragment and must not share one default: the
+		 * smoke tool has folded the verdict into `ok` since #681, while the
+		 * engine's `POST /runs` flag is off unless asked for.
+		 */
+		test("each surface states its own default, in its own unit", () => {
+			const shapeOf = (name: string) =>
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>;
+			const scenario = shapeOf("run_collection").failOnSchemaError.description ?? "";
+			const smoke = shapeOf("run_collection_smoke").failOnSchemaError.description ?? "";
+			expect(scenario).toContain("fails its step (default false)");
+			expect(smoke).toContain("fails its request (default true)");
+		});
+	});
 });
 
 describe("start_load_run scenario runs", () => {
@@ -1647,6 +1698,46 @@ describe("start_load_run scenario runs", () => {
 			expect(firstText(res), key).toMatch(/do not apply to a scenario load run/);
 		}
 		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * The schema gate is the design-mode runner's (issue #766): no load path
+	 * reads `failOnSchemaError`, so both of this tool's paths refuse it rather
+	 * than starting a run whose flag nothing applies. It is *declared* on the
+	 * tool for the refusal to be reachable at all - the MCP SDK strips whatever
+	 * the schema does not name before a handler sees it.
+	 */
+	test.each([
+		["a scenario", { scenario: { collectionId: "c1" } }],
+		["a single target", { url: "https://api.example.com/x" }],
+	])("refuses failOnSchemaError beside %s, naming the executor", async (_label, target) => {
+		const client = scenarioLoadClient();
+		for (const value of [true, false]) {
+			const res = await dispatchTool(
+				"start_load_run",
+				{ ...target, failOnSchemaError: value, confirmed: true },
+				ctxWith(client, allowed)
+			);
+			expect(res.isError, String(value)).toBe(true);
+			expect(firstText(res), String(value)).toContain('"failOnSchemaError"');
+			expect(firstText(res), String(value)).toMatch(/once the run has drained/);
+			// The surface that does honour it, so the refusal is a redirection.
+			expect(firstText(res), String(value)).toMatch(/run_collection/);
+		}
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(client.composeRequest).not.toHaveBeenCalled();
+	});
+
+	test("declares failOnSchemaError so the refusal survives schema validation", () => {
+		// An argument the schema does not declare is stripped by the SDK before
+		// the handler runs, which would drop the flag in silence - the failure
+		// this refusal exists to prevent.
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodTypeAny
+		>;
+		expect(shape.failOnSchemaError).toBeDefined();
+		expect(shape.failOnSchemaError.description).toMatch(/Not available on a load run/);
 	});
 
 	test("refuses the two modes the engine cannot drive, with its reasoning", async () => {

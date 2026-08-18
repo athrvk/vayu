@@ -353,7 +353,10 @@ Notes:
   against a document known to lag its API. It defaults to **true** here, where
   the same-named flag on `POST /runs` defaults to false, because this tool has
   folded since #681 and an agent reading its matrix would otherwise start seeing
-  contract failures pass. Only a *checked* verdict can fail a row -
+  contract failures pass. `run_collection` offers the same flag with the
+  engine's default (issue #766, *Scenario runs* below); one schema fragment
+  words both, so the two can differ only in the unit they judge and the way they
+  default. Only a *checked* verdict can fail a row -
   `checked: false` (no declared schema for the status or content type, a body
   that is not JSON) is reported and never counted against the run, and a
   collection bound to nothing carries no `schema` field at all.
@@ -616,6 +619,22 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     the **top-level** `iterations` (total passes across all virtual users); the
     in-block count is the design runner's and the load executor never reads it,
     so offering it there would be an argument written and never read.
+  - **`failOnSchemaError` makes the bound contract a gate** (issue #766), on
+    `run_collection` only, matching the Run Collection dialog's checkbox. It is
+    **run-scoped and top-level**, beside the `scenario` block rather than inside
+    it, and is **sent only when asked for**: the engine defaults it to false, so
+    a run snapshot carries the key exactly when it changed what "failed" meant.
+    With it on, a step whose response does not match the schema its collection's
+    bound document declares fails - but only a step that passed everything else;
+    one already failing keeps the error that named it. Off, the verdict still
+    rides every step and the report's `schemaValidation` totals. Note the
+    default is the opposite of `run_collection_smoke`'s, for the reason recorded
+    there. `start_load_run` **refuses** the flag on either of its paths, naming
+    the executor: a load run validates sampled responses once the run has
+    drained and never demotes a step, so the gate would decide nothing. It is
+    declared on that tool for the refusal's sake - an argument the tool's schema
+    does not name is stripped before the handler sees it, which would drop the
+    flag in silence.
   - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
     per-request skip: every step is composed by id and gated before the run is
     created, and one step the allowlist does not cover refuses the whole run

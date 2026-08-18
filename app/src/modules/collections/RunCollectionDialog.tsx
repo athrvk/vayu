@@ -40,10 +40,13 @@
  * a second way to choose a scenario beside the tree that already owns the
  * choice.
  *
- * **Fail steps on schema errors** is the fifth (issue #720), and it is the only
- * writer of the engine's `failOnSchemaError` anywhere in the app: the flag was
+ * **Fail steps on schema errors** is the fifth (issue #720), and it is the
+ * renderer's only writer of the engine's `failOnSchemaError`: the flag was
  * readable in a stored report and settable by nobody, while the docs told users
- * to set it. It belongs on the run rather than on a request or the collection
+ * to set it. MCP's `run_collection` is the other writer (issue #766), over the
+ * same top-level key and with the same omitted-when-off rule, so a run started
+ * by an agent and one started here are stored alike. It belongs on the run
+ * rather than on a request or the collection
  * because it decides what "failed" means for *this* run's report, which is
  * where the report records it.
  *
