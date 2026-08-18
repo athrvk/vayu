@@ -4943,13 +4943,20 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
 // `pm.iterationData` and a later script running in the same context can call
 // what it stashed. That call reads the *current* execution's row - none - and
 // must say so rather than answering about a run that has finished.
+//
+// The message names every surface that binds a row, not just the collection run
+// #356 shipped with: #402 made a send-with-row one and #599 made a scenario load
+// run's deferred per-step script another, so a message naming only collection
+// runs steers a user who stashed the object during either of those to look for a
+// mistake that is not there.
 ContextData* iteration_data_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data || !data->iteration_data) {
         JS_ThrowTypeError (ctx,
-        "pm.iterationData.%s is not available here: this script is not running "
-        "an iteration of a collection run with a data set. See "
-        "docs/engine/scripting.md.",
+        "pm.iterationData.%s is not available here: this script has no data row "
+        "bound. A row is bound by an iteration of a collection run with a data "
+        "set, by a send-with-row, and by a scenario load run's deferred "
+        "per-step script. See docs/engine/scripting.md.",
         member);
         return nullptr;
     }

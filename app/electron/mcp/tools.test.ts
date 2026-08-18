@@ -1194,6 +1194,107 @@ describe("run_collection_smoke", () => {
 	});
 
 	/**
+	 * The schema verdict above explains itself on the row; a test failure did
+	 * not (issue #733) - `ok:false` beside a 200 named no reason, and an agent
+	 * had no way to reach the detail the tool had already been handed. Passing
+	 * assertions ride the row too: "2 tests, none failed" is the evidence that
+	 * a request judged `ok` was judged against something.
+	 */
+	test("a request that failed on its tests says which tests failed", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "asserts and passes" },
+				{ id: "r2", name: "asserts and fails" },
+				{ id: "r3", name: "asserts nothing" },
+			]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValueOnce({
+					status: 200,
+					testResults: [
+						{ name: "status is 200", passed: true },
+						{ name: "body has id", passed: true },
+					],
+				})
+				.mockResolvedValueOnce({
+					status: 200,
+					testResults: [
+						{ name: "status is 200", passed: true },
+						{
+							name: "body has id",
+							passed: false,
+							error: "expected undefined to be a number",
+						},
+					],
+				})
+				.mockResolvedValueOnce({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const summary = res.structuredContent as {
+			passed: number;
+			failed: number;
+			results: Array<{
+				ok: boolean;
+				tests?: { total: number; failed: number; failures?: string[] };
+			}>;
+		};
+		expect(summary).toMatchObject({ passed: 2, failed: 1 });
+		expect(summary.results[0]).toMatchObject({ ok: true, tests: { total: 2, failed: 0 } });
+		expect(summary.results[0].tests?.failures).toBeUndefined();
+		// The row a `ok:false` with a 200 status would otherwise leave unexplained.
+		expect(summary.results[1].ok).toBe(false);
+		expect(summary.results[1].tests).toMatchObject({ total: 2, failed: 1 });
+		expect(summary.results[1].tests?.failures).toEqual([
+			"body has id: expected undefined to be a number",
+		]);
+		// No assertions ran at all is not "everything passed", so the node is
+		// absent rather than a zero the agent would read as a verdict.
+		expect(summary.results[2]).toMatchObject({ ok: true });
+		expect(summary.results[2].tests).toBeUndefined();
+	});
+
+	/**
+	 * Nothing caps `testResults` upstream, so a script writing hundreds of
+	 * failing assertions would otherwise put all of them on one row of a matrix
+	 * that already carries a row per request. `failed` stays the true count, so
+	 * a cut list is visible as one.
+	 */
+	test("a row's failed-test list is capped, and the count still reports the total", async () => {
+		const testResults = Array.from({ length: 25 }, (_, i) => ({
+			name: `check ${i}`,
+			passed: false,
+			error: "nope",
+		}));
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "noisy" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const row = (
+			res.structuredContent as {
+				results: Array<{ tests?: { total: number; failed: number; failures?: string[] } }>;
+			}
+		).results[0];
+		expect(row.tests).toMatchObject({ total: 25, failed: 25 });
+		expect(row.tests?.failures).toHaveLength(10);
+		expect(row.tests?.failures?.[0]).toBe("check 0: nope");
+	});
+
+	/**
 	 * The gate, made switchable (issue #720). Both directions in one test on the
 	 * same fixture, because the pair is the claim: the argument has to change
 	 * the verdict *and* leave the row's evidence alone. Absent is the on state -

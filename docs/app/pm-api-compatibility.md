@@ -38,7 +38,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
-| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run or a send-with-row, see below |
+| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Console             | `console.log/info/warn/error`                                                    |
 
@@ -475,6 +475,12 @@ A **single send** can bind one row as well: the request builder's Send-with-row
 caret and MCP's `run_request` both take one row on `POST /execute`, which is
 what makes a script that reads `pm.iterationData` testable without starting a
 run. `pm.info.iteration` is then `0` of `1` - the send is row 0 of 1.
+
+A **scenario load run's deferred per-step script** reads one too: the sampled
+response carries the row its iteration was bound to. Those three - a
+data-driven collection run, a send-with-row, and that deferred script - are
+every surface that binds a row, and they are what a stashed
+`pm.iterationData` names when it refuses a later call.
 
 Divergences from Postman:
 

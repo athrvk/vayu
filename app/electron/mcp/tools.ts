@@ -1544,9 +1544,62 @@ const smokeResultSchema = z.object({
 					failures: z.array(z.string()).optional(),
 				})
 				.optional(),
+			/*
+			 * What this request's own post-request script asserted (issue #733).
+			 * A schema verdict explains itself on the row; a test failure did
+			 * not - `ok:false` beside `statusCode: 200` named no reason at all,
+			 * while the detail sat in the `/execute` body this tool had just
+			 * read. Absent when the response carried no test results, which is
+			 * not the same as every assertion passing.
+			 */
+			tests: z
+				.object({
+					total: z.number(),
+					failed: z.number(),
+					failures: z.array(z.string()).optional(),
+				})
+				.optional(),
 		})
 	),
 });
+
+/**
+ * How many failed-test names one smoke row carries.
+ *
+ * Ten, the number the engine caps a schema verdict's `failures` at
+ * (`constants::schema_validation::MAX_FAILURES`), because the two lists ride
+ * the same row and are read the same way. Nothing caps `testResults` upstream -
+ * a script may write as many assertions as it likes - so the cap has to be
+ * here, and `failed` stays the true total so a cut list is visible as one.
+ */
+const MAX_TEST_FAILURES_PER_ROW = 10;
+
+/**
+ * The post-request script's assertions, flattened for a tool result (#733).
+ *
+ * Rendered `name: message` for the reason the schema failures are: an agent
+ * reads this as text. `undefined` means the response carried no test results at
+ * all - the one state that must not become `{total: 0, failed: 0}`, which would
+ * say the script asserted nothing and everything held, when no script ran.
+ */
+function readTestVerdict(
+	resp: Record<string, unknown>
+): { total: number; failed: number; failures?: string[] } | undefined {
+	if (!Array.isArray(resp.testResults)) return undefined;
+	const tests = resp.testResults as Array<{ name?: unknown; passed?: unknown; error?: unknown }>;
+	if (tests.length === 0) return undefined;
+	const failed = tests.filter((t) => t.passed === false);
+	const failures = failed.slice(0, MAX_TEST_FAILURES_PER_ROW).map((t) => {
+		const name = typeof t.name === "string" && t.name ? t.name : "(unnamed test)";
+		const message = typeof t.error === "string" ? t.error.trim() : "";
+		return message ? `${name}: ${message}` : name;
+	});
+	return {
+		total: tests.length,
+		failed: failed.length,
+		...(failures.length > 0 ? { failures } : {}),
+	};
+}
 
 /**
  * The schema verdict a `POST /execute` body carries, flattened for a tool
@@ -3141,7 +3194,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -3239,11 +3292,12 @@ export const TOOLS: McpTool[] = [
 							: typeof resp.statusCode === "number"
 								? resp.statusCode
 								: 0;
-					const testsOk = Array.isArray(resp.testResults)
-						? (resp.testResults as Array<{ passed?: boolean }>).every(
-								(t) => t.passed !== false
-							)
-						: true;
+					// One reading of the assertions decides `ok` *and* rides the
+					// row (issue #733): a row that fails on tests has to be able
+					// to say which, and a second walk here could disagree with
+					// the list the agent is shown.
+					const tests = readTestVerdict(resp);
+					const testsOk = !tests || tests.failed === 0;
 					// The contract's own verdict, folded in the way `testResults`
 					// folds (issue #681): a response the document declares a
 					// schema for and that does not match it is a failed request.
@@ -3265,6 +3319,7 @@ export const TOOLS: McpTool[] = [
 						ok,
 						statusCode: code,
 						...(schema ? { schema } : {}),
+						...(tests ? { tests } : {}),
 					});
 					if (ok) passed++;
 					else failed++;
