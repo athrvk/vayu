@@ -189,6 +189,31 @@ describe("restoring on launch", () => {
 		expect(updateEnvironment).toHaveBeenCalledTimes(1);
 	});
 
+	it("adopts a deactivation the engine reports after holding a selection", async () => {
+		/*
+		 * The direction #758 needed: `activate_environment` with "none" clears the
+		 * engine's flag, and this window has a perfectly valid id in its store.
+		 * Without the once-seen guard the upgrade push fires on that refetch and
+		 * writes the id straight back - the MCP call undone by the app that was
+		 * only watching. Revert the guard and this test sees a PUT.
+		 */
+		listEnvironments.mockResolvedValue([DEV, { ...PROD, isActive: true }]);
+		const client = makeClient();
+		renderHook(() => useActiveEnvironmentRestore(), { wrapper: wrapper(client) });
+
+		await waitFor(() =>
+			expect(useSessionStore.getState().activeEnvironmentId).toBe("env_prod")
+		);
+
+		listEnvironments.mockResolvedValue([DEV, PROD]);
+		await act(async () => {
+			await client.refetchQueries();
+		});
+
+		await waitFor(() => expect(useSessionStore.getState().activeEnvironmentId).toBeNull());
+		expect(updateEnvironment).not.toHaveBeenCalled();
+	});
+
 	it("keeps the stored selection when the engine cannot be reached", async () => {
 		// An empty list from a failed fetch reads exactly like "no environments
 		// exist" - clearing on it would drop a good selection every time the app

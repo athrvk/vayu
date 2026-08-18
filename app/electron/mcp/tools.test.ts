@@ -124,7 +124,19 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			name: "Dev",
 			variables: { baseUrl: { value: "x", enabled: true } },
 		}),
+		createEnvironment: vi
+			.fn()
+			.mockResolvedValue({ id: "env_2", name: "Staging", variables: {} }),
 		updateEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
+		deleteEnvironment: vi.fn().mockResolvedValue({ success: true }),
+		getGlobals: vi.fn().mockResolvedValue({
+			id: "globals",
+			updatedAt: 1,
+			variables: { region: { value: "eu", enabled: true } },
+		}),
+		saveGlobals: vi.fn().mockResolvedValue({ id: "globals", updatedAt: 2, variables: {} }),
+		getCookies: vi.fn().mockResolvedValue({ scopes: [] }),
+		clearCookies: vi.fn().mockResolvedValue({ cleared: 4 }),
 		startMockIssuer: vi.fn().mockResolvedValue({
 			issuerId: "issuer_1",
 			issuerUrl: "http://127.0.0.1:41234",
@@ -748,6 +760,399 @@ describe("data-write tools", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * State CRUD parity (#758): the environment lifecycle, the globals singleton
+ * and the cookie jar.
+ *
+ * What is worth locking here is what the *blob* rule makes fragile. Every write
+ * in this family replaces a whole JSON object engine-side, so each of these
+ * tools is a read-merge-write, and every one of them can silently destroy a
+ * flag, a value or a whole variable by merging wrong. The rest is the shape of
+ * the two calls the engine has no verb for: activation (one PUT, no companion
+ * write) and the three cookie scopes (absent, null and an id are three
+ * different calls).
+ */
+describe("environments, globals and the cookie jar", () => {
+	const WRITES = { allowWrites: true };
+	const allText = (r: { content: Array<{ text: string }> }) =>
+		r.content.map((c) => c.text).join("\n");
+	const varsOf = (payload: unknown) =>
+		(payload as { variables: Record<string, unknown> }).variables;
+	const lastCall = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls[0];
+
+	test("update_environment sets flags and keeps the ones it was not asked about", async () => {
+		// The #314 invariant extended to the object form: `type` and `enabled`
+		// arrive, `value`, `secret` and `createdAt` survive untouched. Drop the
+		// stored spread from the merge and this reads back a plaintext token.
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: {
+					apiKey: { value: "old", enabled: true, secret: true, createdAt: 42 },
+				},
+			}),
+		});
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { apiKey: { type: "string", enabled: false } } },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(varsOf(lastCall(client.updateEnvironment)[1]).apiKey).toEqual({
+			value: "old",
+			enabled: false,
+			secret: true,
+			type: "string",
+			createdAt: 42,
+		});
+	});
+
+	test("update_environment removes a variable rather than blanking it", async () => {
+		// The gap this closes: writing "" leaves the name resolving to an empty
+		// string, which is not the same as the name not being there.
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: {
+					keep: { value: "a", enabled: true },
+					drop: { value: "b", enabled: true },
+				},
+			}),
+		});
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", removeVariables: ["drop"] },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		const written = varsOf(lastCall(client.updateEnvironment)[1]);
+		expect(Object.keys(written)).toEqual(["keep"]);
+		expect(written).not.toHaveProperty("drop");
+	});
+
+	test("update_environment says which names it found nothing to remove for", async () => {
+		// Not an error - a retried call whose first attempt landed would fail on
+		// its own success - but not silent either, or a typo reads as a removal.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", removeVariables: ["ghost"] },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(allText(res)).toContain("ghost");
+		expect(client.updateEnvironment).toHaveBeenCalled();
+	});
+
+	test("update_environment refuses a name that is both set and removed", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { token: "v" }, removeVariables: ["token"] },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("update_environment refuses to flag a variable that has no value yet", async () => {
+		// `{secret: true}` against a mistyped name would otherwise create an empty
+		// secret variable and report success.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { apiKeey: { secret: true } } },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("apiKeey");
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("update_environment refuses a call with nothing to change", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("update_environment renames without disturbing the variables", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", name: "Development" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(lastCall(client.updateEnvironment)[1]).toEqual({
+			name: "Development",
+			variables: { baseUrl: { value: "x", enabled: true } },
+		});
+	});
+
+	test("create_environment stores variables as entries and lets the engine assign the id", async () => {
+		// A body `id` is a 400 since #97, so the tool offers no field for one and
+		// a caller that invents one has it dropped rather than forwarded.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_environment",
+			{
+				id: "env_mine",
+				name: "Staging",
+				description: "pre-prod",
+				variables: { host: "stg.example.com", token: { value: "t", secret: true } },
+			},
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = lastCall(client.createEnvironment)[0];
+		expect(payload).not.toHaveProperty("id");
+		expect(payload).toEqual({
+			name: "Staging",
+			description: "pre-prod",
+			variables: {
+				host: { value: "stg.example.com", enabled: true },
+				token: { value: "t", enabled: true, secret: true },
+			},
+		});
+	});
+
+	test("create_environment refuses a variable with no value", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_environment",
+			{ name: "Staging", variables: { token: { secret: true } } },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.createEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("create_environment is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("create_environment", { name: "Staging" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(client.createEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("activate_environment is one PUT carrying only the flag", async () => {
+		// The engine deactivates the previous row in the same transaction, so a
+		// companion write would be a second definition of the same rule - and a
+		// `name` would be a rename nobody asked for.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"activate_environment",
+			{ environmentId: "env_2" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.updateEnvironment).toHaveBeenCalledTimes(1);
+		expect(lastCall(client.updateEnvironment)).toEqual([
+			"env_2",
+			{ isActive: true },
+			undefined,
+		]);
+	});
+
+	test('activate_environment "none" deactivates whichever environment holds the flag', async () => {
+		// There is no "no environment" row to write true to, so the id has to be
+		// read - which is why this direction costs a list read the other does not.
+		const client = fakeClient({
+			listEnvironments: vi.fn().mockResolvedValue([
+				{ id: "env_1", name: "Dev", isActive: false },
+				{ id: "env_2", name: "Prod", isActive: true },
+			]),
+		});
+		const res = await dispatchTool(
+			"activate_environment",
+			{ environmentId: "none" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(lastCall(client.updateEnvironment)).toEqual([
+			"env_2",
+			{ isActive: false },
+			undefined,
+		]);
+	});
+
+	test('activate_environment "none" writes nothing when nothing is active', async () => {
+		const client = fakeClient({
+			listEnvironments: vi.fn().mockResolvedValue([{ id: "env_1", isActive: false }]),
+		});
+		const res = await dispatchTool(
+			"activate_environment",
+			{ environmentId: "none" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain("No environment was active");
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("activate_environment is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"activate_environment",
+			{ environmentId: "env_2" },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("delete_environment previews with the name and variable count, and deletes nothing", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Prod",
+				isActive: true,
+				variables: { a: { value: "1" }, b: { value: "2" }, c: { value: "3" } },
+			}),
+		});
+		const res = await dispatchTool(
+			"delete_environment",
+			{ environmentId: "env_1" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain("Prod");
+		expect(firstText(res)).toContain("3 variables");
+		expect(firstText(res)).toContain("currently active");
+		expect(client.deleteEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("delete_environment deletes once confirmed", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"delete_environment",
+			{ environmentId: "env_1", confirmed: true },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.deleteEnvironment).toHaveBeenCalledWith("env_1", undefined);
+	});
+
+	test("delete_environment refuses an id no environment has", async () => {
+		// `getEnvironment` resolves from the list, so a miss is null rather than a
+		// 404 - and deleting blind on a null would confirm against nothing.
+		const client = fakeClient({ getEnvironment: vi.fn().mockResolvedValue(null) });
+		const res = await dispatchTool(
+			"delete_environment",
+			{ environmentId: "env_gone", confirmed: true },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.deleteEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("delete_environment is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"delete_environment",
+			{ environmentId: "env_1", confirmed: true },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.getEnvironment).not.toHaveBeenCalled();
+		expect(client.deleteEnvironment).not.toHaveBeenCalled();
+	});
+
+	test("update_globals merges into the stored singleton", async () => {
+		// `POST /globals` replaces the blob whole - it is the resource with no
+		// create/update split - so without the read this write deletes `region`.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_globals",
+			{ variables: { traceId: "abc" } },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(varsOf(lastCall(client.saveGlobals)[0])).toEqual({
+			region: { value: "eu", enabled: true },
+			traceId: { value: "abc", enabled: true },
+		});
+	});
+
+	test("update_globals removes a global rather than blanking it", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_globals",
+			{ removeVariables: ["region"] },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(varsOf(lastCall(client.saveGlobals)[0])).toEqual({});
+	});
+
+	test("update_globals refuses a call with nothing to change", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("update_globals", {}, ctxWith(client, WRITES));
+		expect(res.isError).toBe(true);
+		expect(client.saveGlobals).not.toHaveBeenCalled();
+	});
+
+	test("update_globals is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_globals",
+			{ variables: { a: "b" } },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.saveGlobals).not.toHaveBeenCalled();
+	});
+
+	test("clear_cookies distinguishes every jar, one environment's, and the unnamed one", async () => {
+		// Three calls, not two: the engine reads an absent parameter as "all" and
+		// a present-but-empty one as the no-environment jar, so collapsing null
+		// into undefined would clear every session in the app instead of one.
+		const all = fakeClient();
+		expect((await dispatchTool("clear_cookies", {}, ctxWith(all, WRITES))).isError).toBeFalsy();
+		expect(lastCall(all.clearCookies)).toEqual([undefined, undefined]);
+
+		const scoped = fakeClient();
+		expect(
+			(
+				await dispatchTool(
+					"clear_cookies",
+					{ environmentId: "env_1" },
+					ctxWith(scoped, WRITES)
+				)
+			).isError
+		).toBeFalsy();
+		expect(lastCall(scoped.clearCookies)).toEqual(["env_1", undefined]);
+
+		const unnamed = fakeClient();
+		expect(
+			(await dispatchTool("clear_cookies", { environmentId: null }, ctxWith(unnamed, WRITES)))
+				.isError
+		).toBeFalsy();
+		expect(lastCall(unnamed.clearCookies)).toEqual([null, undefined]);
+	});
+
+	test("clear_cookies is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("clear_cookies", {}, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(client.clearCookies).not.toHaveBeenCalled();
+	});
+
+	test("get_globals and get_cookies read without a gate", async () => {
+		const client = fakeClient();
+		expect((await dispatchTool("get_globals", {}, ctxWith(client))).isError).toBeFalsy();
+		expect((await dispatchTool("get_cookies", {}, ctxWith(client))).isError).toBeFalsy();
+		expect(client.getGlobals).toHaveBeenCalled();
+		expect(client.getCookies).toHaveBeenCalled();
 	});
 });
 

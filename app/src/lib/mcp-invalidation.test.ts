@@ -85,6 +85,16 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.compose.all);
 	});
 
+	test("an environment change also takes the globals singleton", () => {
+		// `update_globals` (#758) declares the `environment` family, so this key is
+		// what makes its write visible: without it the Variables drawer's Globals
+		// scope and the resolver keep serving the pre-write values, which is the
+		// "written but never read" shape one step removed - the event is emitted,
+		// and nothing refetches what it changed.
+		const { keys } = keysFor({ entity: "environment" });
+		expect(keys).toContainEqual(queryKeys.globals.all);
+	});
+
 	test("a run invalidates both list families", () => {
 		const { keys } = keysFor({ entity: "run" });
 		expect(keys).toContainEqual(queryKeys.runs.lists());

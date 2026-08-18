@@ -969,6 +969,182 @@ function optionalPageLimit(
 	return value;
 }
 
+// --- Variable blobs ----------------------------------------------------------
+//
+// Environments and globals store their variables as one JSON blob that every
+// write replaces wholesale (`PUT /environments/:id`, `POST /globals`), so
+// "change one variable" is always read-merge-write here. One implementation for
+// both, because the two blobs have the same shape and the same invariant
+// (issue #314): a write must carry forward the flags it was not asked to
+// change, or a rotated secret comes back unmasked and a disabled variable
+// silently re-enables.
+
+/**
+ * One variable as an agent may state it: a bare value, or a value with the
+ * flags the Variables drawer sets beside it.
+ *
+ * The string form is what `update_environment` has always taken and stays the
+ * short spelling for the common case. The object form is what makes the flags
+ * reachable at all - every field is optional, and an omitted one keeps whatever
+ * is stored rather than resetting it, which is the same merge rule the value
+ * itself follows.
+ */
+const VARIABLE_INPUT = z.union([
+	z.string(),
+	z.object({
+		value: z.string().optional().describe("New value. Omitted keeps the stored one."),
+		secret: z
+			.boolean()
+			.optional()
+			.describe(
+				"Mask this variable in the Vayu UI. App-side display only - MCP reads (list_environments, vayu://environments) return every value in full."
+			),
+		type: z
+			.enum(["string", "number", "boolean", "json"])
+			.optional()
+			.describe("How the app renders and validates the value."),
+		enabled: z
+			.boolean()
+			.optional()
+			.describe("Whether the variable takes part in {{...}} resolution."),
+	}),
+]);
+
+/** The `variables` argument, described for whichever blob it is writing. */
+function variablesInput(subject: string) {
+	return z
+		.record(VARIABLE_INPUT)
+		.optional()
+		.describe(
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone.`
+		);
+}
+
+/** The `removeVariables` argument - the delete a blank value cannot express. */
+function removeVariablesInput(subject: string) {
+	return z
+		.array(z.string())
+		.optional()
+		.describe(
+			`Variable names to delete from ${subject} outright. Setting a variable to an empty string leaves the name resolving to nothing; this removes it. A name that is not there is reported, not an error.`
+		);
+}
+
+/** Read and validate `removeVariables` off raw arguments. */
+function removalNames(args: Record<string, unknown>): string[] {
+	const value = args.removeVariables;
+	if (value === undefined || value === null) return [];
+	if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || name === "")) {
+		throw new ToolArgError('"removeVariables" must be an array of variable names.');
+	}
+	return value as string[];
+}
+
+interface MergedVariables {
+	/** The whole blob to write back. */
+	variables: Record<string, unknown>;
+	/** Names `removeVariables` asked for that the blob did not hold. */
+	absentRemovals: string[];
+}
+
+/**
+ * Lay a caller's patch over a stored variables blob.
+ *
+ * Removals run first and a name in both lists is refused rather than resolved:
+ * "set it and delete it" has no correct order, so guessing one would apply half
+ * of what the caller asked for and report success.
+ *
+ * A new variable must carry a value. Without that rule `{secret: true}` against
+ * a mistyped name creates an empty secret variable and reports success - the
+ * typo becomes a variable rather than an error. "New" covers a stored entry
+ * that is not usable either (a bare string off disk, `lib/variable-resolution.ts`
+ * D17), since there is no value there to keep.
+ */
+function mergeVariables(
+	stored: unknown,
+	patch: Record<string, unknown> | undefined,
+	removals: readonly string[]
+): MergedVariables {
+	const merged: Record<string, unknown> = isRecord(stored) ? { ...stored } : {};
+	const absentRemovals: string[] = [];
+	const held = (name: string) => Object.prototype.hasOwnProperty.call(merged, name);
+
+	for (const name of removals) {
+		if (patch && Object.prototype.hasOwnProperty.call(patch, name)) {
+			throw new ToolArgError(
+				`"${name}" is named in both "variables" and "removeVariables". Pick one.`
+			);
+		}
+		if (held(name)) delete merged[name];
+		else absentRemovals.push(name);
+	}
+
+	for (const [name, input] of Object.entries(patch ?? {})) {
+		const prev = merged[name];
+		// The object guard keeps a malformed stored entry (a bare string, an
+		// array) from spreading into index-keyed garbage - it is replaced with a
+		// sane entry rather than merged onto.
+		const base = isRecord(prev) ? prev : {};
+		if (typeof input === "string") {
+			// `enabled` leads the spread so a new (or malformed) entry defaults to
+			// enabled while an existing explicit flag survives: writing a value
+			// must not silently re-enable a variable the user disabled.
+			merged[name] = { enabled: true, ...base, value: input };
+			continue;
+		}
+		if (!isRecord(input)) {
+			throw new ToolArgError(
+				`"${name}" must be a string value, or an object with any of value, secret, type, enabled.`
+			);
+		}
+		const stated: Record<string, unknown> = {};
+		for (const field of ["value", "secret", "type", "enabled"] as const) {
+			if (input[field] !== undefined) stated[field] = input[field];
+		}
+		if (stated.value === undefined && typeof base.value !== "string") {
+			throw new ToolArgError(
+				`"${name}" has no stored value to keep, so this call has to give it one: pass a string, or an object carrying "value".`
+			);
+		}
+		merged[name] = { enabled: true, ...base, ...stated };
+	}
+
+	return { variables: merged, absentRemovals };
+}
+
+/**
+ * What a removal list asked for and did not find, said in band.
+ *
+ * A name that was not there is not an error - a retried call whose first
+ * attempt landed would otherwise fail on its own success - but it is not
+ * nothing either: silence would let a mistyped name read as a variable
+ * removed.
+ */
+function absentRemovalCaveat(names: readonly string[]): string {
+	if (names.length === 0) return "";
+	return `\n\nNothing to remove for: ${names.join(", ")} - no variable of that name was stored.`;
+}
+
+/**
+ * An environment named in words, for the prompt that asks a human to delete it.
+ *
+ * The variable count is the part that has to be there, for the reason
+ * `describeInbox`'s capture count is: an environment holding 20 variables and an
+ * empty one are the same call with very different consequences. Whether it is
+ * the *active* environment is the other half - deleting that one also drops
+ * whatever every unsent tab was resolving against.
+ */
+function describeEnvironment(environmentId: string, environment: Record<string, unknown>): string {
+	const name =
+		typeof environment.name === "string" && environment.name !== ""
+			? environment.name
+			: environmentId;
+	const count = isRecord(environment.variables) ? Object.keys(environment.variables).length : 0;
+	const parts = [`${count} variable${count === 1 ? "" : "s"}`];
+	if (environment.isActive === true) parts.push("currently active");
+	return `the environment "${name}" (${parts.join(", ")})`;
+}
+
 /** A row offset: whole and non-negative, since 0 is the first page. */
 function optionalOffset(args: Record<string, unknown>, key: string): number {
 	const v = args[key];
@@ -3218,11 +3394,49 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "create_environment",
+		category: "write",
+		invalidates: ["environment"],
+		description:
+			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings.",
+		annotations: {
+			title: "Create environment",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			name: z.string().describe("Display name for the environment."),
+			description: z.string().optional().describe("Optional description."),
+			variables: variablesInput("the new environment"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const name = requireStr(args, "name");
+			const patch = isRecord(args.variables) ? args.variables : undefined;
+			if (args.variables !== undefined && patch === undefined) {
+				return errorResult('"variables" must be an object mapping names to values.');
+			}
+			// Merged against nothing, which is what turns the string form into a
+			// stored entry and enforces "a new variable carries a value" - on a
+			// create every variable is new.
+			const merged = mergeVariables({}, patch, []);
+			// No `id`: the engine assigns every id it stores and answers a body
+			// carrying one with a 400 (issue #97), so the tool does not offer a
+			// field it would only have to refuse.
+			const payload: Record<string, unknown> = { name, variables: merged.variables };
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			return callEngine(() => ctx.client.createEnvironment(payload, signal));
+		},
+	},
+	{
 		name: "update_environment",
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set or overwrite variables on an environment (merges with the existing variables - other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings.",
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -3231,21 +3445,27 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			environmentId: z.string().describe("Environment ID to update."),
-			variables: z
-				.record(z.string())
-				.describe("Variables to set/overwrite as a key -> value string map."),
+			variables: variablesInput("this environment"),
+			removeVariables: removeVariablesInput("this environment"),
 			name: z.string().optional().describe("Optional new name for the environment."),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
 			const environmentId = requireStr(args, "environmentId");
-			const vars = args.variables;
-			if (!vars || typeof vars !== "object" || Array.isArray(vars)) {
+			const patch = isRecord(args.variables) ? args.variables : undefined;
+			if (args.variables !== undefined && patch === undefined) {
 				return errorResult('"variables" must be an object mapping names to values.');
 			}
-			// Fetch the current env so we merge (upsert replaces the whole blob) and
-			// keep the existing name (which the engine requires).
+			const removals = removalNames(args);
+			const rename = str(args, "name");
+			if (patch === undefined && removals.length === 0 && rename === undefined) {
+				return errorResult(
+					'Pass at least one change: "variables", "removeVariables" or "name".'
+				);
+			}
+			// Fetch the current env so we merge (the PUT replaces the whole blob)
+			// and keep the existing name (which the engine requires).
 			let existing: Record<string, unknown>;
 			try {
 				existing = ((await ctx.client.getEnvironment(environmentId, signal)) ??
@@ -3253,40 +3473,248 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
-			const mergedVars: Record<string, unknown> =
-				existing.variables && typeof existing.variables === "object"
-					? { ...(existing.variables as Record<string, unknown>) }
-					: {};
-			for (const [key, value] of Object.entries(vars as Record<string, string>)) {
-				// Overwrite the *value*, not the entry: `secret`, `type` and
-				// `createdAt` are the user's own settings (a secret rotated here
-				// must stay masked in the popover), and nothing else restores
-				// them - the engine replaces the blob wholesale. The object guard
-				// keeps a malformed stored entry (a bare string, an array) from
-				// spreading into index-keyed garbage; the renderer treats those
-				// as a real case (`lib/variable-resolution.ts`, D17), so they are
-				// replaced with a sane entry rather than merged onto.
-				const prev = mergedVars[key];
-				const base =
-					prev && typeof prev === "object" && !Array.isArray(prev)
-						? (prev as Record<string, unknown>)
-						: {};
-				// `enabled` leads the spread so a new (or malformed) entry defaults
-				// to enabled while an existing explicit flag survives - writing a
-				// value must not silently re-enable a variable the user disabled.
-				// The tool returns the updated environment, so a caller who wrote
-				// to a disabled variable sees `enabled: false` in the result.
-				mergedVars[key] = { enabled: true, ...base, value: String(value) };
-			}
+			const merged = mergeVariables(existing.variables, patch, removals);
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no
 			// default - omitting it would keep the stored name, but sending the
 			// caller's rename in the same call is the point of the `name` arg.
 			const payload: Record<string, unknown> = {
-				name: str(args, "name") ?? (typeof existing.name === "string" ? existing.name : ""),
-				variables: mergedVars,
+				name: rename ?? (typeof existing.name === "string" ? existing.name : ""),
+				variables: merged.variables,
 			};
-			return callEngine(() => ctx.client.updateEnvironment(environmentId, payload, signal));
+			const result = await callEngine(() =>
+				ctx.client.updateEnvironment(environmentId, payload, signal)
+			);
+			return result.isError
+				? result
+				: withCaveat(result, absentRemovalCaveat(merged.absentRemovals));
+		},
+	},
+	{
+		name: "activate_environment",
+		category: "write",
+		invalidates: ["environment"],
+		description:
+			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings.',
+		annotations: {
+			title: "Activate environment",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			environmentId: z
+				.string()
+				.describe('Environment ID to activate, or "none" to leave none active.'),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const environmentId = requireStr(args, "environmentId");
+			if (environmentId !== "none") {
+				// `isActive: true` is the whole switch: the DB layer clears the
+				// previously active row in the same transaction
+				// (`deactivate_other_environments_locked`), so a companion write
+				// would be a second definition of the same rule. No `name` - absent
+				// on a PUT means keep.
+				return callEngine(() =>
+					ctx.client.updateEnvironment(environmentId, { isActive: true }, signal)
+				);
+			}
+			// There is no "no environment" row to write true to, so clearing is
+			// spelled as deactivating whichever row holds the flag - the same shape
+			// `useSetActiveEnvironmentMutation` sends. Which row that is has to be
+			// read: the engine has no "deactivate all" verb.
+			let active: Record<string, unknown> | undefined;
+			try {
+				const listed = await ctx.client.listEnvironments(signal);
+				const rows = Array.isArray(listed) ? listed : [];
+				active = rows.find((row) => isRecord(row) && row.isActive === true) as
+					| Record<string, unknown>
+					| undefined;
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const activeId = active && typeof active.id === "string" ? active.id : undefined;
+			if (activeId === undefined) {
+				// Successful and deliberately without effect, so it emits no
+				// data-changed event - there is nothing for the renderer to refetch.
+				return unchanged(
+					textResult("No environment was active, so there was nothing to deactivate.")
+				);
+			}
+			return callEngine(() =>
+				ctx.client.updateEnvironment(activeId, { isActive: false }, signal)
+			);
+		},
+	},
+	{
+		name: "delete_environment",
+		category: "write",
+		invalidates: ["environment"],
+		description:
+			"Delete an environment and every variable in it. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the environment's name and how many variables go with it; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a saved request that referenced those variables keeps its {{placeholders}} with nothing to resolve them.",
+		annotations: {
+			title: "Delete environment",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			environmentId: z.string().describe("Environment ID to delete."),
+			confirmed: confirmedInput("actually delete the environment and its variables"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const environmentId = requireStr(args, "environmentId");
+			// Read it first so the prompt names the environment and its variable
+			// count rather than an id - the read-before-prompt every delete here
+			// does. `getEnvironment` resolves from the list (the engine has no
+			// `GET /environments/:id`) and answers null for an id nothing matches.
+			let environment: Record<string, unknown>;
+			try {
+				const found = await ctx.client.getEnvironment(environmentId, signal);
+				if (!isRecord(found))
+					return errorResult(`No environment with id "${environmentId}".`);
+				environment = found;
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const subject = describeEnvironment(environmentId, environment);
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete ${subject}?\n\nEvery variable in it goes with it. This cannot be undone.`,
+				acceptTitle: "Delete the environment",
+				acceptDescription: "Confirm to delete this environment and its variables.",
+				declined: "Environment not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`This would delete ${subject}, along with every variable in it. This cannot be undone.\n\n` +
+					"This is a preview. To delete it, call delete_environment again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			return callEngine(() => ctx.client.deleteEnvironment(environmentId, signal));
+		},
+	},
+	{
+		name: "get_globals",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read the global variables - the bottom of the resolution order, used by every request whatever environment is active (environment > collection chain > globals). An engine that has never had any answers an empty set rather than an error.",
+		annotations: {
+			title: "Get global variables",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getGlobals(signal)),
+	},
+	{
+		name: "update_globals",
+		category: "write",
+		invalidates: ["environment"],
+		description:
+			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings.",
+		annotations: {
+			title: "Update global variables",
+			readOnlyHint: false,
+			destructiveHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			variables: variablesInput("the globals"),
+			removeVariables: removeVariablesInput("the globals"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const patch = isRecord(args.variables) ? args.variables : undefined;
+			if (args.variables !== undefined && patch === undefined) {
+				return errorResult('"variables" must be an object mapping names to values.');
+			}
+			const removals = removalNames(args);
+			if (patch === undefined && removals.length === 0) {
+				return errorResult('Pass at least one change: "variables" or "removeVariables".');
+			}
+			// `POST /globals` saves the singleton whole - it is the one resource
+			// with no create/update split, so an absent `variables` there means
+			// `{}`, not "keep". The read is what makes this a merge rather than a
+			// replace.
+			let stored: unknown;
+			try {
+				stored = await ctx.client.getGlobals(signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const merged = mergeVariables(
+				isRecord(stored) ? stored.variables : undefined,
+				patch,
+				removals
+			);
+			const result = await callEngine(() =>
+				ctx.client.saveGlobals({ variables: merged.variables }, signal)
+			);
+			return result.isError
+				? result
+				: withCaveat(result, absentRemovalCaveat(merged.absentRemovals));
+		},
+	},
+	{
+		name: "get_cookies",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment.",
+		annotations: {
+			title: "Get cookie jars",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getCookies(signal)),
+	},
+	{
+		name: "clear_cookies",
+		category: "write",
+		invalidates: ["cookie"],
+		description:
+			"Drop stored cookies, so the next request starts a fresh session - the tool equivalent of Settings -> General -> Cookies. Omit environmentId to clear every jar, pass an id to clear that environment's, or pass null to clear the jar used when no environment is selected. Returns how many cookies were dropped. No confirmation: nothing saved is lost, only session state a re-login restores. GUARDED: requires write access to be enabled in Vayu Settings.",
+		annotations: {
+			title: "Clear cookie jars",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			environmentId: z
+				.string()
+				.nullable()
+				.optional()
+				.describe(
+					'Scope to clear: an environment ID for that environment\'s jar, null for the no-environment jar, or omitted for every jar. Omitting and passing null are different calls - "all" and "the unnamed one".'
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			// Null, not falsy: `null` is a scope of its own here (the jar no
+			// environment id can name), so it has to stay distinguishable from an
+			// absent argument all the way to the query string.
+			const stated = args.environmentId;
+			if (stated !== undefined && stated !== null && typeof stated !== "string") {
+				return errorResult(
+					'"environmentId" must be an environment ID, null for the no-environment jar, or omitted for every jar.'
+				);
+			}
+			const scope: string | null | undefined =
+				stated === null ? null : str(args, "environmentId");
+			return callEngine(() => ctx.client.clearCookies(scope, signal));
 		},
 	},
 	{
